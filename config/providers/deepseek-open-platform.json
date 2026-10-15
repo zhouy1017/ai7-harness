@@ -27,6 +27,12 @@
       "readOn": "2026-09-10",
       "note": "The Tool Calls guide admits only `\"type\": \"function\"`, the Chat Completions reference states \"Currently, only functions are supported as a tool\", and the Responses API guide marks `web_search` `Ignored` (ADR 0080 §3)."
     },
+    "chat-completions-reference": {
+      "kind": "vendor-documentation",
+      "source": "DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion",
+      "readOn": "2026-10-15",
+      "note": "Lists `deepseek-flash` and `deepseek-v4-pro` as the request's model ids; the non-streaming response carries the answer as the string `choices[0].message.content` and, in thinking mode (the `thinking` parameter defaults to enabled), the reasoning as the string `choices[0].message.reasoning_content`."
+    },
     "models-and-pricing": {
       "kind": "vendor-documentation",
       "source": "DeepSeek official API documentation, models and pricing pages (api-docs.deepseek.com), as ADR 0080 §3 records them",
@@ -68,10 +74,12 @@
           "modelId": "deepseek-flash",
           "displayName": "DeepSeek V4.1 Flash",
           "capabilities": {
-            "requestShape": { "value": "openai-chat-completions", "evidence": "models-and-pricing" }
+            "requestShape": { "value": "openai-chat-completions", "evidence": "models-and-pricing" },
+            "answerChannel": { "value": "message-content-string", "evidence": "chat-completions-reference" },
+            "reasoningChannel": { "value": "message-reasoning-content", "evidence": "chat-completions-reference" }
           },
           "context": { "tokens": 1000000, "evidence": "models-and-pricing" },
-          "note": "Declared and inert: the vendor's current id for V4.1 Flash, so the rename its notice forces is a policy-byte review rather than a source edit. No binding names it."
+          "note": "The vendor's current id for V4.1 Flash, named by Provider Processing v13's ordinary-production binding for the DeepSeek 开放平台（官方） route (Issue #811). Answer and reasoning channels are the vendor's documented response contract; it sends no unverified format, reasoning-control or tool parameters."
         }
       ]
     }

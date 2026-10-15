@@ -380,8 +380,14 @@ describe('model capability profiles', () => {
     });
     // Exactly these two are active, and the table's size is pinned beside them so that declaring a
     // model cannot enlarge the active set: a new row arrives inert or the count moves and this fails.
+    // Issue #811: the official route's V4.1 Flash reads its documented answer and reasoning channels, and nothing else.
+    const officialFlash = PROVIDER_MODEL_PROFILES['deepseek-open-platform/deepseek-flash']!;
+    expect(officialFlash.capabilities).toEqual({
+      requestShape: 'openai-chat-completions', reasoningControl: 'none', structuredOutput: 'none', answerChannel: 'message-content-string',
+      reasoningChannel: 'message-reasoning-content', usageAttribution: 'unknown', toolCalling: 'none', webSearchTool: 'none',
+    });
     expect(Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.capabilities.answerChannel !== 'none'))
-      .toEqual([DEEPSEEK_V4_PRO_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, OPENCODE_GO_V41_FLASH_PROFILE]);
+      .toEqual([DEEPSEEK_V4_PRO_PROFILE, officialFlash, OPENCODE_GO_V4_FLASH_PROFILE, OPENCODE_GO_V41_FLASH_PROFILE]);
     // Every generated row is in the table once: building it dropped nothing.
     expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(GENERATED_MODEL_PROFILES.length);
   });

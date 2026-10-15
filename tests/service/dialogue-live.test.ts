@@ -8,6 +8,7 @@ import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogu
 import { DialogueExecutionOwner, dialogueLiveRoute, dialogueRouteRefusal, type DialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import {
   DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL,
+  DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL,
   DIALOGUE_SCHEMA_SQL,
   DIALOGUE_TRIGGER_SQL,
 } from '../../src/service/dialogue/dialogue-ledger.js';
@@ -21,6 +22,7 @@ import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { PROVIDER_LEDGER_FILE, ProviderResultCache, isItemLine, type ProviderCacheEntry, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
 import { transmitOnce } from '../../src/service/provider/live-transmission.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
+import { MODEL_SERVICE_CONNECTION_REVISION_11_SQL } from '../../src/service/bounded-manuscript.js';
 import { ANALYSIS_LEDGER_REVISION_59_SQL, LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { READERS_REPORT_SCHEMA_SQL } from '../../src/service/readers-reports.js';
 import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
@@ -709,6 +711,92 @@ describe('revision 71', () => {
         .toEqual([{ provider_processing_version: null, policy_rule_id: null }]);
       expect(() => database.prepare('UPDATE dialogue_execution_bindings SET bound_at = bound_at').run()).toThrowError('DIALOGUE_LEDGER_IMMUTABLE');
       expect(() => database.prepare('DELETE FROM dialogue_execution_bindings').run()).toThrowError('DIALOGUE_LEDGER_IMMUTABLE');
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe('revision 72 (Issue #811)', () => {
+  it('migrates a revision-71 store: dialogue bindings byte for byte, the official connection kept, and both production routes bindable', async () => {
+    const { DialogueExecutionOwner: Owner } = await import('../../src/service/dialogue/dialogue-execution.js');
+    const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
+    const { resolve } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const local = new Owner({ records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
+    const book = await importSample1Book(store, roots.codeRoot, '修订72');
+    const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+    local.begin(turn);
+    const before = await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null), settled, 'answered');
+    await local.dispose();
+    const officialReference = randomUUID();
+    store.close();
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    let database = new DatabaseSync(path);
+    let rows: unknown[];
+    const stamp = '2026-10-01T00:00:00.000Z';
+    try {
+      database.exec('PRAGMA foreign_keys = OFF');
+      database.exec('BEGIN');
+      // Revision 71's texts: the bindings as S17c widened them, and the one official v4-pro connection Issue #712 stored.
+      database.exec('CREATE TEMP TABLE keep AS SELECT rowid AS keep_rowid, * FROM dialogue_execution_bindings');
+      database.exec('DROP TABLE dialogue_execution_bindings');
+      database.exec(DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL);
+      database.exec(`INSERT INTO dialogue_execution_bindings(rowid, attempt_id, harness_session_id, route, model, operational_scope,
+        behavior_composition_sha256, prompt_contract_sha256, fixture_sha256, bound_at, canonical_json, sha256, provider_processing_version, policy_rule_id)
+        SELECT keep_rowid, attempt_id, harness_session_id, route, model, operational_scope, behavior_composition_sha256, prompt_contract_sha256,
+        fixture_sha256, bound_at, canonical_json, sha256, provider_processing_version, policy_rule_id FROM temp.keep`);
+      database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_update!);
+      database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_delete!);
+      rows = database.prepare('SELECT rowid, * FROM dialogue_execution_bindings ORDER BY rowid').all();
+      database.exec('DROP TABLE model_service_connections');
+      database.exec(MODEL_SERVICE_CONNECTION_REVISION_11_SQL);
+      database.prepare(`INSERT INTO model_service_connections VALUES ('main-editorial-deepseek-v4-pro', 'main-editorial', '旧连接', 'deepseek-open-platform',
+        'deepseek-v4-pro', 1, 1, '[]', 'deepseek-api-key', ?, 'ready', ?, ?, ?)`).run(officialReference, stamp, stamp, stamp);
+      database.exec('PRAGMA user_version = 71');
+      database.exec('COMMIT');
+    } finally {
+      database.close();
+    }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    opened.push(store);
+    expect(sha256Hex(JSON.stringify(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null)))).toBe(sha256Hex(JSON.stringify(before)));
+    // The official connection: its reference and state kept, the route's current model, and the route in use.
+    expect(store.getModelServiceConnection()).toMatchObject({
+      connectionId: 'main-editorial-deepseek-v4-pro', connectionName: '旧连接', credentialReference: officialReference, credentialOperationState: 'ready',
+      selected: true, binding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-flash', credentialSlot: 'deepseek-api-key' },
+    });
+    // Both production routes are bindable now: a Go connection beside it, and a production dialogue attempt on either route.
+    const go = store.saveModelServiceConnection('Go 连接', null, 'ready', 'opencode-go');
+    expect(go).toMatchObject({ connectionId: 'main-editorial-opencode-go', selected: false, binding: { modelId: 'deepseek-v4.1-flash' } });
+    expect(go.credentialReference).not.toBe(officialReference);
+    for (const route of ['opencode-go', 'deepseek-open-platform'] as const) {
+      const next = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+      store.bindDialogueAttempt(next.attemptId, {
+        harnessSessionId: randomUUID(), route, model: route === 'opencode-go' ? 'deepseek-v4.1-flash' : 'deepseek-flash', operationalScope: 'ordinary-production',
+        behaviorCompositionSha256: 'a'.repeat(64), promptContractSha256: DIALOGUE_PROMPT_CONTRACT_DIGEST, providerProcessingVersion: 'v13',
+        policyRuleId: 'ordinary-production-editorial-dialogue', boundAt: new Date().toISOString(),
+      });
+    }
+    // Developer-live stays on the Go route alone.
+    const refused = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+    expect(() => store.bindDialogueAttempt(refused.attemptId, {
+      harnessSessionId: randomUUID(), route: 'deepseek-open-platform', model: 'deepseek-flash', operationalScope: 'developer-live',
+      behaviorCompositionSha256: 'a'.repeat(64), promptContractSha256: DIALOGUE_PROMPT_CONTRACT_DIGEST, providerProcessingVersion: 'v12',
+      policyRuleId: 'developer-live-public-samplebook-editorial-dialogue', boundAt: new Date().toISOString(),
+    })).toThrow();
+    store.close();
+    database = new DatabaseSync(path);
+    try {
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
+      expect(LATEST_SCHEMA_VERSION).toBe(72);
+      const sql = (database.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_execution_bindings'").get() as { sql: string }).sql;
+      expect(sql.replace(/\s+/gu, ' ')).toBe(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings.replace(/\s+/gu, ' '));
+      expect(database.prepare('SELECT rowid, * FROM dialogue_execution_bindings ORDER BY rowid').all().slice(0, rows.length)).toEqual(rows);
+      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(() => database.prepare('UPDATE dialogue_execution_bindings SET bound_at = bound_at').run()).toThrowError('DIALOGUE_LEDGER_IMMUTABLE');
     } finally {
       database.close();
     }

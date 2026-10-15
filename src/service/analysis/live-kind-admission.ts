@@ -38,8 +38,8 @@ export interface LiveKindExpectation {
 }
 
 /**
- * The selected rule that admits `kind` live, or `null` (Issue #429, generalising #809): the verified developer-live
- * projection, and exactly one of its admitted rules listing the kind and naming every required category. A missing or
+ * The selected rule that admits `kind` live, or `null` (Issue #429, generalising #809): the verified developer-live or
+ * ordinary-production projection, and exactly one of its admitted rules listing the kind and naming every required category. A missing or
  * ambiguous rule fails closed.
  */
 export function liveKindRule(
@@ -47,8 +47,10 @@ export function liveKindRule(
   kind: string,
   requiredCategories: readonly OutboundDataCategory[] = [],
 ): AdmittedProviderRule | null {
+  // Developer-live's rules, or ordinary production's filled from the editor's configured binding (Issue #811).
   if (policy === undefined || policy.integrityState !== 'verified' || policy.denialReason !== null ||
-      policy.operationalScope !== 'developer-live' || !policy.providerProcessing.liveTransmissionAllowed ||
+      (policy.operationalScope !== 'developer-live' && policy.operationalScope !== 'ordinary-production') ||
+      !policy.providerProcessing.liveTransmissionAllowed ||
       policy.providerProcessing.decision !== 'eligible-only' ||
       policy.providerProcessing.authorizedLiveTransmissionCount !== 'bounded-by-run') return null;
   const rules = (policy.providerProcessing.admittedRules ?? []).filter((rule) =>

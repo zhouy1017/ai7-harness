@@ -551,6 +551,7 @@ import {
   SET_RULE_BUDGET,
   SET_RULE_CHANGED,
   SET_RULE_DEVELOPER_LIVE,
+  SET_RULE_ORDINARY_PRODUCTION,
   SET_RULE_EDITED,
   SET_RULE_FIRST_BASELINE,
   SET_RULE_RANGE,
@@ -6202,6 +6203,8 @@ export class EditorialStore {
     const reason = kindReason !== null
       ? kindReason
       // #810: an admitted writing plan may set its own rule; other live kinds keep the existing refusal.
+      : envelope.providerStatus === 'remote-eligible-ordinary-production'
+        ? SET_RULE_ORDINARY_PRODUCTION
       : envelope.providerStatus === 'remote-eligible-developer-live' && !(defaultExecutionRuleKind(pattern) === 'writing' && !this.#writingLiveUnavailable())
         ? SET_RULE_DEVELOPER_LIVE
         : plan.planRevision !== null
