@@ -45,6 +45,7 @@ import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { readBookTasks, readGlobalAttention } from './global-attention.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
+import { proxyAwareFetch } from './provider/proxy-setting.js';
 import type { DormantHarnessRuntime } from './runtime.js';
 import type { EditorialStore, WaitingTaskRun } from './store.js';
 import type { CooperativeJobOwner } from './cooperative-jobs.js';
@@ -1672,7 +1673,7 @@ async function run(): Promise<void> {
     // keeps the product provider-free exactly like development-ci, and the ceiling is never `unset` under
     // v5. The captured `fetch` travels with the launch facts and reaches no other owner.
     const developerLive: DeveloperLiveRuntime | null = launchPolicy.operationalScope === 'developer-live'
-      ? { launch: resolveDeveloperLiveLaunch(launchForm, resolve(codeRoot, '..')), nativeFetch: (await import('./provider/proxy-setting.js')).proxyAwareFetch(nativeFetch, () => store!.getModelServiceProxy(), undefined, (failure) => { transportFailure = failure; }) }
+      ? { launch: resolveDeveloperLiveLaunch(launchForm, resolve(codeRoot, '..')), nativeFetch: proxyAwareFetch(nativeFetch,() => store!.getModelServiceProxy(), undefined, (failure) => { transportFailure = failure; }) }
       : null;
     // The J-04-only control resolves the hand-written synthetic fixture before the store opens, so the
     // frozen plan can pin the exact fixture identity, lineage, and digest; every other launch binds no route.
