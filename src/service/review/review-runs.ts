@@ -765,7 +765,7 @@ interface CategoryView {
 interface RunView {
   readonly snapshot: RunSnapshot;
   /** `whenOnline` for an approval made with 联网后开始任务 (Issue #760, S74c), which the Run waits under until it begins. */
-  readonly authorization: null | { readonly authorizedAt: string; readonly approvals: ReadonlyMap<string, string>; readonly whenOnline: boolean };
+  readonly authorization: null | { readonly authorizedAt: string; readonly approvals: ReadonlyMap<string, string>; readonly whenOnline: boolean; readonly ruleVersionId: string | null };
   readonly driving: boolean;
   readonly categories: ReadonlyArray<CategoryView>;
   readonly findings: ReadonlyArray<FindingView>;
@@ -831,6 +831,7 @@ export type ReviewRunPrepareInput =
     categoryIds: ReadonlyArray<string>;
     scope: ReviewRunScopeRequest;
     launchPolicy: LaunchPolicyProjection;
+    redoOf?: string | null;
     /**
      * The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4), already resolved and checked by
      * its ledger: the Run records it as its pin, with the steps the Book could not take left out and said why.
@@ -859,6 +860,7 @@ interface PlannedCategory {
 }
 
 interface PreparationWork {
+  readonly redoOf: string | null;
   readonly materialReferences?: TaskMaterialBoundary;
   readonly workId: string;
   readonly bookId: string;
@@ -887,11 +889,12 @@ export type ReviewRunDriveStep =
   | { readonly kind: 'done' }
   | { readonly kind: 'write' }
   | { readonly kind: 'start' }
-  | { readonly kind: 'dispatch'; readonly runRecordId: string; readonly ledger: BaselineAnalysisStore }
+  | ({ readonly kind: 'dispatch' } & ReviewRunHandOff)
   | { readonly kind: 'settle' };
 
 /** A category Run authorized on its ledger and ready for the one execution owner. */
 export interface ReviewRunHandOff {
+  readonly resume?: boolean;
   readonly runRecordId: string;
   readonly ledger: BaselineAnalysisStore;
 }
@@ -1011,6 +1014,7 @@ export class ReviewRunStore {
         return { position: position + 1, entry, plan };
       });
     const work: PreparationWork = {
+      redoOf: input.redoOf ?? null,
       workId: randomUUID(),
       bookId,
       configuration: house,
@@ -1138,10 +1142,12 @@ export class ReviewRunStore {
 
   /** The ledger's own start request for one category: the definition's fixed goal for the mode, never a restated one. */
   #ledgerRequest(work: PreparationWork, mode: AnalysisTaskMode, selectedRange: ReviewBlockRange | null, ledger: BaselineAnalysisStore): {
-    phase: 'start'; bookId: string; goal: AnalysisGoal; update: { mode: AnalysisTaskMode; selectedRange: ReviewBlockRange | null } | null; launchPolicy: LaunchPolicyProjection;
+    phase: 'start'; bookId: string; goal: AnalysisGoal; update: { mode: AnalysisTaskMode; selectedRange: ReviewBlockRange | null } | null; launchPolicy: LaunchPolicyProjection; redoOf?: string;
   } {
     const definition = ledger.definition;
+    const prior = work.redoOf === null ? null : ledger.inspect(work.bookId).run;
     return {
+      ...(prior?.state === 'cancelled' && prior.transitions.some((entry) => entry.state === 'executing') ? { redoOf: prior.runRecordId } : {}),
       phase: 'start',
       bookId: work.bookId,
       goal: definition.mode(mode).goal as AnalysisGoal,
@@ -1255,6 +1261,7 @@ export class ReviewRunStore {
     planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
     slotBusy = false,
     start: 'now' | 'when-online' = 'now',
+    ruleVersionId: string | null = null,
   ): void {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
     const existing = this.#authorizationOf(reviewRunId);
@@ -1267,6 +1274,12 @@ export class ReviewRunStore {
       tasks.every((category) => approved.get(category.categoryId) === category.task!.planEnvelopeDigest),
     'REVIEW_AUTHORIZATION_STALE', '授权所依据的计划与这次审阅准备的计划不一致；请重新查看计划。');
     if (existing !== null) return;
+    requireReview(ruleVersionId === null || UUID_PATTERN.test(ruleVersionId), 'REVIEW_AUTHORIZATION_INVALID', '默认执行规则版本无效。');
+    requireReview(ruleVersionId === null || tasks.every((category) => {
+      const ledger = this.#categoryLedger(category);
+      return ledger.launch.live === null || ledger.launch.policy?.providerProcessing.admittedRules.some((rule) =>
+        rule.taskKinds.includes(ledger.definition.kind) && rule.matchingActiveDefaultExecutionRuleAllowed === true);
+    }), 'ANALYSIS_ORIGIN_NOT_ADMITTED', '当前模型处理规则未允许审阅快速开始。');
     requireReview(!this.#materialsRefusedLive(snapshot), 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
     const unavailableMaterial = this.#materialReadings(snapshot).find((reading) => reading.refusal !== null)?.refusal;
     requireReview(unavailableMaterial === undefined, unavailableMaterial?.code ?? 'REVIEW_PLAN_CHANGED', unavailableMaterial?.message ?? '');
@@ -1302,6 +1315,7 @@ export class ReviewRunStore {
       authorizedAt,
       actor: 'editor',
       interaction: 'authorize-review-run',
+      ...(ruleVersionId === null ? {} : { origin: 'default-execution-rule', ruleVersionId }),
       // 联网后开始任务 (OFF-005): the same one approval, which the Run waits under. An approval that starts now carries no key,
       // so every record written before this one reads exactly as it did.
       ...(start === 'when-online' ? { start: 'when-online' } : {}),
@@ -1327,7 +1341,33 @@ export class ReviewRunStore {
     requireReview(typeof reviewRunId === 'string' && UUID_PATTERN.test(reviewRunId), 'REVIEW_RUN_INVALID', '审阅记录标识无效。');
     const row = this.#db.prepare('SELECT * FROM review_runs WHERE review_run_id = ?').get(reviewRunId) as SqlRow | undefined;
     requireReview(row !== undefined, 'REVIEW_RUN_NOT_FOUND', '这次审阅不存在。');
-    return this.#snapshotOf(row);
+    const snapshot = this.#snapshotOf(row);
+    // An editor's plan revision belongs to the same category Task. Historical approvals retain their exact digests.
+    const authorized = this.#authorizationOf(reviewRunId);
+    if (authorized !== null) return { ...snapshot, categories: snapshot.categories.map((category) =>
+      this.#withPlanDigest(category, authorized.approvals.get(category.categoryId) ?? category.task?.planEnvelopeDigest ?? '')) };
+    const newest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(snapshot.bookId) as SqlRow;
+    if (text(newest.review_run_id) !== reviewRunId) return snapshot;
+    return { ...snapshot, categories: snapshot.categories.map((category) => {
+      if (category.task === null) return category;
+      const version = this.#db.prepare(`SELECT v.plan_envelope_sha256 FROM analysis_plan_versions v
+        JOIN analysis_plan_revisions r ON r.plan_revision_id = v.plan_revision_id
+        WHERE v.task_intent_id = ? AND r.trigger_kind = 'plan-edit' ORDER BY v.ordinal DESC LIMIT 1`).get(category.task.taskIntentId) as SqlRow | undefined;
+      return version === undefined ? category : this.#withPlanDigest(category, text(version.plan_envelope_sha256));
+    }) };
+  }
+
+  #withPlanDigest(category: SnapshotCategory, digest: string): SnapshotCategory {
+    const task = category.task;
+    if (task === null || task.planEnvelopeDigest === digest) return category;
+    const frozen = this.#categoryLedger(category).frozenPlan(task.taskIntentId, digest);
+    const provider = frozen.components['provider-resolution-plan'];
+    requireReview(isRecord(provider), 'REVIEW_RECORD_INVALID', '审阅类别的模型服务计划缺失。');
+    const ceiling = provider.runBudgetCeiling;
+    requireReview(ceiling === 'unset' || (isRecord(ceiling) && typeof ceiling.maxTotalTokens === 'number'),
+      'REVIEW_RECORD_INVALID', '审阅类别的预算上限无效。');
+    return { ...category, task: { ...task, planEnvelopeDigest: digest, plan: { ...task.plan,
+      budgetCeilingLabel: ceiling === 'unset' ? '未设置任务预算上限' : `任务运行预算上限：${ceiling.maxTotalTokens} tokens` } } };
   }
 
   /**
@@ -1358,6 +1398,80 @@ export class ReviewRunStore {
   /** The Book check alone, for a caller about to hand a Run to the Book-agnostic drive loop. */
   requireRunOfBook(bookId: string, reviewRunId: string): void {
     this.#runOfBook(bookId, reviewRunId);
+  }
+
+  controlTasks(bookId: string, reviewRunId: string): Array<{
+    categoryId: string; label: string; taskIntentId: string; planEnvelopeDigest: string; ledger: BaselineAnalysisStore;
+  }> {
+    return this.#runOfBook(bookId, reviewRunId).categories.flatMap((category) => category.task === null ? [] : [{
+      categoryId: category.categoryId, label: category.entry.label, taskIntentId: category.task.taskIntentId,
+      planEnvelopeDigest: category.task.planEnvelopeDigest, ledger: this.#categoryLedger(category),
+    }]);
+  }
+
+  ledgerForRun(runRecordId: string): BaselineAnalysisStore {
+    const row = this.#db.prepare(`SELECT rr.review_run_id, rr.book_id FROM review_runs rr
+      JOIN json_each(rr.canonical_json, '$.categories') c
+      JOIN analysis_run_records r ON r.task_intent_id = json_extract(c.value, '$.task.taskIntentId')
+      WHERE r.run_record_id = ?`).get(runRecordId) as SqlRow | undefined;
+    requireReview(row !== undefined, 'REVIEW_RUN_NOT_FOUND', '运行不属于审阅。');
+    const tasks = this.controlTasks(text(row.book_id), text(row.review_run_id));
+    const found = tasks.find((task) => this.#runRecordOf(task.taskIntentId) === runRecordId);
+    requireReview(found !== undefined, 'REVIEW_RECORD_INVALID', '审阅类别的运行记录缺失。');
+    return found.ledger;
+  }
+
+  defaultRuleVersion(reviewRunId: string): string | null {
+    return this.#authorizationOf(reviewRunId)?.ruleVersionId ?? null;
+  }
+
+  paused(reviewRunId: string): boolean {
+    const snapshot = this.#run(reviewRunId);
+    return this.controlTasks(snapshot.bookId, reviewRunId).some((task) => {
+      const runRecordId = this.#runRecordOf(task.taskIntentId);
+      const state = runRecordId === null ? null : task.ledger.currentRunState(runRecordId);
+      return state === 'paused' || state === 'resumable' || state === 'awaiting-clarification';
+    });
+  }
+
+  /** Cancel categories not yet dispatched; completed findings stay on their original ledgers. */
+  cancelRemaining(bookId: string, reviewRunId: string): void {
+    const snapshot = this.#runOfBook(bookId, reviewRunId);
+    requireReview(this.#authorizationOf(reviewRunId) !== null, 'REVIEW_RUN_NOT_AUTHORIZED', '这次审阅尚未开始。');
+    transact(this.#db, () => {
+      for (const category of snapshot.categories) {
+        if (this.#events(reviewRunId, category.categoryId).length === 0 &&
+            (category.task === null || this.#runRecordOf(category.task.taskIntentId) === null)) {
+          this.#recordEvent(reviewRunId, category.categoryId, 'refused', CANCELLED_DETAIL, { extra: { code: REVIEW_RUN_CANCELLED } });
+        }
+      }
+    });
+  }
+
+  finishCancelled(bookId: string, reviewRunId: string): void {
+    for (const task of this.controlTasks(bookId, reviewRunId)) {
+      const runId = this.#runRecordOf(task.taskIntentId);
+      if (runId === null || task.ledger.currentRunState(runId) !== 'cancelled') continue;
+      this.settle(reviewRunId, task.categoryId);
+      if (this.step(reviewRunId, task.categoryId).kind === 'write') this.write(reviewRunId, task.categoryId);
+    }
+  }
+
+  redoRequest(bookId: string, reviewRunId: string) {
+    const snapshot = this.#runOfBook(bookId, reviewRunId);
+    requireReview(!this.#driving.has(reviewRunId) && this.#stoppedFor(reviewRunId) === 'cancelled',
+      'ANALYSIS_REDO_STALE', '这次审阅需要先取消，才能改计划重做。');
+    const head = this.#head(bookId);
+    requireReview(head !== null, 'REVIEW_MANUSCRIPT_ABSENT', NO_MANUSCRIPT_REASON);
+    const chapters = this.#chapterOptions(bookId, head).chapters;
+    const range = snapshot.scope.selectedRange;
+    const from = range === null ? null : chapters.find((chapter) => chapter.position === range.startPosition)?.blockId ?? null;
+    const to = range === null ? null : chapters.find((chapter) => chapter.endPosition === range.endPosition)?.blockId ?? null;
+    const scope: ReviewRunScopeRequest = { kind: snapshot.scope.kind,
+      fromChapterBlockId: snapshot.scope.kind === 'selection' ? snapshot.scope.blockIds?.[0] ?? null : from,
+      toChapterBlockId: snapshot.scope.kind === 'selection' ? snapshot.scope.blockIds?.at(-1) ?? null : to };
+    return { categoryIds: snapshot.categories.map((category) => category.categoryId), scope, redoOf: reviewRunId,
+      materialIds: snapshot.materialReferences?.references.map((reference) => reference.materialId) ?? [] };
   }
 
   /**
@@ -1574,6 +1688,7 @@ export class ReviewRunStore {
       authorizedAt: text(row.authorized_at),
       approvals: new Map((approvals as ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>).map((entry) => [entry.categoryId, entry.planEnvelopeDigest] as const)),
       whenOnline: record.start === 'when-online',
+      ruleVersionId: record.origin === 'default-execution-rule' && typeof record.ruleVersionId === 'string' ? record.ruleVersionId : null,
     };
   }
 
@@ -1863,7 +1978,9 @@ export class ReviewRunStore {
     // leaves it so for 继续审阅 (Issue #657 review) — and is dispatched; every other Run is settled from its own record,
     // including one the owner took that this history never heard of.
     const ledger = this.#categoryLedger(category);
-    return ledger.currentRunState(runRecordId) === 'authorized' ? { kind: 'dispatch', runRecordId, ledger } : SETTLE;
+    const state = ledger.currentRunState(runRecordId);
+    return state === 'authorized' ? { kind: 'dispatch', runRecordId, ledger }
+      : state === 'paused' || state === 'resumable' ? { kind: 'dispatch', runRecordId, ledger, resume: true } : SETTLE;
   }
 
   /**
@@ -1900,7 +2017,9 @@ export class ReviewRunStore {
     }
     let dispatchRunRecordId: string | null;
     try {
-      dispatchRunRecordId = ledger.authorize(snapshot.bookId, category.task.taskIntentId, approved).dispatchRunRecordId;
+      const ruleVersionId = this.defaultRuleVersion(reviewRunId);
+      dispatchRunRecordId = ledger.authorize(snapshot.bookId, category.task.taskIntentId, approved, 'now',
+        ruleVersionId === null ? { kind: 'standard-direct' } : { kind: 'default-execution-rule', ruleVersionId }).dispatchRunRecordId;
     } catch (error) {
       if (!(error instanceof AnalysisError)) throw error;
       this.#recordEvent(reviewRunId, categoryId, 'refused', error.message, { extra: { code: error.code } });
@@ -1960,7 +2079,7 @@ export class ReviewRunStore {
         .get(runRecordId) as SqlRow | undefined;
       const summary = outcome === undefined ? null : recordOf(text(outcome.canonical_json), text(outcome.sha256)).summary;
       const outcomeSummary = typeof summary === 'string' ? summary : null;
-      if (state === 'completed' || state === 'completed-with-gaps') {
+      if (state === 'completed' || state === 'completed-with-gaps' || (state === 'cancelled' && outcome?.result_set_revision_id != null)) {
         const revisionId = outcome === undefined ? null : nullableText(outcome.result_set_revision_id);
         if (revisionId === null) {
           this.#recordEvent(reviewRunId, categoryId, 'failed', '运行已结束，但没有形成结果集修订版。', { runRecordId });
@@ -2026,8 +2145,8 @@ export class ReviewRunStore {
   /**
    * Startup reconciliation of the review-category kinds (Issue #657): a category Run a stopped service left admitted,
    * executing or pausing has nothing running it. Unsettled, it reads as under way for good — the category's next Task is
-   * refused, and a page may poll — until the editor happens on 继续审阅. Each kind's ledger settles it as it settles every
-   * kind with no 续行: `interrupted` with its outcome. A category Run left `authorized` sent nothing and stays as it is:
+   * refused, and a page may poll — until the editor happens on 继续审阅. Each kind's ledger keeps its
+   * continuation point for explicit 续行, without forming a terminal outcome. A category Run left `authorized` sent nothing and stays as it is:
    * its Review Run owns it, and 继续审阅 — the editor's own choice — dispatches it (ADR 0034; Issue #657 review). One
    * no Review Run owns is blocked before dispatch with why.
    *
@@ -2856,6 +2975,11 @@ export class ReviewRunStore {
 
   /** What stopped a Run for good, from its categories' events: an exclusion, the editor's 取消任务 after it, or nothing. */
   #stoppedFor(reviewRunId: string): ReviewRunStop | null {
+    const cancelled = this.#db.prepare(`SELECT 1 FROM review_runs rr JOIN json_each(rr.canonical_json, '$.categories') c
+      JOIN analysis_run_records r ON r.task_intent_id = json_extract(c.value, '$.task.taskIntentId')
+      WHERE rr.review_run_id = ? AND (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id
+        ORDER BY s.sequence DESC LIMIT 1) IN ('cancelling', 'cancelled') LIMIT 1`).get(reviewRunId);
+    if (cancelled !== undefined) return 'cancelled';
     let stop: ReviewRunStop | null = null;
     for (const row of this.#db.prepare(
       "SELECT canonical_json, sha256 FROM review_run_category_events WHERE review_run_id = ? AND state IN ('refused', 'interrupted')",
@@ -3253,6 +3377,7 @@ export class ReviewRunStore {
 
   /** A Run's categories and its own state, from the records alone: everything `#runView` reads but the findings. */
   #runStateView(snapshot: RunSnapshot): Omit<RunView, 'findings' | 'historicallyAffected'> {
+    snapshot = this.#run(snapshot.reviewRunId);
     const authorization = this.#authorizationOf(snapshot.reviewRunId);
     const driving = this.#driving.has(snapshot.reviewRunId);
     const stop = this.#stoppedFor(snapshot.reviewRunId);
@@ -3362,7 +3487,12 @@ export class ReviewRunStore {
         .get(view.snapshot.reviewRunId) as SqlRow;
       const blockIds = view.snapshot.scope.kind === 'selection' ? view.snapshot.scope.blockIds ?? [] : [];
       const selection = blockIds.length === 0 ? null : { manuscriptId: view.snapshot.manuscript.manuscriptId, fromBlockId: blockIds[0]!, toBlockId: blockIds[blockIds.length - 1]! };
+      const control = this.controlTasks(view.snapshot.bookId, view.snapshot.reviewRunId).flatMap((task) =>
+        task.ledger.attentionReadings(progress, since, limit, { bookId: view.snapshot.bookId, cancelled: false }).tasks
+          .filter((reading) => reading.taskIntentId === task.taskIntentId && reading.run !== null &&
+            (['pausing', 'paused', 'resumable', 'awaiting-clarification', 'cancelling'].includes(reading.run.state) || reading.run.progress !== null)))[0];
       return {
+        ...(control === undefined ? {} : { control }),
         bookId: view.snapshot.bookId,
         bookTitle: text(row.book_title),
         reviewRunId: view.snapshot.reviewRunId,

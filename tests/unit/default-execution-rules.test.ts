@@ -17,6 +17,7 @@ import {
   defaultExecutionRuleTitle,
   writingRuleOtherTypeReason,
   writingRulePattern,
+  reviewRulePattern,
   writingRuleTypeId,
   writingRuleTypeLabel,
   isDefaultExecutionRulePattern,
@@ -72,9 +73,19 @@ describe('what a 默认执行规则 binds', () => {
 });
 
 describe('the words of quick start and its rules', () => {
+  it('keys a review rule by its exact category set in canonical order', () => {
+    const pattern = reviewRulePattern(['typos-and-usage', 'style-and-format', 'typos-and-usage']);
+    expect(pattern).toBe('review:style-and-format+typos-and-usage');
+    expect(isDefaultExecutionRulePattern(pattern)).toBe(true);
+    expect(isDefaultExecutionRulePattern('review:typos-and-usage+style-and-format')).toBe(false);
+    expect(isDefaultExecutionRulePattern('review:typos-and-usage+typos-and-usage')).toBe(false);
+    expect(isDefaultExecutionRulePattern('review:')).toBe(false);
+    expect(defaultExecutionRuleKind(pattern)).toBe('review-run');
+    expect(defaultExecutionRuleTitle(pattern)).toBe('审阅 · 体例与格式、错别字与规范用语');
+  });
   it('names a rule by the quick start it gives and its version, and covers only the two whole-Book updates and one writing type each', () => {
     expect(DEFAULT_EXECUTION_RULE_QUICK_LABELS).toEqual({ 'sync-current': '开始同步', 'reanalyze-book': '开始全部重来' });
-    expect(DEFAULT_EXECUTION_RULE_PROCEDURES).toEqual({ 'baseline-analysis': '基线分析', writing: '写作任务' });
+    expect(DEFAULT_EXECUTION_RULE_PROCEDURES).toEqual({ 'baseline-analysis': '基线分析', writing: '写作任务', 'review-run': '审阅' });
     expect(defaultExecutionRuleName('sync-current', 3)).toBe('开始同步 · 第 3 版');
     // A writing rule is one house type's (#701 review P2-1), named by the Task and its type.
     expect(writingRulePattern('promotion-article')).toBe('writing:promotion-article');

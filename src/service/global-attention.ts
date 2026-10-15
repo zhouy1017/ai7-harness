@@ -177,13 +177,14 @@ export interface UnconfirmedAttentionReading {
  * kinds: their own surfaces follow them, and only the wait is one the editor may have left behind.
  */
 export interface WaitingTaskAttentionReading {
+  readonly control?: AnalysisTaskAttentionReading;
   readonly kind: 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite' | 'writing' | 'review-run';
   readonly bookId: string;
   readonly bookTitle: string;
   readonly taskIntentId: string;
   readonly runRecordId: string;
   /** `launch-blocked` is a waiting Run Reconnect Preflight blocked because this launch cannot start it (CONC-006). */
-  readonly state: 'awaiting-connectivity' | 'plan-moved' | 'launch-blocked' | 'clarification';
+  readonly state: BaselineAnalysisRunState | 'plan-moved' | 'launch-blocked' | 'clarification';
   readonly ref?: string;
   readonly reviewOrdinal?: number;
   /** When the Run's last state was recorded. */
@@ -207,6 +208,7 @@ export interface AnalysisOutcomeAttentionReading {
 
 /** One Review Run as the Review Run ledger reads it: the Book's latest, or one that completed recently. */
 export interface ReviewRunAttentionReading {
+  readonly control?: AnalysisTaskAttentionReading;
   readonly bookId: string;
   readonly bookTitle: string;
   readonly reviewRunId: string;
@@ -654,6 +656,11 @@ function reviewObject(reading: ReviewRunAttentionReading): GlobalAttentionObject
 
 /** The Book's latest Review Run's item, if its state asks for one; a Run that reached the manuscript is 最近完成's. */
 function reviewRunItem(reading: ReviewRunAttentionReading, waitingFor: WaitingFor = 'admitting'): GlobalAttentionItemProjection | null {
+  const controlled = reading.control === undefined ? null : analysisTaskItem(reading.control, waitingFor);
+  if (controlled !== null) return { ...controlled, itemId: `review:${reading.reviewRunId}`, object: reviewObject(reading),
+    facts: { ...controlled.facts, categories: reading.categories.map(categoryFact) },
+    nextStep: controlled.state === 'analysis-running' || controlled.state === 'analysis-queued' ? 'view-review' : controlled.nextStep,
+    target: { kind: 'review', bookId: reading.bookId, reviewRunId: reading.reviewRunId } };
   const book = { bookId: reading.bookId, title: reading.bookTitle };
   const object = reviewObject(reading);
   const target: GlobalAttentionTarget = { kind: 'review', bookId: reading.bookId, reviewRunId: reading.reviewRunId };
@@ -711,6 +718,12 @@ function reviewRunItem(reading: ReviewRunAttentionReading, waitingFor: WaitingFo
  * items a baseline Run's wait makes, on the Task's own plan in the Task Drawer, beside the surface that owns it.
  */
 function waitingTaskItem(reading: WaitingTaskAttentionReading, waitingFor: WaitingFor): GlobalAttentionItemProjection {
+  // Control readings carry only the four ledger kinds; a Review Run's model question (#865) comes without one.
+  const kind = reading.kind;
+  const controlled = reading.control === undefined || kind === 'review-run' ? null : analysisTaskItem(reading.control, waitingFor);
+  if (controlled !== null && kind !== 'review-run') return { ...controlled, itemId: `task:${reading.taskIntentId}`,
+    object: { kind: 'task', taskKind: kind },
+    target: { kind: 'task-plan', bookId: reading.bookId, taskKind: kind, ref: reading.taskIntentId } };
   const fields = {
     itemId: `task:${reading.taskIntentId}`,
     at: reading.stateAt,

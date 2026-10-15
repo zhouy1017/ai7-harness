@@ -271,6 +271,10 @@ describe('one model question per Run unit', () => {
     expect(plan.clarifications).toHaveLength(1);
     expect(store.inspectGlobalAttention(() => null, false).groups.find((group) => group.key === 'decisions')!.items)
       .toContainEqual(expect.objectContaining({ state: 'analysis-clarification', target: { kind: 'task-plan', bookId, taskKind: 'initial-evaluation', ref: taskIntentId } }));
+    // One item for the Task, whichever reading carries it: the run-control reading (#870) and the question are never listed twice.
+    const listed = store.inspectGlobalAttention(() => null, false).groups.flatMap((group) => group.items).filter((item) => item.itemId === `task:${taskIntentId}`);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ state: 'analysis-clarification', facts: { clarificationOrigin: 'model' } });
     store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: plan.clarifications[0]!.requestId, optionId: 'model-option-0', note: null });
     const ledger = store.clarificationLedger(bookId, taskIntentId);
     expect(ledger.kind).toBe('evaluation');

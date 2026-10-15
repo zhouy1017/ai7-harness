@@ -617,6 +617,56 @@ function baselinePlanEdit(
   };
 }
 
+/** Shared drawer controls; kind-specific scope, outcomes and material disclosures stay on their own plan. */
+export function withLedgerRunControls(
+  plan: TaskPlanProjection,
+  projection: BaselineAnalysisProjection,
+  blocks: ReadonlyArray<ManifestBlockInput>,
+  stopped?: BaselineStoppedRunFacts,
+  developerLive = false,
+): TaskPlanProjection {
+  const version = projection.planVersion;
+  if (version === null || projection.providerResolutionPlan === null) return plan;
+  const edits = version.edits;
+  const run = projection.run;
+  const impactWords = (lines: ReadonlyArray<string>): string[] => lines.map((line) => line === CANCELLATION_NO_EFFECTS
+    ? plan.kind === 'review-run' ? '已经形成的审阅批注与修改建议会保留；取消不会撤回已完成的受控动作。'
+      : '这项任务只形成草稿或建议，不会自动采用、改稿或发稿。'
+    : line.replace('这本书最新的分析', '这项任务最新的结果'));
+  const budgetReached = run?.state === 'interrupted' && projection.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached';
+  const canRedo = run !== null && runBegan(run) &&
+    (run.state === 'paused' || run.state === 'resumable' || run.state === 'cancelled' || budgetReached);
+  const redo = !canRedo || plan.kind === 'fixed-task' || plan.kind === 'baseline-analysis' ? null : {
+    summary: run.state === 'cancelled' || budgetReached ? [] : [
+      ...impactWords(baselineCancellationImpact(run, null, stopped === undefined ? null : {
+        unitsSettled: stopped.unitsSettled, unitsTotal: stopped.unitsTotal, bindingHolds: stopped.bindingHolds,
+      })),
+      '然后准备一项新任务；开始之前可以先改计划。新任务由你开始，不会自己运行。',
+    ],
+    prepare: { kind: plan.kind, ref: plan.ref, redoOf: run.runRecordId },
+  };
+  return {
+    ...plan,
+    state: run !== null && ['pausing', 'paused', 'resumable', 'awaiting-clarification', 'cancelling', 'cancelled'].includes(run.state)
+      ? baselineState(projection, stopped) : plan.state,
+    edit: baselinePlanEdit(projection, version.ordinal, blocks, projection.providerResolutionPlan.runBudgetCeiling,
+      developerLive),
+    boundary: {
+      ...plan.boundary,
+      adaptable: PLAN_EDITABLE_ADAPTATIONS.map((id) => ({
+        id, label: PLAN_EDIT_ADAPTATION_LABELS[id], removable: true, movable: false,
+        removed: edits.disallowedAdaptations.includes(id), askFirst: (edits.askFirstAdaptations ?? []).includes(id),
+      })),
+    },
+    runControl: (() => {
+      const control = baselineRunControl(projection, stopped);
+      return control === null ? null : { ...control, cancel: { ...control.cancel, impact: impactWords(control.cancel.impact) } };
+    })(),
+    redo,
+    budgetStop: baselineBudgetStop(projection),
+  };
+}
+
 type ReadUnit = { readonly unitOrdinal: number; readonly startPosition: number; readonly endPosition: number; readonly disposition: string };
 type ReadManifest = { readonly units: ReadonlyArray<{ readonly ordinal: number; readonly overlapBlockIds: ReadonlyArray<string> }> };
 
@@ -925,7 +975,7 @@ export function evaluationMaterialPlan(plan: TaskPlanProjection, materials: Read
  * The plan of the Book's AI7 初评 Task: the evaluation kind's ledger read in the editor's words, as the baseline plan is. Its
  * steps are what the kind does — read each range for the evidence of each scored item, then score the items — and what it
  * makes is AI7's draft beside the editor's scores, which the record never takes for the editor's. It is started from the bar
- * and takes no edits, rules, pause or redo in this slice: a changed plan is prepared again from 评估.
+ * and gets its shared controls and Run-honoured edits from `withLedgerRunControls`.
  */
 export function initialEvaluationPlan(input: {
   projection: InitialEvaluationProjection;
@@ -1077,7 +1127,7 @@ const READERS_REPORT_NO_RULE = '审稿意见还不能设为快速开始默认：
  * there is none (「本社暂无审稿意见范例，本次不参考范例」, the Owner's answer of 2026-10-07). Its steps are what the kind
  * does — read each range for passages the report can point to, then write the five sections — and what it makes is a draft
  * the editor edits on the manuscript surface: never a change of the record, never a delivery. It is started from the bar and
- * takes no edits, rules, pause or redo: a changed plan is drafted again from 评估.
+ * gets its shared controls and Run-honoured edits from `withLedgerRunControls`.
  */
 export function readersReportPlan(input: {
   projection: ReadersReportProjection;
@@ -1343,8 +1393,7 @@ export function writingReferenceLines(input: WritingContractInput, exemplarsHere
  * house's 范例 of the type among them, referenced and never copied. Its steps are what the kind does — read each range for what
  * the document can draw on, then write it — and what it makes is a draft that becomes the type's document in its 起草 phase
  * once the editor opens it: never a delivery. It is started from the bar — or by 快速开始 under the Book's writing 默认执行规则,
- * which `设为快速开始默认…` sets from it (S84b; `defaultRule`) — and takes no edits, pause or redo: a changed plan is drafted
- * again from 交付物.
+ * which `设为快速开始默认…` sets from it (S84b; `defaultRule`) — with shared controls and Run-honoured edits added by `withLedgerRunControls`.
  */
 export function writingPlan(input: {
   projection: WritingProjection;
@@ -1529,7 +1578,7 @@ const EVALUATION_REWRITE_NO_RULE = '按我的评分重写评语还不能设为�
  * plan is. It names the version and the saved entry whose scores the 评语 are rewritten to, and the items the editor scored; its
  * steps are what the kind does — read each range for what bears out the editor's scores, then rewrite each 评语 and the 总评 —
  * and what it makes is a proposal: never a number, never a change of the record until the editor 采用 it. It is started from
- * the bar and takes no edits, rules, pause or redo: a changed plan is asked again from 评估.
+ * the bar, with shared controls and Run-honoured edits added by `withLedgerRunControls`.
  */
 export function evaluationRewritePlan(input: {
   projection: EvaluationRewriteProjection;

@@ -157,6 +157,7 @@ export const DIALOGUE_CLOSED_CAUSE = 'AI7_CLOSED';
 export class DialogueExecutionOwner {
   readonly #deps: DialogueExecutionDeps;
   #active: ActiveAnswer | null = null;
+  readonly #queued: DialogueTurnStart[] = [];
   #disposed = false;
 
   constructor(deps: DialogueExecutionDeps) {
@@ -171,12 +172,13 @@ export class DialogueExecutionOwner {
     const refusal = dialogueRouteRefusal(this.#deps, sourceDigest);
     if (refusal !== null) throw new DialogueError('DIALOGUE_ROUTE_UNAVAILABLE', refusal);
     if (this.#disposed) throw new DialogueError('DIALOGUE_ROUTE_UNAVAILABLE', 'AI7 正在关闭；没有发送任何内容。');
-    if (this.#active !== null) throw new DialogueError('DIALOGUE_BUSY', '另一段对话正在回答；停止它或等它答完再提问。');
   }
 
   /** What the attempt in flight sent and has streamed so far; `null` for any other attempt. */
   liveText(attemptId: string): LiveAnswer | null {
     const active = this.#active;
+    const queued = this.#queued.find((turn) => turn.attemptId === attemptId);
+    if (queued !== undefined) return { message: queued.message, streamed: '', queued: true };
     return active !== null && active.attemptId === attemptId ? { message: active.message, streamed: active.streamed } : null;
   }
 
@@ -187,6 +189,11 @@ export class DialogueExecutionOwner {
   /** Start the attempt's turn and return at once; the answer streams into memory and settles its own outcome. */
   begin(turn: DialogueTurnStart): void {
     this.requireReady();
+    if (this.#active?.attemptId === turn.attemptId || this.#queued.some((queued) => queued.attemptId === turn.attemptId)) return;
+    if (this.#active !== null) {
+      this.#queued.push(turn);
+      return;
+    }
     let settle!: () => void;
     const done = new Promise<void>((resolve) => { settle = resolve; });
     const active: ActiveAnswer = { attemptId: turn.attemptId, message: turn.message, streamed: '', stopRequested: false, harness: null, done };
@@ -194,11 +201,31 @@ export class DialogueExecutionOwner {
     void this.#run(active, turn).finally(() => {
       if (this.#active === active) this.#active = null;
       settle();
+      this.#beginQueued();
     });
+  }
+
+  #beginQueued(): void {
+    while (!this.#disposed && this.#active === null) {
+      const next = this.#queued.shift();
+      if (next === undefined) return;
+      try { this.begin(next); }
+      catch (error) {
+        const code = error instanceof DialogueError ? error.code : 'DIALOGUE_DISPATCH_FAILED';
+        this.#deps.records.settleDialogueAttempt(next.attemptId, 'failed', null, code);
+      }
+    }
   }
 
   /** 停止回答: interrupt the answer in flight and wait until it has settled as stopped. */
   async stop(attemptId: string): Promise<void> {
+    const queued = this.#queued.findIndex((turn) => turn.attemptId === attemptId);
+    if (queued !== -1) {
+      // A queued attempt has neither a Harness span nor a sent request. Cancellation uses the existing stopped outcome.
+      this.#deps.records.settleDialogueAttempt(attemptId, 'stopped', null, null);
+      this.#queued.splice(queued, 1);
+      return;
+    }
     const active = this.#active;
     if (active === null || active.attemptId !== attemptId) return;
     active.stopRequested = true;
@@ -209,10 +236,12 @@ export class DialogueExecutionOwner {
   /** AI7 is closing: the answer in flight is interrupted and settles 回答中断 before the store closes. */
   async dispose(): Promise<void> {
     this.#disposed = true;
-    const active = this.#active;
-    if (active === null) return;
-    active.harness?.interrupt();
-    await active.done;
+    try {
+      for (const queued of this.#queued.splice(0)) this.#deps.records.settleDialogueAttempt(queued.attemptId, 'interrupted', null, DIALOGUE_CLOSED_CAUSE);
+    } finally {
+      const active = this.#active;
+      if (active !== null) { active.harness?.interrupt(); await active.done; }
+    }
   }
 
   async #run(active: ActiveAnswer, turn: DialogueTurnStart): Promise<void> {

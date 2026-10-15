@@ -6,6 +6,8 @@ import {
 } from '../shared/protocol.js';
 import {
   DIALOGUE_ACTIONS,
+  DIALOGUE_QUEUED_CANCEL,
+  DIALOGUE_QUEUED_CANCELLED,
   DIALOGUE_ANSWER_HEADING,
   DIALOGUE_AUTHORITY_NOTE,
   DIALOGUE_CONVERT_INCOMPLETE,
@@ -178,7 +180,11 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       ? document.activeElement.dataset['dialogueAction'] ?? null
       : null;
     const buttons: HTMLButtonElement[] = [];
-    if (can.stop) buttons.push(actionButton('stop', true, true, () => void act('stop')));
+    if (can.stop) {
+      const stop = actionButton('stop', true, true, () => void act('stop'));
+      if (latest?.queued === true) stop.textContent = DIALOGUE_QUEUED_CANCEL;
+      buttons.push(stop);
+    }
     if (latest !== undefined && latest.state !== 'answering') {
       buttons.push(actionButton('continue', can.continue, can.continue, () => void act('continue')));
       buttons.push(actionButton('regenerate', can.regenerate, !can.continue, () => void act('regenerate')));
@@ -197,7 +203,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
   function appends(next: DialogueProjection): boolean {
     const latest = next.attempts.at(-1);
     return shown !== null && latest !== undefined && dialogue !== null && latest.attemptId === shown.attemptId &&
-      latest.state === shown.state && latest.fragmentsFrom === shown.count && next.attempts.length === dialogue.attempts.length;
+      latest.state === shown.state && latest.queued === dialogue.attempts.at(-1)?.queued && latest.fragmentsFrom === shown.count && next.attempts.length === dialogue.attempts.length;
   }
 
   /** Read the dialogue: whole from `after` 0, or only the fragments that arrived since; anything else that moved reads it whole. */
@@ -257,7 +263,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       working = false;
       if (dialogueId !== next.dialogueId) return;
       paint(next);
-      options.setStatus(action === 'stop' ? DIALOGUE_STATUS.stopped : words, 'success');
+      options.setStatus(action === 'stop' ? (latest.queued === true ? DIALOGUE_QUEUED_CANCELLED : DIALOGUE_STATUS.stopped) : words, 'success');
       options.onChanged();
       actions.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
       if (next.attempts.at(-1)?.state === 'answering') {

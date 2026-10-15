@@ -98,6 +98,7 @@ export function fragmentReading(state: DialogueAnswerState): FragmentReading {
 }
 
 export interface ResolvedAttempt {
+  readonly queued?: boolean;
   readonly attempt: StoredDialogueAttempt;
   readonly state: DialogueAnswerState;
   /** The answer's complete fragments: a 继续回答 carries what the answer it goes on from kept, then its own. */
@@ -111,6 +112,7 @@ export interface ResolvedAttempt {
  */
 /** What the answer in flight holds in memory: the message its turn sent, and every delta streamed so far. */
 export interface LiveAnswer {
+  readonly queued?: boolean;
   readonly message: DialogueMessageInput;
   readonly streamed: string;
 }
@@ -136,7 +138,7 @@ export function resolveAttempts(
     const own = streamed === null ? [] : splitFragments(streamed, fragmentReading(state));
     const prior = attempt.kind === 'continue' ? resolved.at(-1) : undefined;
     const carried = prior === undefined ? [] : prior.fragments;
-    resolved.push({ attempt, state, fragments: [...carried, ...own], source });
+    resolved.push({ attempt, state, fragments: [...carried, ...own], source, ...(streaming?.queued === true ? { queued: true } : {}) });
   }
   return { attempts: resolved, first };
 }
@@ -163,6 +165,7 @@ export function dialogueProjection(
       ordinal: entry.attempt.ordinal,
       kind: entry.attempt.kind,
       state: entry.state,
+      ...(entry.queued === true ? { queued: true } : {}),
       fragments: entry.fragments.slice(from).map((fragment) => ({ text: fragment.text, breakAfter: fragment.breakAfter })),
       fragmentsFrom: from,
       fragmentTotal: entry.fragments.length,

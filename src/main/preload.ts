@@ -239,6 +239,14 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['cancelBaselineAnalysisRun']['output']>(IPC_CHANNELS.cancelBaselineAnalysisRun, input),
   pauseBaselineAnalysisRun: (input: Omit<ServiceOperationMap['pauseBaselineAnalysisRun']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['pauseBaselineAnalysisRun']['output']>(IPC_CHANNELS.pauseBaselineAnalysisRun, input),
+  controlTaskRun: (input: Omit<ServiceOperationMap['controlTaskRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['controlTaskRun']['output']>(IPC_CHANNELS.controlTaskRun, input),
+  editTaskPlan: (input: Omit<ServiceOperationMap['editTaskPlan']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['editTaskPlan']['output']>(IPC_CHANNELS.editTaskPlan, input),
+  redoTaskPlan: (input: Omit<ServiceOperationMap['redoTaskPlan']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['redoTaskPlan']['output']>(IPC_CHANNELS.redoTaskPlan, input),
+  quickStartReviewRun: (input: Omit<ServiceOperationMap['quickStartReviewRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['quickStartReviewRun']['output']>(IPC_CHANNELS.quickStartReviewRun, input),
   resumeBaselineAnalysisRun: (input: Omit<ServiceOperationMap['resumeBaselineAnalysisRun']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['resumeBaselineAnalysisRun']['output']>(IPC_CHANNELS.resumeBaselineAnalysisRun, input),
   editBaselineAnalysisPlan: (input: Omit<ServiceOperationMap['editBaselineAnalysisPlan']['input'], 'bookId'>) =>

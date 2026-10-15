@@ -902,10 +902,11 @@ async function main() {
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'panel-start');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'running'`, 'panel-started', 120_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'panel-back-running');
+    at('panel-stop-wording');
     const running = await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-running' &&
       cardsOf(panel, 'running')[0].reason === `正在逐个阅读范围分析 · 已完成 ${FIRST_HOLD}/${SAMPLE1_UNITS} 个阅读范围`, 'panel-running', 180_000);
     requireJourney(running.running === 'true' && cardsOf(running, 'running')[0].pill === '运行中' && statesOf(running, 'waiting').length === 0 &&
-      JSON.stringify(cardsOf(running, 'running')[0].actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['cancel', '取消任务', 'enabled'], ['plan', '查看计划', 'enabled']]),
+      JSON.stringify(cardsOf(running, 'running')[0].actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['cancel', '停止任务', 'enabled'], ['plan', '查看计划', 'enabled']]),
     'panel-running-card', running);
 
     at('panel-pause');
@@ -915,7 +916,7 @@ async function main() {
     await writeHold(FIRST_HOLD + 1);
     const paused = await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-paused', 'panel-paused', 120_000);
     requireJourney(cardsOf(paused, 'running')[0].pill === '已暂停' &&
-      JSON.stringify(cardsOf(paused, 'running')[0].actions) === JSON.stringify([['resume', '续行', 'enabled'], ['cancel', '取消任务', 'enabled'], ['plan', '查看计划', 'enabled']]),
+      JSON.stringify(cardsOf(paused, 'running')[0].actions) === JSON.stringify([['resume', '续行', 'enabled'], ['cancel', '停止任务', 'enabled'], ['plan', '查看计划', 'enabled']]),
     'panel-paused-card', paused);
 
     at('panel-resume');
