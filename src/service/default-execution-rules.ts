@@ -11,6 +11,7 @@ import {
   type WritingDefaultExecutionRulePattern,
 } from '../shared/protocol.js';
 import { productionDocumentType } from './production-document-types.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION } from './review/category-configuration.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { diffMaterialPlanInputs } from './analysis/plan-boundary.js';
 import { DRIFT_FIELD_LABELS } from './task-plan.js';
@@ -138,6 +139,16 @@ export function initializeDefaultExecutionRuleSchema(db: DatabaseSync): void {
  * no relation moves.
  */
 const WRITING_RULE_PATTERN = /^writing:([a-z][a-z0-9-]{0,63})$/u;
+const REVIEW_RULE_PATTERN = /^review:([a-z][a-z0-9-]*(?:\+[a-z][a-z0-9-]*)*)$/u;
+
+export function reviewRulePattern(categoryIds: ReadonlyArray<string>): `review:${string}` {
+  return `review:${[...new Set(categoryIds)].sort().join('+')}`;
+}
+
+function isReviewRulePattern(pattern: string): pattern is `review:${string}` {
+  const categories = REVIEW_RULE_PATTERN.exec(pattern)?.[1]?.split('+');
+  return categories !== undefined && pattern.length <= 256 && reviewRulePattern(categories) === pattern;
+}
 
 export function writingRulePattern(typeId: string): WritingDefaultExecutionRulePattern {
   return `writing:${typeId}`;
@@ -150,7 +161,7 @@ export function writingRuleTypeId(pattern: string): string | null {
 
 /** Whether a Task mode — or a writing rule's pattern — is one a rule may cover (S75 D3, S84b). */
 export function isDefaultExecutionRulePattern(mode: string): mode is DefaultExecutionRulePattern {
-  return (DEFAULT_EXECUTION_RULE_PATTERNS as readonly string[]).includes(mode) || WRITING_RULE_PATTERN.test(mode);
+  return (DEFAULT_EXECUTION_RULE_PATTERNS as readonly string[]).includes(mode) || WRITING_RULE_PATTERN.test(mode) || isReviewRulePattern(mode);
 }
 
 /**
@@ -158,6 +169,7 @@ export function isDefaultExecutionRulePattern(mode: string): mode is DefaultExec
  * whole Book (S75 D3), and the writing Task of one house type (S84b).
  */
 export function defaultExecutionRuleKind(pattern: DefaultExecutionRulePattern): DefaultExecutionRuleKind {
+  if (isReviewRulePattern(pattern)) return 'review-run';
   return writingRuleTypeId(pattern) === null ? 'baseline-analysis' : 'writing';
 }
 const RULE_SCHEMA = 'ai7.default-execution-rule/1' as const;
@@ -181,12 +193,15 @@ function writingTypeLabel(typeId: string): string {
  * button is the generic 快速开始 — `写作任务 · 宣传文章`.
  */
 export function defaultExecutionRuleTitle(pattern: DefaultExecutionRulePattern): string {
+  if (isReviewRulePattern(pattern)) return `审阅 · ${pattern.slice(7).split('+').map((id) =>
+    BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => category.categoryId === id)?.label ?? id).join('、')}`;
   const typeId = writingRuleTypeId(pattern);
   return typeId === null ? DEFAULT_EXECUTION_RULE_QUICK_LABELS[pattern as BaselineDefaultExecutionRulePattern] : `写作任务 · ${writingTypeLabel(typeId)}`;
 }
 
 /** The 工序 a rule binds, as the confirmation's and 工序与规则's `工序` row names it. */
 export const DEFAULT_EXECUTION_RULE_PROCEDURES: Readonly<Record<DefaultExecutionRuleKind, string>> = {
+  'review-run': '审阅',
   'baseline-analysis': '基线分析',
   writing: '写作任务',
 };
@@ -474,6 +489,7 @@ const BASELINE_RULE_DOES: Readonly<Record<BaselineDefaultExecutionRulePattern, s
 
 /** What 快速开始 does under a rule of the pattern. */
 export function defaultExecutionRuleDoes(pattern: DefaultExecutionRulePattern): string {
+  if (isReviewRulePattern(pattern)) return '点「快速开始」后，AI7 先准备所选类别的审阅计划：与规则一致时直接开始，有任何不同都停在计划上，等你看过再开始。规则不会自己开始任何任务。';
   const typeId = writingRuleTypeId(pattern);
   const after = '有任何不同都停在计划上，等你看过再开始。';
   if (typeId === null) {
@@ -501,6 +517,7 @@ export function writingRuleOtherTypeReason(ruleName: string, ruleTypeLabel: stri
  * type the rule starts; `null` for a baseline rule, whose pattern is its whole scope.
  */
 export function defaultExecutionRuleCovers(pattern: DefaultExecutionRulePattern): string | null {
+  if (isReviewRulePattern(pattern)) return defaultExecutionRuleTitle(pattern);
   const typeId = writingRuleTypeId(pattern);
   return typeId === null ? null : `新建文档「${writingTypeLabel(typeId)}」`;
 }

@@ -238,6 +238,9 @@ describe('live material references (#809)', () => {
   });
 
   it.each(['review', 'writing', 'readers-report'] as const)('replays recorded %s units and any synthesis without a socket or credential', async (kind) => {
+    // These captures precede clarification /2; preserve the original question contract for their replay.
+    policy = withRuleFor(policy, kindId(kind), { clarificationQuestionAllowed: false, clarificationTimeoutHours: null });
+    bind();
     recorded = await loadModelFixture(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), `sample1-recorded-v41-material-${kind}`);
     await prepare(kind)();
     expect(recordedUnits.size).toBe(8);

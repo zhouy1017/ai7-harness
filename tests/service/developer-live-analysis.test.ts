@@ -731,6 +731,59 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     await store.close();
   });
 
+  // Issue #865: a model question and the answer turn that follows it are two requests with their own cache identities; a rerun
+  // that asks and is answered the same way replays both, and the transport is never called again.
+  it('replays a model question and its answer turn from the cache, each under its own identity (Issue #865)', async () => {
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const { units: responses, named } = await unitAnswers(prepared);
+    const question = JSON.stringify({ question: '本范围按哪个阅读重点处理？', options: ['人物', '事件'], freeTextAllowed: true });
+    const asking = (calls: StubCall[]): typeof fetch => {
+      const inner = stubTransport({ calls, responses, named }) as unknown as (url: string, init: { headers: Record<string, string>; body: string }) => Promise<unknown>;
+      return (async (url: string, init: { headers: Record<string, string>; body: string }) => {
+        const text = (JSON.parse(init.body) as { messages: Array<{ content: string }> }).messages.at(-1)!.content;
+        if (!/^分析单元 1\//u.test(text) || text.includes('澄清回答 /2')) return inner(url, init);
+        calls.push({ url, headers: { ...init.headers }, body: init.body });
+        return { status: 200, json: async () => ({ choices: [{ message: { content: question } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }) };
+      }) as unknown as typeof fetch;
+    };
+    const answered = async (plan: BaselineAnalysisProjection, calls: StubCall[]): Promise<BaselineAnalysisProjection> => {
+      const execution = owner(store, asking(calls));
+      const waiting = await runLive(store, bookId, plan, execution);
+      expect(waiting.run!.state).toBe('awaiting-clarification');
+      const taskIntentId = plan.taskIntent!.taskIntentId;
+      const card = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).clarifications.find((entry) => entry.origin === 'model')!;
+      store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: card.requestId, optionId: 'model-option-0', note: null });
+      execution.continueAnswered(waiting.run!.runRecordId);
+      await execution.whenIdle();
+      return store.inspectBaselineAnalysis(bookId, () => null);
+    };
+    const firstCalls: StubCall[] = [];
+    expect((await answered(prepared, firstCalls)).run!.state).toBe('completed');
+    expect(firstCalls).toHaveLength(FULL_CHAIN_TURNS + 1);
+
+    let progress = store.createBaselineAnalysisPreparationWork(
+      bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], { mode: 'reanalyze-book', selectedRange: null }, launchPolicy,
+    );
+    while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+    const secondCalls: StubCall[] = [];
+    const second = await answered(progress.projection!, secondCalls);
+    expect(second.run!.state).toBe('completed');
+    expect(second.resultSetRevision!.coverage.unitsClosed).toBe(SAMPLE1_UNITS);
+    expect(secondCalls).toHaveLength(0);
+
+    const lines = await ledgerLines(cacheRoot);
+    const line = (outcome: string, step: string) => lines.find((entry) => entry.outcome === outcome && (entry.validation as { step: string }).step === step);
+    const asked = line('transmitted', 'first-baseline/unit-1');
+    const answer = line('transmitted', 'first-baseline/unit-1-clarification-answer');
+    expect(asked).toBeDefined();
+    expect(answer).toBeDefined();
+    expect(answer!.requestDigest).not.toBe(asked!.requestDigest);
+    expect(answer!.cacheKey).not.toBe(asked!.cacheKey);
+    expect(line('replayed', 'reanalyze-book/unit-1')).toMatchObject({ cacheKey: asked!.cacheKey });
+    expect(line('replayed', 'reanalyze-book/unit-1-clarification-answer')).toMatchObject({ cacheKey: answer!.cacheKey });
+    await store.close();
+  });
+
   // ADR 0089 · Issue #808: the development checks apply to development validation only. A live Run outside it is business —
   // the same user Task asked twice reaches the transport twice — and the developer cache and ledger are neither read nor written.
   it('sends every model step of two identical business Tasks to the transport and never touches the developer cache or ledger', async () => {

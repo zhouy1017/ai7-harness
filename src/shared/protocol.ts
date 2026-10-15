@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 132 as const;
+export const SERVICE_PROTOCOL_VERSION = 136 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -72,6 +72,10 @@ export const IPC_CHANNELS = {
   cancelWaitingTask: 'ai7:j04:cancel-waiting-task',
   cancelBaselineAnalysisRun: 'ai7:j04:cancel-baseline-analysis-run',
   pauseBaselineAnalysisRun: 'ai7:j04:pause-baseline-analysis-run',
+  controlTaskRun: 'ai7:tasks:control-run',
+  editTaskPlan: 'ai7:tasks:edit-plan',
+  redoTaskPlan: 'ai7:tasks:redo-plan',
+  quickStartReviewRun: 'ai7:review:quick-start',
   resumeBaselineAnalysisRun: 'ai7:j04:resume-baseline-analysis-run',
   editBaselineAnalysisPlan: 'ai7:j04:edit-baseline-analysis-plan',
   answerBaselineAnalysisClarification: 'ai7:j04:answer-baseline-analysis-clarification',
@@ -2735,6 +2739,8 @@ export type RunReportIfRedoneProjection =
 
 /** The Run Report as it is recorded inside the Task Outcome, before its own digest is taken. */
 export interface RunReportRecordProjection {
+  /** Editorial choices only; no question or answer content enters the Run Report. */
+  modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'timed-out' | 'unanswered'; line: string }>;
   schema: 'ai7.analysis.run-report/1';
   runRecordId: string;
   taskIntentId: string;
@@ -5677,6 +5683,25 @@ export interface InspectTaskPlanInput {
   ref: string | null;
 }
 
+/** Controls use the same ledger Run and authorization for every planned task kind. */
+export interface ControlTaskRunInput {
+  bookId: string;
+  kind: StartWhenOnlineTaskKind;
+  ref: string;
+  action: 'pause' | 'resume' | 'cancel';
+}
+
+export interface EditTaskPlanInput {
+  bookId: string;
+  kind: StartWhenOnlineTaskKind;
+  ref: string;
+  planEnvelopeDigest: string;
+  removedSteps: ReadonlyArray<string>;
+  disallowedAdaptations: ReadonlyArray<string>;
+  askFirstAdaptations?: ReadonlyArray<string>;
+  runBudgetCeiling?: { kind: 'tokens'; maxTotalTokens: number } | null;
+}
+
 /**
  * Where a plan stands, as the drawer's state pill says it (editor-surfaces §6 状态). `unconnected` is 模型未连接:
  * the plan's route sends to a model service whose credential is not ready (Issue #420, S74a). `offline` is 离线,
@@ -5988,7 +6013,7 @@ export interface TaskPlanProjection {
 }
 
 /** The answers a question about a safe retry can have (Issue #422, S76d; CLAR-006, INPUT-002). */
-export type ClarificationOptionId = 'retry' | 'record-gap';
+export type ClarificationOptionId = 'retry' | 'record-gap' | `model-option-${0 | 1 | 2 | 3}` | 'free-text' | 'no-answer';
 
 /**
  * One Clarification Request of the Task's Run as the drawer's card shows it (Issue #422, S76d; V2-UX-CLAR-001 to
@@ -5997,6 +6022,9 @@ export type ClarificationOptionId = 'retry' | 'record-gap';
  * answer as it was recorded. `unanswered` is a question whose Run ended before an answer came.
  */
 export interface TaskPlanClarificationProjection {
+  origin?: 'product' | 'model';
+  freeTextAllowed?: boolean;
+  taskIntentId?: string;
   requestId: string;
   unitOrdinal: number;
   planVersion: number;
@@ -6035,7 +6063,8 @@ export interface TaskPlanReprepareProjection {
 
 export interface TaskPlanRedoProjection {
   summary: ReadonlyArray<string>;
-  prepare: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; redoOf: string };
+  prepare: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; redoOf: string }
+    | { kind: StartWhenOnlineTaskKind; ref: string; redoOf: string };
 }
 
 /**
@@ -6047,11 +6076,12 @@ export interface TaskPlanRedoProjection {
  */
 export type BaselineDefaultExecutionRulePattern = 'sync-current' | 'reanalyze-book';
 export type WritingDefaultExecutionRulePattern = `writing:${string}`;
-export type DefaultExecutionRulePattern = BaselineDefaultExecutionRulePattern | WritingDefaultExecutionRulePattern;
+export type ReviewDefaultExecutionRulePattern = `review:${string}`;
+export type DefaultExecutionRulePattern = BaselineDefaultExecutionRulePattern | WritingDefaultExecutionRulePattern | ReviewDefaultExecutionRulePattern;
 /** The baseline's two patterns; a writing pattern is one per house type. */
 export const DEFAULT_EXECUTION_RULE_PATTERNS: readonly BaselineDefaultExecutionRulePattern[] = ['sync-current', 'reanalyze-book'];
 /** The analysis kind each pattern's Tasks are of, as the analysis ledger names it. */
-export type DefaultExecutionRuleKind = 'baseline-analysis' | 'writing';
+export type DefaultExecutionRuleKind = 'baseline-analysis' | 'writing' | 'review-run';
 
 /**
  * What a rule version binds: the material inputs of the plan the editor viewed when setting it that stay the same
@@ -10627,6 +10657,7 @@ export type GlobalAttentionObjectProjection =
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
+  clarificationOrigin?: 'model';
   /** The Run in flight: its declared step and its Measured Run Progress (V2-UX-ATTN-004). */
   progress: null | { stage: RunReportUsageStageId; unitsSettled: number; unitsTotal: number };
   /**
@@ -10779,6 +10810,8 @@ export interface DialogueFragmentProjection {
 }
 
 export interface DialogueAttemptProjection {
+  /** Still waiting behind another answer; no request or new business state has been recorded. */
+  readonly queued?: boolean;
   readonly attemptId: string;
   readonly ordinal: number;
   readonly kind: DialogueAttemptKind;
@@ -11467,6 +11500,13 @@ export interface ServiceOperationMap {
   pauseBaselineAnalysisRun: {
     input: { bookId: string; taskIntentId: string };
     output: BaselineAnalysisProjection;
+  };
+  controlTaskRun: { input: ControlTaskRunInput; output: TaskPlanProjection };
+  editTaskPlan: { input: EditTaskPlanInput; output: TaskPlanProjection };
+  redoTaskPlan: { input: Pick<ControlTaskRunInput, 'bookId' | 'kind' | 'ref'>; output: ServiceJobProjection };
+  quickStartReviewRun: {
+    input: { bookId: string; reviewRunId: string; planEnvelopeDigest: string; ruleVersionId: string };
+    output: { outcome: 'started' | 'fell-back'; reasons: ReadonlyArray<string>; projection: ReviewWorkspaceProjection };
   };
   /**
    * 续行 (CONT-015, CONT-016): after lightweight revalidation, the same Run goes on in a new Harness Execution Span from
@@ -12255,6 +12295,10 @@ export interface RendererApi {
   cancelWaitingTask(input: Omit<CancelWaitingTaskInput, 'bookId'>): Promise<TaskPlanProjection>;
   cancelBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   pauseBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
+  controlTaskRun(input: Omit<ControlTaskRunInput, 'bookId'>): Promise<TaskPlanProjection>;
+  editTaskPlan(input: Omit<EditTaskPlanInput, 'bookId'>): Promise<TaskPlanProjection>;
+  redoTaskPlan(input: Pick<ControlTaskRunInput, 'kind' | 'ref'>): Promise<ServiceJobProjection>;
+  quickStartReviewRun(input: Omit<ServiceOperationMap['quickStartReviewRun']['input'], 'bookId'>): Promise<ServiceOperationMap['quickStartReviewRun']['output']>;
   resumeBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   /** 更新计划 (Issue #419): the next plan version of the Book's baseline analysis Task, as the editor left it. */
   editBaselineAnalysisPlan(input: {

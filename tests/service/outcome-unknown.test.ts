@@ -200,6 +200,7 @@ describe('结果待确认 over the real store', () => {
       const after = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
       expect(after.redo?.prepare).toMatchObject({ redoOf: runRecordId, update: { mode: 'sync-current' } });
       expect(after.resend).toBeNull();
+      if (after.redo === null || 'kind' in after.redo.prepare) throw new Error('Expected baseline redo');
       let progress = store.createBaselineAnalysisPreparationWork(bookId, after.redo!.prepare.goal, after.redo!.prepare.update, launchPolicy, false, runRecordId);
       while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
       const redo = progress.projection!;

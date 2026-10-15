@@ -3282,6 +3282,9 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
   for (const adaptation of report.adaptations) {
     adaptations.append(element('li', undefined, `第 ${adaptation.unitOrdinal} 个阅读范围安全重试一次 · ${localInstantLabel(adaptation.recordedAt)}`));
   }
+  for (const clarification of report.modelClarifications ?? []) {
+    adaptations.append(element('li', 'analysis-run-report-clarification', clarification.line));
+  }
   const sample = report.assurance;
   const sampleReading = sample.state === 'not-run' || sample.size === 0
     ? '这次运行没有抽样复核。'

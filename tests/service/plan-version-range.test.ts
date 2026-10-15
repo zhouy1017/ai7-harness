@@ -219,7 +219,8 @@ describe('a Task\'s range reads as its latest plan version (Issue #288 甲)', ()
       expect(cancelled.state.key).toBe('cancelled-after-start');
       expect(cancelled.goal.chips.position).toBe(segments(rangeA));
       expect(cancelled.redo).toEqual({ summary: [], prepare: { goal: BASELINE_ANALYSIS_MODE_GOALS[RANGE], update: { mode: RANGE, selectedRange: rangeA }, redoOf: runRecordId } });
-      const redo = prepare(bookId, cancelled.redo!.prepare.update, { redoOf: runRecordId });
+      if (cancelled.redo === null || 'kind' in cancelled.redo.prepare) throw new Error('Expected baseline redo');
+      const redo = prepare(bookId, cancelled.redo.prepare.update, { redoOf: runRecordId });
       expect(redo.taskIntent).toMatchObject({ mode: RANGE, redoOf: { runRecordId, taskIntentId: zFirstId } });
       expect(intentRowRange(redo.taskIntent!.taskIntentId)).toEqual(rangeA);
       expect(redo.update?.selectedRange).toEqual(rangeA);

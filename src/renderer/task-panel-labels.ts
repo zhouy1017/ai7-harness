@@ -68,7 +68,7 @@ export const TASK_PANEL_KIND_LABELS = {
 export const TASK_PANEL_ACTION_LABELS = {
   pause: '暂停',
   resume: '续行',
-  cancel: '取消任务',
+  cancel: '停止任务',
   plan: TASK_PLAN_OPEN,
   result: '查看结果',
   // A dialogue Task's own two (TASK-044): its latest answer in the floating window, and the dialogue in the foreground.

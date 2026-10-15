@@ -1,4 +1,5 @@
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { clarificationPromptContractDigest } from './provider/clarification-contract.js';
 import {
   READERS_REPORT_KIND,
   READERS_REPORT_SECTION_LABELS,
@@ -284,7 +285,8 @@ export class ReadersReports {
     } catch {
       throw new ReadersReportError('READERS_REPORT_RECORD_INVALID', CORRUPT);
     }
-    requireReport(digest === row.prompt_contract_sha256, 'READERS_REPORT_RECORD_INVALID', CORRUPT);
+    requireReport(digest === row.prompt_contract_sha256 || clarificationPromptContractDigest(digest) === row.prompt_contract_sha256,
+      'READERS_REPORT_RECORD_INVALID', CORRUPT);
     return {
       taskIntentId: text(row.task_intent_id),
       promptContractSha256: text(row.prompt_contract_sha256),

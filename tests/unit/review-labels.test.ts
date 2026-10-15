@@ -96,7 +96,7 @@ describe('the words of the 审阅 destination', () => {
       'rereview-changed': '只审改动过的章',
       'open-run': '查看这次审阅',
       prepare: '先看计划',
-      'quick-start': '开始审阅',
+      'quick-start': '快速开始',
       'cancel-preparation': '取消准备',
       'close-sheet': '取消',
       revise: '返回修改',
@@ -165,7 +165,7 @@ describe('the words of the 审阅 destination', () => {
     expect(REVIEW_COST_BEFORE_PLAN).toBe('先看计划后显示');
     expect(REVIEW_NOT_DO).toBe('不会直接修改稿件；不读范围外正文；不导出或发布；不存里程碑。');
     // A Review Run never takes a 默认执行规则: there is nothing to set first, so nothing says it is not set yet.
-    expect(REVIEW_QUICK_START_REASON).toBe('审阅没有快速开始：每次都先看计划，再开始任务。');
+    expect(REVIEW_QUICK_START_REASON).toBe('快速开始先准备所选类别的计划；只有匹配这本书的默认执行规则才会开始，否则先看计划。');
     const none = { from: null, to: null };
     expect(reviewReadConsequence(null, manuscript, none)).toBe('选好范围后显示');
     expect(reviewReadConsequence('whole', manuscript, none)).toBe('当前稿件（修订版 r2）的全部 97 个内容块');

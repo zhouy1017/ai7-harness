@@ -1,4 +1,5 @@
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { clarificationPromptContractDigest } from './provider/clarification-contract.js';
 import { ImportedExemplarError, readImportedExemplar } from './imported-exemplars.js';
 import { WRITING_KIND, type WritingDraftWordsProjection } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
@@ -500,7 +501,8 @@ export class WritingTasks {
     } catch {
       throw new WritingTaskError('WRITING_RECORD_INVALID', CORRUPT);
     }
-    requireWriting(!exemplarsReadable || !materialsReadable || digest === row.prompt_contract_sha256, 'WRITING_RECORD_INVALID', CORRUPT);
+    requireWriting(!exemplarsReadable || !materialsReadable || digest === row.prompt_contract_sha256 ||
+      clarificationPromptContractDigest(digest) === row.prompt_contract_sha256, 'WRITING_RECORD_INVALID', CORRUPT);
     return {
       taskIntentId: text(row.task_intent_id),
       promptContractSha256: text(row.prompt_contract_sha256),

@@ -138,9 +138,9 @@ async function writeResponse(response: ServiceResponse): Promise<void> {
  * and that refusal is the operation's answer. A store refusal is already coded, and a fatal store error
  * must reach the service's own handling unchanged.
  */
-function driveReviewRun(reviewRuns: ReviewRunDriver, reviewRunId: string): void {
+function driveReviewRun(reviewRuns: ReviewRunDriver, reviewRunId: string, resume = false): void {
   try {
-    void reviewRuns.drive(reviewRunId);
+    void (resume ? reviewRuns.continue(reviewRunId) : reviewRuns.drive(reviewRunId));
   } catch (error) {
     if (error instanceof StoreErrorClass || !(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
     throw new StoreErrorClass(error.code, error.message.length > 0 ? error.message : '审阅未能开始。');
@@ -518,6 +518,46 @@ async function dispatch(
     // 更新计划 (Issue #419, plan slice S73; PLAN-009, PLAN-011): the next plan version, as the editor left the plan.
     case 'editBaselineAnalysisPlan':
       return { id: request.id, ok: true, op: request.op, result: store.editBaselineAnalysisPlan(request.input, analysisProgress) };
+    case 'editTaskPlan':
+      return { id: request.id, ok: true, op: request.op, result: store.editTaskPlan(request.input, analysisProgress) };
+    case 'redoTaskPlan':
+      return { id: request.id, ok: true, op: request.op, result: jobs.startTaskRedo(request.input, launchPolicy) };
+    case 'quickStartReviewRun': {
+      const started = await store.quickStartReviewRun(request.input, {
+        credentialReadiness: (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity: connectivity.planConnectivity,
+      }, analysisProgress);
+      if (started.dispatch) driveReviewRun(reviewRuns, request.input.reviewRunId);
+      return { id: request.id, ok: true, op: request.op, result: { outcome: started.outcome, reasons: started.reasons,
+        projection: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress) } };
+    }
+    case 'controlTaskRun': {
+      if (request.input.action === 'resume') {
+        const plan = await store.inspectTaskPlanWithConnection(request.input,
+          (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress);
+        if (plan.runControl?.resume?.reason !== null) {
+          throw new StoreErrorClass('TASK_RESUME_BLOCKED', plan.runControl?.resume?.reason ?? '这项任务现在不能续行。');
+        }
+      }
+      const { runRecordId, ledger } = store.requestTaskRunControl(request.input);
+      if (runRecordId !== null) {
+        if (request.input.action === 'pause') analysisExecution.pauseRun(runRecordId, ledger);
+        else if (request.input.action === 'cancel') analysisExecution.cancelRun(runRecordId, ledger);
+        else if (request.input.kind === 'review-run') driveReviewRun(reviewRuns, request.input.ref, true);
+        else {
+          // As 续行 of a baseline Run: a refusal from the owner reaches the drawer in its own words, the Run left as it was.
+          try {
+            analysisExecution.admitAndDispatch(runRecordId, ledger, { resume: true });
+          } catch (error) {
+            const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+            throw new StoreErrorClass(code, error instanceof Error ? error.message : '续行未能进入调度。');
+          }
+        }
+        if (request.input.kind === 'review-run' && request.input.action === 'cancel') {
+          void analysisExecution.whenDone(runRecordId).then(() => store.finishCancelledReviewRun(runRecordId)).catch(() => undefined);
+        }
+      }
+      return { id: request.id, ok: true, op: request.op, result: store.inspectTaskPlan(request.input, analysisProgress) };
+    }
     // 提交回答 (Issue #422, S76d; CLAR-006): the answer is recorded; a Run that stopped for it goes on — at once when the
     // slot is free, or once it is. A Run still reading finds it at its next unit boundary, and a paused one at 续行.
     case 'answerBaselineAnalysisClarification': {
@@ -528,7 +568,7 @@ async function dispatch(
       let blocked: string | null = null;
       try {
         const plan = await store.inspectTaskPlanWithConnection(
-          { bookId: request.input.bookId, kind: 'baseline-analysis', ref: request.input.taskIntentId },
+          store.clarificationPlanTarget(request.input.bookId, request.input.taskIntentId),
           (binding) => analysisExecution.liveCredentialReadiness(binding),
           connectivity.planConnectivity,
           analysisProgress,
@@ -542,7 +582,7 @@ async function dispatch(
       const answered = store.answerBaselineAnalysisClarification(request.input);
       if (answered.runState === 'awaiting-clarification') {
         try {
-          analysisExecution.continueAnswered(answered.runRecordId, store.baselineAnalysisLedger);
+          analysisExecution.continueAnswered(answered.runRecordId, store.clarificationLedger(request.input.bookId, request.input.taskIntentId));
         } catch (error) {
           const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
           throw new StoreErrorClass(code, error instanceof Error ? error.message : '回答已记下，但这项任务未能按回答接着做。');
@@ -986,17 +1026,21 @@ async function dispatch(
         op: request.op,
         result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress),
       };
-    case 'continueReviewRun':
+    case 'continueReviewRun': {
       // 继续审阅. The loop is service-internal and knows no Book, so the Run is first required to be the
       // route's Book's; the loop itself refuses a Run never approved or another Run of the Book in flight.
       store.requireReviewRunOfBook(request.input.bookId, request.input.reviewRunId);
-      driveReviewRun(reviewRuns, request.input.reviewRunId);
+      const plan = await store.inspectTaskPlanWithConnection({ bookId: request.input.bookId, kind: 'review-run', ref: request.input.reviewRunId },
+        (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress);
+      if (plan.runControl?.resume != null && plan.runControl.resume.reason !== null) throw new StoreErrorClass('TASK_RESUME_BLOCKED', plan.runControl.resume.reason);
+      driveReviewRun(reviewRuns, request.input.reviewRunId, plan.runControl?.resume != null);
       return {
         id: request.id,
         ok: true,
         op: request.op,
         result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress),
       };
+    }
     case 'recordReviewFindingDisposition':
       return {
         id: request.id,
@@ -1862,34 +1906,33 @@ async function run(): Promise<void> {
     // Starts the governor had not admitted when AI7 closed were blocked with why by the reconciliation: nothing starts by
     // itself after a restart (ADR 0034), and the editor starts them again when they choose. A Run the editor had answered before
     // AI7 closed, and that was not yet taken on, is left 可续行 with its answer the same way (Issue #767).
-    // AI7 初评 has no 续行 (Issue #429 review, P1): one left under way ends 已中断 with its outcome, and one left waiting for a
-    // place is blocked with why, so 评估 offers 重新初评 instead of reading a Run under way for good.
+    // Every ledger kind now keeps its continuation checkpoint; reconciliation leaves it for an explicit 续行.
     store.reconcileStoppedInitialEvaluationRuns();
-    // 事实核查 and the review categories have no 续行 either (Issue #657): each settles the same way, so the Book can
-    // prepare them again and no page polls a Run nothing executes. 继续审阅 then records what such a category came to.
     // A Review Run's category left authorized sent nothing and is 继续审阅's to dispatch, the editor's own choice.
     store.reconcileStoppedFactualReviewRuns();
     store.reconcileStoppedReviewCategoryRuns();
-    // 审稿意见 has no 续行 either (Issue #429, S81c): reconciled by kind exactly as 初评 is. A damaged record of it never stops the
-    // service starting: its Run stays as it was and 评估 says 审稿意见 is unavailable, with why.
+    // A damaged kind-specific record never prevents service startup; its owning surface reports the refusal.
     try {
       store.reconcileStoppedReadersReportRuns();
     } catch {
       // Reported where the 审稿意见 is read.
     }
-    // 按我的评分重写评语 has no 续行 either (Issue #429, S81b2): reconciled by kind as 审稿意见 is, and a damaged record of it never
-    // stops the service starting.
     try {
       store.reconcileStoppedEvaluationRewriteRuns();
     } catch {
       // Reported where 评估 reads the rewrite.
     }
-    // 写作任务 has no 续行 either (Issue #432, S84a): reconciled by kind exactly as 审稿意见 is, and a damaged record of it never
-    // stops the service starting.
     try {
       store.reconcileStoppedWritingRuns();
     } catch {
       // Reported where 交付物 reads the writing Task.
+    }
+    for (const runRecordId of store.cancellingLedgerRuns()) {
+      try {
+        analysisExecution.cancelRun(runRecordId, store.executionLedgerForRun(runRecordId));
+        void analysisExecution.whenDone(runRecordId).then(() => store!.finishCancelledReviewRun(runRecordId)).catch(() => undefined);
+      }
+      catch { /* The drawer keeps offering cancellation when the frozen contract cannot be read. */ }
     }
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
@@ -1932,7 +1975,7 @@ async function run(): Promise<void> {
       (connectivityPath !== undefined && routeKind === LOCAL_DETERMINISTIC_ROUTE);
     let preflightInFlight: Promise<ReconnectPreflightProjection> | null = null;
     const connectivity: ConnectivityContext = {
-      planConnectivity: { reading, reachesNetwork, slotBusy: () => owner.busy, carriesStoppedRun: (runRecordId) => owner.carriesStoppedRun(runRecordId, openStore.baselineAnalysisLedger) },
+      planConnectivity: { reading, reachesNetwork, slotBusy: () => owner.busy, carriesStoppedRun: (runRecordId) => owner.carriesStoppedRun(runRecordId, openStore.executionLedgerForRun(runRecordId)) },
       // A waiting Run's route reaches its model over the network, or it would not wait: offline first, then a missing
       // credential, then the slot — the order the drawer reads them in.
       waitingFor: async () => reading() === 'offline'
@@ -1974,6 +2017,20 @@ async function run(): Promise<void> {
     // (Issue #434 review). A preflight under way checks again itself.
     preflightTimer = setInterval(() => {
       if (!openStore.replacementFrozen()) void connectivity.preflight().catch(() => undefined);
+      if (!openStore.replacementFrozen()) {
+        // A timer callback that throws would end the service: whatever one tick cannot read, it reads again on the next.
+        try {
+          for (const run of openStore.modelClarificationRuns()) {
+            try {
+              run.ledger.expireModelClarifications(run.runRecordId);
+              const kept = new Set(run.ledger.unitCheckpoints(run.runRecordId).map((entry) => entry.unit.unitOrdinal));
+              if (run.ledger.clarificationsOf(run.runRecordId).some((entry) => entry.origin === 'model' && entry.answer !== null && !kept.has(entry.unitOrdinal))) {
+                owner.continueAnswered(run.runRecordId, run.ledger);
+              }
+            } catch { /* A busy or unavailable binding, or a record that does not read, is checked again next tick. */ }
+          }
+        } catch { /* The store itself could not be read this tick. */ }
+      }
     }, RECONNECT_PREFLIGHT_INTERVAL_MS);
     preflightTimer.unref();
     // 定期自动备份 (Issue #434, S86b): asked at start, then hourly while the service runs; a backup is made only when one is due.

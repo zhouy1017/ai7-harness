@@ -357,7 +357,7 @@ describe('待我处理 over Review Runs', () => {
       first.authorizeReviewRun(drivenBook.bookId, driven.reviewRunId, approvals(driven));
       const loop = driver.drive(driven.reviewRunId);
       const running = read(first, owner);
-      expect(summary(running, 'active')).toEqual([['L2 审阅 乙', 'review-running', 'view-review']]);
+      expect(summary(running, 'active')).toEqual([['L2 审阅 乙', 'analysis-queued', 'view-review']]);
       // The loop has taken the Run and waits for the slot for its first category, which it names.
       const current = items(running, 'active')[0]!.facts.categories[0];
       expect(current?.label).toBe(TYPOS_AND_USAGE.label);

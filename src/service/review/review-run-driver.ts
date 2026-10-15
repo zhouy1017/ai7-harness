@@ -38,6 +38,8 @@ export interface ReviewRunDriveSteps {
   fail(reviewRunId: string, categoryId: string, code: string, message: string): void;
   /** The category now waiting for a place of the governor, or `null` once it has one (Issue #632); in memory only. */
   waitingForPlace(reviewRunId: string, categoryId: string | null): void;
+  /** A category kept its continuation checkpoint: no settlement or later category starts until 续行. */
+  paused?(reviewRunId: string): boolean;
 }
 
 /**
@@ -47,7 +49,7 @@ export interface ReviewRunDriveSteps {
 export interface ReviewRunExecutionOwner {
   /** Every place is taken; an owner that does not say is read as having one free. */
   readonly busy?: boolean;
-  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore): void;
+  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore, options?: { resume?: boolean }): void;
   whenPlaceFree(): Promise<void>;
   whenDone(runRecordId: string): Promise<void>;
 }
@@ -77,12 +79,12 @@ export class ReviewRunDriver {
    * taken synchronously — a projection read right after this call reads it `running` — and the
    * returned promise settles when the loop ends. Driving a Run already driven returns its loop.
    */
-  drive(reviewRunId: string): Promise<void> {
+  drive(reviewRunId: string, options: { resume?: boolean } = {}): Promise<void> {
     const existing = this.#loops.get(reviewRunId);
     if (existing !== undefined) return existing;
     if (this.#stopping) return Promise.resolve();
     const categoryIds = this.#steps.begin(reviewRunId);
-    const loop = this.#pump(this.#run(reviewRunId, categoryIds)).finally(() => {
+    const loop = this.#pump(this.#run(reviewRunId, categoryIds, options.resume === true)).finally(() => {
       this.#loops.delete(reviewRunId);
       try {
         this.#steps.end(reviewRunId);
@@ -100,7 +102,7 @@ export class ReviewRunDriver {
    * already say where each category stands.
    */
   continue(reviewRunId: string): Promise<void> {
-    return this.drive(reviewRunId);
+    return this.drive(reviewRunId, { resume: true });
   }
 
   isDriving(reviewRunId: string): boolean {
@@ -134,11 +136,13 @@ export class ReviewRunDriver {
     return advance(() => steps.next());
   }
 
-  *#run(reviewRunId: string, categoryIds: ReadonlyArray<string>): Generator<Promise<void>, void, void> {
+  *#run(reviewRunId: string, categoryIds: ReadonlyArray<string>, resume: boolean): Generator<Promise<void>, void, void> {
     for (const categoryId of categoryIds) {
-      if (this.#stopping) return;
+      if (this.#stopping || (!resume && this.#steps.paused?.(reviewRunId) === true)) return;
       try {
-        yield* this.#category(reviewRunId, categoryId);
+        const next = this.#steps.step(reviewRunId, categoryId);
+        yield* this.#category(reviewRunId, categoryId, resume);
+        if (next.kind === 'start' || next.kind === 'dispatch') resume = false;
       } catch (error) {
         try {
           this.#steps.fail(reviewRunId, categoryId, codeOf(error), messageOf(error));
@@ -156,8 +160,9 @@ export class ReviewRunDriver {
    * a Run the owner interrupted is settled as interrupted, and one that completed is put on the
    * manuscript, which is the manuscript's own quick write and loses nothing a restart would redo.
    */
-  *#category(reviewRunId: string, categoryId: string): Generator<Promise<void>, void, void> {
+  *#category(reviewRunId: string, categoryId: string, resume: boolean): Generator<Promise<void>, void, void> {
     for (;;) {
+      if (!resume && this.#steps.paused?.(reviewRunId) === true) return;
       const step = this.#steps.step(reviewRunId, categoryId);
       switch (step.kind) {
         case 'done':
@@ -177,6 +182,7 @@ export class ReviewRunDriver {
           if (this.#stopping) return;
           const handOff = this.#steps.start(reviewRunId, categoryId);
           if (handOff !== null) yield this.#dispatch(reviewRunId, categoryId, handOff);
+          resume = false;
           break;
         }
         case 'dispatch': {
@@ -188,6 +194,7 @@ export class ReviewRunDriver {
           const again = this.#steps.step(reviewRunId, categoryId);
           if (again.kind !== 'dispatch' || again.runRecordId !== step.runRecordId) break;
           yield this.#dispatch(reviewRunId, categoryId, again);
+          resume = false;
           break;
         }
       }
@@ -210,7 +217,7 @@ export class ReviewRunDriver {
 
   async #dispatch(reviewRunId: string, categoryId: string, handOff: ReviewRunHandOff): Promise<void> {
     try {
-      this.#owner.admitAndDispatch(handOff.runRecordId, handOff.ledger);
+      this.#owner.admitAndDispatch(handOff.runRecordId, handOff.ledger, handOff.resume === true ? { resume: true } : undefined);
     } catch (error) {
       const code = codeOf(error);
       // The last place was taken between the wait and the hand-off: the next step waits again and dispatches.

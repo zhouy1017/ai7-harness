@@ -65,7 +65,7 @@ export const REVIEW_ACTION_LABELS = {
   'rereview-changed': '只审改动过的章',
   'open-run': '查看这次审阅',
   prepare: '先看计划',
-  'quick-start': '开始审阅',
+  'quick-start': '快速开始',
   'cancel-preparation': '取消准备',
   'close-sheet': '取消',
   revise: '返回修改',
@@ -220,7 +220,7 @@ export const REVIEW_CHAPTER_FROM = '从';
 export const REVIEW_CHAPTER_TO = '到';
 export const REVIEW_CHAPTER_PLACEHOLDER = '请选择';
 /** ②A's exact reason (editor-surfaces §6, B11): the quick start waits for a Default Execution Rule (S75). */
-export const REVIEW_QUICK_START_REASON = '审阅没有快速开始：每次都先看计划，再开始任务。';
+export const REVIEW_QUICK_START_REASON = '快速开始先准备所选类别的计划；只有匹配这本书的默认执行规则才会开始，否则先看计划。';
 export const REVIEW_CONSEQUENCE_TERMS = ['会读取', '会发送', '不会做', '费用'] as const;
 /** §10's target words for what a Task never does, the editor's half; the technical half is the plan's. */
 export const REVIEW_NOT_DO = '不会直接修改稿件；不读范围外正文；不导出或发布；不存里程碑。';

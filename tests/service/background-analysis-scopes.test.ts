@@ -14,7 +14,8 @@ import {
   backgroundShareFullReason,
 } from '../../src/service/background-analysis-enrollments.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { buildClarificationAnswerMessage, clarificationMessageRequestDigest } from '../../src/service/provider/clarification-contract.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../../src/service/store.js';
 import {
@@ -418,8 +419,14 @@ describe('后台分析登记 with a mandatory ceiling, Series and all-Books scop
     }
   }, 300_000);
 
-  it.each(['answer', 'cancel'] as const)('retains a background %s while its share is full, including after a foreground Run frees its place', async (action) => {
-    fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+  it.each([
+    { clarification: 'safe-retry', action: 'answer' }, { clarification: 'safe-retry', action: 'cancel' },
+    { clarification: 'model', action: 'answer' }, { clarification: 'model', action: 'cancel' },
+  ] as const)('retains a background $clarification $action while its share is full, including after a foreground Run frees its place', async ({ clarification, action }) => {
+    fixture = await loadModelFixture(FIXTURES_ROOT, clarification === 'model' ? 'sample1-baseline-happy' : 'sample1-baseline-transient-retry');
+    const entries = new Map(fixture.entries);
+    const baseEntries = [...fixture.entries.values()];
+    if (clarification === 'model') fixture = { ...fixture, identity: 'sample1-model-clarification-background-restack', entries };
     const store = await openWithRoute();
     let holdNext = false;
     let held = false;
@@ -445,13 +452,24 @@ describe('后台分析登记 with a mandatory ceiling, Series and all-Books scop
       while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
       const prepared = work.projection!;
       const taskIntentId = prepared.taskIntent!.taskIntentId;
-      const asking = store.editBaselineAnalysisPlan({ bookId: first.bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest,
+      const asking = clarification === 'model' ? prepared : store.editBaselineAnalysisPlan({
+        bookId: first.bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest,
         removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] });
+      if (clarification === 'model') {
+        for (const unit of prepared.coverageManifest!.units) {
+          const base = baseEntries.find((entry) => entry.unitOrdinal === unit.ordinal)!;
+          const digest = store.baselineAnalysisLedger.definition.requestDigest(unit.ordinal, unit.digest);
+          entries.set(fixtureEntryKey(unit.ordinal, digest), { ...base, requestDigest: digest,
+            response: unit.ordinal === 1 ? { kind: 'unit-result', usage: { inputTokens: 10, outputTokens: 5 },
+              text: JSON.stringify({ question: '本范围按哪个阅读重点处理？', options: ['人物', '事件'], freeTextAllowed: true }) } : base.response });
+        }
+      }
       const firstRun = store.startEnrolledBaselineAnalysis(first.bookId, taskIntentId, asking.planEnvelope!.digest, version, 'first-baseline', runtime()).dispatchRunRecordId!;
       owner.admitAndDispatch(firstRun);
       await owner.whenIdle();
       expect(store.baselineAnalysisLedger.currentRunState(firstRun)).toBe('awaiting-clarification');
       expect(owner.idle).toBe(true);
+      expect([owner.busy, owner.full]).toEqual([false, false]);
       const kept = store.baselineAnalysisLedger.unitCheckpoints(firstRun).length;
       expect(kept).toBe(7);
       enroll(store, second.bookId, 'backfill', 1_000_000);
@@ -463,7 +481,19 @@ describe('后台分析登记 with a mandatory ceiling, Series and all-Books scop
       expect(held).toBe(true);
       if (action === 'answer') {
         const request = store.baselineAnalysisLedger.clarificationsOf(firstRun)[0]!;
-        store.answerBaselineAnalysisClarification({ bookId: first.bookId, taskIntentId, requestId: request.requestId, optionId: 'retry', note: null });
+        expect(request.origin === 'model').toBe(clarification === 'model');
+        store.answerBaselineAnalysisClarification({ bookId: first.bookId, taskIntentId, requestId: request.requestId,
+          optionId: clarification === 'model' ? 'model-option-0' : 'retry', note: null });
+        if (clarification === 'model') {
+          const ledger = store.baselineAnalysisLedger;
+          const facts = ledger.loadExecutionPlan(firstRun);
+          const unit = facts.manifest.units[0]!;
+          const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
+          const message = buildClarificationAnswerMessage(ledger.definition.buildUnitMessage(unit, facts.manifest.units.length,
+            new Map(blocks.map((block) => [block.blockId, block]))), ledger.clarificationsOf(firstRun)[0]!);
+          const digest = clarificationMessageRequestDigest(message)!;
+          entries.set(fixtureEntryKey(1, digest), { ...baseEntries.find((entry) => entry.unitOrdinal === 1)!, requestDigest: digest });
+        }
         expect(owner.continueAnswered(firstRun)).toBe('queued');
       } else {
         store.requestBaselineAnalysisCancel(first.bookId, taskIntentId);
@@ -479,9 +509,10 @@ describe('后台分析登记 with a mandatory ceiling, Series and all-Books scop
       released = true;
       await owner.whenIdle();
       const settled = store.inspectBaselineAnalysis(first.bookId, () => null);
-      expect(settled.run!.state).toBe(action === 'answer' ? 'completed-with-gaps' : 'cancelled');
-      expect(settled.resultSetRevision!.coverage.unitsClosed).toBe(action === 'answer' ? 7 : 6);
-      if (action === 'answer') expect(store.baselineAnalysisLedger.clarificationsOf(firstRun)[0]!.answer?.optionId).toBe('retry');
+      expect(settled.run!.state).toBe(action === 'answer' ? clarification === 'model' ? 'completed' : 'completed-with-gaps' : 'cancelled');
+      expect(settled.resultSetRevision!.coverage.unitsClosed).toBe((action === 'answer' ? 7 : 6) + (clarification === 'model' ? 1 : 0));
+      if (action === 'answer') expect(store.baselineAnalysisLedger.clarificationsOf(firstRun)[0]!.answer?.optionId)
+        .toBe(clarification === 'model' ? 'model-option-0' : 'retry');
       store.markCleanShutdown();
     } finally {
       released = true;
