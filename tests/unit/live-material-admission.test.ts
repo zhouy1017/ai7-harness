@@ -79,4 +79,8 @@ describe('material-bearing live kind admission (#809)', () => {
     expect(() => writingKindDefinition({ type: { typeId: 'promotion-article', label: '宣传文章' }, book: { title: '合成图书', authors: [], editors: [], series: [] },
       audience: '读者', channel: '纸面', requirements: null, synopsis: null, evaluation: null, exemplars: [], materials: [material] }, 2, [{ ...source, sha256: 'f'.repeat(64) }])).toThrowError();
   });
+
+  it('does not turn the material-free score rewrite into a material wrapper through a direct caller', () => {
+    expect(liveKindAdmission(admitting('evaluation-rewrite'), wrap({ ...initial, kind: 'evaluation-rewrite' }), binding)).toBeNull();
+  });
 });

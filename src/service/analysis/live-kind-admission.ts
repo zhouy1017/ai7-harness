@@ -133,6 +133,8 @@ function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectatio
     };
   }
   const planned = plannedPayloadCategories(definition.kind);
+  // Only 初评 and 审稿意见 have evaluation material wrappers; rewriting an editor's scores has none.
+  if (definition.kind === EVALUATION_REWRITE_KIND && liveMaterialContract(definition) !== null) return null;
   if (planned !== undefined) return { promptContractDigest: liveMaterialContract(definition)?.basePromptContractDigest ?? definition.livePromptContractDigest?.() ?? null, payloadCategories: planned };
   return null;
 }
