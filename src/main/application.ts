@@ -2807,8 +2807,8 @@ function registerRendererHandlers(
         return result;
       });
     }));
-  for (const operation of ['controlTaskRun', 'editTaskPlan', 'redoTaskPlan'] as const) {
-    ipcMain.handle(IPC_CHANNELS[operation], (event, input: Omit<ServiceOperationMap['controlTaskRun']['input'], 'bookId'> | Omit<ServiceOperationMap['editTaskPlan']['input'], 'bookId'> | Omit<ServiceOperationMap['redoTaskPlan']['input'], 'bookId'>) =>
+  for (const operation of ['controlTaskRun', 'editTaskPlan'] as const) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: Omit<ServiceOperationMap['controlTaskRun']['input'], 'bookId'> | Omit<ServiceOperationMap['editTaskPlan']['input'], 'bookId'>) =>
       envelope(async () => {
         const owned = requireSender(event);
         return serializeEffect(async () => {
@@ -2822,6 +2822,20 @@ function registerRendererHandlers(
         });
       }));
   }
+  // 改计划重做 prepares through the kind's own cooperative job, which this window then polls and may cancel as its own.
+  ipcMain.handle(IPC_CHANNELS.redoTaskPlan, (event, input: Omit<ServiceOperationMap['redoTaskPlan']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const job = await service.call('redoTaskPlan', { kind: input.kind, ref: input.ref, bookId: route.bookId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        rememberEditorResource(owned, 'job', job.jobId, { operation: operationForJob(job), bookId: route.bookId, manuscriptId: null, branchId: null });
+        return job;
+      });
+    }));
   // Reconnect Preflight names no Book: it only ever admits Runs the editor already authorized to start when
   // online. It is serialized with every other effect, because an admission dispatches.
   ipcMain.handle(
