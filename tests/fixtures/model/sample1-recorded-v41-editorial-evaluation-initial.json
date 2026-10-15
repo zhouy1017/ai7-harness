@@ -1,0 +1,351 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-recorded-v41-editorial-evaluation-initial",
+  "description": "AI7 初评 of the #812 measured editorial-evidence pass on exact sample1, Go deepseek-v4.1-flash under developer-live Provider Processing v14 / active set v11, 2026-10-15, validation case editorial-evidence/sample1-initial-evaluation, capture head 5955f39d: the eight unit turns under the v14 model-question task contract and the book-level synthesis (S40/evaluation-first/1-9). The Run Report reflection S40/evaluation-first/10 ended outcome-unknown 0.4 s after the synthesis response (the #851 pattern) and has no capture. The synthesis entry is keyed under the Task's wrapped contract, as the deterministic adapter of such a Run asks it (generator branch of #812); each entry was emitted by tools/generate-model-fixture.mjs with exact sample1 source proof and keeps its original capture provenance. Measured-pass evidence for #812; replay proves application behaviour, not current model quality.",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "c1015ef1dcd1ec841384297d26d7df734febade6f462cca9566ab281c8abe582",
+      "contentDigest": "582fd4c3541fa6f2cfc613106f45b9713aeeeeacfb82ffbbcd940853533b9981",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":1,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"以对仗格言「识时务者为俊杰／不识时务者为圣贤」开篇，两句独立成段，简短有力，奠定全文价值张力与叙事基调。\",\"blockOrdinals\":[5,6]},{\"itemId\":\"literary-quality\",\"note\":\"用「喘气」「叹气」「丢下毛笔」「撕碎到找不到一个完整的字」等动作细节，呈现曾本之写信时的犹疑与痛楚，人物形象具体可感。\",\"blockOrdinals\":[7,8]},{\"itemId\":\"literary-quality\",\"note\":\"「满屋的叹息」「不像是针对被撕了好几遍的这封信，更像是为了某个人」，以物写情、留白含蓄，作者声音克制而带抒情性。\",\"blockOrdinals\":[14]},{\"itemId\":\"literary-quality\",\"note\":\"结尾由巴黎香榭丽舍大街求爱传说转入东湖花前月下，以「墨香墨彩」「比只花两元钱买张彩票就中了大奖还稀罕」作比，语言带议论与感喟。\",\"blockOrdinals\":[15]},{\"itemId\":\"theme-and-context\",\"note\":\"围绕青铜重器、曾侯乙尊盘、楚学界泰斗等设定展开，将器物意义与学界人物命运勾连，具文博与楚文化语境。\",\"blockOrdinals\":[2,10,11]},{\"itemId\":\"theme-and-context\",\"note\":\"「识时务／不识时务」与「俊杰／圣贤」构成价值命题，指向知识分子在时势与操守之间的抉择。\",\"blockOrdinals\":[5,6,7]},{\"itemId\":\"theme-and-context\",\"note\":\"手写书信与当代「宁肯每天上门送一束玫瑰花，也懒得写情书求爱」形成对照，触及书写与情感表达方式变迁的现代议题。\",\"blockOrdinals\":[15]},{\"itemId\":\"theme-and-context\",\"note\":\"六十五岁做「七十小寿」的地方习俗及卜算之说，呈现地域民俗与「有福之人」观念，附带可好可不好的双重内涵。\",\"blockOrdinals\":[10]},{\"itemId\":\"structure-and-coherence\",\"note\":\"章节以「壹」标号，先列格言，再写人物动作，随后补叙寿宴与八年前旧事，呈片段式推进而非线性叙事。\",\"blockOrdinals\":[4,5,7,9,13]},{\"itemId\":\"structure-and-coherence\",\"note\":\"由「如此级别的弟子一共有两位」引出被警察带走的另一位及其名字在话语体系中消失，制造悬念并与前文呼应。\",\"blockOrdinals\":[12,13,14]},{\"itemId\":\"structure-and-coherence\",\"note\":\"末段从曾本之的具体人事跳至一九九○年代巴黎往事与书信话题，视角与时空转换较大，与主线的关系有待后文接续。\",\"blockOrdinals\":[15]},{\"itemId\":\"chinese-language\",\"note\":\"文白相间，格言、白描与议论交织；「曾侯乙尊盘级的」「国宝中的国宝」等用语凝练而有分量。\",\"blockOrdinals\":[5,6,11]},{\"itemId\":\"chinese-language\",\"note\":\"「从邮筒到邮局再到邮递员，最后才到收信人手里」以递进罗列铺陈书信的抵达过程，句式口语化而富节奏。\",\"blockOrdinals\":[15]},{\"itemId\":\"readers-and-market\",\"note\":\"署名刘醒龙，标注为《青铜重器》之一，知名作家与系列标识具备一定的读者辨识度与号召力。\",\"blockOrdinals\":[2,3]},{\"itemId\":\"readers-and-market\",\"note\":\"开篇即以书信反复写就又被撕碎、弟子被警察带走、其名字从话语中消失等悬念设置，具知识分子题材与情节钩子。\",\"blockOrdinals\":[8,13,14]}]}",
+        "usage": {
+          "inputTokens": 1759,
+          "outputTokens": 2839
+        }
+      },
+      "capture": {
+        "subject": "evaluation-unit",
+        "itemId": "S40/evaluation-first/1",
+        "selectedItemId": "S40/evaluation-first/1",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "taskPromptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "capturedAt": "2026-10-15T16:56:59.506Z",
+        "providerRequestDigest": "29197869cc3f355c1f9f1f1cbbdb80cc4f5485e56eb1fc5c5dcf500b194b2c82",
+        "providerResponseDigest": "4180a56f2eef73a8d8dcfee9d6d69262b486477d78feb7642b07140c22d06494",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "aba5460fa40abaa12849d32fd272e9817bc2b0a5c1c02ff2952f856a62c0516e",
+        "generation": "b997389ef21c1387232440807c16303dcc8f7c30443cad7506c1f163e4890884",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-initial-evaluation",
+          "step": "evaluation-first/unit-1"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "709205acf5db7f5fd257e982fcdeb35782d01c2d736dd5a617d4208fb5defd81"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "5ea5d59dc24639344f5031b4f8945ce428746a53d4b2caa46a88c10a3e688bfc",
+      "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":2,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"重叠段用巴黎女子与玫瑰兴叹的轶事起笔，以“比只花两元钱买张彩票就中了大奖还稀罕”的夸张比喻写书信之稀罕，随笔式语调先声夺人。\",\"blockOrdinals\":[1]},{\"itemId\":\"literary-quality\",\"note\":\"曾本之以“皓首苍颜”“大师意识”被引入，其不打电话、不发邮件、短信只看不写的习惯由旁人之口道出，叙述带半调侃意味，人物声音渐显。\",\"blockOrdinals\":[2]},{\"itemId\":\"literary-quality\",\"note\":\"以“突然变得异常吊诡”“将很平常的事情，变得极不平常”及“曾本之刚刚收到一封信”等短段制造悬念与节奏顿挫。\",\"blockOrdinals\":[3,4]},{\"itemId\":\"literary-quality\",\"note\":\"核心悬念设置为“用甲骨文写的信”，写信人却死于一九八○年代最后的夏天，叙述者有意隐去信的内容，悬念留白。\",\"blockOrdinals\":[6,7]},{\"itemId\":\"literary-quality\",\"note\":\"信封地址以长串递进式短语铺陈至“周一下午四点十分独坐在此的曾本之先生亲启”，又点明其非甲骨文而是打印机楷体，细节诡异而克制。\",\"blockOrdinals\":[8,9]},{\"itemId\":\"literary-quality\",\"note\":\"收束于日光移影与蚌壳打水漂，以“比女人身上的曲线还要美丽的弧线，渐次推向湖心”作结，抒情静笔与前面悬念形成张力。\",\"blockOrdinals\":[11]},{\"itemId\":\"theme-and-context\",\"note\":\"重叠段以巴黎传说到东湖花前月下，慨叹电话、电子邮件、短信取代手写书信，为全书的书信文化消逝主题定调。\",\"blockOrdinals\":[1,2]},{\"itemId\":\"theme-and-context\",\"note\":\"将拒用电话邮件短信的行为称为“大师意识”，并预言“人类历史上的最后一批纸质书信”将身价百倍，直接触及技术变迁与人文价值命题。\",\"blockOrdinals\":[2]},{\"itemId\":\"theme-and-context\",\"note\":\"英法德日文字、繁体字、甲骨文与楚学院研究专业并置，铺陈学者的文字世界，凸显学术与古文字的文化语境。\",\"blockOrdinals\":[5,6]},{\"itemId\":\"theme-and-context\",\"note\":\"“一九八○年代最后的那个夏天”与“从灵魂放飞，孤灯守灵，到扶棺下葬，清明立碑”并置，把死亡时间与葬仪流程写入，暗含历史与仪式的双重意味。\",\"blockOrdinals\":[7]},{\"itemId\":\"theme-and-context\",\"note\":\"随州擂鼓墩曾侯乙大墓、省博物馆、楚学院、东湖公园、小梅岭、可竹轩、老鼠尾、先月亭等地名密集出现，构成武汉与荆楚考古的地方文化坐标。\",\"blockOrdinals\":[8,10,11]},{\"itemId\":\"structure-and-coherence\",\"note\":\"单元按“平常写信习惯—忽然收到一封信—信为甲骨文—写信人已死—地址不得外知”逐级递进释放信息，因果链清晰且层层加码。\",\"blockOrdinals\":[2,3,6,7,8]},{\"itemId\":\"structure-and-coherence\",\"note\":\"重叠段的书信主题与本部第一段曾本之的书信习惯自然衔接，母题延续，过渡不突兀。\",\"blockOrdinals\":[1,2]},{\"itemId\":\"structure-and-coherence\",\"note\":\"第九块随即说明信封文字系打印机楷体而非甲骨文，及时消解读者对上段地址的误解，叙述自洽。\",\"blockOrdinals\":[8,9]},{\"itemId\":\"structure-and-coherence\",\"note\":\"结尾由悬念陡然转入移影、投蚌壳的闲笔，形成缓冲，为后续情节留出停顿与期待。\",\"blockOrdinals\":[10,11]},{\"itemId\":\"chinese-language\",\"note\":\"“皓首苍颜”“吊诡”“亲启”“扶棺下葬”等文白夹杂的用词与简体、繁体、甲骨文的对照相配，语体偏雅。\",\"blockOrdinals\":[2,5,7,8]},{\"itemId\":\"chinese-language\",\"note\":\"信封地址写成一条超长定语套叠句，既模拟地址格式又嵌入叙事信息，句式刻意绵长，读来有辨识度。\",\"blockOrdinals\":[8]},{\"itemId\":\"chinese-language\",\"note\":\"“阴影从身体右边无声无息地移到左边”“弹起又落下，落下又弹起”等动词与叠句细密，画面感强。\",\"blockOrdinals\":[10,11]},{\"itemId\":\"readers-and-market\",\"note\":\"死人以甲骨文寄信且寄至无人知晓的私密地点，悬疑与超常元素明确，具备类型小说的开篇钩子。\",\"blockOrdinals\":[6,7,8]},{\"itemId\":\"readers-and-market\",\"note\":\"甲骨文、曾侯乙墓、楚学院等考古学术元素叠加书信抒情母题，兼具文化悬疑与人文怀旧卖点，可吸引悬疑及文化类读者。\",\"blockOrdinals\":[1,6,8,11]}]}",
+        "usage": {
+          "inputTokens": 1649,
+          "outputTokens": 3086
+        }
+      },
+      "capture": {
+        "subject": "evaluation-unit",
+        "itemId": "S40/evaluation-first/2",
+        "selectedItemId": "S40/evaluation-first/2",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "taskPromptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "capturedAt": "2026-10-15T16:57:23.766Z",
+        "providerRequestDigest": "69dcce30dec721e52e4189bb8c0d96fdbaa3875549ca3d47b08f44addd33ea41",
+        "providerResponseDigest": "6679ce81f6af57debeb79b76f89eac3d0c8d727eb5977de4980c5239f919b9a2",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "50a358249b988cceb428e0de91bdd2af0b21c27350c1ad66d4bae8eb3210e599",
+        "generation": "b997389ef21c1387232440807c16303dcc8f7c30443cad7506c1f163e4890884",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-initial-evaluation",
+          "step": "evaluation-first/unit-2"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "5af8bffe0e1e46406dd15beaddac3f9a57edb6959c3eea7cfce8f6f70ced62a0"
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "8dbada6eab87d4e19db036f3c40fa30337c0478e76e2dcafa286c0b96c84889f",
+      "contentDigest": "a961d6dc02f89d79d932b93f7d23398f5ae6d205901f48adc2ba7e8b682b0d29",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":3,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"开篇以“清水幽幽”“柳枝悠悠”“空荡荡”的叠词排比铺陈春雷过后的湖景，再以野鸭、金鲤、春风等动态细节写出通感式舒适，抒情笔调鲜明，显示作者偏诗性的叙述偏好。\",\"blockOrdinals\":[2]},{\"itemId\":\"literary-quality\",\"note\":\"梦境与现实的转换处理轻巧：“青铜重器和甲骨文的梦境，一下子化成春光无限的东湖碧水”，以一声沉雷作转场节点，把考古梦境与眼前湖景叠合。\",\"blockOrdinals\":[2,4]},{\"itemId\":\"literary-quality\",\"note\":\"悬念以细节层层递进：古怪地址、三十几年邮龄、发黄信笺、四个甲骨文字，最后落在“世界上最后一片安宁之地终于不再属于自己了”，张力克制不外露。\",\"blockOrdinals\":[9,10,11]},{\"itemId\":\"literary-quality\",\"note\":\"人物声音区分明显：邮递员粗直口语（“别拿甲骨文吓唬人，我看你也是睁眼瞎”）与曾本之的学究式话语（通信自由与隐私权）形成两种腔调对照。\",\"blockOrdinals\":[16,17,18]},{\"itemId\":\"literary-quality\",\"note\":\"“已经有一阵子了，每个星期……载有甲骨文的梦境，就会造访睡意正浓的曾本之”以简短段落交代反复出现的梦境，节奏干净，带轻微神秘调性。\",\"blockOrdinals\":[3]},{\"itemId\":\"theme-and-context\",\"note\":\"甲骨文、青铜重器、被黄土掩埋的甲骨等意象构成核心文化符号，把题材锚定在考古与古文字领域，呼应文物热的时代语境。\",\"blockOrdinals\":[2,15]},{\"itemId\":\"theme-and-context\",\"note\":\"“世界上最后一片安宁之地”与随后关于通信自由、隐私权的辩解，指向现代个体安宁被外力侵扰的隐忧，具备可延展的价值命题。\",\"blockOrdinals\":[11,17]},{\"itemId\":\"theme-and-context\",\"note\":\"邮递员自述东亭邮局三十几年、“这一带尽是文化单位，文化人一多稀奇古怪的信件就多”，写出特定城市文化区的生活面貌与邮政行当的时代印记。\",\"blockOrdinals\":[9]},{\"itemId\":\"theme-and-context\",\"note\":\"发黄信笺与甲骨文四字提示来信者跨越时间，暗示历史对当下的追溯，为主题预留了历史文化回响的空间。\",\"blockOrdinals\":[10,13,14]},{\"itemId\":\"structure-and-coherence\",\"note\":\"本单元由静景到雷声到入梦到惊醒，再到邮递员出现、拆信、点明甲骨文，依次推进，事件链条清楚，环环相接。\",\"blockOrdinals\":[2,3,4,5,10,12,15]},{\"itemId\":\"structure-and-coherence\",\"note\":\"“沉雷/春雷”意象在梦境与现实间反复呼应（“一声沉雷落到地面上”与“梦中的那一声沉雷，没有留下任何痕迹”），起缝合两个时空的作用。\",\"blockOrdinals\":[2,4]},{\"itemId\":\"structure-and-coherence\",\"note\":\"多处单句成段（“他将眼前的景物怔怔地看过几遍”“梦中的那一声沉雷，没有留下任何痕迹”）加快节奏并制造停顿感，配合悬念推进。\",\"blockOrdinals\":[4,5]},{\"itemId\":\"structure-and-coherence\",\"note\":\"以邮递员的嘟哝作结，把“信是何人所寄”“内容为何”的疑问悬置，为下文人物的进一步行动留下钩子。\",\"blockOrdinals\":[18]},{\"itemId\":\"chinese-language\",\"note\":\"语言善用通感与拟人：“一缕缕的阳光，不停地吹在人的身上”、鲤鱼“像淘气的小猫那样，追着自己的尾巴转了一圈又一圈”，表达新鲜流畅。\",\"blockOrdinals\":[2]},{\"itemId\":\"chinese-language\",\"note\":\"书面雅词与口语并置（“忍俊不禁”“没有乱方寸”与“睁眼瞎”“小把戏”），文白分寸大体得当，未见生硬。\",\"blockOrdinals\":[10,16,18]},{\"itemId\":\"chinese-language\",\"note\":\"句长变化明显：开篇用长句铺陈景物，随后短句与对话交替，形成张弛有别的语言节奏。\",\"blockOrdinals\":[2,3,5,6]},{\"itemId\":\"readers-and-market\",\"note\":\"开篇即抛出“甲骨文怪信”的谜面，加之邮递员的好奇与质疑，具备类型小说的钩子效果，容易吸引大众读者继续阅读。\",\"blockOrdinals\":[10,11,13,15]},{\"itemId\":\"readers-and-market\",\"note\":\"邮递员的市井调侃起到缓冲作用，使考古、甲骨文等专业元素不至于抬高阅读门槛，扩大潜在读者面。\",\"blockOrdinals\":[9,17,18]},{\"itemId\":\"readers-and-market\",\"note\":\"东湖、东亭等具体地名与湖景描写带来地域辨识度，对本地读者及偏好地域书写的读者有吸引力。\",\"blockOrdinals\":[2,9]}]}",
+        "usage": {
+          "inputTokens": 2040,
+          "outputTokens": 4001
+        }
+      },
+      "capture": {
+        "subject": "evaluation-unit",
+        "itemId": "S40/evaluation-first/3",
+        "selectedItemId": "S40/evaluation-first/3",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "taskPromptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "capturedAt": "2026-10-15T16:57:41.704Z",
+        "providerRequestDigest": "ed003647fe9938096b651f8741de19a83f0ad65d7f4883a6fa3a7c7be07c030d",
+        "providerResponseDigest": "6fd53222b1e647b0d655259a2e0b589ff971bf5354d78e9ab43586924ce68238",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "7e46c558cc53f0af2b618d204c0075fe56e57126d5c653f439e90e86fbad5cde",
+        "generation": "b997389ef21c1387232440807c16303dcc8f7c30443cad7506c1f163e4890884",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-initial-evaluation",
+          "step": "evaluation-first/unit-3"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "bef23fd8f7d4d4d86dd3fd0e20e61cbb439b4c0ea730b3e17f70411503c82c4e"
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "b1cba4053efbed3565e8a7e9049b21a79308e421561f45545f9af33a6f9c6039",
+      "contentDigest": "12743a413d0267626854136350c016a039416f2f096dca9decfd5c7d4f8956cc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":4,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"以“晴空霹雳”形容甲骨文书信，并用“或许是……或许是……”的排比推测信的含义，既制造悬念又呈现曾本之的思维习惯。\",\"blockOrdinals\":[2]},{\"itemId\":\"literary-quality\",\"note\":\"“四个字”“言简意赅”“职业习惯/职业素养”形成对称叙述，作者用克制笔法让物象承担信息，不直接抒情。\",\"blockOrdinals\":[3,4,5]},{\"itemId\":\"literary-quality\",\"note\":\"印章“郝嘉”与“熟悉程度仅次于自己的名字”对照，写出人物内心波澜而不直言情绪。\",\"blockOrdinals\":[7,8]},{\"itemId\":\"literary-quality\",\"note\":\"章首题记式格言“人身上若是没有一点古怪的东西那就不是人”两句，为第二部分定调。\",\"blockOrdinals\":[10,11]},{\"itemId\":\"literary-quality\",\"note\":\"曾本之与马跃之互相打趣，“铜臭”对“丝绸般的声音”，以语言游戏写学术同行关系。\",\"blockOrdinals\":[15,16]},{\"itemId\":\"literary-quality\",\"note\":\"曾本之四十岁前婚恋“惨淡经营”的自嘲式旁白，人物刻画带谐趣。\",\"blockOrdinals\":[14]},{\"itemId\":\"literary-quality\",\"note\":\"安静一句抢白纠正“好久”，以第三方口吻打破两人客套，人物声音鲜明。\",\"blockOrdinals\":[17]},{\"itemId\":\"theme-and-context\",\"note\":\"楚学院、楚学、甲骨文、两周重器等称谓与说法，呈现古文字与考古学界的专业语境。\",\"blockOrdinals\":[13,14]},{\"itemId\":\"theme-and-context\",\"note\":\"“知之者之之也，不知者之之乎”一句概括学界对两位学者的尊崇与各有所短的风气。\",\"blockOrdinals\":[14]},{\"itemId\":\"theme-and-context\",\"note\":\"信件被读解为“先前某件事中途被停止”“有话想说而没说，现在必须说话”，暗示学术或时代风向将变。\",\"blockOrdinals\":[2]},{\"itemId\":\"theme-and-context\",\"note\":\"二十年未通的“郝嘉”之名重新出现，指向被中断的历史与人事纠葛。\",\"blockOrdinals\":[7,8]},{\"itemId\":\"theme-and-context\",\"note\":\"“政府规定的下班时间”“楚学院”“水果湖”等单位与地名细节，点出体制内生活与武汉地域背景。\",\"blockOrdinals\":[12,14]},{\"itemId\":\"structure-and-coherence\",\"note\":\"以“贰”单独成段标示第二部分开始，章节切分清晰。\",\"blockOrdinals\":[9]},{\"itemId\":\"structure-and-coherence\",\"note\":\"先立两句格言，再转入曾本之在家等女婿的具体场景，由议论过渡到叙事。\",\"blockOrdinals\":[10,11,12]},{\"itemId\":\"structure-and-coherence\",\"note\":\"电话情节暂时搁置信件悬念，引出马跃之，扩展人物关系网。\",\"blockOrdinals\":[12,13]},{\"itemId\":\"structure-and-coherence\",\"note\":\"段落以对话收束，安静插话形成小转折，节奏由客套转向家常。\",\"blockOrdinals\":[15,16,17]},{\"itemId\":\"structure-and-coherence\",\"note\":\"承接上文“别拿甲骨文吓唬人”的争执，本单元继续围绕甲骨文与楚学展开，与上一单元衔接紧密。\",\"blockOrdinals\":[1,2,6]},{\"itemId\":\"chinese-language\",\"note\":\"“晴空霹雳”“红彤彤的印章”“满身铜臭”“丝绸般的声音”等比喻与色彩词密集，语言质感强。\",\"blockOrdinals\":[2,7,15,16]},{\"itemId\":\"chinese-language\",\"note\":\"文言化成分“拯之承启”“知之者之之也，不知者之之乎”与现代白话并置，语体层次分明。\",\"blockOrdinals\":[6,14]},{\"itemId\":\"chinese-language\",\"note\":\"“点了一下千金之首”一类搭配略显生硬，为可留意的表达现象。\",\"blockOrdinals\":[14]},{\"itemId\":\"chinese-language\",\"note\":\"口语化对白（“什么好久，你们有没有时间概念？”）与叙述性长句交替出现。\",\"blockOrdinals\":[17]},{\"itemId\":\"readers-and-market\",\"note\":\"甲骨文四字书信、无名红印、“郝嘉”身份之谜构成强悬念钩子，易牵引追故事的读者。\",\"blockOrdinals\":[6,7,8]},{\"itemId\":\"readers-and-market\",\"note\":\"学者互损的幽默对白阅读轻快，可缓解学术题材的沉闷感。\",\"blockOrdinals\":[15,16]},{\"itemId\":\"readers-and-market\",\"note\":\"楚学、漆器丝绸、两周重器等专业内容构成一定知识门槛，可能筛掉部分读者。\",\"blockOrdinals\":[13,14]},{\"itemId\":\"readers-and-market\",\"note\":\"章节前独立成段的格言短句简短上口，便于摘录与传播。\",\"blockOrdinals\":[10,11]}]}",
+        "usage": {
+          "inputTokens": 1868,
+          "outputTokens": 3232
+        }
+      },
+      "capture": {
+        "subject": "evaluation-unit",
+        "itemId": "S40/evaluation-first/4",
+        "selectedItemId": "S40/evaluation-first/4",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "taskPromptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "capturedAt": "2026-10-15T16:58:16.881Z",
+        "providerRequestDigest": "dbf68d7cfb7929d97944d0c33e1f5eda2d2846d439b9f229e6e4d40756ec377d",
+        "providerResponseDigest": "fb0af27c5c97e110b19fa70dcb9fd404309b847a1f26364e2ffc1755315118fe",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "43b9ce95f121435d9061d6c7349c2e01015b9b82a9e1fc66909130f5651c3f07",
+        "generation": "b997389ef21c1387232440807c16303dcc8f7c30443cad7506c1f163e4890884",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-initial-evaluation",
+          "step": "evaluation-first/unit-4"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "1f787d96059318a6f5a77d0108f257b66ae139813497a82ffdf5bcf69cc41b17"
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "35294c4958c4ecacfaccfefea96b9ff8ec314de4f99dd4da04fabb91fca235ca",
+      "contentDigest": "48fb4b784e0dd65b543799e015af64f0abe448d8913011525d29bf328972394b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":5,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"承接上一单元，安静抢先插话、连珠反问，与马跃之的哈哈大笑并置，三人斗嘴的现场感和各自语气保持分明。\",\"blockOrdinals\":[1,2]},{\"itemId\":\"literary-quality\",\"note\":\"马跃之的调侃与安静的泼辣回击一来一往，口语节奏明快，玩笑里带醋意，人物声音区分度高。\",\"blockOrdinals\":[2,3]},{\"itemId\":\"literary-quality\",\"note\":\"“曾本之在电话这边笑，马跃之在电话那边笑”以对仗短句收束一轮斗嘴，用动作写默契，不加评说。\",\"blockOrdinals\":[4]},{\"itemId\":\"literary-quality\",\"note\":\"叙述者以“他俩这样说话是有渊源的”自然转入插叙，交代婚礼上的玩笑及其后来应验，使人物关系有来历可循。\",\"blockOrdinals\":[5]},{\"itemId\":\"literary-quality\",\"note\":\"马跃之“装疯卖傻倚老卖老”一串铺排式自陈，带自我消解的幽默腔，同时也透出倦意与消极情绪。\",\"blockOrdinals\":[8]},{\"itemId\":\"theme-and-context\",\"note\":\"“研究青铜重器的，将来就找一个浑身铜臭的女人”把学术与金钱戏谑对举，含知识分子生活境遇的自嘲。\",\"blockOrdinals\":[5]},{\"itemId\":\"theme-and-context\",\"note\":\"“你们女人真是没有醋就不过日子”一类调侃，呈现带性别刻板色彩的玩笑话语，反映人物关系与时代语感。\",\"blockOrdinals\":[2]},{\"itemId\":\"theme-and-context\",\"note\":\"宁波方面邀约、楚学院通知、女婿郑雄常年作陪，牵出熟人网络与出差陪同的人情安排，安静此次破例引人注意。\",\"blockOrdinals\":[6,7]},{\"itemId\":\"theme-and-context\",\"note\":\"宁波、楚学院、水果湖等地名与机构名，交代了故事所处的社会空间与地域背景。\",\"blockOrdinals\":[6,7,8]},{\"itemId\":\"theme-and-context\",\"note\":\"安静主张男人年纪大了要多外出走动、换个刺激以免老年痴呆，触及对老年生活状态与心理的关切。\",\"blockOrdinals\":[7,8]},{\"itemId\":\"structure-and-coherence\",\"note\":\"由打趣闲话转入宁波之行的正事，马跃之欲言又止，曾本之直截了当发问，最后落到关于郑雄的提问，形成悬念收束。\",\"blockOrdinals\":[6,9,10]},{\"itemId\":\"structure-and-coherence\",\"note\":\"婚姻渊源的插叙夹在前后两段笑谈之间，承接“渊源”二字又引出正经事，叙事节奏松紧交替。\",\"blockOrdinals\":[4,5,6]},{\"itemId\":\"structure-and-coherence\",\"note\":\"结尾以一句反问把线索从宁波邀约转向郑雄，留下未解的悬问，为下一单元储备推动力。\",\"blockOrdinals\":[10]},{\"itemId\":\"chinese-language\",\"note\":\"俗语成语密集使用：醋坛子、一语成谶、桃花眼、老顽童、装疯卖傻、拖泥带水、直截了当，口语与书面语自然夹杂。\",\"blockOrdinals\":[2,3,5,8,9]},{\"itemId\":\"chinese-language\",\"note\":\"“丝绸般美丽的妻子”“看什么都像看丝绸”将马跃之的研究领域化为比喻，人物语言与人设贴合。\",\"blockOrdinals\":[3,5]},{\"itemId\":\"chinese-language\",\"note\":\"句式长短交替，短句作节拍、长句担叙事，如两句“笑”的短对与交代来龙去脉的长句相配合。\",\"blockOrdinals\":[3,4,6]},{\"itemId\":\"readers-and-market\",\"note\":\"本单元几乎全由对话推进，信息密度不高、节奏轻快，阅读门槛低，趣味主要靠斗嘴与人物关系支撑。\",\"blockOrdinals\":[2,3,6,9]},{\"itemId\":\"readers-and-market\",\"note\":\"收尾抛出“郑雄下午是不是参加了省里的会议？”的悬问，具备牵引读者继续读下去的钩子，但题材圈子偏窄，吸引力偏特定读者。\",\"blockOrdinals\":[10]}]}",
+        "usage": {
+          "inputTokens": 1702,
+          "outputTokens": 2468
+        }
+      },
+      "capture": {
+        "subject": "evaluation-unit",
+        "itemId": "S40/evaluation-first/5",
+        "selectedItemId": "S40/evaluation-first/5",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "taskPromptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "capturedAt": "2026-10-15T16:58:45.639Z",
+        "providerRequestDigest": "7f8021fdfe5067bce40683cf6857b64fc8944a7130bfeac578c7c2cbf3066a00",
+        "providerResponseDigest": "26d808d62a28ba06a4746611895a368eee473bddfe5737bda55e39f3d6155fa3",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "aa961c5c30c22166fc1a699569f2877316daa4c5c9a5a244b8c165d3a9c41523",
+        "generation": "b997389ef21c1387232440807c16303dcc8f7c30443cad7506c1f163e4890884",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-initial-evaluation",
+          "step": "evaluation-first/unit-5"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "fd8385be5cc4f5c3fe5f18ac5dfc976b9fdde10c0879b61e2f4ae8a73702ce1b"
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "7b51f84cd95d8ef1b5afaed27b8eaac015b91754cdaad4cdfa91d7efd9cc8c54",
+      "contentDigest": "81cda8000df69574b2084ed55f80191148b5a479aa2c9916d8c463f40555a804",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":6,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"叙述用“像风一样顺畅，像水一样透彻”形容马跃之的言谈，又把他的话比作越王勾践剑“有诗意很优雅地戳着心窝”，比喻成体系且带鲜明叙述者腔调。\",\"blockOrdinals\":[5]},{\"itemId\":\"literary-quality\",\"note\":\"曾本之的回应以“金戈铁马的楚庄王”与“长袖善舞的溜须小吏”对照，继以武珞路容不下、要连起光谷与汉阳大道的夸张说法，讽刺性比喻见其人物声音。\",\"blockOrdinals\":[6]},{\"itemId\":\"literary-quality\",\"note\":\"两位人物语言分工清晰：马跃之成段议论、层层转折，曾本之少言而锋利，作者通过语体差异刻画修养与性情。\",\"blockOrdinals\":[4,6]},{\"itemId\":\"literary-quality\",\"note\":\"郑雄翻楚学新书“从头到尾”后嫌其“只会炒剩饭”，并贬低马跃之专著，用动作与评语并置写出人物的轻慢，细节具有表现力。\",\"blockOrdinals\":[2]},{\"itemId\":\"theme-and-context\",\"note\":\"学术评价被置于权力与面子关系之中：马跃之的专著被轻视，曾本之当面维护，郑雄以“十本比不上曾本之一本”回敬，呈现学界与官场交缠。\",\"blockOrdinals\":[2]},{\"itemId\":\"theme-and-context\",\"note\":\"郑雄恭维新省长是“二十一世纪的楚庄王”，引来对僭越与礼坏的议论，将春秋霸主、太上皇与今日省委书记并置，古今权力想象构成核心对照。\",\"blockOrdinals\":[3,4]},{\"itemId\":\"theme-and-context\",\"note\":\"地名与机构密集出现：大别山、长江、武珞路、光谷大道、汉阳大道、水果湖、楚学院，锚定湖北武汉的地方色彩与文化语境。\",\"blockOrdinals\":[5,6,8]},{\"itemId\":\"theme-and-context\",\"note\":\"消息来源被归于柳琴“在水果湖一带有太多的朋友和熟人”，点出人情网络是信息流通渠道，也是人物行事顾虑的一部分。\",\"blockOrdinals\":[5]},{\"itemId\":\"structure-and-coherence\",\"note\":\"本单元以对话推进：承接上一单元的问句作答，再转述郑雄发言、展开评论、引出曾本之反应、马跃之劝导，最后落到决定，链条清晰。\",\"blockOrdinals\":[1,3,4,6,7,8]},{\"itemId\":\"structure-and-coherence\",\"note\":\"马跃之先提郑雄贬低其专著，后转述郑雄在会上失言，两条线相互映照，为人际关系与后续冲突埋下铺垫。\",\"blockOrdinals\":[2,3]},{\"itemId\":\"structure-and-coherence\",\"note\":\"结尾由“留点面子”一句触发曾本之“暗暗作了决定”，暂不提甲骨文信并约次日见面，在收束本段的同时抛出悬置线索。\",\"blockOrdinals\":[7,8]},{\"itemId\":\"chinese-language\",\"note\":\"“三年不鸣，一鸣惊人，三年不飞，一飞冲天”与“有僭越和礼坏之嫌”等，用四字格、排比与文言式判断句，形成议论性强的书面语节奏。\",\"blockOrdinals\":[4]},{\"itemId\":\"chinese-language\",\"note\":\"“像风一样顺畅，像水一样透彻”“一句句话，一个个字”以对偶与复叠铺陈，语感流畅，兼有抒情与评断。\",\"blockOrdinals\":[5]},{\"itemId\":\"chinese-language\",\"note\":\"成语典故使用密集：金戈铁马、长袖善舞、车水马龙、楚庄王、越王勾践剑、楚穆王，文白相间，语言带有明显的知识者腔。\",\"blockOrdinals\":[4,5,6]},{\"itemId\":\"chinese-language\",\"note\":\"人物口语与雅语混杂，如“哪想到他一开口就……”“人家现在是副厅长”与前后文雅表述形成落差，增强对话的可听性。\",\"blockOrdinals\":[3,7]},{\"itemId\":\"readers-and-market\",\"note\":\"官场应酬、副厅级身份、在家里留面子等描写贴近现实经验，对关注高校与官场生态的读者具代入感。\",\"blockOrdinals\":[2,7]},{\"itemId\":\"readers-and-market\",\"note\":\"典故、职官与武汉地名的密度较高，熟悉楚文化与本地的读者易共鸣，其他读者可能感到一定门槛。\",\"blockOrdinals\":[4,5,6]},{\"itemId\":\"readers-and-market\",\"note\":\"以“用甲骨文写的那封信”作为悬念收尾并引出次日约定，为后文留存牵引力，具备继续阅读的动力。\",\"blockOrdinals\":[7,8]}]}",
+        "usage": {
+          "inputTokens": 1666,
+          "outputTokens": 2750
+        }
+      },
+      "capture": {
+        "subject": "evaluation-unit",
+        "itemId": "S40/evaluation-first/6",
+        "selectedItemId": "S40/evaluation-first/6",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "taskPromptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "capturedAt": "2026-10-15T16:59:11.157Z",
+        "providerRequestDigest": "c30b5f7ce6f46430bb8e76542ee416ac9d8867d1f1e9d0c2a292e26da51a4970",
+        "providerResponseDigest": "6b4b2c4d5183e15734b349b813c2421941c5212d102d9bfbf263e9cfbfb8bf57",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "9726c37688f0a9c8c4516a1a20592594add497f3299b19a957927dce6ea0d805",
+        "generation": "b997389ef21c1387232440807c16303dcc8f7c30443cad7506c1f163e4890884",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-initial-evaluation",
+          "step": "evaluation-first/unit-6"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "bd022a550fe489d19930fab160700fba9454530efcf40403d36101fc0271a78f"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "a3687f0e5c3bfadf9b00b4e5605174f2072441a9b84fef821951bc9746de732b",
+      "contentDigest": "ff158e0f8eec32fdf485f964e2c66d92fed84cbf57de527a97b67c515b9aad50",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":7,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"以曾侯乙尊盘黑白照片为曾本之“个人生活中的唯一饰物”，并写其胸膛心潮“比……长江与汉水交汇时形成的暗流还要汹涌”，用意象化笔墨刻画人物隐秘内心。\",\"blockOrdinals\":[2]},{\"itemId\":\"literary-quality\",\"note\":\"楚楚前扑挂脖、捂嘴、童言插话等家庭喜剧笔触，与随后曾、郑之间语调冷峻的论辩并置，呈现叙述声音在温情与讥诮间的切换。\",\"blockOrdinals\":[5,6,7,8]},{\"itemId\":\"literary-quality\",\"note\":\"郑雄“不敢笑，又不能不笑，将嘴角咧两下，又让眉梢扬两下”，以细小动作写人物的圆滑与尴尬，人物刻画具象。\",\"blockOrdinals\":[18]},{\"itemId\":\"theme-and-context\",\"note\":\"以楚学、青铜重器研究为专业底色，具体点到一九六六年出土的九鼎七簋、一九六五年出土的天兽御尊等考古细节，营造文博学术语境。\",\"blockOrdinals\":[17]},{\"itemId\":\"theme-and-context\",\"note\":\"“让青铜重器成为当代重器”“只有占住这个位置”等语，呈现学术研究与行政权力、政治正确之间的纠缠，触及知识分子的处境主题。\",\"blockOrdinals\":[16,18]},{\"itemId\":\"theme-and-context\",\"note\":\"一九七八年曾侯乙尊盘刚出土时的照片被写成人物唯一饰物，将具体考古史实与个人情感、既往辉煌的留恋相衔接。\",\"blockOrdinals\":[2]},{\"itemId\":\"structure-and-coherence\",\"note\":\"本单元以两次门铃为节点串联三场：书房独坐、女儿携外孙到访、郑雄归家后气氛微妙变化，场景推进层次清楚。\",\"blockOrdinals\":[3,5,10,11,12]},{\"itemId\":\"structure-and-coherence\",\"note\":\"紧接上单元的电话约定，写曾本之“大约是内心有了别的想法”而取放大镜细看尊盘纹饰，为后文留下伏笔。\",\"blockOrdinals\":[1,2]},{\"itemId\":\"structure-and-coherence\",\"note\":\"情节主要由对话推动，楚楚“管青铜的，就不要管丝绸”一句既制造笑点，又与前文专业话题呼应，起承接作用。\",\"blockOrdinals\":[7,8,9]},{\"itemId\":\"chinese-language\",\"note\":\"家庭对话口语鲜活，如安静抱怨“哪有这样做学问的”、楚楚“外婆也要向外公学习”，语气与人物身份贴合。\",\"blockOrdinals\":[4,8]},{\"itemId\":\"chinese-language\",\"note\":\"比喻通俗而有生活气：“回头外婆就会朝我刮一场台风”“外公愿意当外婆的出气筒”“大树底下好乘凉”。\",\"blockOrdinals\":[7,16]},{\"itemId\":\"chinese-language\",\"note\":\"书面语与口语混用，“不待曾本之说什么”“大有长进”“该著书立说的全部著书立说”等句式带文雅与调侃双重味道。\",\"blockOrdinals\":[5,16]},{\"itemId\":\"readers-and-market\",\"note\":\"考古文博题材叠加知识分子家庭伦理与官场讽刺，类型辨识度较强；楚楚的童言可作轻松看点，调节阅读节奏。\",\"blockOrdinals\":[8,12]},{\"itemId\":\"readers-and-market\",\"note\":\"曾侯乙尊盘、九鼎七簋等真实文物元素与学术门派之争，可能对文博、历史题材读者形成吸引力。\",\"blockOrdinals\":[2,17]}]}",
+        "usage": {
+          "inputTokens": 1916,
+          "outputTokens": 2482
+        }
+      },
+      "capture": {
+        "subject": "evaluation-unit",
+        "itemId": "S40/evaluation-first/7",
+        "selectedItemId": "S40/evaluation-first/7",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "taskPromptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "capturedAt": "2026-10-15T16:59:41.701Z",
+        "providerRequestDigest": "6b50507a2a07e683c5d67f28ba6911288f16e97221d91634e8a76f9c05f8ecbb",
+        "providerResponseDigest": "4d9504a3d0f390022d93def0e998fb99c155ea27f66da464358ec797de3eac5b",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "dc5a3c26d152ed814dbc90b34b54da4648fe7118c2db93a8fa867440c148df8b",
+        "generation": "b997389ef21c1387232440807c16303dcc8f7c30443cad7506c1f163e4890884",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-initial-evaluation",
+          "step": "evaluation-first/unit-7"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "0099ba3d4316da525d54107e5019a54ab7443e55288ec21702a1483339efec8b"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "0c44ce07367dbb71b46ded93bc818a69c35c7814baf33e4f6add97f491d0c5c2",
+      "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":8,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"细节动作克制：曾本之\\\"将手伸进口袋里\\\"想取信\\\"最终还是将伸进口袋的手，原样退出来\\\"，以未完成的动作写犹疑与自持，笔法含蓄。\",\"blockOrdinals\":[2]},{\"itemId\":\"literary-quality\",\"note\":\"家庭日常白描具声音层次：楚楚趴门一遍遍叫外公、郑雄敲门道晚安、书房中央拥抱互道晚安，构成温和而略显程式化的家庭仪式感。\",\"blockOrdinals\":[2,3,5]},{\"itemId\":\"literary-quality\",\"note\":\"郑雄\\\"将嘴角咧两下，又让眉梢扬两下\\\"以面部小动作写其周旋姿态，刻画简省而有讽意。\",\"blockOrdinals\":[1]},{\"itemId\":\"theme-and-context\",\"note\":\"\\\"先生\\\"称呼折射学界权威与家庭伦理的错位：郑雄八年从不叫爸爸，且如此称呼者\\\"无一不是学界权威\\\"，礼俗在此成为身份标记。\",\"blockOrdinals\":[4]},{\"itemId\":\"theme-and-context\",\"note\":\"马跃之\\\"酸溜溜\\\"的议论与曾本之的一向不回应，透出学术圈名分竞争与人情世故，也显曾本之的处世姿态。\",\"blockOrdinals\":[4]},{\"itemId\":\"structure-and-coherence\",\"note\":\"以声音递减推进收束：家里各种声音\\\"渐次消失\\\"—彻底安静—才取出信，段落由喧入静，节奏收拢自然。\",\"blockOrdinals\":[3,5,6]},{\"itemId\":\"structure-and-coherence\",\"note\":\"结尾\\\"古怪的来信\\\"与前文东湖边收信相呼应，作为悬置钩子留待后文，形成叙事推力。\",\"blockOrdinals\":[2,6]},{\"itemId\":\"structure-and-coherence\",\"note\":\"从盯视龟甲到取出书信，物件切换交代曾本之夜间独处与未了心事，为下一场景过渡。\",\"blockOrdinals\":[2,6]},{\"itemId\":\"chinese-language\",\"note\":\"语言简净准确，\\\"原样退出来\\\"\\\"渐次消失\\\"\\\"摊在写字台上\\\"等表述克制，书面叙述与口语对白交替自然。\",\"blockOrdinals\":[2,3,6]},{\"itemId\":\"chinese-language\",\"note\":\"\\\"将嘴角咧两下，又让眉梢扬两下\\\"\\\"酸溜溜地说过\\\"等活用动词与拟态语，人物语气可感，表达不落俗套。\",\"blockOrdinals\":[1,4]},{\"itemId\":\"readers-and-market\",\"note\":\"家庭温情细节（楚楚叫外公、夫妻书房相拥道晚安）与学界人情交织，易引发生活流读者亲近与共情。\",\"blockOrdinals\":[2,4,5]},{\"itemId\":\"readers-and-market\",\"note\":\"\\\"古怪的来信\\\"始终未展开内容，悬念悬置构成持续追读动力，利于连载或长篇阅读黏性。\",\"blockOrdinals\":[2,6]}]}",
+        "usage": {
+          "inputTokens": 1261,
+          "outputTokens": 1680
+        }
+      },
+      "capture": {
+        "subject": "evaluation-unit",
+        "itemId": "S40/evaluation-first/8",
+        "selectedItemId": "S40/evaluation-first/8",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "taskPromptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "capturedAt": "2026-10-15T17:00:08.210Z",
+        "providerRequestDigest": "14b4ddc4d4482875447fdb55196292987bdd8e62e8ebe4da9d00ec7d035ae3d1",
+        "providerResponseDigest": "fec9613026dba548b01b5a59155198c432530f5c028dc41955295ce06c8e7f54",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "8659258c63b0b4b706bedf3241f9360243535fe9fd1e91e19b65d278016fccb7",
+        "generation": "b997389ef21c1387232440807c16303dcc8f7c30443cad7506c1f163e4890884",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-initial-evaluation",
+          "step": "evaluation-first/unit-8"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "13e7ce79e85d4f8134c00ca350115824b439a218fa5c790f6aee7a159aa5fe79"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "13d2bdce5184a06badf1cf687932da2232122716862d5f92556dab5569e34bfb",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation.synthesis-result/2\",\"items\":[{\"itemId\":\"literary-quality\",\"score\":17,\"comment\":\"格言开篇、「满屋的叹息」以物写情、撕信与退手等未完成动作、尊盘照片作唯一饰物，作者声音克制而带抒情性；三人斗嘴、马跃之与曾本之语体差异使人物声音分明。个别家庭场景（叫外公、书房道晚安）略显程式化，郑雄小动作重复出现，声音的新鲜度略有折损。\"},{\"itemId\":\"theme-and-context\",\"score\":17,\"comment\":\"以曾侯乙尊盘、甲骨文、楚学院为底色，把「识时务／不识时务」的知识分子操守命题，与书信被电话邮件短信取代、学术与行政权力纠缠、隐私安宁被侵扰等议题叠合，并密集织入武汉与荆楚考古地名，社会文化语境厚实。少数调侃带性别刻板色彩，属人物话语层面的现象。\"},{\"itemId\":\"structure-and-coherence\",\"score\":16.5,\"comment\":\"各单元事件链清楚：等信、拆信、电话、家宴层层推进，以单句成段与沉雷意象缝合梦境和现实，结尾常以反问或未展信作钩子，连贯性稳。但章节呈片段式推进，单元一对一九九○年代巴黎往事的跳转较大，与主线接口尚待后文接续，书信内容长时间悬置。\"},{\"itemId\":\"chinese-language\",\"score\":17,\"comment\":\"文白相间、雅俗并用，通感拟人（阳光「吹」在身上、鲤鱼追尾）新鲜，对偶复叠与四字格密度高，口语对白鲜活可听，长短句张弛有别；「以物写情」的表述多克制准确。个别搭配如「点了一下千金之首」略生硬，成语典故与文言式判断句密集，偶有堆叠感。\"},{\"itemId\":\"readers-and-market\",\"score\":15,\"comment\":\"署名与系列标识带辨识度，甲骨文怪信、无名红印、郝嘉之谜构成强钩子，文博题材叠加家庭伦理与官场讽刺，类型卖点清楚。但楚学、重器、职官典故密度高，形成门槛；单元五几乎全由闲谈推进，信息密度偏低，题材圈子偏窄，吸引力集中于特定读者。\"}],\"strengths\":[\"甲骨文怪信悬念设置密集，钩子层层加码，追读动力强\",\"文白相间、雅俗杂糅，语言质感强，格言短句便于流传\",\"以未完成的动作与物象写心理，笔法含蓄克制\",\"学者斗嘴与家庭日常两条声线交错，人物声音区分度高\",\"文博考古细节与武汉荆楚地名交织，文化语境厚实\"],\"weaknesses\":[\"核心信件内容长期悬置，单元八仍未展开，悬念消耗偏慢\",\"楚学、职官、典故与专业称谓密集，对普通读者形成门槛\",\"单元五以闲谈为主，信息推进少，节奏偏轻\",\"部分家庭场景与郑雄的小动作反复出现，略显程式化\",\"章节片段式推进，单元一时空跳转较大，主线接口稍显松\"],\"nextStep\":\"建议编辑重点核查第一部分的书信悬念节奏与单元一的时空转换接口，并评估专业术语密度对普通读者的门槛，必要时适度收束闲谈段。\",\"suggestedConclusion\":\"recommend\",\"market\":{\"readers\":[\"偏好文化悬疑与文博考古题材的读者\",\"关注知识分子与官场生态书写的读者\",\"湖北武汉及荆楚文化地域读者\",\"《青铜重器》系列与刘醒龙的既有读者\",\"喜欢雅俗并置语言与学者斗嘴趣味的文学读者\"],\"sellingPoints\":[\"甲骨文怪信寄自亡者的高概念悬念\",\"曾侯乙尊盘、九鼎七簋等文博细节营造的真实感\",\"书信文化消逝与学者操守的价值命题\",\"文白相间、格言短句与市井口语并存的语言辨识度\",\"学术、权力与家庭伦理三线交织的当代知识分子图景\"],\"channels\":[\"文学类与悬疑类媒体书评、专栏连载\",\"文博与地方文化媒体联动，配合博物馆、考古话题宣传\",\"武汉本地书店与地域文化主题活动\",\"长篇连载与有声书形式，利用悬念钩子维持黏性\",\"高校与读书会共读，围绕知识分子处境展开讨论\"],\"marketReturn\":null,\"awards\":{\"statement\":\"语言讲究、主题严肃，具备参评文学类奖项的品质基础。\",\"basis\":\"依据为格言开篇、以物写情的克制笔法、文白并置的语言质地及知识分子操守与学术权力纠缠的题材分量；未见销量或获奖记录等外部数据。\"}}}",
+        "usage": {
+          "inputTokens": 8115,
+          "outputTokens": 1831
+        }
+      },
+      "capture": {
+        "subject": "task-synthesis",
+        "itemId": "S40/evaluation-first/9",
+        "selectedItemId": "S40/evaluation-first/9",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "3e8bb0c639321075afd59c108bfffd3ea8f796a1d1d6b685b141d752e38a86da",
+        "taskPromptContractDigest": "8d421c02429610ed211ced0b3aa111633232da9600a95e26b67f9ceb05b79669",
+        "capturedAt": "2026-10-15T17:00:24.704Z",
+        "providerRequestDigest": "e6c4175feb77c391142ba9033b3a2be262189f3f4da7e0b081202c9c491882bf",
+        "providerResponseDigest": "6b4b027b1db56b75b5d367e6deb81501e0113d2df3669c97354e7587f01931ba",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "b5d69cce41599be9cbda656553a0a40e93f613ec7a788ff7050aa7ddda44282e",
+        "generation": "667e1497ed6afd01a1ef91785f59d292ec35430b8355ed66ef315ecab12088eb",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-initial-evaluation",
+          "step": "evaluation-first/reduction"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "83352814deb30455c258c7221b89e68f62fae932b248080c6211f184b0fd5f43"
+      }
+    }
+  ]
+}

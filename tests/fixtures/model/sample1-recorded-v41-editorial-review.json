@@ -1,0 +1,1649 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-recorded-v41-editorial-review",
+  "description": "Exact sample1 Review Run of the #812 measured editorial-evidence pass on Go deepseek-v4.1-flash under developer-live Provider Processing v14 / active set v11, 2026-10-15: 错别字与规范用语, 体例与格式 and 文学性与表达改进 over the whole book, validation case editorial-evidence/sample1-review-three-categories, capture head 5955f39d. 37 of the 38 captured responses (S40/review-first/53-58 and 62-93): unit 7 of 错别字与规范用语 has no capture (its send was held outcome-unknown when the first driver was stopped), and the 文学性与表达改进 sampling turn S40/review-first/92 is refused FIXTURE_GEN/identity-unmapped because its answer cites a block its request never carried. Each entry was emitted by tools/generate-model-fixture.mjs with exact sample1 source proof and keeps its original capture provenance. Measured-pass evidence for #812; replay proves application behaviour, not current model quality.",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "7ad7c76d038b4f9100cfe6700d8b1c23232ac831c558aaf633f44f98e0bc466b",
+      "contentDigest": "582fd4c3541fa6f2cfc613106f45b9713aeeeeacfb82ffbbcd940853533b9981",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"还要通过一种比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“一种比较特别卜算”中形容词短语直接修饰名词，缺少结构助词“的”，句子成分残缺、读不通；补上后为“一种比较特别的卜算”。\",\"replacement\":\"还要通过一种比较特别的卜算\",\"clauseId\":\"typos-and-usage/2\"},{\"quote\":\"一把接一把地\",\"blockOrdinal\":8,\"severity\":\"note\",\"note\":\"“把”是用于抓、握一类动作的量词，与“撕碎”搭配不当；撕纸的动作宜用“下”作量词。\",\"replacement\":\"一下接一下地\",\"clauseId\":\"typos-and-usage/2\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"note\",\"note\":\"按出版物数字用法规范，公历的世纪、年代应用阿拉伯数字标示，宜写作“20世纪90年代”；此处用汉字数字加“年代”的写法不合规范。\",\"replacement\":\"20世纪90年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "usage": {
+          "inputTokens": 2014,
+          "outputTokens": 12435
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/53",
+        "selectedItemId": "S40/review-first/53",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:20:33.377Z",
+        "providerRequestDigest": "72e072743b6ba22b27f7063edb2c71ac70f135fce6fd8096af389ff8fd15ee32",
+        "providerResponseDigest": "ad4859a285cb095753d81e943780597d5a456d34e000b039ed2de0169f664678",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "0c579c6b06f32cc441975e08f359873d36b3534876a78a268db02957d06aa544",
+        "generation": "955070a213add80f873185a98d7730ea9779ccaa48165375f49b02f9bda0d7aa",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-1"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "1c66ccc43131e002796050e0a043debf03ca03bc2c0f260553c1d45d208dad74"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "050032134bcbb05586f6add6cacb54d848a08c2fe0aeb211ceeeaefc6442ca5b",
+      "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"极端少数之人\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"“极端少数”搭配生硬，“极端”是程度副词，不宜直接修饰“少数”，通用说法为“极少数”。\",\"replacement\":\"极少数人\",\"clauseId\":\"typos-and-usage/2\"},{\"quote\":\"将很平常的事情，变得极不平常\",\"blockOrdinal\":4,\"severity\":\"note\",\"note\":\"逗号把“将……事情变得……”的宾语与谓语割开，状语结构被拆散，建议删去该逗号。\",\"replacement\":\"将很平常的事情变得极不平常\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"一九八○年代\",\"blockOrdinal\":7,\"severity\":\"should\",\"note\":\"公历世纪、年代按出版物数字用法应用阿拉伯数字，汉字形式宜改为“20世纪80年代”。\",\"replacement\":\"20世纪80年代\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"其信封上的地址不是曾本之工作的楚学院，而是写着\",\"blockOrdinal\":8,\"severity\":\"should\",\"note\":\"“不是……而是……”前后成分不对应：主语“地址”与谓语“写着”搭配不当，宜让两分句都指地址。\",\"replacement\":\"其信封上写的地址不是曾本之工作的楚学院，而是\",\"clauseId\":\"typos-and-usage/2\"},{\"quote\":\"尖尖的阴影，从曾本之\",\"blockOrdinal\":10,\"severity\":\"note\",\"note\":\"逗号插在“将……阴影从……移到……”之间，割裂状语与谓语，建议删去该逗号。\",\"replacement\":\"尖尖的阴影从曾本之\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"美丽的弧线，渐次推向湖心\",\"blockOrdinal\":11,\"severity\":\"note\",\"note\":\"逗号割裂“将……弧线渐次推向湖心”的结构，宾语与谓语之间不宜停顿，建议删去。\",\"replacement\":\"美丽的弧线渐次推向湖心\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "usage": {
+          "inputTokens": 1887,
+          "outputTokens": 13910
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/54",
+        "selectedItemId": "S40/review-first/54",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:22:22.887Z",
+        "providerRequestDigest": "b90a753b9cfc79a2824347b7f16dc5a331ef4f85348502d4639844891f656724",
+        "providerResponseDigest": "d79ccfe67be537fbba5606097053e6c820cd66a4a4d6adcd1d60b256c108bbaa",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "f703640d318dfb7fed6f9e632e7d45b21a928a686328659c0c8407312c57ff05",
+        "generation": "955070a213add80f873185a98d7730ea9779ccaa48165375f49b02f9bda0d7aa",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-2"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "a0222854a2e5deda5abb9e0eed22d48993cfa5ebe0f3722562bee505d80822cb"
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "d953cb8bdf486d039a6a69a5ac3548803ced41c490a1db94956587557a1b41ad",
+      "contentDigest": "a961d6dc02f89d79d932b93f7d23398f5ae6d205901f48adc2ba7e8b682b0d29",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"多不会超过两次\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"「多」单用不能表示「至多」，与「超过」搭配不当，属漏字（漏「最」）。\",\"replacement\":\"最多不会超过两次\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"是不是解决了世界上的某个不解之谜？\",\"blockOrdinal\":16,\"severity\":\"should\",\"note\":\"全句为「他想了解……」的间接引语，属陈述句，虽含疑问词，句末应用句号，不宜用问号。\",\"replacement\":\"是不是解决了世界上的某个不解之谜。\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"文化人一多稀奇古怪的信件就多\",\"blockOrdinal\":9,\"severity\":\"note\",\"note\":\"「文化人一多」是复句中的条件分句，其后宜加逗号，与后一分句分开。\",\"replacement\":\"文化人一多，稀奇古怪的信件就多\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "usage": {
+          "inputTokens": 2294,
+          "outputTokens": 7283
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/55",
+        "selectedItemId": "S40/review-first/55",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:24:17.908Z",
+        "providerRequestDigest": "cdcde53c46832043c891a699c133d1c6fb14d8869ded4d8e5a248446156bed52",
+        "providerResponseDigest": "336ca4b5a12aac4e8f5a520a10708ed34de5c0bc5de90cf59af3e084b669a6fa",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "03f151e1553aaca07fbec033407baefe640e34d21c707d3e288d9087ecab0c08",
+        "generation": "955070a213add80f873185a98d7730ea9779ccaa48165375f49b02f9bda0d7aa",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-3"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "f2ec3a7a0c846b26ef21f0447d3d3dba958986fe0852b08c5c256c33e81ce9c3"
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "9db7137fc26ea72ebae88df45b2e179bbd71a4e634092dffcc19bb2738562f25",
+      "contentDigest": "12743a413d0267626854136350c016a039416f2f096dca9decfd5c7d4f8956cc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":4,\"findings\":[{\"quote\":\"像晴空霹雳一样\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"“晴空霹雳”为异形写法，通用规范词形是“晴天霹雳”，建议统一为推荐词形。\",\"replacement\":\"像晴天霹雳一样\",\"clauseId\":\"typos-and-usage/4\"},{\"quote\":\"四个甲骨文文字是\",\"blockOrdinal\":6,\"severity\":\"should\",\"note\":\"“甲骨文”本身已含“文”字，再加“文字”语义重复，属多字，规范说法为“甲骨文字”。\",\"replacement\":\"四个甲骨文字是\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"在四个甲骨文文字的左下方\",\"blockOrdinal\":7,\"severity\":\"should\",\"note\":\"同前，“甲骨文文字”中“文字”为多余成分，应删去“文”字，作“甲骨文字”。\",\"replacement\":\"在四个甲骨文字的左下方\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"贰\",\"blockOrdinal\":9,\"severity\":\"note\",\"note\":\"表示章节序数宜用汉字数字“二”；“贰”是财务、票据用的大写数字，按出版物数字用法规范不宜用于此处。\",\"replacement\":\"二\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"古怪的东西那就不是人\",\"blockOrdinal\":10,\"severity\":\"should\",\"note\":\"假设复句的两个分句之间缺少停顿，应在“东西”后加逗号，读来更合标点规范。\",\"replacement\":\"古怪的东西，那就不是人\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"奇异的事情那就不是人生\",\"blockOrdinal\":11,\"severity\":\"should\",\"note\":\"与上一句同构，假设分句之间缺逗号，应在“事情”后补逗号。\",\"replacement\":\"奇异的事情，那就不是人生\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"马跃之上第一次谈恋爱\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"“上”在此处为衍字（多字），与前后文不搭配，删去后“马跃之第一次谈恋爱就选了……”语义通顺；若原意另有成分（如“上大学时”），需核对补齐。\",\"replacement\":\"马跃之第一次谈恋爱\",\"clauseId\":\"typos-and-usage/1\"}]}",
+        "usage": {
+          "inputTokens": 2112,
+          "outputTokens": 7648
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/56",
+        "selectedItemId": "S40/review-first/56",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:25:22.234Z",
+        "providerRequestDigest": "abaf11b9fa8396fb83f2289c9a58bf672f348926e77b91408485f6fe3b8f7bb4",
+        "providerResponseDigest": "26facc05420410a78b7fd08e6cfdd345e4890ba346f491d4b892cfa86d7514ce",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "687eafd2640c1a77562bc2d3ed086438c763097ec539ea59567fd28ec0721eab",
+        "generation": "955070a213add80f873185a98d7730ea9779ccaa48165375f49b02f9bda0d7aa",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-4"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "0145b4b0c51aee5cc2345c08ba35dd4285d1a9f4ae91deb2b9a968f7f93022a4"
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "e71bcead803c5fcad354d64bd9e230cc2e6ca3bc750ac87935d564747f8b646f",
+      "contentDigest": "48fb4b784e0dd65b543799e015af64f0abe448d8913011525d29bf328972394b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":5,\"findings\":[{\"quote\":\"可以一路上与好好聊聊天\",\"blockOrdinal\":5,\"severity\":\"must\",\"note\":\"漏字：介词“与”后缺宾语，成分残缺，读者无法判断与谁聊天，句意不通。\",\"replacement\":\"可以一路上与曾本之好好聊聊天\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"装疯卖傻倚老卖老的话\",\"blockOrdinal\":7,\"severity\":\"note\",\"note\":\"标点：本句并列成分以逗号分隔，“装疯卖傻”与“倚老卖老”两个并列词语之间缺顿号，连写易被误读为一个词组。\",\"replacement\":\"装疯卖傻的话，倚老卖老的话\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "usage": {
+          "inputTokens": 1945,
+          "outputTokens": 4462
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/57",
+        "selectedItemId": "S40/review-first/57",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:26:25.229Z",
+        "providerRequestDigest": "c96316c342db4d6c9d74be2e9872679cd3acd40108334db047a2999f6b45e026",
+        "providerResponseDigest": "c8da408976165ae1f25ffef5c69308683ace337a6ddd814147a5512918edcdbb",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "093011de9bb0fa5e92391d49684ab61c252a513fc21f196831eacf3cc62a0f2e",
+        "generation": "955070a213add80f873185a98d7730ea9779ccaa48165375f49b02f9bda0d7aa",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-5"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "4eaa4f9951134c05a356e8d10845754695bb526f2e6a678e7fd299cd9355a96f"
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "cae370317640f70d0947038138a02a5feed570cd1a9f3497058244e7b7921dba",
+      "contentDigest": "81cda8000df69574b2084ed55f80191148b5a479aa2c9916d8c463f40555a804",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":6,\"findings\":[{\"quote\":\"如果郑雄仅仅只是如此说一说\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"“仅仅”与“只是”语义重复，属成分赘余，删去其一即可通顺。\",\"replacement\":\"如果郑雄仅仅如此说一说\",\"clauseId\":\"typos-and-usage/2\"},{\"quote\":\"官衔带长字的人\",\"blockOrdinal\":1,\"severity\":\"note\",\"note\":\"“长”指官衔中的“长”字，属需要标明的特殊成分，按标点用法宜加引号，以免与“长字”连读。\",\"replacement\":\"官衔带“长”字的人\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"马跃之的如何保护春秋墓葬中出土丝绸的专著\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"此处指马跃之所著的一部具体专著，属书名，应使用书名号标示。\",\"replacement\":\"马跃之的《如何保护春秋墓葬中出土丝绸》这部专著\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"有诗意很优雅地戳着他的心窝\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"“有诗意”与“很优雅地”是两个并列状语，中间缺顿号，连写会使结构与语气含混。\",\"replacement\":\"有诗意、很优雅地戳着他的心窝\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"连接起才够用\",\"blockOrdinal\":5,\"severity\":\"must\",\"note\":\"“连接起”后漏“来”，动词与补语搭配不完整，句意不顺畅。\",\"replacement\":\"连接起来才够用\",\"clauseId\":\"typos-and-usage/1\"}]}",
+        "usage": {
+          "inputTokens": 1918,
+          "outputTokens": 7672
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/58",
+        "selectedItemId": "S40/review-first/58",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:27:06.874Z",
+        "providerRequestDigest": "d75ba54300fc506a78ae9d86c5a38ddcd022bfe33a487fbb1e888f8367e84d0e",
+        "providerResponseDigest": "3cd85f72afbbc86bba5515b95dd35041eefca4e2804b34b7582e95be52c58d3c",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "e144ae5483cea411cbbc2fdebdbd46c52461a263fbccaeea0f9c5d8fa109369e",
+        "generation": "955070a213add80f873185a98d7730ea9779ccaa48165375f49b02f9bda0d7aa",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-6"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "1f940efa322fafe994960ce88206ae62bbe0ba9b4e1ef54330563f13678a42d0"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "a443e4b41edf8dc20181cd2a279f035a9c1bcffacb14b96fbd027610079a5f38",
+      "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":8,\"findings\":[{\"quote\":\"必须在门外小声叫上几次\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"前有“只要他将书房的门关起来”，条件关联词“只要”应与“就/就得”呼应；此处用“必须”造成关联词搭配不当，句子读来前后脱节。\",\"replacement\":\"就得在门外小声叫上几次\",\"clauseId\":\"typos-and-usage/2\"},{\"quote\":\"无论配得上或者配不上\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"“无论”引导的并列选择项习惯用“还是”“或”连接，“或者”与“无论”搭配不合一般用法；“配得上或者配不上”宜改为“配得上还是配不上”。\",\"replacement\":\"无论配得上还是配不上\",\"clauseId\":\"typos-and-usage/2\"},{\"quote\":\"接下来安静在外面敲门\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"“安静”在文中是人名，此处紧接“接下来”，易先被读作形容词，句意一时不明；在“接下来”后加逗号可断开歧义。\",\"replacement\":\"接下来，安静在外面敲门\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "usage": {
+          "inputTokens": 1510,
+          "outputTokens": 3697
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/62",
+        "selectedItemId": "S40/review-first/62",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:32:27.689Z",
+        "providerRequestDigest": "7ff7861a4327ed842a60399e44df5bfb34618d97de2aa85a88de83496053986a",
+        "providerResponseDigest": "b868184d8d7651edbd56164e98b55dec1ab9f22cb56e714f0ee9777ae82ae374",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "de13bdf6d18007d1c4f98aa26f6d301f97ad76e57c65409706f73da80983a594",
+        "generation": "955070a213add80f873185a98d7730ea9779ccaa48165375f49b02f9bda0d7aa",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-8"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "e1a858ecde8dcf5af34da837baa505a86ba3acd5aaa3a59df63fa94b38c0ee09"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "5a059c0ea67aebb8a382aa93931d3c7e8e10d0b017cf5ce3627f478e690e71bb",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"内容块10c888251240b946be4ac127中确有「还要通过一种比较特别卜算」，形容词短语「比较特别」直接修饰名词「卜算」而缺结构助词，属成分残缺，发现与原样文字相符。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"内容块762362e172224d81c60e191d中确有「一把接一把地将两张纸撕碎」，「把」为抓握类量词，与被撕纸张（以「张」计）的撕碎动作搭配不当，发现所述问题在原文中可核查。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"内容块b82d0a26081b8e510c3fab93中确有「一九九○年代」，为公历年代，按数字用法应以阿拉伯数字标示，发现所指写法与规范不符，成立。\"}]}",
+        "usage": {
+          "inputTokens": 2480,
+          "outputTokens": 3723
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first/63",
+        "selectedItemId": "S40/review-first/63",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:33:09.538Z",
+        "providerRequestDigest": "a70cbb3620a1c2dbbc821d08473bc8d80ec07b6222aec8b6302bcdd2eef4125b",
+        "providerResponseDigest": "36d39e222c82e3d3ad4072cdefabbccf95c9ea6e620807591d4fc3e64439d62e",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "d2f596b3ff487594a02d7161c744ccd4887a98616f34f06a3691b676cbd262a4",
+        "generation": "f7c41dff9334671e10c0a659efca9d1a4b7db16976d6df0f2591c16beea8d9ed",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/sampling-1-unit-1"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_0f19a27040116f378419e5b0"
+          },
+          {
+            "placeholder": "{{ref:2}}",
+            "identity": "rfd_eab72e29ff8833c55d46e6c6"
+          },
+          {
+            "placeholder": "{{ref:3}}",
+            "identity": "rfd_fde8acb00a902d1fc7656c03"
+          }
+        ],
+        "fixtureResponseDigest": "ca10c0a2238dd9b7029cc274640c5ce21193d3e50d91614b804c37ab4a710b86"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "7fdf92e3e8a714866933c9ac9fb48e8618513a3dd5fe5d45cd032839dac72a52",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"{{sample-block:2}} 中逐字存在「极端少数之人」，“极端”修饰“少数”确属搭配生硬，作为提示级用词建议成立。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"{{sample-block:4}} 原文为「将很平常的事情，变得极不平常」，逗号确实插在“将”的宾语与谓语之间，发现所指位置准确，删除逗号的建议成立。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"{{sample-block:7}} 中确作「一九八○年代」，公历年代用汉字数字与数字用法规范不符，改为阿拉伯数字的发现成立。\"},{\"ref\":\"{{ref:4}}\",\"disposition\":\"成立\",\"reason\":\"{{sample-block:8}} 中确为「不是……楚学院，而是写着……」，第二分句主语与“地址”不一致，指出的搭配不对应成立。\"},{\"ref\":\"{{ref:5}}\",\"disposition\":\"成立\",\"reason\":\"{{sample-block:10}} 中确作「尖尖的阴影，从曾本之身体的右边……移到左边」，逗号插在“将”的宾语与后接状语谓语之间，发现成立。\"},{\"ref\":\"{{ref:6}}\",\"disposition\":\"成立\",\"reason\":\"{{sample-block:11}} 中确作「美丽的弧线，渐次推向湖心」，逗号割裂“将……弧线……推向湖心”的结构，发现成立。\"}]}",
+        "usage": {
+          "inputTokens": 2551,
+          "outputTokens": 5869
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first/64",
+        "selectedItemId": "S40/review-first/64",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:34:23.054Z",
+        "providerRequestDigest": "02871c24f99cfbe0b9823cd155826779923c0a436d6dc79df97d334744e99778",
+        "providerResponseDigest": "d2bdf4b879082ec964b5b1fc0dd922935492341ef4a34a5083793204b1dbbd8b",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "42041d460479feceb4638c987df3afe41a737eb8aa22f6460e7ea16ab4eb5702",
+        "generation": "f7c41dff9334671e10c0a659efca9d1a4b7db16976d6df0f2591c16beea8d9ed",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/sampling-2-unit-2"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_fb4d13dfc69afa0e74659cea"
+          },
+          {
+            "placeholder": "{{ref:2}}",
+            "identity": "rfd_26e78e6751ba0e4fc9d64b39"
+          },
+          {
+            "placeholder": "{{ref:3}}",
+            "identity": "rfd_09155acc0de1ed5520f4de90"
+          },
+          {
+            "placeholder": "{{ref:4}}",
+            "identity": "rfd_9819eaff286d43c6efe458e1"
+          },
+          {
+            "placeholder": "{{ref:5}}",
+            "identity": "rfd_0eef3263e903681118c2f8e3"
+          },
+          {
+            "placeholder": "{{ref:6}}",
+            "identity": "rfd_8eb39a04172ae601c7a63ed4"
+          },
+          {
+            "placeholder": "{{sample-block:2}}",
+            "identity": "blk_78c2fac10d3a73f4b4e7bb4d"
+          },
+          {
+            "placeholder": "{{sample-block:4}}",
+            "identity": "blk_f6bc997713988d227d401fea"
+          },
+          {
+            "placeholder": "{{sample-block:7}}",
+            "identity": "blk_177354de741f70edf25ed42f"
+          },
+          {
+            "placeholder": "{{sample-block:8}}",
+            "identity": "blk_49af20020a2c278b3e12ebae"
+          },
+          {
+            "placeholder": "{{sample-block:10}}",
+            "identity": "blk_0fef02ba9a7043c4afa80d82"
+          },
+          {
+            "placeholder": "{{sample-block:11}}",
+            "identity": "blk_17c0c4c9b42bd604740c42e8"
+          }
+        ],
+        "fixtureResponseDigest": "d444b153ccbbeb010b1617b6b52a6b527f59812a105fd67780e992ebb0a533a0"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "8280b9be2db5e4b7420a75b9fc0be25ebd128f5a73cb04b55ec5f826251b26ca",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"需降级\",\"reason\":\"引文「像晴空霹雳一样」确在块4d6a66中；但「晴空」与「晴天」并非同一词的异形写法，「晴空霹雳」是常见变体表达，是否必须统一为「晴天霹雳」属词形偏好，宜降为提示级。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文「四个甲骨文文字是」逐字见块ae0289；「甲骨文」已含文字之义，再接「文字」确为重复多字，删「文」后语句通顺，发现被支持。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"引文「在四个甲骨文文字的左下方」逐字见块aac964，与前一发现同源；重复成分判断一致，发现被支持。\"},{\"ref\":\"{{ref:4}}\",\"disposition\":\"需降级\",\"reason\":\"块6ac6df仅以「贰」作章节标记；以壹贰叁作章节序号是出版物常见体例，规范未明确禁止，原note断言「不宜用于此处」依据不足，宜降为体例选择提示。\"},{\"ref\":\"{{ref:5}}\",\"disposition\":\"成立\",\"reason\":\"引文「古怪的东西那就不是人」逐字见块5d57e4；假设分句与结果分句「那就……」之间通常用逗号断开，缺逗号易误读，发现被支持。\"},{\"ref\":\"{{ref:6}}\",\"disposition\":\"成立\",\"reason\":\"引文「奇异的事情那就不是人生」逐字见块f1cc6d，与上一句同构；假设与结果分句间缺逗号，判断成立。\"},{\"ref\":\"{{ref:7}}\",\"disposition\":\"成立\",\"reason\":\"引文「马跃之上第一次谈恋爱」逐字见块43a450；「上」与前后文无法搭配，作衍字删去后语句通顺，发现被支持。\"}]}",
+        "usage": {
+          "inputTokens": 2838,
+          "outputTokens": 7105
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first/65",
+        "selectedItemId": "S40/review-first/65",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:35:18.983Z",
+        "providerRequestDigest": "b8cdd8909c15ccfc854f1a4653c95208d9e81e12cdaa9d46a857ff161e59f6f4",
+        "providerResponseDigest": "d5f9cfda464b7baee86ee7f5f2aeb6d193226454c26f23d67f25dfe17650d56a",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "e5b946ed61bade9bbed357ab4a18fd619ec193dc7e64b6431adf6007db4099ac",
+        "generation": "f7c41dff9334671e10c0a659efca9d1a4b7db16976d6df0f2591c16beea8d9ed",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/sampling-3-unit-4"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_48e18a1c06ca689143048fa7"
+          },
+          {
+            "placeholder": "{{ref:2}}",
+            "identity": "rfd_5a90621da8dd8727d9cef6c5"
+          },
+          {
+            "placeholder": "{{ref:3}}",
+            "identity": "rfd_3b53b78cfd62fe89fe2b1f05"
+          },
+          {
+            "placeholder": "{{ref:4}}",
+            "identity": "rfd_8091c42593acf74a152e81f8"
+          },
+          {
+            "placeholder": "{{ref:5}}",
+            "identity": "rfd_1c58371ca45bad3c60c8fa3b"
+          },
+          {
+            "placeholder": "{{ref:6}}",
+            "identity": "rfd_e38eadb5879ee79ebf5b4b18"
+          },
+          {
+            "placeholder": "{{ref:7}}",
+            "identity": "rfd_70d24c60b2357f32c40a9bd6"
+          }
+        ],
+        "fixtureResponseDigest": "ca41a47ed061ffb87afe2a236fbbf277ebf9ce0a625d2dcc9bfb1abeec2fd18d"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "e50216cb0c23227a77b1c16f9e3eb0107e141b9752289c0c09f351cce60de1db",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文「必须在门外小声叫上几次」在内容块中确实唯一出现，且前文以「只要」引导条件分句，条件与结果之间用「必须」承接，属关联词搭配不当，发现所述与原文相符。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文「无论配得上或者配不上」在内容块中唯一出现，原文确以「无论」搭配「或者」连接并列选择项，与规范用法不合，发现所指位置与问题均成立。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"引文「接下来安静在外面敲门」在内容块中唯一出现，同块下文「与推门进来的安静轻轻拥抱一下」证实「安静」是人名，紧接「接下来」确有歧义，属标点提示类问题，与 note 级别相称。\"}]}",
+        "usage": {
+          "inputTokens": 1978,
+          "outputTokens": 884
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first/66",
+        "selectedItemId": "S40/review-first/66",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:37:06.402Z",
+        "providerRequestDigest": "368db6254f387e789110619e9fc848b730fe7a4b1903da016ae71eb2514301bf",
+        "providerResponseDigest": "266d3b0b79b52555a1b0e381385d08cdfd9342ef86adfb2f9dfaf3f5bd37bca8",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "eee25bcddb0a78986bbfce70ed85a1913edf133ae053d6d6082c76248913f928",
+        "generation": "f7c41dff9334671e10c0a659efca9d1a4b7db16976d6df0f2591c16beea8d9ed",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/sampling-4-unit-8"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_b0f3a8cf330f47610476cb74"
+          },
+          {
+            "placeholder": "{{ref:2}}",
+            "identity": "rfd_a854696dc97fc4e8458efde5"
+          },
+          {
+            "placeholder": "{{ref:3}}",
+            "identity": "rfd_cc3e103404f720d148906cee"
+          }
+        ],
+        "fixtureResponseDigest": "3601b6c4e7c1b5f5f9b888666c65ff7a3e1fb81d993be93e0c72ba121c67d9e5"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "ae9e5f5a8fac487e4497e3f3627ca19b0d8d9146ac699388696037c92d9b7ee2",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一轮在 units 阶段遇到 adapter-failure 时不要只重试一次；先把该单元隔离，换用备用适配器或降级路径，并为其单独预留重跑预算。\",\"basis\":\"账目中 failureCodes/gapCodes 均有 adapter-failure 计数 1，units.retried=1、units.gaps=1，说明一次重试后仍留下缺口。\"},{\"suggestion\":\"把本轮因 adapter-failure 留下缺口的单元列为下一轮必读单元，强制重新提交后再进入后续归并；暂时不要复用该单元结果。\",\"basis\":\"units.gaps=1 且 stages.units=closed-with-gaps；units.reused=0、submitted=8，缺口单元没有可复用的完整结果。\"},{\"suggestion\":\"下一轮降低 note 与 should 两类发现的信任：先复核再采纳，只有复核通过的才计入最终发现；must 可维持直接采纳。\",\"basis\":\"assurance precision 显示 note 估计 0.88（8 抽样、7 维持）、should 估计 0.90（10 抽样、9 维持），must 为 1.00（1 抽样、1 维持）。\"},{\"suggestion\":\"下一轮对 note 与 should 发现增加引文定位与第二遍重读，尤其在最终计数前逐条确认，而不是仅依赖本轮 assurance 结论。\",\"basis\":\"note/should 的维持率分别约 0.88、0.90，低于 must 的 1.00；且 excluded:quote-not-found=10 表明定位环节仍有丢失。\"},{\"suggestion\":\"下一轮在 assurance 之前加入引文定位预检：把 quote-not-found 的发现退回原单元重写引文或重定位，再决定是否排除。\",\"basis\":\"findingCounts 中 excluded:quote-not-found 为 10，而总 finding 为 19；这说明大量候选在定位阶段被排除。\"},{\"suggestion\":\"下一轮为 units 阶段增加单次输出预算，或把大单元拆成更小内容块；同时设置输出接近上限时的续写或重试。\",\"basis\":\"units 阶段 9 次请求产生 outputTokens=57107，平均每次约 6.3k；同一阶段出现 adapter-failure。\"},{\"suggestion\":\"若对同一稿件重跑，先启用并校验上一轮单元缓存，优先复用未变更单元，避免再次全量重算。\",\"basis\":\"units.recomputed=8、reused=0、submitted=8，说明本轮全部重新计算，没有复用。\"},{\"suggestion\":\"下一轮给 cross-unit-reduction 分配独立预算并至少运行一次；若不运行，应在分类中显式标记为计划内跳过而非 completed-with-gaps。\",\"basis\":\"stages.cross-unit-reduction=not-run，inputTokens/outputTokens/requests 均为 0；classification=completed-with-gaps。\"},{\"suggestion\":\"下一轮把 adaptationCount 至少按 1 次预留，并在发生适配调整后重读受影响的单元，而不是只记录次数。\",\"basis\":\"adaptationCount=1；账目只给出次数，未显示哪些单元受适配调整影响。\"}]}",
+        "usage": {
+          "inputTokens": 1481,
+          "outputTokens": 3660
+        }
+      },
+      "capture": {
+        "subject": "reflection",
+        "itemId": "S40/review-first/67",
+        "selectedItemId": "S40/review-first/67",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676",
+        "taskPromptContractDigest": "1f683bd44f4607ee63e3ba803a2829ee7c1b433f731dc851017ad941533aa5a4",
+        "capturedAt": "2026-10-15T16:37:15.773Z",
+        "providerRequestDigest": "372e828f386b2950a59927e2198538f7067e374806594bf10057b3c0df782a99",
+        "providerResponseDigest": "26622f8a2ac7026718e91a0a1c5c65b297cc5afad68d0d085e4a5007cb76452e",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "5e02da45ca84c32ed14434dcf145e1b919e1f7780000c10b88ad1b131184dfb7",
+        "generation": "9fb830a45c1da501af080e771a0bc41dac9f17a4aa02dd13da8b72b354b11d30",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/reflection"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "e8256edada270ea3c8ee3948c6958354e8d6c281f650c98726d2fb3820674e66"
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "a37ff0b5d3d73a73996ae8bd4c23edb26dbdce9f0e79c9beda4f071ae55c7912",
+      "contentDigest": "582fd4c3541fa6f2cfc613106f45b9713aeeeeacfb82ffbbcd940853533b9981",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"此处以「之一」标示作品归属，正文分节却用「壹」标示层级，同一单元内并存两套编号方式，层级关系不易判断。若「之一」为丛书或系列标识，建议与正文章节编号在格式上明确区分。\",\"clauseId\":\"style-and-format/1\"},{\"quote\":\"“识时务者为俊杰，不识时务者为圣贤”\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"同一引语在块5、块6以两个独立段落呈现、各以句号收尾，此处则加引号并合成一句、中间用逗号，字号与标点处理前后不一致。引语的呈现方式宜全书统一。\",\"clauseId\":\"style-and-format/3\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"年份中的零使用了圆圈符号「○」，而全书年份与数量均用汉字数字（如「六十五岁」「八年前」「二十年」）。此处字形与体例不统一，建议改用汉字「〇」。\",\"clauseId\":\"style-and-format/2\"}]}",
+        "usage": {
+          "inputTokens": 1926,
+          "outputTokens": 2180
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/68",
+        "selectedItemId": "S40/review-first/68",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:37:50.027Z",
+        "providerRequestDigest": "15870898e4409e8ca65df42fc1da061786f522162a781bb0d372e3436ba8c794",
+        "providerResponseDigest": "160fefd5cfaa450bd734948ae83741833446e9a2e93d3bab2d65a2bffcda0a48",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "b4a9bda709e8c76081ac2fb49429cd72dae8fa7ea9a7bd944731a744ff17fbfd",
+        "generation": "13efbe6ec931cec5b51d812b84c1d2ecd881186ec02c928123dbdba23d661625",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-1"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "8ff2d070fa808ed39f2e18f5786d661ce0ddc641a75fa87f3dbdfb98b7e38b5d"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "17d7314a42ab9ee41a7b6c991c1ff0e171591e9826f2714a3fcb03dec3714abe",
+      "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"一九八○年代最后的那个夏天。二十多年前\",\"blockOrdinal\":6,\"severity\":\"note\",\"note\":\"同一事件在同一段内先用确切年代纪年，紧接着改用概数「二十多年前」，时间表述一详一略、方式不统一；建议在同一段内统一为一种时间表述方式。\",\"clauseId\":\"style-and-format/2\"}]}",
+        "usage": {
+          "inputTokens": 1800,
+          "outputTokens": 11226
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/69",
+        "selectedItemId": "S40/review-first/69",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:38:10.891Z",
+        "providerRequestDigest": "d070ef1a7d740c1e5b8de69c0ecc18628e54857ab7f95eea913995da9724ab85",
+        "providerResponseDigest": "b602882c680336eda9d235f69f3c83ca362bc568713beacc207fb9e7e627cc4c",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "70d31e3697cdf9b86ea28bdcbb79891f56ef46a6f502bb14171efd6ab6fe2683",
+        "generation": "13efbe6ec931cec5b51d812b84c1d2ecd881186ec02c928123dbdba23d661625",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-2"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "6bbc0ac13fac06129c28c9ffbb27a248dc3305b3e06296cce4a47a7d300ab3db"
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "d47eab0b17f0631a82f6b65ccd9e0c1a027f4b985551e5e398acc53ceeb0494d",
+      "contentDigest": "a961d6dc02f89d79d932b93f7d23398f5ae6d205901f48adc2ba7e8b682b0d29",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"东亭邮局\",\"blockOrdinal\":10,\"severity\":\"note\",\"clauseId\":\"style-and-format/3\",\"note\":\"同一段中同一邮政机构先称“东亭邮局”，随后又称“邮政局的人”，专名前后不一致。若二者指同一单位，建议统一称法，以免读者误解为两个机构。\"},{\"quote\":\"邮政法\",\"blockOrdinal\":18,\"severity\":\"note\",\"clauseId\":\"style-and-format/3\",\"note\":\"“邮政法”为法律名称，此处未加书名号。若全书对法律、法规名称统一使用书名号，此处应与全书体例保持一致；请编辑核对约定后处理。\"}]}",
+        "usage": {
+          "inputTokens": 2211,
+          "outputTokens": 5702
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/70",
+        "selectedItemId": "S40/review-first/70",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:39:53.598Z",
+        "providerRequestDigest": "a3826f2a768a70c38b5e6c686ce55655c50e05f1e5c84eee0b2671db4f7f5220",
+        "providerResponseDigest": "f15b58cd3081fd954d3bdf9899b665206573587f66feeae72bf37094edf60258",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "04f24b2f1cbd9aa7de5c65d6757fc1b9c0063b9e42d4781c9c5874aa201a605e",
+        "generation": "13efbe6ec931cec5b51d812b84c1d2ecd881186ec02c928123dbdba23d661625",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-3"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "aff0b5bd547f7b490f512891b275a8e19360eb616baf492115c6442d1c41762c"
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "986113ff3eee48a5e904fa92d85202236af69d933e929cc80cb54d4f48989b6b",
+      "contentDigest": "12743a413d0267626854136350c016a039416f2f096dca9decfd5c7d4f8956cc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":4,\"findings\":[{\"quote\":\"贰\",\"blockOrdinal\":9,\"severity\":\"note\",\"clauseId\":\"style-and-format/1\",\"note\":\"此处“贰”以独立段落充当章节标记，稿件中未见其与正文段落有层级、字体或编号方式的区分。建议核对全书章节序号体例（如“壹/贰”或“一、二”）。\"},{\"quote\":\"拯之承启！\",\"blockOrdinal\":6,\"severity\":\"should\",\"clauseId\":\"style-and-format/3\",\"note\":\"上文称信上“只竖着写了四个字”，此处释文末尾却带感叹号，与四字之数不符；且该释文与下一段的印章名字同为裸文呈现，未加引号或其他标注。释文呈现方式建议全书统一。\"}]}",
+        "usage": {
+          "inputTokens": 2022,
+          "outputTokens": 4202
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/71",
+        "selectedItemId": "S40/review-first/71",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:40:42.770Z",
+        "providerRequestDigest": "a1230abff7b5159410a8bf0995c9f11791e4031460c41a9cd49b4770072f2a6f",
+        "providerResponseDigest": "7a9110c3420a4b2439205e05d54b4fa5658e14d3869ddaa7b205ba4961a0b491",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "1a9744b206c11f243e63ca0184f5b15285592527800a9746bb86c6fe7fc7bda3",
+        "generation": "13efbe6ec931cec5b51d812b84c1d2ecd881186ec02c928123dbdba23d661625",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-4"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "13fa2b423a2526f7446290485d6a9d4312a931c6c78b0846ca9c1f6d537d16bb"
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "a7d49e29db9f993f34f176231f9728f848edd14e7ccc1b7a9134b004cc5a8d3b",
+      "contentDigest": "48fb4b784e0dd65b543799e015af64f0abe448d8913011525d29bf328972394b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":5,\"findings\":[{\"quote\":\"因为二人关系很好\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"同一单元内指代同一对人物的数词表述不统一：此处作“二人”，前后文则作“两个人”（如“可以去两个人”“两个人在电话里将去宁波的事敲定”），另有“俩人”性质的“他俩”。建议按全书体例统一“二”与“两”的用法。\",\"clauseId\":\"style-and-format/2\"}]}",
+        "usage": {
+          "inputTokens": 1860,
+          "outputTokens": 3344
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/72",
+        "selectedItemId": "S40/review-first/72",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:41:21.678Z",
+        "providerRequestDigest": "c6d12d5a3512096e17c57d82260d9b2cf04bf21de336e480052b64b9bdd2aff1",
+        "providerResponseDigest": "9bfadf6530b78548f93288c1bf206a480892862631cde5b9448bcec126d26213",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "51bc430c8fbcd2be8a310d10ed0ad07af2e7652e434ea45a748a4c3a9bfa2bdd",
+        "generation": "13efbe6ec931cec5b51d812b84c1d2ecd881186ec02c928123dbdba23d661625",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-5"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "6725be05f6c9f4a1d91d9f53a7d30cda79d892848c46d33aaa1fc55842307143"
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "64f309dc66d0041b4d0d283b90e884458cb807f52bfdd6b394332e4e5a62ff1f",
+      "contentDigest": "81cda8000df69574b2084ed55f80191148b5a479aa2c9916d8c463f40555a804",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":6,\"findings\":[{\"quote\":\"马跃之的如何保护春秋墓葬中出土丝绸的专著\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"此处显然是在指马跃之的一部专著（该段后文亦称其为“书”“这本专著”），但书名以普通行文呈现，未加书名号。若确为正式书名，宜统一使用《》标示，以免与全书书名呈现体例不一致。\",\"clauseId\":\"style-and-format/3\"}]}",
+        "usage": {
+          "inputTokens": 1834,
+          "outputTokens": 3668
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/73",
+        "selectedItemId": "S40/review-first/73",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:41:42.836Z",
+        "providerRequestDigest": "3e5296221af1b4f8be1489521751f5dac37b57f05058e05bcf84b94266aae539",
+        "providerResponseDigest": "29481e4fd78a87ba54de03ba816e39e0e132d78c8e39a84fc6a5a89d063bd3c5",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "c79dc4933c2470c2cf8fc2cc72ec4dfd33ade967f24f8817c34f56d42d60e3e2",
+        "generation": "13efbe6ec931cec5b51d812b84c1d2ecd881186ec02c928123dbdba23d661625",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-6"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "fec4af2cdc48aeeedb5438e6bed4f43bb8d60f4453f3931aa7764010a19d3ba3"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "45cf9cc1998690b71f96981fb9cb12de18e9d301df498dec701f29f16b581d84",
+      "contentDigest": "ff158e0f8eec32fdf485f964e2c66d92fed84cbf57de527a97b67c515b9aad50",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":7,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 2064,
+          "outputTokens": 1373
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/74",
+        "selectedItemId": "S40/review-first/74",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:42:15.526Z",
+        "providerRequestDigest": "c2c9dc6aa5fcb06c64cea3c207bbba9b5e426fee881be108ecee752ce1ec1514",
+        "providerResponseDigest": "1479a4fdd44fbe5a34fb22ea4f57a1d4ec1283c243270e489b49945ed77fbe98",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "4bf9f02366758edbe5ee7383d62af76353bf82421ab4003854484b72334a3a14",
+        "generation": "13efbe6ec931cec5b51d812b84c1d2ecd881186ec02c928123dbdba23d661625",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-7"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "56f06a2da4527d25ffc3e47a3c29a1c065c77b3e91d8fe78f07952370ae469e3"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "0c096dff1decf3ac32b4bad1dca129c2c2403a66393e2cb1d2964e244dede1a1",
+      "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":8,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1424,
+          "outputTokens": 4611
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/75",
+        "selectedItemId": "S40/review-first/75",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:42:31.069Z",
+        "providerRequestDigest": "c2d7dadef9a29ad343466cb41df2c3cb38b9a023d652c051e6916b6b3ef9ee0d",
+        "providerResponseDigest": "4b4d785cfb1d6bfc179e30c2275629788049b2f53bbd957570a4b9b26220d846",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "a6c49f432b82532e0e317ad090291e7ae3be9bdaded13f4e8b8a94c07882d052",
+        "generation": "13efbe6ec931cec5b51d812b84c1d2ecd881186ec02c928123dbdba23d661625",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-8"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "20273b434373dbb656a9aac9b4fbf5548fa143e9750c07076a0ed707f37e9d16"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "760180aaacef378655047a23ae9dd707b7327a2980908586ba4718ddc4ec9c94",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"块2逐字为「《青铜重器》之一」，块4逐字为「壹」，同一单元内确有两套编号线索并存，层级关系无从判断，属标题与章节编号体例问题，发现被支持。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"块5、块6将该引语分作两段并各以句号收束，块14则逐字作「重写“识时务者为俊杰，不识时务者为圣贤”作为开头语」，引号与逗号处理差异可见；惟「字号」非内容块所能判定。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"块14逐字含「一九九○年代某天」，零位作「○」；同单元「六十五岁」「八年前」「二十年」均用汉字数字，字形不统一之说由内容块支持。\"}]}",
+        "usage": {
+          "inputTokens": 2416,
+          "outputTokens": 2184
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first/76",
+        "selectedItemId": "S40/review-first/76",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:43:19.368Z",
+        "providerRequestDigest": "95805e6ae19aaecc595a5b2c2eccb2e4b50f75d78758a46d7396d08633f20912",
+        "providerResponseDigest": "674bd8e3ca0a88f7d7fa4983968336d6bf9dafa426e1cb1c84a2fd3ca35078e0",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "18f272aa00d6f7ecae3b7a77ecb97f26a6ce9a3e5016331e6a82d0161776f172",
+        "generation": "5027650198831f736cca194202ad9e6cea302585dd0833f1e6da05b654ea889d",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/sampling-1-unit-1"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_56a167584d4f8342fb73ab0e"
+          },
+          {
+            "placeholder": "{{ref:2}}",
+            "identity": "rfd_f2f229b4433cde61562b7b1d"
+          },
+          {
+            "placeholder": "{{ref:3}}",
+            "identity": "rfd_3aa5de8db59b23004b9afdf2"
+          }
+        ],
+        "fixtureResponseDigest": "d9bb6d912887e038ceb5b39d770eba85bc947dda18b5cdb6c27fd2ff6fc00417"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "bb7d89fb97ab3e093c9f5b86d966f076211c880011014cdefde0ca6a59751604",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"同一内容块 {{sample-block:10}} 中先出现「东亭邮局」，随后又出现「邮政局的人」，两个称法并存于同一段，稿件按原样支持该发现所述的前后称法不一致现象，且发现已按 note 级别谨慎表述。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"{{sample-block:18}} 中「邮政法」确实以光杆形式出现，未加书名号，稿件按原样支持该发现关于法律名称呈现方式需与全书体例核对的判断，且其仅为提示性说明。\"}]}",
+        "usage": {
+          "inputTokens": 2583,
+          "outputTokens": 762
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first/77",
+        "selectedItemId": "S40/review-first/77",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:43:39.814Z",
+        "providerRequestDigest": "1129b7995a0b9298a020db05990d513ec805cc0155c4ae6c81c3eadf079a765d",
+        "providerResponseDigest": "39c7a9b37eedc78de60766e0a7237ccbfc94debcbc502287df32441121b34e13",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "e50260081235d6667fc9138647e0ccf3f9bd5a6813db5cb405b832b45cd57297",
+        "generation": "5027650198831f736cca194202ad9e6cea302585dd0833f1e6da05b654ea889d",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/sampling-2-unit-3"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_5c44033eb59aa4bb9e4fb516"
+          },
+          {
+            "placeholder": "{{ref:2}}",
+            "identity": "rfd_0c802dd1eb6791fefc3ba509"
+          },
+          {
+            "placeholder": "{{sample-block:10}}",
+            "identity": "blk_8ff6b124e5549d908bfb5226"
+          },
+          {
+            "placeholder": "{{sample-block:18}}",
+            "identity": "blk_32b2ffa9ab644c1952ab92de"
+          }
+        ],
+        "fixtureResponseDigest": "80ecc006012ced147c39b387f476254ff6442dd13685e0d18016cb4849139c18"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "7cc2f0ab5b1730a2806dfeaf5a29570ae39136691dad614ec374a085d5bf8af5",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"「贰」在本单元中确以独立段落出现，与前后叙述段落相比，看不到层级、字体或编号标记上的任何差别；该发现仅作提示，建议核对全书章节序号体例，与其可见信息相称，故成立。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"需降级\",\"reason\":\"释文与印章名同为裸文呈现、未加引号，这点由内容块支持；但「拯之承启」后的「！」应是「四个甲骨文文字是：……」这一叙述句的句末标点，内容块不足以支持「与四字之数不符」的判断，只支持其较弱说法。\"}]}",
+        "usage": {
+          "inputTokens": 2410,
+          "outputTokens": 2907
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first/78",
+        "selectedItemId": "S40/review-first/78",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:43:48.517Z",
+        "providerRequestDigest": "945ee46e9eba5d46bd6a6181665aa8175e2af41508633987fc0f4ef15015517a",
+        "providerResponseDigest": "5f4691e1e2b4e9aaf88303c66056335f919b8e80f1b064b790be0896655b9ce0",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "baac856446d81efa2e59473cd1a72a88b8a3384a4446db60797cfee29800090e",
+        "generation": "5027650198831f736cca194202ad9e6cea302585dd0833f1e6da05b654ea889d",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/sampling-3-unit-4"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_d3ba48fa79609d80d35a8c35"
+          },
+          {
+            "placeholder": "{{ref:2}}",
+            "identity": "rfd_efa0fa7611008828bf28d948"
+          }
+        ],
+        "fixtureResponseDigest": "8f8be6409e33f96df4681dbff418dca00818e33d58cea3034537a260385c2c5e"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "97b18354b62d00281b1e5dd5f3380a3fc8e1be4cfceba007790e0d8b85eb2ad7",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"该引文在内容块中原样出现，同块后文以「书」「这本专著」指称，确指马跃之的一部著作，且该名称未加书名号；发现所述文本事实与所指位置均被内容块支持，属书名呈现体例的建议级问题，判定成立。\"}]}",
+        "usage": {
+          "inputTokens": 2159,
+          "outputTokens": 954
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first/79",
+        "selectedItemId": "S40/review-first/79",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:44:16.087Z",
+        "providerRequestDigest": "4a7c5efa161107c828547779ca7c9c11c1b9a6dc0195789710865d0ed369c797",
+        "providerResponseDigest": "e3f95854ad65cd0f9474c19b3c43541e6a4fe74128b2eac1668ce9ca63ddc870",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "82dfe05964744625a9c6174a00b6eda45206cc76153401d2126f61968d90e666",
+        "generation": "5027650198831f736cca194202ad9e6cea302585dd0833f1e6da05b654ea889d",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/sampling-4-unit-6"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_8f9b580bdfd96d1f0dd0acb1"
+          }
+        ],
+        "fixtureResponseDigest": "9982f8356a3ebbf3458fc7a2dd31777a588c7cee88d9dd15e92f0f13979a8061"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "a7657326e7cea89092e7d5c4eeda88e1ac60d05dcb59dc09a60ee4659892b562",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下次运行对 should 层级发现安排二次复核或全量抽检，不只抽 4 条；未通过复核的不进入最终清单。\",\"basis\":\"assurance.precision 中 should 层级 estimate 0.75、sampled 4、upheld 3；candidateCount 8、size 8、upheld 7。\"},{\"suggestion\":\"下次运行增加引文定位校验，并把 quote-not-found 排除项回写到对应单元，必要时只重读这些单元。\",\"basis\":\"findingCounts 有 excluded:quote-not-found 2，而 units.retried 0、gaps 0、failureCodes 为空。\"},{\"suggestion\":\"下次运行把 cross-unit-reduction 设为必跑，至少对 note 与 should 两类做跨单元去重和体例归并。\",\"basis\":\"stages 中 cross-unit-reduction 为 not-run，该阶段 inputTokens、outputTokens、requests 均为 0。\"},{\"suggestion\":\"下次运行在单元层预留重试预算：出现排除项或校验不通过时重读原单元，而不是零重试走完。\",\"basis\":\"units.retried 0、reused 0、submitted 8、recomputed 8，failureCodes 与 gapCodes 为空。\"},{\"suggestion\":\"下次运行记录被排除项的所属单元与原因，便于精确决定重读范围，而不是重跑全部单元。\",\"basis\":\"2 条 excluded:quote-not-found，但账目未给出这些排除项分布在哪些单元。\"},{\"suggestion\":\"下次运行维持 8 个单元的规模，但监控 units 阶段输出量，若单单元输出继续偏高则拆分或限定输出字段。\",\"basis\":\"usagePerStage.units 为 inputTokens 15141、outputTokens 36306、requests 8；adaptationCount 0。\"},{\"suggestion\":\"下次运行对 note 层级可维持较小抽检规模；把复核资源优先投向 should 层级和引文校验。\",\"basis\":\"note 层级 estimate 1、sampled 4、upheld 4；should 层级 estimate 0.75、upheld 3。\"},{\"suggestion\":\"下次运行把 assurance 抽样规模从每层 4 条提高到覆盖全部 should 条目或整批候选，减少漏掉低置信发现。\",\"basis\":\"assurance.candidateCount 8、size 8、state closed，但 should 层级仅 sampled 4、upheld 3。\"}]}",
+        "usage": {
+          "inputTokens": 1324,
+          "outputTokens": 1887
+        }
+      },
+      "capture": {
+        "subject": "reflection",
+        "itemId": "S40/review-first/80",
+        "selectedItemId": "S40/review-first/80",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676",
+        "taskPromptContractDigest": "c821445c58df4213e0979e613554f406c0746904eb461924f5f0911f1cffa853",
+        "capturedAt": "2026-10-15T16:44:26.174Z",
+        "providerRequestDigest": "03a39c6ef06b53bbbb68ec45a8cee6dedca0a0a2b691ded67b8215f78c4e6ae5",
+        "providerResponseDigest": "d3081d4d3f6ac8e8e994df6f5d61937a626a659d236adf25db05e9aed812b225",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "293bb0336a8546efae36c06a66b1f51373f91e19fb3787a173de39f92f8fa367",
+        "generation": "de019ee41c11aaf4a177ff0aa3d3c9b95e09c5e5eabf04d72ed0dd76f07df069",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/reflection"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "18a9857c8bd984bd280dc2a40273dba8009c2f802e8305b72137c1672f2d2ad4"
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "94c42dba48014ef7b46f7dec5b88c876495bb5307faa604ceb886b10671bea69",
+      "contentDigest": "582fd4c3541fa6f2cfc613106f45b9713aeeeeacfb82ffbbcd940853533b9981",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"通过一种比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"should\",\"note\":\"“一种比较特别卜算”缺少结构助词，读起来是硬拼在一起的，节奏也顿住；补一个“的”即可顺畅。\",\"replacement\":\"通过一种比较特别的卜算\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"可好是还可以过一次大寿，可不好是也许活不到大寿才提前享受小寿\",\"blockOrdinal\":10,\"severity\":\"should\",\"note\":\"前句已用“可好可不好”，此处又接连两个“可好/可不好”，且句式重复，显得绕口；“享受小寿”与前文“小寿”也贴得过紧。\",\"replacement\":\"好的一面是还能再过一次大寿，不好的一面则是也许活不到大寿，才提前做这场小寿\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"其存在的意义被视为国宝中的国宝\",\"blockOrdinal\":11,\"severity\":\"should\",\"note\":\"“意义”与“国宝”不是同类概念，主谓搭配生硬，判断落不到实处。\",\"replacement\":\"其地位被视为国宝中的国宝\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"用如此器物作为评价\",\"blockOrdinal\":11,\"severity\":\"note\",\"note\":\"“用器物作为评价”把比喻的喻体和评价本身混在一起，意思含混；改成“作比”指向更清楚。\",\"replacement\":\"用如此器物来作比\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"重新写出来的内容与先前写过的内容几乎一字不差\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"一句之内“写出来”“写过”两次落在“写”上，“内容”也重复，句子冗长拖沓。\",\"replacement\":\"重写出来的内容与先前几乎一字不差\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"这种叹息不像是针对被撕了好几遍的这封信，更像是为了某个人\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"“针对……更像是为了……”两个介词结构不平行，后半句的逻辑落点也因此飘忽，句式收紧后对照关系更清楚。\",\"replacement\":\"这种叹息与其说是冲着被撕了好几遍的这封信，不如说是为了某个人\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"在巴黎香榭丽舍大街上望着玫瑰兴叹\",\"blockOrdinal\":15,\"severity\":\"note\",\"note\":\"“望着……兴叹”是把“望洋兴叹”拆开套用，缺少连接词，读来略生硬，添“而”字即可成句。\",\"replacement\":\"在巴黎香榭丽舍大街上望玫瑰而兴叹\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"都已习惯宁肯每天上门送一束玫瑰花\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"“习惯”与“宁肯”叠在一处，两个都表取舍趋向，语义打架也使句子发滞，去掉“习惯”更利落。\",\"replacement\":\"都已宁可每天上门送一束玫瑰花\",\"clauseId\":\"literary-expression/1\"}]}",
+        "usage": {
+          "inputTokens": 1941,
+          "outputTokens": 3835
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/81",
+        "selectedItemId": "S40/review-first/81",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:44:43.520Z",
+        "providerRequestDigest": "f7f06ee23e6d6d97f7c433920484846849192f2462f10494840fc952fba613ca",
+        "providerResponseDigest": "8a75278564893de0c917742c335628d0a0107c0d11aaf809a18251cbb04295f9",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "e3f2d42522c78d4c7613258fdcdf006c74a04479e34bef7d372f3ba4ce988e2b",
+        "generation": "adcbc0d49ee78645d6ad31a7f76e5145125156a9db64793a4e38c9ac3bb87786",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-1"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "d8a7384358bedf5d3017659827278814035c850ff8d5451409633473fafc4fc7"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "3f58651f0ee9475f01ae34c9785ddf9a99a4718b098042407e8a907bbb36f2c6",
+      "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"极端少数之人\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"“极端少数”不合汉语搭配，“极端”多修饰程度而非数量，读来生硬；改用“极少数人之一”既顺口也与后文“之一”相承。\",\"replacement\":\"极少数人之一\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"将很平常的事情，变得极不平常\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"“很平常”与“极不平常”这类正反对举已近套语，且与本单元上一段“变得异常吊诡”用词雷同，两头相抵反而含糊。\",\"replacement\":\"使一桩再平常不过的小事骤然不同寻常\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"偶尔有英法德日等文字\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"“有……等文字”搭配生硬，“英法德日”四字连排也缺顿挫；改为“夹杂”并加顿号，语意更清楚，节奏也顺。\",\"replacement\":\"偶尔夹杂英、法、德、日等文字\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"大多数写信人是用繁体字，他自然也用繁体字写回信\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"一句之内“用”字两见、“繁体字”紧接重复，读来滞涩；把前一处改为“写的是”、后一处保留“用”，指称不变而音调有变化。\",\"replacement\":\"大多数写信人写的是繁体字，他自然也用繁体字回信\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"那次没有仪式的生命告别\",\"blockOrdinal\":7,\"severity\":\"note\",\"note\":\"“生命告别”作名词性指代偏抽象含混，与前面“没有仪式”叠加后语义更虚；删去“生命”二字，指向反而明确。\",\"replacement\":\"那次没有仪式的告别\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"描述的正是曾本之在固定时间、固定地点放松神经的地方\",\"blockOrdinal\":9,\"severity\":\"should\",\"note\":\"“文字……描述……地方”主宾搭配不顺，宜作“所写的正是……地方”；“放松神经”亦偏生理化，改“放松身心”更贴此处情境。\",\"replacement\":\"所写的正是曾本之在固定时间、固定地点放松身心的地方\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"太阳将先月亭尖尖的阴影\",\"blockOrdinal\":10,\"severity\":\"should\",\"note\":\"“尖尖的阴影”搭配生硬，读者易误以为阴影本身是尖的；实为亭尖投下的影子，写明“亭尖的”既准确又不失画面。\",\"replacement\":\"太阳将先月亭亭尖的影子\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"有些无聊的曾本之\",\"blockOrdinal\":11,\"severity\":\"should\",\"note\":\"把“有些无聊”直接前置修饰人名，语气拗口且像定性；拆成短句，人物状态与动作依次叙来，更接近口语的叙述节奏。\",\"replacement\":\"曾本之有些无聊，\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"最终悄无声息地沉入湖底\",\"blockOrdinal\":11,\"severity\":\"should\",\"note\":\"上一段刚用过“无声无息地移到左边”，紧接又用“悄无声息”，同一意象词语重复；换作“悄然”可避复而意味相近。\",\"replacement\":\"最终悄然沉入湖底\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"先月亭影子顶尖之处\",\"blockOrdinal\":11,\"severity\":\"note\",\"note\":\"同一事物前句作“阴影”，此处作“影子”，称说不一，稍显松散；统一为“阴影”，前后呼应更紧。\",\"replacement\":\"先月亭阴影顶尖之处\",\"clauseId\":\"literary-expression/1\"}]}",
+        "usage": {
+          "inputTokens": 1820,
+          "outputTokens": 6044
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/82",
+        "selectedItemId": "S40/review-first/82",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:45:04.407Z",
+        "providerRequestDigest": "d928a89ba816b5ffc7f1cb7ba8f3dc449eb30c45018850f9bf1d72a5451cbf31",
+        "providerResponseDigest": "acf8073e82d78d7d2705825dff3d054ae8a922099deea84145f056e987ff995d",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "7b09e5b360dc4d79cdd8c09365c0d5e84344ec710583e4da534ce34bf936522b",
+        "generation": "adcbc0d49ee78645d6ad31a7f76e5145125156a9db64793a4e38c9ac3bb87786",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-2"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "4e32a20f755a37a0fa1edc8b1103ef99b3546fbe7347fb3893a493be43095f2c"
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "da8bd9f00baab7ebe5ca19c2a4b61fec0ad4704e91a4fb43a3484e96bf8cdbf6",
+      "contentDigest": "a961d6dc02f89d79d932b93f7d23398f5ae6d205901f48adc2ba7e8b682b0d29",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"小脑袋甩动的水珠\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"“小脑袋甩动的水珠”搭配生硬，水珠是被甩出来的，这样写读来像水珠自己在甩动；改“甩出的”语义更清楚，画面也更利落。\",\"replacement\":\"小脑袋甩出的水珠\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"湖面上刚刚响过一声春雷\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"同一句后文又出现“刚刚响过”，与“突如其来的”叠加，读来拖沓。删去前一处“刚刚”，保留后一处的强调，节奏更匀。\",\"replacement\":\"湖面上响过一声春雷\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"多不会超过两次，但也不会少于一次\",\"blockOrdinal\":3,\"severity\":\"should\",\"note\":\"用“多”表上限语意含混，一问一答式的两个分句也拖慢节奏。改为“多则两次，少则一次”，意思不变而利落。\",\"replacement\":\"多则两次，少则一次\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"但与曾本之收到的这封信相比，先前那些古怪便是再正常不过的了\",\"blockOrdinal\":10,\"severity\":\"should\",\"note\":\"“与……相比”和“便是……”句式杂糅，且“那些古怪”缺中心语，指代含混。补出“的信件”，并把“便是”改为“就”。\",\"replacement\":\"但与曾本之收到的这封信相比，先前那些古怪的信件就再正常不过了\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"便忍俊不禁。曾本之也想看个究竟\",\"blockOrdinal\":11,\"severity\":\"should\",\"note\":\"相连两句都以“曾本之”作主语，读来板滞。后句换用“他”，指代不变而语气更连贯。\",\"replacement\":\"便忍俊不禁。他也想看个究竟\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"让也想看个稀奇的邮递员不知为何物\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"主语是“四个字”，谓语却是“让……邮递员不知为何物”，读来像说邮递员不知自己为何物，语义含混。改后明确是邮递员认不出那几个字。\",\"replacement\":\"让也想看个稀奇的邮递员一时认不出是什么\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"而是一眼看出，这四个字，从字迹气韵到纸张气息，实在是太熟悉了\",\"blockOrdinal\":15,\"severity\":\"note\",\"note\":\"一句之内“那四个字”“它们”“这四个字”三度指称同一对象，显得拖沓。删去重复的“这四个字”，并用“无论……还是”收紧节奏。\",\"replacement\":\"而是一眼看出，无论字迹气韵还是纸张气息，都实在太熟悉了\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"曾本之没有乱方寸，还记得耐心地向邮递员解释\",\"blockOrdinal\":17,\"severity\":\"should\",\"note\":\"“没有乱方寸”与“还记得耐心地”搭配生硬，“还记得”尤其突兀。改为“没有乱了方寸，仍耐心地”，动作衔接更顺。\",\"replacement\":\"曾本之没有乱了方寸，仍耐心地向邮递员解释\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"既然在如此古怪的收信地址背后，还有更加古怪的甲骨文文字，它所书写的内容是什么\",\"blockOrdinal\":18,\"severity\":\"should\",\"note\":\"“甲骨文文字”语义重复；“既然……还有……”之后缺“那么”一类承接词，长句读来含混。删去赘词并补出承接，句意更清。\",\"replacement\":\"既然在如此古怪的收信地址背后，还有更加古怪的甲骨文，那么它书写的内容是什么\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"曾本之不再满足邮递员的好奇心\",\"blockOrdinal\":18,\"severity\":\"should\",\"note\":\"“不再满足”暗示先前曾经满足过对方的好奇心，本句并无此意，语意含混。改“没有满足”，只表示这一次没有作答。\",\"replacement\":\"曾本之没有满足邮递员的好奇心\",\"clauseId\":\"literary-expression/2\"}]}",
+        "usage": {
+          "inputTokens": 2231,
+          "outputTokens": 11132
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/83",
+        "selectedItemId": "S40/review-first/83",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:45:53.585Z",
+        "providerRequestDigest": "9b6a4aea50177376a1598588da89993f2a549b5caf4d89e9351c8f57b71989bd",
+        "providerResponseDigest": "30fa185860b61db46f1b5e7811aff0345d651bbb5772d61141412a75eb276c5e",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "ebb84ea699f7b61e83b7f29829bedf93147fd21722aa9fd878e8ff9cc5c28b3b",
+        "generation": "adcbc0d49ee78645d6ad31a7f76e5145125156a9db64793a4e38c9ac3bb87786",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-3"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "0d8840a2b445f1674a8b421862e608421fc3e195f2a73def836b161dd30e2207"
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "bca121849a76174dcfa895a9ec21df92abf08d8a03a25ece950306413d050f3d",
+      "contentDigest": "12743a413d0267626854136350c016a039416f2f096dca9decfd5c7d4f8956cc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":4,\"findings\":[{\"quote\":\"像晴空霹雳一样来到眼前\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"“晴空霹雳”是现成套语，用来形容突兀而至的书信缺少新意，也削弱了后文的冲击力。\",\"replacement\":\"像晴天里忽然炸开的惊雷一般来到眼前\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"总之都是表示，有什么事情从此要大变样了。\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"“总之都是表示”动宾搭配生硬，像把两个短语硬粘在一处，收束也含糊。\",\"replacement\":\"总之，那意思无非是说，有什么事情从此要大变样了。\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"如此言简意赅符合曾本之的职业习惯。\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"主谓之间没有停顿，“如此言简意赅”与后半句挤成一句，节奏发紧。\",\"replacement\":\"如此言简意赅，正合曾本之的职业习惯。\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"同样，它也表明写信人具有与曾本之相同的职业素养。\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"“同样……也”与“相同的”语义重叠，句子拖沓，语势也弱。\",\"replacement\":\"这也表明，写信人有着与曾本之一样的职业素养。\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"四个甲骨文文字是：\",\"blockOrdinal\":6,\"severity\":\"note\",\"note\":\"“甲骨文文字”把“甲骨文”与“文字”叠在一起，且紧接上一段的“四个字”，用词重复。\",\"replacement\":\"那四个字是：\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"那是一个人的名字。虽然过去了二十多年，曾本之对这个名字的熟悉程度，依然仅次于自己的名字。\",\"blockOrdinal\":8,\"severity\":\"should\",\"note\":\"一句内连用三个“名字”；“一个人的名字”指代含混，未点明印章主人与曾本之的关联。\",\"replacement\":\"那是一个人的名字。虽然过去了二十多年，曾本之对它依然熟悉，仅次于自己的名字。\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"老朋友也是不爱打电话，而喜欢写信的一类，也是因为急了，才费力地找出曾本之的电话号码。\",\"blockOrdinal\":13,\"severity\":\"should\",\"note\":\"“也是……的一类”与后一个“也是”叠用，句式拗口，一逗到底，读来费力。\",\"replacement\":\"老朋友也是那种不爱打电话、只喜欢写信的人，这回实在是急了，才费力地找出曾本之的电话号码。\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"情绪上才振作一些\",\"blockOrdinal\":13,\"severity\":\"note\",\"note\":\"“情绪上才振作一些”搭配生硬，振作的是人，不是情绪，且“到……后”显累赘。\",\"replacement\":\"精神才振作了一些\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"马跃之上第一次谈恋爱就选了一个不算“市花”，起码也是水果湖“湖花”的柳琴把婚结了。\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"长句一逗到底，“马跃之上第一次”读来拗口，停顿位置不清，节奏拖沓。\",\"replacement\":\"马跃之第一次谈恋爱，就选了一个不算“市花”、起码也是水果湖“湖花”的柳琴，把婚结了。\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"总算点了一下千金之首\",\"blockOrdinal\":14,\"severity\":\"should\",\"note\":\"“点了一下千金之首”绕过“点头”本意，说法生硬费解，与全句口语笔调不谐。\",\"replacement\":\"这位千金总算点了头\",\"clauseId\":\"literary-expression/2\"}]}",
+        "usage": {
+          "inputTokens": 2041,
+          "outputTokens": 6624
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/84",
+        "selectedItemId": "S40/review-first/84",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:48:01.372Z",
+        "providerRequestDigest": "37a889915fbcb6f9194eb5f9c77471e71d3d4192c34ab1e95f565dc0b963b058",
+        "providerResponseDigest": "aaf7afa50c40bba5937569e8ff9f5fa9d34bcc289a9753385d21ceb7f263128c",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "9d791bfef5cbafc8ba9a4a34aff230297bb5616286fd0b8286ba11ae3ce74951",
+        "generation": "adcbc0d49ee78645d6ad31a7f76e5145125156a9db64793a4e38c9ac3bb87786",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-4"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "dbef2142a97f3806317736536c905c58d9c553f4564e75a769e5a515db0d44e2"
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "362f801923c41270c45cecadce699037c16557b65b5f3fa6b187147201a549db",
+      "contentDigest": "48fb4b784e0dd65b543799e015af64f0abe448d8913011525d29bf328972394b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":5,\"findings\":[{\"quote\":\"没有醋就不过日子\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"“没有醋就不过日子”动宾搭配生硬，口语句式不顺；改成“离了醋就过不了日子”更自然，挖苦的语义不变。\",\"replacement\":\"离了醋就过不了日子\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"在别人面前你俩是一对老顽固，你俩单独在一起\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"“你俩”在同一句内连用两次，节奏拖沓；后半句承前省略主语，前后对举更利落。\",\"replacement\":\"在别人面前你俩是一对老顽固，单独在一起\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"比研究的青铜重器更难的难题\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"“更难的难题”中“难”字叠用，且“研究的”前缺主语，读来拗口；改写后仍是自嘲婚姻比研究青铜更难。\",\"replacement\":\"比他所研究的青铜重器更棘手的难题\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"他要借马跃之的吉瑞祝福自己\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"“吉瑞”生造且与“借……祝福自己”搭配不当；此处指借别人的吉利话为自己讨彩，用“吉言”更确切。\",\"replacement\":\"他要借马跃之的吉言祝福自己\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"可以一路上与好好聊聊天\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"“与好好聊聊天”缺了同行的对象，句子读不通；按上下文补出曾本之，只补表达、不动情节。\",\"replacement\":\"可以一路上与曾本之好好聊聊天\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"一旦发现自己的幽默太冷了\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"“幽默太冷了”含混，既可读作冷笑话，也可读作冷场；从上下文看是后者，说“冷了场”更清楚。\",\"replacement\":\"一旦发现自己的玩笑冷了场\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"果然，马跃之接着就来了一个转折\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"“来了一个转折”是叙述套语且生硬；改用“话锋一转”，保留原来的转折意，也更合汉语节奏。\",\"replacement\":\"果然，马跃之接着话锋一转\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"奇怪的是安静一向只要女婿郑雄陪同曾本之出差\",\"blockOrdinal\":6,\"severity\":\"should\",\"note\":\"“一向只要”中的“只要”易被读作条件连词，与“一向”冲突；改成“只让”后语义清楚，不改变事实。\",\"replacement\":\"奇怪的是，安静一向只让女婿郑雄陪同曾本之出差\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"如此拖泥带水并非马跃之的性格\",\"blockOrdinal\":8,\"severity\":\"note\",\"note\":\"“并非……的性格”搭配略生硬，“不像……的性格”更顺口，句意不变。\",\"replacement\":\"如此拖泥带水不像马跃之的性格\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"曾本之认真地问，马跃之只能跟着认真地回答\",\"blockOrdinal\":9,\"severity\":\"should\",\"note\":\"一句之内“认真地问”“认真地回答”重复“认真”，节奏板滞；前半改用“正色问”，仍保留认真之意。\",\"replacement\":\"曾本之正色问，马跃之只能跟着认真地回答\",\"clauseId\":\"literary-expression/1\"}]}",
+        "usage": {
+          "inputTokens": 1873,
+          "outputTokens": 6483
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/85",
+        "selectedItemId": "S40/review-first/85",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:48:53.432Z",
+        "providerRequestDigest": "d83c0f40d06db9b19bdc4e816058fc2bdc1eaf361682433f0c2ddbdd5466b2d1",
+        "providerResponseDigest": "f34862ab58a847100061bea6f1d7d1dbfb0c09c5c2e00afc01c2d52b26fc97aa",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "3fe78310e5e4f1dd0a41b4ba8213f40167c8fdf0cfff15269a1039fe12f40330",
+        "generation": "adcbc0d49ee78645d6ad31a7f76e5145125156a9db64793a4e38c9ac3bb87786",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-5"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "df5d8764d463032f0d72993fe30fc0bd9f5bfa1ce04d1908483e89b65c546ddc"
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "fdbb9de89ac0fc145dc8854087d71fed264b968e43faedde847a6f9ee8d9a526",
+      "contentDigest": "81cda8000df69574b2084ed55f80191148b5a479aa2c9916d8c463f40555a804",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":6,\"findings\":[{\"quote\":\"仅仅只是\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"「仅仅」与「只是」语义重叠，读来拖沓；删去一个即可，原意和语气都不变。\",\"replacement\":\"仅仅\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"掉队落伍\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"「掉队」与「落伍」同义并列，显得重沓；留一个词即可，意思不变。\",\"replacement\":\"掉队\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"堂堂中原霸主统辖的范围有好几个省\",\"blockOrdinal\":3,\"severity\":\"should\",\"note\":\"「统辖的范围有好几个省」结构松散，动词与「范围」搭配生硬；改后更顺口。\",\"replacement\":\"堂堂中原霸主，统辖着好几个省\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"楚庄王虽然少年就登上大位\",\"blockOrdinal\":3,\"severity\":\"note\",\"note\":\"「少年」作状语不合习惯，与「登上大位」搭配略生硬；「年少」更自然。\",\"replacement\":\"楚庄王虽然年少就登上大位\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"像风一样顺畅，像水一样透彻\",\"blockOrdinal\":4,\"severity\":\"note\",\"note\":\"两个熟套比喻并列，既显陈词，又拖慢节奏；直说顺畅、透彻更利落。\",\"replacement\":\"顺畅而透彻\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"一句句话，一个个字\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"此语与同段后文「每一个字和每一句话」重复；改为「字字句句」既简洁又避开重复。\",\"replacement\":\"字字句句\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"有诗意很优雅地戳着他的心窝\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"两个修饰语直接叠加作状语，念读拗口；加顿号并改用「带着」更顺。\",\"replacement\":\"带着诗意、优雅地戳着他的心窝\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"马跃之甚至故意自贬，妻子太能干了也不是好事\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"自贬的话直接混入叙述，读者一时分不清是转述还是叙事；补一「说」字即顺畅。\",\"replacement\":\"马跃之甚至故意自贬，说妻子太能干了也不是好事\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"长袖善舞的溜须小吏倒是车水马龙\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"「车水马龙」形容车马人流，用来形容小吏搭配不当，前后语义打架。\",\"replacement\":\"长袖善舞的溜须小吏倒是成群结队\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"连接起才够用\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"「连接起」缺「来」，句尾节奏突断，朗读不顺；补一字即通。\",\"replacement\":\"连接起来才够用\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"马跃之再说话时，反而有些劝导的意思\",\"blockOrdinal\":6,\"severity\":\"note\",\"note\":\"「再说话」与前文「说」字重复，且「反而」转折略生硬；「再开口」「倒」更自然。\",\"replacement\":\"马跃之再开口时，倒有些劝导的意思\",\"clauseId\":\"literary-expression/1\"}]}",
+        "usage": {
+          "inputTokens": 1850,
+          "outputTokens": 4680
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/86",
+        "selectedItemId": "S40/review-first/86",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:50:24.214Z",
+        "providerRequestDigest": "709abd151f0915aa889005dd8ba8219e9e8b22be49a5e0069e1bc18789f8ad6d",
+        "providerResponseDigest": "d6f11fc2696a61af111018cced38b776325658777ff928a2e1ef1a967ba76139",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "228ea51e3490d71782849d642bac8b28d621c59bf1a26782eb88dfacaf9c6459",
+        "generation": "adcbc0d49ee78645d6ad31a7f76e5145125156a9db64793a4e38c9ac3bb87786",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-6"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "67b31e9042624a206890018eda44057e0269ba286d7fc726ad7cabfbbbbf6ff9"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "700530844e06bac90afba3e8b782a8e2a9136f3be73a6e21b3b03a977642affe",
+      "contentDigest": "ff158e0f8eec32fdf485f964e2c66d92fed84cbf57de527a97b67c515b9aad50",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":7,\"findings\":[{\"quote\":\"比龙王庙下面，长江与汉水交汇时形成的暗流还要汹涌\",\"blockOrdinal\":1,\"severity\":\"note\",\"clauseId\":\"literary-expression/1\",\"note\":\"逗号把“比……暗流”的长定语切成两截，读来节奏断裂；且与上文“比女人的烫发还要”句式叠加，显得松散。\",\"replacement\":\"比龙王庙下面长江与汉水交汇时形成的暗流还要汹涌\"},{\"quote\":\"精心装饰的曾侯乙尊盘照片\",\"blockOrdinal\":1,\"severity\":\"should\",\"clauseId\":\"literary-expression/1\",\"note\":\"“照片”与“装饰”搭配不确，此处说的是装框装裱，用“装裱”更贴合实物。\",\"replacement\":\"精心装裱的曾侯乙尊盘照片\"},{\"quote\":\"仔细地察看起来\",\"blockOrdinal\":1,\"severity\":\"should\",\"clauseId\":\"literary-expression/1\",\"note\":\"“察看”接“起来”生硬，且本段已两见“看”字，换成“端详”更贴切也更有表现力。\",\"replacement\":\"仔细地端详起来\"},{\"quote\":\"等到弄明白安静只是让去开门时\",\"blockOrdinal\":4,\"severity\":\"should\",\"clauseId\":\"literary-expression/2\",\"note\":\"主语和宾语一并省略，容易误读成安静自己去开门，语义含混。\",\"replacement\":\"等到他弄明白安静只是让他去开门时\"},{\"quote\":\"不待曾本之说什么\",\"blockOrdinal\":4,\"severity\":\"note\",\"clauseId\":\"literary-expression/1\",\"note\":\"本块“曾本之”三见、“说什么”两见，读来重复拖沓，改用代词更顺。\",\"replacement\":\"不待他开口\"},{\"quote\":\"先前的副省长超越常务副省长升级为省长\",\"blockOrdinal\":13,\"severity\":\"should\",\"clauseId\":\"literary-expression/1\",\"note\":\"“超越……升级为”搭配生硬，且“副省长”紧接重复，人物身份交代拗口。\",\"replacement\":\"先前那位副省长越过常务副省长，升成了省长\"},{\"quote\":\"难道后半辈子就用耍嘴皮子来对付\",\"blockOrdinal\":14,\"severity\":\"should\",\"clauseId\":\"literary-expression/1\",\"note\":\"“用……来对付”搭配生硬，“对付”又没有宾语，语意发飘，口语质问感被削弱。\",\"replacement\":\"难道后半辈子就靠耍嘴皮子混日子\"},{\"quote\":\"就够你好好钻研几年，还不一定能成\",\"blockOrdinal\":16,\"severity\":\"should\",\"clauseId\":\"literary-expression/2\",\"note\":\"“成”字指代含混：是成文、成说还是研究透？读者无从落实，语气也随之松掉。\",\"replacement\":\"就够你好好钻研几年，还不一定钻研得透\"},{\"quote\":\"只有占住这个位置，才发现这个位置有多么重要\",\"blockOrdinal\":17,\"severity\":\"should\",\"clauseId\":\"literary-expression/1\",\"note\":\"“这个位置”一句之内两见，第二次改用代词，句子更干净，重心也落到“重要”上。\",\"replacement\":\"只有占住这个位置，才发现它有多么重要\"}]}",
+        "usage": {
+          "inputTokens": 2087,
+          "outputTokens": 5969
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/87",
+        "selectedItemId": "S40/review-first/87",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:51:00.923Z",
+        "providerRequestDigest": "48f21a7a4e01739f9af814cb563d3ca240a1c9d0e3dc5c7ed26a479abf4f5abc",
+        "providerResponseDigest": "272a5470a9b664e2a71d06450e65846438fea865beada2b348e0bfc7b838e933",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "61995fa980a9be19e9f6b5088ab38919fad6e4d11b8bcff47ceb8b0e6197f751",
+        "generation": "adcbc0d49ee78645d6ad31a7f76e5145125156a9db64793a4e38c9ac3bb87786",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-7"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "004e004301cf8354bba210ac7d4be0e77b6d5c7084083c598d3456c9e6e949be"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "e8481f90cbe534c89d1509cd0f4753df568718080fbfa9538917e11e34f23a2f",
+      "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":8,\"findings\":[{\"quote\":\"直到他去了卫生间，曾本之才转身回到书房\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"同一句内连用两个“曾本之”，主语重复、句子拖沓；后一处承前省略即可，读来更利落。\",\"replacement\":\"直到他去了卫生间，才转身回到书房\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"而是盯着一片半个巴掌大小、上面有一串甲骨文的龟甲\",\"blockOrdinal\":1,\"severity\":\"note\",\"note\":\"本段开头已用“盯着郑雄”，此处再用“盯着”，同一动作词紧邻复读；换“把目光落在……上”可避免重复。\",\"replacement\":\"而是把目光落在一片半个巴掌大小、上面有一串甲骨文的龟甲上\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"或者看看他是否需要添些茶水，必须在门外小声叫上几次\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"“必须”生硬，且与前面的主语“家里的人”被逗号隔断，承接不顺；改“都得先”更贴合这一家常规矩的口吻。\",\"replacement\":\"或者看看他是否需要添些茶水，都得先在门外小声叫上几次\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"郑雄多少年如一日地用手指在门上轻轻敲了两下\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"“多少年如一日”表长期惯常，“敲了两下”却是单次动作，二者相冲；点明“像多少年来的每个晚上一样”即可兼顾惯常与这一次。\",\"replacement\":\"郑雄像多少年来的每个晚上一样，用手指在门上轻轻敲了两下\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"家里的各种声音在渐次消失\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"“在”与“渐次”叠加，副词偏书面，节奏发涩；“正渐渐”更顺，也保留进行中的意味。\",\"replacement\":\"家里的各种声音正渐渐消失\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"毕竟将岳父称作先生或将丈夫称作先生的先例不少\",\"blockOrdinal\":3,\"severity\":\"should\",\"note\":\"一句之内“称作先生”连出两次，显得啰嗦；合并两项后只保留一次，句子更收紧。\",\"replacement\":\"毕竟将岳父或丈夫称作先生的先例不少\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"接下来安静在外面敲门\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"“接下来”作过场词含混，且紧接人名“安静”，易误读为“安静地在外敲门”；补逗号并加“轮到”可消歧义。\",\"replacement\":\"接下来，轮到安静在外面敲门\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"家里彻底安静下来之后\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"前文已反复出现“安静”，其中还有人名“安静”，此处“安静下来”再次撞词；改“静下来”更干净，也收住全段。\",\"replacement\":\"等到家里彻底静下来\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"最终还是将伸进口袋的手，原样退出来\",\"blockOrdinal\":1,\"severity\":\"note\",\"note\":\"动宾之间插逗号，节奏断裂，“退出来”配“手”也生硬；改“将手原样抽了出来”既顺口，也避开前句“伸进口袋”的重复。\",\"replacement\":\"最终还是将手原样抽了出来\",\"clauseId\":\"literary-expression/1\"}]}",
+        "usage": {
+          "inputTokens": 1440,
+          "outputTokens": 7134
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first/88",
+        "selectedItemId": "S40/review-first/88",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:51:48.395Z",
+        "providerRequestDigest": "93a79d45d3f68cfa658445422184b21c4c1034f0c37aa00dc329f5d5a2f0344d",
+        "providerResponseDigest": "7437770b2688e12db6e2b4163681e398552b69a31a3ec1104e89c8c189661bc4",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "a3b695076f32eb36acd2fe2206ad3b20caaf4318c0582d8d1128466b6f570905",
+        "generation": "adcbc0d49ee78645d6ad31a7f76e5145125156a9db64793a4e38c9ac3bb87786",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/unit-8"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "2088d33ddf1e313d77e8baae7670e49159e213b59a82e686ccb31f0749704c96"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "1f5b607a6bad3c28ce15b8f2c16ade3b9184a5d36c774ea1566d322247cc5094",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"原文紧接“其中内涵可好可不好”后又连用“可好是……可不好是……”，重复与绕口确实存在，引文逐字可见，替换保留原意。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"“其存在的意义被视为国宝中的国宝”中“意义”与“国宝”确非同类概念，主谓搭配落不到实处，属表达问题，引文原样存在。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"“用如此器物作为评价”把喻体与评价混说，语义含混；引文在块中逐字可查，改“作比”更明确。\"},{\"ref\":\"{{ref:4}}\",\"disposition\":\"成立\",\"reason\":\"一句内“重写”“写出来”“写过”及“内容”重复，句子拖沓，引文与原文完全一致，属表达层面可改。\"},{\"ref\":\"{{ref:5}}\",\"disposition\":\"成立\",\"reason\":\"“不像是针对……更像是为了……”两个介词结构不平行，对照落点不稳；引文逐字可见，收紧句式不改事实。\"},{\"ref\":\"{{ref:6}}\",\"disposition\":\"成立\",\"reason\":\"“望着玫瑰兴叹”确系拆用“望洋兴叹”而无连接词，读来略生硬；引文在块中逐字存在，属轻度表达提示。\"},{\"ref\":\"{{ref:7}}\",\"disposition\":\"成立\",\"reason\":\"“都已习惯宁肯……”中“习惯”与表取舍的“宁肯”叠放，句子发滞；引文逐字可见，删“习惯”为纯表达调整。\"}]}",
+        "usage": {
+          "inputTokens": 2777,
+          "outputTokens": 1745
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first/89",
+        "selectedItemId": "S40/review-first/89",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:52:45.672Z",
+        "providerRequestDigest": "9d425ff28027e85a1c585cd40ab191fe154a7a1bbaf1d765ac1dcd6c6b947b73",
+        "providerResponseDigest": "4e178c5736ca18ec67e2e1aca7dbf8660b1efab6171972f832ef8f9b3396be19",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "65a4592eb71cd95365f3ab38e653068f24443469a08f45d10fa082496464c836",
+        "generation": "f56288d24da028d1ae94341c3a1e4e4a8d59c695cd91b1727d403e6c2b2c2c38",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/sampling-1-unit-1"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_435597bf58b1f047c6ab25a3"
+          },
+          {
+            "placeholder": "{{ref:2}}",
+            "identity": "rfd_64290ccd5e19d6fde2e34b6a"
+          },
+          {
+            "placeholder": "{{ref:3}}",
+            "identity": "rfd_6a4ad121d753c53d169bc6fd"
+          },
+          {
+            "placeholder": "{{ref:4}}",
+            "identity": "rfd_92aebdf058d297a939cfb1f7"
+          },
+          {
+            "placeholder": "{{ref:5}}",
+            "identity": "rfd_42ebbbd45c4782ec340adbbe"
+          },
+          {
+            "placeholder": "{{ref:6}}",
+            "identity": "rfd_7046d746b4c4a4f9e21fda49"
+          },
+          {
+            "placeholder": "{{ref:7}}",
+            "identity": "rfd_fa4ee96add7ec334cf4643d5"
+          }
+        ],
+        "fixtureResponseDigest": "5a005e290d1ec9eb6fb945914b42ead562da4f80f90b3beef0e3b94c33432dfd"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "e873e9f0272ac3a908b6ca96f95a2f8e96f9829c4a2cdde62b7403059d2b489a",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"内容块确有“极端少数之人”，“极端”修饰数量性名词的搭配确实生硬，改为“极少数人之一”保留原意且未改事实，属表达层面建议。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"内容块确为“将很平常的事情，变得极不平常”，正反对举近乎套语；另一内容块有“变得异常吊诡”，句式雷同之说有据（虽隔一段而非紧邻，不影响判断）。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"内容块原文即“偶尔有英法德日等文字”，“有……等文字”搭配生硬、四国名连排无顿挫，改“夹杂”并加顿号确实更顺，属表达改进。\"},{\"ref\":\"{{ref:4}}\",\"disposition\":\"成立\",\"reason\":\"引文与内容块完全一致，一句之内“用”字两见、“繁体字”紧接重复，读来滞涩；“写的是”与“用”错开，指称未变，属同级提示。\"},{\"ref\":\"{{ref:5}}\",\"disposition\":\"成立\",\"reason\":\"内容块原文为“这段文字描述的正是……放松神经的地方”，“文字描述……地方”主宾搭配不顺，“放松神经”亦偏生理化，改“所写的”“放松身心”未改事实。\"},{\"ref\":\"{{ref:6}}\",\"disposition\":\"成立\",\"reason\":\"内容块确有“先月亭尖尖的阴影”，尖尖修饰阴影确易生歧义；改“亭尖的影子”点明亭尖投下的影子，画面与事实不变，属表达层面。\"},{\"ref\":\"{{ref:7}}\",\"disposition\":\"成立\",\"reason\":\"内容块开头即“有些无聊的曾本之捡起身边的一块蚌壳”，以“有些无聊”直接前置修饰人名确显拗口并近于定性，拆成短句更顺，未改动作顺序。\"},{\"ref\":\"{{ref:8}}\",\"disposition\":\"成立\",\"reason\":\"内容块确有“最终悄无声息地沉入湖底”，另一内容块有“无声无息地移到左边”，同一意象词紧接重复；换“悄然”避复而意味相近，判断成立。\"},{\"ref\":\"{{ref:9}}\",\"disposition\":\"成立\",\"reason\":\"同一内容块先作“先月亭阴影顶尖之处”，后作“先月亭影子顶尖之处”，同一事物称说不一，统一为“阴影”前后呼应更紧，属表达提示。\"}]}",
+        "usage": {
+          "inputTokens": 2809,
+          "outputTokens": 2210
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first/90",
+        "selectedItemId": "S40/review-first/90",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:53:15.094Z",
+        "providerRequestDigest": "17ca75db63075ece14fc40f9c1961ba2d5bbe2473eb9cd43f0d263f47cbf1044",
+        "providerResponseDigest": "d402ca9358e90f60139d7f3eb39d80aaef09fe26e34b75b51f613bfc976f7cdc",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "2c4f13c34e9a5e5d7d3537dd209cd07e1b40aa2eadc7ca111ed72a08c8455e3d",
+        "generation": "f56288d24da028d1ae94341c3a1e4e4a8d59c695cd91b1727d403e6c2b2c2c38",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/sampling-2-unit-2"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_612d2c38b2909cc7fd2c21b9"
+          },
+          {
+            "placeholder": "{{ref:2}}",
+            "identity": "rfd_bbc6c57f9df30f535a798075"
+          },
+          {
+            "placeholder": "{{ref:3}}",
+            "identity": "rfd_f27b7d08fe8ac8df6a34267a"
+          },
+          {
+            "placeholder": "{{ref:4}}",
+            "identity": "rfd_512eeadca69cf8da84e58491"
+          },
+          {
+            "placeholder": "{{ref:5}}",
+            "identity": "rfd_82bec606050bc8638e037cb4"
+          },
+          {
+            "placeholder": "{{ref:6}}",
+            "identity": "rfd_04af039f47385c956b4a429f"
+          },
+          {
+            "placeholder": "{{ref:7}}",
+            "identity": "rfd_b590346cfa46d56abb1fa2af"
+          },
+          {
+            "placeholder": "{{ref:8}}",
+            "identity": "rfd_ca4d7c4598fa8697c3a594a2"
+          },
+          {
+            "placeholder": "{{ref:9}}",
+            "identity": "rfd_5173572b54f38c6acba567f3"
+          }
+        ],
+        "fixtureResponseDigest": "52c2ced0d282715bd3a4fd632fc1179f31193dc4e491b6ed045672db6e3827b3"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "1c3b74053626f086a04ea5a0e7f6b7d688754d5c4d3513f71f93e9c2c952ecb5",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"内容块确有「小脑袋甩动的水珠」，「甩动」多用于尾、辫等自身可摆动之物，接「水珠」搭配生硬；改「甩出的」不改变情节与画面，成立。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"同一句先有「刚刚响过」，句末又有「突如其来的雷声刚刚响过」，重复确实拖沓；删前一处「刚刚」不损原意，成立。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"内容块确有「多不会超过两次，但也不会少于一次」，「多」单用表上限又与「不会超过」叠加，两个分句也冗长；替代说法意思不变，成立。\"},{\"ref\":\"{{ref:4}}\",\"disposition\":\"成立\",\"reason\":\"引文与原块相符，「先前那些古怪」省去中心语，指代略松；补出「的信件」并不改变事实、关系与语气，成立。\"},{\"ref\":\"{{ref:5}}\",\"disposition\":\"成立\",\"reason\":\"内容块相邻两句同以「曾本之」起首，读来板滞属实；后句改用「他」指代不变，成立。\"},{\"ref\":\"{{ref:6}}\",\"disposition\":\"需降级\",\"reason\":\"引文与原块相符，改「认不出是什么」确可更清楚；但「让……不知为何物」是常见使动搭配，读成邮递员不知自己为何物并不自然，含混之说被夸大，只支持较弱的清晰化建议。\"},{\"ref\":\"{{ref:7}}\",\"disposition\":\"成立\",\"reason\":\"同一句内「那四个字」「它们」「这四个字」确三度指称同一对象，引文逐字相符；删重复并改「无论……还是」不损原意，成立。\"},{\"ref\":\"{{ref:8}}\",\"disposition\":\"成立\",\"reason\":\"内容块确有该句，「没有乱方寸」与「还记得耐心地」衔接生硬；改为「没有乱了方寸，仍耐心地」保持原意与作者语气，成立。\"}]}",
+        "usage": {
+          "inputTokens": 3202,
+          "outputTokens": 8388
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first/91",
+        "selectedItemId": "S40/review-first/91",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:53:26.906Z",
+        "providerRequestDigest": "52b6f1b9275944f56e9940cee942d2b75596026aa8d21d7b659b6954da925dbb",
+        "providerResponseDigest": "c9736023842a39db63f19589ec04ac595dff384fcdf817f569031ceb7d57de16",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "d47dbf6d069a8b3f9637fe1c401b1914f47124d20d9c8e994afe041d55a7a453",
+        "generation": "f56288d24da028d1ae94341c3a1e4e4a8d59c695cd91b1727d403e6c2b2c2c38",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/sampling-3-unit-3"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_6813c4c61f4f30d48f979171"
+          },
+          {
+            "placeholder": "{{ref:2}}",
+            "identity": "rfd_1a5c98ee189d04b2a01a27cf"
+          },
+          {
+            "placeholder": "{{ref:3}}",
+            "identity": "rfd_640fc68f736983efa9ae9a8e"
+          },
+          {
+            "placeholder": "{{ref:4}}",
+            "identity": "rfd_21ad8d45f6e332b8828fc3a0"
+          },
+          {
+            "placeholder": "{{ref:5}}",
+            "identity": "rfd_775471b3d62cd485e7e3f90e"
+          },
+          {
+            "placeholder": "{{ref:6}}",
+            "identity": "rfd_a1cfd8d7d3500f43169e02d2"
+          },
+          {
+            "placeholder": "{{ref:7}}",
+            "identity": "rfd_2eafef8be9c4d0bd75e4194a"
+          },
+          {
+            "placeholder": "{{ref:8}}",
+            "identity": "rfd_1536ceac00c4a78310ed61b3"
+          }
+        ],
+        "fixtureResponseDigest": "1492b8dc27da506e23f63c2e47b144f508c43254f3d37c1d3b64c3e56e9ff1d3"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "db58acfa32f9a17f76bdfa704294896d0f198c6965dc1bc37a611eab4d413bd3",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下次在归类前加一道引文回填/校验步骤，或要求提交更短的引文，以降低因引文不匹配被整条丢弃的比例。\",\"basis\":\"excluded:quote-not-found 为 39，而保留的 finding 合计 38（note 9、should 29），丢弃量与保留量相当。\"},{\"suggestion\":\"对产生 quote-not-found 的单元安排一次定向重读，只核对引文位置与逐字文本，不重新生成整份发现。\",\"basis\":\"units.recomputed 8、retried 0、gaps 0，说明丢弃发生在单元之后的环节，而非单元执行失败。\"},{\"suggestion\":\"下次把 cross-unit-reduction 真正执行，对跨单元重复或近似的发现先合并，再进入 assurance-sampling。\",\"basis\":\"stages 中 cross-unit-reduction 为 not-run 而 reduction 为 closed；该阶段 inputTokens、outputTokens、requests 全为 0。\"},{\"suggestion\":\"提高 should 层的抽样覆盖，或把 should 类发现的默认信任档下调一档，以覆盖其未被支持的情形。\",\"basis\":\"assurance.precision 中 should 层 sampled 23、upheld 22、estimate 0.96，是本轮唯一低于 1 的层级。\"},{\"suggestion\":\"把 assurance-sampling 的产出压缩为每条仅回 upheld/not-upheld 加简短理由码，削减该阶段输出开销。\",\"basis\":\"assurance-sampling 4 次请求输出 14272 tokens，相对 units 阶段 8 次请求输出 51901 tokens，单次产出偏高。\"},{\"suggestion\":\"当剔除率明显偏高时触发一次计划内调整（如临时收窄引文长度或匹配规则），而不是全程不做调整。\",\"basis\":\"adaptationCount 为 0，同时 excluded:quote-not-found 达到 39。\"},{\"suggestion\":\"下次将 assurance 抽样规模提到接近候选总量，或明确记录未入样的候选条目，避免覆盖缺口无记录。\",\"basis\":\"assurance.candidateCount 38、size 30、upheld 29，有 8 条候选未进入抽样。\"},{\"suggestion\":\"给单元阶段设定单次输出上限，或要求每单元只列最高置信的若干条发现，以控制单次输出体量。\",\"basis\":\"units 阶段 8 次请求输出 51901 tokens，平均每次约 6488 tokens，为两个已运行阶段中最高。\"},{\"suggestion\":\"单元数量与预算维持不变：无缺口、无失败代码、无重试，说明当前单元划分与配额已够用。\",\"basis\":\"units.gaps 0、retried 0、failureCodes []、gapCodes []、submitted 8，分类为 completed。\"}]}",
+        "usage": {
+          "inputTokens": 1352,
+          "outputTokens": 1950
+        }
+      },
+      "capture": {
+        "subject": "reflection",
+        "itemId": "S40/review-first/93",
+        "selectedItemId": "S40/review-first/93",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676",
+        "taskPromptContractDigest": "d45f27f85812c7dab37fc28c7202d0182a0bf934cca56ca4d617ebfe3420376e",
+        "capturedAt": "2026-10-15T16:54:56.481Z",
+        "providerRequestDigest": "a82ddc008c75883911f1be46faf72b7525a27a93deb7ab6d4adca0bff8247a58",
+        "providerResponseDigest": "d1672812ea787ef71bc0e64126ba84d4ed395ae29a9af3416bc8656c7797c26b",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "b54b8409c9839a320f67a25e6e6f54e453b943ce1d36d04e3fcb8e28bf323461",
+        "generation": "3fd36c23b56ba6670c8aee28ebfa4fd77de600b9cb16409b33547b7c54e174f5",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-review-three-categories",
+          "step": "review-first/reflection"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "37b702a43ae15994fa678076b04c8f8d1e8fe0567086a70f581f4f58ca79f0f4"
+      }
+    }
+  ]
+}
