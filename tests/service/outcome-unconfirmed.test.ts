@@ -578,6 +578,7 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toBeUndefined();
       // Kept as a gap is not read: the redo's plan still names unit 4 as sent again.
       const after = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
+      if (after.redo === null || 'kind' in after.redo.prepare) throw new Error('Expected baseline redo');
       let redoProgress = store.createBaselineAnalysisPreparationWork(bookId, after.redo!.prepare.goal, after.redo!.prepare.update, launchPolicy, false, runRecordId);
       while (!redoProgress.done) redoProgress = store.advanceBaselineAnalysisPreparationWork(redoProgress.workId!);
       expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: redoProgress.projection!.taskIntent!.taskIntentId }).resend?.units).toEqual([4]);

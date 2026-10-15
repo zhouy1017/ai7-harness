@@ -331,9 +331,15 @@ describe('factual review over the real store on exact sample1', () => {
           expect(settled.run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
           expect(settled.taskOutcome).toBeNull();
         } else {
-          // This kind cannot resume: 已中断 with its outcome, no revision — never 可续行 or 已暂停.
-          expect(settled.run).toMatchObject({ runRecordId, state: 'interrupted' });
-          expect(settled.taskOutcome).toMatchObject({ classification: 'interrupted', resultSetRevisionId: null, safeNextAction: RECONCILED_INTERRUPTED_DETAIL });
+          expect(settled.run).toMatchObject({ runRecordId, state: planted === 'pausing' ? 'paused' : 'resumable' });
+          expect(settled.taskOutcome).toBeNull();
+          const execution = new BaselineAnalysisExecutionOwner({ ledger: second.baselineAnalysisLedger, launchPolicy, fixture: factualFixture, secretResolver: { resolve: async () => null } });
+          try {
+            const ledger = second.factualReviewLedger;
+            ledger.requestCancel(bookId, settled.taskIntent!.taskIntentId);
+            execution.cancelRun(runRecordId, ledger);
+            await execution.whenIdle();
+          } finally { await execution.dispose(); }
         }
         // A second reconciliation settles nothing more.
         expect(second.reconcileStoppedFactualReviewRuns()).toEqual({ settled: 0 });

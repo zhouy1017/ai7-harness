@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ServiceJobProjection } from '../shared/protocol.js';
+import type { ControlTaskRunInput, LaunchPolicyProjection, ServiceJobProjection } from '../shared/protocol.js';
 import { StoreError, StoreFatalError, type EditorialStore } from './store.js';
 
 const MAX_ACTIVE_JOBS = 4;
@@ -22,6 +22,16 @@ interface TerminalReceipt {
 }
 
 export class CooperativeJobOwner {
+  startTaskRedo(input: Pick<ControlTaskRunInput, 'bookId' | 'kind' | 'ref'>, policy: LaunchPolicyProjection): ServiceJobProjection {
+    const request = this.#store.redoTaskRequest(input);
+    switch (request.kind) {
+      case 'initial-evaluation': return this.startInitialEvaluationPreparation(input.bookId, policy, request.materialIds, request.redoOf);
+      case 'readers-report': return this.startReadersReportPreparation(input.bookId, request.template, policy, request.materialIds, request.redoOf);
+      case 'evaluation-rewrite': return this.startEvaluationRewritePreparation(input.bookId, request.recordId, policy, request.redoOf);
+      case 'writing': return this.startWritingPreparation(input.bookId, request.request, policy, request.redoOf);
+      case 'review-run': return this.startReviewRunPreparation(input.bookId, request.categoryIds, request.scope, policy, null, request.materialIds, request.redoOf);
+    }
+  }
   readonly #store: EditorialStore;
   readonly #jobs = new Map<string, JobRecord>();
   readonly #polledTerminalReceipts = new Map<string, TerminalReceipt>();
@@ -147,9 +157,10 @@ export class CooperativeJobOwner {
     bookId: string,
     launchPolicy: Parameters<EditorialStore['createInitialEvaluationPreparationWork']>[1],
     materialIds: ReadonlyArray<string> = [],
+    redoOf: string | null = null,
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createInitialEvaluationPreparationWork(bookId, launchPolicy, materialIds);
+    const work = this.#store.createInitialEvaluationPreparationWork(bookId, launchPolicy, materialIds, redoOf);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,
@@ -186,9 +197,10 @@ export class CooperativeJobOwner {
     template: Parameters<EditorialStore['createReadersReportPreparationWork']>[1],
     launchPolicy: Parameters<EditorialStore['createReadersReportPreparationWork']>[2],
     materialIds: ReadonlyArray<string> = [],
+    redoOf: string | null = null,
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createReadersReportPreparationWork(bookId, template, launchPolicy, materialIds);
+    const work = this.#store.createReadersReportPreparationWork(bookId, template, launchPolicy, materialIds, redoOf);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,
@@ -224,9 +236,10 @@ export class CooperativeJobOwner {
     bookId: string,
     recordId: string,
     launchPolicy: Parameters<EditorialStore['createEvaluationRewritePreparationWork']>[2],
+    redoOf: string | null = null,
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createEvaluationRewritePreparationWork(bookId, recordId, launchPolicy);
+    const work = this.#store.createEvaluationRewritePreparationWork(bookId, recordId, launchPolicy, redoOf);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,
@@ -262,9 +275,10 @@ export class CooperativeJobOwner {
     bookId: string,
     request: Parameters<EditorialStore['createWritingPreparationWork']>[1],
     launchPolicy: Parameters<EditorialStore['createWritingPreparationWork']>[2],
+    redoOf: string | null = null,
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createWritingPreparationWork(bookId, request, launchPolicy);
+    const work = this.#store.createWritingPreparationWork(bookId, request, launchPolicy, redoOf);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,
@@ -340,9 +354,10 @@ export class CooperativeJobOwner {
     launchPolicy: Parameters<EditorialStore['createReviewRunPreparationWork']>[3],
     capturedProcedure: Parameters<EditorialStore['createReviewRunPreparationWork']>[4] = null,
     materialIds: ReadonlyArray<string> = [],
+    redoOf: string | null = null,
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds);
+    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds, redoOf);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,

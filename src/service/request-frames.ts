@@ -725,22 +725,41 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 更新计划 (Issue #419): the Task, the version the editor read, and the full set of what the plan leaves out — a few
     // short identities, each once; the ledger decides which of them the plan can leave out.
+    case 'editTaskPlan':
     case 'editBaselineAnalysisPlan': {
       // `askFirstAdaptations` (Issue #422, S76d) and `runBudgetCeiling` (Issue #51, S16a) are optional: a frame without
       // them still means what it meant. A ceiling is a whole count of tokens, or `null` for none.
-      const input = requireInputWithOptional(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest', 'removedSteps', 'disallowedAdaptations'],
+      const shared = value.op === 'editTaskPlan';
+      const input = requireInputWithOptional(value.input, ['bookId', ...(shared ? ['kind', 'ref'] : ['taskIntentId']), 'planEnvelopeDigest', 'removedSteps', 'disallowedAdaptations'],
         ['askFirstAdaptations', 'runBudgetCeiling'], tentativeId);
       const ceiling = (candidate: unknown): boolean => isRecord(candidate) && hasExactKeys(candidate, ['kind', 'maxTotalTokens']) &&
         candidate.kind === 'tokens' && isSafeInteger(candidate.maxTotalTokens, 1) && candidate.maxTotalTokens <= 999_999_999_999;
       const identities = (list: unknown): boolean => Array.isArray(list) && list.length <= 8 &&
         list.every((entry) => isBoundedString(entry, 64) && /^[a-z][a-z-]*$/u.test(entry)) && new Set(list).size === list.length;
-      if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) ||
+      if (!validUuid(input.bookId) || (shared ? !START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) || !validUuid(input.ref) : !validUuid(input.taskIntentId)) ||
           !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest) ||
           !identities(input.removedSteps) || !identities(input.disallowedAdaptations) ||
           (Object.hasOwn(input, 'askFirstAdaptations') && !identities(input.askFirstAdaptations)) ||
           !optionalOrNull(input, 'runBudgetCeiling', ceiling)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    case 'controlTaskRun': {
+      const input = requireInput(value.input, ['bookId', 'kind', 'ref', 'action'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.ref) || !START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) ||
+          !['pause', 'resume', 'cancel'].includes(input.action as string)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'redoTaskPlan': {
+      const input = requireInput(value.input, ['bookId', 'kind', 'ref'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.ref) || !START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'quickStartReviewRun': {
+      const input = requireInput(value.input, ['bookId', 'reviewRunId', 'planEnvelopeDigest', 'ruleVersionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.reviewRunId) || !validUuid(input.ruleVersionId) ||
+          !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest)) throw new ProtocolError(tentativeId);
       break;
     }
     // 提交回答 (Issue #422, S76d): the question and the Task it belongs to, the one option chosen, and a note or none.

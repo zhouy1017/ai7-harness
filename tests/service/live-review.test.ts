@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
+import { ALWAYS_ONLINE } from '../../src/service/connectivity.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
@@ -206,6 +207,50 @@ describe('reference-free review on the Go execution path', () => {
     expect(() => store.createReviewRunPreparationWork(book.bookId, ['cross-deliverable-consistency'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy))
       .toThrowError(/跨交付物一致性/u);
     expect(sent).toBe(0);
+  });
+
+  it('quick-starts a review category-set rule only while the selected rule admits that origin (#866)', async () => {
+    const book = await importSample1Book(store, roots.codeRoot, 'L2 sample1 review quick start');
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+    recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
+    const prepare = (): ReviewRunProjection => {
+      let progress = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+      while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
+      return progress.projection!.run!;
+    };
+    const runtime = { credentialReadiness: async () => 'present' as const, connectivity: ALWAYS_ONLINE };
+    const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+    const ledger = store.reviewCategoryLedger(definition);
+    // The selected developer-live policy (v14 under active set v11) admits the default-rule origin for review.
+    expect(ledger.launch.policy?.providerProcessing.admittedRules?.find((rule) => rule.taskKinds.includes(definition.kind))
+      ?.matchingActiveDefaultExecutionRuleAllowed).toBe(true);
+    const first = prepare();
+    const plan = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId });
+    expect(plan.defaultRule).toMatchObject({ canSet: true, reason: null });
+    const rule = store.setDefaultExecutionRule(book.bookId, first.reviewRunId, plan.defaultRule.planEnvelopeDigest!);
+    expect(rule.taskKind).toBe('review-run');
+    expect(await store.quickStartReviewRun({ bookId: book.bookId, reviewRunId: first.reviewRunId, planEnvelopeDigest: plan.edit.planEnvelopeDigest!,
+      ruleVersionId: rule.ruleVersionId }, runtime)).toEqual({ outcome: 'started', reasons: [], dispatch: true });
+    await driver.drive(first.reviewRunId);
+    expect(store.inspectReviewWorkspace(book.bookId, first.reviewRunId).run!.categories.map((category) => category.state)).toEqual(['settled']);
+    expect(store.inspectReviewCategory(book.bookId, definition).authorization).toMatchObject({ origin: 'default-execution-rule', ruleVersionId: rule.ruleVersionId });
+
+    // A policy whose review rule does not admit the origin (v12's reading): the plan offers no rule, 快速开始 falls back
+    // before anything is authorized, and the category ledger refuses the origin itself.
+    const launch = ledger.launch;
+    const providerProcessing = launch.policy!.providerProcessing;
+    ledger.bindLaunch({ ...launch, policy: { ...launch.policy!, providerProcessing: { ...providerProcessing,
+      admittedRules: providerProcessing.admittedRules!.map((entry) => entry.taskKinds.includes(definition.kind)
+        ? { ...entry, matchingActiveDefaultExecutionRuleAllowed: false } : entry) } } });
+    const second = prepare();
+    const refused = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: second.reviewRunId });
+    expect(refused.defaultRule).toMatchObject({ canSet: false, reason: '当前模型处理规则未允许审阅快速开始；请先看计划。' });
+    expect(await store.quickStartReviewRun({ bookId: book.bookId, reviewRunId: second.reviewRunId, planEnvelopeDigest: refused.edit.planEnvelopeDigest!,
+      ruleVersionId: rule.ruleVersionId }, runtime)).toEqual({ outcome: 'fell-back', reasons: ['当前模型处理规则未允许审阅快速开始；请先看计划。'], dispatch: false });
+    expect(store.inspectReviewWorkspace(book.bookId, second.reviewRunId).run!.authorization).toBeNull();
+    const task = store.inspectReviewCategory(book.bookId, definition);
+    expect(() => ledger.authorize(book.bookId, task.taskIntent!.taskIntentId, task.planEnvelope!.digest, 'now',
+      { kind: 'default-execution-rule', ruleVersionId: rule.ruleVersionId })).toThrowError(expect.objectContaining({ code: 'ANALYSIS_ORIGIN_NOT_ADMITTED' }));
   });
 
   it.each(['unknown', 'quota'] as const)('retains %s without retrying or silently repeating the category', async (mode) => {

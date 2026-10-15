@@ -541,7 +541,7 @@ describe('the authorization bar (S74a)', () => {
   });
 
   it('offers a Run under way 暂停, 取消任务 — which only opens its summary — and 改计划重做 with why it waits (Issue #422; AUTH-010, CTRL-001, CTRL-004)', () => {
-    expect([TASK_BAR_PAUSE, TASK_BAR_CANCEL_RUN, TASK_BAR_REDO]).toEqual(['暂停', '取消任务', '改计划重做']);
+    expect([TASK_BAR_PAUSE, TASK_BAR_CANCEL_RUN, TASK_BAR_REDO]).toEqual(['暂停', '停止任务', '改计划重做']);
     expect([TASK_BAR_CANCEL_IMPACT_HEADING, TASK_BAR_CANCEL_CONFIRM, TASK_BAR_CANCEL_KEEP]).toEqual(['取消影响摘要', '确认取消任务', '继续运行']);
     const runControl = {
       runRecordId: 'run',
@@ -561,7 +561,7 @@ describe('the authorization bar (S74a)', () => {
     expect(running).toMatchObject({ readiness: 'started', statement: null, note: null, status: '运行中' });
     expect(running.actions).toEqual([
       { name: 'pause', label: '暂停', tone: 'secondary', disabledReason: null },
-      { name: 'cancel-run', label: '取消任务', tone: 'secondary', disabledReason: null },
+      { name: 'cancel-run', label: '停止任务', tone: 'secondary', disabledReason: null },
       { name: 'redo', label: '改计划重做', tone: 'quiet', disabledReason: '先暂停，再改计划重做' },
       { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
     ]);
@@ -611,7 +611,7 @@ describe('the authorization bar (S74a)', () => {
     expect(paused).toMatchObject({ status: '已暂停', note: '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分' });
     expect(paused.actions).toEqual([
       { name: 'resume', label: '续行', tone: 'primary', disabledReason: null },
-      { name: 'cancel-run', label: '取消任务', tone: 'secondary', disabledReason: null },
+      { name: 'cancel-run', label: '停止任务', tone: 'secondary', disabledReason: null },
       // 暂停后出现 续行 与 改计划重做 (editor-surfaces §6; Issue #422, S76c).
       { name: 'redo', label: '改计划重做', tone: 'secondary', disabledReason: null },
       { name: 'run-link', label: '查看运行', tone: 'secondary', disabledReason: null },
@@ -863,7 +863,7 @@ describe('模型服务账户限额 in the drawer (S16b)', () => {
     expect(limited.actions.map((entry) => [entry.name, entry.label, entry.tone, entry.disabledReason])).toEqual([
       ['connect', '处理模型服务', 'secondary', null],
       ['resume', '续行', 'primary', null],
-      ['cancel-run', '取消任务', 'secondary', null],
+      ['cancel-run', '停止任务', 'secondary', null],
       ['redo', '改计划重做', 'secondary', null],
       ['run-link', '查看运行', 'secondary', null],
     ]);
@@ -901,7 +901,7 @@ describe('结果待确认 in the drawer (S16c)', () => {
     expect(unknown).toMatchObject({ status: '结果待确认', note: taskBarOutcomeUnknownNote(1, 8, 8) });
     expect(unknown.actions.map((entry) => [entry.name, entry.label, entry.tone, entry.disabledReason])).toEqual([
       ['view-unconfirmed', '查看未确认的部分', 'primary', null],
-      ['cancel-run', '取消任务', 'secondary', null],
+      ['cancel-run', '停止任务', 'secondary', null],
       ['run-link', '查看运行', 'secondary', null],
     ]);
     // A kept progress that does not read back is never a count.

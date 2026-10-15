@@ -791,6 +791,7 @@ const STANDARD_DIRECT: AnalysisAuthorizationOrigin = { kind: 'standard-direct' }
 export const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
 
 function transact<T>(db: DatabaseSync, body: () => T): T {
+  if (db.isTransaction) return body();
   db.exec('BEGIN IMMEDIATE');
   try {
     const result = body();
@@ -1427,9 +1428,7 @@ export class BaselineAnalysisStore {
     outcomes: AnalysisOutcomeAttentionReading[];
   } {
     const kind = this.#definition.kind;
-    // 待我处理 names the baseline analysis alone: every other kind's Tasks run inside a Review Run, which
-    // the Review Run ledger reads as one item of its own.
-    requireAnalysis(kind === BASELINE_ANALYSIS_KIND, 'ANALYSIS_KIND_INVALID', '待我处理只读取基线分析的任务。');
+    // The caller composes each kind's readings under its own Task target; review categories remain one Review Run item.
     // Each Book's latest Task, exactly as `#latestIntentRow` orders them, kept only when it could need the
     // editor: prepared and not yet started, or with a Run whose last state is not a completion — whose
     // outcome is read below instead.
@@ -2117,7 +2116,6 @@ export class BaselineAnalysisStore {
       runBudgetCeiling?: unknown;
     },
   ): AnalysisProjection {
-    requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND, 'ANALYSIS_PLAN_EDIT_UNSUPPORTED', '这类任务的计划不能在这里修改。');
     const existing = this.inspect(bookId);
     const intentRow = this.#latestIntentRow(bookId);
     requireAnalysis(intentRow !== undefined && existing.taskIntent !== null && existing.taskIntent.taskIntentId === input.taskIntentId,
@@ -2130,6 +2128,10 @@ export class BaselineAnalysisStore {
       'ANALYSIS_PLAN_EDIT_STALE', '计划已经变了；请重新查看计划后再修改。');
     const next = canonicalPlanEdits(input);
     requireAnalysis(next !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '这项修改不在这份计划可以改的范围内。');
+    requireAnalysis(this.#definition.assurance !== null || next.removedSteps.length === 0,
+      'ANALYSIS_PLAN_EDIT_INVALID', '这项任务没有核对与抽检步骤，不能修改该步骤。');
+    requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || (next.askFirstAdaptations ?? []).length === 0,
+      'ANALYSIS_PLAN_EDIT_INVALID', '这项任务暂不能把安全重试改成先问你。');
     requireAnalysis(!launchSetsCeilingOf(this.#launch.live) || next.runBudgetCeiling === undefined, 'ANALYSIS_PLAN_EDIT_INVALID', PLAN_CEILING_LAUNCH_REASON);
     const current = this.#planVersionFacts(intent.taskIntentId).at(-1);
     requireAnalysis(current !== undefined && current.ordinal === existing.planVersion.ordinal, 'ANALYSIS_RECORD_INVALID', '任务计划缺少计划版本。');
@@ -3174,16 +3176,16 @@ export class BaselineAnalysisStore {
       // 调整预算并重做 (Issue #51, S16a; V2-UX-MODEL-017): a Run the Run Budget Ceiling stopped is redone the same way — the
       // ceiling is raised or removed in the new Task's plan, never on the stopped Run.
       const budgetReached = run !== null && run.state === 'interrupted' && existing.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached';
-      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND && run !== null && run.runRecordId === redoOf &&
+      requireAnalysis(run !== null && run.runRecordId === redoOf &&
         ((run.state === 'cancelled' && run.transitions.some((transition) => transition.state === 'executing')) || budgetReached),
       'ANALYSIS_REDO_STALE', '只有这本书最近一项任务里开始后取消、或因预算上限停止的运行可以改计划重做。');
       const expected = latest !== null && latest.provenance.runRecordId === redoOf
         ? { mode: 'sync-current', selectedRange: null }
         : existing.update === null ? null : { mode: existing.update.mode, selectedRange: existing.update.selectedRange };
-      requireAnalysis(!input.reconfirm && (expected === null
+      requireAnalysis(!input.reconfirm && (this.#definition.kind !== BASELINE_ANALYSIS_KIND || (expected === null
         ? update === null
         : update !== null && update.mode === expected.mode && update.selectedRange?.startPosition === expected.selectedRange?.startPosition &&
-          update.selectedRange?.endPosition === expected.selectedRange?.endPosition),
+          update.selectedRange?.endPosition === expected.selectedRange?.endPosition)),
       'ANALYSIS_REDO_INVALID', '改计划重做沿用这次运行已读完的部分，接着读其余的；什么都没读完时，照原样从头再做。');
     }
     // The latest Task asked for again as it was — the same way over the same range, its predecessor still the latest
@@ -3653,7 +3655,8 @@ export class BaselineAnalysisStore {
       // rule (#810), under developer-live only: ordinary production admits no default-rule origin yet (Issue #811, wave 4).
       // Background enrollment stays refused live.
       requireAnalysis(origin.kind === 'standard-direct' || (origin.kind === 'default-execution-rule' && admitted !== null &&
-          this.#definition.kind === WRITING_KIND && scope === 'developer-live'),
+          ((this.#definition.kind === WRITING_KIND && scope === 'developer-live') ||
+            liveKindRule(this.#launch.policy, this.#definition.kind)?.matchingActiveDefaultExecutionRuleAllowed === true)),
         'ANALYSIS_ORIGIN_NOT_ADMITTED', `${scope} 当前只允许直接授权的基线稿件分析。`);
     }
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) &&
@@ -4194,8 +4197,7 @@ export class BaselineAnalysisStore {
    * nothing running it. One pausing settles `paused` — the boundary it waited for is reached — and one admitted or
    * executing `resumable`, 任务已中断 · 可续行, its Run Authorization kept and nothing dispatched until 续行. A start the
    * governor had not admitted yet is blocked before dispatch with why: nothing starts by itself after a restart (ADR
-   * 0034). A Run left cancelling is named for the execution owner, which finishes the cancellation. A kind with no 续行
-   * (every kind but the baseline) ends a Run left admitted, executing or pausing `interrupted` instead, with its outcome.
+   * 0034). A Run left cancelling is named for the execution owner, which finishes the cancellation.
    */
   reconcileStoppedRuns(options: {
     /**
@@ -4212,19 +4214,12 @@ export class BaselineAnalysisStore {
        WHERE i.kind = ?
        ORDER BY r.recorded_at, r.rowid`,
     ).all(this.#definition.kind) as SqlRow[];
-    // Only the baseline kind keeps unit checkpoints and offers 续行 (Issue #422, S76b); every other kind's Run left
-    // under way ends interrupted instead, as the execution owner's own `resumableOnInterrupt` reads it.
-    const resumable = this.#definition.kind === BASELINE_ANALYSIS_KIND;
     let settled = 0;
     const cancelling: string[] = [];
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
       const state = row.last_state === null ? null : asString(row.last_state);
-      if (!resumable && (state === 'admitted' || state === 'executing' || state === 'pausing')) {
-        // A kind with no 续行 (Issue #429 review, P1): left under way, it would read as running for good. It ends here.
-        this.#settleInterruptedWithoutResume(runRecordId);
-        settled += 1;
-      } else if (state === 'pausing') {
+      if (state === 'pausing') {
         this.recordRunState(runRecordId, 'paused', { detail: RECONCILED_PAUSED_DETAIL, reconciled: true });
         settled += 1;
       } else if (state === 'admitted' || state === 'executing') {
@@ -4245,42 +4240,6 @@ export class BaselineAnalysisStore {
       }
     }
     return { settled, cancelling };
-  }
-
-  /**
-   * The terminal `interrupted` of a Run a stopped service left under way, for a kind that cannot resume: no revision
-   * formed, and its Task Outcome and Run Report say exactly that — stages that never ran, no units, no usage.
-   */
-  #settleInterruptedWithoutResume(runRecordId: string): void {
-    const facts = this.cancellationFacts(runRecordId);
-    this.recordRunState(runRecordId, 'interrupted', { detail: RECONCILED_INTERRUPTED_DETAIL, reconciled: true });
-    this.recordOutcome({
-      taskIntentId: facts.taskIntentId,
-      runRecordId,
-      classification: 'interrupted',
-      resultSetRevisionId: null,
-      summary: RECONCILED_INTERRUPTED_DETAIL,
-      safeNextAction: RECONCILED_INTERRUPTED_DETAIL,
-      report: buildRunReport({
-        runRecordId,
-        taskIntentId: facts.taskIntentId,
-        attemptId: facts.attemptId,
-        resultSetRevisionId: null,
-        classification: 'interrupted',
-        recordedAt: new Date().toISOString(),
-        spans: new Map(),
-        usage: { units: RUN_REPORT_NO_USAGE, 'cross-unit-reduction': RUN_REPORT_NO_USAGE, 'assurance-sampling': RUN_REPORT_NO_USAGE },
-        unitRows: [],
-        // The turns it sent before AI7 closed were sent: the units the ledger recorded a turn for are the ones it submitted.
-        submitted: facts.attemptId === null ? 0 : this.submittedUnitCount(facts.attemptId),
-        adaptations: [],
-        gaps: [],
-        crossUnit: { state: 'not-run', reason: RECONCILED_INTERRUPTED_STAGE_REASON },
-        sample: assuranceSampleNotRun(RECONCILED_INTERRUPTED_STAGE_REASON),
-        findingCounts: [],
-        terminalFailure: null,
-      }, runReportReflectionNotRun(RECONCILED_INTERRUPTED_STAGE_REASON)),
-    });
   }
 
   /**

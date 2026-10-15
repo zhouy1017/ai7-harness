@@ -442,8 +442,9 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
         { id: 'category:plot-consistency', label: '读取基线分析的线索：情节逻辑与前后一致', result: '情节逻辑与前后一致的发现（稿件上的标记）', removable: false, removed: false },
         { id: 'report', label: '汇总', result: '审阅报告', removable: false, removed: false },
       ]);
-      // A Review Run keeps no plan versions: its plan takes no edit here (Issue #419).
-      expect(drawer.edit).toEqual({ editable: false, reason: null, lastEdit: null, planEnvelopeDigest: null, budget: null });
+      // Review edits revise its category plans under their existing version ledgers.
+      expect(drawer.edit).toMatchObject({ editable: true, reason: null, lastEdit: null, budget: { settable: true, ceiling: 'unset' } });
+      expect(drawer.edit.planEnvelopeDigest).toMatch(/^[a-f0-9]{64}$/u);
       expect(drawer.participation.after).toContain('每一类完成后');
       expect(technical(drawer, `category:${TYPOS_AND_USAGE.categoryId}`)).toMatch(/计划权限边界 [0-9a-f]{64}/u);
       expect(technical(drawer, 'category:plot-consistency')).toContain('没有任务');
