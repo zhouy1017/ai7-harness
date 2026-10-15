@@ -1577,7 +1577,7 @@ async function main() {
     requireJourney(questionCard?.options.filter((option) => option.id.startsWith('model-option-')).length === 2 && questionCard.freeTextAllowed === true, 'model-question-options');
 
     at('model-question-answer-turn');
-    await clickSelector(renderer, `[data-task-drawer-control="clarification-option:${questionCard.requestId}:model-option-0"]`, 'model-question-choose');
+    await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(`[data-task-drawer-control="clarification-option:${questionCard.requestId}:model-option-0"]`)}); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return input.checked; })()`, 'model-question-choose');
     await clickSelector(renderer, `[data-task-drawer-control="clarification-submit:${questionCard.requestId}"]`, 'model-question-submit');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((p)=>p.taskIntent?.taskIntentId===${JSON.stringify(questionTask)} && ['completed','completed-with-gaps'].includes(p.run?.state))`, 'model-question-completes', 120_000);
     const questionDone = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
