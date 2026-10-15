@@ -47,6 +47,23 @@ const ANSWER = '这段一直用第三人称限知视角叙述。人物的心理�
 const CONTINUED = '末句可以把语气放缓，与前文的节奏一致。';
 const VALIDATION: DevelopmentValidationIntent = { family: 'editorial-dialogue', case: 'sample1-selected-paragraph', delta: null };
 
+/** The platform tools the selected v16 dialogue rule projects (Issue #473): the five shipped backends in rank order, no key requirement under developer-live. */
+const DIALOGUE_PLATFORM_TOOLS = {
+  websearch: {
+    selection: 'user-configured',
+    backends: ['search-tinyfish@api.search.tinyfish.ai', 'search-deepseek@api.deepseek.com', 'search-brave@api.search.brave.com',
+      'search-parallel@api.parallel.ai', 'search-bochaai@api.bochaai.com'].map((entry) => {
+      const [id, host] = entry.split('@') as [string, string];
+      return { id, host, credentialSlot: id };
+    }),
+    selectionRequiresCredential: false,
+  },
+  webfetch: { maxBytes: 5_242_880, timeoutSeconds: 30, boundedByCitations: true },
+  breaker: { roundTrips: 128, end: '联网核查未完成' },
+  oneQueryPerRunUnit: true,
+  toolResultCategory: 'public-or-synthetic',
+};
+
 /** The selected policy's dialogue allow rule, as the verified projection lists it (Issue #831); varied for the refusals. */
 function dialogueRule(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -57,7 +74,7 @@ function dialogueRule(overrides: Record<string, unknown> = {}): Record<string, u
     endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint,
     model: OPENCODE_GO_MODEL,
     credentialSlot: OPENCODE_GO_ROUTE_PROFILE.credentialSlot,
-    outboundDataCategories: ['editor-selected-manuscript-excerpt'],
+    outboundDataCategories: ['editor-selected-manuscript-excerpt', 'web-search-query', 'public-source-fetch'],
     crossUnitSynthesisAllowed: false,
     materialReferencesAllowed: false,
     editorialDeliverablesAllowed: false,
@@ -65,6 +82,8 @@ function dialogueRule(overrides: Record<string, unknown> = {}): Record<string, u
     clarificationTimeoutHours: null,
     backgroundOrigin: false,
     matchingActiveDefaultExecutionRuleAllowed: false,
+    webSearchToolAllowed: true,
+    platformTools: DIALOGUE_PLATFORM_TOOLS,
     ...overrides,
   };
 }

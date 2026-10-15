@@ -60,10 +60,10 @@ export type RemoteExecutionRoute = ConfiguredRouteId;
 export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
- * The trusted scope's Provider Processing pin: selected v14 admits baseline analysis, enrolled background analysis within a
+ * The trusted scope's Provider Processing pin: selected v16 admits baseline analysis, enrolled background analysis within a
  * mandatory ceiling, editorial dialogue, review (with cross-deliverable consistency), writing, evaluation, and 润色 and
- * conflict-regeneration Suggestions on V4.1. Historical v5, v9, v10, v11 and v12 and the superseded web reservation v8 are
- * readable identities, not launch selections.
+ * conflict-regeneration Suggestions on V4.1, with the platform tools on review, writing, evaluation and dialogue. Historical v5,
+ * v9, v10, v11, v12 and v14 and the superseded web reservation v8 are readable identities, not launch selections.
  */
 export type EgressPolicyPin =
   | {
@@ -74,7 +74,7 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14';
+      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16';
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     }
@@ -346,10 +346,14 @@ export function assistantToolCallDigest(content: ReadonlyArray<AssembledContentB
     : { type: block.type, text: block.text ?? null })));
 }
 
-/** Whether a binding carries a rule naming the platform tools under the one scope that may name them. */
+/**
+ * Whether a binding carries a rule naming the platform tools under a scope that may name them: developer-live (v16) and, since
+ * Provider Processing v17, ordinary-production. development-ci never names a tool.
+ */
 function platformToolsOf(binding: EgressBindingFacts): PlatformToolsRule | null {
   const rule = binding.platformTools ?? null;
-  return rule !== null && binding.policy.operationalScope === 'developer-live' ? rule : null;
+  const scope = binding.policy.operationalScope;
+  return rule !== null && (scope === 'developer-live' || scope === 'ordinary-production') ? rule : null;
 }
 
 /**

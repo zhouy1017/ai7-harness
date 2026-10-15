@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all twenty-six current and historical pairs and validates every one at this base', () => {
+  it('discovers all twenty-nine current and historical pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(26);
+    expect(pairs).toHaveLength(29);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(26);
+    expect(results).toHaveLength(29);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -316,13 +316,15 @@ describe('Provider Processing v12, v13 and active-set v10 schemas (Issue #853)',
   });
 });
 
-describe('Provider Processing v14, v15 and active-set v11 schemas (Issue #863)', () => {
+describe('Provider Processing v14 to v17 and active-set v11 schemas (Issues #863, #473)', () => {
   type Rules = { decision: { providerAllowRules: Array<Record<string, unknown>> } };
   const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
   const BACKGROUND = 7;
   const scopes = [
     ['v14', 'developerLive', 'developerLiveBackgroundRule', 'developerLiveReviewRule'],
     ['v15', 'production', 'productionBackgroundRule', 'productionReviewRule'],
+    ['v16', 'developerLive', 'developerLiveBackgroundRule', 'developerLiveReviewRule'],
+    ['v17', 'production', 'productionBackgroundRule', 'productionReviewRule'],
   ] as const;
   const pair = (version: string) => readPair(`provider-processing-policy.${version}.json`, `provider-processing-policy.${version}.schema.json`);
 
@@ -433,5 +435,77 @@ describe('Provider Processing v14, v15 and active-set v11 schemas (Issue #863)',
     moved.activePolicies['provider-processing-policy'].scopePins['developer-live']!.version = 'v14';
     expect(() => validatePolicyDocument(moved, v10.schemaData)).toThrowError();
     expect((policyData as { predecessorVersion: string }).predecessorVersion).toBe('v10');
+  });
+});
+
+describe('Provider Processing v16, v17 and active-set v12 schemas: platform tools (Issue #473, slice 6d)', () => {
+  type Rules = { decision: { providerAllowRules: Array<Record<string, unknown>> } };
+  const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+  const RESEARCH = [1, 2, 3, 4];
+  const pair = (version: string) => readPair(`provider-processing-policy.${version}.json`, `provider-processing-policy.${version}.schema.json`);
+
+  it.each([['v16', 'v14'], ['v17', 'v15']] as const)('validates %s and keeps its predecessor\'s role, credential, separation and selection consts', (now, before) => {
+    const { policyData, schemaData } = pair(now);
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    const current = policyData as Record<string, unknown>;
+    const predecessor = pair(before).policyData as Record<string, unknown>;
+    for (const section of ['roleBindings', 'credentialBoundary', 'authoritySeparations', 'trustedSelection']) {
+      expect(current[section], `${now} ${section}`).toEqual(predecessor[section]);
+    }
+    // The vocabulary gains exactly the two web categories.
+    expect(Object.keys(current.outboundDataCategories as object)).toEqual([...Object.keys(predecessor.outboundDataCategories as object), 'web-search-query', 'public-source-fetch']);
+    expect(current.predecessorVersion).toBe(before);
+  });
+
+  it.each(['v16', 'v17'])('pins %s\'s platform tools block, its web switch and its research kinds as consts', (version) => {
+    const { policyData, schemaData } = pair(version);
+    for (const index of RESEARCH) {
+      const variants: Array<[string, (rule: Record<string, unknown>) => void, RegExp]> = [
+        ['drop block', (rule) => { delete rule.platformTools; }, /Required property "platformTools" is missing/],
+        ['switch off', (rule) => { (rule.transmissions as Record<string, unknown>).webSearchToolAllowed = false; }, /transmissions does not equal the required const/],
+        ['fetch bound', (rule) => { ((rule.platformTools as Record<string, Record<string, unknown>>).webfetch!).maxBytes = 10_485_760; }, /platformTools does not equal the required const/],
+        ['breaker', (rule) => { ((rule.platformTools as Record<string, Record<string, unknown>>).breaker!).roundTrips = 256; }, /platformTools does not equal the required const/],
+        ['backend host', (rule) => {
+          ((rule.platformTools as { websearch: { backends: Array<Record<string, unknown>> } }).websearch.backends[0]!).host = 'search.example.com';
+        }, /platformTools does not equal the required const/],
+      ];
+      for (const [label, mutate, error] of variants) {
+        const mutated = clone(policyData) as Rules;
+        mutate(mutated.decision.providerAllowRules[index]!);
+        expect(() => validatePolicyDocument(mutated, schemaData), `${index} ${label}`).toThrowError(error);
+      }
+    }
+    // A rule that does not research cannot carry the block.
+    for (const index of [0, 5, 6, 7]) {
+      const mutated = clone(policyData) as Rules;
+      mutated.decision.providerAllowRules[index]!.platformTools = clone(mutated.decision.providerAllowRules[2]!.platformTools);
+      expect(() => validatePolicyDocument(mutated, schemaData), String(index)).toThrowError(/additional properties|platformTools/i);
+    }
+    // 出版政策与风险 joins no rule this wave.
+    const kinds = clone(policyData) as Rules;
+    (kinds.decision.providerAllowRules[2]!.allowedTaskKinds as string[]).push('editorial-review/publication-risk');
+    expect(() => validatePolicyDocument(kinds, schemaData)).toThrowError(/allowedTaskKinds does not equal the required const/);
+  });
+
+  it('rejects an active-set v12 whose ordinary-production or developer-live pin is not the exact v17 or v16 document', () => {
+    const { policyData, schemaData } = readPair('active-policy-set.v12.json', 'active-policy-set.v12.schema.json');
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    type Pins = { activePolicies: { 'provider-processing-policy': { scopePins: Record<string, Record<string, unknown>> } } };
+    for (const [scope, field, value] of [
+      ['ordinary-production', 'version', 'v15'],
+      ['ordinary-production', 'sha256', '1f398f923d57a442fe6c410b5831c25f45c6983973ccfcf619472db8a8666b46'],
+      ['developer-live', 'version', 'v14'],
+      ['developer-live', 'sha256', '98ec1f93f26e896d1a6a37b3829eacffb7deb9b52f8966252aa3f7115717bb6d'],
+    ] as const) {
+      const mutated = clone(policyData) as Pins;
+      mutated.activePolicies['provider-processing-policy'].scopePins[scope]![field] = value;
+      expect(() => validatePolicyDocument(mutated, schemaData), `${scope} ${field}`).toThrowError(/does not equal the required const/);
+    }
+    // v11 keeps pinning the old pair, so a v11 whose pins moved to the successors is not v11.
+    const v11 = readPair('active-policy-set.v11.json', 'active-policy-set.v11.schema.json');
+    const moved = clone(v11.policyData) as Pins;
+    moved.activePolicies['provider-processing-policy'].scopePins['developer-live']!.version = 'v16';
+    expect(() => validatePolicyDocument(moved, v11.schemaData)).toThrowError();
+    expect((policyData as { predecessorVersion: string }).predecessorVersion).toBe('v11');
   });
 });

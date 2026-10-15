@@ -41,7 +41,7 @@ async function ruleOf(version: 'v5' | 'v7'): Promise<PlatformToolsRule | null> {
   const document = JSON.parse(await readFile(resolve(REPO_ROOT, `docs/policies/provider-processing-policy.${version}.json`), 'utf8')) as {
     decision: { providerAllowRules: unknown[] };
   };
-  return readPlatformToolsRule(document.decision.providerAllowRules[0]);
+  return readPlatformToolsRule(document.decision.providerAllowRules[0]) as PlatformToolsRule | null;
 }
 
 function binding(platformTools: PlatformToolsRule | null, version: 'v5' | 'v8' = 'v5'): EgressBindingFacts {
@@ -150,7 +150,19 @@ describe('under the selected Provider Processing v5 every platform-tool path sti
     expect(() => EgressTicketBook.open(malformed, { currentBindingDigest: () => BINDING_DIGEST })).toThrowError('PLATFORM_TOOLS_NOT_NAMED');
   });
 
-  it('never reads a rule outside developer-live, even one carrying the block', async () => {
+  it('counts a rule naming the platform tools under ordinary-production as under developer-live (Provider Processing v17)', async () => {
+    const production: EgressBindingFacts = {
+      ...binding(await ruleOf('v7'), 'v8'),
+      policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v17', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+      ruleOutboundCategories: new Set(['public-or-synthetic']),
+    };
+    expect(evaluateEgress(payload([user(UNIT)]), production, scope())).toMatchObject({ decision: 'transmit-remote' });
+    expect(evaluateEgress(payload(LOOP), production, scope())).toMatchObject({ decision: 'transmit-remote' });
+    // The same binding without the rule's block still refuses every tool, exactly as before.
+    expect(evaluateEgress(payload([user(UNIT)]), { ...production, platformTools: null }, scope())).toMatchObject({ reason: 'tools-present' });
+  });
+
+  it('never reads a rule under development-ci, even one carrying the block', async () => {
     const forged: EgressBindingFacts = {
       ...binding(await ruleOf('v7')),
       policy: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 },

@@ -1908,23 +1908,24 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ordinary-production';
 /**
- * Historical v5, v9, v10, v11, v12 and the superseded web reservation v8 remain readable identities; selected v14 admits baseline
- * analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable consistency
- * and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and 润色 and
- * conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules. A type member does not
- * select or activate a policy.
+ * Historical v5, v9, v10, v11, v12, v14 and the superseded web reservation v8 remain readable identities; selected v16 admits
+ * baseline analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable
+ * consistency and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and
+ * 润色 and conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules, and AI7's platform
+ * tools (websearch through the user-selected backend, webfetch) on review, writing, evaluation and dialogue. A type member does
+ * not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15';
-/** Historical v5, v7, v8, v9 and v10, the superseded web reservation v6, and selected v11. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17';
+/** Historical v5, v7, v8, v9, v10 and v11, the superseded web reservation v6, and selected v12. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
- * Provider Processing v14 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
+ * Provider Processing v16 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
  * resolved once the manifest freezes and before the plan does.
  */
 export type DeveloperLiveCeiling =
@@ -2117,6 +2118,9 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
  * `frozen-material-reference-excerpt` and `editorial-deliverable-excerpt`, arrive with v12 for Material-Reference-bearing
  * review, writing and evaluation and for cross-deliverable consistency. A declaration only: the gate's logic is the consuming
  * slices' to change. Ordinary production v13 also carries the three unpublished classes from its policy rules.
+ * `web-search-query` (the model's own search query, sent to the selected search backend's host) and `public-source-fetch` (a
+ * public page address the model cited, fetched by AI7's webfetch) arrive with Provider Processing v16 and v17 on the rules that may
+ * research.
  */
 export type OutboundDataCategoryId =
   | 'public-or-synthetic'
@@ -2129,7 +2133,9 @@ export type OutboundDataCategoryId =
   | 'editorial-deliverable-excerpt'
   | 'unpublished-metadata'
   | 'unpublished-excerpts'
-  | 'unpublished-full-content';
+  | 'unpublished-full-content'
+  | 'web-search-query'
+  | 'public-source-fetch';
 
 /**
  * One allow rule of the selected Provider Processing policy, as the launch verified it from the pinned bytes: the task kinds it
@@ -2186,6 +2192,43 @@ export interface AdmittedProviderRule {
    * and writing in developer-live only; `false` for every other rule. A newly user-initiated Task is still required, so a default rule never starts work alone.
    */
   readonly matchingActiveDefaultExecutionRuleAllowed: boolean;
+  /**
+   * The rule's web switch (`transmissions.webSearchToolAllowed`, Provider Processing v16 and v17): `true` exactly for the rules that may
+   * research — review (事实核查 and 学术道德与引用 among its kinds), writing, the three evaluation contracts and editorial
+   * dialogue — and `false` for baseline analysis, 润色, conflict regeneration and enrolled background analysis.
+   */
+  readonly webSearchToolAllowed: boolean;
+  /** The rule's platform tools as the launch verified them, or `null` exactly when `webSearchToolAllowed` is `false`. */
+  readonly platformTools: AdmittedPlatformTools | null;
+}
+
+/**
+ * AI7's platform tools one admitted rule names (Provider Processing v16 and v17), as the launch verified them against the search
+ * backend registry: eligibility only. Which backend a Run uses, its freeze, the tickets and the host allowance belong to the
+ * consuming slice; a backend listed here is selectable, never selected.
+ */
+export interface AdmittedPlatformTools {
+  readonly websearch: {
+    readonly selection: 'user-configured';
+    /** The shipped backends in the recorded ranking order; the first is the default selection. */
+    readonly backends: ReadonlyArray<AdmittedSearchBackend>;
+    /** `true` under ordinary-production: a backend without the editor's own configured key cannot be selected for a Run. */
+    readonly selectionRequiresCredential: boolean;
+  };
+  /** AI7's webfetch: at most `maxBytes` and `timeoutSeconds` per page, only for addresses the model cited. */
+  readonly webfetch: { readonly maxBytes: number; readonly timeoutSeconds: number; readonly boundedByCitations: true };
+  /** The per-unit circuit breaker: after `roundTrips` consecutive tool round trips the unit ends, disclosed as `end` (联网核查未完成). */
+  readonly breaker: { readonly roundTrips: number; readonly end: string };
+  readonly oneQueryPerRunUnit: true;
+  /** The category tool results return to the model as. */
+  readonly toolResultCategory: 'public-or-synthetic';
+}
+
+/** One selectable search backend of an admitted rule: its id, the one host its search calls may address, and its broker slot. */
+export interface AdmittedSearchBackend {
+  readonly id: string;
+  readonly host: string;
+  readonly credentialSlot: string;
 }
 
 export interface LaunchPolicyProjection {
@@ -2201,20 +2244,20 @@ export interface LaunchPolicyProjection {
     liveTransmissionAllowed: boolean;
     /**
      * Whether the active Provider Processing policy names the cross-unit reduction's transmission
-     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v14 document it
+     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v16 document it
      * is `true`, and anything else — absent included — means the reduction does not dispatch.
      */
     crossUnitReductionAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the assurance sampling suboperation's
-     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v14
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v16
      * document it is `true`; anything else — absent included — means the suboperation does not
      * dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
-     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v14 document it is
+     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v16 document it is
      * `true`; anything else — absent included — means the turn does not dispatch and the report
      * records `policy-bounded` with its reason.
      */
@@ -2225,7 +2268,7 @@ export interface LaunchPolicyProjection {
      */
     readonly admittedRules: readonly AdmittedProviderRule[];
     /**
-     * Only under `ordinary-production` (Provider Processing v15): `setup-required` while the editor's own model service is not
+     * Only under `ordinary-production` (Provider Processing v17): `setup-required` while the editor's own model service is not
      * configured, so no rule is admitted; `configured` once the launch supplied a binding the policy allows, which fills every
      * admitted rule's route, endpoint, model and credential slot. Absent under every other scope.
      */
