@@ -4,7 +4,7 @@ This is the human projection of [the immutable v15 JSON](provider-processing-pol
 
 ## In plain words
 
-Everything v13 let the editor do with their own manuscripts, on their own computer, with their own model-service account, v15 still lets them do, and nothing more except the two things below. The editor's credential, data location, redaction, the two routes (OpenCode Go `deepseek-v4.1-flash`, the default, or the official DeepSeek platform `deepseek-flash`), the ban on the Provider Result Cache and Provider Test Ledger, and the account-limit stop are exactly v13's. See [the v13 projection](provider-processing-policy.v13.md) for those terms.
+Everything v13 let the editor do with their own manuscripts, on their own computer, with their own model-service account, v15 still lets them do, and nothing more except the three things below. The editor's credential, data location, redaction, the two routes (OpenCode Go `deepseek-v4.1-flash`, the default, or the official DeepSeek platform `deepseek-flash`), the ban on the Provider Result Cache and Provider Test Ledger, and the account-limit stop are exactly v13's. See [the v13 projection](provider-processing-policy.v13.md) for those terms.
 
 ## What is newly allowed
 

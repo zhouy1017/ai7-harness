@@ -2177,8 +2177,8 @@ export interface AdmittedProviderRule {
   readonly backgroundOrigin: boolean;
   /**
    * Whether the rule's `authorityOrigin` admits the Task's matching active Default Execution Rule (快速开始) as its origin
-   * (`authorityOrigin.matchingActiveDefaultExecutionRuleAllowed`, Provider Processing v14 and v15): `true` for writing and, since v14
-   * and v15, review; `false` for every other rule. A newly user-initiated Task is still required, so a default rule never starts work alone.
+   * (`authorityOrigin.matchingActiveDefaultExecutionRuleAllowed`, Provider Processing v14 and v15): `true` for review in both scopes
+   * and writing in developer-live only; `false` for every other rule. A newly user-initiated Task is still required, so a default rule never starts work alone.
    */
   readonly matchingActiveDefaultExecutionRuleAllowed: boolean;
 }
@@ -2196,20 +2196,20 @@ export interface LaunchPolicyProjection {
     liveTransmissionAllowed: boolean;
     /**
      * Whether the active Provider Processing policy names the cross-unit reduction's transmission
-     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v12 document it
+     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v14 document it
      * is `true`, and anything else — absent included — means the reduction does not dispatch.
      */
     crossUnitReductionAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the assurance sampling suboperation's
-     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v12
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v14
      * document it is `true`; anything else — absent included — means the suboperation does not
      * dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
-     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v12 document it is
+     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v14 document it is
      * `true`; anything else — absent included — means the turn does not dispatch and the report
      * records `policy-bounded` with its reason.
      */
