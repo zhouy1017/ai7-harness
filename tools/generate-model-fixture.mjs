@@ -345,6 +345,7 @@ async function loadSample1Owners() {
         "export { reviewCategoryKindDefinition } from './src/service/review/review-category-kind.ts';",
         "export { reviewCategoryContract, reviewCategoryContractDigest } from './src/service/review/review-category-contract.ts';",
         "export { reviewCategoryContractInput } from './src/service/review/category-configuration.ts';",
+        "export { reviewDeliverables } from './src/service/production-documents.ts';",
         "export { initialEvaluationKindDefinition } from './src/service/evaluation/initial-evaluation-kind.ts';",
         "export { readersReportKindDefinition } from './src/service/evaluation/readers-report-kind.ts';",
         "export { evaluationRewriteKindDefinition } from './src/service/evaluation/evaluation-rewrite-kind.ts';",
@@ -523,6 +524,20 @@ export async function verifySample1Capture(request, selection, parsed) {
       if (category.executor !== 'review-category-contract' || category.entry.searchEngine ||
           category.entry.seriesKnowledge !== undefined || category.task.planEnvelopeDigest !== sha256Hex(canonicalJson(envelope))) fail();
       const input = owners.reviewCategoryContractInput(category.entry);
+      if (input.deliverables !== undefined) {
+        // #813: prove each read-only participant from S66's records and the admitted sample1 source, not caller text.
+        const current = owners.reviewDeliverables(database, manifest.manuscript.bookId);
+        if (category.entry.categoryId !== 'cross-deliverable-consistency' || current.unavailableReason !== null ||
+            canonicalJson(current.participants) !== canonicalJson(input.deliverables) ||
+            input.deliverables.some((document) => document.sourceDigest !== SAMPLE1_SOURCE_SHA256)) fail();
+        // A manuscript-only content key would also answer a Run comparing different deliverable words. Keep only the exact
+        // request key, which pins every participant; fresh-import regression replays this response through controlled transport.
+        parsed.contentDigest = null;
+        parsed.exactParticipantsOnly = true;
+        parsed.participantContentDigest = sha256Hex(canonicalJson(input.deliverables.map(({ typeId, title, paragraphs }) => ({
+          typeId, title, paragraphs: paragraphs.map(({ position, text, truncated }) => ({ position, text, truncated })),
+        }))));
+      }
       const prompt = owners.reviewCategoryContract(input);
       contract = { prompt, digest: owners.reviewCategoryContractDigest(prompt) };
       definition = owners.reviewCategoryKindDefinition(input);
@@ -1308,6 +1323,10 @@ export async function generateModelFixture(request, now = new Date()) {
   const selection = resolveLedgerSelection(await readLedgerLines(request.cacheRoot), request.selector);
   const entry = await readSelectedEntry(request.cacheRoot, selection);
   const parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest);
+  if (parsed.subject === 'review-unit' && parsed.unitMessage.split('\n', 1)[0].includes(' · 类别 cross-deliverable-consistency · ')) {
+    parsed.contentDigest = null;
+    parsed.exactParticipantsOnly = true;
+  }
   requireStageContract(selection, parsed);
   parsed.sample1Verified = await verifySample1Capture(request, selection, parsed);
   refuse(JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
@@ -1330,7 +1349,9 @@ export async function generateModelFixture(request, now = new Date()) {
   'FIXTURE_GEN/identity-unmapped', '响应含有未经映射或不唯一的占位符。');
   return assembleFixture({
     identity: request.identity,
-    description: request.description,
+    description: parsed.exactParticipantsOnly
+      ? `${request.description} Exact request key only: a manuscript-only content key could replay against different deliverable text; fresh-import regression uses controlled recorded-response transport with the same sample1-derived document words. Participant excerpt digest: ${parsed.participantContentDigest ?? 'unproved'}.`
+      : request.description,
     itemId: selection.itemId,
     model: selection.model,
     generatedOn: now.toISOString().slice(0, 10),

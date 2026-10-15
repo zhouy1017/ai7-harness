@@ -10,6 +10,7 @@ import { runReportUsageReconciles } from '../../src/service/analysis/run-report.
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { READERS_REPORT_NEEDS_FINALIZED, READERS_REPORT_SCHEMA_SQL, READERS_REPORT_TRIGGER_SQL } from '../../src/service/readers-reports.js';
+import { REVIEW_DELIVERABLES_ABSENT, reviewDeliverables } from '../../src/service/production-documents.js';
 import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL } from '../../src/service/evaluation-rewrites.js';
 import { WRITING_TASK_SCHEMA_SQL } from '../../src/service/writing-tasks.js';
@@ -293,6 +294,20 @@ describe('审稿意见 over the real store on exact sample1', () => {
       const saved = (await book.store.saveProductionDocumentVersion({ bookId: book.bookId, documentId: draft.document.documentId, branchId: draft.document.branchId })).document!;
       expect(saved.versions.map((version) => version.label)).toEqual(['版本 2', '版本 1']);
       expect(book.store.inspectEvaluation(book.bookId, null).readersReport.templates[0]!.draft!.document.versions[0]!.label).toBe('版本 2');
+
+      // Moved through 定稿 as a house document would be, the draft is still no 交付物 (#813): 跨交付物一致性 neither compares it
+      // nor reads it as an unfinalized deliverable, so the Book keeps the no-deliverable reason.
+      for (const action of ['start', 'complete'] as const) {
+        const current = book.store.inspectEvaluation(book.bookId, null).readersReport.templates[0]!.draft!.document;
+        book.store.transitionProductionDocumentPhase({ bookId: book.bookId, documentId: current.documentId, phaseId: 'finalization', action,
+          expectedTransitions: current.workflow.transitions, reason: null });
+      }
+      const readers = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        expect(reviewDeliverables(readers, book.bookId)).toEqual({ participants: [], leftOut: [], unavailableReason: REVIEW_DELIVERABLES_ABSENT });
+      } finally {
+        readers.close();
+      }
 
       // Exported as DOCX, written fresh from the draft's own words: nothing of the manuscript's file is read for it.
       const target = { kind: 'document', documentId: draft.document.documentId, revisionId: saved.versions[0]!.revisionId } as const;

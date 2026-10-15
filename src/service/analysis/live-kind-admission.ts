@@ -83,6 +83,8 @@ export function liveKindAdmitted(
       material.basePromptContractDigest !== expectation.promptContractDigest) return null;
   if (material !== null && liveMaterialRule(policy, kind) === null) return null;
   const rule = liveKindRule(policy, kind, [...expectation.payloadCategories, ...(material === null ? [] : ['frozen-material-reference-excerpt'] as const)]);
+  if (kind === reviewCategoryKindId('cross-deliverable-consistency') &&
+      rule?.editorialDeliverablesAllowed !== true) return null;
   if (rule === null || rule.route !== binding.route || rule.endpoint !== binding.endpoint || rule.model !== binding.model ||
       rule.credentialSlot !== binding.credentialSlot) return null;
   return {
@@ -113,6 +115,7 @@ export const WRITING_PAYLOAD_CATEGORIES: readonly OutboundDataCategory[] = ['pub
 
 /** Every outbound category a planned kind's payload carries; `undefined` for a kind with no row. */
 function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[] | undefined {
+  if (kind === reviewCategoryKindId('cross-deliverable-consistency')) return ['public-or-synthetic', 'editorial-deliverable-excerpt'];
   return kind === WRITING_KIND ? WRITING_PAYLOAD_CATEGORIES : EVALUATION_PAYLOAD_CATEGORIES[kind];
 }
 
@@ -123,6 +126,10 @@ function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[]
  * kind has no row and is not admitted.
  */
 function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectation | null {
+  if (definition.kind === reviewCategoryKindId('cross-deliverable-consistency')) return {
+    promptContractDigest: definition.livePromptContractDigest?.() ?? null,
+    payloadCategories: plannedPayloadCategories(definition.kind)!,
+  };
   const review = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => reviewCategoryKindId(category.categoryId) === definition.kind);
   if (review !== undefined) {
     if (review.executor !== 'review-category-contract' || review.searchEngine || review.seriesKnowledge !== undefined) return null;

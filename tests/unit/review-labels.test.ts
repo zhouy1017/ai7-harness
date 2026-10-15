@@ -230,6 +230,8 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewReplacementLine('他们')).toBe('改为「他们」');
     expect(reviewReplacementLine('')).toBe('建议删去这段文字');
     expect(reviewClauseLine({ documentTitle: '通用规范汉字用字', clauseId: 'C1', text: '用规范字。' })).toBe('依据：条款 C1 · 通用规范汉字用字：用规范字。');
+    expect(reviewClauseLine({ documentTitle: '新闻稿 · 版本 2 · 修订 r2 · 第 3 段（只读）', clauseId: 'deliverable/news-release/3', text: '合成片段。' }))
+      .toBe('比对来源（只读）：新闻稿 · 版本 2 · 修订 r2 · 第 3 段（只读）：合成片段。');
     expect(REVIEW_RISK_POINT).toBe('需人工复核的风险点');
     expect(REVIEW_ANCHOR_CHANGED).toBe('原文已变，未能在稿件上标出');
     expect(REVIEW_CAPABILITY_REASON).toBe('请先打开稿件再处理这条发现。');

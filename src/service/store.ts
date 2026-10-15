@@ -16342,6 +16342,8 @@ export class EditorialStore {
   /** Verify the consuming ledger's frozen material boundary; no material paragraphs are paged or composed here. */
   materialGuard(runRecordId: string, ledger: BaselineAnalysisStore): MaterialGuardRefusal | null {
     this.#assertAvailable();
+    const deliverable = this.#reviewRuns.deliverableGuard(runRecordId, ledger.launch.live !== null);
+    if (deliverable !== null) return deliverable;
     const intent = this.#authority.prepare('SELECT t.task_intent_id, t.book_id FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     requireStore(intent !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
     const boundary = ledger.definition.kind === 'writing'
