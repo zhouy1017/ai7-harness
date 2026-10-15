@@ -27,7 +27,7 @@ import type {
   TaskPlanStartProjection,
   TaskPlanStepProjection,
 } from '../shared/protocol.js';
-import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, READERS_REPORT_TEMPLATE_LABELS, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
+import { MODEL_SERVICE_ROUTES, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, READERS_REPORT_TEMPLATE_LABELS, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
 import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
 import type { ClarificationFacts } from './analysis/clarifications.js';
 import { namedNonEffects } from './analysis/baseline-analysis-store.js';
@@ -118,6 +118,15 @@ export function withResend(plan: TaskPlanProjection, units: ReadonlyArray<number
 /** No Run has measured a duration this estimate could stand on. */
 export const DURATION_UNKNOWN = '暂无可靠估计';
 const NO_USAGE = '不发送，没有模型用量';
+const PRODUCTION_UNSET_USAGE = '发送到所选模型服务；模型用量按实际调用记录，未设任务运行预算上限';
+type PlannedExecutionRoute = NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>['executionRoute'];
+function isRemoteExecutionRoute(route: PlannedExecutionRoute): route is Extract<PlannedExecutionRoute, { endpoint: string }> {
+  return MODEL_SERVICE_ROUTES.some((remote) => remote === route.kind);
+}
+function liveDecision(pin: ProviderProcessingPin): string {
+  const label = pin.operationalScope === 'ordinary-production' ? '本地正式生产' : '开发者实时';
+  return `${label}（${pin.operationalScope} · ${pin.version}）：实时传输受运行边界约束`;
+}
 const NOT_READ = '其他图书；来源材料（来源版本仅作血缘证据，不属于可读范围）';
 /**
  * `这些一变就先停下来问你` (PLAN-004, PLAN-012): the three groups the authorization rules fix, each locked.
@@ -382,7 +391,7 @@ function reconfirmRequest(projection: BaselineAnalysisProjection, revision: Base
 /** The bar of the Book's baseline analysis Task: the ledger's own `canAuthorize` and `canReconfirmPlan`, read. */
 function baselineStart(projection: BaselineAnalysisProjection, planEnvelopeDigest: string): TaskPlanStartProjection {
   const route = projection.providerResolutionPlan!.executionRoute;
-  const needsModelConnection = route.kind === 'opencode-go';
+  const needsModelConnection = isRemoteExecutionRoute(route);
   if (projection.authorization !== null) return startedBar(needsModelConnection);
   const revision = projection.planRevision;
   if (!projection.actions.canAuthorize) {
@@ -683,7 +692,7 @@ export function baselineAnalysisPlan(input: {
   const reused = counts?.reused ?? 0;
   const route = provider.executionRoute;
   const remote = provider.remoteBinding;
-  const live = route.kind === 'opencode-go';
+  const live = isRemoteExecutionRoute(route);
   const ceiling = provider.runBudgetCeiling;
   const where = range === null ? '全书' : position;
   // 重新分析所选范围 names what it reads again (Issue #423 review, P2-1): the ranges holding the selection, never only the selection.
@@ -734,7 +743,7 @@ export function baselineAnalysisPlan(input: {
       role: roleLabel(provider.role),
       provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
       decision: live
-        ? `开发者实时（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}）：实时传输受运行边界约束`
+        ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
@@ -743,7 +752,7 @@ export function baselineAnalysisPlan(input: {
       // The ceiling the Run is held to, the launch's or the editor's (Issue #51, S16a), is a ceiling and never a prediction.
       // It is evaluated before each request (MODEL-016), so the turn under way when it is reached still counts: nothing
       // promises the Run stays under it, only that nothing more is sent once it is reached.
-      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : NO_USAGE,
+      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
       duration: DURATION_UNKNOWN,
       budgetCeiling: budgetCeilingLabel(ceiling),
@@ -806,7 +815,7 @@ export function baselineAnalysisPlan(input: {
       ]),
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
-        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+        : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
       { key: 'provider-binding', label: '模型提供方绑定', value: `${remote.providerId} · ${remote.modelId} · adapter r${remote.adapterRevision} · config r${remote.configurationRevision} · 凭据 ${remote.credentialReadiness}` },
       { key: 'credential-reference', label: '凭据引用', value: remote.credentialReference },
       { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
@@ -938,13 +947,13 @@ export function initialEvaluationPlan(input: {
   const units = manifest.units.length;
   const route = provider.executionRoute;
   const remote = provider.remoteBinding;
-  const live = route.kind === 'opencode-go';
+  const live = isRemoteExecutionRoute(route);
   const ceiling = provider.runBudgetCeiling;
   const revision = projection.planRevision;
   const boundary = envelope.boundary;
   // The baseline's state reading is the ledger's and not the kind's: every state of the one Run record reads the same.
   const state = baselineState(projection as unknown as BaselineAnalysisProjection);
-  const needsModelConnection = route.kind === 'opencode-go';
+  const needsModelConnection = isRemoteExecutionRoute(route);
   const start: TaskPlanStartProjection = projection.authorization !== null
     ? startedBar(needsModelConnection)
     : !projection.actions.canAuthorize
@@ -977,13 +986,13 @@ export function initialEvaluationPlan(input: {
       role: roleLabel(provider.role),
       provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
       decision: live
-        ? `开发者实时（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}）：实时传输受运行边界约束`
+        ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
       send: live ? `所读范围内的稿件正文发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
-      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : NO_USAGE,
+      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
       duration: DURATION_UNKNOWN,
       budgetCeiling: budgetCeilingLabel(ceiling),
@@ -1025,7 +1034,7 @@ export function initialEvaluationPlan(input: {
       { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
-        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+        : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
       { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
       { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
       { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },
@@ -1090,12 +1099,12 @@ export function readersReportPlan(input: {
   const units = manifest.units.length;
   const route = provider.executionRoute;
   const remote = provider.remoteBinding;
-  const live = route.kind === 'opencode-go';
+  const live = isRemoteExecutionRoute(route);
   const ceiling = provider.runBudgetCeiling;
   const revision = projection.planRevision;
   const boundary = envelope.boundary;
   const state = baselineState(projection as unknown as BaselineAnalysisProjection);
-  const needsModelConnection = route.kind === 'opencode-go';
+  const needsModelConnection = isRemoteExecutionRoute(route);
   const start: TaskPlanStartProjection = projection.authorization !== null
     ? startedBar(needsModelConnection)
     : !projection.actions.canAuthorize
@@ -1132,13 +1141,13 @@ export function readersReportPlan(input: {
       role: roleLabel(provider.role),
       provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
       decision: live
-        ? `开发者实时（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}）：实时传输受运行边界约束`
+        ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
       send: live ? `所读范围内的稿件正文与评估记录发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
-      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : NO_USAGE,
+      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
       duration: DURATION_UNKNOWN,
       budgetCeiling: budgetCeilingLabel(ceiling),
@@ -1185,7 +1194,7 @@ export function readersReportPlan(input: {
       { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
-        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+        : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
       { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
       { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
       { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },
@@ -1368,7 +1377,7 @@ export function writingPlan(input: {
   const units = manifest.units.length;
   const route = provider.executionRoute;
   const remote = provider.remoteBinding;
-  const live = route.kind === 'opencode-go';
+  const live = isRemoteExecutionRoute(route);
   const ceiling = provider.runBudgetCeiling;
   const revision = projection.planRevision;
   const boundary = envelope.boundary;
@@ -1377,7 +1386,7 @@ export function writingPlan(input: {
   const materialGone = writingExemplarGone(projection, exemplarsHere) ? null : writingMaterialGone(projection, materials);
   const gone = writingExemplarGone(projection, exemplarsHere) || materialGone !== null;
   const state = gone ? { key: 'ready' as const, label: materialGone === null ? WRITING_EXEMPLAR_GONE_LABEL : writingMaterialRefusalLabel(materialGone) } : writingState(projection);
-  const needsModelConnection = route.kind === 'opencode-go';
+  const needsModelConnection = isRemoteExecutionRoute(route);
   // A Task whose 范例 is no longer here is never started (#688 re-review): the bar says why, and offers nothing that starts it.
   const start: TaskPlanStartProjection = gone
     ? { readiness: 'unavailable', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null, unavailableReason: materialGone?.refusal?.message ?? WRITING_EXEMPLAR_MOVED }
@@ -1418,13 +1427,13 @@ export function writingPlan(input: {
       role: roleLabel(provider.role),
       provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
       decision: live
-        ? `开发者实时（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}）：实时传输受运行边界约束`
+        ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
       send: live ? `所读范围内的稿件正文与参考材料发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
-      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : NO_USAGE,
+      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
       duration: DURATION_UNKNOWN,
       budgetCeiling: budgetCeilingLabel(ceiling),
@@ -1472,7 +1481,7 @@ export function writingPlan(input: {
       { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
-        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+        : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
       { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
       { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
       { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },
@@ -1542,12 +1551,12 @@ export function evaluationRewritePlan(input: {
   const units = manifest.units.length;
   const route = provider.executionRoute;
   const remote = provider.remoteBinding;
-  const live = route.kind === 'opencode-go';
+  const live = isRemoteExecutionRoute(route);
   const ceiling = provider.runBudgetCeiling;
   const revision = projection.planRevision;
   const boundary = envelope.boundary;
   const state = baselineState(projection as unknown as BaselineAnalysisProjection);
-  const needsModelConnection = route.kind === 'opencode-go';
+  const needsModelConnection = isRemoteExecutionRoute(route);
   const start: TaskPlanStartProjection = projection.authorization !== null
     ? startedBar(needsModelConnection)
     : !projection.actions.canAuthorize
@@ -1581,13 +1590,13 @@ export function evaluationRewritePlan(input: {
       role: roleLabel(provider.role),
       provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
       decision: live
-        ? `开发者实时（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}）：实时传输受运行边界约束`
+        ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
       send: live ? `所读范围内的稿件正文与这一版评估的评分和评语发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
-      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : NO_USAGE,
+      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
       duration: DURATION_UNKNOWN,
       budgetCeiling: budgetCeilingLabel(ceiling),
@@ -1633,7 +1642,7 @@ export function evaluationRewritePlan(input: {
       { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
-        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+        : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
       { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
       { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
       { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },
@@ -2186,7 +2195,8 @@ export function reviewRunPlan(input: {
   const firstProcedure = procedures[0] ?? '审阅工序';
   const ceilings = tasks.map((category) => frozenCeiling(category.task!.components));
   const route = tasks.length === 0 ? null : frozenRoute(tasks[0]!.task!.components);
-  const live = route?.kind === 'opencode-go';
+  const live = MODEL_SERVICE_ROUTES.some((remote) => remote === route?.kind);
+  const production = tasks.some((category) => (category.task!.components['provider-resolution-plan'] as { remoteBinding?: { providerProcessing?: { operationalScope?: unknown } } }).remoteBinding?.providerProcessing?.operationalScope === 'ordinary-production');
   const allSet = ceilings.length > 0 && ceilings.every((ceiling) => ceiling !== 'unset');
   const ceilingTotal = ceilings.reduce((total, ceiling) => total + (ceiling === 'unset' ? 0 : ceiling.maxTotalTokens), 0);
   const unitsRead = tasks.reduce((total, category) => total + category.task!.plan.recomputed, 0);
@@ -2208,7 +2218,7 @@ export function reviewRunPlan(input: {
   // route every category froze decides whether starting needs a model connection. A Run has no revision
   // route, so a plan that moved is only ever `changed`; the leads alone need nothing and start as they are.
   const routes = tasks.map((category) => frozenRoute(category.task!.components).kind);
-  const needsModelConnection = routes.includes('opencode-go');
+  const needsModelConnection = routes.some((kind) => MODEL_SERVICE_ROUTES.some((remote) => remote === kind));
   const start: TaskPlanStartProjection = facts.state !== 'prepared' || facts.authorizedAt !== null
     ? startedBar(needsModelConnection)
     : facts.staleReasons.length > 0
@@ -2268,13 +2278,13 @@ export function reviewRunPlan(input: {
       provider: route === null ? '不调用模型' : live ? `${route.kind} · ${route.model}` : 'AI7 本地确定性模型适配器',
       decision: route === null
         ? '只读基线分析的线索，不调用模型'
-        : live ? '开发者实时：实时传输受运行边界约束'
+        : live ? `${production ? '本地正式生产' : '开发者实时'}：实时传输受运行边界约束`
           : route.kind === 'none'
             ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
             : '远程模型服务被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行',
       send: route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，发往为审阅配置的模型服务` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
-      usage: live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : NO_USAGE,
+      usage: live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: live && allSet,
       duration: DURATION_UNKNOWN,
       budgetCeiling: allSet ? `任务运行预算上限：${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : BUDGET_NOT_SET,

@@ -2,8 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { sha256Hex } from '../analysis/canonical.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../analysis/execution.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
-import type { DeveloperLiveRuntime } from '../launch-policy.js';
-import type { LaunchPolicyProjection } from '../../shared/protocol.js';
+import { isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
+import {
+  MODEL_SERVICE_SETUP_REQUIRED_REASON,
+  type DeveloperLiveProviderProcessingVersion,
+  type LaunchPolicyProjection,
+  type OrdinaryProductionProviderProcessingVersion,
+} from '../../shared/protocol.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
@@ -51,9 +56,13 @@ export interface DialogueRecords {
   settleDialogueAttempt(attemptId: string, outcome: DialogueOutcome, endSeq: number | null, causeCode: string | null): void;
 }
 
-/** What a developer-live launch gives the dialogue: its runtime, the broker, and the route its policy admits, if any. */
+/**
+ * What a live launch gives the dialogue: its runtime, the broker, and the route its policy admits, if any. Under
+ * ordinary-production (Issue #811) the route and the Credential Reference are the editor's configured binding, read at each
+ * attempt, so a route switch reaches the next question.
+ */
 export interface DialogueLiveRoute {
-  readonly runtime: DeveloperLiveRuntime;
+  readonly runtime: LiveRuntime;
   readonly broker: CredentialBroker;
   /** The route the selected policy admits for the dialogue; `null` refuses every dialogue under this launch. */
   readonly route: AdmittedDialogueRoute | null;
@@ -86,6 +95,29 @@ export function dialogueLiveRoute(runtime: DeveloperLiveRuntime, policy: LaunchP
   };
 }
 
+/**
+ * The dialogue's route under an ordinary-production launch (Issue #811): the route the current policy admits on the editor's
+ * configured binding, that connection's own Credential Reference, and a broker that never reads a development one.
+ */
+export function productionDialogueRoute(
+  runtime: OrdinaryProductionRuntime,
+  policy: () => LaunchPolicyProjection,
+  credentialReference: () => string | null,
+  secretResolver: SecretResolver,
+): DialogueLiveRoute {
+  return {
+    runtime,
+    broker: new CredentialBroker(secretResolver, { developmentReferences: 'refused' }),
+    get route() {
+      const admitted = admittedDialogueRoute(policy());
+      return admitted !== null && credentialReference() !== null ? admitted : null;
+    },
+    get credentialReference() {
+      return credentialReference() ?? '';
+    },
+  };
+}
+
 /** The validation purpose every live dialogue call is filed under in the Provider Test Ledger. */
 export const DIALOGUE_TEST_ITEM_PURPOSE = DIALOGUE_TASK_KIND;
 
@@ -95,8 +127,10 @@ export const DIALOGUE_TEST_ITEM_PURPOSE = DIALOGUE_TASK_KIND;
  */
 export function dialogueRouteRefusal(deps: Pick<DialogueExecutionDeps, 'fixture' | 'live'>, sourceDigest?: string | null): string | null {
   if (deps.live !== null) {
-    if (deps.live.route === null) return '当前选定的模型处理规则没有准许对话使用实时模型；这次没有发送任何内容。';
-    if (sourceDigest !== undefined && (sourceDigest === null || !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(sourceDigest))) {
+    const production = isOrdinaryProductionRuntime(deps.live.runtime);
+    if (deps.live.route === null) return production ? MODEL_SERVICE_SETUP_REQUIRED_REASON : '当前选定的模型处理规则没有准许对话使用实时模型；这次没有发送任何内容。';
+    // Ordinary production sends the editor's own manuscript (Issue #811); only developer-live is held to the Public SampleBooks.
+    if (!production && sourceDigest !== undefined && (sourceDigest === null || !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(sourceDigest))) {
       return '这本书不在开发者实时可发送的公开样书范围内；这次没有发送任何内容。';
     }
     return null;
@@ -194,12 +228,14 @@ export class DialogueExecutionOwner {
     let failure: string | null = null;
     try {
       const route = live === null ? null : live.route!;
+      // Read once: under ordinary-production the configured reference may change while this answer is in flight (Issue #811).
+      const credentialReference = live === null ? '' : live.credentialReference;
       const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
       const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
       const composition = describeComposition(executionRoute, model, promptContractDigest, { sessionLog: true });
       const bindingDigest = sha256Hex(`${turn.attemptId}\u0000${sessionId}\u0000${composition.digest}`);
       const slotBinding: CredentialSlotBinding | null = live === null || route === null ? null : {
-        bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference: live.credentialReference,
+        bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference,
       };
       const bindingFacts: EgressBindingFacts = {
         bindingDigest,
@@ -211,16 +247,19 @@ export class DialogueExecutionOwner {
         policy: route === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           // The selected version, as the verified projection names it.
-          : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+          : route.operationalScope === 'ordinary-production'
+            ? { operationalScope: 'ordinary-production', providerProcessingVersion: route.providerProcessingVersion as OrdinaryProductionProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
+            : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion as DeveloperLiveProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         // The one message this attempt may send: the selected words and the question, and what a stopped answer kept.
         admittedUserMessages: new Set([message]),
         ...(route === null ? {} : { ruleOutboundCategories: route.outboundDataCategories }),
       };
       // Development validation only (ADR 0089, Issue #808): the Provider Test Ledger and Result Cache answer, refuse or record
       // the request. A live launch outside one is business, and the request reaches the transport itself.
-      const validation = live?.runtime.launch.validation ?? null;
+      // Ordinary production has no development validation, so no answer ever reaches the developer cache or ledger (Issue #811).
+      const validation = live === null || isOrdinaryProductionRuntime(live.runtime) ? null : live.runtime.launch.validation;
       let cache: ProviderResultCache | null = null;
-      if (live !== null && validation !== null) {
+      if (live !== null && validation !== null && !isOrdinaryProductionRuntime(live.runtime)) {
         cache = new ProviderResultCache(live.runtime.launch.providerCacheRoot);
         await cache.open();
       }
@@ -290,7 +329,9 @@ export class DialogueExecutionOwner {
       try {
         // The credential is checked for presence only; its value is released to the final adapter alone, inside the send.
         if (live !== null && slotBinding !== null && await live.broker.checkReadiness(slotBinding) !== 'present') {
-          throw new DialogueError('DIALOGUE_CREDENTIAL_ABSENT', '受保护凭据库中没有对话所用模型服务的开发凭据；未发送任何内容。');
+          throw new DialogueError('DIALOGUE_CREDENTIAL_ABSENT', isOrdinaryProductionRuntime(live.runtime)
+            ? '受保护凭据库中没有你为对话所用模型服务保存的凭据；请在 设置 › 模型服务 重新输入。未发送任何内容。'
+            : '受保护凭据库中没有对话所用模型服务的开发凭据；未发送任何内容。');
         }
         records.bindDialogueAttempt(turn.attemptId, route === null
           ? {
@@ -305,9 +346,9 @@ export class DialogueExecutionOwner {
           }
           : {
             harnessSessionId: sessionId,
-            route: 'opencode-go',
+            route: route.profile.route as 'opencode-go' | 'deepseek-open-platform',
             model,
-            operationalScope: 'developer-live',
+            operationalScope: route.operationalScope,
             behaviorCompositionSha256: harness.composition.digest,
             promptContractSha256: promptContractDigest,
             providerProcessingVersion: route.providerProcessingVersion,

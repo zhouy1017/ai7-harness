@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
@@ -74,6 +75,29 @@ export const DEVELOPER_LIVE_POLICY_BINDING = {
 export const DEFAULT_PROVIDER_CACHE_DIRECTORY = 'ai7-harness-provider-cache';
 
 /**
+ * The two bindings an ordinary-production Model Role may be configured to (Issue #811, Owner decision 23 of 2026-10-13): OpenCode
+ * Go DeepSeek V4.1 Flash, the default, and DeepSeek 开放平台（官方） V4.1 Flash, an independent choice — exactly v13's
+ * `allowedBindings`, which `tests/unit/ordinary-production-launch.test.ts` pins against the bytes. The store lists these routes,
+ * the service arms their hosts, and the resolver checks a configured binding against the policy itself. Never a fallback chain.
+ */
+export const ORDINARY_PRODUCTION_ALLOWED_BINDINGS = [
+  { route: 'opencode-go', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'deepseek-v4.1-flash', credentialSlot: 'opencode-go' },
+  { route: 'deepseek-open-platform', endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash', credentialSlot: 'deepseek-api-key' },
+] as const;
+export type OrdinaryProductionAllowedBinding = (typeof ORDINARY_PRODUCTION_ALLOWED_BINDINGS)[number];
+
+/**
+ * The allowed binding a configured one names exactly, on a well-formed production Credential Reference (Issue #811); `null` for any
+ * other binding and for a reference a provider document fixes for development, which a production connection never holds.
+ */
+export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | null): OrdinaryProductionAllowedBinding | null {
+  if (binding === null || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference) ||
+      DEVELOPMENT_CREDENTIAL_REFERENCES.has(binding.credentialReference.toLowerCase())) return null;
+  return ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((allowed) => allowed.route === binding.route && allowed.endpoint === binding.endpoint &&
+    allowed.model === binding.model && allowed.credentialSlot === binding.credentialSlot) ?? null;
+}
+
+/**
  * The developer-live launch facts derived from the form: the required ceiling, the cache root outside the checkout, and the
  * development validation the launch performs.
  */
@@ -100,6 +124,26 @@ export interface DeveloperLiveRuntime {
   readonly launch: DeveloperLiveLaunch;
   /** The native `fetch`, captured before `installNodeNetworkDenial()`; only the `opencode-go` transport receives it. */
   readonly nativeFetch: typeof fetch;
+}
+
+/**
+ * Everything an ordinary-production launch carries past the network denial (Issue #811): the native `fetch` the service entry
+ * captured, and nothing of development — no launch ceiling, no Provider Result Cache root, no development validation. Which
+ * route a Run takes is its frozen plan's, from the editor's configured binding; the runtime exists only when the launch policy
+ * actually bound `ordinary-production`.
+ */
+export interface OrdinaryProductionRuntime {
+  readonly scope: 'ordinary-production';
+  /** The native `fetch`, captured before `installNodeNetworkDenial()`; only the two production routes' transports receive it. */
+  readonly nativeFetch: typeof fetch;
+}
+
+/** The runtime a live launch carries: developer-live's, or ordinary production's. */
+export type LiveRuntime = DeveloperLiveRuntime | OrdinaryProductionRuntime;
+
+/** Whether a live runtime is ordinary production's. */
+export function isOrdinaryProductionRuntime(runtime: LiveRuntime | null | undefined): runtime is OrdinaryProductionRuntime {
+  return runtime !== null && runtime !== undefined && 'scope' in runtime && runtime.scope === 'ordinary-production';
 }
 
 function isInsideOrEqual(root: string, candidate: string): boolean {

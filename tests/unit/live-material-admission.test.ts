@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { liveKindAdmission, liveKindContractCategories, liveMaterialRule } from '../../src/service/analysis/live-kind-admission.js';
-import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { initialEvaluationKindDefinition } from '../../src/service/evaluation/initial-evaluation-kind.js';
@@ -38,6 +38,20 @@ function admitting(kind: string): LaunchPolicyProjection {
 }
 
 describe('material-bearing live kind admission (#809)', () => {
+  it.each(ORDINARY_PRODUCTION_ALLOWED_BINDINGS)('keeps material admission on the configured production route $route after restacking #811', async (productionBinding) => {
+    const policy = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'ordinary-production',
+      { ...productionBinding, credentialReference: '33333333-3333-4333-8333-333333333333' });
+    expect(policy.providerProcessing.version).toBe('v13');
+    for (const definition of [wrap(review), wrap(initial), wrap(report), writing()]) {
+      expect(liveKindAdmission(policy, definition, productionBinding)).not.toBeNull();
+      expect(liveKindAdmission(withRuleFor(policy, definition.kind, { materialReferencesAllowed: false }), definition, productionBinding)).toBeNull();
+      const rule = liveMaterialRule(policy, definition.kind)!;
+      expect(liveKindAdmission(withRuleFor(policy, definition.kind, {
+        outboundDataCategories: rule.outboundDataCategories.filter((category) => category !== 'frozen-material-reference-excerpt'),
+      }), definition, productionBinding)).toBeNull();
+    }
+  });
+
   it.each([() => wrap(review), () => wrap(initial), () => wrap(report), writing])('is admitted by the selected Provider Processing v12 rule exactly as projected', (make) => {
     const definition = make();
     expect(selected.providerProcessing.version).toBe('v12');
@@ -87,7 +101,7 @@ describe('material-bearing live kind admission (#809)', () => {
       audience: '读者', channel: '纸面', requirements: null, synopsis: null, evaluation: null, exemplars: [], materials: [material] }, 2, [{ ...source, sha256: 'f'.repeat(64) }])).toThrowError();
   });
 
-  it('keeps the deliverable term of the one review rule when 跨交付物一致性 carries material', () => {
+  it('keeps the deliverable term of the one review rule when 跨交付物一致性 carries material', async () => {
     const entry = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((candidate) => candidate.categoryId === 'cross-deliverable-consistency')!;
     const cross = wrap(reviewCategoryKindDefinition(reviewCategoryContractInput({ ...entry, executor: 'review-category-contract', unavailableReason: null,
       guidelineDocuments: [{ documentId: 'synthetic/cross-deliverable', title: '合成比对规则', issuer: '合成', version: '1',
@@ -99,6 +113,13 @@ describe('material-bearing live kind admission (#809)', () => {
     expect(liveKindAdmission(withRuleFor(selected, cross.kind, { editorialDeliverablesAllowed: false }), cross, binding)).toBeNull();
     expect(liveKindAdmission(withRuleFor(selected, cross.kind, { materialReferencesAllowed: false }), cross, binding)).toBeNull();
     expect(liveKindContractCategories(cross.kind, cross)).toEqual(['editorial-deliverable-excerpt', 'frozen-material-reference-excerpt']);
+    for (const productionBinding of ORDINARY_PRODUCTION_ALLOWED_BINDINGS) {
+      const policy = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'ordinary-production',
+        { ...productionBinding, credentialReference: '33333333-3333-4333-8333-333333333333' });
+      expect(liveKindAdmission(policy, cross, productionBinding)).not.toBeNull();
+      expect(liveKindAdmission(withRuleFor(policy, cross.kind, { editorialDeliverablesAllowed: false }), cross, productionBinding)).toBeNull();
+      expect(liveKindAdmission(withRuleFor(policy, cross.kind, { materialReferencesAllowed: false }), cross, productionBinding)).toBeNull();
+    }
   });
 
   it('does not turn the material-free score rewrite into a material wrapper through a direct caller', () => {

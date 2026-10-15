@@ -8,7 +8,7 @@ Generated from the provider documents under [`config/providers/`](../../config/p
 
 - **Declared** — a document declares the route and the model. A declared model whose `answerChannel` is `none` is inert: it can read no response. A declared format is a claim about the request shape and nothing else (ADR 0073 §3).
 - **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.
-- **Bindable** — a route a Provider Resolution Plan may bind. No document makes a route bindable: that is a Provider Processing policy rule naming the exact binding, the Owner's decision per provider, and its first transmission is a named test item under ADR 0067. Today the bindable routes are the production connection's `deepseek-open-platform` and Provider Processing v5's developer-live `opencode-go` (`ExecutionRoute`, `src/service/provider/egress-gate.ts`).
+- **Bindable** — a route a Provider Resolution Plan may bind. No document makes a route bindable: that is a Provider Processing policy rule naming the exact binding, the Owner's decision per provider, and its first transmission is a named test item under ADR 0067. Today the bindable routes are the developer-live route of Provider Processing v12, `opencode-go` · `deepseek-v4.1-flash`, and the two bindings Provider Processing v13 lets an editor configure under ordinary-production (Issue #811): OpenCode Go `opencode-go` · `deepseek-v4.1-flash`, the default, and DeepSeek 开放平台（官方） `deepseek-open-platform` · `deepseek-flash` (`ExecutionRoute`, `src/service/provider/egress-gate.ts`).
 
 A capability a document does not declare is absent with `unverified` evidence. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page's "1M" is read as 1,000,000), and `none` where no page read states one.
 
@@ -172,7 +172,7 @@ The production connection's route, unchanged: the one route that sends the DSH a
 | `deepseek-v4-pro` | DeepSeek V4 Pro High | 1,000,000 | `function` | `none` |
 | `deepseek-flash` | DeepSeek V4.1 Flash | 1,000,000 | `none` | `none` |
 
-Inert: 1 of 2 (no declared answer channel). Established:
+Inert: 0 of 2 (no declared answer channel). Established:
 
 - `deepseek-v4-pro` · `requestShape: openai-chat-completions` — `frozen-request-baseline`, since adapter revision 1
 - `deepseek-v4-pro` · `reasoningControl: deepseek-thinking` — `frozen-request-baseline`, since adapter revision 1
@@ -181,14 +181,17 @@ Inert: 1 of 2 (no declared answer channel). Established:
 - every model · `webSearchTool: none` — `vendor-documentation`, DeepSeek official — Tool Calls guide, Chat Completions reference, Responses API guide (api-docs.deepseek.com), read 2026-09-10
 - every model · context 1,000,000 — `vendor-documentation`, DeepSeek official API documentation, models and pricing pages (api-docs.deepseek.com), as ADR 0080 §3 records them, read 2026-09-10
 - `deepseek-flash` · `requestShape: openai-chat-completions` — `vendor-documentation`, DeepSeek official API documentation, models and pricing pages (api-docs.deepseek.com), as ADR 0080 §3 records them, read 2026-09-10
+- `deepseek-flash` · `answerChannel: message-content-string` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15
+- `deepseek-flash` · `reasoningChannel: message-reasoning-content` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15
 - `deepseek-v4-pro`: The production model. Its request side is exactly what adapter revision 1 has always sent; its response side has never been observed, so every other read-side capability is absent. By the vendor's notice, from 12:00 Beijing time on 2026-09-14 requests for this id are routed to V4.1 Flash (ADR 0080 §3); the id is not moved here (ADR 0080 §5.3).
-- `deepseek-flash`: Declared and inert: the vendor's current id for V4.1 Flash, so the rename its notice forces is a policy-byte review rather than a source edit. No binding names it.
+- `deepseek-flash`: The vendor's current id for V4.1 Flash, named by Provider Processing v13's ordinary-production binding for the DeepSeek 开放平台（官方） route (Issue #811). Answer and reasoning channels are the vendor's documented response contract, which the #811 ordinary-production observation of 2026-10-15 (one baseline Task, recorded on the Issue, no ledger line by design) agreed with; it sends no unverified format, reasoning-control or tool parameters.
 
 Readings:
 
 - `production-baseline` — `frozen-request-baseline`, since adapter revision 1. The production route's request-side values predate the profile table, are pinned byte for byte by the adapter suite, and have never been transmitted live. `authorization: Bearer` is what adapter revision 1 has always sent on this route.
 - `tool-calls-guide` — `vendor-documentation`, DeepSeek official Tool Calls guide, api-docs.deepseek.com/guides/tool_calls, read 2026-09-11. Documents function tools with `strict` JSON-schema parameters and states "From DeepSeek-V3.2, the API supports tool use in the thinking mode." The `tool_choice` values and the thinking-mode round-trip rules are not on that page and remain for the first live item (ADR 0080 §2).
 - `no-web-search` — `vendor-documentation`, DeepSeek official — Tool Calls guide, Chat Completions reference, Responses API guide (api-docs.deepseek.com), read 2026-09-10. The Tool Calls guide admits only `"type": "function"`, the Chat Completions reference states "Currently, only functions are supported as a tool", and the Responses API guide marks `web_search` `Ignored` (ADR 0080 §3).
+- `chat-completions-reference` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15. Lists `deepseek-flash` and `deepseek-v4-pro` as the request's model ids; the non-streaming response carries the answer as the string `choices[0].message.content` and, in thinking mode (the `thinking` parameter defaults to enabled), the reasoning as the string `choices[0].message.reasoning_content`.
 - `models-and-pricing` — `vendor-documentation`, DeepSeek official API documentation, models and pricing pages (api-docs.deepseek.com), as ADR 0080 §3 records them, read 2026-09-10. Prints `deepseek-flash` (DeepSeek-V4.1-Flash) and `deepseek-v4-pro` (DeepSeek-V4-Pro-0813), each with a 1M context.
 
 Open:

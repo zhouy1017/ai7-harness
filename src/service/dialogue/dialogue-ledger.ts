@@ -23,6 +23,9 @@ import type { DialogueMessageInput } from './contract.js';
  * Revision 71 (Issue #52, S17c) widens `dialogue_execution_bindings` for the live route: an attempt bound to the Go route
  * under developer-live names no fixture and instead the Provider Processing version and allow rule that admitted it; one
  * bound to the local deterministic fixture names the fixture and neither of them, exactly as revision 60 recorded it.
+ * Revision 72 (Issue #811) widens it again for ordinary production: an attempt there is bound to the editor's configured
+ * route — Go or DeepSeek 开放平台（官方） — and names its policy version and rule exactly as a developer-live one does;
+ * developer-live attempts stay on the Go route only.
  */
 export const DIALOGUE_SCHEMA_SQL = {
   dialogue_tasks: `CREATE TABLE dialogue_tasks (
@@ -59,9 +62,9 @@ export const DIALOGUE_SCHEMA_SQL = {
   dialogue_execution_bindings: `CREATE TABLE dialogue_execution_bindings (
   attempt_id TEXT PRIMARY KEY REFERENCES dialogue_attempts(attempt_id),
   harness_session_id TEXT NOT NULL UNIQUE,
-  route TEXT NOT NULL CHECK(route IN ('ai7-local-deterministic', 'opencode-go')),
+  route TEXT NOT NULL CHECK(route IN ('ai7-local-deterministic', 'opencode-go', 'deepseek-open-platform')),
   model TEXT NOT NULL CHECK(length(model) BETWEEN 1 AND 128),
-  operational_scope TEXT NOT NULL CHECK(operational_scope IN ('development-ci', 'developer-live')),
+  operational_scope TEXT NOT NULL CHECK(operational_scope IN ('development-ci', 'developer-live', 'ordinary-production')),
   behavior_composition_sha256 TEXT NOT NULL CHECK(length(behavior_composition_sha256) = 64),
   prompt_contract_sha256 TEXT NOT NULL CHECK(length(prompt_contract_sha256) = 64),
   fixture_sha256 TEXT CHECK(fixture_sha256 IS NULL OR length(fixture_sha256) = 64),
@@ -70,10 +73,11 @@ export const DIALOGUE_SCHEMA_SQL = {
   sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
   provider_processing_version TEXT CHECK(provider_processing_version IS NULL OR length(provider_processing_version) BETWEEN 2 AND 16),
   policy_rule_id TEXT CHECK(policy_rule_id IS NULL OR length(policy_rule_id) BETWEEN 1 AND 128),
-  CHECK((route = 'opencode-go') = (operational_scope = 'developer-live')),
-  CHECK((route = 'opencode-go') = (fixture_sha256 IS NULL)),
-  CHECK((route = 'opencode-go') = (provider_processing_version IS NOT NULL)),
-  CHECK((provider_processing_version IS NULL) = (policy_rule_id IS NULL))
+  CHECK((route = 'ai7-local-deterministic') = (operational_scope = 'development-ci')),
+  CHECK((route != 'ai7-local-deterministic') = (fixture_sha256 IS NULL)),
+  CHECK((route != 'ai7-local-deterministic') = (provider_processing_version IS NOT NULL)),
+  CHECK((provider_processing_version IS NULL) = (policy_rule_id IS NULL)),
+  CHECK(NOT (operational_scope = 'developer-live' AND route != 'opencode-go'))
 ) STRICT`,
   dialogue_harness_spans: `CREATE TABLE dialogue_harness_spans (
   attempt_id TEXT PRIMARY KEY REFERENCES dialogue_execution_bindings(attempt_id),
@@ -156,30 +160,53 @@ export const DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL = `CREATE TABLE dialogu
   sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
 ) STRICT`;
 
+/** `dialogue_execution_bindings` as revision 71 widened it: the developer-live Go route beside the local one. */
+export const DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL = `CREATE TABLE dialogue_execution_bindings (
+  attempt_id TEXT PRIMARY KEY REFERENCES dialogue_attempts(attempt_id),
+  harness_session_id TEXT NOT NULL UNIQUE,
+  route TEXT NOT NULL CHECK(route IN ('ai7-local-deterministic', 'opencode-go')),
+  model TEXT NOT NULL CHECK(length(model) BETWEEN 1 AND 128),
+  operational_scope TEXT NOT NULL CHECK(operational_scope IN ('development-ci', 'developer-live')),
+  behavior_composition_sha256 TEXT NOT NULL CHECK(length(behavior_composition_sha256) = 64),
+  prompt_contract_sha256 TEXT NOT NULL CHECK(length(prompt_contract_sha256) = 64),
+  fixture_sha256 TEXT CHECK(fixture_sha256 IS NULL OR length(fixture_sha256) = 64),
+  bound_at TEXT NOT NULL,
+  canonical_json TEXT NOT NULL,
+  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+  provider_processing_version TEXT CHECK(provider_processing_version IS NULL OR length(provider_processing_version) BETWEEN 2 AND 16),
+  policy_rule_id TEXT CHECK(policy_rule_id IS NULL OR length(policy_rule_id) BETWEEN 1 AND 128),
+  CHECK((route = 'opencode-go') = (operational_scope = 'developer-live')),
+  CHECK((route = 'opencode-go') = (fixture_sha256 IS NULL)),
+  CHECK((route = 'opencode-go') = (provider_processing_version IS NOT NULL)),
+  CHECK((provider_processing_version IS NULL) = (policy_rule_id IS NULL))
+) STRICT`;
+
 /** A relation's text with its whitespace folded, the way the other ledgers compare exact texts. */
 function foldedSql(value: string): string {
   return value.trim().replace(/\s+/gu, ' ');
 }
 
 /**
- * Which of its two texts `dialogue_execution_bindings` holds: revision 60's, or revision 71's that admits the live route.
- * No other text was ever created, so any other is refused.
+ * Which of its three texts `dialogue_execution_bindings` holds: revision 60's, revision 71's that admits the developer-live
+ * route, or revision 72's that admits ordinary production's two routes. No other text was ever created, so any other is refused.
  */
-export function dialogueExecutionBindingsShape(db: DatabaseSync): 'revision-60' | 'current' {
+export function dialogueExecutionBindingsShape(db: DatabaseSync): 'revision-60' | 'revision-71' | 'current' {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'dialogue_execution_bindings'").get() as SqlRow | undefined;
   const sql = row === undefined ? '' : foldedSql(text(row.sql));
   if (sql === foldedSql(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings)) return 'current';
+  if (sql === foldedSql(DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL)) return 'revision-71';
   requireDialogue(sql === foldedSql(DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL), 'SCHEMA_MIGRATION_FAILED', '对话执行绑定表结构不兼容。');
   return 'revision-60';
 }
 
 /**
- * Revision 60 → 71 for `dialogue_execution_bindings` (Issue #52, S17c): the relation is rebuilt from its current text, every
- * row copied byte for byte, rowid included, in rowid order — the two new columns stay empty, as a local binding's always are
- * — and its two ledger triggers re-armed from their own texts. It runs in the caller's transaction with foreign keys off,
- * so the spans that name a binding keep their rows while the relation they reference is re-created.
+ * Revision 60 or 71 → 72 for `dialogue_execution_bindings` (Issue #52, S17c; Issue #811): the relation is rebuilt from its
+ * current text, every row copied byte for byte, rowid included, in rowid order — from revision 60 the two columns revision 71
+ * added stay empty, as a local binding's always are — and its two ledger triggers re-armed from their own texts. It runs in
+ * the caller's transaction with foreign keys off, so the spans that name a binding keep their rows while the relation they
+ * reference is re-created.
  */
-function widenDialogueExecutionBindings(db: DatabaseSync): void {
+function widenDialogueExecutionBindings(db: DatabaseSync, from: 'revision-60' | 'revision-71'): void {
   requireDialogue(
     db.isTransaction && integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys) === 0,
     'SCHEMA_MIGRATION_FAILED',
@@ -196,7 +223,7 @@ function widenDialogueExecutionBindings(db: DatabaseSync): void {
   db.exec('CREATE TEMP TABLE migrate_dialogue_execution_bindings AS SELECT rowid AS migrate_rowid, * FROM dialogue_execution_bindings');
   db.exec('DROP TABLE dialogue_execution_bindings');
   db.exec(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings);
-  requireDialogue(columnsOf().join(', ') === [...columns, 'provider_processing_version', 'policy_rule_id'].join(', '),
+  requireDialogue(columnsOf().join(', ') === (from === 'revision-60' ? [...columns, 'provider_processing_version', 'policy_rule_id'] : columns).join(', '),
     'SCHEMA_MIGRATION_FAILED', '对话执行绑定表迁移前后的列不一致。');
   const list = columns.join(', ');
   db.exec(`INSERT INTO dialogue_execution_bindings(rowid, ${list})
@@ -208,11 +235,13 @@ function widenDialogueExecutionBindings(db: DatabaseSync): void {
 
 /**
  * Revision 60's relations, created once: a store that predates them gains six empty relations and nothing existing moves.
- * A store that has them at revision 60's text has `dialogue_execution_bindings` widened for revision 71, in one transaction.
+ * A store that has them at revision 60's or 71's text has `dialogue_execution_bindings` widened for revision 72, in one
+ * transaction.
  */
 export function initializeDialogueSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'dialogue_tasks'").get() !== undefined;
-  if (existing && dialogueExecutionBindingsShape(db) === 'current') return;
+  const shape = existing ? dialogueExecutionBindingsShape(db) : null;
+  if (shape === 'current') return;
   const foreignKeys = (): number => integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
   const restoreForeignKeys = existing && foreignKeys() === 1;
   if (existing) {
@@ -222,8 +251,8 @@ export function initializeDialogueSchema(db: DatabaseSync): void {
   try {
     db.exec('BEGIN IMMEDIATE');
     try {
-      if (existing) {
-        widenDialogueExecutionBindings(db);
+      if (shape !== null) {
+        widenDialogueExecutionBindings(db, shape);
         requireDialogue(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
       } else {
         for (const sql of Object.values(DIALOGUE_SCHEMA_SQL)) db.exec(sql);
@@ -312,12 +341,21 @@ export interface StoredLocalDialogueBinding extends DialogueBindingBase {
   readonly fixtureSha256: string;
 }
 
-/** An attempt sent on the Go route under developer-live (S17c): the policy version and allow rule that admitted it. */
+/**
+ * An attempt sent on a live route (S17c; Issue #811): the Go route under developer-live, or the editor's configured Go or
+ * DeepSeek 开放平台（官方） route under ordinary-production, with the policy version and allow rule that admitted it.
+ */
 export interface StoredLiveDialogueBinding extends DialogueBindingBase {
-  readonly route: 'opencode-go';
-  readonly operationalScope: 'developer-live';
+  readonly route: 'opencode-go' | 'deepseek-open-platform';
+  readonly operationalScope: 'developer-live' | 'ordinary-production';
   readonly providerProcessingVersion: string;
   readonly policyRuleId: string;
+}
+
+/** Whether a live binding's scope and route are a pair the ledger records: developer-live on Go only. */
+function livePairAdmitted(route: string, scope: string): boolean {
+  return (scope === 'developer-live' && route === 'opencode-go') ||
+    (scope === 'ordinary-production' && (route === 'opencode-go' || route === 'deepseek-open-platform'));
 }
 
 export type StoredDialogueBinding = StoredLocalDialogueBinding | StoredLiveDialogueBinding;
@@ -498,9 +536,9 @@ export class DialogueLedger {
         requireDialogue(bindingRow.provider_processing_version === null && bindingRow.policy_rule_id === null, 'DIALOGUE_RECORD_INVALID', INVALID);
         binding = { ...shared, route, operationalScope: scope, fixtureSha256: text(bindingRow.fixture_sha256) };
       } else {
-        requireDialogue(route === 'opencode-go' && scope === 'developer-live' && bindingRow.fixture_sha256 === null, 'DIALOGUE_RECORD_INVALID', INVALID);
+        requireDialogue(livePairAdmitted(route, scope) && bindingRow.fixture_sha256 === null, 'DIALOGUE_RECORD_INVALID', INVALID);
         binding = {
-          ...shared, route, operationalScope: scope,
+          ...shared, route: route as StoredLiveDialogueBinding['route'], operationalScope: scope as StoredLiveDialogueBinding['operationalScope'],
           providerProcessingVersion: text(bindingRow.provider_processing_version), policyRuleId: text(bindingRow.policy_rule_id),
         };
       }
@@ -561,11 +599,11 @@ export class DialogueLedger {
   }
 
   bind(attemptId: string, binding: StoredDialogueBinding): void {
-    const live = binding.route === 'opencode-go';
+    const live = binding.route !== 'ai7-local-deterministic';
     requireDialogue(UUID_PATTERN.test(binding.harnessSessionId) && DIGEST_PATTERN.test(binding.behaviorCompositionSha256) &&
       DIGEST_PATTERN.test(binding.promptContractSha256) &&
       (live
-        ? binding.operationalScope === 'developer-live' && /^v[1-9][0-9]{0,14}$/u.test(binding.providerProcessingVersion) &&
+        ? livePairAdmitted(binding.route, binding.operationalScope) && /^v[1-9][0-9]{0,14}$/u.test(binding.providerProcessingVersion) &&
           binding.policyRuleId.length > 0 && binding.policyRuleId.length <= 128
         : binding.operationalScope === 'development-ci' && DIGEST_PATTERN.test(binding.fixtureSha256)),
     'DIALOGUE_INVALID', '对话的执行绑定无效。');

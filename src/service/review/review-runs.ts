@@ -503,6 +503,7 @@ const PROVIDER_STATUS_LABELS: Readonly<Record<string, string>> = {
   'remote-denied-local-deterministic': '远程模型绑定被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行',
   'remote-denied-no-route': '远程模型绑定被拒绝，且没有可执行的本地路由；授权后会在派发前阻止',
   'remote-eligible-developer-live': 'developer-live：实时传输受运行边界约束',
+  'remote-eligible-ordinary-production': 'ordinary-production：经你配置的模型服务实时传输，受运行边界约束',
 };
 
 function text(value: SQLOutputValue | undefined): string {
@@ -2132,7 +2133,7 @@ export class ReviewRunStore {
       const review = revision as ReviewCategoryResultSetRevisionProjection;
       // #809: the live non-web route has no external evidence. The label follows the recorded
       // result into both its finding and its mark; model confidence cannot turn it into verification.
-      const unverified = revision.policyPin.operationalScope === 'developer-live';
+      const unverified = revision.policyPin.operationalScope === 'developer-live' || revision.policyPin.operationalScope === 'ordinary-production';
       const disclosure = unverified ? '【未联网核查】' : '';
       findings = review.findings.filter(read).map((finding) => ({
         kindRef: finding.findingId,

@@ -26,9 +26,17 @@ import {
   type ServiceSuccessResponse,
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
-import { armSingleHostAllowance, installNodeNetworkDenial } from '../shared/network-denial.js';
+import { armHostAllowanceSet, armSingleHostAllowance, installNodeNetworkDenial } from '../shared/network-denial.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
-import { DEVELOPER_LIVE_POLICY_BINDING, resolveDeveloperLiveLaunch, type DeveloperLiveRuntime } from './launch-policy.js';
+import {
+  DEVELOPER_LIVE_POLICY_BINDING,
+  ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
+  allowedProductionBindingOf,
+  resolveDeveloperLiveLaunch,
+  type ConfiguredProviderBinding,
+  type DeveloperLiveRuntime,
+  type OrdinaryProductionRuntime,
+} from './launch-policy.js';
 import { readSoftwareVersion } from './data-version.js';
 import { BACKUP_CHECK_INTERVAL_MS } from './scheduled-backups.js';
 import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
@@ -50,7 +58,7 @@ import type { EditorialStore, WaitingTaskRun } from './store.js';
 import type { CooperativeJobOwner } from './cooperative-jobs.js';
 import { REPLACEMENT_WAITING_MESSAGE, replacementBlockedBy, takenWhileReplacementWaits } from './replacement-gate.js';
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
-import type { LaunchBinding } from './analysis/baseline-analysis-store.js';
+import type { LaunchBinding, OrdinaryProductionLaunchBinding } from './analysis/baseline-analysis-store.js';
 import type { ReviewRunDriver } from './review/review-run-driver.js';
 import type { BackgroundAnalysisDispatcher } from './background-analysis.js';
 
@@ -191,6 +199,11 @@ async function dispatch(
   launchPolicy: LaunchPolicyProjection,
   connectivity: ConnectivityContext,
   background: BackgroundAnalysisDispatcher,
+  /**
+   * Re-read the configured model-service binding after a settings change (Issue #811) and answer the launch policy that
+   * results: under ordinary-production the route new Tasks use; under every other scope the launch's own, unchanged.
+   */
+  modelServiceChanged: () => Promise<LaunchPolicyProjection> = async () => launchPolicy,
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
@@ -222,31 +235,39 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), launchPolicy },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy },
       };
-    case 'saveModelServiceConnection':
+    case 'saveModelServiceConnection': {
+      const result = store.saveModelServiceConnection(
+        request.input.connectionName,
+        request.input.credentialReference,
+        request.input.credentialOperationState,
+        request.input.route,
+      );
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result };
+    }
+    case 'selectModelServiceRoute': {
+      // A settings change, never a fallback (Issue #811): new Tasks plan on this route; Runs under way keep their frozen binding.
+      store.selectModelServiceRoute(request.input.route);
+      const policy = await modelServiceChanged();
       return {
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.saveModelServiceConnection(
-          request.input.connectionName,
-          request.input.credentialReference,
-          request.input.credentialOperationState,
-        ),
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy },
       };
-    case 'setModelServiceCredentialState':
+    }
+    case 'setModelServiceCredentialState': {
+      const result = store.setModelServiceCredentialState(
+        request.input.credentialReference,
+        request.input.credentialOperationState,
+      );
+      await modelServiceChanged();
       // A credential that became ready may be all a waiting Run waited for (OFF-009): look again, afterwards.
       queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
-      return {
-        id: request.id,
-        ok: true,
-        op: request.op,
-        result: store.setModelServiceCredentialState(
-          request.input.credentialReference,
-          request.input.credentialOperationState,
-        ),
-      };
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     case 'getRecoveryComparison':
       return { id: request.id, ok: true, op: request.op, result: await store.getRecoveryComparison(request.input.attentionId) };
     case 'viewRecoveryCandidate':
@@ -353,7 +374,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: await store.inspectTaskPlanWithConnection(request.input, () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
+        result: await store.inspectTaskPlanWithConnection(request.input, (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress),
       };
     // 保留为缺口 (Issue #757; Manual Outcome Resolution): recorded, and the plan read again as the drawer reads it.
     case 'resolveUnconfirmedOutcomes': {
@@ -365,7 +386,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: await store.inspectTaskPlanWithConnection(plan, () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
+        result: await store.inspectTaskPlanWithConnection(plan, (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress),
       };
     }
     case 'inspectForegroundExecutionBoundary':
@@ -464,7 +485,7 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: await store.inspectTaskPlanWithConnection({ bookId: request.input.bookId, kind: request.input.kind, ref: request.input.ref },
-          () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
+          (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress),
       };
     }
     case 'cancelWaitingTask': {
@@ -476,7 +497,7 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: await store.inspectTaskPlanWithConnection({ bookId: request.input.bookId, kind: request.input.kind, ref: request.input.ref },
-          () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
+          (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress),
       };
     }
     case 'cancelWaitingBaselineAnalysis': {
@@ -505,7 +526,7 @@ async function dispatch(
       try {
         const plan = await store.inspectTaskPlanWithConnection(
           { bookId: request.input.bookId, kind: 'baseline-analysis', ref: request.input.taskIntentId },
-          () => analysisExecution.liveCredentialReadiness(),
+          (binding) => analysisExecution.liveCredentialReadiness(binding),
           connectivity.planConnectivity,
           analysisProgress,
         );
@@ -544,7 +565,7 @@ async function dispatch(
       const runRecordId = store.continuableBaselineAnalysisRun(request.input.bookId, request.input.taskIntentId);
       const plan = await store.inspectTaskPlanWithConnection(
         { bookId: request.input.bookId, kind: 'baseline-analysis', ref: request.input.taskIntentId },
-        () => analysisExecution.liveCredentialReadiness(),
+        (binding) => analysisExecution.liveCredentialReadiness(binding),
         connectivity.planConnectivity,
         analysisProgress,
       );
@@ -585,7 +606,7 @@ async function dispatch(
         request.input.taskIntentId,
         request.input.planEnvelopeDigest,
         request.input.ruleVersionId,
-        { credentialReadiness: () => analysisExecution.liveCredentialReadiness(), connectivity: connectivity.planConnectivity },
+        { credentialReadiness: (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity: connectivity.planConnectivity },
       );
       if (started.dispatchRunRecordId !== null) {
         // Through the governor as 开始任务's start goes (Issue #49, S14): a quick start falls back while every place is
@@ -883,7 +904,7 @@ async function dispatch(
         request.input.taskIntentId,
         request.input.planEnvelopeDigest,
         request.input.ruleVersionId,
-        { credentialReadiness: () => analysisExecution.liveCredentialReadiness(), connectivity: connectivity.planConnectivity },
+        { credentialReadiness: (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity: connectivity.planConnectivity },
       );
       if (started.dispatchRunRecordId !== null && started.ledger !== null) {
         try {
@@ -1567,6 +1588,41 @@ function parseArguments(argv: string[]): {
   };
 }
 
+/**
+ * The binding the editor configured (Issue #811): the route they chose, unless its credential was removed; else the default
+ * Go route once its credential is ready; else none, and every model-calling action says 模型服务需设置.
+ */
+function configuredRoleBindingOf(store: EditorialStore): ConfiguredProviderBinding | null {
+  const connections = store.getModelServiceConnections();
+  const selected = connections.find((connection) => connection.selected) ?? null;
+  const connection = selected !== null
+    ? (selected.credentialOperationState === 'missing' ? null : selected)
+    : connections.find((candidate) => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready') ?? null;
+  if (connection === null) return null;
+  const allowed = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === connection.binding.providerId);
+  return allowed === undefined ? null : {
+    route: allowed.route,
+    endpoint: allowed.endpoint,
+    model: allowed.model,
+    credentialSlot: allowed.credentialSlot,
+    credentialReference: connection.credentialReference,
+  };
+}
+
+/** The launch binding a configured route gives the ledgers: its exact facts, and a Run ceiling left to the editor (S16a). */
+function productionLaunchBindingOf(configured: ConfiguredProviderBinding | null): OrdinaryProductionLaunchBinding | null {
+  const allowed = allowedProductionBindingOf(configured);
+  return allowed === null || configured === null ? null : {
+    scope: 'ordinary-production',
+    route: allowed.route,
+    model: allowed.model,
+    endpoint: allowed.endpoint,
+    credentialSlot: allowed.credentialSlot,
+    credentialReference: configured.credentialReference,
+    runBudgetCeiling: 'unset',
+  };
+}
+
 function parentIsAlive(parentPid: number): boolean {
   if (process.ppid !== parentPid) return false;
   try {
@@ -1604,6 +1660,13 @@ async function run(): Promise<void> {
     // policy's endpoint host and port; Node's own fetch resolves `tls.connect` and `dns.lookup` at call time.
     const endpoint = new URL(DEVELOPER_LIVE_POLICY_BINDING.endpoint);
     armSingleHostAllowance({ host: endpoint.hostname, port: endpoint.port === '' ? 443 : Number(endpoint.port) });
+  } else if (launchForm.trustedOperationalScope === 'ordinary-production') {
+    // Ordinary production (Issue #811): the two allowed bindings' endpoint hosts, so the editor may choose the route for their
+    // next Task without restarting AI7. Which one a Run reaches is its frozen plan's, checked again by the Egress Gate.
+    armHostAllowanceSet(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.map(({ endpoint }) => {
+      const url = new URL(endpoint);
+      return { host: url.hostname, port: url.port === '' ? 443 : Number(url.port) };
+    }));
   }
   installNodeNetworkDenial();
   reachServiceStartup('process');
@@ -1616,8 +1679,8 @@ async function run(): Promise<void> {
     { loadLaunchFixture },
     { createKeyringSecretResolver },
     { ReviewRunDriver },
-    { DialogueExecutionOwner, dialogueLiveRoute },
-    { FastRoleExecutionOwner, fastRoleLiveRoutes },
+    { DialogueExecutionOwner, dialogueLiveRoute, productionDialogueRoute },
+    { FastRoleExecutionOwner, fastRoleLiveRoutes, productionFastRoleRoutes },
     { FastRoleRequests: FastRoleRequestsClass, fastInteractionRoutes },
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
     { baselinePromptContractForLaunch },
@@ -1664,12 +1727,19 @@ async function run(): Promise<void> {
   let background: BackgroundAnalysisDispatcher | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
-    const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
+    // Under ordinary-production the policy is resolved again with the editor's configured binding once the store is open, and
+    // again after every model-service settings change (Issue #811); under every other scope it is the launch's, once.
+    let launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
     // The developer-live runtime exists only when the requested scope actually verified; a denied policy
     // keeps the product provider-free exactly like development-ci, and the ceiling is never `unset` under
     // v5. The captured `fetch` travels with the launch facts and reaches no other owner.
     const developerLive: DeveloperLiveRuntime | null = launchPolicy.operationalScope === 'developer-live'
       ? { launch: resolveDeveloperLiveLaunch(launchForm, resolve(codeRoot, '..')), nativeFetch }
+      : null;
+    // Ordinary production (Issue #811): the captured transport and nothing of development — no Provider Result Cache, no
+    // Provider Test Ledger and no validation intent is ever constructed under this scope.
+    const production: OrdinaryProductionRuntime | null = launchPolicy.operationalScope === 'ordinary-production'
+      ? { scope: 'ordinary-production', nativeFetch }
       : null;
     // The J-04-only control resolves the hand-written synthetic fixture before the store opens, so the
     // frozen plan can pin the exact fixture identity, lineage, and digest; every other launch binds no route.
@@ -1704,9 +1774,29 @@ async function run(): Promise<void> {
       ...(calibrationMinBooks === undefined ? {} : { calibrationMinAdjustments: calibrationMinBooks }),
     });
     reachServiceStartup('owners');
+    // Under ordinary-production the binding is the editor's configured route (Issue #811), read now and after every settings
+    // change; a plan freezes whichever binding is configured when it is frozen, so a route switch reaches new Tasks only.
+    const productionState: { live: OrdinaryProductionLaunchBinding | null } = { live: null };
+    const openedStore = store;
+    const modelServiceChanged = async (): Promise<LaunchPolicyProjection> => {
+      if (production === null) return launchPolicy;
+      const configured = configuredRoleBindingOf(openedStore);
+      launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', configured);
+      productionState.live = launchPolicy.operationalScope === 'ordinary-production' && launchPolicy.providerProcessing.bindingState === 'configured'
+        ? productionLaunchBindingOf(configured)
+        : null;
+      return launchPolicy;
+    };
+    await modelServiceChanged();
     // The ledger learns the trusted launch once, before any frame is served, so every plan it freezes
     // names the binding this launch actually bound rather than re-deriving one at dispatch.
-    const launch: LaunchBinding = developerLive === null
+    const launch: LaunchBinding = production !== null
+      ? {
+          operationalScope: 'ordinary-production',
+          get policy() { return launchPolicy; },
+          get live() { return productionState.live; },
+        }
+      : developerLive === null
       ? { operationalScope: 'development-ci', live: null }
       : {
           operationalScope: 'developer-live',
@@ -1736,6 +1826,9 @@ async function run(): Promise<void> {
       fixture,
       secretResolver: createKeyringSecretResolver(),
       developerLive,
+      production,
+      currentLaunchPolicy: () => launchPolicy,
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', binding),
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
       // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
       readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
@@ -1794,14 +1887,23 @@ async function run(): Promise<void> {
       fixture,
       sessionLogRoot: await ensureCanonicalDataDirectory(dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
       // Under developer-live, the route the selected policy admits for the dialogue, if any (Issue #52, S17c).
-      live: developerLive === null ? null : dialogueLiveRoute(developerLive, launchPolicy, createKeyringSecretResolver()),
+      live: developerLive !== null
+        ? dialogueLiveRoute(developerLive, launchPolicy, createKeyringSecretResolver())
+        // Ordinary production (Issue #811): the route and reference the editor configured, read at each question.
+        : production !== null
+          ? productionDialogueRoute(production, () => launchPolicy, () => productionState.live?.credentialReference ?? null, createKeyringSecretResolver())
+          : null,
       answerHold: answerHoldPath === undefined ? null : controlledAnswerHold(answerHoldPath),
     });
     // 润色这段 and 基于当前稿件重新生成建议 (Issue #842): the launch's fixture under development-ci, and under developer-live the
     // route the selected policy admits for each kind, if any.
     const fastRoleOwner = new FastRoleExecutionOwner({
       fixture,
-      live: developerLive === null ? null : fastRoleLiveRoutes(developerLive, launchPolicy, createKeyringSecretResolver()),
+      live: developerLive !== null
+        ? fastRoleLiveRoutes(developerLive, launchPolicy, createKeyringSecretResolver())
+        : production !== null
+          ? productionFastRoleRoutes(production, () => launchPolicy, () => productionState.live?.credentialReference ?? null, createKeyringSecretResolver())
+          : null,
     });
     fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store) };
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the
@@ -1811,7 +1913,9 @@ async function run(): Promise<void> {
     const reviewDriver = reviewRuns;
     const reading = connectivityPath === undefined ? hostConnectivity : () => controlledConnectivity(connectivityPath);
     const reachesNetwork = (routeKind: string): boolean =>
-      routeKind === DEVELOPER_LIVE_POLICY_BINDING.route || (connectivityPath !== undefined && routeKind === LOCAL_DETERMINISTIC_ROUTE);
+      routeKind === DEVELOPER_LIVE_POLICY_BINDING.route ||
+      (production !== null && ORDINARY_PRODUCTION_ALLOWED_BINDINGS.some((binding) => binding.route === routeKind)) ||
+      (connectivityPath !== undefined && routeKind === LOCAL_DETERMINISTIC_ROUTE);
     let preflightInFlight: Promise<ReconnectPreflightProjection> | null = null;
     const connectivity: ConnectivityContext = {
       planConnectivity: { reading, reachesNetwork, slotBusy: () => owner.busy, carriesStoppedRun: (runRecordId) => owner.carriesStoppedRun(runRecordId, openStore.baselineAnalysisLedger) },
@@ -1830,9 +1934,9 @@ async function run(): Promise<void> {
           stillWaiting: (run) => openStore.taskRunWaits(run),
           drift: (run) => openStore.taskPreflightDrift(run),
           block: (run, reasons, cause) => openStore.blockWaitingTaskRun(run, reasons, cause),
-          reachesNetwork: developerLive !== null || (connectivityPath !== undefined && fixture !== null),
+          reachesNetwork: developerLive !== null || production !== null || (connectivityPath !== undefined && fixture !== null),
           connectivity: reading,
-          credentialReadiness: () => owner.liveCredentialReadiness(),
+          credentialReadiness: (run) => owner.liveCredentialReadiness(openStore.taskCredentialBinding({ bookId: run.bookId, kind: run.kind, ref: run.ref }, run.runRecordId)),
           slotBusy: () => owner.busy,
           admit: (run) => {
             if (run.kind === 'review-run') {
@@ -1887,7 +1991,8 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, request, importControl, launchPolicy, connectivity, background);
+        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, request, importControl, launchPolicy, connectivity,
+          background, modelServiceChanged);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();

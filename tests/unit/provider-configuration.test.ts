@@ -551,9 +551,11 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
     expect(OPENCODE_GO_V4_FLASH_PROFILE.context).toEqual({ tokens: null, evidence: { kind: 'unverified' } });
   });
 
-  it('declares every other configured model inert beside the three readable profiles, and no configured route bindable', () => {
+  it('declares every other configured model inert beside the four readable profiles, and no configured route bindable', () => {
     for (const profile of Object.values(PROVIDER_MODEL_PROFILES)) {
       if (profile === DEEPSEEK_V4_PRO_PROFILE || profile === OPENCODE_GO_V4_FLASH_PROFILE || profile === OPENCODE_GO_V41_FLASH_PROFILE) continue;
+      // Issue #811: the official route's V4.1 Flash, which ordinary production binds, reads its documented channels.
+      if (profile.key === 'deepseek-open-platform/deepseek-flash') continue;
       // A declared format is a claim about the request shape and nothing else (ADR 0073 §3).
       expect(profile.capabilities.answerChannel, profile.key).toBe('none');
       expect(profile.capabilities.reasoningChannel, profile.key).toBe('none');

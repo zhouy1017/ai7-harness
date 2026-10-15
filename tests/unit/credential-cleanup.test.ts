@@ -43,7 +43,7 @@ function plantStore(dataRoot: string, version: number, state: string | null): vo
     database.exec(`PRAGMA user_version = ${version}`);
     if (state !== null) {
       database.prepare('INSERT INTO model_service_connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-        'main-editorial-deepseek-v4-pro', 'main-editorial', '主编辑模型', 'deepseek-open-platform', 'deepseek-v4-pro', 1, 1,
+        'main-editorial-deepseek-v4-pro', 'main-editorial', '主编辑模型', 'deepseek-open-platform', 'deepseek-flash', 1, 1,
         '[]', 'deepseek-api-key', REFERENCE, state,
       );
     }
