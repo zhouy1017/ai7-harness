@@ -2124,6 +2124,18 @@ export interface AdmittedProviderRule {
    * including the v10 rules, which name their own reduction and reflection steps instead.
    */
   readonly crossUnitSynthesisAllowed: boolean;
+  /**
+   * Whether the rule's `source` block admits frozen Material Reference excerpts (`source.materialReferencesAllowed`; `false` when the
+   * rule's source does not name the term). A consuming kind admits a material-bearing contract only under a rule that states this
+   * and also lists `frozen-material-reference-excerpt` among its outbound categories (Provider Processing v12 and v13).
+   */
+  readonly materialReferencesAllowed: boolean;
+  /**
+   * Whether the rule's `source` block admits the Book's finalized editorial deliverables (`source.editorialDeliverablesAllowed`; `false`
+   * when the term is absent). A deliverable-bearing kind (cross-deliverable consistency) needs this together with
+   * `editorial-deliverable-excerpt` among the rule's outbound categories.
+   */
+  readonly editorialDeliverablesAllowed: boolean;
 }
 
 export interface LaunchPolicyProjection {

@@ -243,6 +243,12 @@ function verifyRuleBinding(rule: Record<string, unknown>, modelRole: string): vo
   );
 }
 
+/** One boolean of a rule's `source` block as the projection carries it: `true` only when the block states it `true`; absent is `false`. */
+function sourceFlag(rule: Record<string, unknown>, key: 'materialReferencesAllowed' | 'editorialDeliverablesAllowed'): boolean {
+  const source = rule['source'];
+  return isRecord(source) && source[key] === true;
+}
+
 function exactStrings(value: unknown, expected: readonly string[]): value is string[] {
   return Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index]);
 }
@@ -553,6 +559,8 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
       credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot,
       outboundDataCategories: [...reading.outboundDataCategories],
       crossUnitSynthesisAllowed: reading.crossUnitSynthesisAllowed,
+      materialReferencesAllowed: sourceFlag(rule, 'materialReferencesAllowed'),
+      editorialDeliverablesAllowed: sourceFlag(rule, 'editorialDeliverablesAllowed'),
     });
   }
   requirePolicy(seen.has(DEVELOPER_LIVE_POLICY_BINDING.ruleId));
@@ -1001,6 +1009,8 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
       credentialSlot: allowed.credentialSlot,
       outboundDataCategories: [...kind.outboundDataCategories],
       crossUnitSynthesisAllowed: kind.crossUnitSynthesisAllowed,
+      materialReferencesAllowed: kind.blocks.source['materialReferencesAllowed'] === true,
+      editorialDeliverablesAllowed: kind.blocks.source['editorialDeliverablesAllowed'] === true,
     });
   }
   return admitted;

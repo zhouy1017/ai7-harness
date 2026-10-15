@@ -66,6 +66,8 @@ const V12_UNCHANGED_RULES: Record<string, AdmittedProviderRule> = {
     ...GO_BINDING,
     outboundDataCategories: ['public-or-synthetic'],
     crossUnitSynthesisAllowed: false,
+    materialReferencesAllowed: false,
+    editorialDeliverablesAllowed: false,
   },
   dialogue: {
     ruleId: 'developer-live-public-samplebook-editorial-dialogue',
@@ -74,6 +76,8 @@ const V12_UNCHANGED_RULES: Record<string, AdmittedProviderRule> = {
     ...GO_BINDING,
     outboundDataCategories: ['editor-selected-manuscript-excerpt'],
     crossUnitSynthesisAllowed: false,
+    materialReferencesAllowed: false,
+    editorialDeliverablesAllowed: false,
   },
   polish: {
     ruleId: 'developer-live-public-samplebook-editorial-polish',
@@ -82,6 +86,8 @@ const V12_UNCHANGED_RULES: Record<string, AdmittedProviderRule> = {
     ...GO_BINDING,
     outboundDataCategories: ['editor-selected-manuscript-excerpt'],
     crossUnitSynthesisAllowed: false,
+    materialReferencesAllowed: false,
+    editorialDeliverablesAllowed: false,
   },
   conflict: {
     ruleId: 'developer-live-public-samplebook-conflict-regenerate',
@@ -90,6 +96,8 @@ const V12_UNCHANGED_RULES: Record<string, AdmittedProviderRule> = {
     ...GO_BINDING,
     outboundDataCategories: ['manuscript-conflict-region-excerpt'],
     crossUnitSynthesisAllowed: false,
+    materialReferencesAllowed: false,
+    editorialDeliverablesAllowed: false,
   },
 };
 /** The three rules v12 changes (Issue #853): the review rule gains cross-deliverable consistency and two categories; writing and evaluation gain frozen Material Reference excerpts. */
@@ -101,6 +109,8 @@ const V12_CHANGED_RULES: Record<string, AdmittedProviderRule> = {
     ...GO_BINDING,
     outboundDataCategories: ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt'],
     crossUnitSynthesisAllowed: false,
+    materialReferencesAllowed: true,
+    editorialDeliverablesAllowed: true,
   },
   writing: {
     ruleId: 'developer-live-public-samplebook-writing',
@@ -109,6 +119,8 @@ const V12_CHANGED_RULES: Record<string, AdmittedProviderRule> = {
     ...GO_BINDING,
     outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
     crossUnitSynthesisAllowed: true,
+    materialReferencesAllowed: true,
+    editorialDeliverablesAllowed: false,
   },
   evaluation: {
     ruleId: 'developer-live-public-samplebook-evaluation',
@@ -117,6 +129,8 @@ const V12_CHANGED_RULES: Record<string, AdmittedProviderRule> = {
     ...GO_BINDING,
     outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
     crossUnitSynthesisAllowed: true,
+    materialReferencesAllowed: true,
+    editorialDeliverablesAllowed: false,
   },
 };
 const V12_ADMITTED_RULES: AdmittedProviderRule[] = [
@@ -598,6 +612,17 @@ describe('the rules Provider Processing v12 carries from v11 and widens (Issues 
     ]);
     expect(reading.admittedRules.filter((rule) => rule.outboundDataCategories.includes('editorial-deliverable-excerpt')).map((rule) => rule.ruleId))
       .toEqual(['developer-live-public-samplebook-reference-free-review']);
+    // The projection carries the two source terms beside the categories (Issue #853, brief revision 2): a consumer admits a
+    // material- or deliverable-bearing kind only under a rule stating the flag and listing the matching category, and the two
+    // never disagree in the pinned bytes.
+    const flagged = reading.admittedRules.filter((rule) => rule.materialReferencesAllowed).map((rule) => rule.ruleId);
+    expect(flagged).toEqual(withMaterial);
+    expect(reading.admittedRules.filter((rule) => rule.editorialDeliverablesAllowed).map((rule) => rule.ruleId))
+      .toEqual(['developer-live-public-samplebook-reference-free-review']);
+    for (const rule of reading.admittedRules) {
+      expect(rule.materialReferencesAllowed, rule.ruleId).toBe(rule.outboundDataCategories.includes('frozen-material-reference-excerpt'));
+      expect(rule.editorialDeliverablesAllowed, rule.ruleId).toBe(rule.outboundDataCategories.includes('editorial-deliverable-excerpt'));
+    }
     for (const index of [REVIEW, WRITING, EVALUATION]) {
       // Each of the three needs its material term true; Series Knowledge stays refused everywhere.
       await expect(v12PolicyWithBlock(index, 'source', { materialReferencesAllowed: false }).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
@@ -709,6 +734,8 @@ function productionAdmittedRules(binding: ConfiguredProviderBinding): AdmittedPr
     ...routing,
     outboundDataCategories: rule.outboundDataCategories,
     crossUnitSynthesisAllowed: rule.crossUnitSynthesisAllowed,
+    materialReferencesAllowed: rule.materialReferencesAllowed,
+    editorialDeliverablesAllowed: rule.editorialDeliverablesAllowed,
   }));
 }
 
@@ -933,6 +960,15 @@ describe('Provider Processing v13 (ordinary-production, Issue #853)', () => {
       label: '本机生产：实时传输受运行边界约束',
     });
     expect(projection.providerProcessing.admittedRules).toHaveLength(7);
+    // The two source flags agree with the categories here too: material in review, writing and evaluation; deliverables in review.
+    expect(projection.providerProcessing.admittedRules.filter((rule) => rule.materialReferencesAllowed).map((rule) => rule.ruleId))
+      .toEqual(['ordinary-production-review', 'ordinary-production-writing', 'ordinary-production-evaluation']);
+    expect(projection.providerProcessing.admittedRules.filter((rule) => rule.editorialDeliverablesAllowed).map((rule) => rule.ruleId))
+      .toEqual(['ordinary-production-review']);
+    for (const rule of projection.providerProcessing.admittedRules) {
+      expect(rule.materialReferencesAllowed, rule.ruleId).toBe(rule.outboundDataCategories.includes('frozen-material-reference-excerpt'));
+      expect(rule.editorialDeliverablesAllowed, rule.ruleId).toBe(rule.outboundDataCategories.includes('editorial-deliverable-excerpt'));
+    }
     // One binding serves the Main Editorial and the Fast Interaction rules alike; the credential reference never enters the projection.
     expect(new Set(projection.providerProcessing.admittedRules.map((rule) => `${rule.route}|${rule.endpoint}|${rule.model}|${rule.credentialSlot}`)).size).toBe(1);
     expect(JSON.stringify(projection)).not.toContain(binding.credentialReference);
