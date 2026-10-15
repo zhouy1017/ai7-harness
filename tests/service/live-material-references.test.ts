@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EditorialStore } from '../../src/service/store.js';
+import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy, DEVELOPER_LIVE_POLICY_BINDING } from '../../src/service/launch-policy.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
@@ -44,6 +44,7 @@ let reportFixture: ResolvedModelFixture;
 let evaluationFixture: ResolvedModelFixture;
 let recorded: ResolvedModelFixture | null;
 let recordedUnits: Set<number>;
+let planRef: string;
 const writingRequest = { typeId: 'promotion-article', audience: '文学作品读者', channel: '图书介绍',
   requirements: '依据稿件与允许参考的资料起草，资料只参照、不照抄。' } as const;
 
@@ -139,8 +140,29 @@ beforeEach(async () => {
 
 afterEach(async () => { const stopped = driver?.dispose(); await owner?.dispose(); await stopped; store?.close(); await roots?.dispose(); });
 
+/** The kind's one rule without the named material term — `both` reads as Provider Processing v11's rule does. */
+function deny(kind: Kind, term: 'category' | 'flag' | 'both'): void {
+  const id = kindId(kind);
+  const rule = policy.providerProcessing.admittedRules.find((candidate) => candidate.taskKinds.includes(id))!;
+  policy = withRuleFor(policy, id, {
+    ...(term === 'flag' ? {} : { outboundDataCategories: rule.outboundDataCategories.filter((category) => category !== 'frozen-material-reference-excerpt') }),
+    ...(term === 'category' ? {} : { materialReferencesAllowed: false }),
+  });
+  bind();
+}
+
+/** The predecessor's exact refusal of a material-bearing live Task, code and words. */
+const refusalOf = (kind: Kind) => kind === 'writing' ? { code: 'WRITING_UNAVAILABLE', message: WRITING_MATERIAL_LIVE_UNAVAILABLE }
+  : { code: kind === 'review' ? 'REVIEW_MATERIAL_UNAVAILABLE' : 'TASK_MATERIAL_UNAVAILABLE', message: TASK_MATERIAL_LIVE_UNAVAILABLE };
+
+function thrown(action: () => unknown): unknown {
+  try { action(); } catch (error) { return error; }
+  throw new Error('NOT_REFUSED');
+}
+
 function prepare(kind: Kind) {
   const assertPlan = (ref: string) => {
+    planRef = ref;
     const plan = store.inspectTaskPlan({ bookId, kind: kind === 'review' ? 'review-run' : kind, ref });
     expect(plan.start.readiness).toBe('ready');
     expect(plan.scope.send.includes('资料库资料')).toBe(true);
@@ -235,13 +257,31 @@ describe('live material references (#809)', () => {
     }
   });
 
-  it.each(kinds)('keeps the exact predecessor refusal for %s when its rule lacks the category', (kind) => {
-    const id = kindId(kind);
-    const rule = policy.providerProcessing.admittedRules.find((candidate) => candidate.taskKinds.includes(id))!;
-    policy = withRuleFor(policy, id, { outboundDataCategories: rule.outboundDataCategories.filter((category) => category !== 'frozen-material-reference-excerpt') });
-    bind();
-    expect(() => prepare(kind)).toThrowError(kind === 'writing' ? WRITING_MATERIAL_LIVE_UNAVAILABLE : TASK_MATERIAL_LIVE_UNAVAILABLE);
+  it.each(kinds.flatMap((kind) => (['category', 'flag'] as const).map((term) => ({ kind, term }))))('keeps the exact predecessor refusal for $kind when its rule lacks the material $term', ({ kind, term }) => {
+    deny(kind, term);
+    expect(thrown(() => prepare(kind))).toMatchObject(refusalOf(kind));
     expect(sent).toHaveLength(0);
+  });
+
+  it.each(kinds)('refuses a %s plan prepared under the admitting rule once the rule reads as v11, and says nothing would be sent', async (kind) => {
+    const run = prepare(kind);
+    deny(kind, 'both');
+    // Brief revision 5: the review send condition and the two evaluation `refusedLive` arguments ask the exact kind's rule.
+    if (kind !== 'writing') {
+      expect(store.inspectTaskPlan({ bookId, kind: kind === 'review' ? 'review-run' : kind, ref: planRef }).scope.send)
+        .toBe('不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始');
+    }
+    await expect(run()).rejects.toMatchObject(refusalOf(kind));
+    expect(sent).toHaveLength(0);
+  });
+
+  it('answers a review naming an unknown Book with a coded refusal, the predecessor one under a v11 rule', () => {
+    const request = () => store.createReviewRunPreparationWork(randomUUID(), ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy, null, [materialId]);
+    const admitted = thrown(request);
+    expect(admitted).toBeInstanceOf(StoreError);
+    expect(admitted).toMatchObject({ code: 'REVIEW_BOOK_NOT_FOUND' });
+    deny('review', 'both');
+    expect(thrown(request)).toMatchObject(refusalOf('review'));
   });
 
   it.each(kinds.flatMap((kind) => (['withdrawn', 'moved', 'corrupt'] as const).map((damage) => ({ kind, damage }))))('re-checks $kind after $damage, keeping its completed unit', async ({ kind, damage }) => {

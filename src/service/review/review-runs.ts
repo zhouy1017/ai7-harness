@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading } from '../task-material-references.js';
 import { liveMaterialRule } from '../analysis/live-kind-admission.js';
-import { reviewCategoryKindId } from '../../shared/protocol.js';
+import { isReviewCategoryId, reviewCategoryKindId } from '../../shared/protocol.js';
 import { liveReviewRule, liveReviewUnavailableReason } from './live-review-admission.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -2559,6 +2559,9 @@ export class ReviewRunStore {
 
   /** Only Task-backed readers transmit material; each must carry its own admitting rule. */
   materialReferencesLiveAllowed(bookId: string, categoryIds: ReadonlyArray<string>): boolean {
+    const policy = this.#ledgers.baseline().launch.policy;
+    // A launch none of whose selected readers' rules admits material refuses before reading the Book, as before #809.
+    if (!Array.isArray(categoryIds) || !categoryIds.some((id) => isReviewCategoryId(id) && liveMaterialRule(policy, reviewCategoryKindId(id)) !== null)) return false;
     this.#requireBook(bookId);
     const readers = this.#forBook(bookId, this.#configuration()).categories.filter((entry) => categoryIds.includes(entry.categoryId) && entry.executor === 'review-category-contract');
     return readers.length > 0 && readers.every((entry) => liveMaterialRule(this.#ledgers.baseline().launch.policy, reviewCategoryKindId(entry.categoryId)) !== null);
