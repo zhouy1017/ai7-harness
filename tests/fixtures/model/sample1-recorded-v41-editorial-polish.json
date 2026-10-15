@@ -1,7 +1,7 @@
 {
   "schema": "ai7.model-fixture/1",
   "identity": "sample1-recorded-v41-editorial-polish",
-  "description": "Two 润色这段 answers of the #812 measured editorial-evidence pass on exact sample1, Go deepseek-v4.1-flash under developer-live Provider Processing v14 / active set v11, 2026-10-15, validation case editorial-evidence/sample1-polish-two-sentences with the declared delta input:editorial-evidence-two-new-sample1-sentences (two sentences other than #842's), capture head 5955f39d; items S30/editorial-polish/2 and 3, keyed under unit ordinal 0 by the ai7.editorial-polish/1 request digest. Each entry was emitted by tools/generate-model-fixture.mjs with exact sample1 source proof and keeps its original capture provenance. Measured-pass evidence for #812; replay proves application behaviour, not current model quality.",
+  "description": "Two 润色这段 answers of the #812 measured editorial-evidence pass on exact sample1, Go deepseek-v4.1-flash under developer-live Provider Processing v14 / active set v11, 2026-10-15, validation case editorial-evidence/sample1-polish-two-sentences with the declared delta input:editorial-evidence-two-new-sample1-sentences (two sentences other than #842's), capture head db58a668; items S30/editorial-polish/2 and 3, keyed under unit ordinal 0 by the ai7.editorial-polish/1 request digest. Each entry was emitted by tools/generate-model-fixture.mjs with exact sample1 source proof and keeps its original capture provenance. Measured-pass evidence for #812; replay proves application behaviour, not current model quality.",
   "basedOn": null,
   "provider": "ai7-local-deterministic",
   "model": "ai7-deterministic-fixture",

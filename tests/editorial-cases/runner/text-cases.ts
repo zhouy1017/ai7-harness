@@ -77,7 +77,8 @@ export function resolveTextAnchors(store: EditorialStore, book: ImportedBook, te
       return { id: concern.id, paragraph: defect.paragraph, from: defect.from, to: defect.to, words, corrections: defect.correction === null ? [] : [defect.correction], category: defect.category };
     }
     const range = locateOnce(blockText(concern.paragraph!, concern.id), concern.words!, `${testCase.id}/${concern.id}`);
-    return { id: concern.id, paragraph: concern.paragraph!, ...range, words: concern.words!, corrections: concern.corrections ?? [], category: concern.category ?? null };
+    return { id: concern.id, paragraph: concern.paragraph!, ...range, words: concern.words!, corrections: concern.corrections ?? [], category: concern.category ?? null,
+      ...(concern.keywords === undefined ? {} : { keywords: concern.keywords }) };
   });
   const checks = testCase.falsePositiveChecks.map((check): TextAnchor => {
     if (check.trap !== undefined) {
@@ -101,7 +102,7 @@ export function resolveTextAnchors(store: EditorialStore, book: ImportedBook, te
  */
 export function scoreTextFindings(findings: ReadonlyArray<TextFinding>, resolution: TextResolution, context: {
   readonly unreadParagraphs?: ReadonlySet<number>;
-  readonly excluded?: ReadonlyArray<{ categoryId: string; quote: string }>;
+  readonly excluded?: ReadonlyArray<{ categoryId: string; quote: string; note: string; replacement: string | null }>;
 } = {}): {
   scored: ReadonlyArray<ScoredFinding>;
   counts: Omit<FindingCounts, 'listed' | 'located' | 'excluded'>;
@@ -131,13 +132,14 @@ export function scoreTextFindings(findings: ReadonlyArray<TextFinding>, resoluti
 function openConcerns(
   resolution: TextResolution,
   met: ReadonlySet<string>,
-  context: { readonly unreadParagraphs?: ReadonlySet<number>; readonly excluded?: ReadonlyArray<{ categoryId: string; quote: string }> },
+  context: { readonly unreadParagraphs?: ReadonlySet<number>; readonly excluded?: ReadonlyArray<{ categoryId: string; quote: string; note: string; replacement: string | null }> },
 ) {
   const open = resolution.concerns.filter((concern) => !met.has(concern.id));
   const unmeasured = open.filter((concern) => context.unreadParagraphs?.has(concern.paragraph) === true);
   const measured = open.filter((concern) => !unmeasured.includes(concern));
   const excludedOnly = measured.filter((concern) => concern.words.length > 0 && (context.excluded ?? []).some((finding) =>
-    (concern.category === null || concern.category === finding.categoryId) && finding.quote.includes(concern.words)));
+    (concern.category === null || concern.category === finding.categoryId) && finding.quote.includes(concern.words) &&
+    (concern.keywords === undefined || concern.keywords.some((word) => `${finding.note}\n${finding.replacement ?? ''}`.includes(word)))));
   return {
     met: resolution.concerns.filter((concern) => met.has(concern.id)).map((concern) => concern.id),
     missed: measured.map((concern) => concern.id),

@@ -3,27 +3,71 @@
   "id": "review-literary-sample1",
   "kind": "review",
   "title": "文学性与表达改进 · sample1 全书",
-  "manuscript": { "source": "sample1" },
+  "manuscript": {
+    "source": "sample1"
+  },
   "bookTitle": "sample1 编辑价值证据 · 审阅",
-  "input": { "categories": ["literary-expression"], "scope": "whole" },
+  "input": {
+    "categories": [
+      "literary-expression"
+    ],
+    "scope": "whole"
+  },
   "fixture": "sample1-recorded-v41-editorial-review",
   "measuredPass": "review",
-  "replay": { "route": "developer-live", "modelQuestions": true },
+  "replay": {
+    "route": "developer-live",
+    "modelQuestions": true
+  },
   "expectedConcerns": [
-    { "id": "s1-stacked-adverbials", "category": "literary-expression", "paragraph": 72, "words": "有诗意很优雅地", "corrections": ["诗意而优雅地", "既有诗意又很优雅地"], "concern": "状语“有诗意很优雅地”堆叠生硬" },
-    { "id": "s1-cliche-simile-curve", "category": "literary-expression", "paragraph": 25, "words": "比女人身上的曲线还要美丽的弧线", "corrections": [], "concern": "以女性身体作喻，比喻俗套" },
-    { "id": "s1-cliche-simile-perm", "category": "literary-expression", "paragraph": 76, "words": "比女人的烫发还要复杂", "corrections": [], "concern": "再次以女性作喻，同类比喻重复" },
-    { "id": "s1-long-attributive", "category": "literary-expression", "paragraph": 69, "words": "马跃之的如何保护春秋墓葬中出土丝绸的专著", "corrections": [], "concern": "定语过长，“的如何……的专著”句式拗口" },
-    { "id": "s1-repetitive-ke", "category": "literary-expression", "paragraph": 10, "words": "可好是还可以过一次大寿", "corrections": [], "concern": "“可好……可不好……”句式重复，表达累赘" }
+    {
+      "id": "s1-stacked-adverbials",
+      "category": "literary-expression",
+      "paragraph": 72,
+      "words": "有诗意很优雅地",
+      "corrections": [
+        "诗意而优雅地",
+        "既有诗意又很优雅地"
+      ],
+      "concern": "状语“有诗意很优雅地”堆叠生硬"
+    },
+    {
+      "id": "s1-long-attributive",
+      "category": "literary-expression",
+      "paragraph": 69,
+      "words": "马跃之的如何保护春秋墓葬中出土丝绸的专著",
+      "corrections": [],
+      "concern": "定语过长，“的如何……的专著”句式拗口"
+    }
   ],
   "falsePositiveChecks": [
-    { "id": "s1-epigraph-a", "paragraph": 5, "words": "识时务者为俊杰", "reason": "开篇题辞，与下句对举，不应改写" },
-    { "id": "s1-epigraph-b", "paragraph": 6, "words": "不识时务者为圣贤", "reason": "开篇题辞的有意反转" },
-    { "id": "s1-classical-allusion", "paragraph": 71, "words": "三年不鸣，一鸣惊人，三年不飞，一飞冲天", "reason": "楚庄王典故的引语" },
-    { "id": "s1-wordplay-literary", "paragraph": 56, "words": "知之者之之也，不知者之之乎", "reason": "有意的文字游戏" }
+    {
+      "id": "s1-epigraph-a",
+      "paragraph": 5,
+      "words": "识时务者为俊杰",
+      "reason": "开篇题辞，与下句对举，不应改写"
+    },
+    {
+      "id": "s1-epigraph-b",
+      "paragraph": 6,
+      "words": "不识时务者为圣贤",
+      "reason": "开篇题辞的有意反转"
+    },
+    {
+      "id": "s1-classical-allusion",
+      "paragraph": 71,
+      "words": "三年不鸣，一鸣惊人，三年不飞，一飞冲天",
+      "reason": "楚庄王典故的引语"
+    },
+    {
+      "id": "s1-wordplay-literary",
+      "paragraph": 56,
+      "words": "知之者之之也，不知者之之乎",
+      "reason": "有意的文字游戏"
+    }
   ],
   "observations": {
-    "acceptance": "指出生硬或俗套的表达并给出保留原意的改写，编辑可采纳或在其基础上修改。",
+    "acceptance": "指出状语堆叠和长定语造成的可读性问题，保留原意。两处性别比喻和可好/可不好的正反铺陈属于需要语境判断的风格选择，不强制计为漏报。",
     "rework": "改写题辞、典故或有意的文字游戏，或改写改变了原意。"
   }
 }

@@ -59,11 +59,21 @@ describe('scoring', () => {
     expect(simulatedEditor(finding(0, 2, 'z'), { kind: 'unclassified' }, [concern], block)).toEqual({ action: 'leave', reason: 'unclassified' });
   });
 
+  it('requires the named issue when a quotation can support a different editorial observation', () => {
+    const specific = { ...concern, keywords: ['漏字'] };
+    expect(classifyFinding({ ...finding(10, 14, 'y'), note: '格式可调整' }, [specific], [])).toEqual({ kind: 'unclassified' });
+    expect(classifyFinding({ ...finding(10, 14, 'y'), note: '此处漏字' }, [specific], [])).toEqual({ kind: 'useful', concernId: 'c', precise: true });
+    const protectedName = anchor('name', 3, 10, 13, '林小远');
+    expect(classifyFinding({ ...finding(11, 12, '小'), quote: '小' }, [], [protectedName])).toEqual({ kind: 'unclassified' });
+    expect(classifyFinding({ ...finding(11, 12, '大'), quote: '小' }, [], [protectedName])).toEqual({ kind: 'false-positive', checkId: 'name' });
+  });
+
   it('reads structural anchors by item, passage kind, paragraphs, keywords, section and length', () => {
     const notes = [{ text: '甲骨文来信构成悬念', paragraphs: [20, 21], item: 'structure-and-coherence' }, { text: '个别脱字', paragraphs: [10], passageKind: 'problem' }];
     expect(structuralMet({ id: 'a', item: 'structure-and-coherence', paragraphs: [21, 44] }, notes, {})).toBe(true);
     expect(structuralMet({ id: 'b', item: 'chinese-language', paragraphs: [10] }, notes, {})).toBe(false);
     expect(structuralMet({ id: 'c', passageKind: 'problem', paragraphs: [10], keywords: ['脱字'] }, notes, {})).toBe(true);
+    expect(structuralMet({ id: 'c', passageKind: 'problem', paragraphs: [10], keywords: ['脱字'] }, [{ text: '叙事流畅', paragraphs: [10], passageKind: 'problem' }], {})).toBe(false);
     expect(structuralMet({ id: 'd', keywords: ['抄袭'] }, notes, { overall: '无' })).toBe(false);
     expect(structuralMet({ id: 'e', section: 'draft', keywords: ['蟠虺'], maxGraphemes: 5 }, notes, { draft: '《蟠虺》' })).toBe(true);
     expect(structuralMet({ id: 'f', section: 'draft', maxGraphemes: 3 }, notes, { draft: '《蟠虺》' })).toBe(false);
@@ -101,8 +111,8 @@ describe('the case set', () => {
     for (const id of SYNTHETIC_MANUSCRIPT_IDS) {
       const first = generateSyntheticManuscript(id);
       expect(generateSyntheticManuscript(id)).toEqual(first);
-      expect(first.defects.length).toBe(7);
-      expect(first.traps.length).toBe(3);
+      expect(first.defects.length).toBe(id === 'synthetic-museum' ? 6 : 7);
+      expect(first.traps.length).toBe(id === 'synthetic-museum' ? 4 : 3);
       for (const anchorAt of [...first.defects, ...first.traps]) {
         const text = first.paragraphs[anchorAt.paragraph - 1]!.text;
         const words = [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(text)].slice(anchorAt.from, anchorAt.to).map((part) => part.segment).join('');
@@ -114,22 +124,59 @@ describe('the case set', () => {
 });
 
 describe('the harness', () => {
+  it('checks the reviewed baseline by default and pins replay contract drift', async () => {
+    // @ts-expect-error Plain ESM tool has no declarations.
+    const tool = await import('../../tools/editorial-evidence.mjs');
+    expect(tool.parseArguments(['--replay', 'fixtures']).baseline).toBe(join(ROOT, 'tests', 'editorial-cases', 'replay-baseline.json'));
+    expect(tool.parseArguments(['--replay', 'fixtures', '--update-baseline', 'candidate.json']).baseline).toBeNull();
+    const metrics = { outcome: {}, findings: null, concerns: {}, checks: {}, effort: null, delivery: null, result: null,
+      replay: { answered: 1, unmatched: 0 }, evidence: { recordedUsage: {}, fixtures: [], contractsAgree: true, replayContracts: ['base'] } };
+    expect(tool.comparable(metrics)).not.toEqual(tool.comparable({ ...metrics, evidence: { ...metrics.evidence, contractsAgree: false } }));
+    expect(tool.comparable(metrics)).toEqual(tool.comparable({ ...metrics, evidence: { ...metrics.evidence, replayContracts: ['another-task-identity'] } }));
+  });
+
   it('replays every case provider-free, labels every source as fixture and matches the reviewed baseline', async () => {
     const out = await mkdtemp(join(await realpath(tmpdir()), 'ai7-editorial-evidence-'));
     try {
       const started = Date.now();
-      const run = spawnSync(process.execPath, [join(ROOT, 'tools', 'editorial-evidence.mjs'), '--replay', 'fixtures', '--out', out,
-        '--baseline', join(ROOT, 'tests', 'editorial-cases', 'replay-baseline.json')], { cwd: ROOT, encoding: 'utf8', timeout: 240_000, windowsHide: true });
+      const run = spawnSync(process.execPath, [join(ROOT, 'tools', 'editorial-evidence.mjs'), '--replay', 'fixtures', '--out', out],
+        { cwd: ROOT, encoding: 'utf8', timeout: 240_000, windowsHide: true });
       expect(run.stdout.split('\n').filter((line) => line.includes('baseline-mismatch') || line.includes('/error ')), run.stderr).toEqual([]);
       expect(run.status).toBe(0);
       expect(Date.now() - started).toBeLessThan(240_000);
-      const report = JSON.parse(await readFile(join(out, 'metrics.json'), 'utf8')) as { cases: Array<Record<string, any>> };
+      const report = JSON.parse(await readFile(join(out, 'metrics.json'), 'utf8')) as { cases: Array<Record<string, any>>; byKind: Array<Record<string, any>>; measuredPassLedger: unknown };
       expect(report.cases.length).toBeGreaterThanOrEqual(12);
       for (const entry of report.cases) {
         expect(entry.source, entry.id).toBe('fixture');
         if (entry.effort !== null) expect(entry.effort.restoredExactly, entry.id).toBe(true);
       }
+      // OPEN DEFECT #879 measurement, deliberately separate from the baseline. These are losses, not success criteria for
+      // localization. A future #879 fix must replace this measurement with its positive regression in that Issue's scope.
+      const reviews = report.cases.filter((entry) => ['review-typos-sample1', 'review-style-sample1', 'review-literary-sample1'].includes(entry.id));
+      expect(reviews.reduce((sum, entry) => sum + entry.findings.listed, 0), 'open #879: listed findings').toBe(116);
+      expect(reviews.map((entry) => [entry.id, entry.result.quoteNotFound]), 'open #879: excluded verbatim quotations').toEqual([
+        ['review-literary-sample1', 39], ['review-style-sample1', 2], ['review-typos-sample1', 10],
+      ]);
+      expect(reviews.reduce((sum, entry) => sum + entry.result.verbatimInBook, 0), 'open #879: all quotations occur verbatim').toBe(51);
+      expect(reviews.reduce((sum, entry) => sum + entry.result.ownBlockOrdinalMatches, 0), 'open #879: ordinal excluding overlap').toBe(50);
+      expect(report.cases.find((entry) => entry.id === 'review-typos-sample1')!.concerns.unmeasured).toEqual(['s1-missing-ta']);
+      expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'measured-pass')).toMatchObject({
+        cases: 3, concerns: 11, matched: 3, missed: 7, unmeasured: 1, raisedButExcluded: 3, falsePositiveChecks: 1,
+      });
+      expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'authored')).toMatchObject({
+        cases: 2, concerns: 13, matched: 11, missed: 2, falsePositiveChecks: 2,
+      });
+      expect(report.measuredPassLedger).toBeNull();
       expect(await readFile(join(out, 'metrics.md'), 'utf8')).toContain('| Case | Kind | Source |');
+      const baseline = JSON.parse(await readFile(join(ROOT, 'tests', 'editorial-cases', 'replay-baseline.json'), 'utf8'));
+      baseline.cases['polish-sample1-usage'].findings.useful += 1;
+      const changedBaseline = join(out, 'changed-baseline.json');
+      await writeFile(changedBaseline, JSON.stringify(baseline));
+      const regression = spawnSync(process.execPath, [join(ROOT, 'tools', 'editorial-evidence.mjs'), '--replay', 'fixtures',
+        '--case', 'polish-sample1-usage', '--baseline', changedBaseline, '--out', out],
+      { cwd: ROOT, encoding: 'utf8', timeout: 60_000, windowsHide: true });
+      expect(regression.status, regression.stderr).toBe(1);
+      expect(regression.stdout).toContain('EDITORIAL_EVIDENCE/baseline-mismatch/polish-sample1-usage');
     } finally {
       await rm(out, { recursive: true, force: true });
     }

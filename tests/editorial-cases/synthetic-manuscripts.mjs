@@ -82,13 +82,13 @@ const MUSEUM = {
     { id: 'mu-quote-marks', paragraph: 5, clean: '“家底”', injected: '「家底」', category: 'style-and-format', concern: '引号形式与全文“”体例不一致' },
     { id: 'mu-ellipsis', paragraph: 7, clean: '匆匆走过……', injected: '匆匆走过...', category: 'style-and-format', concern: '省略号应为中文“……”' },
     { id: 'mu-institution-name', paragraph: 8, clean: '青川县博物馆由此', injected: '青川县博物院由此', category: 'style-and-format', concern: '同一机构名称前后不一致（博物馆/博物院）' },
-    { id: 'mu-unit-symbol', paragraph: 9, clean: '全程约三公里', injected: '全程约3km', category: 'style-and-format', concern: '计量单位写法与中文行文体例不一致' },
-    { id: 'mu-book-title', paragraph: 10, clean: '县志里记载', injected: '县志里记载', category: 'style-and-format', concern: '同一书名前文加书名号、此处未加（《青川县志》）', anchorOnly: true },
+    { id: 'mu-unit-symbol', paragraph: 9, clean: '全程约三公里', injected: '全程约3km', category: 'style-and-format', concern: '数字与单位符号之间缺少空格，且与本文中文数量写法不一致；不把 km 符号本身判作错误' },
   ],
   traps: [
     { id: 'mu-case-number', paragraph: 11, words: 'A-12', reason: '展柜编号，字母与连字符按原样保留' },
     { id: 'mu-scale-ratio', paragraph: 11, words: '1∶5000', reason: '比例尺按国家标准使用比号与阿拉伯数字' },
     { id: 'mu-recorded-year', paragraph: 8, words: '二〇一九年', reason: '汉字数字年份与全文体例一致' },
+    { id: 'mu-generic-gazetteer', paragraph: 10, words: '县志里记载', reason: '县志是上文所提文献的泛称，不是正式书名，不必加书名号' },
   ],
 };
 

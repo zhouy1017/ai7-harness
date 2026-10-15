@@ -3,26 +3,72 @@
   "id": "review-style-sample1",
   "kind": "review",
   "title": "体例与格式 · sample1 全书",
-  "manuscript": { "source": "sample1" },
+  "manuscript": {
+    "source": "sample1"
+  },
   "bookTitle": "sample1 编辑价值证据 · 审阅",
-  "input": { "categories": ["style-and-format"], "scope": "whole" },
+  "input": {
+    "categories": [
+      "style-and-format"
+    ],
+    "scope": "whole"
+  },
   "fixture": "sample1-recorded-v41-editorial-review",
   "measuredPass": "review",
-  "replay": { "route": "developer-live", "modelQuestions": true },
+  "replay": {
+    "route": "developer-live",
+    "modelQuestions": true
+  },
   "expectedConcerns": [
-    { "id": "s1-chapter-one-heading", "category": "style-and-format", "paragraph": 4, "words": "壹", "corrections": [], "concern": "章序号“壹”作为正文段落排出，未按标题格式处理" },
-    { "id": "s1-chapter-two-heading", "category": "style-and-format", "paragraph": 51, "words": "贰", "corrections": [], "concern": "章序号“贰”作为正文段落排出，未按标题格式处理" },
-    { "id": "s1-front-matter-title", "category": "style-and-format", "paragraph": 1, "words": "蟠虺", "corrections": [], "concern": "书名、丛书名与作者署名作为正文段落排出，未按题名格式处理" },
-    { "id": "s1-circle-zero-1990", "category": "style-and-format", "paragraph": 15, "words": "一九九○年代", "corrections": [], "concern": "汉字数字中的零用字不统一（“○”应为“〇”）" },
-    { "id": "s1-circle-zero-1980", "category": "style-and-format", "paragraph": 21, "words": "一九八○年代", "corrections": [], "concern": "汉字数字中的零用字不统一（“○”应为“〇”）" }
+    {
+      "id": "s1-circle-zero-1990",
+      "category": "style-and-format",
+      "paragraph": 15,
+      "words": "一九九○年代",
+      "corrections": [],
+      "concern": "汉字数字中的零用字不统一（“○”应为“〇”）",
+      "keywords": [
+        "〇",
+        "圆圈",
+        "零"
+      ]
+    },
+    {
+      "id": "s1-circle-zero-1980",
+      "category": "style-and-format",
+      "paragraph": 21,
+      "words": "一九八○年代",
+      "corrections": [],
+      "concern": "汉字数字中的零用字不统一（“○”应为“〇”）",
+      "keywords": [
+        "〇",
+        "圆圈",
+        "零"
+      ]
+    }
   ],
   "falsePositiveChecks": [
-    { "id": "s1-chinese-year", "paragraph": 91, "words": "一九六六年", "reason": "全书年份统一用汉字数字，不应要求改为阿拉伯数字" },
-    { "id": "s1-quoted-address", "paragraph": 22, "words": "过小梅岭、可竹轩", "reason": "信封地址的引文，标点照录" },
-    { "id": "s1-inscription-mark", "paragraph": 48, "words": "拯之承启！", "reason": "甲骨文书信原文及其标点" }
+    {
+      "id": "s1-chinese-year",
+      "paragraph": 91,
+      "words": "一九六六年",
+      "reason": "全书年份统一用汉字数字，不应要求改为阿拉伯数字"
+    },
+    {
+      "id": "s1-quoted-address",
+      "paragraph": 22,
+      "words": "过小梅岭、可竹轩",
+      "reason": "信封地址的引文，标点照录"
+    },
+    {
+      "id": "s1-inscription-mark",
+      "paragraph": 48,
+      "words": "拯之承启！",
+      "reason": "甲骨文书信原文及其标点"
+    }
   ],
   "observations": {
-    "acceptance": "指出章序号、题名与数字用字的体例问题并给出所在位置的批注，编辑可据以统一体例。",
+    "acceptance": "指出年份零字符的用字问题并准确定位；纯文本中的独立章序、书名与署名不能证明版式有错，条件性的核对建议留给编辑判断。",
     "rework": "把全书一致的汉字数字或引文标点当作体例错误，或批注位置与问题不符。"
   }
 }

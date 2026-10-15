@@ -17,6 +17,8 @@ export interface TextAnchor {
   /** Acceptable corrected forms of `words`, the first preferred; empty when any reasonable rewording is acceptable. */
   readonly corrections: ReadonlyArray<string>;
   readonly category: string | null;
+  /** Optional evidence of the particular issue, beyond merely quoting the same span. */
+  readonly keywords?: ReadonlyArray<string>;
 }
 
 export interface TextFinding {
@@ -27,6 +29,7 @@ export interface TextFinding {
   readonly from: number;
   readonly to: number;
   readonly quote: string;
+  readonly note?: string;
   /** What a 修改建议 proposes in place of the quotation; `null` for a 批注. */
   readonly replacement: string | null;
   readonly markId: string | null;
@@ -82,11 +85,19 @@ export function classifyFinding(
   checks: ReadonlyArray<Omit<TextAnchor, 'corrections' | 'category'>>,
 ): FindingVerdict {
   if (finding.paragraph === null) return { kind: 'unclassified' };
-  const check = checks.find((candidate) => candidate.paragraph === finding.paragraph && overlaps(candidate, finding) &&
-    (finding.replacement === null || !finding.replacement.includes(candidate.words)));
+  const check = checks.find((candidate) => {
+    if (candidate.paragraph !== finding.paragraph || !overlaps(candidate, finding)) return false;
+    if (finding.replacement === null) return true;
+    // Include the untouched part of a protected span: a replacement can cover only part of it.
+    const words = graphemesOf(candidate.words);
+    const after = words.slice(0, Math.max(0, finding.from - candidate.from)).join('') + finding.replacement +
+      words.slice(Math.max(0, finding.to - candidate.from)).join('');
+    return !after.includes(candidate.words);
+  });
   if (check !== undefined) return { kind: 'false-positive', checkId: check.id };
   const concern = concerns.find((candidate) => candidate.paragraph === finding.paragraph && overlaps(candidate, finding) &&
-    (candidate.category === null || candidate.category === finding.categoryId));
+    (candidate.category === null || candidate.category === finding.categoryId) &&
+    (candidate.keywords === undefined || candidate.keywords.some((word) => `${finding.note ?? ''}\n${finding.replacement ?? ''}`.includes(word))));
   if (concern === undefined) return { kind: 'unclassified' };
   return { kind: 'useful', concernId: concern.id, precise: finding.from <= concern.from && finding.to >= concern.to };
 }

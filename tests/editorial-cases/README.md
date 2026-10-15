@@ -66,6 +66,8 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
 A **text concern or check** (review, polish) anchors to a paragraph — block `n` of the imported Book, 1-based — and either
 `words` (a short fragment occurring exactly once in that paragraph) or, for a synthetic manuscript, a generator `defect` / `trap`
 id. A text concern may carry `corrections`: the acceptable corrected forms of `words`, the first preferred.
+It may also require `keywords` in the finding's note or replacement, so quoting a date does not by itself demonstrate
+recognition of its specific zero-character problem.
 
 A **structural concern** (evaluation, report, writing) anchors to paragraphs a result must cite (`paragraphs`) and may further
 require an evaluation `item`, a report passage `passageKind`, or one of `keywords` in the model's own words for that anchor.
@@ -76,11 +78,13 @@ of its `keywords`. Keyword checks are a coarse proxy; the report says so.
 
 `tools/editorial-evidence.mjs` matches a located finding to a concern when it lies in the concern's paragraph and its range
 overlaps the concern's words; it is **precise** when it covers them. A false-positive check fires when a finding flags its
-protected words (a 批注) or proposes text in which they no longer stand (a 修改建议). It reports:
+protected words (a 批注) or proposes text in which they no longer stand, including the unchanged edges of a partial replacement
+(a 修改建议). Issue-specific keywords, when declared, must also match. These are anchor proxies, not semantic quality scores. It reports:
 
 - **useful findings** (matched a concern), **unclassified** (matched nothing), **false positives** (fired a check) and
   **misses** (concerns nothing matched). Two open concerns are kept apart from a miss: **unmeasured** — in a unit the Run holds
-  no answer for — and **raised but excluded** — the model quoted the concern's words in a finding the product could not place;
+  no answer for — and **raised but excluded** — the subset of misses for which the model quoted the concern's words and met its
+  issue-specific keywords in a finding the product could not place;
 - **location correctness**: listed, located and excluded findings as the product counted them, and precise / matched;
 - **editing effort**: what a simulated editor did with the resulting marks — *adopted* (the proposal already yields an
   acceptable correction), *edited* (the right place but another wording, corrected to the preferred form), *rejected* (a false
@@ -95,3 +99,14 @@ protected words (a 批注) or proposes text in which they no longer stand (a 修
   among them (`contractsAgree`): the deterministic adapter answers by unit header and digest, so a capture whose contract has
   since drifted still answers, and the metric says so;
 - model, route, contract digests, capture date, recorded usage and replay elapsed time.
+
+The JSON and Markdown outputs also aggregate by kind and capture cohort (this measured pass, earlier captures, authored
+controls). With `--ledger`, JSON includes measured-pass before/after counts and per-case transmissions, failures, refusals and
+usage from read-only metadata; orphaned claims remain separately disclosed in the evidence report. `fresh` describes the
+original capture, never a new transmission during replay.
+
+`pnpm run evidence:replay` and the harness test both check `replay-baseline.json` by default, including stable outcomes,
+contract agreement and fixture hashes. A deliberate update uses `--update-baseline tests/editorial-cases/replay-baseline.json`
+and refuses any failed case. Generated Task identities and replay time are not stable baseline values. The explicit open-#879
+assertions independently expose the 51/116 excluded findings; their presence in a baseline does not turn the defect into a pass
+for localization quality. Reviewer expectation corrections and their changed scores are recorded in the evidence report.

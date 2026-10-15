@@ -21,6 +21,8 @@ export interface ReviewObservation {
   readonly concerns: { met: ReadonlyArray<string>; missed: ReadonlyArray<string>; unmeasured: ReadonlyArray<string>; excludedOnly: ReadonlyArray<string> };
   readonly checks: { triggered: ReadonlyArray<string> };
   readonly effort: EditingEffort;
+  /** Measurement of open #879, never a successful localization claim. */
+  readonly defect879: { issue: number; quoteNotFound: number; verbatimInBook: number; ownBlockOrdinalMatches: number };
 }
 
 function scopeOf(store: EditorialStore, book: ImportedBook, scope: unknown) {
@@ -71,8 +73,10 @@ export async function runReviewCase(
   let unitsTotal = 0;
   const gaps: string[] = [];
   const unreadParagraphs = new Set<number>();
-  const excludedQuotes: Array<{ categoryId: string; quote: string }> = [];
-  const positions = new Map(workingBlocks(store, book).map((block) => [block.blockId, block.position]));
+  const excludedQuotes: Array<{ categoryId: string; quote: string; note: string; replacement: string | null }> = [];
+  const blocks = workingBlocks(store, book);
+  const positions = new Map(blocks.map((block) => [block.blockId, block.position]));
+  const defect879 = { issue: 879, quoteNotFound: 0, verbatimInBook: 0, ownBlockOrdinalMatches: 0 };
   let listed = 0;
   let located = 0;
   let excluded = 0;
@@ -98,7 +102,14 @@ export async function runReviewCase(
         if (position !== undefined) unreadParagraphs.add(position);
       }
     }
-    excludedQuotes.push(...revision.excluded.map((finding) => ({ categoryId, quote: finding.quote })));
+    excludedQuotes.push(...revision.excluded.map((finding) => ({ categoryId, quote: finding.quote, note: finding.note, replacement: finding.replacement })));
+    for (const finding of revision.excluded) {
+      if (finding.reason !== 'quote-not-found') continue;
+      defect879.quoteNotFound += 1;
+      if (blocks.some((block) => block.text.includes(finding.quote))) defect879.verbatimInBook += 1;
+      const ownId = manifest?.units.find((unit) => unit.ordinal === finding.unitOrdinal)?.blockIds[finding.blockOrdinal - 1];
+      if (blocks.find((block) => block.blockId === ownId)?.text.includes(finding.quote)) defect879.ownBlockOrdinalMatches += 1;
+    }
     unitsClosed += revision.coverage.unitsClosed;
     unitsTotal += revision.coverage.unitsTotal;
     gaps.push(...revision.gaps.map((gap) => `${categoryId}/${gap.unitOrdinal}:${gap.code}`));
@@ -110,7 +121,7 @@ export async function runReviewCase(
   const findings = allFindings(store, book.bookId, run).filter((finding) => categories.includes(finding.categoryId));
   const scored = scoreTextFindings(findings.map((finding) => ({
     key: finding.findingId, categoryId: finding.categoryId, paragraph: finding.blockPosition, from: finding.fromGrapheme, to: finding.toGrapheme,
-    quote: finding.quote, replacement: finding.replacement, markId: finding.markId,
+    quote: finding.quote, note: finding.note, replacement: finding.replacement, markId: finding.markId,
   })), resolution, { unreadParagraphs, excluded: excludedQuotes });
   const effort = await applyAndReverse(store, book, scored, resolution, {
     resolveAnnotation: (finding) => {
@@ -126,5 +137,6 @@ export async function runReviewCase(
     concerns: scored.concerns,
     checks: scored.checks,
     effort,
+    defect879,
   };
 }

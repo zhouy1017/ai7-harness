@@ -60,6 +60,7 @@ export function parseArguments(argv) {
   }
   if (options.replay !== 'fixtures') throw new EditorialEvidenceError('EDITORIAL_EVIDENCE/replay-required', '--replay fixtures');
   if (options.baseline !== null && options.updateBaseline !== null) throw new EditorialEvidenceError('EDITORIAL_EVIDENCE/baseline-ambiguous');
+  if (options.baseline === null && options.updateBaseline === null) options.baseline = join(ROOT, 'tests', 'editorial-cases', 'replay-baseline.json');
   return options;
 }
 
@@ -94,17 +95,37 @@ async function loadCases(runner, selected) {
 export async function readLedgerItems(cacheRoot) {
   const raw = await readFile(join(cacheRoot, 'ledger.jsonl'), 'utf8');
   const items = new Map();
+  let position = 0;
   for (const line of raw.split('\n')) {
     if (line.trim().length === 0) continue;
+    position += 1;
     let parsed;
-    try { parsed = JSON.parse(line); } catch { continue; }
+    try { parsed = JSON.parse(line); } catch { throw new EditorialEvidenceError('EDITORIAL_EVIDENCE/ledger-invalid'); }
     if (typeof parsed.itemId !== 'string') continue;
     const list = items.get(parsed.itemId) ?? [];
     list.push({ outcome: parsed.outcome ?? null, decision: parsed.validation?.decision ?? null, family: parsed.validation?.family ?? null,
-      case: parsed.validation?.case ?? null, recordedAt: parsed.recordedAt ?? null, incurredUsage: parsed.incurredUsage ?? null });
+      case: parsed.validation?.case ?? null, recordedAt: parsed.recordedAt ?? null, incurredUsage: parsed.incurredUsage ?? null, position });
     items.set(parsed.itemId, list);
   }
   return items;
+}
+
+/** Ledger observations only: an orphaned pre-send claim has no line and is disclosed separately in the evidence document. */
+export function measuredPassLedger(items) {
+  if (items === null) return null;
+  const all = [...items.values()].flat().sort((a, b) => a.position - b.position);
+  const pass = all.filter((line) => line.family === 'editorial-evidence');
+  if (pass.length === 0) return null;
+  const first = pass[0].position;
+  const last = pass.at(-1).position;
+  const totals = (lines) => ({ lines: lines.length, transmitted: lines.filter((line) => line.outcome === 'transmitted').length,
+    failed: lines.filter((line) => line.outcome === 'failed').length, refused: lines.filter((line) => line.outcome === 'refused').length,
+    inputTokens: lines.reduce((n, line) => n + (line.incurredUsage?.inputTokens ?? 0), 0),
+    outputTokens: lines.reduce((n, line) => n + (line.incurredUsage?.outputTokens ?? 0), 0) });
+  return { before: { lines: first - 1, transmitted: all.filter((line) => line.position < first && line.outcome === 'transmitted').length },
+    after: { lines: last, transmitted: all.filter((line) => line.position <= last && line.outcome === 'transmitted').length },
+    totals: totals(pass), byCase: Object.fromEntries([...new Set(pass.map((line) => line.case))].map((id) => [id, totals(pass.filter((line) => line.case === id))])),
+    orphanedClaims: 'not read; see the measured-pass incident disclosure' };
 }
 
 /** Label one capture by the ledger line of the item that captured it. */
@@ -122,11 +143,35 @@ export function caseSource(metrics, ledgerItems) {
   return labels.length === 1 ? labels[0] : labels.sort().join('+');
 }
 
-/** What a baseline pins of a case: everything but timing and the evidence source, which depend on the host. */
+/** Stable outcomes, contract agreement and fixture bytes; elapsed time, source labels and generated Task identities vary. */
 export function comparable(metrics) {
   return { outcome: metrics.outcome, findings: metrics.findings, concerns: metrics.concerns, checks: metrics.checks, effort: metrics.effort,
     delivery: metrics.delivery, result: metrics.result, replay: { answered: metrics.replay.answered, unmatched: metrics.replay.unmatched },
-    recordedUsage: metrics.evidence.recordedUsage, fixtures: metrics.evidence.fixtures.map((fixture) => fixture.sha256) };
+    recordedUsage: metrics.evidence.recordedUsage, contractsAgree: metrics.evidence.contractsAgree,
+    fixtures: metrics.evidence.fixtures.map((fixture) => fixture.sha256) };
+}
+
+/** Aggregate concerns by kind without mixing the measured pass, earlier captures and authored synthetic controls. */
+export function byKind(cases) {
+  const groups = new Map();
+  for (const entry of cases) {
+    if (entry.error !== undefined) continue;
+    const cohort = entry.measuredPass !== null ? 'measured-pass' : entry.evidence.fixtures.every((fixture) => fixture.provenance === 'authored') ? 'authored' : 'earlier-capture';
+    const key = `${entry.kind}/${cohort}`;
+    const group = groups.get(key) ?? { kind: entry.kind, cohort, cases: 0, concerns: 0, matched: 0, missed: 0, unmeasured: 0,
+      raisedButExcluded: 0, falsePositiveChecks: 0, usefulFindings: 0, falsePositiveFindings: 0 };
+    group.cases += 1;
+    group.concerns += entry.concerns.total;
+    group.matched += entry.concerns.met.length;
+    group.missed += entry.concerns.missed.length;
+    group.unmeasured += entry.concerns.unmeasured?.length ?? 0;
+    group.raisedButExcluded += entry.concerns.excludedOnly?.length ?? 0;
+    group.falsePositiveChecks += entry.checks.triggered.length;
+    group.usefulFindings += entry.findings?.useful ?? 0;
+    group.falsePositiveFindings += entry.findings?.falsePositives ?? 0;
+    groups.set(key, group);
+  }
+  return [...groups.values()];
 }
 
 const cell = (value) => String(value).replace(/\|/gu, '/');
@@ -167,6 +212,9 @@ export function markdownTable(report) {
     const ids = (list) => (list === undefined || list.length === 0 ? 'none' : list.map((id) => `\`${id}\``).join(', '));
     lines.push(`- \`${entry.id}\`: missed ${ids(entry.concerns.missed)} (raised by the model but excluded by the product: ${ids(entry.concerns.excludedOnly)}); unmeasured ${ids(entry.concerns.unmeasured)}; triggered ${ids(entry.checks.triggered)}`);
   }
+  lines.push('', '| Kind | Capture cohort | Cases | Matched / concerns | Missed (raised but excluded) | Unmeasured | FP checks |',
+    '| --- | --- | ---: | ---: | ---: | ---: | ---: |');
+  for (const group of report.byKind ?? []) lines.push(`| ${group.kind} | ${group.cohort} | ${group.cases} | ${group.matched}/${group.concerns} | ${group.missed} (${group.raisedButExcluded}) | ${group.unmeasured} | ${group.falsePositiveChecks} |`);
   return `${lines.join('\n')}\n`;
 }
 
@@ -199,7 +247,8 @@ export async function main(argv) {
       results.push({ id: testCase.id, error: boundedCode(error) });
     }
   }
-  const report = { schema: METRICS_SCHEMA, mode: options.ledger === null ? 'replay fixtures' : 'replay fixtures, sources from the Provider Test Ledger', cases: results };
+  const report = { schema: METRICS_SCHEMA, mode: options.ledger === null ? 'replay fixtures' : 'replay fixtures, sources from the Provider Test Ledger',
+    cases: results, byKind: byKind(results), measuredPassLedger: measuredPassLedger(ledgerItems) };
   await mkdir(options.out, { recursive: true });
   await writeFile(join(options.out, 'metrics.json'), `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(join(options.out, 'metrics.md'), markdownTable(report));
@@ -209,6 +258,7 @@ export async function main(argv) {
       : `EDITORIAL_EVIDENCE/case/${entry.id} source=${entry.source} concerns=${entry.concerns.met.length}/${entry.concerns.total} checks=${entry.checks.triggered.length}/${entry.checks.total} ms=${entry.replay.elapsedMs}`);
   }
   if (options.updateBaseline !== null) {
+    if (failed > 0) { console.log('EDITORIAL_EVIDENCE/baseline-update-refused'); return 1; }
     const baseline = Object.fromEntries(results.filter((entry) => entry.error === undefined).map((entry) => [entry.id, comparable(entry)]));
     await writeFile(options.updateBaseline, `${JSON.stringify({ schema: 'ai7.editorial-evidence-baseline/1', cases: baseline }, null, 2)}\n`);
   }

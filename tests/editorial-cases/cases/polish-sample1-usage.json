@@ -2,21 +2,46 @@
   "schema": "ai7.editorial-case/1",
   "id": "polish-sample1-usage",
   "kind": "polish",
-  "title": "润色这段 · 不规范搭配的一句",
-  "manuscript": { "source": "sample1" },
+  "title": "润色这段 · 可精简的一句",
+  "manuscript": {
+    "source": "sample1"
+  },
   "bookTitle": "sample1 编辑价值证据 · 审阅",
-  "input": { "selection": { "paragraph": 16, "start": "皓首苍颜的曾本之", "end": "极端少数之人。" } },
+  "input": {
+    "selection": {
+      "paragraph": 16,
+      "start": "皓首苍颜的曾本之",
+      "end": "极端少数之人。"
+    }
+  },
   "fixture": "sample1-recorded-v41-editorial-polish",
   "measuredPass": "polish",
-  "replay": { "route": "deterministic" },
+  "replay": {
+    "route": "deterministic"
+  },
   "expectedConcerns": [
-    { "id": "s1-polish-extreme-few", "category": "polish", "paragraph": 16, "words": "极端少数之人", "corrections": ["极少数人", "极少数之人"], "concern": "“极端少数”不合规范搭配，应为“极少数”" }
+    {
+      "id": "s1-polish-extreme-few",
+      "category": "polish",
+      "paragraph": 16,
+      "words": "极端少数之人",
+      "corrections": [
+        "极少数人",
+        "极少数之人"
+      ],
+      "concern": "本次润色可精简程度修饰和文言尾词；这是一项表达偏好，不把原句断定为规范错误。"
+    }
   ],
   "falsePositiveChecks": [
-    { "id": "s1-polish-idiom", "paragraph": 16, "words": "皓首苍颜", "reason": "成语，按原样保留" }
+    {
+      "id": "s1-polish-idiom",
+      "paragraph": 16,
+      "words": "皓首苍颜",
+      "reason": "成语，按原样保留"
+    }
   ],
   "observations": {
-    "acceptance": "把“极端少数之人”改为规范说法，其余措辞基本不动。",
+    "acceptance": "将较繁复的表达精简为自然说法，保留原意与成语。",
     "rework": "改动成语或大幅重写整句。"
   }
 }

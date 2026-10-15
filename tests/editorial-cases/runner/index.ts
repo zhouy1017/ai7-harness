@@ -199,7 +199,7 @@ export async function runEditorialCase(request: RunCaseRequest): Promise<CaseMet
         evidence: await evidence(),
         outcome: observed.outcome, findings: { ...observed.findings },
         concerns: { total: concernsTotal, ...observed.concerns }, checks: { total: checksTotal, ...observed.checks },
-        effort: { ...observed.effort }, delivery: null, result: null,
+        effort: { ...observed.effort }, delivery: null, result: { ...observed.defect879 },
         replay: { answered: tally.answered, unmatched: tally.unmatched, elapsedMs: Date.now() - started },
       };
     }

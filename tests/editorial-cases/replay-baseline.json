@@ -53,6 +53,7 @@
         "inputTokens": 102419,
         "outputTokens": 183983
       },
+      "contractsAgree": null,
       "fixtures": [
         "1fb1225ccf47378ec88e8f645e76c460a639a36153fad4aa822975d88a216fa4",
         "b0fad8dff857d6d41bab0a4e9d2e4821ac92686a62e15b3737dcbf25ee6af5cb"
@@ -113,7 +114,12 @@
         "restoredExactly": true
       },
       "delivery": null,
-      "result": null,
+      "result": {
+        "issue": 879,
+        "quoteNotFound": 1,
+        "verbatimInBook": 1,
+        "ownBlockOrdinalMatches": 0
+      },
       "replay": {
         "answered": 2,
         "unmatched": 2
@@ -123,6 +129,7 @@
         "inputTokens": 7291,
         "outputTokens": 35673
       },
+      "contractsAgree": false,
       "fixtures": [
         "088d7fbe02667dbac382aab68a7f84d1e9cac47396008637c53a14e34d4797e1"
       ]
@@ -144,10 +151,11 @@
           "e-voice-opening",
           "e-oracle-letter-hook",
           "e-academia-and-power",
-          "e-language-slips",
           "e-suspense-selling-point"
         ],
-        "missed": []
+        "missed": [
+          "e-language-slips"
+        ]
       },
       "checks": {
         "total": 2,
@@ -174,8 +182,9 @@
         "inputTokens": 21976,
         "outputTokens": 24369
       },
+      "contractsAgree": true,
       "fixtures": [
-        "dccf88c7b2fac5a99d379e6bcca9c7b44e623c2d0eb8ee53c8c7237ea612c8cf"
+        "daf4ad379cbac8fc513f0faeb514e0592497dee02e94c65affe1bddfe87a2ac3"
       ]
     },
     "material-review-sample1": {
@@ -201,7 +210,7 @@
         "falsePositives": 0
       },
       "concerns": {
-        "total": 8,
+        "total": 7,
         "met": [
           "m-missing-de",
           "m-missing-lai"
@@ -209,15 +218,12 @@
         "missed": [
           "m-circle-1990",
           "m-circle-1980",
-          "m-extreme-few",
           "m-stray-shang",
           "m-missing-object",
           "m-missing-ta"
         ],
         "unmeasured": [],
         "excludedOnly": [
-          "m-circle-1980",
-          "m-extreme-few",
           "m-stray-shang",
           "m-missing-object"
         ]
@@ -237,7 +243,12 @@
         "restoredExactly": true
       },
       "delivery": null,
-      "result": null,
+      "result": {
+        "issue": 879,
+        "quoteNotFound": 10,
+        "verbatimInBook": 10,
+        "ownBlockOrdinalMatches": 10
+      },
       "replay": {
         "answered": 13,
         "unmatched": 0
@@ -247,6 +258,7 @@
         "inputTokens": 29666,
         "outputTokens": 92049
       },
+      "contractsAgree": false,
       "fixtures": [
         "5059d1153ecc672cce36b6c9796f0cdeecb871015401b46f97fbeb490bdde0a7"
       ]
@@ -299,8 +311,9 @@
         "inputTokens": 487,
         "outputTokens": 3130
       },
+      "contractsAgree": null,
       "fixtures": [
-        "2143caaf884789726aafadd3111c2c639852a37b825dcdcef272c0d31c87c24f"
+        "a820f604793614b077f97754aa04a3bf71dd516ca083a81b49b2cac3aee454f9"
       ]
     },
     "polish-sample1-usage": {
@@ -351,8 +364,9 @@
         "inputTokens": 469,
         "outputTokens": 1275
       },
+      "contractsAgree": null,
       "fixtures": [
-        "2143caaf884789726aafadd3111c2c639852a37b825dcdcef272c0d31c87c24f"
+        "a820f604793614b077f97754aa04a3bf71dd516ca083a81b49b2cac3aee454f9"
       ]
     },
     "readers-report-sample1": {
@@ -372,11 +386,12 @@
         "total": 4,
         "met": [
           "r-strength-letter-hook",
-          "r-problem-language",
-          "r-suggestion-language",
           "r-conclusion-follows-record"
         ],
-        "missed": []
+        "missed": [
+          "r-problem-language",
+          "r-suggestion-language"
+        ]
       },
       "checks": {
         "total": 2,
@@ -402,9 +417,10 @@
         "inputTokens": 102390,
         "outputTokens": 58564
       },
+      "contractsAgree": true,
       "fixtures": [
-        "dccf88c7b2fac5a99d379e6bcca9c7b44e623c2d0eb8ee53c8c7237ea612c8cf",
-        "2af6631c3dca19d3a78c1e907dc0413d0f8f5651d6d97c349dd2d237afff62c5"
+        "daf4ad379cbac8fc513f0faeb514e0592497dee02e94c65affe1bddfe87a2ac3",
+        "583de00c3e5297a18191f919c1107751d4d160694bc8aa05bdd79347a88b194a"
       ]
     },
     "review-literary-sample1": {
@@ -424,20 +440,16 @@
         "listed": 77,
         "located": 38,
         "excluded": 39,
-        "useful": 1,
-        "precise": 1,
-        "unclassified": 37,
+        "useful": 0,
+        "precise": 0,
+        "unclassified": 38,
         "falsePositives": 0
       },
       "concerns": {
-        "total": 5,
-        "met": [
-          "s1-repetitive-ke"
-        ],
+        "total": 2,
+        "met": [],
         "missed": [
           "s1-stacked-adverbials",
-          "s1-cliche-simile-curve",
-          "s1-cliche-simile-perm",
           "s1-long-attributive"
         ],
         "unmeasured": [],
@@ -450,17 +462,22 @@
         "triggered": []
       },
       "effort": {
-        "adopted": 1,
+        "adopted": 0,
         "edited": 0,
         "rejected": 0,
-        "left": 37,
-        "applied": 1,
-        "appliedCorrect": 1,
-        "reversed": 1,
+        "left": 38,
+        "applied": 0,
+        "appliedCorrect": 0,
+        "reversed": 0,
         "restoredExactly": true
       },
       "delivery": null,
-      "result": null,
+      "result": {
+        "issue": 879,
+        "quoteNotFound": 39,
+        "verbatimInBook": 39,
+        "ownBlockOrdinalMatches": 39
+      },
       "replay": {
         "answered": 11,
         "unmatched": 2
@@ -470,6 +487,7 @@
         "inputTokens": 25423,
         "outputTokens": 66194
       },
+      "contractsAgree": true,
       "fixtures": [
         "de9aa151b509ce9ec3bbfe4522fef968be4c287b10b74d41c3deb0ba40b3266e"
       ]
@@ -491,26 +509,21 @@
         "listed": 10,
         "located": 8,
         "excluded": 2,
-        "useful": 2,
-        "precise": 2,
-        "unclassified": 5,
+        "useful": 1,
+        "precise": 1,
+        "unclassified": 6,
         "falsePositives": 1
       },
       "concerns": {
-        "total": 5,
+        "total": 2,
         "met": [
-          "s1-chapter-two-heading",
           "s1-circle-zero-1990"
         ],
         "missed": [
-          "s1-chapter-one-heading",
-          "s1-front-matter-title",
           "s1-circle-zero-1980"
         ],
         "unmeasured": [],
-        "excludedOnly": [
-          "s1-circle-zero-1980"
-        ]
+        "excludedOnly": []
       },
       "checks": {
         "total": 3,
@@ -519,17 +532,22 @@
         ]
       },
       "effort": {
-        "adopted": 2,
+        "adopted": 1,
         "edited": 0,
         "rejected": 1,
-        "left": 5,
+        "left": 6,
         "applied": 0,
         "appliedCorrect": 0,
         "reversed": 0,
         "restoredExactly": true
       },
       "delivery": null,
-      "result": null,
+      "result": {
+        "issue": 879,
+        "quoteNotFound": 2,
+        "verbatimInBook": 2,
+        "ownBlockOrdinalMatches": 2
+      },
       "replay": {
         "answered": 13,
         "unmatched": 0
@@ -539,6 +557,7 @@
         "inputTokens": 26033,
         "outputTokens": 45000
       },
+      "contractsAgree": true,
       "fixtures": [
         "de9aa151b509ce9ec3bbfe4522fef968be4c287b10b74d41c3deb0ba40b3266e"
       ]
@@ -566,7 +585,7 @@
         "falsePositives": 1
       },
       "concerns": {
-        "total": 7,
+        "total": 6,
         "met": [
           "mu-half-width-comma",
           "mu-numeral-style",
@@ -575,14 +594,13 @@
           "mu-unit-symbol"
         ],
         "missed": [
-          "mu-institution-name",
-          "mu-book-title"
+          "mu-institution-name"
         ],
         "unmeasured": [],
         "excludedOnly": []
       },
       "checks": {
-        "total": 3,
+        "total": 4,
         "triggered": [
           "mu-scale-ratio"
         ]
@@ -598,7 +616,12 @@
         "restoredExactly": true
       },
       "delivery": null,
-      "result": null,
+      "result": {
+        "issue": 879,
+        "quoteNotFound": 0,
+        "verbatimInBook": 0,
+        "ownBlockOrdinalMatches": 0
+      },
       "replay": {
         "answered": 0,
         "unmatched": 0
@@ -608,6 +631,7 @@
         "inputTokens": 5600,
         "outputTokens": 2080
       },
+      "contractsAgree": null,
       "fixtures": [
         "cc7dbd51867c057fdc0bd9822a45fb5191b78ef278f8fc22a8e9d6d9ab5b4e2d"
       ]
@@ -631,21 +655,20 @@
         "listed": 29,
         "located": 19,
         "excluded": 10,
-        "useful": 5,
-        "precise": 5,
-        "unclassified": 14,
+        "useful": 2,
+        "precise": 2,
+        "unclassified": 17,
         "falsePositives": 0
       },
       "concerns": {
-        "total": 8,
+        "total": 7,
         "met": [
           "s1-missing-de",
-          "s1-circle-1990",
-          "s1-circle-1980",
-          "s1-extreme-few",
           "s1-stray-shang"
         ],
         "missed": [
+          "s1-circle-1990",
+          "s1-circle-1980",
           "s1-missing-object",
           "s1-missing-lai"
         ],
@@ -662,17 +685,22 @@
         "triggered": []
       },
       "effort": {
-        "adopted": 3,
-        "edited": 2,
+        "adopted": 2,
+        "edited": 0,
         "rejected": 0,
-        "left": 14,
-        "applied": 5,
-        "appliedCorrect": 5,
-        "reversed": 5,
+        "left": 17,
+        "applied": 2,
+        "appliedCorrect": 2,
+        "reversed": 2,
         "restoredExactly": true
       },
       "delivery": null,
-      "result": null,
+      "result": {
+        "issue": 879,
+        "quoteNotFound": 10,
+        "verbatimInBook": 10,
+        "ownBlockOrdinalMatches": 9
+      },
       "replay": {
         "answered": 12,
         "unmatched": 1
@@ -682,6 +710,7 @@
         "inputTokens": 25008,
         "outputTokens": 78348
       },
+      "contractsAgree": true,
       "fixtures": [
         "de9aa151b509ce9ec3bbfe4522fef968be4c287b10b74d41c3deb0ba40b3266e"
       ]
@@ -741,7 +770,12 @@
         "restoredExactly": true
       },
       "delivery": null,
-      "result": null,
+      "result": {
+        "issue": 879,
+        "quoteNotFound": 1,
+        "verbatimInBook": 0,
+        "ownBlockOrdinalMatches": 0
+      },
       "replay": {
         "answered": 0,
         "unmatched": 0
@@ -751,6 +785,7 @@
         "inputTokens": 5600,
         "outputTokens": 2080
       },
+      "contractsAgree": null,
       "fixtures": [
         "cc7dbd51867c057fdc0bd9822a45fb5191b78ef278f8fc22a8e9d6d9ab5b4e2d"
       ]
@@ -780,8 +815,10 @@
         ]
       },
       "checks": {
-        "total": 2,
-        "triggered": []
+        "total": 3,
+        "triggered": [
+          "w-letter-already-opened"
+        ]
       },
       "effort": null,
       "delivery": {
@@ -803,8 +840,9 @@
         "inputTokens": 17940,
         "outputTokens": 18851
       },
+      "contractsAgree": true,
       "fixtures": [
-        "e36899c2365e395657925cbd08373fc3397216a41a68ff0aadfdb760c5d0abc2"
+        "fac5d50819b4a74db5036997a0307e63b4568ce9ec0fc8515731983f642f6a95"
       ]
     }
   }
