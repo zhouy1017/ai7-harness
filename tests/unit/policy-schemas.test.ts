@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all twenty-three current and historical pairs and validates every one at this base', () => {
+  it('discovers all twenty-six current and historical pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(23);
+    expect(pairs).toHaveLength(26);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(23);
+    expect(results).toHaveLength(26);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -313,5 +313,125 @@ describe('Provider Processing v12, v13 and active-set v10 schemas (Issue #853)',
     const moved = clone(v9.policyData) as Pins;
     moved.activePolicies['provider-processing-policy'].scopePins['ordinary-production']!.version = 'v13';
     expect(() => validatePolicyDocument(moved, v9.schemaData)).toThrowError();
+  });
+});
+
+describe('Provider Processing v14, v15 and active-set v11 schemas (Issue #863)', () => {
+  type Rules = { decision: { providerAllowRules: Array<Record<string, unknown>> } };
+  const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+  const BACKGROUND = 7;
+  const scopes = [
+    ['v14', 'developerLive', 'developerLiveBackgroundRule', 'developerLiveReviewRule'],
+    ['v15', 'production', 'productionBackgroundRule', 'productionReviewRule'],
+  ] as const;
+  const pair = (version: string) => readPair(`provider-processing-policy.${version}.json`, `provider-processing-policy.${version}.schema.json`);
+
+  it.each(scopes)('validates %s\'s eight-rule tuple and rejects a ninth rule or one without the background rule', (version) => {
+    const { policyData, schemaData } = pair(version);
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    const widened = clone(policyData) as Rules;
+    widened.decision.providerAllowRules.push(clone(widened.decision.providerAllowRules[BACKGROUND]!));
+    expect(() => validatePolicyDocument(widened, schemaData)).toThrowError(/has more than 8 allowed items/);
+    const narrowed = clone(policyData) as Rules;
+    narrowed.decision.providerAllowRules.splice(BACKGROUND, 1);
+    expect(() => validatePolicyDocument(narrowed, schemaData)).toThrowError(/fewer than 8 required items/);
+  });
+
+  it.each(scopes)('rejects a %s background rule whose ceiling is not mandatory, split equally or capped at capacity minus one', (version, _prefix, definition) => {
+    const { policyData, schemaData } = pair(version);
+    for (const overrides of [
+      { unsetRunBudgetCeilingAllowed: true }, { enrollmentCeilingRequired: false },
+      { ceilingSplitAcrossBooks: 'proportional' }, { backgroundSlotShare: 'capacity' },
+    ]) {
+      const mutated = clone(policyData) as Rules;
+      Object.assign(mutated.decision.providerAllowRules[BACKGROUND]!.authorizationPreconditions as Record<string, unknown>, overrides);
+      expect(() => validatePolicyDocument(mutated, schemaData), JSON.stringify(overrides))
+        .toThrowError(new RegExp(`${definition}/properties/authorizationPreconditions does not equal the required const`));
+    }
+    const origin = clone(policyData) as Rules;
+    (origin.decision.providerAllowRules[BACKGROUND]!.authorityOrigin as Record<string, unknown>).newUserInitiatedTaskRequired = true;
+    expect(() => validatePolicyDocument(origin, schemaData)).toThrowError(new RegExp(`${definition}/properties/authorityOrigin does not equal the required const`));
+    const kinds = clone(policyData) as Rules;
+    (kinds.decision.providerAllowRules[BACKGROUND]!.allowedTaskKinds as string[]).push('writing');
+    expect(() => validatePolicyDocument(kinds, schemaData)).toThrowError(new RegExp(`${definition}/properties/allowedTaskKinds does not equal the required const`));
+  });
+
+  it.each(scopes)('rejects a %s foreground rule that turns on a background or scheduled mode', (version) => {
+    const { policyData, schemaData } = pair(version);
+    for (const index of [0, 1, 2, 3, 4, 5, 6]) {
+      const mutated = clone(policyData) as Rules;
+      (mutated.decision.providerAllowRules[index]!.executionMode as Record<string, unknown>).backgroundAllowed = true;
+      expect(() => validatePolicyDocument(mutated, schemaData), String(index)).toThrowError(/executionMode does not equal the required const/);
+    }
+  });
+
+  it.each(scopes)('rejects %s clarification terms that drop, widen or move the one-question-per-unit contract', (version) => {
+    const { policyData, schemaData } = pair(version);
+    for (const index of [0, 2, 3, 4, BACKGROUND]) {
+      for (const [key, value] of [['maxQuestionsPerUnit', 2], ['timeoutHours', 48], ['unitWaitsOthersContinue', false], ['modelQuestionAllowed', false],
+        ['timeoutContinuesAs', 'ends-the-run']] as const) {
+        const mutated = clone(policyData) as Rules;
+        (mutated.decision.providerAllowRules[index]!.clarification as Record<string, unknown>)[key] = value;
+        expect(() => validatePolicyDocument(mutated, schemaData), `${index}.${key}`).toThrowError(/clarification does not equal the required const/);
+      }
+      const dropped = clone(policyData) as Rules;
+      delete dropped.decision.providerAllowRules[index]!.clarification;
+      expect(() => validatePolicyDocument(dropped, schemaData), `${index} dropped`).toThrowError(/Required property "clarification" is missing/);
+      const noTurn = clone(policyData) as Rules;
+      delete (noTurn.decision.providerAllowRules[index]!.transmissions as Record<string, unknown>).plusClarificationAnswerTurns;
+      expect(() => validatePolicyDocument(noTurn, schemaData), `${index} turn`).toThrowError(/transmissions does not equal the required const/);
+    }
+    // The dialogue, 润色 and conflict regeneration declare no model question.
+    for (const index of [1, 5, 6]) {
+      const asks = clone(policyData) as Rules;
+      (asks.decision.providerAllowRules[index]!.clarification as Record<string, unknown>).modelQuestionAllowed = true;
+      expect(() => validatePolicyDocument(asks, schemaData), String(index)).toThrowError(/clarification does not equal the required const/);
+    }
+  });
+
+  it.each(scopes)('admits the default-execution-rule origin for review in %s, and for no other rule that did not have it', (version, _prefix, _background, review) => {
+    const { policyData, schemaData } = pair(version);
+    expect((clone(policyData) as Rules).decision.providerAllowRules[2]!.authorityOrigin).toMatchObject({ matchingActiveDefaultExecutionRuleAllowed: true });
+    const withdrawn = clone(policyData) as Rules;
+    (withdrawn.decision.providerAllowRules[2]!.authorityOrigin as Record<string, unknown>).matchingActiveDefaultExecutionRuleAllowed = false;
+    expect(() => validatePolicyDocument(withdrawn, schemaData)).toThrowError(new RegExp(`${review}/properties/authorityOrigin does not equal the required const`));
+    for (const index of [0, 1, 5, 6, BACKGROUND]) {
+      const widened = clone(policyData) as Rules;
+      (widened.decision.providerAllowRules[index]!.authorityOrigin as Record<string, unknown>).matchingActiveDefaultExecutionRuleAllowed = true;
+      expect(() => validatePolicyDocument(widened, schemaData), String(index)).toThrowError(/authorityOrigin does not equal the required const/);
+    }
+  });
+
+  it('keeps v14 and v15 on the unchanged role, credential and authority-separation consts of their predecessors', () => {
+    for (const [now, before] of [['v14', 'v12'], ['v15', 'v13']] as const) {
+      const current = pair(now).policyData as Record<string, unknown>;
+      const predecessor = pair(before).policyData as Record<string, unknown>;
+      for (const section of ['roleBindings', 'credentialBoundary', 'authoritySeparations', 'outboundDataCategories', 'trustedSelection']) {
+        expect(current[section], `${now} ${section}`).toEqual(predecessor[section]);
+      }
+      expect(current.predecessorVersion).toBe(before);
+    }
+  });
+
+  it('rejects an active-set v11 whose ordinary-production or developer-live pin is not the exact v15 or v14 document', () => {
+    const { policyData, schemaData } = readPair('active-policy-set.v11.json', 'active-policy-set.v11.schema.json');
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    type Pins = { activePolicies: { 'provider-processing-policy': { scopePins: Record<string, Record<string, unknown>> } } };
+    for (const [scope, field, value] of [
+      ['ordinary-production', 'version', 'v13'],
+      ['ordinary-production', 'sha256', '465f6bb3b43d522c2464f0589e6302600799192ee46ba17df23269f08f94ea3e'],
+      ['developer-live', 'version', 'v12'],
+      ['developer-live', 'sha256', '9bc27046af27c2967482c51ec4850668df13154a8c8e3ad94bdcb6fae3b47b2c'],
+    ] as const) {
+      const mutated = clone(policyData) as Pins;
+      mutated.activePolicies['provider-processing-policy'].scopePins[scope]![field] = value;
+      expect(() => validatePolicyDocument(mutated, schemaData), `${scope} ${field}`).toThrowError(/does not equal the required const/);
+    }
+    // v10 keeps pinning the old pair, so a v10 whose pins moved to the successors is not v10.
+    const v10 = readPair('active-policy-set.v10.json', 'active-policy-set.v10.schema.json');
+    const moved = clone(v10.policyData) as Pins;
+    moved.activePolicies['provider-processing-policy'].scopePins['developer-live']!.version = 'v14';
+    expect(() => validatePolicyDocument(moved, v10.schemaData)).toThrowError();
+    expect((policyData as { predecessorVersion: string }).predecessorVersion).toBe('v10');
   });
 });

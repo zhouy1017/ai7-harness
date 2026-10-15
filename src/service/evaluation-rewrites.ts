@@ -1,4 +1,5 @@
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { clarificationPromptContractDigest } from './provider/clarification-contract.js';
 import {
   EVALUATION_REWRITE_KIND,
   MAX_EVALUATION_EVIDENCE_NOTES,
@@ -326,7 +327,8 @@ export class EvaluationRewrites {
     } catch {
       throw new EvaluationRewriteError('EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
     }
-    requireRewrite(digest === row.prompt_contract_sha256, 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
+    requireRewrite(digest === row.prompt_contract_sha256 || clarificationPromptContractDigest(digest) === row.prompt_contract_sha256,
+      'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
     return {
       taskIntentId: text(row.task_intent_id),
       promptContractSha256: text(row.prompt_contract_sha256),

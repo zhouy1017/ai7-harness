@@ -78,7 +78,8 @@ const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSu
 // Synchronized delta with Issue #95 (S39): 后台分析登记's three members — its read, 登记 and 撤销登记. They read, record or revoke
 // the editor's standing decision for the route's Book; 登记 also asks the service's dispatcher to look at once, and every Run
 // it may start is its own exact Task, plan and Run Authorization. J-09 proves them; here the Book has none and no Run of it.
-const ENROLLMENT_MEMBERS = ['inspectBackgroundAnalysisEnrollment', 'enrollBackgroundAnalysis', 'revokeBackgroundAnalysisEnrollment'];
+// Synchronized delta with Issue #864: its fourth, `暂停` / `续行` of an Enrollment in force, which holds or releases what it would start.
+const ENROLLMENT_MEMBERS = ['inspectBackgroundAnalysisEnrollment', 'enrollBackgroundAnalysis', 'revokeBackgroundAnalysisEnrollment', 'holdBackgroundAnalysisEnrollment'];
 const EXPORT_MEMBERS = [
   'reviewManuscriptExport', 'chooseManuscriptExportDestination', 'approveManuscriptExport', 'revealManuscriptExport',
   'reviewBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'approveBookDeliveryPackageExport', 'cancelBookDeliveryPackageExport',
@@ -677,7 +678,7 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.harnessSessionId === attempt.executionBinding.harnessSessionId &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v10', liveTransmissions: 0 }) &&
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v11', liveTransmissions: 0 }) &&
     revision?.provenance?.taskIntentId === prepared.taskIntent.taskIntentId && revision?.provenance?.attemptId === attempt.attemptId &&
     // Synchronized delta (#274, #275): eight unit turns, the reduction's, and the sample's.
     revision?.usage?.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
@@ -772,7 +773,7 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     revision?.adapterPin?.fixtureIdentity === FIXTURE_IDENTITY && revision?.adapterPin?.fixtureSha256 === fixtureDigest &&
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v10', liveTransmissions: 0 }) &&
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v11', liveTransmissions: 0 }) &&
     revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
     sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
     sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
@@ -2865,7 +2866,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-sheet-open');
     // Nine categories and none preselected, the unavailable two saying why; four scopes and none
     // preselected; the four consequence lines; the quick start waits for a Default Execution Rule.
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[type=checkbox][name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter((box)=>box.disabled); const quick=sheet.querySelector('[data-review-action="quick-start"]'); const terms=Array.from(sheet.querySelectorAll('dl.review-consequences dt')).map((term)=>term.textContent); return boxes.length===9 && boxes.every((box)=>!box.checked) && JSON.stringify(disabled.map((box)=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && disabled.every((box)=>(box.dataset.unavailableReason??'').length>0) && scopes.length===4 && scopes.every((scope)=>!scope.checked) && quick instanceof HTMLButtonElement && quick.disabled && sheet.querySelector('.review-quick-start-reason')?.textContent==='审阅没有快速开始：每次都先看计划，再开始任务。' && JSON.stringify(terms)===JSON.stringify(['会读取','会发送','不会做','费用']); })()`, 'review-sheet-contract');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[type=checkbox][name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter((box)=>box.disabled); const quick=sheet.querySelector('[data-review-action="quick-start"]'); const terms=Array.from(sheet.querySelectorAll('dl.review-consequences dt')).map((term)=>term.textContent); return boxes.length===9 && boxes.every((box)=>!box.checked) && JSON.stringify(disabled.map((box)=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && disabled.every((box)=>(box.dataset.unavailableReason??'').length>0) && scopes.length===4 && scopes.every((scope)=>!scope.checked) && quick instanceof HTMLButtonElement && quick.disabled && sheet.querySelector('.review-quick-start-reason')?.textContent==='快速开始先准备所选类别的计划；只有匹配这本书的默认执行规则才会开始，否则先看计划。' && JSON.stringify(terms)===JSON.stringify(['会读取','会发送','不会做','费用']); })()`, 'review-sheet-contract');
 
     at('review-prepare');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
@@ -2897,7 +2898,7 @@ async function main() {
     requireJourney(reviewDrawer.bar?.state === 'ready' && reviewDrawer.bar.start === 'ready' &&
       reviewDrawer.bar.summary === `《${bookName}》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：审阅发现与审阅报告 · 不改稿` &&
       reviewDrawer.bar.statement === BAR_STATEMENT && reviewDrawer.bar.note === null &&
-      barActions(reviewDrawer) === 'start:开始任务:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled',
+      barActions(reviewDrawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
     'review-bar-ready', reviewDrawer.bar);
 
     // ---- 联网后开始任务 of a Review Run (Issue #760, plan slice S74c; editor-surfaces §6 离线 / 等待网络; V2-UX-AUTH-002,
@@ -2911,7 +2912,7 @@ async function main() {
     requireJourney(reviewOffline?.kind === 'review-run' && reviewOffline.pill === '离线' && reviewOffline.bar?.state === 'offline' &&
       reviewOffline.bar.start === 'offline' && reviewOffline.bar.statement === BAR_STATEMENT &&
       reviewOffline.bar.note === '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容' &&
-      barActions(reviewOffline) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:disabled',
+      barActions(reviewOffline) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:enabled',
     'review-offline-bar', reviewOffline?.bar);
     await assertRenderer(renderer, `(() => { const bar=document.querySelector('#task-drawer .task-drawer-bar'); return bar instanceof HTMLElement && !bar.contains(document.activeElement) && [...bar.querySelectorAll('button')].every((button)=>!button.textContent.includes('授权')); })()`, 'review-offline-nothing-preselected');
 

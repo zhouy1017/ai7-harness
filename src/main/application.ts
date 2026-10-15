@@ -2793,6 +2793,49 @@ function registerRendererHandlers(
         }),
     );
   }
+  // Shared controls are bound to the sender's current Book and serialized with its other effects.
+  ipcMain.handle(IPC_CHANNELS.quickStartReviewRun, (event, input: Omit<ServiceOperationMap['quickStartReviewRun']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('quickStartReviewRun', { ...input, bookId: route.bookId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.projection.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '审阅结果不属于当前图书工作台。');
+        return result;
+      });
+    }));
+  for (const operation of ['controlTaskRun', 'editTaskPlan'] as const) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: Omit<ServiceOperationMap['controlTaskRun']['input'], 'bookId'> | Omit<ServiceOperationMap['editTaskPlan']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call(operation, { ...input, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if ('bookId' in result && result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务控制的结果不属于当前图书工作台。');
+          return result;
+        });
+      }));
+  }
+  // 改计划重做 prepares through the kind's own cooperative job, which this window then polls and may cancel as its own.
+  ipcMain.handle(IPC_CHANNELS.redoTaskPlan, (event, input: Omit<ServiceOperationMap['redoTaskPlan']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const job = await service.call('redoTaskPlan', { kind: input.kind, ref: input.ref, bookId: route.bookId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        rememberEditorResource(owned, 'job', job.jobId, { operation: operationForJob(job), bookId: route.bookId, manuscriptId: null, branchId: null });
+        return job;
+      });
+    }));
   // Reconnect Preflight names no Book: it only ever admits Runs the editor already authorized to start when
   // online. It is serialized with every other effect, because an admission dispatches.
   ipcMain.handle(
@@ -2902,6 +2945,9 @@ function registerRendererHandlers(
           const result = await service.call('enrollBackgroundAnalysis', {
             disclosureDigest: input.disclosureDigest,
             startingPoint: input.startingPoint,
+            // The scope and the required tokens ceiling (Issue #864), copied field by field.
+            scope: { kind: input.scope?.kind, seriesId: input.scope?.seriesId } as ServiceOperationMap['enrollBackgroundAnalysis']['input']['scope'],
+            ceilingTokens: input.ceilingTokens,
             bookId: route.bookId,
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
@@ -2922,6 +2968,25 @@ function registerRendererHandlers(
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
           const result = await service.call('revokeBackgroundAnalysisEnrollment', { enrollmentId: input.enrollmentId, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '后台分析登记不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
+  // `暂停` / `续行` of the route's Book's Enrollment (Issue #864), serialized like its other two decisions.
+  ipcMain.handle(
+    IPC_CHANNELS.holdBackgroundAnalysisEnrollment,
+    (event, input: Omit<ServiceOperationMap['holdBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('holdBackgroundAnalysisEnrollment', { enrollmentId: input.enrollmentId, hold: input.hold, bookId: route.bookId });
           requireCurrentRouteGeneration(owned, routeGeneration);
           if (result.bookId !== route.bookId) {
             throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '后台分析登记不属于当前图书工作台。');

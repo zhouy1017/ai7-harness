@@ -4,6 +4,8 @@ import type { OutboundDataCategory } from '../provider/egress-gate.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../review/review-category-kind.js';
 import { liveMaterialContract } from '../task-material-references.js';
+import { withModelClarification } from '../provider/clarification-contract.js';
+import type { AnalysisKindDefinition } from './kind-definition.js';
 
 /** The rule facts a live step reads from the one selected rule that admitted its kind. */
 export interface LiveKindRule {
@@ -42,12 +44,14 @@ export interface LiveKindExpectation {
 /**
  * The selected rule that admits `kind` live, or `null` (Issue #429, generalising #809): the verified developer-live or
  * ordinary-production projection, and exactly one of its admitted rules listing the kind and naming every required category. A missing or
- * ambiguous rule fails closed.
+ * ambiguous rule fails closed. The enrolled-background rule (`backgroundOrigin`, Provider Processing v14 and v15) lists the baseline
+ * kind truthfully but is another origin's rule: a `foreground` lookup (the default) skips it and a `background` lookup selects only it.
  */
 export function liveKindRule(
   policy: LaunchPolicyProjection | undefined,
   kind: string,
   requiredCategories: readonly OutboundDataCategory[] = [],
+  origin: 'foreground' | 'background' = 'foreground',
 ): AdmittedProviderRule | null {
   // Developer-live's rules, or ordinary production's filled from the editor's configured binding (Issue #811).
   if (policy === undefined || policy.integrityState !== 'verified' || policy.denialReason !== null ||
@@ -55,7 +59,8 @@ export function liveKindRule(
       !policy.providerProcessing.liveTransmissionAllowed ||
       policy.providerProcessing.decision !== 'eligible-only' ||
       policy.providerProcessing.authorizedLiveTransmissionCount !== 'bounded-by-run') return null;
-  const rules = (policy.providerProcessing.admittedRules ?? []).filter((rule) => rule.taskKinds.includes(kind));
+  const rules = (policy.providerProcessing.admittedRules ?? []).filter((rule) =>
+    rule.taskKinds.includes(kind) && (rule.backgroundOrigin === true) === (origin === 'background'));
   const rule = rules.length === 1 ? rules[0]! : null;
   return rule !== null && requiredCategories.every((category) => rule.outboundDataCategories.includes(category)) ? rule : null;
 }
@@ -153,6 +158,14 @@ export function liveKindAdmission(
   definition: LiveKindDefinition,
   binding: LiveKindBinding,
 ): LiveKindRule | null {
+  const wrapped = definition as LiveKindDefinition & { clarificationBase?: AnalysisKindDefinition };
+  if (wrapped.clarificationBase !== undefined) {
+    const expected = withModelClarification(wrapped.clarificationBase);
+    const rule = liveKindRule(policy, definition.kind);
+    if (rule?.clarificationQuestionAllowed !== true ||
+        expected.promptContractDigest !== definition.promptContractDigest || expected.systemPrompt !== definition.systemPrompt) return null;
+    return liveKindAdmission(policy, wrapped.clarificationBase, binding);
+  }
   const expectation = liveKindExpectation(definition);
   return expectation === null ? null : liveKindAdmitted(policy, definition.kind, definition, binding, expectation);
 }

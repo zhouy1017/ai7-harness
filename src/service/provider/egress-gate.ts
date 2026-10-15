@@ -60,9 +60,10 @@ export type RemoteExecutionRoute = ConfiguredRouteId;
 export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
- * The trusted scope's Provider Processing pin: selected v12 admits baseline analysis, editorial dialogue, review (with
- * cross-deliverable consistency), writing, evaluation, and 润色 and conflict-regeneration Suggestions on V4.1. Historical v5,
- * v9, v10 and v11 and the superseded web reservation v8 are readable identities, not launch selections.
+ * The trusted scope's Provider Processing pin: selected v14 admits baseline analysis, enrolled background analysis within a
+ * mandatory ceiling, editorial dialogue, review (with cross-deliverable consistency), writing, evaluation, and 润色 and
+ * conflict-regeneration Suggestions on V4.1. Historical v5, v9, v10, v11 and v12 and the superseded web reservation v8 are
+ * readable identities, not launch selections.
  */
 export type EgressPolicyPin =
   | {
@@ -73,7 +74,7 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
+      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14';
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     }

@@ -239,6 +239,14 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['cancelBaselineAnalysisRun']['output']>(IPC_CHANNELS.cancelBaselineAnalysisRun, input),
   pauseBaselineAnalysisRun: (input: Omit<ServiceOperationMap['pauseBaselineAnalysisRun']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['pauseBaselineAnalysisRun']['output']>(IPC_CHANNELS.pauseBaselineAnalysisRun, input),
+  controlTaskRun: (input: Omit<ServiceOperationMap['controlTaskRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['controlTaskRun']['output']>(IPC_CHANNELS.controlTaskRun, input),
+  editTaskPlan: (input: Omit<ServiceOperationMap['editTaskPlan']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['editTaskPlan']['output']>(IPC_CHANNELS.editTaskPlan, input),
+  redoTaskPlan: (input: Omit<ServiceOperationMap['redoTaskPlan']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['redoTaskPlan']['output']>(IPC_CHANNELS.redoTaskPlan, input),
+  quickStartReviewRun: (input: Omit<ServiceOperationMap['quickStartReviewRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['quickStartReviewRun']['output']>(IPC_CHANNELS.quickStartReviewRun, input),
   resumeBaselineAnalysisRun: (input: Omit<ServiceOperationMap['resumeBaselineAnalysisRun']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['resumeBaselineAnalysisRun']['output']>(IPC_CHANNELS.resumeBaselineAnalysisRun, input),
   editBaselineAnalysisPlan: (input: Omit<ServiceOperationMap['editBaselineAnalysisPlan']['input'], 'bookId'>) =>
@@ -261,6 +269,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['enrollBackgroundAnalysis']['output']>(IPC_CHANNELS.enrollBackgroundAnalysis, input),
   revokeBackgroundAnalysisEnrollment: (input: Omit<ServiceOperationMap['revokeBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['revokeBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.revokeBackgroundAnalysisEnrollment, input),
+  holdBackgroundAnalysisEnrollment: (input: Omit<ServiceOperationMap['holdBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['holdBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.holdBackgroundAnalysisEnrollment, input),
   inspectReviewGuidelines: (input?: ServiceOperationMap['inspectReviewGuidelines']['input']) =>
     invoke<ServiceOperationMap['inspectReviewGuidelines']['output']>(IPC_CHANNELS.inspectReviewGuidelines, input ?? {}),
   previewReviewGuidelineVersion: (input: { documentId: string; previewId?: string; clausePage?: number }) =>

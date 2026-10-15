@@ -1,0 +1,119 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-model-clarification",
+  "description": "Authored synthetic clarification alternative for exact sample1: unit 1 asks one question under the provider clarification instruction /2, all other units complete, and the answer 人物 yields the original synthetic unit result once. No live output or editorial-quality evidence.",
+  "provenance": "authored",
+  "basedOn": "sample1-baseline-happy",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "c3caace51ba401d52d94413c33ff315c53eb66cae05c5cfb73220cd418662df9",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"question\":\"本范围按哪个阅读重点处理？\",\"options\":[\"人物\",\"事件\"],\"freeTextAllowed\":true}",
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 5
+        }
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "b2ac20431f20e1389ff1b0fd95fbd851e307f90a2ba3635050d59de26e3a03fd",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":2,\"synopsis\":\"合成概述（单元 2）：承接上文，交代合成人物乙与人物甲的初次相遇。\",\"entities\":[{\"name\":\"合成人物乙\",\"kind\":\"person\",\"aliases\":[],\"note\":null,\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"合成事件：人物甲与人物乙初次相遇。\",\"chronology\":null,\"participants\":[\"合成人物甲\",\"合成人物乙\"],\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[{\"subject\":\"合成人物甲\",\"object\":\"合成人物乙\",\"relation\":\"相识\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"settingClaims\":[],\"conflicts\":[],\"unresolved\":[],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1100,
+          "outputTokens": 220
+        }
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "0efa150a4fe99c56282761b088501c75d7f8f776c154b7a55f1edf521856f64c",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":3,\"synopsis\":\"合成概述（单元 3）：人物乙的视角段落，其中对合成之城方位的说法与开篇不同。\",\"entities\":[{\"name\":\"合成人物乙\",\"kind\":\"person\",\"aliases\":[\"阿甲\"],\"note\":\"合成注记：本单元称其为阿甲。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"合成之城\",\"kind\":\"place\",\"aliases\":[\"城邦\"],\"note\":null,\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"合成事件：人物乙回望合成之城。\",\"chronology\":null,\"participants\":[\"合成人物乙\"],\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[],\"settingClaims\":[{\"subject\":\"合成之城\",\"claim\":\"位于南方\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"conflicts\":[{\"description\":\"合成单元内冲突：同一段落先后使用了两种称谓。\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"unresolved\":[],\"confidence\":\"medium\"}",
+        "usage": {
+          "inputTokens": 1500,
+          "outputTokens": 340
+        }
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "34568207a072202ef17ea4dbcf3ca28a7d5eaedb2913dbe215a1605cce22a7e3",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":4,\"synopsis\":\"合成概述（单元 4）：过渡段落，推进合成情节并引入合成物件丙。\",\"entities\":[{\"name\":\"合成物件丙\",\"kind\":\"object\",\"aliases\":[],\"note\":null,\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"合成事件：合成物件丙被交给人物甲。\",\"chronology\":\"中段\",\"participants\":[\"合成人物甲\"],\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[{\"subject\":\"合成人物甲\",\"object\":\"合成物件丙\",\"relation\":\"持有\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"settingClaims\":[],\"conflicts\":[],\"unresolved\":[],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1500,
+          "outputTokens": 200
+        }
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "c203d816b6f3a77f2909e7e2df3fd78fe40874ac47bc5d1d323db56db0d1a4b6",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":5,\"synopsis\":\"合成概述（单元 5）：以合成之城为组织的说法出现，与前文作为地点的说法并存。\",\"entities\":[{\"name\":\"合成之城\",\"kind\":\"organization\",\"aliases\":[],\"note\":\"合成注记：本单元将其当作一个组织。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[],\"relationships\":[],\"settingClaims\":[],\"conflicts\":[],\"unresolved\":[{\"description\":\"合成未解事项：合成之城究竟是地点还是组织，本单元无法判定。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"medium\"}",
+        "usage": {
+          "inputTokens": 1400,
+          "outputTokens": 180
+        }
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "9c47b01cced7e1d635887f62a200c2794366ab4b7d75ff2f441982448f224374",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":6,\"synopsis\":\"合成概述（单元 6）：高潮前的铺垫段落。\",\"entities\":[],\"events\":[{\"ordinal\":1,\"summary\":\"合成事件：矛盾积累。\",\"chronology\":\"中段之后\",\"participants\":[\"合成人物甲\",\"合成人物乙\"],\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[],\"settingClaims\":[],\"conflicts\":[],\"unresolved\":[],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1450,
+          "outputTokens": 150
+        }
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "7696b4f3a299e3c6b98cecf7c36d0cb5386327094b4a3616933b580ba7173020",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":7,\"synopsis\":\"合成概述（单元 7）：合成高潮段落。\",\"entities\":[{\"name\":\"合成人物甲\",\"kind\":\"person\",\"aliases\":[],\"note\":null,\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"合成事件：高潮到来。\",\"chronology\":\"高潮\",\"participants\":[\"合成人物甲\"],\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[],\"settingClaims\":[],\"conflicts\":[],\"unresolved\":[],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1500,
+          "outputTokens": 160
+        }
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "6d902e25b6bb9da2bc5ea309c9c6cf2b7eafb350294ece0e39a670afd53d4a31",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":8,\"synopsis\":\"合成概述（单元 8）：结尾段落收束合成情节。\",\"entities\":[],\"events\":[{\"ordinal\":1,\"summary\":\"合成事件：情节收束。\",\"chronology\":\"结尾\",\"participants\":[],\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[],\"settingClaims\":[],\"conflicts\":[],\"unresolved\":[],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 800,
+          "outputTokens": 120
+        }
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "340ca9da0ecd3a490279936203c800b829b9560202e0d13dd1d1be03fb9892ba",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":1,\"synopsis\":\"合成概述（单元 1）：开篇段落交代合成人物甲的出场与合成之城的初始设定。\",\"entities\":[{\"name\":\"合成人物甲\",\"kind\":\"person\",\"aliases\":[\"阿甲\"],\"note\":\"合成注记：主要人物占位。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":0,\"toGrapheme\":8}]},{\"name\":\"合成之城\",\"kind\":\"place\",\"aliases\":[],\"note\":null,\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"合成事件一：人物甲抵达合成之城。\",\"chronology\":\"开端\",\"participants\":[\"合成人物甲\"],\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":2,\"summary\":\"合成事件二：合成之城的规矩被首次提及。\",\"chronology\":\"开端之后\",\"participants\":[],\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[{\"subject\":\"合成人物甲\",\"object\":\"合成之城\",\"relation\":\"抵达\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"settingClaims\":[{\"subject\":\"合成之城\",\"claim\":\"位于北方\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"conflicts\":[],\"unresolved\":[{\"description\":\"合成未解事项：人物甲的来历在本单元未交代。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1400,
+          "outputTokens": 360
+        }
+      }
+    }
+  ]
+}

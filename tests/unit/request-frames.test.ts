@@ -78,6 +78,25 @@ function flushJournalEditInput(insertText: string): InputOf<'flushJournalEdit'> 
 }
 
 describe('decodeRequest accepts well-formed frames', () => {
+  it('routes controls, edits and redo for every planned kind with bounded identities', () => {
+    for (const kind of ['review-run', 'writing', 'initial-evaluation', 'readers-report', 'evaluation-rewrite'] as const) {
+      const target = { bookId: randomUUID(), kind, ref: randomUUID() };
+      for (const action of ['pause', 'resume', 'cancel'] as const) {
+        const request = { id: randomUUID(), op: 'controlTaskRun', input: { ...target, action } } satisfies ServiceRequest;
+        expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
+        expect(() => decodeRequest(frameOf({ ...request, input: { ...request.input, action: 'rewind' } }))).toThrow(ProtocolError);
+      }
+      const edit = { id: randomUUID(), op: 'editTaskPlan', input: { ...target, planEnvelopeDigest: 'a'.repeat(64),
+        removedSteps: [], disallowedAdaptations: ['safe-retry'] } } satisfies ServiceRequest;
+      const redo = { id: randomUUID(), op: 'redoTaskPlan', input: target } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(edit))).toEqual(edit);
+      expect(decodeRequest(acceptedFrameOf(redo))).toEqual(redo);
+      expect(() => decodeRequest(frameOf({ ...redo, input: { ...target, kind: 'fixed-task' } }))).toThrow(ProtocolError);
+    }
+    const quick = { id: randomUUID(), op: 'quickStartReviewRun', input: { bookId: randomUUID(), reviewRunId: randomUUID(),
+      planEnvelopeDigest: 'b'.repeat(64), ruleVersionId: randomUUID() } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(quick))).toEqual(quick);
+  });
   it('accepts an operation that takes no input', () => {
     const request = { id: randomUUID(), op: 'ready', input: {} } satisfies ServiceRequest;
     expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
@@ -305,6 +324,29 @@ describe('decodeRequest accepts well-formed frames', () => {
       { ...answer.input, note: 7 },
       { bookId: answer.input.bookId, taskIntentId: answer.input.taskIntentId, requestId: answer.input.requestId, optionId: 'retry' },
       { ...answer.input, runRecordId: randomUUID() },
+    ]) {
+      expect(rejectionFor(frameOf({ ...answer, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
+  it('answers a model question by option, free text or 不回答 in graphemes, and keeps the safe-retry note bound exactly (Issue #865)', () => {
+    const answer = {
+      id: randomUUID(),
+      op: 'answerBaselineAnalysisClarification',
+      input: { bookId: randomUUID(), taskIntentId: randomUUID(), requestId: randomUUID(), optionId: 'model-option-3', note: null },
+    } satisfies ServiceRequest;
+    // 500 composed graphemes are 3,500 UTF-16 code units: a model answer counts graphemes.
+    const composed = '👩🏽‍💻'.repeat(500);
+    for (const input of [answer.input, { ...answer.input, optionId: 'no-answer' }, { ...answer.input, optionId: 'free-text', note: composed }] as const) {
+      const request = { ...answer, input } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
+    }
+    for (const input of [
+      { ...answer.input, optionId: 'model-option-4' },
+      { ...answer.input, optionId: 'free-text', note: `${composed}a` },
+      // S76d's own answers keep their predecessor bound: at most 500 UTF-16 code units and never an empty note.
+      { ...answer.input, optionId: 'retry', note: '👩🏽‍💻'.repeat(72) },
+      { ...answer.input, optionId: 'record-gap', note: '' },
     ]) {
       expect(rejectionFor(frameOf({ ...answer, input }))).toBeInstanceOf(ProtocolError);
     }

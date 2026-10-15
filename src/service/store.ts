@@ -10,6 +10,8 @@ import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } fr
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
+  ControlTaskRunInput,
+  EditTaskPlanInput,
   CoverageManifestProjection,
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
@@ -272,6 +274,8 @@ import type {
   DefaultExecutionRuleProjection,
   DefaultExecutionRuleReference,
   BackgroundAnalysisEnrollmentProjection,
+  BackgroundAnalysisScopeKind,
+  BackgroundAnalysisScopeOffer,
   BackgroundAnalysisStartingPoint,
   DefaultExecutionRuleBinding,
   DefaultExecutionRulesProjection,
@@ -301,6 +305,7 @@ import type {
   ReviewWorkspaceProjection,
 } from '../shared/protocol.js';
 import {
+  BACKGROUND_ANALYSIS_CEILING_MAX,
   INITIAL_EVALUATION_MODE_GOALS,
   READERS_REPORT_LIVE_UNAVAILABLE,
   READERS_REPORT_MODE_GOALS,
@@ -484,6 +489,7 @@ import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
 import { RecentCache } from './recent-cache.js';
 import {
   baselineAnalysisPlan,
+  baselineClarifications,
   initialEvaluationPlan,
   evaluationMaterialPlan,
   analysisTaskStateLabel,
@@ -503,6 +509,7 @@ import {
   withPlanMovedReason,
   withAnswerBlockers,
   withResumeBlockers,
+  withLedgerRunControls,
   withResend,
   categoryResendDisclosure,
   RESUME_BLOCKED_BINDING,
@@ -564,6 +571,7 @@ import {
   defaultExecutionRuleKind,
   writingRuleOtherTypeReason,
   writingRulePattern,
+  reviewRulePattern,
   writingRuleTypeLabel,
   defaultExecutionRuleDrift,
   defaultExecutionRuleReference,
@@ -578,7 +586,11 @@ import { initializeRunCheckpointSchema } from './analysis/run-checkpoints.js';
 import {
   BACKGROUND_ANALYSIS_LISTED,
   BACKGROUND_ANALYSIS_NOT_GRANTED,
-  BACKGROUND_DEVELOPER_LIVE,
+  BACKGROUND_CEILING_RULE,
+  BACKGROUND_NO_CEILING,
+  BACKGROUND_NO_RULE,
+  BACKGROUND_PAUSED,
+  BACKGROUND_SUSPENDED,
   BACKGROUND_ENROLL_NO_ROUTE,
   BACKGROUND_ENROLL_NO_SHARE,
   BACKGROUND_NO_ROUTE,
@@ -596,7 +608,7 @@ import {
   backgroundShareFullReason,
   BACKGROUND_ANALYSIS_STATEMENT,
   BACKGROUND_ANALYSIS_WHAT,
-  BACKGROUND_ENROLL_DEVELOPER_LIVE,
+  BACKGROUND_ENROLL_NO_RULE,
   BACKGROUND_ENROLL_STALE,
   BACKGROUND_FACTS_UNREADABLE,
   BACKGROUND_REVOKE_CONSEQUENCES,
@@ -607,13 +619,24 @@ import {
   BackgroundAnalysisEnrollmentLedger,
   backgroundAnalysisDecisionOf,
   backgroundAnalysisWhen,
+  backgroundCeilingShares,
   backgroundDriftReason,
+  backgroundEnrollmentDrift,
   backgroundEnrollmentName,
+  backgroundCeilingTooLowReason,
+  backgroundRunReportLines,
+  backgroundScopeLabel,
+  backgroundScopeMemberActiveReason,
+  backgroundScopeMemberUnreadableReason,
+  BACKGROUND_CEILING_REQUIRED,
   initializeBackgroundAnalysisEnrollmentSchema,
   type BackgroundAnalysisDecision,
+  type BackgroundAnalysisEnrollInput,
   type BackgroundAnalysisEnrollmentRecord,
+  type BackgroundAnalysisScope,
 } from './background-analysis-enrollments.js';
 import { initializeClarificationSchema } from './analysis/clarifications.js';
+import { clarificationPlanBaseDigest } from './provider/clarification-contract.js';
 import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import { initializeProductionDocumentDeliverySchema, initializeProductionDocumentSchema } from './production-document-ledger.js';
 import {
@@ -782,7 +805,7 @@ import {
 } from '../shared/protocol.js';
 /** How many items or Runs one line of an exclusion's impact preview names before it gives the count. */
 const NAMED_EXCLUSION_ENTRIES = 5;
-import { isRecord } from './analysis/canonical.js';
+import { canonicalRecord, isRecord } from './analysis/canonical.js';
 import {
   DIALOGUE_BASIS_QUOTE_CHARACTERS,
   DIALOGUE_MARK_SOURCE_LABEL,
@@ -977,6 +1000,7 @@ import {
   EVALUATION_PROFILE_SCHEMA_VERSION,
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
+  MODEL_CLARIFICATION_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -1592,6 +1616,14 @@ function unconfirmedSurfaceOf(kind: string): TaskPlanKind | null {
   if (kind === EVALUATION_REWRITE_KIND) return 'evaluation-rewrite';
   if (kind === WRITING_KIND) return 'writing';
   return null;
+}
+
+/** Material readers rebuild the exact inner contract before the optional clarification instruction is restored. */
+function unwrappedPlanPromptDigest(execution: Record<string, unknown>, envelope: Record<string, unknown>): string {
+  const base = clarificationPlanBaseDigest(execution, envelope);
+  requireStore(base !== null,
+  'ANALYSIS_RECORD_INVALID', '任务澄清指令的基础契约与计划不一致。');
+  return base;
 }
 
 /** What 保留为缺口 names: the digest of exactly the outcomes listed, in key order (Issue #757). */
@@ -2259,7 +2291,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2323,7 +2355,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2701,7 +2733,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2754,7 +2786,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2899,7 +2931,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2951,7 +2983,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3428,7 +3460,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3480,7 +3512,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -5022,7 +5054,7 @@ export class EditorialStore {
 
   /** ②A's analysis; each update mode carries its quick start (Issue #421). */
   inspectBaselineAnalysis(bookId: string, progress?: ProgressReader, revisionId: string | null = null): BaselineAnalysisProjection {
-    return this.#withQuickStart(this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress, revisionId)) as BaselineAnalysisProjection);
+    return this.#withBackgroundReport(this.#withQuickStart(this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress, revisionId)) as BaselineAnalysisProjection));
   }
 
   // ---- J-04 factual review (Issue #53, plan slice S18a) -------------------------------------------
@@ -5185,7 +5217,7 @@ export class EditorialStore {
           materials = { bookId: latestForBook, references: this.#analysisCall(() => taskMaterialSources(pins)) };
           const envelope = components.get('plan-envelope');
           requireStore(envelope !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录不完整。');
-          frozenPromptDigest = asString(envelope.promptContractDigest as SqlRow[string]);
+          frozenPromptDigest = unwrappedPlanPromptDigest(components.get('execution-plan')!, envelope);
         }
       }
     }
@@ -5298,6 +5330,7 @@ export class EditorialStore {
     // The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4): pinned by the Run.
     capturedProcedure: { versionId: string; documentSha256: string } | null = null,
     materialIds: ReadonlyArray<string> = [],
+    redoOf: string | null = null,
   ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
     const procedure = capturedProcedure === null ? null : this.#procedureCall(() => this.#capturedProcedurePin(bookId, capturedProcedure));
     requireStore(Array.isArray(materialIds) && materialIds.length <= MAX_WRITING_MATERIALS && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) && new Set(materialIds).size === materialIds.length,
@@ -5308,7 +5341,7 @@ export class EditorialStore {
         'REVIEW_MATERIAL_CATEGORY_REQUIRED', REVIEW_MATERIAL_CATEGORY_REQUIRED);
     }
     const references = this.#prepareTaskMaterials(bookId, materialIds);
-    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure,
+    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, redoOf,
       ...(references.length === 0 ? {} : { materialReferences: { bookId, references } }),
     }));
   }
@@ -5410,6 +5443,7 @@ export class EditorialStore {
       write: (reviewRunId, categoryId) => this.#reviewCall(() => runs.write(reviewRunId, categoryId)),
       fail: (reviewRunId, categoryId, code, message) => this.#reviewCall(() => runs.fail(reviewRunId, categoryId, code, message)),
       waitingForPlace: (reviewRunId, categoryId) => runs.waitingForPlace(reviewRunId, categoryId),
+      paused: (reviewRunId) => this.#reviewCall(() => runs.paused(reviewRunId)),
     };
   }
 
@@ -5436,9 +5470,57 @@ export class EditorialStore {
     carriesStoppedRun: (runRecordId: string) => boolean = () => true,
   ): { plan: TaskPlanProjection; routeKind: string | null; provider?: NonNullable<BaselineAnalysisProjection['providerResolutionPlan']> } {
     const found = this.#taskPlanOfKind(input, progress, carriesStoppedRun);
+    if (input.kind !== 'baseline-analysis' && input.kind !== 'fixed-task') {
+      const tasks = input.kind === 'review-run'
+        ? this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, found.plan.ref)).categories.flatMap((category) => category.task === null ? [] : [category.task.taskIntentId])
+        : [found.plan.ref];
+      const cards = tasks.filter((taskIntentId) => this.#authority.prepare(`SELECT 1 FROM analysis_clarification_requests q
+        JOIN analysis_run_records r ON r.run_record_id = q.run_record_id WHERE r.task_intent_id = ? AND q.model_question_json IS NOT NULL LIMIT 1`)
+        .get(taskIntentId) !== undefined).flatMap((taskIntentId) => {
+        const ledger = this.clarificationLedger(input.bookId, taskIntentId);
+        const projection = this.#analysisCall(() => ledger.inspect(input.bookId, progress));
+        return baselineClarifications({ run: projection.run }, projection.run === null ? [] : ledger.clarificationsOf(projection.run.runRecordId));
+      });
+      found.plan = { ...found.plan, clarifications: cards };
+    }
     // 结果待确认 a completed Run of this kind left on the Book (Issue #757): listed on whichever of its plans is open.
     if (input.kind === 'fixed-task') return found;
-    return { ...found, plan: { ...found.plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) } };
+    let plan = found.plan;
+    if (input.kind === 'review-run') {
+      const tasks = this.#reviewCall(() => this.#reviewRuns.controlTasks(input.bookId, plan.ref));
+      const active = tasks.find((task) => {
+        const projection = task.ledger.inspect(input.bookId, progress);
+        return projection.taskIntent?.taskIntentId === task.taskIntentId && runIsActive(projection.run?.state ?? null);
+      });
+      // Only this Review Run's own category Task, never a later Task of the same kind on the Book.
+      const controlling = active ?? tasks.find((task) => {
+        const projection = task.ledger.inspect(input.bookId);
+        return projection.taskIntent?.taskIntentId === task.taskIntentId && projection.run?.state === 'cancelled';
+      }) ?? tasks[0];
+      if (controlling !== undefined) {
+        const projection = this.#analysisCall(() => controlling.ledger.inspect(input.bookId, progress)) as unknown as BaselineAnalysisProjection;
+        if (projection.taskIntent?.taskIntentId === controlling.taskIntentId) {
+          const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun, controlling.ledger);
+          const originalState = plan.state;
+          plan = withLedgerRunControls(plan, projection, [], stopped ?? undefined, controlling.ledger.launch.operationalScope === 'developer-live');
+          if (active === undefined && projection.run?.state !== 'cancelled') plan = { ...plan, state: originalState, runControl: null };
+          plan = { ...plan, edit: { ...plan.edit, planEnvelopeDigest: plan.edit.editable
+            ? canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest : null } };
+        }
+      }
+      plan = { ...plan, defaultRule: this.#reviewDefaultRule(input.bookId, plan.ref) };
+    }
+    if (input.kind !== 'baseline-analysis' && input.kind !== 'review-run') {
+      const ledger = this.#currentLedgerOf(input.kind, input.bookId, plan.ref);
+      const projection = this.#analysisCall(() => ledger.inspect(input.bookId, progress)) as unknown as BaselineAnalysisProjection;
+      const checkpoint = projection.checkpoint;
+      if (checkpoint !== null) {
+        const blocks = this.#analysisCall(() => ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
+        const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun, ledger);
+        plan = withLedgerRunControls(plan, projection, blocks, stopped ?? undefined, ledger.launch.operationalScope === 'developer-live');
+      }
+    }
+    return { ...found, plan: { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) } };
   }
 
   #taskPlanOfKind(
@@ -5717,6 +5799,86 @@ export class EditorialStore {
     return this.#analysisCall(() => this.#baselineAnalysis.requestCancel(bookId, taskIntentId)).runRecordId;
   }
 
+  /** The existing execution owner receives the actual kind ledger, including frozen contract variants. */
+  taskRunLedger(input: Pick<ControlTaskRunInput, 'bookId' | 'kind' | 'ref'>): BaselineAnalysisStore {
+    if (input.kind === 'review-run') {
+      const tasks = this.#reviewCall(() => this.#reviewRuns.controlTasks(input.bookId, input.ref));
+      const active = tasks.find((task) => {
+        const projection = this.#analysisCall(() => task.ledger.inspect(input.bookId));
+        return projection.taskIntent?.taskIntentId === task.taskIntentId && runIsActive(projection.run?.state ?? null);
+      });
+      const controlled = active ?? tasks.find((task) => {
+        const projection = this.#analysisCall(() => task.ledger.inspect(input.bookId));
+        return projection.taskIntent?.taskIntentId === task.taskIntentId && projection.run?.state === 'cancelled';
+      });
+      requireStore(controlled !== undefined, 'TASK_CONTROL_STALE', '这次审阅没有可控制的类别运行。');
+      return controlled.ledger;
+    }
+    return this.#currentLedgerOf(input.kind, input.bookId, input.ref);
+  }
+
+  executionLedgerForRun(runRecordId: string): BaselineAnalysisStore {
+    const row = this.#authority.prepare(`SELECT t.book_id, t.task_intent_id, t.kind FROM analysis_run_records r
+      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ?`).get(runRecordId) as SqlRow | undefined;
+    requireStore(row !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
+    const kind = asString(row.kind);
+    if (kind === BASELINE_ANALYSIS_KIND) return this.#baselineAnalysis;
+    if (kind === INITIAL_EVALUATION_KIND) return this.#initialLedgerForTask(asString(row.task_intent_id));
+    const mapped = kind === READERS_REPORT_KIND ? 'readers-report' : kind === EVALUATION_REWRITE_KIND ? 'evaluation-rewrite'
+      : kind === WRITING_KIND ? 'writing' : null;
+    if (mapped !== null) return this.#currentLedgerOf(mapped, asString(row.book_id), asString(row.task_intent_id));
+    return this.#reviewCall(() => this.#reviewRuns.ledgerForRun(runRecordId));
+  }
+
+  /** Redo prepares the same kind and request through its ordinary, cancellable preparation owner. */
+  redoTaskRequest(input: Pick<ControlTaskRunInput, 'bookId' | 'kind' | 'ref'>) {
+    if (input.kind === 'review-run') return { kind: input.kind, ...this.#reviewCall(() => this.#reviewRuns.redoRequest(input.bookId, input.ref)) };
+    const ledger = this.taskRunLedger(input);
+    const projection = this.#analysisCall(() => ledger.inspect(input.bookId));
+    requireStore(projection.taskIntent?.taskIntentId === input.ref && projection.run !== null &&
+      (projection.run.state === 'cancelled' || (projection.run.state === 'interrupted' && projection.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached')) &&
+      projection.run.transitions.some((entry) => entry.state === 'executing'), 'ANALYSIS_REDO_STALE', '只有开始后取消的运行可以改计划重做。');
+    const redoOf = projection.run.runRecordId;
+    const materialIds = ledger.definition.materialReferences?.sources.map((source) => source.materialId) ?? [];
+    switch (input.kind) {
+      case 'initial-evaluation': return { kind: input.kind, redoOf, materialIds };
+      case 'readers-report': return { kind: input.kind, redoOf, materialIds, template: this.#latestReadersReport(input.bookId)!.task.template };
+      case 'evaluation-rewrite': return { kind: input.kind, redoOf, recordId: this.#latestEvaluationRewrite(input.bookId)!.task.recordId };
+      case 'writing': {
+        const task = this.#latestWriting(input.bookId)!.task;
+        return { kind: input.kind, redoOf, request: { typeId: task.typeId, audience: task.input.audience,
+          channel: task.input.channel, requirements: task.input.requirements, materialIds: task.materials.map((material) => material.source.materialId) } };
+      }
+    }
+  }
+
+  requestTaskRunControl(input: ControlTaskRunInput): { runRecordId: string | null; ledger: BaselineAnalysisStore } {
+    const ledger = this.taskRunLedger(input);
+    const ref = input.kind === 'review-run' ? this.#analysisCall(() => ledger.inspect(input.bookId)).taskIntent!.taskIntentId : input.ref;
+    const runRecordId = this.#analysisCall(() => input.action === 'pause'
+      ? ledger.requestPause(input.bookId, ref).runRecordId
+      : input.action === 'cancel' ? ledger.requestCancel(input.bookId, ref).runRecordId
+        : ledger.continuableRun(input.bookId, ref));
+    if (input.kind === 'review-run' && input.action === 'cancel') this.#reviewCall(() => this.#reviewRuns.cancelRemaining(input.bookId, input.ref));
+    return { runRecordId, ledger };
+  }
+
+  editTaskPlan(input: EditTaskPlanInput, progress?: ProgressReader): TaskPlanProjection {
+    if (input.kind === 'review-run') {
+      const tasks = this.#reviewCall(() => this.#reviewRuns.controlTasks(input.bookId, input.ref));
+      const digest = canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest;
+      requireStore(digest === input.planEnvelopeDigest && tasks.length > 0, 'ANALYSIS_PLAN_EDIT_STALE', '计划已经变了；请重新查看计划后再修改。');
+      this.#transaction(this.#authority, () => {
+        for (const task of tasks) this.#analysisCall(() => task.ledger.editPlan(input.bookId,
+          { ...input, taskIntentId: task.taskIntentId, planEnvelopeDigest: task.planEnvelopeDigest }));
+      });
+      return this.inspectTaskPlan(input, progress);
+    }
+    const ledger = this.taskRunLedger(input);
+    this.#analysisCall(() => ledger.editPlan(input.bookId, { ...input, taskIntentId: input.ref }));
+    return this.inspectTaskPlan(input, progress);
+  }
+
   /**
    * 更新计划 (Issue #419, plan slice S73; V2-UX-PLAN-009, PLAN-011): the next plan version of the Book's baseline analysis
    * Task, as the editor left it, and the Book's analysis as it then reads.
@@ -5748,8 +5910,57 @@ export class EditorialStore {
     runState: BaselineAnalysisRunState;
   } {
     this.#assertAvailable();
-    const answered = this.#analysisCall(() => this.#baselineAnalysis.recordClarificationAnswer(input.bookId, input));
+    const ledger = this.clarificationLedger(input.bookId, input.taskIntentId);
+    const answered = this.#analysisCall(() => ledger.recordClarificationAnswer(input.bookId, input));
     return { runRecordId: answered.runRecordId, runState: answered.runState };
+  }
+
+  /** Resolve the existing Run ledger from its Task, never from a client-selected model or kind. */
+  clarificationLedger(bookId: string, taskIntentId: string): BaselineAnalysisStore {
+    this.#assertAvailable();
+    const row = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE book_id = ? AND task_intent_id = ?').get(bookId, taskIntentId) as SqlRow | undefined;
+    requireStore(row !== undefined, 'ANALYSIS_CLARIFICATION_STALE', '这个问题不是这本书当前任务提的。');
+    const kind = asString(row.kind);
+    if (kind === BASELINE_ANALYSIS_KIND) return this.#baselineAnalysis;
+    if (kind === FACTUAL_REVIEW_KIND) return this.#factualReview;
+    if (isReviewCategoryKindId(kind)) {
+      const entry = reviewCategoryEntry(kind.slice(kind.indexOf('/') + 1));
+      requireStore(entry !== null, 'ANALYSIS_CLARIFICATION_STALE', '这个审阅类别已经变化。');
+      return this.#reviewLedgerOf(entry, undefined, undefined, bookId);
+    }
+    const surface = unconfirmedSurfaceOf(kind);
+    requireStore(surface === 'initial-evaluation' || surface === 'readers-report' || surface === 'evaluation-rewrite' || surface === 'writing',
+      'ANALYSIS_CLARIFICATION_STALE', '这个任务种类不能回答模型问题。');
+    return this.#currentLedgerOf(surface, bookId, taskIntentId);
+  }
+
+  /** Waiting model questions survive restart; this read supplies the existing service timer, not a new scheduler. */
+  modelClarificationRuns(): Array<{ bookId: string; taskIntentId: string; runRecordId: string; ledger: BaselineAnalysisStore }> {
+    const rows = this.#authority.prepare(`SELECT DISTINCT i.book_id, i.task_intent_id, q.run_record_id
+      FROM analysis_clarification_requests q JOIN analysis_task_intents i ON i.task_intent_id =
+        (SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = q.run_record_id)
+      WHERE q.model_question_json IS NOT NULL AND
+        (SELECT state FROM analysis_run_states s WHERE s.run_record_id = q.run_record_id ORDER BY sequence DESC LIMIT 1) = 'awaiting-clarification'`).all() as SqlRow[];
+    // A Run whose ledger no longer resolves is left to its own surface; the others still time out and continue.
+    return rows.flatMap((row) => {
+      try {
+        return [{ bookId: asString(row.book_id), taskIntentId: asString(row.task_intent_id), runRecordId: asString(row.run_record_id),
+          ledger: this.clarificationLedger(asString(row.book_id), asString(row.task_intent_id)) }];
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+        return [];
+      }
+    });
+  }
+
+  clarificationPlanTarget(bookId: string, taskIntentId: string): InspectTaskPlanInput {
+    const ledger = this.clarificationLedger(bookId, taskIntentId);
+    const kind = unconfirmedSurfaceOf(ledger.kind)!;
+    if (kind !== 'review-run') return { bookId, kind, ref: taskIntentId };
+    const row = this.#authority.prepare(`SELECT rr.review_run_id FROM review_runs rr
+      JOIN json_each(rr.canonical_json, '$.categories') c ON json_extract(c.value, '$.task.taskIntentId') = ? WHERE rr.book_id = ?`).get(taskIntentId, bookId) as SqlRow | undefined;
+    requireStore(row !== undefined, 'ANALYSIS_CLARIFICATION_STALE', '这个审阅任务已经变化。');
+    return { bookId, kind, ref: asString(row.review_run_id) };
   }
 
   /**
@@ -5776,22 +5987,28 @@ export class EditorialStore {
     return this.#analysisCall(() => this.#baselineAnalysis.reconcileStoppedRuns());
   }
 
-  /**
-   * Startup reconciliation of the evaluation kind's ledger (Issue #429 review, P1): a 初评 left admitted or executing has nothing
-   * running it and cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before
-   * dispatch with why. Either way 评估 offers 重新初评 at once instead of reading a Run under way for good.
-   */
+  cancellingLedgerRuns(): string[] {
+    return (this.#authority.prepare(`SELECT r.run_record_id FROM analysis_run_records r JOIN analysis_task_intents t
+      ON t.task_intent_id = r.task_intent_id WHERE t.kind <> ? AND (SELECT s.state FROM analysis_run_states s
+      WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) = 'cancelling'`).all(BASELINE_ANALYSIS_KIND) as SqlRow[])
+      .map((row) => asString(row.run_record_id));
+  }
+
+  finishCancelledReviewRun(runRecordId: string): void {
+    for (const row of this.#authority.prepare(`SELECT rr.review_run_id, rr.book_id FROM review_runs rr
+      JOIN json_each(rr.canonical_json, '$.categories') c JOIN analysis_run_records r
+      ON r.task_intent_id = json_extract(c.value, '$.task.taskIntentId') WHERE r.run_record_id = ?`).all(runRecordId) as SqlRow[]) {
+      this.#reviewCall(() => this.#reviewRuns.finishCancelled(asString(row.book_id), asString(row.review_run_id)));
+    }
+  }
+
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedInitialEvaluationRuns(): { settled: number } {
     this.#assertAvailable();
     return { settled: this.#analysisCall(() => this.#initialEvaluation.reconcileStoppedRuns()).settled };
   }
 
-  /**
-   * Startup reconciliation of the factual kind's ledger (Issue #657): its Runs — 事实核查's own, and a Review Run's 事实核查
-   * category — cannot resume either, so one left admitted, executing or pausing ends 已中断 with its outcome, and one left
-   * waiting for a place is blocked before dispatch with why. The Book can then check facts again at once. A Review Run's
-   * 事实核查 left authorized sent nothing and is left for 继续审阅 to dispatch, as every category of a Review Run is.
-   */
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedFactualReviewRuns(): { settled: number } {
     this.#assertAvailable();
     return {
@@ -5800,11 +6017,7 @@ export class EditorialStore {
     };
   }
 
-  /**
-   * Startup reconciliation of the review categories' ledgers (Issue #657), as the factual kind's: a category Run a stopped
-   * service left under way is settled now, not only when the editor happens on 继续审阅, which then records what it came
-   * to; one left authorized is 继续审阅's to dispatch.
-   */
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedReviewCategoryRuns(): { settled: number } {
     this.#assertAvailable();
     return { settled: this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns())) };
@@ -5815,7 +6028,8 @@ export class EditorialStore {
    * closed: what it kept; for a stopped one, why 续行 cannot go on as authorized, if not; and — read by the execution
    * owner — whether this launch can still carry it under the binding it persisted.
    */
-  #baselineStoppedRun(projection: BaselineAnalysisProjection, carriesStoppedRun: (runRecordId: string) => boolean): BaselineStoppedRunFacts | null {
+  #baselineStoppedRun(projection: BaselineAnalysisProjection, carriesStoppedRun: (runRecordId: string) => boolean,
+    ledger: BaselineAnalysisStore = this.#baselineAnalysis): BaselineStoppedRunFacts | null {
     const run = projection.run;
     if (run === null || run.progress !== null) return null;
     const stopped = run.state === 'paused' || run.state === 'resumable' || run.state === 'awaiting-clarification';
@@ -5828,12 +6042,12 @@ export class EditorialStore {
       let unitsClosed: number | null;
       let waiting: Array<{ unitOrdinal: number; answered: boolean }> = [];
       try {
-        const checkpoints = this.#baselineAnalysis.unitCheckpoints(run.runRecordId);
+        const checkpoints = ledger.unitCheckpoints(run.runRecordId);
         unitsSettled = checkpoints.length;
         unitsClosed = checkpoints.filter((checkpoint) => checkpoint.unit.closed.state === 'closed').length;
         // The units that asked the editor and have not settled since (Issue #422, S76d).
         const settled = new Set(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal));
-        waiting = this.#baselineAnalysis.clarificationsOf(run.runRecordId)
+        waiting = ledger.clarificationsOf(run.runRecordId)
           .filter((request) => !settled.has(request.unitOrdinal))
           .map((request) => ({ unitOrdinal: request.unitOrdinal, answered: request.answer !== null }));
       } catch {
@@ -5841,14 +6055,14 @@ export class EditorialStore {
         unitsSettled = null;
         unitsClosed = null;
       }
-      const blockers = stopped ? [...this.#baselineAnalysis.continuationBlockers(run.runRecordId), ...(bindingHolds ? [] : [RESUME_BLOCKED_BINDING])] : [];
+      const blockers = stopped ? [...ledger.continuationBlockers(run.runRecordId), ...(bindingHolds ? [] : [RESUME_BLOCKED_BINDING])] : [];
       // 模型服务账户限额 (Issue #51, S16b): the stop the provider's limit made, which 续行 takes on once it clears.
-      const accountLimit = run.state === 'resumable' ? this.#baselineAnalysis.accountLimitOf(run.runRecordId) : null;
+      const accountLimit = run.state === 'resumable' ? ledger.accountLimitOf(run.runRecordId) : null;
       // 结果待确认 (Issue #51, S16c): the ranges whose sent requests' results cannot be known — held by any stopped Run, and
       // whether the Run stopped there itself, which it never goes on from.
-      const unconfirmed = stopped ? this.#baselineAnalysis.unconfirmedRangesOf(run.runRecordId) : [];
+      const unconfirmed = stopped ? ledger.unconfirmedRangesOf(run.runRecordId) : [];
       const outcomeUnknown = unconfirmed.length === 0 ? null
-        : { units: unconfirmed, stopped: run.state === 'resumable' && this.#baselineAnalysis.outcomeUnknownOf(run.runRecordId) !== null };
+        : { units: unconfirmed, stopped: run.state === 'resumable' && ledger.outcomeUnknownOf(run.runRecordId) !== null };
       return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit, outcomeUnknown };
     });
   }
@@ -6092,7 +6306,7 @@ export class EditorialStore {
    * 待我处理's and the 任务 panel's reading of every other ledger kind (Issue #760, S74c): each Book's latest Task of the kind whose
    * Run waits to start once online, or was blocked because its plan moved meanwhile.
    */
-  #waitingTaskAttention(bookId: string | null, limit: number): WaitingTaskAttentionReading[] {
+  #waitingTaskAttention(bookId: string | null, limit: number, progress?: ProgressReader): WaitingTaskAttentionReading[] {
     const readings: WaitingTaskAttentionReading[] = [];
     // A kind whose records no longer read is said where its own surface reads it, never by taking 待我处理 down with it.
     for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
@@ -6100,6 +6314,39 @@ export class EditorialStore {
         const ledger = kind === 'initial-evaluation' ? this.#initialEvaluation : this.#anyLedgerOfKind(kind);
         if (ledger === null) continue;
         for (const reading of this.#analysisCall(() => ledger.waitingAttentionReadings(bookId, limit))) readings.push({ kind, ...reading });
+        const controls = this.#analysisCall(() => ledger.attentionReadings(progress ?? (() => null), '', limit,
+          bookId === null ? null : { bookId, cancelled: false })).tasks;
+        for (const control of controls) {
+          const run = control.run;
+          if (run === null || !runIsActive(run.state) || run.state === 'awaiting-connectivity') continue;
+          readings.push({ kind, bookId: control.bookId, bookTitle: control.bookTitle, taskIntentId: control.taskIntentId,
+            runRecordId: run.runRecordId, state: run.state, stateAt: run.stateAt, control });
+        }
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+      }
+    }
+    const questions = this.#authority.prepare(`SELECT DISTINCT q.run_record_id, q.raised_at, i.book_id, i.task_intent_id, i.kind, b.title
+      FROM analysis_clarification_requests q JOIN analysis_run_records r ON r.run_record_id = q.run_record_id
+      JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id JOIN books b ON b.book_id = i.book_id
+      LEFT JOIN analysis_clarification_answers a ON a.request_id = q.request_id
+      WHERE q.model_question_json IS NOT NULL AND a.answer_id IS NULL AND i.kind <> ? AND (? IS NULL OR i.book_id = ?)
+      AND (SELECT state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY sequence DESC LIMIT 1)
+        IN ('admitted','executing','pausing','paused','resumable','awaiting-clarification') LIMIT ?`).all(BASELINE_ANALYSIS_KIND, bookId, bookId, limit) as SqlRow[];
+    // A Task the control readings above already carry shows its open question there, as the baseline's does (#870).
+    const seen = new Set<string>(readings.map((reading) => reading.taskIntentId));
+    for (const row of questions) {
+      const taskIntentId = asString(row.task_intent_id);
+      if (seen.has(taskIntentId)) continue;
+      seen.add(taskIntentId);
+      // As above: a Task whose records no longer read is said on its own surface, never by taking 待我处理 down with it.
+      try {
+        const target = this.clarificationPlanTarget(asString(row.book_id), taskIntentId);
+        if (target.kind === 'fixed-task' || target.kind === 'baseline-analysis') continue;
+        const reviewOrdinal = target.kind === 'review-run' ? this.#reviewCall(() => this.#reviewRuns.planFacts(asString(row.book_id), target.ref!)).ordinal : null;
+        readings.push({ kind: target.kind, bookId: asString(row.book_id), bookTitle: asString(row.title), taskIntentId,
+          ...(reviewOrdinal === null ? {} : { reviewOrdinal }),
+          ref: target.ref!, runRecordId: asString(row.run_record_id), state: 'clarification', stateAt: asString(row.raised_at) });
       } catch (error) {
         if (!(error instanceof StoreError)) throw error;
       }
@@ -6274,6 +6521,15 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest),
       'DEFAULT_EXECUTION_RULE_INVALID', '默认执行规则的参数无效。');
+    if (this.#authority.prepare('SELECT 1 FROM review_runs WHERE review_run_id = ? AND book_id = ?').get(taskIntentId, bookId) !== undefined) {
+      const facts = this.#reviewRuleFacts(bookId, taskIntentId);
+      const offer = this.#reviewDefaultRule(bookId, taskIntentId);
+      requireStore(facts.digest === planEnvelopeDigest && (offer.canSet || offer.current?.fromThisPlan === true),
+        'DEFAULT_EXECUTION_RULE_UNAVAILABLE', offer.reason ?? SET_RULE_CHANGED);
+      requireStore(facts.binding !== null && facts.tasks[0] !== undefined, 'DEFAULT_EXECUTION_RULE_UNAVAILABLE', '没有可设为默认的审阅计划。');
+      return this.#ruleProjection(this.#ruleCall(() => this.#rules.set({ bookId, pattern: facts.pattern,
+        sourceTaskIntentId: facts.tasks[0]!.taskIntentId, sourcePlanEnvelopeDigest: facts.digest, binding: facts.binding! })));
+    }
     // The plan on show is a writing Task's (S84b) when its Task is of that kind; every other plan is the baseline's, as before.
     const intentKind = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ? AND book_id = ?')
       .get(taskIntentId, bookId) as SqlRow | undefined;
@@ -6306,6 +6562,76 @@ export class EditorialStore {
     this.#assertAvailable();
     const rules = this.#ruleCall(() => this.#rules.list()).map((record) => this.#ruleProjection(record));
     return { rules, statement: DEFAULT_EXECUTION_RULES_STATEMENT };
+  }
+
+  #reviewRuleFacts(bookId: string, reviewRunId: string) {
+    const review = this.#reviewCall(() => this.#reviewRuns.planFacts(bookId, reviewRunId));
+    const tasks = this.#reviewCall(() => this.#reviewRuns.controlTasks(bookId, reviewRunId));
+    const projections = tasks.map((task) => this.#analysisCall(() => task.ledger.inspect(bookId)));
+    const pattern = reviewRulePattern(review.categories.map((category) => category.categoryId));
+    const digest = canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest;
+    const bindings = projections.map((projection) => projection.planVersion === null ? null : defaultExecutionRuleBindingOf(projection.planVersion.materialInputs));
+    const first = bindings[0];
+    const binding: DefaultExecutionRuleBinding | null = first == null || bindings.some((value) => value === null) ? null : {
+      ...first,
+      artifactPin: { ...first.artifactPin, identity: pattern, nativeCarrierSha256: canonicalRecord(bindings).digest,
+        sidecarSha256: canonicalRecord(review.categories.map((category) => ({ categoryId: category.categoryId, procedure: category.procedure, basis: category.basisStatement }))).digest },
+      expectedOutcome: `审阅类别：${review.categories.map((category) => category.categoryId).sort().join('、')}`,
+    };
+    const allowed = tasks.every((task) => task.ledger.launch.live === null ||
+      liveKindRule(task.ledger.launch.policy, task.ledger.definition.kind)?.matchingActiveDefaultExecutionRuleAllowed === true);
+    return { tasks, projections, pattern, digest, binding, allowed, review };
+  }
+
+  #reviewDefaultRule(bookId: string, reviewRunId: string): TaskPlanDefaultRuleProjection {
+    const facts = this.#reviewRuleFacts(bookId, reviewRunId);
+    const rule = this.#ruleCall(() => this.#rules.forPattern(bookId, facts.pattern));
+    const current = rule === null ? null : { ...defaultExecutionRuleReference(rule, rule.version), state: rule.state,
+      fromThisPlan: rule.version.sourcePlanEnvelopeDigest === facts.digest };
+    const reason = !facts.allowed ? '当前模型处理规则未允许审阅快速开始；请先看计划。'
+      : facts.binding === null ? '这次审阅没有可设为默认的模型任务。'
+        : facts.projections.some((projection, index) => projection.taskIntent?.taskIntentId !== facts.tasks[index]!.taskIntentId || projection.planRevision !== null)
+          ? SET_RULE_CHANGED
+          : facts.projections.some((projection) => projection.planVersion?.edits.runBudgetCeiling !== undefined) ? SET_RULE_BUDGET
+            : facts.projections.some((projection) => { const edits = projection.planVersion?.edits; return edits !== undefined &&
+              (edits.removedSteps.length > 0 || edits.disallowedAdaptations.length > 0 || (edits.askFirstAdaptations ?? []).length > 0); }) ? SET_RULE_EDITED
+              : current?.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
+    const ruleVersionId = this.#reviewCall(() => this.#reviewRuns.defaultRuleVersion(reviewRunId));
+    const started = ruleVersionId === null ? null : this.#ruleCall(() => this.#rules.version(ruleVersionId));
+    return { canSet: reason === null, reason, current, planEnvelopeDigest: reason === null ? facts.digest : null,
+      binds: facts.binding === null ? [] : defaultRuleBindingRows(facts.binding, '审阅', defaultExecutionRuleCovers(facts.pattern)),
+      startedBy: started === null ? null : defaultExecutionRuleReference(started.rule, started.version) };
+  }
+
+  async quickStartReviewRun(input: { bookId: string; reviewRunId: string; planEnvelopeDigest: string; ruleVersionId: string },
+    runtime: { credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
+    progress?: ProgressReader): Promise<{ outcome: 'started' | 'fell-back'; reasons: string[]; dispatch: boolean }> {
+    const facts = this.#reviewRuleFacts(input.bookId, input.reviewRunId);
+    const startedBy = this.#reviewCall(() => this.#reviewRuns.defaultRuleVersion(input.reviewRunId));
+    if (startedBy !== null) {
+      requireStore(startedBy === input.ruleVersionId && facts.digest === input.planEnvelopeDigest,
+        'ANALYSIS_AUTHORIZATION_STALE', '这次审阅已经按另一份计划或规则开始。');
+      return { outcome: 'started', reasons: [], dispatch: false };
+    }
+    const rule = this.#ruleCall(() => this.#rules.activeFor(input.bookId, facts.pattern));
+    const fallBack = (reason: string) => ({ outcome: 'fell-back' as const, reasons: [reason], dispatch: false });
+    if (rule === null || rule.version.ruleVersionId !== input.ruleVersionId) return fallBack(quickStartNoRuleReason(facts.pattern));
+    if (!facts.allowed) return fallBack('当前模型处理规则未允许审阅快速开始；请先看计划。');
+    if (facts.digest !== input.planEnvelopeDigest || facts.binding === null ||
+      canonicalRecord(facts.binding).digest !== canonicalRecord(rule.version.binding).digest) return fallBack(QUICK_START_PLAN_CHANGED);
+    if (facts.projections.some((projection) => projection.planVersion?.edits.removedSteps.length !== 0 ||
+      projection.planVersion.edits.disallowedAdaptations.length !== 0 || (projection.planVersion.edits.askFirstAdaptations ?? []).length !== 0 ||
+      projection.planVersion.edits.runBudgetCeiling !== undefined)) return fallBack(SET_RULE_EDITED);
+    const plan = await this.inspectTaskPlanWithConnection({ bookId: input.bookId, kind: 'review-run', ref: input.reviewRunId },
+      runtime.credentialReadiness, runtime.connectivity, progress);
+    if (plan.start.readiness !== 'ready') return fallBack(plan.start.readiness === 'offline' ? QUICK_START_OFFLINE : QUICK_START_NOT_READY);
+    if (runtime.connectivity.slotBusy()) return fallBack(QUICK_START_SLOT_BUSY);
+    // Re-read every match after asynchronous credential readiness, before recording the one approval.
+    const now = this.#reviewRuleFacts(input.bookId, input.reviewRunId);
+    const active = this.#ruleCall(() => this.#rules.activeFor(input.bookId, now.pattern));
+    if (active?.version.ruleVersionId !== input.ruleVersionId || now.digest !== facts.digest || !now.allowed) return fallBack(QUICK_START_RULE_CHANGED);
+    this.#reviewCall(() => this.#reviewRuns.recordAuthorization(input.bookId, input.reviewRunId, plan.start.categoryDigests, false, 'now', input.ruleVersionId));
+    return { outcome: 'started', reasons: [], dispatch: true };
   }
 
   /** 停用 (S75 D7): the rule stays on record with every version, and quick start stops using it. */
@@ -6401,6 +6727,10 @@ export class EditorialStore {
    * ②A's 后台分析: the Book's Enrollment, what it would do now and why, the Runs it started, the dispatcher's latest look at the
    * Book, and `登记…`'s disclosure — everything the Enrollment would bind, read from the Book's own facts, before the editor
    * chooses where it starts. Reading writes nothing. A damaged record is said as damaged, and stops only this Book.
+   *
+   * Issue #864: the disclosure offers this Book alone, each Series it is in and every Book of the house, each scope's Books in the
+   * order its ceiling is shared in, and the ceiling is the editor's to set — required. A Series or all-Books Enrollment names the
+   * Books of its scope the dispatcher's latest look skipped, and why.
    */
   inspectBackgroundAnalysisEnrollment(bookId: string, runtime: BackgroundAnalysisRuntime): BackgroundAnalysisEnrollmentProjection {
     this.#assertAvailable();
@@ -6410,32 +6740,34 @@ export class EditorialStore {
     const title = asString(book.title);
     const read = this.#enrollmentRead(bookId);
     const record = read === 'damaged' ? null : read;
-    const state = read === 'damaged' ? 'damaged' : record === null ? 'none' : record.state;
+    const state = read === 'damaged' ? 'damaged' : record === null ? 'none' : record.state === 'active' && record.paused ? 'paused' : record.state;
     const next = this.#analysisCall(() => this.#backgroundDecision(bookId, read, runtime));
-    const live = this.#baselineAnalysis.launch.live !== null;
     const binding = this.#enrollmentBinding(bookId);
     const nextOrdinal = record === null ? 1 : record.version.ordinal + 1;
     const reason = state === 'damaged'
       ? BACKGROUND_RECORD_DAMAGED
-      : state === 'active'
+      : state === 'active' || state === 'paused'
         ? '这本书已经登记了后台分析；要改，请先撤销登记再重新登记。'
-        : live
-          ? BACKGROUND_ENROLL_DEVELOPER_LIVE
+        : !this.#backgroundRuleAdmits()
+          ? BACKGROUND_ENROLL_NO_RULE
           : !runtime.routeExecutable
             ? BACKGROUND_ENROLL_NO_ROUTE
             : backgroundAnalysisShare(runtime.capacity) < 1
               ? BACKGROUND_ENROLL_NO_SHARE
               : binding === null ? BACKGROUND_FACTS_UNREADABLE : null;
-    const scope = `《${title}》这一本书`;
+    const scope = backgroundScopeLabel('book', title, 1);
+    const scopes = this.#backgroundScopeOffers(bookId, title);
     const when = backgroundAnalysisWhen(runtime.quietMs);
-    const binds = binding === null ? [] : defaultRuleBindingRows(binding, DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis']);
+    // The ceiling is the editor's to set at 登记, never the Book's own setting (Issue #864).
+    const binds = binding === null ? [] : defaultRuleBindingRows(binding, DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis'])
+      .map((row) => (row.label === '预算上限' ? { label: row.label, value: BACKGROUND_CEILING_REQUIRED } : row));
     const startingPoints = (['prospective', 'backfill'] as const).map((value) => ({
       value, label: BACKGROUND_STARTING_POINT_LABELS[value], note: BACKGROUND_STARTING_POINT_NOTES[value],
     }));
     // The digest of exactly what the disclosure shows: a `登记` that names another is refused as stale.
     const disclosureDigest = reason !== null ? null : sha256(canonicalJson({
-      schema: 'ai7.background-analysis-enrollment.disclosure/1', bookId, ordinal: nextOrdinal, scope, what: BACKGROUND_ANALYSIS_WHAT, when,
-      binding, startingPoints, notGranted: BACKGROUND_ANALYSIS_NOT_GRANTED,
+      schema: 'ai7.background-analysis-enrollment.disclosure/2', bookId, ordinal: nextOrdinal, scope, scopes, what: BACKGROUND_ANALYSIS_WHAT, when,
+      binding: { ...binding, runBudgetCeiling: 'required' }, startingPoints, notGranted: BACKGROUND_ANALYSIS_NOT_GRANTED, ceilingRule: BACKGROUND_CEILING_RULE,
     }));
     // The ten newest Runs the Enrollment started, and how many there are (#713 review, P3-5).
     const startedRows = this.#authority.prepare(
@@ -6470,13 +6802,14 @@ export class EditorialStore {
       : this.#enrollmentCall(() => this.#enrollments.history(bookId, BACKGROUND_ANALYSIS_LISTED));
     const look = this.#backgroundLooks.get(bookId) ?? null;
     const notStarted = this.#backgroundNotStarted.get(bookId) ?? null;
+    const enrolledScope = record === null ? null : this.#enrollmentScopeOf(record.version.scope, bookId, title);
     return {
       bookId,
       bookTitle: title,
       state,
       stateLabel: BACKGROUND_STATE_LABELS[state],
       statement: BACKGROUND_ANALYSIS_STATEMENT,
-      enrollment: record === null ? null : {
+      enrollment: record === null || enrolledScope === null ? null : {
         enrollmentId: record.enrollmentId,
         enrollmentVersionId: record.version.enrollmentVersionId,
         ordinal: record.version.ordinal,
@@ -6487,9 +6820,20 @@ export class EditorialStore {
         enrolledAt: record.version.createdAt,
         stateRecordedAt: record.stateRecordedAt,
         binds: defaultRuleBindingRows(record.version.binding, DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis']),
+        ceilingTokens: record.version.ceiling?.maxTotalTokens ?? null,
+        shareTokens: record.version.share?.maxTotalTokens ?? null,
+        scope: enrolledScope,
       },
-      history: history.entries.map((entry) => ({ ...entry, stateLabel: BACKGROUND_STATE_LABELS[entry.state] })),
+      history: history.entries.map((entry) => {
+        const shown = entry.state === 'active' && entry.paused ? 'paused' : entry.state;
+        return { state: shown, stateLabel: BACKGROUND_STATE_LABELS[shown], ordinal: entry.ordinal, recordedAt: entry.recordedAt };
+      }),
       historyCount: history.count,
+      skipped: record === null || record.state !== 'active' || enrolledScope === null || record.version.scope.kind === 'book' ? [] : enrolledScope.books.flatMap((member) => {
+        // The dispatcher's latest look found nothing to do there: the Book's working text has nothing new for its analysis.
+        const memberLook = this.#backgroundLooks.get(member.bookId);
+        return memberLook?.kind === 'none' ? [{ bookId: member.bookId, title: member.title, reason: memberLook.reason }] : [];
+      }),
       next: { kind: next.kind, reason: next.reason },
       lastLook: look,
       lastNotStarted: notStarted,
@@ -6500,70 +6844,131 @@ export class EditorialStore {
         reason,
         disclosureDigest,
         scope,
+        scopes,
         what: BACKGROUND_ANALYSIS_WHAT,
         when,
         binds,
         startingPoints,
         notGranted: BACKGROUND_ANALYSIS_NOT_GRANTED,
+        ceilingRule: BACKGROUND_CEILING_RULE,
       },
-      revoke: { canRevoke: state === 'active' || state === 'suspended', consequences: BACKGROUND_REVOKE_CONSEQUENCES },
+      hold: { canPause: state === 'active', canResume: state === 'paused' },
+      revoke: { canRevoke: state === 'active' || state === 'paused' || state === 'suspended', consequences: BACKGROUND_REVOKE_CONSEQUENCES },
     };
   }
 
   /**
    * `登记` (ADR 0048; V2-UX-ANALYSIS-017): a separate, explicit decision of the editor, bound to the disclosure they confirmed
-   * by its digest and to the starting point they chose. Nothing else — setting up a model service, importing, enabling a
-   * profile, a rule, a Session or a Run that succeeded — ever makes one. The same confirmation made twice answers as once. An
-   * Enrollment suspended after the local data was replaced is confirmed this way too, as its next version.
+   * by its digest, to the starting point they chose, to the scope it covers and to the tokens ceiling they set, which is required
+   * (Issue #864). Nothing else — setting up a model service, importing, enabling a profile, a rule, a Session or a Run that
+   * succeeded — ever makes one. The same confirmation made twice answers as once. An Enrollment suspended after the local data
+   * was replaced is confirmed this way too, as its next version.
+   *
+   * A Series or all-Books scope enrolls every Book of it in one transaction, in the scope's order, each with its equal share of
+   * the ceiling and the remainder on the first; a Book of it that already has an Enrollment in force, or whose settings cannot be
+   * read, refuses the whole 登记 and is named.
    */
   enrollBackgroundAnalysis(
     bookId: string,
     disclosureDigest: string,
     startingPoint: BackgroundAnalysisStartingPoint,
+    scope: { kind: BackgroundAnalysisScopeKind; seriesId: string | null },
+    ceilingTokens: number,
     runtime: BackgroundAnalysisRuntime,
   ): BackgroundAnalysisEnrollmentProjection {
     this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(bookId) && DIGEST_PATTERN.test(disclosureDigest) && (startingPoint === 'prospective' || startingPoint === 'backfill'),
-      'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
+    requireStore(UUID_PATTERN.test(bookId) && DIGEST_PATTERN.test(disclosureDigest) && (startingPoint === 'prospective' || startingPoint === 'backfill') &&
+      (scope.kind === 'series' ? typeof scope.seriesId === 'string' && UUID_PATTERN.test(scope.seriesId) : (scope.kind === 'book' || scope.kind === 'all-books') && scope.seriesId === null),
+    'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
+    requireStore(Number.isSafeInteger(ceilingTokens) && ceilingTokens >= 1 && ceilingTokens <= BACKGROUND_ANALYSIS_CEILING_MAX,
+      'BACKGROUND_ANALYSIS_CEILING_REQUIRED', '请设置后台分析的预算上限（tokens）：登记必须有上限。');
     const current = this.#enrollmentRead(bookId);
     if (current !== 'damaged' && current !== null && current.state === 'active' && current.version.disclosureDigest === disclosureDigest &&
-        current.version.startingPoint === startingPoint) {
+        current.version.startingPoint === startingPoint && current.version.ceiling?.maxTotalTokens === ceilingTokens &&
+        current.version.scope.kind === scope.kind && (current.version.scope.kind === 'book' ? null : current.version.scope.seriesId) === scope.seriesId) {
       return this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
     }
     const shown = this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
     requireStore(shown.offer.canEnroll, 'BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE', shown.offer.reason ?? BACKGROUND_ENROLL_STALE);
     requireStore(shown.offer.disclosureDigest === disclosureDigest, 'BACKGROUND_ANALYSIS_ENROLLMENT_STALE', BACKGROUND_ENROLL_STALE);
-    const binding = this.#enrollmentBinding(bookId);
-    requireStore(binding !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE', BACKGROUND_FACTS_UNREADABLE);
-    const point = this.#analysisCall(() => this.#baselineAnalysis.workingPointOf(bookId));
-    this.#enrollmentCall(() => this.#enrollments.enroll({
-      bookId,
-      startingPoint,
-      binding,
-      enrolledAt: { revisionId: point.revisionId, journalSequence: point.journalSequence, workingDigest: point.workingDigest },
-      disclosureDigest,
-    }));
-    this.#backgroundNotStarted.delete(bookId);
+    const offered = shown.offer.scopes.find((entry) => entry.kind === scope.kind && entry.seriesId === scope.seriesId);
+    requireStore(offered !== undefined, 'BACKGROUND_ANALYSIS_ENROLLMENT_STALE', BACKGROUND_ENROLL_STALE);
+    requireStore(ceilingTokens >= offered.books.length, 'BACKGROUND_ANALYSIS_CEILING_TOO_LOW', backgroundCeilingTooLowReason(offered.books.length));
+    const shares = backgroundCeilingShares(ceilingTokens, offered.books.length);
+    const scopeEnrollmentId = offered.kind === 'book' ? null : randomUUID();
+    const inputs: BackgroundAnalysisEnrollInput[] = offered.books.map((member, index) => {
+      const memberRead = this.#enrollmentRead(member.bookId);
+      requireStore(member.bookId === bookId || (memberRead !== 'damaged' && (memberRead === null || memberRead.state !== 'active')),
+        'BACKGROUND_ANALYSIS_ENROLLMENT_ACTIVE', backgroundScopeMemberActiveReason(member.title));
+      const memberBinding = this.#enrollmentBinding(member.bookId);
+      requireStore(memberBinding !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE', backgroundScopeMemberUnreadableReason(member.title));
+      const point = this.#analysisCall(() => this.#baselineAnalysis.workingPointOf(member.bookId));
+      const share = { kind: 'tokens' as const, maxTotalTokens: shares[index]! };
+      const memberScope: BackgroundAnalysisScope = scopeEnrollmentId === null ? { kind: 'book' } : {
+        kind: offered.kind as 'series' | 'all-books', scopeEnrollmentId, seriesId: offered.seriesId,
+        books: offered.books.map((entry) => entry.bookId), position: index + 1,
+      };
+      return {
+        bookId: member.bookId,
+        startingPoint,
+        // What the Enrollment binds holds the Book's share as its budget: each Run it starts is held to it.
+        binding: { ...memberBinding, runBudgetCeiling: share },
+        enrolledAt: { revisionId: point.revisionId, journalSequence: point.journalSequence, workingDigest: point.workingDigest },
+        disclosureDigest,
+        ceiling: { kind: 'tokens', maxTotalTokens: ceilingTokens },
+        share,
+        scope: memberScope,
+      };
+    });
+    this.#enrollmentCall(() => this.#enrollments.enrollAll(inputs));
+    for (const input of inputs) this.#backgroundNotStarted.delete(input.bookId);
     return this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
   }
 
   /**
-   * `撤销登记`: a state appended to the Book's Enrollment. No new Run starts under it; a Run it started goes on as the editor's
-   * to pause or cancel, and its results, records and what it sent stay as they are.
+   * `撤销登记`: a state appended to the Book's Enrollment — to every Book of its scope, for a Series or all-Books Enrollment. No
+   * new Run starts under it; a Run it started goes on as the editor's to pause or cancel, and its results, records and what it
+   * sent stay as they are.
    */
   revokeBackgroundAnalysisEnrollment(bookId: string, enrollmentId: string, runtime: BackgroundAnalysisRuntime): BackgroundAnalysisEnrollmentProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(enrollmentId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
     const current = this.#enrollmentCall(() => this.#enrollments.forBook(bookId));
     requireStore(current !== null && current.enrollmentId === enrollmentId, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台分析登记不属于这本书。');
-    this.#enrollmentCall(() => this.#enrollments.revoke(enrollmentId));
+    this.#transaction(this.#authority, () => {
+      for (const member of this.#scopeMembersOf(current)) {
+        if (member.state !== 'revoked') this.#enrollmentCall(() => this.#enrollments.revoke(member.enrollmentId));
+      }
+    });
     return this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
   }
 
-  /** Every Book that has an Enrollment, in the order they were enrolled, read without verifying a record: what the dispatcher looks at. */
+  /**
+   * `暂停` / `续行` (Issue #864): the Enrollment in force — every Book of its scope — holds or releases what it would start. A Run
+   * it already started is not touched: pausing or cancelling that Run is the Run's own control.
+   */
+  holdBackgroundAnalysisEnrollment(bookId: string, enrollmentId: string, hold: 'pause' | 'resume', runtime: BackgroundAnalysisRuntime): BackgroundAnalysisEnrollmentProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(enrollmentId) && (hold === 'pause' || hold === 'resume'),
+      'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
+    const current = this.#enrollmentCall(() => this.#enrollments.forBook(bookId));
+    requireStore(current !== null && current.enrollmentId === enrollmentId, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台分析登记不属于这本书。');
+    requireStore(current.state === 'active', 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_ACTIVE', current.state === 'suspended' ? BACKGROUND_SUSPENDED : BACKGROUND_REVOKED);
+    this.#transaction(this.#authority, () => {
+      for (const member of this.#scopeMembersOf(current)) {
+        if (member.state === 'active') this.#enrollmentCall(() => this.#enrollments.hold(member.enrollmentId, hold === 'pause'));
+      }
+    });
+    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+  }
+
+  /**
+   * Every Book that has an Enrollment, in the order the dispatcher looks at them, read without verifying a record: a Series or
+   * all-Books scope's Books together in the scope's order (Issue #864).
+   */
   backgroundAnalysisBooks(): ReadonlyArray<string> {
     this.#assertAvailable();
-    return this.#enrollmentCall(() => this.#enrollments.enrolledBooks());
+    return this.#enrollmentCall(() => this.#enrollments.dispatchOrder());
   }
 
   /**
@@ -6575,13 +6980,14 @@ export class EditorialStore {
     const read = this.#enrollmentRead(bookId);
     const decision = this.#analysisCall(() => this.#backgroundDecision(bookId, read, runtime));
     this.#backgroundLooks.set(bookId, { at: new Date(runtime.now).toISOString(), kind: decision.kind, reason: decision.reason });
-    return { decision, enrollmentVersionId: read !== 'damaged' && read !== null && read.state === 'active' ? read.version.enrollmentVersionId : null };
+    return { decision, enrollmentVersionId: read !== 'damaged' && read !== null && read.state === 'active' && !read.paused ? read.version.enrollmentVersionId : null };
   }
 
   /**
    * The dispatcher's preparation (the Commander's ruling on #713, P1-2): exactly what 先看计划 prepares, under a Task Intent of
    * its own marked with the enrollment version — never one the editor asked for — and refused while any preparation of the Book
-   * is under way or the editor's own plan waits to be started. Its checkpoint gives way to any other the Book asks for.
+   * is under way or the editor's own plan waits to be started. Its checkpoint gives way to any other the Book asks for. Its plan
+   * freezes the Book's share of the Enrollment's ceiling as the Run's own (Issue #864).
    */
   createBackgroundBaselineAnalysisPreparationWork(
     bookId: string,
@@ -6592,24 +6998,29 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(enrollmentVersionId) && (mode === 'first-baseline' || mode === 'sync-current'),
       'BACKGROUND_ANALYSIS_START_INVALID', '后台分析的参数无效。');
+    const found = this.#enrollmentCall(() => this.#enrollments.version(enrollmentVersionId));
+    requireStore(found !== null && found.enrollment.bookId === bookId && found.version.share !== null,
+      'BACKGROUND_ANALYSIS_START_INVALID', BACKGROUND_NO_CEILING);
     return this.#baselineProgress(() => this.#baselineAnalysis.prepare({
       phase: 'start', bookId, goal: BASELINE_ANALYSIS_MODE_GOALS[mode], update: mode === 'first-baseline' ? null : { mode, selectedRange: null },
-      reconfirm: false, launchPolicy, background: { enrollmentVersionId },
+      reconfirm: false, launchPolicy, background: { enrollmentVersionId, runBudgetCeiling: found.version.share! },
     }));
   }
 
   /**
    * Whether the dispatcher's preparation may take its next step (#713 review, P2-2, P2-3): asked before every step, so the step
-   * that freezes the plan and the start that follows it in the same turn are never taken once the Enrollment was revoked or
-   * changed, the local data is to be replaced, the editor began any work, the manuscript was edited, what the Enrollment binds
-   * moved, or no place is left for it. Answers why not, or `null`.
+   * that freezes the plan and the start that follows it in the same turn are never taken once the Enrollment was revoked, paused
+   * or changed, the local data is to be replaced, the editor began any work, the manuscript was edited, what the Enrollment binds
+   * moved, this launch's policy no longer admits it, or no place is left for it. Answers why not, or `null`.
    */
   backgroundMayContinue(bookId: string, enrollmentVersionId: string, workId: string | null, runtime: BackgroundAnalysisRuntime): string | null {
     this.#assertAvailable();
     const read = this.#enrollmentRead(bookId);
     if (read === 'damaged') return BACKGROUND_RECORD_DAMAGED;
     if (read === null || read.state !== 'active' || read.version.enrollmentVersionId !== enrollmentVersionId) return BACKGROUND_REVOKED;
-    if (this.#baselineAnalysis.launch.live !== null) return BACKGROUND_DEVELOPER_LIVE;
+    if (read.paused) return BACKGROUND_PAUSED;
+    if (read.version.share === null) return BACKGROUND_NO_CEILING;
+    if (!this.#backgroundRuleAdmits()) return BACKGROUND_NO_RULE;
     if (!runtime.routeExecutable) return BACKGROUND_NO_ROUTE;
     if (this.replacementFrozen()) return BACKGROUND_REPLACEMENT_WAITING;
     if (this.#baselineAnalysis.preparationInFlightBesides(bookId, workId)) return BACKGROUND_PREPARATION_IN_FLIGHT;
@@ -6621,7 +7032,7 @@ export class EditorialStore {
     const share = backgroundAnalysisShare(runtime.capacity);
     if (this.#backgroundRunningCount() >= share) return backgroundShareFullReason(share);
     try {
-      const drift = defaultExecutionRuleDrift(read.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
+      const drift = backgroundEnrollmentDrift(read.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
       if (drift.length > 0) return backgroundDriftReason(drift);
     } catch (error) {
       if (error instanceof AnalysisError) return BACKGROUND_FACTS_UNREADABLE;
@@ -6634,9 +7045,9 @@ export class EditorialStore {
    * The dispatcher's start of the Task it has just prepared, in the same turn as the step that froze its plan (ADR 0048; ADR
    * 0046): recorded as 开始任务 would record it, its Run Authorization's origin `background-analysis-enrollment` naming the
    * enrollment version. It starts only the Task Intent the dispatcher created under that version. Anything that would make the
-   * start differ from what the Enrollment binds — it was revoked or changed, developer-live, the plan's mode, its key content,
-   * what it binds, or a route this launch cannot execute — records nothing more and says why; the plan stays the Enrollment's,
-   * said as such, and is never taken for the editor's.
+   * start differ from what the Enrollment binds — it was revoked, paused or changed, this launch's policy does not admit it, the
+   * plan's mode, its key content, what it binds, a ceiling above the Book's share, or a route this launch cannot execute —
+   * records nothing more and says why; the plan stays the Enrollment's, said as such, and is never taken for the editor's.
    */
   startEnrolledBaselineAnalysis(
     bookId: string,
@@ -6656,7 +7067,10 @@ export class EditorialStore {
     const record = this.#enrollmentRead(bookId);
     if (record === 'damaged') return refused(BACKGROUND_RECORD_DAMAGED);
     if (record === null || record.state !== 'active' || record.version.enrollmentVersionId !== enrollmentVersionId) return refused(BACKGROUND_REVOKED);
-    if (this.#baselineAnalysis.launch.live !== null) return refused(BACKGROUND_DEVELOPER_LIVE);
+    if (record.paused) return refused(BACKGROUND_PAUSED);
+    const share = record.version.share;
+    if (share === null) return refused(BACKGROUND_NO_CEILING);
+    if (!this.#backgroundRuleAdmits()) return refused(BACKGROUND_NO_RULE);
     if (!runtime.routeExecutable) return refused(BACKGROUND_NO_ROUTE);
     const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId)) as BaselineAnalysisProjection;
     const intent = projection.taskIntent;
@@ -6674,8 +7088,11 @@ export class EditorialStore {
     }
     requireStore(intent.mode === mode, 'BACKGROUND_ANALYSIS_START_INVALID', '后台分析只做首次基线分析或同步到当前稿件。');
     if (projection.planRevision !== null) return refused(QUICK_START_PLAN_CHANGED);
-    const drift = defaultExecutionRuleDrift(record.version.binding, version.materialInputs);
+    const drift = backgroundEnrollmentDrift(record.version.binding, version.materialInputs);
     if (drift.length > 0) return refused(backgroundDriftReason(drift));
+    // The plan holds the Run to the Book's share, or less (Issue #864): never to no ceiling, never to more.
+    const frozen = version.materialInputs.runBudgetCeiling;
+    if (frozen === 'unset' || frozen.maxTotalTokens > share.maxTotalTokens) return refused(BACKGROUND_NO_CEILING);
     // 结果待确认 (Issue #51, S16c; CTRL-007, CONT-011): a plan that would send again a range whose earlier result could not be
     // known is never started by the dispatcher, whatever changed between its look and this start.
     if (this.#analysisCall(() => this.#baselineAnalysis.resendUnitsOf(projection)).length > 0) return refused(BACKGROUND_OUTCOME_UNKNOWN);
@@ -6693,7 +7110,8 @@ export class EditorialStore {
 
   /**
    * After the local data was replaced or rolled back (the Commander's ruling on #713, P3-1): every Enrollment the restored data
-   * holds in force comes up suspended, starting nothing until the editor confirms it again. A merge brings none.
+   * holds in force — paused or not — comes up suspended (待你确认), starting nothing until the editor confirms it again. A merge
+   * brings none.
    */
   #suspendRestoredEnrollments(): void {
     this.#enrollmentCall(() => this.#enrollments.suspendActive());
@@ -6709,7 +7127,65 @@ export class EditorialStore {
     }
   }
 
-  /** How many background Runs hold a place of the governor, or wait for one, now. */
+  /**
+   * The Enrollments one decision covers (Issue #864): the Book's own, or — for a Series or all-Books Enrollment — that of every
+   * Book of its scope whose version in force is still of the same 登记. A member whose record does not read back is left alone.
+   */
+  #scopeMembersOf(record: BackgroundAnalysisEnrollmentRecord): ReadonlyArray<BackgroundAnalysisEnrollmentRecord> {
+    const scope = record.version.scope;
+    if (scope.kind === 'book') return [record];
+    return scope.books.flatMap((memberId) => {
+      const member = memberId === record.bookId ? record : this.#enrollmentRead(memberId);
+      return member !== null && member !== 'damaged' && member.version.scope.kind !== 'book' &&
+        member.version.scope.scopeEnrollmentId === scope.scopeEnrollmentId ? [member] : [];
+    });
+  }
+
+  /**
+   * The scopes `登记…` offers for the Book (Issue #864): the Book alone; each Series it is in, its Books in the order they joined
+   * it; and every Book of the house in the order they were made, once the house holds more than this one.
+   */
+  #backgroundScopeOffers(bookId: string, title: string): BackgroundAnalysisScopeOffer[] {
+    const offers: BackgroundAnalysisScopeOffer[] = [{ kind: 'book', seriesId: null, label: backgroundScopeLabel('book', title, 1), books: [{ bookId, title }] }];
+    const titleOf = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?');
+    for (const membership of this.#seriesCall(() => this.#series.seriesOf(bookId)).memberships) {
+      const books = this.#seriesCall(() => [...this.#series.members(membership.seriesId)]).reverse().map((member) => ({
+        bookId: member.bookId,
+        title: asString((titleOf.get(member.bookId) as SqlRow).title),
+      }));
+      offers.push({ kind: 'series', seriesId: membership.seriesId, label: backgroundScopeLabel('series', membership.title, books.length), books });
+    }
+    const all = (this.#authority.prepare('SELECT book_id, title FROM books ORDER BY created_at, book_id').all() as SqlRow[])
+      .map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
+    if (all.length > 1) offers.push({ kind: 'all-books', seriesId: null, label: backgroundScopeLabel('all-books', '', all.length), books: all });
+    return offers;
+  }
+
+  /** What a version covers, in ②A's words and with its Books' titles; `null` when a Series it names is no longer on record. */
+  #enrollmentScopeOf(scope: BackgroundAnalysisScope, bookId: string, title: string): NonNullable<BackgroundAnalysisEnrollmentProjection['enrollment']>['scope'] | null {
+    if (scope.kind === 'book') return { kind: 'book', label: backgroundScopeLabel('book', title, 1), books: [{ bookId, title }], position: 1 };
+    const titleOf = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?');
+    const books = scope.books.map((memberId) => ({ bookId: memberId, title: asString(((titleOf.get(memberId) as SqlRow | undefined) ?? { title: '' }).title) }));
+    const name = scope.kind === 'series' ? this.#seriesCall(() => this.#series.find(scope.seriesId!))?.title ?? null : '';
+    if (name === null) return null;
+    return { kind: scope.kind, label: backgroundScopeLabel(scope.kind, name, books.length), books, position: scope.position };
+  }
+
+  /**
+   * Whether this launch's selected policy admits a Run a 后台分析登记 dispatches (Issue #864): development-ci's local route, or —
+   * under developer-live and ordinary production — the one enrolled-background rule of Provider Processing v14 / v15, which v12
+   * and v13 do not have.
+   */
+  #backgroundRuleAdmits(): boolean {
+    const launch = this.#baselineAnalysis.launch;
+    if (launch.operationalScope === 'development-ci') return launch.live === null;
+    return launch.live !== null && liveKindRule(launch.policy, BASELINE_ANALYSIS_KIND, [], 'background') !== null;
+  }
+
+  /**
+   * How many background Runs hold a place of the governor, or wait for one, now. A Run waiting for the editor's answer to a
+   * question holds none (Issue #865), nor does one waiting to go online, which no background Run does.
+   */
   #backgroundRunningCount(): number {
     return asNumber((this.#authority.prepare(
       `SELECT count(*) n FROM analysis_run_authorizations a
@@ -6720,15 +7196,48 @@ export class EditorialStore {
     ).get() as SqlRow).n);
   }
 
-  /** What the Book's Enrollment binds, read from its facts now; `null` under developer-live or when they cannot be read. */
+  /** What the Book's Enrollment binds, read from its facts now; `null` when this launch admits no background Run or they cannot be read. */
   #enrollmentBinding(bookId: string): DefaultExecutionRuleBinding | null {
-    if (this.#baselineAnalysis.launch.live !== null) return null;
+    if (!this.#backgroundRuleAdmits()) return null;
     try {
       return defaultExecutionRuleBindingOf(this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
     } catch (error) {
       if (error instanceof AnalysisError || error instanceof StoreError) return null;
       throw error;
     }
+  }
+
+  /**
+   * The Run Report's lines for the Book's latest Task when a 后台分析登记 started it (Issue #864): the version, the scope and
+   * share, and how the Run ended against the ceiling its plan froze. Read beside the report; its record and digest are untouched.
+   */
+  #withBackgroundReport(projection: BaselineAnalysisProjection): BaselineAnalysisProjection {
+    const outcome = projection.taskOutcome;
+    const authorization = projection.authorization;
+    if (outcome === null || outcome.report === null || authorization === null || authorization.origin !== 'background-analysis-enrollment' ||
+        authorization.enrollmentVersionId === null) return projection;
+    const versionId = authorization.enrollmentVersionId;
+    let found: ReturnType<BackgroundAnalysisEnrollmentLedger['version']> = null;
+    try {
+      found = this.#enrollments.version(versionId);
+    } catch (error) {
+      if (!(error instanceof BackgroundAnalysisEnrollmentError)) throw error;
+    }
+    const ours = found !== null && found.enrollment.bookId === projection.bookId ? found.version : null;
+    const bookTitle = (this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(projection.bookId) as SqlRow | undefined)?.title;
+    const scope = ours === null || typeof bookTitle !== 'string' ? null : this.#enrollmentScopeOf(ours.scope, projection.bookId, bookTitle);
+    const frozen = projection.planVersion?.materialInputs.runBudgetCeiling ?? 'unset';
+    const used = Object.values(outcome.report.usagePerStage).reduce((total, usage) => total + usage.inputTokens + usage.outputTokens, 0);
+    const background = backgroundRunReportLines({
+      ordinal: ours?.ordinal ?? null,
+      scopeLabel: scope?.label ?? null,
+      ceilingTokens: ours?.ceiling?.maxTotalTokens ?? null,
+      shareTokens: ours?.share?.maxTotalTokens ?? null,
+      frozenTokens: frozen === 'unset' ? null : frozen.maxTotalTokens,
+      usedTokens: outcome.stop?.usedTokens ?? used,
+      reached: outcome.stop?.reason === 'run-budget-ceiling-reached',
+    });
+    return { ...projection, taskOutcome: { ...outcome, report: { ...outcome.report, background } } };
   }
 
   /**
@@ -6746,14 +7255,16 @@ export class EditorialStore {
     const latestTask = once(() => this.#baselineAnalysis.latestTaskFactsOf(bookId));
     return backgroundAnalysisDecisionOf({
       enrollment: () => (read === 'damaged' ? 'damaged' : read?.state ?? null),
-      developerLive: () => this.#baselineAnalysis.launch.live !== null,
+      paused: () => record!.paused,
+      ceiling: () => record!.version.share !== null,
+      ruleAdmits: () => this.#backgroundRuleAdmits(),
       routeExecutable: () => runtime.routeExecutable,
       replacementWaiting: () => this.replacementFrozen(),
       share: () => backgroundAnalysisShare(runtime.capacity),
       recoveryPending: () => this.#boundedCall(() => this.#boundedAuthority.branchUnderRecovery(point().branchId)),
       drift: once(() => {
         try {
-          return defaultExecutionRuleDrift(record!.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
+          return backgroundEnrollmentDrift(record!.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
         } catch (error) {
           if (error instanceof AnalysisError || error instanceof StoreError) return null;
           throw error;
@@ -8807,12 +9318,13 @@ export class EditorialStore {
     requireStore(row !== undefined && typeof execution.materialReferenceBasePromptContractDigest === 'string' && DIGEST_PATTERN.test(execution.materialReferenceBasePromptContractDigest) &&
       typeof envelope?.promptContractDigest === 'string' && DIGEST_PATTERN.test(envelope.promptContractDigest), 'ANALYSIS_RECORD_INVALID', '任务参考资料的基础契约记录无效。');
     return { boundary: { bookId: asString(row.book_id), references: this.#analysisCall(() => taskMaterialSources(execution.materialReferences)) },
-      baseDigest: execution.materialReferenceBasePromptContractDigest, promptDigest: envelope.promptContractDigest };
+      baseDigest: execution.materialReferenceBasePromptContractDigest, promptDigest: unwrappedPlanPromptDigest(execution, envelope) };
   }
 
   /** The 初评 contract of one profile: the built-in ledger's own for AI7's default profile, else the house version's (Issue #427). */
   #initialBaseDefinition(profile: EvaluationProfileProjection): AnalysisKindDefinition {
-    return profile.sha256 === evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) ? this.#initialEvaluation.definition : initialEvaluationKindDefinition(profile);
+    const builtIn = this.#initialEvaluation.definition;
+    return profile.sha256 === evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) ? builtIn.clarificationBase ?? builtIn : initialEvaluationKindDefinition(profile);
   }
 
   /**
@@ -8822,7 +9334,7 @@ export class EditorialStore {
   #initialLedger(profile: EvaluationProfileProjection, materials?: TaskMaterialBoundary, frozenPromptDigest?: string): BaselineAnalysisStore {
     const base = this.#initialBaseDefinition(profile);
     const readings = materials === undefined || materials.references.length === 0 ? [] : this.#taskMaterialReadings(materials, '评估');
-    if (readings.length === 0 && base === this.#initialEvaluation.definition) return this.#initialEvaluation;
+    if (readings.length === 0 && base === (this.#initialEvaluation.definition.clarificationBase ?? this.#initialEvaluation.definition)) return this.#initialEvaluation;
     const definition = readings.length === 0 ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, frozenPromptDigest));
     const make = (): BaselineAnalysisStore => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
@@ -8910,7 +9422,7 @@ export class EditorialStore {
    * 准备 AI7 初评: the evaluation kind's Task in the mode that applies — the first 初评, or 重新初评 once one settled — whose
    * goal is the kind's own fixed text. The preparation is a cooperative job; its plan opens in the Task Drawer.
    */
-  createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = []): AnalysisPreparationResult<InitialEvaluationProjection> {
+  createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null): AnalysisPreparationResult<InitialEvaluationProjection> {
     this.#requireEvaluationMaterialScope(materialIds.length > 0, INITIAL_EVALUATION_KIND);
     this.#requireInitialEvaluationScope();
     const current = this.inspectInitialEvaluation(bookId);
@@ -8922,6 +9434,7 @@ export class EditorialStore {
       phase: 'start',
       bookId,
       goal: INITIAL_EVALUATION_MODE_GOALS[mode],
+      redoOf,
       update: mode === 'evaluation-first' ? null : { mode, selectedRange: null },
       reconfirm: false,
       launchPolicy,
@@ -9234,7 +9747,7 @@ export class EditorialStore {
    * the mode that applies — the first draft, or another once one settled. Refused under a live scope, while no version is
    * 定稿, or once the template has its draft document. Its plan opens in the Task Drawer.
    */
-  createReadersReportPreparationWork(bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = []): AnalysisPreparationResult<ReadersReportProjection> {
+  createReadersReportPreparationWork(bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null): AnalysisPreparationResult<ReadersReportProjection> {
     this.#requireEvaluationMaterialScope(materialIds.length > 0, READERS_REPORT_KIND);
     this.#requireReadersReportScope();
     requireStore(UUID_PATTERN.test(bookId) && READERS_REPORT_TEMPLATES.includes(template), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
@@ -9251,6 +9764,7 @@ export class EditorialStore {
       phase: 'start',
       bookId,
       goal: READERS_REPORT_MODE_GOALS[mode],
+      redoOf,
       update: mode === 'readers-report-first' ? null : { mode, selectedRange: null },
       reconfirm: false,
       launchPolicy,
@@ -9304,11 +9818,7 @@ export class EditorialStore {
     return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
   }
 
-  /**
-   * Startup reconciliation of the reader's report kind (as 初评's): a draft left admitted or executing has nothing running it and
-   * cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before dispatch with
-   * why. The kind's Runs are reconciled by kind, so any of its ledgers does it.
-   */
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedReadersReportRuns(): { settled: number } {
     this.#assertAvailable();
     const any = this.#readersReportCall(() => this.#readersReports.anyTask());
@@ -9804,6 +10314,7 @@ export class EditorialStore {
     bookId: string,
     request: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> },
     launchPolicy: LaunchPolicyProjection,
+    redoOf: string | null = null,
   ): AnalysisPreparationResult<WritingProjection> {
     // 允许参考's 资料库 items the editor ticked (Issue #428): each once, by identity.
     const materialIds = request.materialIds ?? [];
@@ -9857,6 +10368,7 @@ export class EditorialStore {
       phase: 'start',
       bookId,
       goal: WRITING_MODE_GOALS[mode],
+      redoOf,
       update: mode === 'writing-first' ? null : { mode, selectedRange: null },
       reconfirm: false,
       launchPolicy,
@@ -9917,11 +10429,7 @@ export class EditorialStore {
     return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
   }
 
-  /**
-   * Startup reconciliation of the writing kind (as 审稿意见's): a draft left admitted or executing has nothing running it and
-   * cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before dispatch with
-   * why. The kind's Runs are reconciled by kind, so any of its ledgers does it.
-   */
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedWritingRuns(): { settled: number } {
     this.#assertAvailable();
     const any = this.#writingCall(() => this.#writingTasks.anyTask());
@@ -10517,7 +11025,7 @@ export class EditorialStore {
    * applies. Refused under a live scope, for a 定稿 version, one begun without AI7's 初评, or one whose saved scores do not depart
    * from AI7's yet — the 评语 then already speak to them. Its plan opens in the Task Drawer.
    */
-  createEvaluationRewritePreparationWork(bookId: string, recordId: string, launchPolicy: LaunchPolicyProjection): AnalysisPreparationResult<EvaluationRewriteProjection> {
+  createEvaluationRewritePreparationWork(bookId: string, recordId: string, launchPolicy: LaunchPolicyProjection, redoOf: string | null = null): AnalysisPreparationResult<EvaluationRewriteProjection> {
     this.#requireEvaluationRewriteScope();
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(recordId), 'EVALUATION_REWRITE_INVALID', '评语重写参数无效。');
     const version = this.#evaluationCall(() => this.#evaluations.rewritable(bookId, recordId));
@@ -10532,6 +11040,7 @@ export class EditorialStore {
       phase: 'start',
       bookId,
       goal: EVALUATION_REWRITE_MODE_GOALS[mode],
+      redoOf,
       update: mode === 'evaluation-rewrite-first' ? null : { mode, selectedRange: null },
       reconfirm: false,
       launchPolicy,
@@ -10587,11 +11096,7 @@ export class EditorialStore {
     return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger, recordId: this.#latestEvaluationRewrite(bookId)!.task.recordId };
   }
 
-  /**
-   * Startup reconciliation of the rewrite kind (as 初评's and 审稿意见's): a rewrite left admitted or executing has nothing running it
-   * and cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before dispatch with
-   * why. The kind's Runs are reconciled by kind, so any of its ledgers does it.
-   */
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedEvaluationRewriteRuns(): { settled: number } {
     this.#assertAvailable();
     const any = this.#evaluationRewriteCall(() => this.#evaluationRewrites.anyTask());
@@ -17989,7 +18494,7 @@ export class EditorialStore {
           conflicts: readConflictAttention(this.#authority, limit),
           analysisTasks: baseline.tasks,
           analysisOutcomes: baseline.outcomes,
-          waitingTasks: this.#waitingTaskAttention(null, limit),
+          waitingTasks: this.#waitingTaskAttention(null, limit, progress),
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           maintenance: this.#maintenanceCases.attentionReadings(limit),
@@ -18030,7 +18535,7 @@ export class EditorialStore {
           bookId,
           analysisTasks: baseline.tasks,
           analysisOutcomes: baseline.outcomes,
-          waitingTasks: this.#waitingTaskAttention(bookId, limit),
+          waitingTasks: this.#waitingTaskAttention(bookId, limit, progress),
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           waitingFor,

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { backgroundAnalysisShare, backgroundShareFullReason } from '../background-analysis-enrollments.js';
 import { BASELINE_ANALYSIS_KIND, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
 import { liveKindAdmission, liveKindContractCategories, liveKindRule, type LiveKindRule } from './live-kind-admission.js';
 import { liveMaterialContract } from '../task-material-references.js';
+import { buildClarificationAnswerMessage } from '../provider/clarification-contract.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { describeComposition, prepareExecution, type HarnessExecutionSpan, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
@@ -55,6 +57,7 @@ import {
   CLARIFICATION_ENDED_UNANSWERED,
   CLARIFICATION_RECORD_GAP,
   awaitingClarificationDetail,
+  parseModelClarification,
   type ClarificationFacts,
 } from './clarifications.js';
 import {
@@ -134,11 +137,17 @@ function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
 }
 
 /**
- * How many Runs the governor executes at once (Issue #49, S14; ADR 0021): two under development-ci. Under
- * developer-live the human-attended scope and its live-once Provider testing (ADR 0065, ADR 0067) keep one Run in
- * flight, so a launch there holds one.
+ * How many Runs the governor executes at once (Issue #49, S14; ADR 0021): two. Under development-ci either place takes any
+ * Run. Under a live launch — developer-live and ordinary production — one place is the editor's and the other a 后台分析登记's
+ * (Issue #864, the Commander's governor correction): the editor's Runs still execute one at a time, as the human-attended scope
+ * and its live-once Provider testing (ADR 0065, ADR 0067) have always held them, and the second place takes only a Run an
+ * Enrollment started (`backgroundAnalysisShare`: capacity − 1).
  */
 export const EXECUTION_RUN_CAPACITY = 2;
+/** The places the editor's Runs may hold under a live launch: one, the other being background analysis's (Issue #864). */
+const LIVE_FOREGROUND_PLACES = 1;
+/** Waiting units retain their records and hold no governor place; all other admission semantics stay with the governor. */
+export function holdsGovernorSlot(state: string): boolean { return state !== 'awaiting-clarification'; }
 /** A bounded waiting set; excess starts are recorded as refused before dispatch, never silently dropped. */
 export const EXECUTION_WAITING_CAPACITY = 64;
 export { remapReusedResult } from './reused-result.js';
@@ -148,7 +157,7 @@ export interface ExecutionOwnerDependencies {
   readonly waitingCapacity?: number;
   /** The baseline kind's ledger: the one a dispatch that names no ledger runs against. */
   readonly ledger: BaselineAnalysisStore;
-  /** How many Runs execute at once; `EXECUTION_RUN_CAPACITY` under development-ci and one under developer-live when absent. */
+  /** How many Runs execute at once; `EXECUTION_RUN_CAPACITY` when absent, and exactly that under a live launch (Issue #864). */
   readonly capacity?: number;
   readonly launchPolicy: LaunchPolicyProjection;
   readonly fixture: ResolvedModelFixture | null;
@@ -462,8 +471,10 @@ export class BaselineAnalysisExecutionOwner {
   readonly #broker: CredentialBroker;
   readonly #capacity: number;
   readonly #waitingCapacity: number;
-  /** The Runs executing now, by Run Record (Issue #49, S14): never more than `#capacity`. */
+  /** Runs still unwinding stay here; only those holding a governor place count toward `#capacity` (Issues #49, #865). */
   readonly #active = new Map<string, ActiveRun>();
+  /** Of those, the Runs a 后台分析登记 started (Issue #864): under a live launch the editor's Runs never take their place. */
+  readonly #backgroundActive = new Set<string>();
   /**
    * The Runs authorized and waiting on the governor (Issue #49, S14; CONC-007), in the order they were started: each is
    * admitted, in its turn, as a place frees. Their ledger records them `authorized` until then, so a service that
@@ -493,8 +504,8 @@ export class BaselineAnalysisExecutionOwner {
     this.#deps = deps;
     // Under ordinary production the broker never reads a development Credential Reference (Issue #811).
     this.#broker = new CredentialBroker(deps.secretResolver, { developmentReferences: production !== null ? 'refused' : 'admitted' });
-    const capacity = deps.capacity ?? (live !== null ? 1 : EXECUTION_RUN_CAPACITY);
-    if (!Number.isSafeInteger(capacity) || capacity < 1 || (live !== null && capacity !== 1)) {
+    const capacity = deps.capacity ?? EXECUTION_RUN_CAPACITY;
+    if (!Number.isSafeInteger(capacity) || capacity < 1 || (live !== null && capacity !== EXECUTION_RUN_CAPACITY)) {
       throw new ExecutionAdmissionError('EXECUTION_CAPACITY_INVALID', '运行名额设置无效。');
     }
     this.#capacity = capacity;
@@ -532,11 +543,35 @@ export class BaselineAnalysisExecutionOwner {
   }
 
   /**
-   * Whether the governor has no place now (Issue #49, S14): as many Runs execute as it holds. A start then waits in
-   * its queue (`admitOrQueue`); a quick start, a Review Run's approval and a 续行 wait for a place with their reasons.
+   * Whether the governor has no place for a Run the editor starts now (Issue #49, S14): as many Runs execute as it holds, or —
+   * under a live launch — the editor's one place is taken (Issue #864). A start then waits in its queue (`admitOrQueue`); a quick
+   * start, a Review Run's approval and a 续行 wait for a place with their reasons.
    */
   get busy(): boolean {
-    return this.#active.size >= this.#capacity;
+    const occupying = this.#occupiedPlaces();
+    return occupying.length >= this.#capacity || (this.#live() !== null &&
+      occupying.filter((run) => !this.#backgroundActive.has(run.runRecordId)).length >= LIVE_FOREGROUND_PLACES);
+  }
+
+  /** Whether every place is taken (Issue #864): a Run a 后台分析登记 starts needs a free place, within its share. */
+  get full(): boolean {
+    return this.#occupiedPlaces().length >= this.#capacity;
+  }
+
+  /** The same waiting-state predicate governs total, foreground and background admission (Issues #864, #865). */
+  #occupiedPlaces(): readonly ActiveRun[] {
+    return [...this.#active.values()].filter((run) => holdsGovernorSlot(run.ledger.currentRunState(run.runRecordId)));
+  }
+
+  /** Starts and continuations consume the same origin's share; a waiting Run owns no place (Issue #864 revision 5). */
+  #placeForOrigin(origin: ExecutionPlanFacts['origin']): boolean {
+    return origin === 'background-analysis-enrollment'
+      ? !this.full && this.#occupiedPlaces().filter((run) => this.#backgroundActive.has(run.runRecordId)).length < backgroundAnalysisShare(this.#capacity)
+      : !this.busy;
+  }
+
+  #placeForRun(runRecordId: string, ledger: BaselineAnalysisStore): boolean {
+    return this.#placeForOrigin(ledger.loadExecutionPlan(runRecordId).origin);
   }
 
   /** Whether nothing runs, waits for a place, or waits to finish its cancellation: no Run will write until another starts. */
@@ -559,12 +594,19 @@ export class BaselineAnalysisExecutionOwner {
    * A start the editor just authorized (Issue #49, S14; CONC-007): admitted at once while the governor has a place and
    * no Run waits before it, else queued — `authorized` in its ledger, read as 等待运行名额 — and admitted in its turn.
    */
-  admitOrQueue(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'admitted' | 'queued' {
+  admitOrQueue(
+    runRecordId: string,
+    ledger: BaselineAnalysisStore = this.#deps.ledger,
+    /** The 后台分析登记 dispatcher's start takes the background place (Issue #864); its plan's origin is checked again at admission. */
+    origin: 'foreground' | 'background' = 'foreground',
+  ): 'admitted' | 'queued' {
     // AI7 is closing: the start stays `authorized`; restart recovery requires a fresh explicit start.
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active.has(runRecordId)) return 'admitted';
     if (this.#queued.some((entry) => entry.runRecordId === runRecordId)) return 'queued';
-    if (!this.busy && this.#queued.length === 0) {
+    // Read the persisted origin even when a caller supplies a scheduling hint: it cannot borrow the other origin's place.
+    const placeFree = this.#blockOnRefusal(runRecordId, ledger, () => this.#placeForRun(runRecordId, ledger));
+    if (placeFree && (origin === 'background' || this.#queued.length === 0)) {
       this.#admitInTurn(runRecordId, ledger);
       return 'admitted';
     }
@@ -591,9 +633,9 @@ export class BaselineAnalysisExecutionOwner {
   }
 
   /** A start refused while it is still `authorized` is blocked before dispatch with the reason, and the refusal thrown. */
-  #blockOnRefusal(runRecordId: string, ledger: BaselineAnalysisStore, attempt: () => void): void {
+  #blockOnRefusal<T>(runRecordId: string, ledger: BaselineAnalysisStore, attempt: () => T): T {
     try {
-      attempt();
+      return attempt();
     } catch (error) {
       if (ledger.currentRunState(runRecordId) === 'authorized') {
         const reason = error instanceof Error ? error.message : '运行未能进入调度。';
@@ -621,7 +663,9 @@ export class BaselineAnalysisExecutionOwner {
    */
   #requireStartable(runRecordId: string, ledger: BaselineAnalysisStore): void {
     const live = this.#requireLaunchOf(ledger);
-    this.#requireTransmittable(ledger.loadExecutionPlan(runRecordId), live);
+    const facts = ledger.loadExecutionPlan(runRecordId);
+    this.#requireTransmittable(facts, live);
+    this.#requireOrigin(facts, live, ledger, this.#policy());
     if (ledger.currentRunState(runRecordId) !== 'authorized') {
       throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有刚记录授权的运行可以进入调度。');
     }
@@ -653,6 +697,26 @@ export class BaselineAnalysisExecutionOwner {
     // Ordinary production sends the editor's own manuscript (Issue #811); only developer-live is held to the Public SampleBooks.
     if (live !== null && !isOrdinaryProductionRuntime(live) && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) {
       throw new ExecutionAdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在 developer-live 可传输的 Public SampleBook 集合内；未发起任何传输。');
+    }
+  }
+
+  /**
+   * A Run a 后台分析登记 started (Issue #864) is admitted live only as the foreground kinds are admitted under their own rules:
+   * the baseline kind, under the selected policy's one enrolled-background rule (Provider Processing v14 developer-live, v15
+   * ordinary production), on that rule's exact route, model and credential slot. v12 and v13 have no such rule, so under them
+   * it is refused before anything is sent; development-ci's local route admits it as it admits every Run.
+   */
+  #requireOrigin(facts: ExecutionPlanFacts, live: LiveRuntime | null, ledger: BaselineAnalysisStore, policy: LaunchPolicyProjection, resolvedForRun = false): void {
+    if (facts.origin !== 'background-analysis-enrollment' || live === null) return;
+    const production = isOrdinaryProductionRuntime(live);
+    const rule = ledger.definition.kind !== BASELINE_ANALYSIS_KIND ? null
+      : liveKindRule(policy, BASELINE_ANALYSIS_KIND, [production ? 'unpublished-excerpts' : 'public-or-synthetic'], 'background');
+    const { route, model, credentialSlot } = routeFactsOf(facts, live);
+    // Settings select the next Task's connection. Production resolves this Run's frozen binding before execution and checks it
+    // below again; comparing it with the newly selected connection here would refuse an otherwise unchanged authorized Run.
+    const checkBinding = !production || resolvedForRun || this.#deps.productionPolicyFor === undefined;
+    if (rule === null || (checkBinding && (rule.route !== route || rule.model !== model || rule.credentialSlot !== credentialSlot))) {
+      throw new ExecutionAdmissionError('EXECUTION_ORIGIN_NOT_ADMITTED', '当前策略没有准许后台分析登记开始的运行发送内容；什么都没有发送。');
     }
   }
 
@@ -708,10 +772,16 @@ export class BaselineAnalysisExecutionOwner {
   ): void {
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active.has(runRecordId)) throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '这个运行已经在执行。');
-    if (this.busy) throw new ExecutionAdmissionError('EXECUTION_BUSY', `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
+    if (this.full) throw new ExecutionAdmissionError('EXECUTION_BUSY', `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
     const live = this.#requireLaunchOf(ledger);
     const facts = ledger.loadExecutionPlan(runRecordId);
+    // The background place takes only a Run a 后台分析登记 started; the editor's take their own (Issue #864).
+    const background = facts.origin === 'background-analysis-enrollment';
+    if (!this.#placeForOrigin(facts.origin)) throw new ExecutionAdmissionError('EXECUTION_BUSY', background
+      ? backgroundShareFullReason(backgroundAnalysisShare(this.#capacity))
+      : `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
     this.#requireTransmittable(facts, live);
+    this.#requireOrigin(facts, live, ledger, this.#policy());
     const state = ledger.currentRunState(runRecordId);
     const resuming = options.resume === true;
     // A Run waiting for the editor's answer (Issue #422, S76d) goes on as a continuation too, once the answer is there.
@@ -785,10 +855,14 @@ export class BaselineAnalysisExecutionOwner {
       done: Promise.resolve(),
     };
     this.#active.set(runRecordId, active);
+    if (background) this.#backgroundActive.add(runRecordId);
     active.done = this.#execute(active, facts, continuation).catch((error: unknown) => {
       this.#recordFailure(ledger, facts, error);
     }).finally(() => {
-      if (this.#active.get(runRecordId) === active) this.#active.delete(runRecordId);
+      if (this.#active.get(runRecordId) === active) {
+        this.#active.delete(runRecordId);
+        this.#backgroundActive.delete(runRecordId);
+      }
       this.#drain();
     });
   }
@@ -832,33 +906,52 @@ export class BaselineAnalysisExecutionOwner {
    * meanwhile, then the queued starts in their order — each while the governor has a place.
    */
   #drain(): void {
-    while (!this.busy && !this.#disposed && this.#pendingCancels.length > 0) {
-      const next = this.#pendingCancels.shift()!;
+    for (let index = 0; !this.full && !this.#disposed && index < this.#pendingCancels.length;) {
+      const next = this.#pendingCancels[index]!;
       try {
-        if (next.ledger.currentRunState(next.runRecordId) !== 'cancelling') continue;
+        if (next.ledger.currentRunState(next.runRecordId) !== 'cancelling') {
+          this.#pendingCancels.splice(index, 1);
+          continue;
+        }
+        if (!this.#placeForRun(next.runRecordId, next.ledger)) { index += 1; continue; }
+        this.#pendingCancels.splice(index, 1);
         this.admitAndDispatch(next.runRecordId, next.ledger, { resume: true, cancel: true });
       } catch {
+        if (this.#pendingCancels[index] === next) this.#pendingCancels.splice(index, 1);
         settleCancelWithoutRevision(next.ledger, next.runRecordId, CANCELLED_WITHOUT_REVISION);
       }
     }
     // Then a Run the editor answered while every place was taken (Issue #422, S76d), if it still waits for that answer.
-    while (!this.busy && !this.#disposed && this.#pendingAnswers.length > 0) {
-      const next = this.#pendingAnswers.shift()!;
-      if (next.ledger.currentRunState(next.runRecordId) !== 'awaiting-clarification') continue;
+    for (let index = 0; !this.full && !this.#disposed && index < this.#pendingAnswers.length;) {
+      const next = this.#pendingAnswers[index]!;
       try {
+        if (next.ledger.currentRunState(next.runRecordId) !== 'awaiting-clarification') {
+          this.#pendingAnswers.splice(index, 1);
+          continue;
+        }
+        if (!this.#placeForRun(next.runRecordId, next.ledger)) { index += 1; continue; }
+        this.#pendingAnswers.splice(index, 1);
         this.admitAndDispatch(next.runRecordId, next.ledger, { resume: true });
       } catch {
+        if (this.#pendingAnswers[index] === next) this.#pendingAnswers.splice(index, 1);
         // It stays 任务等待你的说明 with its answer recorded; 续行 is not needed, but the answer's next look finds it.
       }
     }
     // Then the starts waiting on the governor, in their order (CONC-007). One cancelled meanwhile is skipped; one that
     // can no longer be admitted is blocked before dispatch with the reason, never left waiting for a turn it cannot take.
-    while (!this.busy && !this.#disposed && this.#queued.length > 0) {
-      const next = this.#queued.shift()!;
+    for (let index = 0; !this.full && !this.#disposed && index < this.#queued.length;) {
+      const next = this.#queued[index]!;
       try {
-        if (next.ledger.currentRunState(next.runRecordId) !== 'authorized') continue;
+        if (next.ledger.currentRunState(next.runRecordId) !== 'authorized') {
+          this.#queued.splice(index, 1);
+          continue;
+        }
+        const placeFree = this.#blockOnRefusal(next.runRecordId, next.ledger, () => this.#placeForRun(next.runRecordId, next.ledger));
+        if (!placeFree) { index += 1; continue; }
+        this.#queued.splice(index, 1);
         this.#admitInTurn(next.runRecordId, next.ledger);
       } catch {
+        if (this.#queued[index] === next) this.#queued.splice(index, 1);
         // Blocked before dispatch with its reason; the next start in the queue takes the place.
       }
     }
@@ -869,7 +962,7 @@ export class BaselineAnalysisExecutionOwner {
    * envelope — a new span of the same attempt, as 续行 is — at once when the governor has a place, or as soon as it has.
    */
   continueAnswered(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'continuing' | 'queued' {
-    if (!this.busy && !this.#disposed) {
+    if (!this.#disposed && this.#placeForRun(runRecordId, ledger)) {
       this.admitAndDispatch(runRecordId, ledger, { resume: true });
       return 'continuing';
     }
@@ -936,7 +1029,7 @@ export class BaselineAnalysisExecutionOwner {
     // AI7 is closing: the Run stays 正在取消, and the next start's reconciliation finishes it.
     if (this.#disposed) return 'stopping';
     try {
-      if (!this.busy) {
+      if (this.#placeForRun(runRecordId, ledger)) {
         this.admitAndDispatch(runRecordId, ledger, { resume: true, cancel: true });
       } else if (!this.#pendingCancels.some((entry) => entry.runRecordId === runRecordId)) {
         this.#pendingCancels.push({ runRecordId, ledger, progress: stoppedRunProgress(ledger.loadExecutionPlan(runRecordId), checkpoints) });
@@ -1138,7 +1231,10 @@ export class BaselineAnalysisExecutionOwner {
     const liveModelProfile: ProviderModelProfile = production === null ? OPENCODE_GO_V41_FLASH_PROFILE : productionModelProfile(route, model);
     // Under ordinary production the rule that admits the kind names the editor's unpublished words (Issue #811): the
     // baseline's own rule included, read for its categories as any other kind's is.
-    const productionRule = production === null ? null : admitted ?? liveKindRule(policy, BASELINE_ANALYSIS_KIND, ['unpublished-excerpts']);
+    // A Run a 后台分析登记 started is read under the enrolled-background rule, checked again here against the policy it executes under (Issue #864).
+    this.#requireOrigin(facts, live, ledger, policy, true);
+    const productionRule = production === null ? null : admitted ?? liveKindRule(policy, BASELINE_ANALYSIS_KIND, ['unpublished-excerpts'],
+      facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
     // The test item purpose is the Task mode, so a first baseline and each update mode number their
     // live calls separately and a repeated purpose can never collide with an unrelated test. A Task
     // without a plan is the kind's own whole first mode — `first-baseline` for the baseline kind.
@@ -1314,7 +1410,7 @@ export class BaselineAnalysisExecutionOwner {
       }
       currentBindingDigest = bindingDigest;
       bindingDigestForSlot = bindingDigest;
-      const frozenMaterial = liveMaterialContract(definition);
+      const frozenMaterial = liveMaterialContract(definition.clarificationBase ?? definition);
       bindingFacts = {
         bindingDigest,
         route,
@@ -1326,7 +1422,7 @@ export class BaselineAnalysisExecutionOwner {
         // sends an evaluation's editor-authored record or house exemplars only where the rule names them.
         ...(admitted === null ? {} : {
           ruleOutboundCategories: new Set(admitted.outboundDataCategories),
-          contractCategories: new Set(liveKindContractCategories(definition.kind, definition)),
+          contractCategories: new Set(liveKindContractCategories(definition.kind, definition.clarificationBase ?? definition)),
           ...(frozenMaterial === null ? {} : {
             materialExcerpts: frozenMaterial.materials,
             frozenMaterialDigests: new Set(frozenMaterial.sources.map((source) => source.sha256)),
@@ -1524,11 +1620,11 @@ export class BaselineAnalysisExecutionOwner {
         if (unit === undefined || checkpointed.has(unit.ordinal)) continue;
         waiting.set(unit.ordinal, {
           unit, requestDigest: request.requestDigest, failure: request.failure, firstPayloadDigest: request.firstPayloadDigest,
-          firstUnitMessageDigest: request.firstUnitMessageDigest, attempts: 1, usage: request.firstUsage, wallMs: request.firstWallMs,
+          firstUnitMessageDigest: request.firstUnitMessageDigest, attempts: request.firstAttempts ?? 1, usage: request.firstUsage, wallMs: request.firstWallMs,
         });
-        usage.requests += 1;
-        stageUsage.units.requests += 1;
-        active.progress.completedAttempts += 1;
+        usage.requests += request.firstAttempts ?? 1;
+        stageUsage.units.requests += request.firstAttempts ?? 1;
+        active.progress.completedAttempts += request.firstAttempts ?? 1;
         if (request.firstUsage !== null) {
           usage.inputTokens += request.firstUsage.inputTokens;
           usage.outputTokens += request.firstUsage.outputTokens;
@@ -1547,14 +1643,15 @@ export class BaselineAnalysisExecutionOwner {
       // One technical turn for one unit attempt: the span is recorded by reference with the attempt index, the admitted
       // payload digest and the digest of the unit message it submitted — and a safe retry's, the adaptation it carries out
       // (Issue #286) — and every attempt's usage counts toward the Run.
-      const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number, attemptState: RunAttemptState, adaptationId: string | null = null) => {
+      const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number, attemptState: RunAttemptState, adaptationId: string | null = null, answerMessage?: string) => {
         admittedPayloadDigest = null;
         // The baseline this attempt's `awaiting-response` is derived against, taken before the harness
         // can enter the transport, so the reading belongs to this attempt and not the previous one.
         active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
         active.progress.attemptState = attemptState;
-        active.validationStep = `unit-${unit.ordinal}`;
-        const message = unitMessages.get(unit.ordinal)!;
+        active.validationStep = `unit-${unit.ordinal}${answerMessage === undefined ? '' : '-clarification-answer'}`;
+        const message = answerMessage ?? unitMessages.get(unit.ordinal)!;
+        admittedUserMessages.add(message);
         const unitMessageDigest = sha256Hex(message);
         const turn = await harness.submitUnit(message);
         // Read before anything else can start a turn: the adapter clears this at the start of every
@@ -1579,7 +1676,7 @@ export class BaselineAnalysisExecutionOwner {
       // reader sees the count move and nothing in flight.
       const keepSettled = (unit: CoverageManifestUnitProjection, wallMs: number): void => {
         const settledRecord = unitRecords.find((record) => record.unitOrdinal === unit.ordinal);
-        if (active.resumableOnInterrupt && settledRecord !== undefined) {
+        if (settledRecord !== undefined) {
           ledger.recordUnitCheckpoint({ runRecordId: facts.runRecordId, attemptId, unit: settledRecord, observation: unitObservations.get(unit.ordinal) ?? null });
         }
         active.progress.unitsSettled += 1;
@@ -1618,7 +1715,7 @@ export class BaselineAnalysisExecutionOwner {
         readonly wallMs: number;
         readonly firstFailure: { readonly reason: string; readonly code: string } | null;
         readonly withheld: string | null;
-      }): 'settled' | 'end' | 'stop' => {
+      }): 'settled' | 'end' | 'stop' | 'waiting' => {
         const { unit, requestDigest } = s;
         const { turn, unitUsage } = s.attempt;
         const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
@@ -1632,6 +1729,30 @@ export class BaselineAnalysisExecutionOwner {
           acceptedOutputDigests.add(candidate.digest);
           gap('contract-invalid', emptyAnswerGapReason(s.attempt.canonical.reasoningPresent));
         } else if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
+          const question = parseModelClarification(candidate.text);
+          if (question !== null) {
+            acceptedOutputDigests.add(candidate.digest);
+            const origin = ledger.inspect(facts.manifest.manuscript.bookId).authorization?.origin === 'background-analysis-enrollment' ? 'background' : 'foreground';
+            const rule = live === null ? null : liveKindRule(policy, definition.kind, [], origin);
+            const allowed = live === null ? definition.clarificationBase !== undefined
+              : rule?.clarificationQuestionAllowed === true && rule.clarificationTimeoutHours === 24;
+            if (!allowed || ledger.clarificationsOf(facts.runRecordId).some((entry) => entry.unitOrdinal === unit.ordinal)) {
+              gap('contract-invalid', allowed ? '同一阅读范围只能提问一次；模型再次提问，记为契约无效缺口。' : '该任务的准许规则不允许模型提问，记为契约无效缺口。');
+              keepSettled(unit, s.wallMs);
+              return 'settled';
+            }
+            const failure = { code: 'MODEL_CLARIFICATION', failureClass: 'model-question', status: null, reason: '模型提出一个需要你决定的问题。' };
+            ledger.recordClarificationRequest({ runRecordId: facts.runRecordId, attemptId, taskIntentId: facts.taskIntentId,
+              unitOrdinal: unit.ordinal, planVersion: facts.planVersionOrdinal, planEnvelopeDigest: facts.planEnvelopeDigest,
+              requestDigest, failure, modelQuestion: question, firstAttempts: s.attempts, firstPayloadDigest: s.attempt.payloadDigest,
+              firstUnitMessageDigest: s.attempt.unitMessageDigest, firstUsage: s.usage, firstWallMs: s.wallMs });
+            waiting.set(unit.ordinal, { unit, requestDigest, failure, firstPayloadDigest: s.attempt.payloadDigest,
+              firstUnitMessageDigest: s.attempt.unitMessageDigest, attempts: s.attempts, usage: s.usage, wallMs: s.wallMs });
+            active.progress.currentUnitOrdinal = null;
+            active.progress.currentUnitStartedAt = null;
+            active.progress.attemptState = null;
+            return 'waiting';
+          }
           const parsed = definition.parseUnitResult(candidate.text, unit);
           if (parsed.ok) {
             unitObservations.set(unit.ordinal, observation);
@@ -1768,6 +1889,7 @@ export class BaselineAnalysisExecutionOwner {
        */
       const applyAnswers = async (): Promise<'none' | 'applied' | 'stopped' | 'end'> => {
         if (waiting.size === 0) return 'none';
+        ledger.expireModelClarifications(facts.runRecordId);
         const answered = ledger.clarificationsOf(facts.runRecordId).filter((entry) => entry.answer !== null && waiting.has(entry.unitOrdinal));
         if (answered.length === 0) return 'none';
         let spent = false;
@@ -1775,6 +1897,30 @@ export class BaselineAnalysisExecutionOwner {
           // A cancellation outranks every answer (CTRL-005).
           if (active.cancelRequested) return spent ? 'end' : 'stopped';
           const w = waiting.get(entry.unitOrdinal)!;
+          if (entry.origin === 'model') {
+            if (active.interrupted || active.pauseRequested) return spent ? 'end' : 'stopped';
+            if (scopeChanged() || ceilingState() === 'reached') {
+              if (ceilingState() === 'reached') { liveInterruption = 'run-budget-ceiling-reached'; terminalClassification = 'interrupted'; }
+              return 'end';
+            }
+            waiting.delete(entry.unitOrdinal);
+            // An append-only pre-send claim prevents a restart or a repeated answer from sending this turn twice.
+            if (!ledger.claimModelClarificationAnswer(facts.runRecordId, entry.requestId)) {
+              settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
+                'outcome-unknown', '澄清回答回合已提交，结果尚未确认；这次运行不会再次发送。');
+              keepSettled(w.unit, w.wallMs);
+              continue;
+            }
+            active.progress.currentUnitOrdinal = w.unit.ordinal;
+            active.progress.currentUnitStartedAt = new Date().toISOString();
+            const startedAt = Date.now();
+            const attempt = await submitAttempt(w.unit, w.attempts + 1, 'dispatched', null,
+              buildClarificationAnswerMessage(unitMessages.get(w.unit.ordinal)!, entry));
+            const settled = settleFromTurn({ unit: w.unit, requestDigest: w.requestDigest, attempt, attempts: w.attempts + 1,
+              usage: addUsage(w.usage, attempt.unitUsage), wallMs: w.wallMs + Date.now() - startedAt, firstFailure: null, withheld: null });
+            if (settled === 'end' || settled === 'stop') return 'end';
+            continue;
+          }
           const retry = entry.answer!.optionId !== 'record-gap';
           // 再试一次 once the ceiling is spent (Issue #51, S16a): the retry is not sent, and the Run stops as the ceiling reached
           // — once every other answer given is applied too, each as the editor chose. The ceiling is read before a pause or
@@ -2352,6 +2498,11 @@ export class BaselineAnalysisExecutionOwner {
           unitOrdinal: entry.unitOrdinal,
           classifiedReason: entry.classifiedReason,
           recordedAt: entry.recordedAt,
+        })),
+        modelClarifications: ledger.clarificationsOf(facts.runRecordId).filter((entry) => entry.origin === 'model').map((entry) => ({
+          unitOrdinal: entry.unitOrdinal, outcome: entry.answer === null ? 'unanswered' as const
+            : entry.answer.timedOut === true ? 'timed-out' as const
+              : entry.answer.optionId === 'no-answer' ? 'no-answer' as const : 'answered' as const,
         })),
         gaps: reduction.gaps,
         crossUnit: { state: crossUnit.state, reason: crossUnit.state === 'closed' ? null : crossUnit.reason },

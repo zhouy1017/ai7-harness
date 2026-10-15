@@ -25,6 +25,52 @@ export const BACKGROUND_LOADING = '正在读取后台分析登记…';
 export const BACKGROUND_UNAVAILABLE = '无法读取这本书的后台分析登记。';
 export const BACKGROUND_ENROLLED_STATUS = '已登记后台分析';
 export const BACKGROUND_REVOKED_STATUS = '已撤销后台分析登记';
+/** Issue #864: the scope, the required ceiling, and 暂停 / 续行. */
+export const BACKGROUND_SCOPE_LEGEND = '范围';
+export const BACKGROUND_CEILING_LABEL = '预算上限（tokens，必填）';
+export const BACKGROUND_CEILING_FIRST = '请先填写预算上限（tokens）。';
+export const BACKGROUND_PAUSE = '暂停';
+export const BACKGROUND_RESUME = '续行';
+export const BACKGROUND_PAUSED_STATUS = '已暂停后台分析登记';
+export const BACKGROUND_RESUMED_STATUS = '后台分析登记已续行';
+export const BACKGROUND_REPORT_HEADING = '后台分析登记';
+
+/** The ceiling split equally among a scope's Books in order, the remainder to the first — the service's rule, said before 登记. */
+export function backgroundCeilingShares(ceiling: number, books: number): number[] {
+  const each = Math.floor(ceiling / books);
+  return Array.from({ length: books }, (_, index) => each + (index === 0 ? ceiling - each * books : 0));
+}
+
+/** The tokens the editor typed, or `null` while it is not a ceiling every Book of the scope can have a share of. */
+export function backgroundCeilingOf(text: string, books: number, max: number): number | null {
+  const trimmed = text.trim();
+  if (!/^[0-9]+$/u.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return Number.isSafeInteger(value) && value >= Math.max(1, books) && value <= max ? value : null;
+}
+
+/** What each Book's background Runs are held to under the ceiling typed so far. */
+export function backgroundSharePreview(ceiling: number, books: ReadonlyArray<{ title: string }>): string {
+  if (books.length <= 1) return `每次后台分析最多用 ${ceiling} tokens，达到就停下。`;
+  const shares = backgroundCeilingShares(ceiling, books.length);
+  const each = shares[books.length - 1]!;
+  return shares[0] === each
+    ? `${books.length} 本书各 ${each} tokens：每本书的每次后台分析最多用它那一份。`
+    : `${books.length} 本书各 ${each} tokens，第一本《${books[0]!.title}》${shares[0]} tokens：每本书的每次后台分析最多用它那一份。`;
+}
+
+/** `范围：书系《乙》的 3 本书 · 预算上限 900 tokens，本书份额 300 tokens（第 2 本）`. */
+export function backgroundCeilingLine(enrollment: NonNullable<BackgroundAnalysisEnrollmentProjection['enrollment']>): string {
+  if (enrollment.ceilingTokens === null || enrollment.shareTokens === null) return `范围：${enrollment.scope.label} · 这份登记没有预算上限`;
+  return enrollment.scope.kind === 'book'
+    ? `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens`
+    : `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens，本书份额 ${enrollment.shareTokens} tokens（第 ${enrollment.scope.position} 本）`;
+}
+
+/** The Books of a Series or all-Books scope the dispatcher's latest look skipped: `这次跳过：《甲》（…）；《丙》（…）`. */
+export function backgroundSkippedLine(skipped: BackgroundAnalysisEnrollmentProjection['skipped']): string {
+  return `这次跳过：${skipped.map((entry) => `《${entry.title}》（${entry.reason}）`).join('；')}`;
+}
 
 /**
  * What makes the block draw itself again: everything the projection says except when AI7 last looked, which changes on every

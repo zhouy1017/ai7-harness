@@ -1,5 +1,6 @@
 import type { LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
 import { sha256Hex } from '../analysis/canonical.js';
+import { clarificationMessageRequestDigest } from './clarification-contract.js';
 import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
   assuranceSamplingRequestDigest,
@@ -452,7 +453,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     // Report reflection's, keyed by the Run's own accounting. None can collide, because each digest is
     // taken over its own frozen contract digest as well as its own key set.
     const ordinal = named ? 0 : header!.ordinal;
-    const expectedDigest = crossUnit !== null
+    const expectedDigest = (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
       ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnit.unitSetDigest)
       : synthesis !== null
         ? initialEvaluationSynthesisRequestDigest(this.#promptContractDigest, synthesis.setDigest)
@@ -478,7 +479,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
                       ? evaluationRewriteRequestDigest(this.#promptContractDigest, rewriting.ordinal, rewriting.unitDigest)
                       : writing !== null
                         ? writingRequestDigest(this.#promptContractDigest, writing.ordinal, writing.unitDigest)
-                        : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
+                        : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest));
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);

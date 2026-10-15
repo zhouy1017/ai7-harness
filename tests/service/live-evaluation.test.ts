@@ -295,6 +295,11 @@ describe('evaluation on the Go execution path (#429)', () => {
   }, 300_000);
 
   it('replays the recorded live 初评, 审稿意见 and rewrite through the same contracts, outcomes and usage (#429 evidence)', async () => {
+    // The captured Tasks predate clarification /2; preserve their exact semantic instruction in this replay.
+    selected = { ...selected, providerProcessing: { ...selected.providerProcessing,
+      admittedRules: selected.providerProcessing.admittedRules.map((rule) => ({ ...rule, clarificationQuestionAllowed: false, clarificationTimeoutHours: null })),
+    } };
+    bindLive(selected);
     // Recorded units, syntheses and reflections answer; this regression sends nothing and asserts no editorial quality.
     recorded = {
       initial: await loadModelFixture(FIXTURES_ROOT, 'sample1-recorded-v41-evaluation-initial'),

@@ -1,9 +1,21 @@
-import type { BackgroundAnalysisEnrollmentProjection, BackgroundAnalysisStartingPoint, RendererApi } from '../shared/protocol.js';
+import type { BackgroundAnalysisEnrollmentProjection, BackgroundAnalysisScopeOffer, BackgroundAnalysisStartingPoint, RendererApi } from '../shared/protocol.js';
+import { BACKGROUND_ANALYSIS_CEILING_MAX } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import {
   BACKGROUND_BINDS_SUMMARY,
   BACKGROUND_CANCEL,
+  BACKGROUND_CEILING_FIRST,
+  BACKGROUND_CEILING_LABEL,
   BACKGROUND_CHOOSE_FIRST,
+  BACKGROUND_PAUSE,
+  BACKGROUND_PAUSED_STATUS,
+  BACKGROUND_RESUME,
+  BACKGROUND_RESUMED_STATUS,
+  BACKGROUND_SCOPE_LEGEND,
+  backgroundCeilingLine,
+  backgroundCeilingOf,
+  backgroundSharePreview,
+  backgroundSkippedLine,
   BACKGROUND_CONFIRM,
   BACKGROUND_DISCLOSURE_HEADING,
   BACKGROUND_ENROLLED_STATUS,
@@ -42,7 +54,8 @@ import {
  */
 export interface MountBackgroundAnalysisOptions {
   readonly root: HTMLElement;
-  readonly api: Pick<RendererApi, 'inspectBackgroundAnalysisEnrollment' | 'enrollBackgroundAnalysis' | 'revokeBackgroundAnalysisEnrollment'>;
+  readonly api: Pick<RendererApi, 'inspectBackgroundAnalysisEnrollment' | 'enrollBackgroundAnalysis' | 'revokeBackgroundAnalysisEnrollment' |
+    'holdBackgroundAnalysisEnrollment'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   /** A Run the Enrollment started has been recorded since the last read: the analysis card reads again. */
@@ -188,10 +201,21 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       const line = el('p', 'background-analysis-enrollment', backgroundEnrollmentLine(projection.enrollment, localInstantLabel));
       line.dataset['enrollmentVersionId'] = projection.enrollment.enrollmentVersionId;
       nodes.push(line);
+      // What it covers and the ceiling each Run is held to (Issue #864).
+      const ceiling = el('p', 'field-note background-analysis-ceiling', backgroundCeilingLine(projection.enrollment));
+      ceiling.dataset['ceilingTokens'] = String(projection.enrollment.ceilingTokens ?? '');
+      ceiling.dataset['shareTokens'] = String(projection.enrollment.shareTokens ?? '');
+      ceiling.dataset['scopeKind'] = projection.enrollment.scope.kind;
+      nodes.push(ceiling);
       const binds = el('details', 'background-analysis-binds');
       binds.dataset['backgroundDetails'] = 'binds';
       binds.append(el('summary', undefined, BACKGROUND_BINDS_SUMMARY), rows(projection.enrollment.binds));
       nodes.push(binds);
+    }
+    if (projection.skipped.length > 0) {
+      const skipped = el('p', 'field-note background-analysis-skipped', backgroundSkippedLine(projection.skipped));
+      skipped.dataset['skippedBooks'] = projection.skipped.map((entry) => entry.bookId).join(',');
+      nodes.push(skipped);
     }
     if (projection.state !== 'none') {
       const words = backgroundNextLine(projection.next);
@@ -229,7 +253,14 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     const actions = el('div', 'button-row background-analysis-actions');
     const form = el('div', 'background-analysis-form');
     form.hidden = true;
-    if ((projection.state === 'active' || projection.state === 'suspended') && projection.enrollment !== null && projection.revoke.canRevoke) {
+    // 暂停 / 续行 hold and release what the Enrollment would start (Issue #864); a Run it started keeps its own controls.
+    if ((projection.hold.canPause || projection.hold.canResume) && projection.enrollment !== null) {
+      const enrollmentId = projection.enrollment.enrollmentId;
+      const pausing = projection.hold.canPause;
+      const hold = action(pausing ? BACKGROUND_PAUSE : BACKGROUND_RESUME, 'secondary', pausing ? 'pause' : 'resume', () => void submitHold(hold, enrollmentId, pausing ? 'pause' : 'resume'));
+      actions.append(hold);
+    }
+    if ((projection.state === 'active' || projection.state === 'paused' || projection.state === 'suspended') && projection.enrollment !== null && projection.revoke.canRevoke) {
       const enrollmentId = projection.enrollment.enrollmentId;
       const open = action(BACKGROUND_REVOKE_OPEN, 'secondary', 'revoke-open', () => {
         engaged = true;
@@ -241,7 +272,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       open.setAttribute('aria-expanded', 'false');
       actions.append(open);
     }
-    if (projection.state !== 'active') {
+    if (projection.state !== 'active' && projection.state !== 'paused') {
       const open = action(BACKGROUND_ENROLL_OPEN, 'secondary', 'enroll-open', () => {
         engaged = true;
         open.setAttribute('aria-expanded', 'true');
@@ -267,6 +298,21 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     root.replaceChildren(...nodes);
   };
 
+  const submitHold = async (control: HTMLButtonElement, enrollmentId: string, hold: 'pause' | 'resume'): Promise<void> => {
+    control.disabled = true;
+    options.setStatus(hold === 'pause' ? '正在暂停后台分析登记…' : '正在续行后台分析登记…', 'busy');
+    try {
+      const projectionAfter = await api.holdBackgroundAnalysisEnrollment({ enrollmentId, hold });
+      options.setStatus(hold === 'pause' ? BACKGROUND_PAUSED_STATUS : BACKGROUND_RESUMED_STATUS, 'success');
+      if (!root.isConnected) return;
+      draw(projectionAfter);
+      root.querySelector<HTMLButtonElement>(`[data-background-action="${hold === 'pause' ? 'resume' : 'pause'}"]`)?.focus();
+    } catch (error) {
+      control.disabled = false;
+      options.setStatus(options.errorMessage(error, hold === 'pause' ? '无法暂停后台分析登记。' : '无法续行后台分析登记。'), 'error');
+    }
+  };
+
   const close = (open: HTMLButtonElement): void => {
     engaged = false;
     open.setAttribute('aria-expanded', 'false');
@@ -283,12 +329,51 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     const title = el('h4', undefined, BACKGROUND_DISCLOSURE_HEADING);
     title.tabIndex = -1;
     title.id = 'background-analysis-disclosure-heading';
+    // The narrowest scope is the one in force until the editor chooses another (Issue #864).
+    let scope: BackgroundAnalysisScopeOffer = offer.scopes[0] ?? { kind: 'book', seriesId: null, label: offer.scope, books: [] };
     const what = rows([
-      { label: BACKGROUND_SCOPE_LABEL, value: offer.scope },
+      { label: BACKGROUND_SCOPE_LABEL, value: scope.label },
       { label: BACKGROUND_WHAT_LABEL, value: offer.what },
       { label: BACKGROUND_WHEN_LABEL, value: offer.when },
       ...offer.binds,
     ]);
+    const scopeValue = what.querySelector('dd');
+    const scopes = el('fieldset', 'background-analysis-scopes');
+    scopes.hidden = offer.scopes.length <= 1;
+    scopes.append(el('legend', undefined, BACKGROUND_SCOPE_LEGEND));
+    offer.scopes.forEach((entry, index) => {
+      const label = el('label', 'background-analysis-scope');
+      const radio = el('input');
+      radio.type = 'radio';
+      radio.name = 'background-analysis-scope';
+      radio.value = entry.kind;
+      radio.checked = index === 0;
+      radio.dataset['scopeKind'] = entry.kind;
+      if (entry.seriesId !== null) radio.dataset['seriesId'] = entry.seriesId;
+      radio.setAttribute('aria-label', entry.label);
+      radio.addEventListener('change', () => {
+        if (!radio.checked) return;
+        scope = entry;
+        if (scopeValue !== null) scopeValue.textContent = entry.label;
+        refresh();
+      });
+      label.append(radio, el('span', undefined, entry.label));
+      scopes.append(label);
+    });
+    // The ceiling is required: 登记 stays held until it is a number every Book of the scope can have a share of.
+    const ceilingLabel = el('label', 'background-analysis-ceiling-field');
+    const ceilingInput = el('input');
+    ceilingInput.type = 'text';
+    ceilingInput.inputMode = 'numeric';
+    ceilingInput.autocomplete = 'off';
+    ceilingInput.dataset['backgroundCeiling'] = 'true';
+    ceilingInput.setAttribute('aria-required', 'true');
+    const preview = el('p', 'field-note background-analysis-share');
+    preview.id = 'background-analysis-share';
+    preview.setAttribute('aria-live', 'polite');
+    ceilingInput.setAttribute('aria-describedby', preview.id);
+    ceilingLabel.append(el('span', undefined, BACKGROUND_CEILING_LABEL), ceilingInput);
+    const rule = el('p', 'field-note background-analysis-ceiling-rule', offer.ceilingRule);
     const notGranted = el('ul', 'analysis-list background-analysis-not-granted');
     for (const entry of offer.notGranted) notGranted.append(el('li', undefined, entry));
     const fieldset = el('fieldset', 'background-analysis-starting-points');
@@ -299,6 +384,22 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     const confirm = action(BACKGROUND_CONFIRM, 'primary', 'enroll-confirm', () => void submit());
     confirm.disabled = true;
     confirm.setAttribute('aria-describedby', hint.id);
+    const ceilingNow = (): number | null => backgroundCeilingOf(ceilingInput.value, scope.books.length, BACKGROUND_ANALYSIS_CEILING_MAX);
+    // 登记 is offered once a starting point is chosen and the ceiling is set; the hint names the first thing still missing.
+    const refresh = (): void => {
+      const ceiling = ceilingNow();
+      preview.textContent = ceiling === null ? '' : backgroundSharePreview(ceiling, scope.books);
+      const missing = chosen === null ? BACKGROUND_CHOOSE_FIRST : ceiling === null ? BACKGROUND_CEILING_FIRST : null;
+      confirm.disabled = missing !== null;
+      hint.hidden = missing === null;
+      if (missing === null) {
+        confirm.removeAttribute('aria-describedby');
+      } else {
+        hint.textContent = missing;
+        confirm.setAttribute('aria-describedby', hint.id);
+      }
+    };
+    ceilingInput.addEventListener('input', refresh);
     for (const point of offer.startingPoints) {
       const label = el('label', 'background-analysis-starting-point');
       const radio = el('input');
@@ -310,19 +411,20 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       radio.addEventListener('change', () => {
         if (!radio.checked) return;
         chosen = point.value;
-        confirm.disabled = false;
-        hint.hidden = true;
-        confirm.removeAttribute('aria-describedby');
+        refresh();
       });
       label.append(radio, el('span', undefined, point.label), el('span', 'field-note', point.note));
       fieldset.append(label);
     }
     const submit = async (): Promise<void> => {
-      if (chosen === null || offer.disclosureDigest === null) return;
+      const ceilingTokens = ceilingNow();
+      if (chosen === null || ceilingTokens === null || offer.disclosureDigest === null) return;
       confirm.disabled = true;
       options.setStatus('正在登记后台分析…', 'busy');
       try {
-        const projectionAfter = await api.enrollBackgroundAnalysis({ disclosureDigest: offer.disclosureDigest, startingPoint: chosen });
+        const projectionAfter = await api.enrollBackgroundAnalysis({
+          disclosureDigest: offer.disclosureDigest, startingPoint: chosen, scope: { kind: scope.kind, seriesId: scope.seriesId }, ceilingTokens,
+        });
         engaged = false;
         options.setStatus(BACKGROUND_ENROLLED_STATUS, 'success');
         if (!root.isConnected) return;
@@ -337,7 +439,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     buttons.append(confirm, action(BACKGROUND_CANCEL, 'quiet', 'enroll-cancel', cancel));
     const section = el('section', 'background-analysis-disclosure');
     section.setAttribute('aria-labelledby', title.id);
-    section.append(title, what, el('h5', undefined, BACKGROUND_NOT_GRANTED_LABEL), notGranted, fieldset, hint, buttons);
+    section.append(title, what, scopes, ceilingLabel, rule, preview, el('h5', undefined, BACKGROUND_NOT_GRANTED_LABEL), notGranted, fieldset, hint, buttons);
     return [section];
   };
 

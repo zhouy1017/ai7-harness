@@ -128,6 +128,33 @@ function storeBytes(): Buffer {
 }
 
 describe('就这段提问… over the real store and harness', () => {
+  it('cancels a queued attempt without a request or interrupting the answer in flight', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const stepped = steppedHold();
+    const dialogues = owner(store, stepped.hold);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '排队回答之书');
+      const selection = selectionOf(store, book);
+      const first = store.askAboutSelection(book.bookId, { selection, question: QUESTION });
+      dialogues.begin(first);
+      await waitFor(() => stepped.waiting(), (count) => count >= 0, 'first answer held');
+      const second = store.askAboutSelection(book.bookId, { selection, question: QUESTION });
+      dialogues.begin(second);
+      const read = () => store.inspectDialogue(book.bookId, second.dialogueId, 0, (id) => dialogues.liveText(id));
+      expect(read().attempts[0]).toMatchObject({ state: 'answering', queued: true, fragmentTotal: 0 });
+      await dialogues.stop(second.attemptId);
+      expect(read().attempts[0]).toMatchObject({ state: 'stopped', source: 'missing', fragmentTotal: 0 });
+      expect(dialogues.liveText(second.attemptId)).toBeNull();
+      expect(dialogues.liveText(first.attemptId)).not.toBeNull();
+      expect(dialogues.answering).toBe(true);
+      await dialogues.stop(first.attemptId);
+      store.markCleanShutdown();
+    } finally {
+      await dialogues.dispose();
+      store.close();
+    }
+  });
+
   it('streams by complete fragment, stops, answers anew, reads its history from the ledger after a restart, and converts', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const stepped = steppedHold();
@@ -143,7 +170,7 @@ describe('就这段提问… over the real store and harness', () => {
       expect(turn.message).toEqual({ kind: 'ask', selection: selection.selectedText, question: QUESTION, kept: null });
       stepped.allow(2);
       dialogues.begin(turn);
-      expect(() => dialogues.requireReady()).toThrowError(/另一段对话正在回答/u);
+      expect(() => dialogues.requireReady()).not.toThrow();
       const live = (id: string) => dialogues.liveText(id);
       // Held after two deltas: the first sentence is whole, the second is cut in two and is not shown (DIALOG-006).
       await waitFor(() => stepped.waiting(), (at) => at === 2, 'held at two');

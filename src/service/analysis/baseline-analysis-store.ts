@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { liveKindAdmission, liveKindRule } from './live-kind-admission.js';
+import { withModelClarification } from '../provider/clarification-contract.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   BASELINE_ANALYSIS_KIND,
@@ -87,8 +88,12 @@ import {
   CLARIFICATION_NOTE_MAX,
   CLARIFICATION_OPTION_IDS,
   CLARIFICATION_REQUEST_SCHEMA,
+  clarificationGraphemes,
+  modelClarificationExpired,
+  parseModelClarification,
+  type ModelClarificationQuestion,
+  type AnyClarificationOptionId,
   type ClarificationFacts,
-  type ClarificationOptionId,
 } from './clarifications.js';
 import {
   AnalysisError,
@@ -439,8 +444,21 @@ interface PendingIntent {
   readonly mode: AnalysisTaskMode;
   readonly redoOf: string | null;
   readonly preparedByEnrollmentVersionId: string | null;
+  /** The Book's share of the Enrollment's ceiling the dispatcher's Task is held to (Issue #864); `null` for the editor's. */
+  readonly backgroundRunBudgetCeiling: BackgroundRunBudgetCeiling | null;
   readonly predecessor: { readonly revisionId: string; readonly digest: string } | null;
   readonly selectedRange: BaselineAnalysisSelectedRange | null;
+}
+
+/** The tokens ceiling a 后台分析登记 holds each Run it starts to: the Book's share of the Enrollment's ceiling (Issue #864). */
+export interface BackgroundRunBudgetCeiling {
+  readonly kind: 'tokens';
+  readonly maxTotalTokens: number;
+}
+
+function isBackgroundRunBudgetCeiling(value: unknown): value is BackgroundRunBudgetCeiling {
+  return isRecord(value) && value.kind === 'tokens' && Number.isSafeInteger(value.maxTotalTokens) && (value.maxTotalTokens as number) >= 1 &&
+    Object.keys(value).length === 2;
 }
 
 /** The facts one `analysis_task_intents` row carries, with the canonical record they were read from. */
@@ -459,6 +477,8 @@ interface IntentFacts {
   readonly redoOfRunRecordId: string | null;
   /** The 后台分析登记 version whose dispatcher created this Task Intent (Issue #95, S39); `null` for every Task the editor asked for. */
   readonly preparedByEnrollmentVersionId: string | null;
+  /** The ceiling that dispatcher holds the Task's Run to (Issue #864); `null` for the editor's Tasks and for one made before #864. */
+  readonly backgroundRunBudgetCeiling: BackgroundRunBudgetCeiling | null;
 }
 
 /**
@@ -550,7 +570,7 @@ export type BaselineAnalysisPrepareInput =
      * its own, marked with the enrollment version, never one the editor asked for; refused while any preparation of the Book is
      * under way or the editor's own Task is prepared and not started; its checkpoint gives way to any other the Book asks for.
      */
-    background?: { enrollmentVersionId: string };
+    background?: { enrollmentVersionId: string; runBudgetCeiling: BackgroundRunBudgetCeiling };
     /**
      * A new Task Intent even where the latest prepared one would be revised in place (Issue #428): 写作任务's preparation when
      * the 资料库 builds it pins differ from the ones the prepared Task froze. Its contract holds words only, so the same words
@@ -636,6 +656,11 @@ export interface ExecutionPlanFacts {
   /** The exact plan version the Run Authorization bound. */
   readonly planVersionId: string;
   readonly planVersionOrdinal: number;
+  /**
+   * Who started the Run, as its Run Authorization records it (Issue #864): a Run a 后台分析登记 started is admitted live only
+   * under the selected policy's enrolled-background rule.
+   */
+  readonly origin: 'standard-direct' | 'default-execution-rule' | 'background-analysis-enrollment';
   readonly checkpoint: ManuscriptCheckpointBinding;
   readonly manifest: CoverageManifestProjection;
   readonly manifestDigest: string;
@@ -791,6 +816,7 @@ const STANDARD_DIRECT: AnalysisAuthorizationOrigin = { kind: 'standard-direct' }
 export const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
 
 function transact<T>(db: DatabaseSync, body: () => T): T {
+  if (db.isTransaction) return body();
   db.exec('BEGIN IMMEDIATE');
   try {
     const result = body();
@@ -996,7 +1022,7 @@ export class BaselineAnalysisStore {
   readonly #db: DatabaseSync;
   readonly #checkpointOwner: CheckpointOwner;
   readonly #route: BaselineAnalysisRouteFacts | null;
-  readonly #definition: AnalysisKindDefinition;
+  #definition: AnalysisKindDefinition;
   readonly #work = new Map<string, PreparationWork>();
   /**
    * The unread-changes walk of each latest revision, and each revision as the walk reads it (Issue #709; #711 review P2-2).
@@ -1019,7 +1045,7 @@ export class BaselineAnalysisStore {
     this.#db = db;
     this.#checkpointOwner = checkpointOwner;
     this.#route = route;
-    this.#definition = definition;
+    this.#definition = route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ? withModelClarification(definition) : definition;
   }
 
   get route(): BaselineAnalysisRouteFacts | null {
@@ -1028,6 +1054,7 @@ export class BaselineAnalysisStore {
 
   /** The analysis kind this ledger serves; the execution owner reads its contract through this. */
   get definition(): AnalysisKindDefinition {
+    this.#refreshClarificationDefinition();
     return this.#definition;
   }
 
@@ -1071,6 +1098,18 @@ export class BaselineAnalysisStore {
         UUID_PATTERN.test(live.credentialReference)),
     'ANALYSIS_LAUNCH_BINDING_INVALID', '开发者实时绑定缺少必需的运行预算上限或凭据引用。');
     this.#launch = launch;
+    this.#refreshClarificationDefinition();
+  }
+
+  #refreshClarificationDefinition(): void {
+    const launch = this.#launch;
+    const rule = liveKindRule(launch.policy, this.#definition.kind);
+    // The one origin-qualified admitted rule owns eligibility; missing terms deny.
+    if (this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ||
+        rule?.clarificationQuestionAllowed === true) {
+      this.#definition = withModelClarification(this.#definition);
+    // An unconfigured production route has no current rule, but a stopped Run still owns its frozen binding.
+    } else if (rule !== null) this.#definition = this.#definition.clarificationBase ?? this.#definition;
   }
 
   /** The launch's binding as its sentences read it: under ordinary-production without a route, 模型服务需设置. */
@@ -1184,7 +1223,7 @@ export class BaselineAnalysisStore {
       planRevision = revisions.filter((entry) => entry.state === 'pending' && entry.priorPlanVersionId === currentVersion.planVersionId).at(-1) ?? null;
       if (planRevision === null) {
         const live = this.#currentMaterialInputs(bookId, intent.mode, materialInputs.selectedRange, manifest.units.length,
-          planEditCeiling(this.#planEditsOf(intent.taskIntentId, currentVersion.ordinal)));
+          planEditCeiling(this.#planEditsOf(intent.taskIntentId, currentVersion.ordinal)), undefined, intent.backgroundRunBudgetCeiling);
         const diff = diffMaterialPlanInputs(materialInputs, live);
         if (diff.length > 0) {
           const changedFields = diff.map((entry) => entry.field);
@@ -1427,9 +1466,7 @@ export class BaselineAnalysisStore {
     outcomes: AnalysisOutcomeAttentionReading[];
   } {
     const kind = this.#definition.kind;
-    // 待我处理 names the baseline analysis alone: every other kind's Tasks run inside a Review Run, which
-    // the Review Run ledger reads as one item of its own.
-    requireAnalysis(kind === BASELINE_ANALYSIS_KIND, 'ANALYSIS_KIND_INVALID', '待我处理只读取基线分析的任务。');
+    // The caller composes each kind's readings under its own Task target; review categories remain one Review Run item.
     // Each Book's latest Task, exactly as `#latestIntentRow` orders them, kept only when it could need the
     // editor: prepared and not yet started, or with a Run whose last state is not a completion — whose
     // outcome is read below instead.
@@ -1537,7 +1574,7 @@ export class BaselineAnalysisStore {
       const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
       const frozen = materialPlanInputsOfComponents(plan, intent.record);
       const diff = diffMaterialPlanInputs(frozen, this.#currentMaterialInputs(intent.bookId, intent.mode, frozen.selectedRange, manifest.units.length,
-        planEditCeiling(this.#planEditsOf(intent.taskIntentId, current.ordinal))));
+        planEditCeiling(this.#planEditsOf(intent.taskIntentId, current.ordinal)), undefined, intent.backgroundRunBudgetCeiling));
       revision = diff.length === 0 ? null : { planRevisionId: null, at: current.createdAt, changedFields: diff.map((entry) => entry.field) };
     }
     if (revision === null || revision.changedFields.includes('predecessorRevision')) return null;
@@ -1734,6 +1771,8 @@ export class BaselineAnalysisStore {
      */
     editorCeiling: RunBudgetCeilingState = 'unset',
     frozenProductionBinding?: MaterialPlanInputsProjection['providerBinding'],
+    /** A 后台分析登记's Task: the Book's share of the Enrollment's ceiling, which replaces the editor's (Issue #864). */
+    backgroundCeiling: BackgroundRunBudgetCeiling | null = null,
   ): MaterialPlanInputsProjection {
     const connection = this.#db.prepare(
       `SELECT provider_id, model_id, adapter_revision, configuration_revision, credential_reference
@@ -1782,10 +1821,23 @@ export class BaselineAnalysisStore {
       },
       selectedRange: this.#definition.mode(mode).rangeBound ? selectedRange : null,
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
-      runBudgetCeiling: live === null || live.scope === 'ordinary-production' ? editorCeiling : resolveDeveloperLiveCeiling(live.runBudgetCeiling, unitCount),
+      runBudgetCeiling: this.#planCeiling(unitCount, editorCeiling, backgroundCeiling),
       outboundDataCategory: this.#launch.operationalScope === 'ordinary-production' ? 'unpublished-excerpts' : 'public-or-synthetic',
       expectedOutcome: this.#definition.expectedOutcome,
     };
+  }
+
+  /**
+   * The ceiling a plan freezes (Issue #51; ADR 0070; Issue #864): a 后台分析登记's Task its Book's share of the Enrollment's
+   * ceiling — under developer-live the lower of that share and the launch's own — and every other Task the editor's outside
+   * developer-live and the launch's under it.
+   */
+  #planCeiling(unitCount: number, editorCeiling: RunBudgetCeilingState, background: BackgroundRunBudgetCeiling | null): RunBudgetCeilingState {
+    const live = this.#launch.live;
+    const share = background === null ? null : { kind: 'tokens' as const, maxTotalTokens: background.maxTotalTokens };
+    if (live === null || live.scope === 'ordinary-production') return share ?? editorCeiling;
+    const launch = resolveDeveloperLiveCeiling(live.runBudgetCeiling, unitCount);
+    return share === null || launch.maxTotalTokens < share.maxTotalTokens ? launch : share;
   }
 
   /**
@@ -1892,7 +1944,10 @@ export class BaselineAnalysisStore {
   currentRuleFacts(bookId: string, mode: AnalysisTaskMode): MaterialPlanInputsProjection {
     const live = this.#launch.live;
     const liveWriting = live !== null && this.#definition.kind === WRITING_KIND && liveKindRule(this.#launch.policy, WRITING_KIND) !== null;
-    requireAnalysis(UUID_PATTERN.test(bookId) && (live === null || liveWriting) && !this.#definition.mode(mode).rangeBound,
+    // What a 后台分析登记 binds, under the selected policy's enrolled-background rule (Issue #864).
+    const liveBackground = live !== null && this.#definition.kind === BASELINE_ANALYSIS_KIND &&
+      liveKindRule(this.#launch.policy, BASELINE_ANALYSIS_KIND, [], 'background') !== null;
+    requireAnalysis(UUID_PATTERN.test(bookId) && (live === null || liveWriting || liveBackground) && !this.#definition.mode(mode).rangeBound,
       'ANALYSIS_RULE_FACTS_INVALID', '无法读取默认执行规则所需的当前事实。');
     return this.#currentMaterialInputs(bookId, mode, null, liveWriting ? this.#workingUnitCount(bookId) : 0);
   }
@@ -1998,7 +2053,7 @@ export class BaselineAnalysisStore {
     const instant = new Date().toISOString();
     const manifest = existing.coverageManifest;
     const proposed = this.#currentMaterialInputs(bookId, intent.mode, requestedRange, manifest.units.length,
-      planEditCeiling(this.#planEditsOf(intent.taskIntentId, current.ordinal)));
+      planEditCeiling(this.#planEditsOf(intent.taskIntentId, current.ordinal)), undefined, intent.backgroundRunBudgetCeiling);
     const storedCounts = existing.update?.reusePlan?.counts ?? null;
     const countsFor = (inputs: MaterialPlanInputsProjection): AnalysisReusePlanCounts | null =>
       this.#reusePlanCountsFor(bookId, intent.mode, manifest, inputs.selectedRange);
@@ -2117,7 +2172,6 @@ export class BaselineAnalysisStore {
       runBudgetCeiling?: unknown;
     },
   ): AnalysisProjection {
-    requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND, 'ANALYSIS_PLAN_EDIT_UNSUPPORTED', '这类任务的计划不能在这里修改。');
     const existing = this.inspect(bookId);
     const intentRow = this.#latestIntentRow(bookId);
     requireAnalysis(intentRow !== undefined && existing.taskIntent !== null && existing.taskIntent.taskIntentId === input.taskIntentId,
@@ -2130,6 +2184,10 @@ export class BaselineAnalysisStore {
       'ANALYSIS_PLAN_EDIT_STALE', '计划已经变了；请重新查看计划后再修改。');
     const next = canonicalPlanEdits(input);
     requireAnalysis(next !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '这项修改不在这份计划可以改的范围内。');
+    requireAnalysis(this.#definition.assurance !== null || next.removedSteps.length === 0,
+      'ANALYSIS_PLAN_EDIT_INVALID', '这项任务没有核对与抽检步骤，不能修改该步骤。');
+    requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || (next.askFirstAdaptations ?? []).length === 0,
+      'ANALYSIS_PLAN_EDIT_INVALID', '这项任务暂不能把安全重试改成先问你。');
     requireAnalysis(!launchSetsCeilingOf(this.#launch.live) || next.runBudgetCeiling === undefined, 'ANALYSIS_PLAN_EDIT_INVALID', PLAN_CEILING_LAUNCH_REASON);
     const current = this.#planVersionFacts(intent.taskIntentId).at(-1);
     requireAnalysis(current !== undefined && current.ordinal === existing.planVersion.ordinal, 'ANALYSIS_RECORD_INVALID', '任务计划缺少计划版本。');
@@ -2252,7 +2310,10 @@ export class BaselineAnalysisStore {
     requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string' &&
       (record.redoOfRunRecordId === undefined || (typeof record.redoOfRunRecordId === 'string' && UUID_PATTERN.test(record.redoOfRunRecordId))) &&
       (record.preparedByEnrollmentVersionId === undefined ||
-        (typeof record.preparedByEnrollmentVersionId === 'string' && UUID_PATTERN.test(record.preparedByEnrollmentVersionId) && record.redoOfRunRecordId === undefined)),
+        (typeof record.preparedByEnrollmentVersionId === 'string' && UUID_PATTERN.test(record.preparedByEnrollmentVersionId) && record.redoOfRunRecordId === undefined)) &&
+      // Only the dispatcher's Task carries the ceiling its Enrollment holds it to (Issue #864).
+      (record.backgroundRunBudgetCeiling === undefined ||
+        (record.preparedByEnrollmentVersionId !== undefined && isBackgroundRunBudgetCeiling(record.backgroundRunBudgetCeiling))),
     'ANALYSIS_RECORD_INVALID', '任务意图记录无效。');
     const start = row.selected_start_position;
     const end = row.selected_end_position;
@@ -2268,6 +2329,7 @@ export class BaselineAnalysisStore {
       expectedOutcome: record.expectedOutcome,
       redoOfRunRecordId: record.redoOfRunRecordId === undefined ? null : record.redoOfRunRecordId as string,
       preparedByEnrollmentVersionId: record.preparedByEnrollmentVersionId === undefined ? null : record.preparedByEnrollmentVersionId as string,
+      backgroundRunBudgetCeiling: record.backgroundRunBudgetCeiling === undefined ? null : record.backgroundRunBudgetCeiling as BackgroundRunBudgetCeiling,
     };
   }
 
@@ -3137,7 +3199,9 @@ export class BaselineAnalysisStore {
       const scope = this.#launch.operationalScope;
       requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || plannedRunAdmission(input.launchPolicy, this.#definition, this.#launch.live) !== null,
         'ANALYSIS_KIND_NOT_ADMITTED', `${scope} 当前只允许基线稿件分析；该任务种类尚未获准实时执行。`);
-      requireAnalysis(input.background == null,
+      // A 后台分析登记's preparation only under the selected policy's enrolled-background rule (Issue #864; Provider Processing v14/v15).
+      requireAnalysis(input.background == null ||
+          (this.#definition.kind === BASELINE_ANALYSIS_KIND && liveKindRule(input.launchPolicy, BASELINE_ANALYSIS_KIND, [], 'background') !== null),
         'ANALYSIS_ORIGIN_NOT_ADMITTED', `${scope} 当前只允许直接发起的分析任务。`);
     }
     const update = this.#resolveSelectedBlocks(input.bookId, input.update);
@@ -3157,7 +3221,8 @@ export class BaselineAnalysisStore {
         if (work.background && work.bookId === input.bookId) this.prepare({ phase: 'cancel', workId: work.workId });
       }
     } else {
-      requireAnalysis(UUID_PATTERN.test(background.enrollmentVersionId) && input.redoOf == null && !input.reconfirm,
+      requireAnalysis(UUID_PATTERN.test(background.enrollmentVersionId) && isBackgroundRunBudgetCeiling(background.runBudgetCeiling) &&
+        input.redoOf == null && !input.reconfirm,
         'ANALYSIS_BACKGROUND_INVALID', '后台分析的准备参数无效。');
       requireAnalysis(!this.preparationInFlight(input.bookId), 'ANALYSIS_PREPARATION_IN_FLIGHT', '这本书正在准备一项任务；后台分析不接手。');
     }
@@ -3174,16 +3239,16 @@ export class BaselineAnalysisStore {
       // 调整预算并重做 (Issue #51, S16a; V2-UX-MODEL-017): a Run the Run Budget Ceiling stopped is redone the same way — the
       // ceiling is raised or removed in the new Task's plan, never on the stopped Run.
       const budgetReached = run !== null && run.state === 'interrupted' && existing.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached';
-      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND && run !== null && run.runRecordId === redoOf &&
+      requireAnalysis(run !== null && run.runRecordId === redoOf &&
         ((run.state === 'cancelled' && run.transitions.some((transition) => transition.state === 'executing')) || budgetReached),
       'ANALYSIS_REDO_STALE', '只有这本书最近一项任务里开始后取消、或因预算上限停止的运行可以改计划重做。');
       const expected = latest !== null && latest.provenance.runRecordId === redoOf
         ? { mode: 'sync-current', selectedRange: null }
         : existing.update === null ? null : { mode: existing.update.mode, selectedRange: existing.update.selectedRange };
-      requireAnalysis(!input.reconfirm && (expected === null
+      requireAnalysis(!input.reconfirm && (this.#definition.kind !== BASELINE_ANALYSIS_KIND || (expected === null
         ? update === null
         : update !== null && update.mode === expected.mode && update.selectedRange?.startPosition === expected.selectedRange?.startPosition &&
-          update.selectedRange?.endPosition === expected.selectedRange?.endPosition),
+          update.selectedRange?.endPosition === expected.selectedRange?.endPosition)),
       'ANALYSIS_REDO_INVALID', '改计划重做沿用这次运行已读完的部分，接着读其余的；什么都没读完时，照原样从头再做。');
     }
     // The latest Task asked for again as it was — the same way over the same range, its predecessor still the latest
@@ -3268,6 +3333,7 @@ export class BaselineAnalysisStore {
     const pendingIntent: PendingIntent | null = reusable ? null : {
       taskIntentId, bookId: input.bookId, goal: input.goal, mode, redoOf,
       preparedByEnrollmentVersionId: background?.enrollmentVersionId ?? null,
+      backgroundRunBudgetCeiling: background === null ? null : { kind: 'tokens', maxTotalTokens: background.runBudgetCeiling.maxTotalTokens },
       predecessor: initial ? null : { revisionId: latest!.revisionId, digest: latest!.digest },
       selectedRange,
     };
@@ -3305,6 +3371,7 @@ export class BaselineAnalysisStore {
       taskIntentId: intent.taskIntentId,
       ...(intent.redoOf === null ? {} : { redoOfRunRecordId: intent.redoOf }),
       ...(intent.preparedByEnrollmentVersionId === null ? {} : { preparedByEnrollmentVersionId: intent.preparedByEnrollmentVersionId }),
+      ...(intent.backgroundRunBudgetCeiling === null ? {} : { backgroundRunBudgetCeiling: { ...intent.backgroundRunBudgetCeiling } }),
     };
     // A whole first Task's record is the base alone, as it has been since revision 15. Every Task that
     // carries a plan also states its mode, its predecessor and its range — and a range-bound first
@@ -3525,7 +3592,7 @@ export class BaselineAnalysisStore {
               fixtureLineage: this.#route.fixtureLineage,
             },
       outboundDataCategory: production !== null ? 'unpublished-excerpts' : 'public-or-synthetic',
-      runBudgetCeiling: live === null || live.scope === 'ordinary-production' ? planEditCeiling(edits) : resolveDeveloperLiveCeiling(live.runBudgetCeiling, manifest.units.length),
+      runBudgetCeiling: this.#planCeiling(manifest.units.length, planEditCeiling(edits), intent.backgroundRunBudgetCeiling),
     };
     const dispatchAllowed = live !== null || this.#route !== null;
     const stopCondition = production !== null
@@ -3555,15 +3622,19 @@ export class BaselineAnalysisStore {
     const samplingPin = assurance !== null && assurance.promptContractDigest !== ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST
       ? { assurancePromptContractDigest: assurance.promptContractDigest }
       : {};
+    const clarificationPin = this.#definition.clarificationBase === undefined ? {} : {
+      clarificationBasePromptContractDigest: this.#definition.clarificationBase.promptContractDigest,
+    };
     const records: Record<string, { json: string; digest: string }> = {
       'manuscript-pin': canonicalRecord(manuscriptPin),
       'artifact-pin': canonicalRecord(artifactPin),
       'run-source-scope': canonicalRecord(sourceScope),
       'coverage-manifest': canonicalRecord(manifest),
       'provider-resolution-plan': canonicalRecord(providerPlan),
-      'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? { ...executionPlan, ...samplingPin } : {
+      'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? { ...executionPlan, ...samplingPin, ...clarificationPin } : {
         ...executionPlan,
         ...samplingPin,
+        ...clarificationPin,
         materialReferences: this.#definition.materialReferences.sources,
         materialReferenceBasePromptContractDigest: this.#definition.materialReferences.basePromptContractDigest,
       }),
@@ -3649,11 +3720,14 @@ export class BaselineAnalysisStore {
       const admitted = this.#definition.kind === BASELINE_ANALYSIS_KIND ? null : plannedRunAdmission(this.#launch.policy, this.#definition, this.#launch.live);
       requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || admitted !== null,
         'ANALYSIS_KIND_NOT_ADMITTED', `${scope} 当前只允许基线稿件分析；该任务种类尚未获准实时执行。`);
-      // Every admitted kind starts by a direct authorization; writing's quick start also starts under its default execution
-      // rule (#810), under developer-live only: ordinary production admits no default-rule origin yet (Issue #811, wave 4).
-      // Background enrollment stays refused live.
+      // Every admitted kind starts by a direct authorization; writing's developer-live quick start and a kind whose
+      // selected rule admits a matching active default execution rule may also start under that rule (Issue #866).
+      // A 后台分析登记's start only under the selected policy's enrolled-background rule (Issue #864; Provider Processing v14/v15).
       requireAnalysis(origin.kind === 'standard-direct' || (origin.kind === 'default-execution-rule' && admitted !== null &&
-          this.#definition.kind === WRITING_KIND && scope === 'developer-live'),
+          ((this.#definition.kind === WRITING_KIND && scope === 'developer-live') ||
+            liveKindRule(this.#launch.policy, this.#definition.kind)?.matchingActiveDefaultExecutionRuleAllowed === true)) ||
+          (origin.kind === 'background-analysis-enrollment' && this.#definition.kind === BASELINE_ANALYSIS_KIND &&
+            liveKindRule(this.#launch.policy, BASELINE_ANALYSIS_KIND, [], 'background') !== null),
         'ANALYSIS_ORIGIN_NOT_ADMITTED', `${scope} 当前只允许直接授权的基线稿件分析。`);
     }
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) &&
@@ -3921,6 +3995,9 @@ export class BaselineAnalysisStore {
    * and what the first attempt cost. One request per unit and Run; the unit waits until it is answered.
    */
   recordClarificationRequest(input: {
+    modelQuestion?: ModelClarificationQuestion;
+    firstAttempts?: number;
+    raisedAt?: string;
     runRecordId: string;
     attemptId: string;
     taskIntentId: string;
@@ -3940,16 +4017,19 @@ export class BaselineAnalysisStore {
       (input.firstPayloadDigest === null || DIGEST_PATTERN.test(input.firstPayloadDigest)),
     'ANALYSIS_RECORD_INVALID', '澄清请求记录无效。');
     const requestId = randomUUID();
-    const raisedAt = new Date().toISOString();
+    const raisedAt = input.raisedAt ?? new Date().toISOString();
+    const modelJson = input.modelQuestion === undefined ? null : canonicalJson(input.modelQuestion);
+    requireAnalysis(modelJson === null || parseModelClarification(modelJson) !== null, 'ANALYSIS_RECORD_INVALID', '模型澄清问题无效。');
     const record = canonicalRecord({
       schema: CLARIFICATION_REQUEST_SCHEMA,
+      ...(modelJson === null ? {} : { origin: 'model', modelQuestion: input.modelQuestion, firstAttempts: input.firstAttempts ?? 1 }),
       requestId,
       runRecordId: input.runRecordId,
       attemptId: input.attemptId,
       taskIntentId: input.taskIntentId,
       unitOrdinal: input.unitOrdinal,
-      kind: 'ask-first-adaptation',
-      adaptationClass: 'safe-retry',
+      kind: modelJson === null ? 'ask-first-adaptation' : 'model-question',
+      ...(modelJson === null ? { adaptationClass: 'safe-retry' } : {}),
       planVersion: input.planVersion,
       planEnvelopeDigest: input.planEnvelopeDigest,
       requestDigest: input.requestDigest,
@@ -3962,8 +4042,8 @@ export class BaselineAnalysisStore {
       raisedAt,
     });
     this.#db.prepare(
-      'INSERT INTO analysis_clarification_requests(request_id, run_record_id, unit_ordinal, kind, raised_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ).run(requestId, input.runRecordId, input.unitOrdinal, 'ask-first-adaptation', raisedAt, record.json, record.digest);
+      'INSERT INTO analysis_clarification_requests(request_id, run_record_id, unit_ordinal, kind, raised_at, canonical_json, sha256, model_question_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(requestId, input.runRecordId, input.unitOrdinal, 'ask-first-adaptation', raisedAt, record.json, record.digest, modelJson);
     return requestId;
   }
 
@@ -3971,7 +4051,7 @@ export class BaselineAnalysisStore {
   clarificationsOf(runRecordId: string): ClarificationFacts[] {
     requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
     const rows = this.#db.prepare(
-      `SELECT q.request_id, q.unit_ordinal, q.canonical_json q_json, q.sha256 q_sha, a.answer_id, a.option_id, a.canonical_json a_json, a.sha256 a_sha
+      `SELECT q.request_id, q.unit_ordinal, q.model_question_json, q.canonical_json q_json, q.sha256 q_sha, a.answer_id, a.option_id, a.canonical_json a_json, a.sha256 a_sha
        FROM analysis_clarification_requests q
        LEFT JOIN analysis_clarification_answers a ON a.request_id = q.request_id
        WHERE q.run_record_id = ? ORDER BY q.unit_ordinal`,
@@ -3981,21 +4061,28 @@ export class BaselineAnalysisStore {
       requireAnalysis(canonicalRecord(request).digest === asString(row.q_sha) && request.schema === CLARIFICATION_REQUEST_SCHEMA &&
         request.requestId === asString(row.request_id) && request.runRecordId === runRecordId && request.unitOrdinal === asNumber(row.unit_ordinal),
       'ANALYSIS_RECORD_INVALID', '澄清请求记录与其摘要不一致。');
+      const modelQuestion = row.model_question_json === null ? null : parseModelClarification(asString(row.model_question_json));
+      requireAnalysis(row.model_question_json === null ? request.origin === undefined && request.modelQuestion === undefined
+        : modelQuestion !== null && request.origin === 'model' && canonicalJson(request.modelQuestion) === asString(row.model_question_json),
+      'ANALYSIS_RECORD_INVALID', '模型澄清问题与其摘要不一致。');
       let answer: ClarificationFacts['answer'] = null;
       if (row.answer_id !== null) {
         const record = parseCanonicalJson(asString(row.a_json)) as Record<string, unknown>;
         requireAnalysis(canonicalRecord(record).digest === asString(row.a_sha) && record.schema === CLARIFICATION_ANSWER_SCHEMA &&
-          record.answerId === asString(row.answer_id) && record.requestId === request.requestId && record.optionId === asString(row.option_id) &&
+          record.answerId === asString(row.answer_id) && record.requestId === request.requestId &&
+          (modelQuestion === null ? record.optionId === asString(row.option_id) : row.option_id === 'retry') &&
           record.requestSha256 === asString(row.q_sha),
         'ANALYSIS_RECORD_INVALID', '澄清回答记录与其摘要不一致。');
         answer = {
           answerId: record.answerId as string,
-          optionId: record.optionId as ClarificationOptionId,
+          optionId: record.optionId as AnyClarificationOptionId,
           note: record.note as string | null,
           answeredAt: record.answeredAt as string,
+          ...(modelQuestion !== null && record.actor === 'service-timeout' ? { timedOut: true as const } : {}),
         };
       }
       return {
+        ...(modelQuestion === null ? {} : { origin: 'model' as const, modelQuestion, firstAttempts: request.firstAttempts as number }),
         requestId: request.requestId as string,
         runRecordId,
         attemptId: request.attemptId as string,
@@ -4026,11 +4113,7 @@ export class BaselineAnalysisStore {
   } {
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(input.taskIntentId) && UUID_PATTERN.test(input.requestId),
       'ANALYSIS_CLARIFICATION_INVALID', '回答的参数无效。');
-    requireAnalysis(typeof input.optionId === 'string' && (CLARIFICATION_OPTION_IDS as ReadonlyArray<string>).includes(input.optionId),
-      'ANALYSIS_CLARIFICATION_INVALID', '请选择一个回答。');
     const note = typeof input.note === 'string' ? input.note.trim() : null;
-    requireAnalysis(input.note === null || (typeof input.note === 'string' && input.note.isWellFormed() && input.note.length <= CLARIFICATION_NOTE_MAX),
-      'ANALYSIS_CLARIFICATION_INVALID', `说明最多 ${CLARIFICATION_NOTE_MAX} 字。`);
     const current = this.inspect(bookId);
     const run = current.run;
     requireAnalysis(current.taskIntent?.taskIntentId === input.taskIntentId && run !== null,
@@ -4041,6 +4124,20 @@ export class BaselineAnalysisStore {
     const request = this.clarificationsOf(run.runRecordId).find((entry) => entry.requestId === input.requestId);
     requireAnalysis(request !== undefined, 'ANALYSIS_CLARIFICATION_STALE', '这个问题不是这次运行提的。');
     requireAnalysis(request.answer === null, 'ANALYSIS_CLARIFICATION_ANSWERED', '这个问题已经回答过了。');
+    requireAnalysis(!modelClarificationExpired(request, Date.now()), 'ANALYSIS_CLARIFICATION_EXPIRED', '这个问题已超过 24 小时，按「不回答」接着做。');
+    requireAnalysis(input.note === null || (typeof input.note === 'string' && input.note.isWellFormed() &&
+      (request.origin === 'model' ? clarificationGraphemes(input.note) : input.note.length) <= CLARIFICATION_NOTE_MAX),
+    'ANALYSIS_CLARIFICATION_INVALID', `说明最多 ${CLARIFICATION_NOTE_MAX} 字。`);
+    const model = request.modelQuestion;
+    const selected = typeof input.optionId === 'string' ? /^model-option-([0-3])$/u.exec(input.optionId)?.[1] : undefined;
+    // A safe-retry question keeps S76d's words; only a model question offers its own options and free text.
+    requireAnalysis(model !== undefined || (typeof input.optionId === 'string' && (CLARIFICATION_OPTION_IDS as ReadonlyArray<string>).includes(input.optionId)),
+      'ANALYSIS_CLARIFICATION_INVALID', '请选择一个回答。');
+    requireAnalysis(model === undefined
+      || (input.optionId === 'no-answer' ? note === null || note === ''
+        : input.optionId === 'free-text' ? model.freeTextAllowed && note !== null && note !== ''
+          : selected !== undefined && model.options?.[Number(selected)] !== undefined && (note === null || note === '')),
+    'ANALYSIS_CLARIFICATION_INVALID', '请选择一个回答，或在允许时自行说明。');
     const requestRow = this.#db.prepare('SELECT sha256 FROM analysis_clarification_requests WHERE request_id = ?').get(input.requestId) as SqlRow;
     const answerId = randomUUID();
     const answeredAt = new Date().toISOString();
@@ -4057,8 +4154,32 @@ export class BaselineAnalysisStore {
     });
     this.#db.prepare(
       'INSERT INTO analysis_clarification_answers(answer_id, request_id, option_id, answered_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(answerId, input.requestId, input.optionId, answeredAt, record.json, record.digest);
+    ).run(answerId, input.requestId, model === undefined ? input.optionId as string : 'retry', answeredAt, record.json, record.digest);
     return { answerId, runRecordId: run.runRecordId, runState: run.state };
+  }
+
+  /** Service-clock timeout, append-only and idempotent; an editor answer already recorded wins. */
+  expireModelClarifications(runRecordId: string, now = Date.now()): number {
+    let expired = 0;
+    for (const request of this.clarificationsOf(runRecordId)) {
+      if (!modelClarificationExpired(request, now)) continue;
+      const requestRow = this.#db.prepare('SELECT sha256 FROM analysis_clarification_requests WHERE request_id = ?').get(request.requestId)!;
+      const answerId = randomUUID();
+      const answeredAt = new Date(now).toISOString();
+      const record = canonicalRecord({ schema: CLARIFICATION_ANSWER_SCHEMA, answerId, requestId: request.requestId,
+        requestSha256: asString(requestRow.sha256), runRecordId, optionId: 'no-answer', note: null, actor: 'service-timeout', answeredAt });
+      this.#db.prepare('INSERT INTO analysis_clarification_answers(answer_id, request_id, option_id, answered_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(answerId, request.requestId, 'retry', answeredAt, record.json, record.digest);
+      expired += 1;
+    }
+    return expired;
+  }
+
+  claimModelClarificationAnswer(runRecordId: string, requestId: string): boolean {
+    const rows = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ?').all(runRecordId);
+    if (rows.some((row) => (parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>).modelClarificationAnswerClaim === requestId)) return false;
+    this.recordRunState(runRecordId, 'executing', { detail: '按澄清回答接着处理这个阅读范围。', modelClarificationAnswerClaim: requestId });
+    return true;
   }
 
   /**
@@ -4158,11 +4279,12 @@ export class BaselineAnalysisStore {
   }
 
   /** The first question of a Run under way or stopped that still waits for its answer; `null` when none does. */
-  #openClarificationOf(runRecordId: string, state: BaselineAnalysisRunState): { requestId: string; unitOrdinal: number; raisedAt: string } | null {
+  #openClarificationOf(runRecordId: string, state: BaselineAnalysisRunState): { requestId: string; unitOrdinal: number; raisedAt: string; origin?: 'model' } | null {
     if (!(state === 'admitted' || state === 'executing' || state === 'pausing' || state === 'paused' || state === 'resumable' ||
       state === 'awaiting-clarification')) return null;
     const open = this.clarificationsOf(runRecordId).find((entry) => entry.answer === null);
-    return open === undefined ? null : { requestId: open.requestId, unitOrdinal: open.unitOrdinal, raisedAt: open.raisedAt };
+    return open === undefined ? null : { requestId: open.requestId, unitOrdinal: open.unitOrdinal, raisedAt: open.raisedAt,
+      ...(open.origin === 'model' ? { origin: 'model' } : {}) };
   }
 
   /** How many turns each unit of a Run was given across its executions so far, from the spans its attempt recorded. */
@@ -4194,8 +4316,7 @@ export class BaselineAnalysisStore {
    * nothing running it. One pausing settles `paused` — the boundary it waited for is reached — and one admitted or
    * executing `resumable`, 任务已中断 · 可续行, its Run Authorization kept and nothing dispatched until 续行. A start the
    * governor had not admitted yet is blocked before dispatch with why: nothing starts by itself after a restart (ADR
-   * 0034). A Run left cancelling is named for the execution owner, which finishes the cancellation. A kind with no 续行
-   * (every kind but the baseline) ends a Run left admitted, executing or pausing `interrupted` instead, with its outcome.
+   * 0034). A Run left cancelling is named for the execution owner, which finishes the cancellation.
    */
   reconcileStoppedRuns(options: {
     /**
@@ -4212,19 +4333,12 @@ export class BaselineAnalysisStore {
        WHERE i.kind = ?
        ORDER BY r.recorded_at, r.rowid`,
     ).all(this.#definition.kind) as SqlRow[];
-    // Only the baseline kind keeps unit checkpoints and offers 续行 (Issue #422, S76b); every other kind's Run left
-    // under way ends interrupted instead, as the execution owner's own `resumableOnInterrupt` reads it.
-    const resumable = this.#definition.kind === BASELINE_ANALYSIS_KIND;
     let settled = 0;
     const cancelling: string[] = [];
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
       const state = row.last_state === null ? null : asString(row.last_state);
-      if (!resumable && (state === 'admitted' || state === 'executing' || state === 'pausing')) {
-        // A kind with no 续行 (Issue #429 review, P1): left under way, it would read as running for good. It ends here.
-        this.#settleInterruptedWithoutResume(runRecordId);
-        settled += 1;
-      } else if (state === 'pausing') {
+      if (state === 'pausing') {
         this.recordRunState(runRecordId, 'paused', { detail: RECONCILED_PAUSED_DETAIL, reconciled: true });
         settled += 1;
       } else if (state === 'admitted' || state === 'executing') {
@@ -4245,42 +4359,6 @@ export class BaselineAnalysisStore {
       }
     }
     return { settled, cancelling };
-  }
-
-  /**
-   * The terminal `interrupted` of a Run a stopped service left under way, for a kind that cannot resume: no revision
-   * formed, and its Task Outcome and Run Report say exactly that — stages that never ran, no units, no usage.
-   */
-  #settleInterruptedWithoutResume(runRecordId: string): void {
-    const facts = this.cancellationFacts(runRecordId);
-    this.recordRunState(runRecordId, 'interrupted', { detail: RECONCILED_INTERRUPTED_DETAIL, reconciled: true });
-    this.recordOutcome({
-      taskIntentId: facts.taskIntentId,
-      runRecordId,
-      classification: 'interrupted',
-      resultSetRevisionId: null,
-      summary: RECONCILED_INTERRUPTED_DETAIL,
-      safeNextAction: RECONCILED_INTERRUPTED_DETAIL,
-      report: buildRunReport({
-        runRecordId,
-        taskIntentId: facts.taskIntentId,
-        attemptId: facts.attemptId,
-        resultSetRevisionId: null,
-        classification: 'interrupted',
-        recordedAt: new Date().toISOString(),
-        spans: new Map(),
-        usage: { units: RUN_REPORT_NO_USAGE, 'cross-unit-reduction': RUN_REPORT_NO_USAGE, 'assurance-sampling': RUN_REPORT_NO_USAGE },
-        unitRows: [],
-        // The turns it sent before AI7 closed were sent: the units the ledger recorded a turn for are the ones it submitted.
-        submitted: facts.attemptId === null ? 0 : this.submittedUnitCount(facts.attemptId),
-        adaptations: [],
-        gaps: [],
-        crossUnit: { state: 'not-run', reason: RECONCILED_INTERRUPTED_STAGE_REASON },
-        sample: assuranceSampleNotRun(RECONCILED_INTERRUPTED_STAGE_REASON),
-        findingCounts: [],
-        terminalFailure: null,
-      }, runReportReflectionNotRun(RECONCILED_INTERRUPTED_STAGE_REASON)),
-    });
   }
 
   /**
@@ -4356,7 +4434,7 @@ export class BaselineAnalysisStore {
     const live = this.#currentMaterialInputs(intent.bookId, intent.mode, frozen.selectedRange, manifest.units.length,
       planEditCeiling(this.#planEditsOf(intent.taskIntentId, version.ordinal)),
       // An authorized production Run owns its connection; settings select the next Task's connection (#811 revision 9).
-      this.#launch.operationalScope === 'ordinary-production' ? frozen.providerBinding : undefined);
+      this.#launch.operationalScope === 'ordinary-production' ? frozen.providerBinding : undefined, intent.backgroundRunBudgetCeiling);
     return diffMaterialPlanInputs(frozen, live).map((entry) => entry.label);
   }
 
@@ -4417,7 +4495,7 @@ export class BaselineAnalysisStore {
   loadExecutionPlan(runRecordId: string): ExecutionPlanFacts {
     requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
     const run = this.#db.prepare(
-      `SELECT r.run_record_id, r.task_intent_id, a.plan_envelope_sha256
+      `SELECT r.run_record_id, r.task_intent_id, a.plan_envelope_sha256, a.origin, a.canonical_json
        FROM analysis_run_records r
        JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
        WHERE r.run_record_id = ?`,
@@ -4426,6 +4504,10 @@ export class BaselineAnalysisStore {
     const intentRow = this.#db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ?').get(asString(run.task_intent_id)) as SqlRow | undefined;
     requireAnalysis(intentRow !== undefined, 'ANALYSIS_RECORD_INVALID', '任务意图缺失。');
     const intent = this.#intentFacts(intentRow);
+    // Who started the Run (Issue #864): a 后台分析登记's Run is only ever the Task its dispatcher created under that very version.
+    const origin = authorizationOrigin(run);
+    requireAnalysis(origin.origin !== 'background-analysis-enrollment' || intent.preparedByEnrollmentVersionId === origin.enrollmentVersionId,
+      'ANALYSIS_RECORD_INVALID', '运行授权的来源与任务意图不一致。');
     const checkpointRow = this.#db.prepare('SELECT * FROM analysis_task_input_checkpoints WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
     requireAnalysis(checkpointRow !== undefined, 'ANALYSIS_RECORD_INVALID', '任务输入固定点缺失。');
     // The Run executes exactly the plan version its authorization bound, never a later one.
@@ -4456,7 +4538,7 @@ export class BaselineAnalysisStore {
       requireAnalysis(providerPlan.executionRoute.kind === live.route && providerPlan.executionRoute.model === live.model &&
         providerPlan.executionRoute.endpoint === live.endpoint, 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');
       requireAnalysis(providerPlan.remoteBinding.credentialReference === live.credentialReference &&
-        canonicalJson(runBudgetCeiling) === canonicalJson(resolveDeveloperLiveCeiling(live.runBudgetCeiling, manifest.units.length)),
+        canonicalJson(runBudgetCeiling) === canonicalJson(this.#planCeiling(manifest.units.length, 'unset', intent.backgroundRunBudgetCeiling)),
       'ANALYSIS_ROUTE_STALE', '当前启动的凭据引用或运行预算上限与冻结计划不一致。');
     } else {
       requireAnalysis(providerPlan.executionRoute.kind === LOCAL_DETERMINISTIC_ROUTE, 'ANALYSIS_ROUTE_ABSENT', '计划没有可执行的本地路由。');
@@ -4483,7 +4565,9 @@ export class BaselineAnalysisStore {
       asked.every((adaptationClass) => (split.askFirst ?? []).some((entry) => entry.adaptationClass === adaptationClass))),
       'ANALYSIS_RECORD_INVALID', '计划信封与计划修改不一致。');
     // Outside developer-live the ceiling the Run is held to is the one the editor set in this version, or none (Issue #51).
-    requireAnalysis(live !== null || canonicalJson(runBudgetCeiling) === canonicalJson(planEditCeiling(editorEdits)),
+    // A 后台分析登记's Task is held to its Book's share under every scope (Issue #864).
+    requireAnalysis((live !== null && intent.backgroundRunBudgetCeiling === null) ||
+      canonicalJson(runBudgetCeiling) === canonicalJson(this.#planCeiling(manifest.units.length, planEditCeiling(editorEdits), intent.backgroundRunBudgetCeiling)),
       'ANALYSIS_RECORD_INVALID', '计划的预算上限与计划修改不一致。');
     let update: ExecutionUpdateFacts | null = null;
     if (this.#carriesPlan(intent.mode)) {
@@ -4525,6 +4609,7 @@ export class BaselineAnalysisStore {
       runRecordId,
       planVersionId: version.planVersionId,
       planVersionOrdinal: version.ordinal,
+      origin: origin.origin,
       checkpoint: {
         bookId: intent.bookId,
         manuscriptId: asString(checkpointRow.manuscript_id),
@@ -4900,6 +4985,7 @@ export class BaselineAnalysisStore {
     credentialOperationState: ModelCredentialOperationState;
   } {
     requireAnalysis(UUID_PATTERN.test(bookId), 'ANALYSIS_BOOK_INVALID', '任务所属图书无效。');
+    this.#refreshClarificationDefinition();
     // Under ordinary production (Issue #811) the Book is the editor's own manuscript, of any source, and the connection whose
     // credential a plan names is the configured route's; under every other scope exact sample1 and the official row, as before.
     const live = this.#launch.live;

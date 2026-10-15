@@ -217,6 +217,9 @@ type DrawerApi = Pick<
   | 'pauseBaselineAnalysisRun'
   | 'resumeBaselineAnalysisRun'
   | 'editBaselineAnalysisPlan'
+  | 'controlTaskRun'
+  | 'editTaskPlan'
+  | 'redoTaskPlan'
   | 'answerBaselineAnalysisClarification'
   | 'runReconnectPreflight'
   | 'setDefaultExecutionRule'
@@ -1539,7 +1542,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const asked = request;
     // The edit's own version: 模型未连接 or 离线 withholds 开始任务's digest, and the edit sends nothing.
     const planEnvelopeDigest = current?.edit.planEnvelopeDigest ?? null;
-    if (current === null || current.kind !== 'baseline-analysis' || planEnvelopeDigest === null || !beginWork()) return;
+    if (current === null || (current.kind !== 'baseline-analysis' && !isStartWhenOnlineTaskKind(current.kind)) || planEnvelopeDigest === null || !beginWork()) return;
     const removedSteps = current.steps.filter((step) => step.removable && shownRemoved(current, step.id, step.removed)).map((step) => step.id);
     const disallowedAdaptations = current.boundary.adaptable
       .filter((entry) => entry.removable && shownEdit(current, entry.id, committedEdit(entry)) === 'removed')
@@ -1552,18 +1555,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const ceiling = shownCeiling(current);
     options.setStatus('正在更新计划…', 'busy');
     try {
-      const updated = await api.editBaselineAnalysisPlan({
-        taskIntentId: current.ref,
+      const edits = {
         planEnvelopeDigest,
         removedSteps,
         disallowedAdaptations,
         ...(askFirstAdaptations.length === 0 ? {} : { askFirstAdaptations }),
         ...(ceiling === 'unset' ? {} : { runBudgetCeiling: ceiling }),
-      });
+      };
+      const updated = current.kind === 'baseline-analysis'
+        ? await api.editBaselineAnalysisPlan({ ...edits, taskIntentId: current.ref })
+        : await api.editTaskPlan({ ...edits, kind: current.kind, ref: current.ref });
       editBuffers.delete(editKey(current));
       budgetBuffers.delete(editKey(current));
       if (budgetForm?.key === editKey(current)) budgetForm = null;
-      options.setStatus(`计划已更新为第 ${updated.planVersion?.ordinal ?? '?'} 版。`, 'success');
+      const ordinal = typeof updated.planVersion === 'number' ? updated.planVersion : updated.planVersion?.ordinal;
+      options.setStatus(`计划已更新为第 ${ordinal ?? '?'} 版。`, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
@@ -1737,7 +1743,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (current === null || current.redo === null || current.runControl === null || !beginWork()) return;
     options.setStatus('正在取消这次运行，然后准备新任务…', 'busy');
     try {
-      await api.cancelBaselineAnalysisRun({ taskIntentId: current.ref });
+      await controlRun(current, 'cancel');
       redoPending = { ref: current.ref, runRecordId: current.runControl.runRecordId };
       redoConfirmShown = false;
       options.setStatus(TASK_BAR_REDOING_NOTE, 'success');
@@ -1764,16 +1770,19 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     options.setStatus('正在准备改计划重做的新任务…', 'busy');
     let prepared: string | null = null;
     try {
-      const initial = await api.prepareBaselineAnalysis({ goal: redo.prepare.goal, update: redo.prepare.update, reconfirm: false, redoOf: redo.prepare.redoOf });
+      const initial = 'kind' in redo.prepare
+        ? await api.redoTaskPlan({ kind: redo.prepare.kind, ref: redo.prepare.ref })
+        : await api.prepareBaselineAnalysis({ goal: redo.prepare.goal, update: redo.prepare.update, reconfirm: false, redoOf: redo.prepare.redoOf });
       const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
       if (completed.state === 'cancelled') {
         options.setStatus('改计划重做的准备已取消；这次运行保持已取消。', 'success');
         return;
       }
-      if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
-        throw new Error(TASK_BAR_REDO_FAILED);
-      }
-      prepared = completed.result.taskIntent?.taskIntentId ?? null;
+      if (completed.result === null) throw new Error(TASK_BAR_REDO_FAILED);
+      if ('taskIntent' in completed.result) prepared = completed.result.taskIntent?.taskIntentId ?? null;
+      else if ('run' in completed.result && completed.result.run !== null && 'reviewRunId' in completed.result.run) prepared = completed.result.run.reviewRunId;
+      else if ('kind' in redo.prepare) prepared = (await api.inspectTaskPlan({ kind: redo.prepare.kind, ref: null })).ref;
+      if (prepared === null) throw new Error(TASK_BAR_REDO_FAILED);
       options.setStatus('新任务已准备：可以先改计划，再开始。', 'success');
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
@@ -1912,16 +1921,28 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * 确认取消任务 (Issue #422; CTRL-004, CTRL-005): the Run the summary named is cancelled. The service records
    * 正在取消 at once and the Run stops at the next unit boundary; the drawer follows it to 已取消.
    */
+  async function controlRun(current: TaskPlanProjection, action: 'pause' | 'resume' | 'cancel'): Promise<boolean> {
+    if (current.kind === 'baseline-analysis') {
+      const result = action === 'pause' ? await api.pauseBaselineAnalysisRun({ taskIntentId: current.ref })
+        : action === 'resume' ? await api.resumeBaselineAnalysisRun({ taskIntentId: current.ref })
+          : await api.cancelBaselineAnalysisRun({ taskIntentId: current.ref });
+      return result.run?.state === 'cancelling';
+    }
+    if (!isStartWhenOnlineTaskKind(current.kind)) return false;
+    const result = await api.controlTaskRun({ kind: current.kind, ref: current.ref, action });
+    return result.runControl?.cancelling === true;
+  }
+
   async function cancelRun(): Promise<void> {
     const current = plan;
     const asked = request;
-    if (current === null || current.kind !== 'baseline-analysis' || current.runControl === null || !beginWork()) return;
+    if (current === null || current.runControl === null || !beginWork()) return;
     options.setStatus('正在取消任务…', 'busy');
     try {
-      const answered = await api.cancelBaselineAnalysisRun({ taskIntentId: current.ref });
+      const cancelling = await controlRun(current, 'cancel');
       cancelConfirmShown = false;
       // A Run under way stops at its next boundary; one nothing was running settled at once.
-      options.setStatus(answered.run?.state === 'cancelling' ? TASK_BAR_CANCELLING_NOTE : TASK_BAR_CANCELLED_NOTE, 'success');
+      options.setStatus(cancelling ? TASK_BAR_CANCELLING_NOTE : TASK_BAR_CANCELLED_NOTE, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
@@ -1936,10 +1957,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   async function pauseRun(): Promise<void> {
     const current = plan;
     const asked = request;
-    if (current === null || current.kind !== 'baseline-analysis' || current.runControl === null || !beginWork()) return;
+    if (current === null || current.runControl === null || !beginWork()) return;
     options.setStatus('正在暂停任务…', 'busy');
     try {
-      await api.pauseBaselineAnalysisRun({ taskIntentId: current.ref });
+      await controlRun(current, 'pause');
       options.setStatus(TASK_BAR_PAUSING_NOTE, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
@@ -1955,10 +1976,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   async function resumeRun(): Promise<void> {
     const current = plan;
     const asked = request;
-    if (current === null || current.kind !== 'baseline-analysis' || current.runControl === null || !beginWork()) return;
+    if (current === null || current.runControl === null || !beginWork()) return;
     options.setStatus('正在续行…', 'busy');
     try {
-      await api.resumeBaselineAnalysisRun({ taskIntentId: current.ref });
+      await controlRun(current, 'resume');
       options.setStatus('已续行，从已保存的进度接着读。', 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
@@ -2097,7 +2118,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     // A drawer whose service stopped offers nothing; the card says why it cannot be answered only when the Run says so.
     const blocked = card.answerable.reason ?? (interrupted ? '' : null);
     const ready = (): void => {
-      submit.disabled = draft.optionId === null || working || blocked !== null;
+      const validText = card.origin !== 'model' || draft.optionId !== 'free-text' ||
+        (draft.note.trim() !== '' && [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(draft.note)].length <= 500);
+      submit.disabled = draft.optionId === null || !validText || working || blocked !== null;
       submitWhy.textContent = blocked ?? TASK_PLAN_CLARIFICATION_SUBMIT_REASON;
       submitWhy.hidden = !submit.disabled;
       if (submit.disabled) submit.setAttribute('aria-describedby', submitWhy.id);
@@ -2117,6 +2140,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       input.addEventListener('change', () => {
         if (!input.checked) return;
         draft.optionId = option.id;
+        if (card.origin === 'model') { draft.noteOpen = false; draft.note = ''; }
         clarificationDrafts.set(id, draft);
         ready();
       });
@@ -2132,8 +2156,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const noteToggle = control(card.note.label, 'quiet', `clarification-note-toggle:${id}`);
     noteToggle.setAttribute('aria-expanded', draft.noteOpen ? 'true' : 'false');
     noteToggle.disabled = blocked !== null;
+    noteToggle.hidden = card.origin === 'model' && card.freeTextAllowed !== true;
     noteToggle.addEventListener('click', () => {
       draft.noteOpen = !draft.noteOpen;
+      if (card.origin === 'model') draft.optionId = draft.noteOpen ? 'free-text' : null;
       clarificationDrafts.set(id, draft);
       repaintQuestions(draft.noteOpen ? `clarification-note:${id}` : `clarification-note-toggle:${id}`);
     });
@@ -2144,7 +2170,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const note = document.createElement('textarea');
       note.className = 'task-plan-clarification-note';
       note.rows = 3;
-      note.maxLength = card.note.maxLength;
+      if (card.origin !== 'model') note.maxLength = card.note.maxLength;
       note.value = draft.note;
       note.disabled = blocked !== null;
       note.dataset['taskDrawerControl'] = `clarification-note:${id}`;
@@ -2155,6 +2181,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       note.addEventListener('input', () => {
         draft.note = note.value;
         clarificationDrafts.set(id, draft);
+        ready();
       });
       parts.push(note, hint);
     }
@@ -2200,7 +2227,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     options.setStatus('正在提交回答…', 'busy');
     try {
       const note = draft.noteOpen && draft.note.trim().length > 0 ? draft.note.trim() : null;
-      await api.answerBaselineAnalysisClarification({ taskIntentId: current.ref, requestId: card.requestId, optionId, note });
+      await api.answerBaselineAnalysisClarification({ taskIntentId: card.taskIntentId ?? current.ref, requestId: card.requestId, optionId,
+        note: card.origin === 'model' && optionId !== 'free-text' ? null : note });
       clarificationDrafts.delete(card.requestId);
       deferredQuestions.delete(card.requestId);
       options.setStatus(TASK_PLAN_CLARIFICATION_SUBMITTED, 'success');

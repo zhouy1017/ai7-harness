@@ -16,6 +16,8 @@ export const DIALOGUE_QUESTION_LABEL = '你的问题';
 export const DIALOGUE_SENDS_NOTE = '只发送所选文字和你的问题，不改稿件。';
 export const DIALOGUE_ASK = '提问';
 export const DIALOGUE_CANCEL = '取消';
+export const DIALOGUE_QUEUED_CANCEL = '取消';
+export const DIALOGUE_QUEUED_CANCELLED = '已取消等待中的回答，没有发送任何内容。';
 export const DIALOGUE_STATUS = {
   asking: '正在提问…',
   asked: '已提问；回答显示在右侧的对话里。',

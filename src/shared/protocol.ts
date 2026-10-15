@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 131 as const;
+export const SERVICE_PROTOCOL_VERSION = 136 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -72,6 +72,10 @@ export const IPC_CHANNELS = {
   cancelWaitingTask: 'ai7:j04:cancel-waiting-task',
   cancelBaselineAnalysisRun: 'ai7:j04:cancel-baseline-analysis-run',
   pauseBaselineAnalysisRun: 'ai7:j04:pause-baseline-analysis-run',
+  controlTaskRun: 'ai7:tasks:control-run',
+  editTaskPlan: 'ai7:tasks:edit-plan',
+  redoTaskPlan: 'ai7:tasks:redo-plan',
+  quickStartReviewRun: 'ai7:review:quick-start',
   resumeBaselineAnalysisRun: 'ai7:j04:resume-baseline-analysis-run',
   editBaselineAnalysisPlan: 'ai7:j04:edit-baseline-analysis-plan',
   answerBaselineAnalysisClarification: 'ai7:j04:answer-baseline-analysis-clarification',
@@ -83,6 +87,7 @@ export const IPC_CHANNELS = {
   inspectBackgroundAnalysisEnrollment: 'ai7:j09:inspect-background-analysis-enrollment',
   enrollBackgroundAnalysis: 'ai7:j09:enroll-background-analysis',
   revokeBackgroundAnalysisEnrollment: 'ai7:j09:revoke-background-analysis-enrollment',
+  holdBackgroundAnalysisEnrollment: 'ai7:j09:hold-background-analysis-enrollment',
   inspectReviewGuidelines: 'ai7:j15:inspect-review-guidelines',
   previewReviewGuidelineVersion: 'ai7:j15:preview-review-guideline-version',
   importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
@@ -1903,22 +1908,23 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ordinary-production';
 /**
- * Historical v5, v9, v10, v11 and the superseded web reservation v8 remain readable identities; selected v12 admits baseline
- * analysis, editorial dialogue, review (with cross-deliverable consistency and frozen Material References), writing and the
- * three evaluation contracts (with frozen Material References), and 润色 and conflict regeneration Suggestions on V4.1. A type
- * member does not select or activate a policy.
+ * Historical v5, v9, v10, v11, v12 and the superseded web reservation v8 remain readable identities; selected v14 admits baseline
+ * analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable consistency
+ * and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and 润色 and
+ * conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules. A type member does not
+ * select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13';
-/** Historical v5, v7, v8 and v9, the superseded web reservation v6, and selected v10. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15';
+/** Historical v5, v7, v8, v9 and v10, the superseded web reservation v6, and selected v11. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
- * Provider Processing v12 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
+ * Provider Processing v14 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
  * resolved once the manifest freezes and before the plan does.
  */
 export type DeveloperLiveCeiling =
@@ -2148,7 +2154,7 @@ export interface AdmittedProviderRule {
   /**
    * Whether the rule's `source` block admits frozen Material Reference excerpts (`source.materialReferencesAllowed`; `false` when the
    * rule's source does not name the term). A consuming kind admits a material-bearing contract only under a rule that states this
-   * and also lists `frozen-material-reference-excerpt` among its outbound categories (Provider Processing v12 and v13).
+   * and also lists `frozen-material-reference-excerpt` among its outbound categories (Provider Processing v12 to v15).
    */
   readonly materialReferencesAllowed: boolean;
   /**
@@ -2157,6 +2163,29 @@ export interface AdmittedProviderRule {
    * `editorial-deliverable-excerpt` among the rule's outbound categories.
    */
   readonly editorialDeliverablesAllowed: boolean;
+  /**
+   * Whether the rule lets the model ask the editor a clarification question while it works on a unit (`clarification.modelQuestionAllowed`,
+   * Provider Processing v14 and v15): `true` for every Run-based rule (baseline analysis, review, writing, the three evaluation contracts and
+   * enrolled background analysis), `false` for editorial dialogue, 润色 and conflict regeneration. One question per unit; the unit waits.
+   */
+  readonly clarificationQuestionAllowed: boolean;
+  /**
+   * Hours an unanswered question waits before it counts as unanswered and the Run continues with the Run Report disclosing it
+   * (`clarification.timeoutHours`); `null` when the rule allows no question.
+   */
+  readonly clarificationTimeoutHours: number | null;
+  /**
+   * Whether this is the enrolled-background rule (`enrolled-background-manuscript-analysis-processing`, Provider Processing v14 and v15):
+   * the one rule whose origin is an active matching Background Analysis Enrollment. `true` only for that rule, which lists its task
+   * kind (baseline analysis) truthfully; a foreground lookup skips it and a background lookup selects only it.
+   */
+  readonly backgroundOrigin: boolean;
+  /**
+   * Whether the rule's `authorityOrigin` admits the Task's matching active Default Execution Rule (快速开始) as its origin
+   * (`authorityOrigin.matchingActiveDefaultExecutionRuleAllowed`, Provider Processing v14 and v15): `true` for review in both scopes
+   * and writing in developer-live only; `false` for every other rule. A newly user-initiated Task is still required, so a default rule never starts work alone.
+   */
+  readonly matchingActiveDefaultExecutionRuleAllowed: boolean;
 }
 
 export interface LaunchPolicyProjection {
@@ -2172,20 +2201,20 @@ export interface LaunchPolicyProjection {
     liveTransmissionAllowed: boolean;
     /**
      * Whether the active Provider Processing policy names the cross-unit reduction's transmission
-     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v12 document it
+     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v14 document it
      * is `true`, and anything else — absent included — means the reduction does not dispatch.
      */
     crossUnitReductionAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the assurance sampling suboperation's
-     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v12
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v14
      * document it is `true`; anything else — absent included — means the suboperation does not
      * dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
-     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v12 document it is
+     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v14 document it is
      * `true`; anything else — absent included — means the turn does not dispatch and the report
      * records `policy-bounded` with its reason.
      */
@@ -2196,7 +2225,7 @@ export interface LaunchPolicyProjection {
      */
     readonly admittedRules: readonly AdmittedProviderRule[];
     /**
-     * Only under `ordinary-production` (Provider Processing v13): `setup-required` while the editor's own model service is not
+     * Only under `ordinary-production` (Provider Processing v15): `setup-required` while the editor's own model service is not
      * configured, so no rule is admitted; `configured` once the launch supplied a binding the policy allows, which fills every
      * admitted rule's route, endpoint, model and credential slot. Absent under every other scope.
      */
@@ -2710,6 +2739,8 @@ export type RunReportIfRedoneProjection =
 
 /** The Run Report as it is recorded inside the Task Outcome, before its own digest is taken. */
 export interface RunReportRecordProjection {
+  /** Editorial choices only; no question or answer content enters the Run Report. */
+  modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'timed-out' | 'unanswered'; line: string }>;
   schema: 'ai7.analysis.run-report/1';
   runRecordId: string;
   taskIntentId: string;
@@ -2739,6 +2770,12 @@ export interface RunReportRecordProjection {
 /** The report as a reader receives it: the recorded record with the digest of its own canonical JSON. */
 export interface RunReportProjection extends RunReportRecordProjection {
   reportDigest: string;
+  /**
+   * A Run a 后台分析登记 started (Issue #864): which Enrollment version started it, the share of its ceiling the Run was held to,
+   * and how the Run ended against that ceiling, in the reader's words. Read beside the recorded report, never part of its digest;
+   * absent for every Run the editor started.
+   */
+  background?: ReadonlyArray<string>;
 }
 
 export interface AnalysisUnresolvedProjection {
@@ -5646,6 +5683,25 @@ export interface InspectTaskPlanInput {
   ref: string | null;
 }
 
+/** Controls use the same ledger Run and authorization for every planned task kind. */
+export interface ControlTaskRunInput {
+  bookId: string;
+  kind: StartWhenOnlineTaskKind;
+  ref: string;
+  action: 'pause' | 'resume' | 'cancel';
+}
+
+export interface EditTaskPlanInput {
+  bookId: string;
+  kind: StartWhenOnlineTaskKind;
+  ref: string;
+  planEnvelopeDigest: string;
+  removedSteps: ReadonlyArray<string>;
+  disallowedAdaptations: ReadonlyArray<string>;
+  askFirstAdaptations?: ReadonlyArray<string>;
+  runBudgetCeiling?: { kind: 'tokens'; maxTotalTokens: number } | null;
+}
+
 /**
  * Where a plan stands, as the drawer's state pill says it (editor-surfaces §6 状态). `unconnected` is 模型未连接:
  * the plan's route sends to a model service whose credential is not ready (Issue #420, S74a). `offline` is 离线,
@@ -5957,7 +6013,7 @@ export interface TaskPlanProjection {
 }
 
 /** The answers a question about a safe retry can have (Issue #422, S76d; CLAR-006, INPUT-002). */
-export type ClarificationOptionId = 'retry' | 'record-gap';
+export type ClarificationOptionId = 'retry' | 'record-gap' | `model-option-${0 | 1 | 2 | 3}` | 'free-text' | 'no-answer';
 
 /**
  * One Clarification Request of the Task's Run as the drawer's card shows it (Issue #422, S76d; V2-UX-CLAR-001 to
@@ -5966,6 +6022,9 @@ export type ClarificationOptionId = 'retry' | 'record-gap';
  * answer as it was recorded. `unanswered` is a question whose Run ended before an answer came.
  */
 export interface TaskPlanClarificationProjection {
+  origin?: 'product' | 'model';
+  freeTextAllowed?: boolean;
+  taskIntentId?: string;
   requestId: string;
   unitOrdinal: number;
   planVersion: number;
@@ -6004,7 +6063,8 @@ export interface TaskPlanReprepareProjection {
 
 export interface TaskPlanRedoProjection {
   summary: ReadonlyArray<string>;
-  prepare: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; redoOf: string };
+  prepare: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; redoOf: string }
+    | { kind: StartWhenOnlineTaskKind; ref: string; redoOf: string };
 }
 
 /**
@@ -6016,11 +6076,12 @@ export interface TaskPlanRedoProjection {
  */
 export type BaselineDefaultExecutionRulePattern = 'sync-current' | 'reanalyze-book';
 export type WritingDefaultExecutionRulePattern = `writing:${string}`;
-export type DefaultExecutionRulePattern = BaselineDefaultExecutionRulePattern | WritingDefaultExecutionRulePattern;
+export type ReviewDefaultExecutionRulePattern = `review:${string}`;
+export type DefaultExecutionRulePattern = BaselineDefaultExecutionRulePattern | WritingDefaultExecutionRulePattern | ReviewDefaultExecutionRulePattern;
 /** The baseline's two patterns; a writing pattern is one per house type. */
 export const DEFAULT_EXECUTION_RULE_PATTERNS: readonly BaselineDefaultExecutionRulePattern[] = ['sync-current', 'reanalyze-book'];
 /** The analysis kind each pattern's Tasks are of, as the analysis ledger names it. */
-export type DefaultExecutionRuleKind = 'baseline-analysis' | 'writing';
+export type DefaultExecutionRuleKind = 'baseline-analysis' | 'writing' | 'review-run';
 
 /**
  * What a rule version binds: the material inputs of the plan the editor viewed when setting it that stay the same
@@ -6071,15 +6132,35 @@ export interface DefaultExecutionRuleProjection extends DefaultExecutionRuleRefe
 /** Where an Enrollment starts: only what changes after it is made, or the text as it stands too. */
 export type BackgroundAnalysisStartingPoint = 'prospective' | 'backfill';
 
-/** One Book's 后台分析登记 on ②A: what it is, its state, what it would do now and why, and the two decisions it offers. */
+/**
+ * What an Enrollment covers (Issue #864): this one Book, every Book of one Series it is in, or every Book of the house. A Series or
+ * all-Books Enrollment is scheduled per Book in the scope's Book order, each Book's Runs held to its equal share of the ceiling.
+ */
+export type BackgroundAnalysisScopeKind = 'book' | 'series' | 'all-books';
+
+/** The largest tokens ceiling 登记 takes, the same bound as a plan's own 设置上限 (Issue #51). */
+export const BACKGROUND_ANALYSIS_CEILING_MAX = 999_999_999_999;
+
+/** One scope `登记…` offers: its words and its Books in the scope's order, the first of which takes the ceiling's remainder. */
+export interface BackgroundAnalysisScopeOffer {
+  kind: BackgroundAnalysisScopeKind;
+  /** The Series, for a `series` scope; `null` otherwise. */
+  seriesId: string | null;
+  /** `《甲》这一本书`, `书系《乙》的 3 本书`, `全部 5 本图书`. */
+  label: string;
+  books: ReadonlyArray<{ bookId: string; title: string }>;
+}
+
+/** One Book's 后台分析登记 on ②A: what it is, its state, what it would do now and why, and the decisions it offers. */
 export interface BackgroundAnalysisEnrollmentProjection {
   bookId: string;
   bookTitle: string;
   /**
-   * `suspended`: AI7 suspended it when the local data was replaced or rolled back, and it starts nothing until the editor confirms
-   * it again; `damaged`: its record does not read back, and only this Book's background analysis stops.
+   * `paused`: the editor paused it, and it starts nothing until they resume it (Issue #864); `suspended`: AI7 suspended it when the
+   * local data was replaced or rolled back, and it starts nothing until the editor confirms it again (待你确认); `damaged`: its
+   * record does not read back, and only this Book's background analysis stops.
    */
-  state: 'none' | 'active' | 'suspended' | 'revoked' | 'damaged';
+  state: 'none' | 'active' | 'paused' | 'suspended' | 'revoked' | 'damaged';
   stateLabel: string;
   statement: string;
   /** The version in force — or the last one, once revoked; `null` before the Book was ever enrolled. */
@@ -6096,10 +6177,21 @@ export interface BackgroundAnalysisEnrollmentProjection {
     stateRecordedAt: string;
     /** What the version binds, in the words its disclosure listed. */
     binds: ReadonlyArray<{ label: string; value: string }>;
+    /** The tokens ceiling set at 登记 for the whole scope; `null` for a version made before a ceiling was required. */
+    ceilingTokens: number | null;
+    /** This Book's share of it, which each of its background Runs is held to; `null` with the ceiling. */
+    shareTokens: number | null;
+    /** What the version covers, its Books in order, and where this Book stands among them (1 is the first). */
+    scope: { kind: BackgroundAnalysisScopeKind; label: string; books: ReadonlyArray<{ bookId: string; title: string }>; position: number };
   };
   /** The Enrollment's newest states, newest first (at most 10); revoking never shortens it. */
-  history: ReadonlyArray<{ state: 'active' | 'suspended' | 'revoked'; stateLabel: string; ordinal: number; recordedAt: string }>;
+  history: ReadonlyArray<{ state: 'active' | 'paused' | 'suspended' | 'revoked'; stateLabel: string; ordinal: number; recordedAt: string }>;
   historyCount: number;
+  /**
+   * A Series or all-Books Enrollment's Books the dispatcher's latest look skipped, in the scope's order, each with why: their
+   * working text has nothing new to analyse. Empty for a Book scope and before the dispatcher has looked.
+   */
+  skipped: ReadonlyArray<{ bookId: string; title: string; reason: string }>;
   /** What the Enrollment would do now, and why — `start` only while every condition holds. */
   next: { kind: 'start' | 'none' | 'wait' | 'stopped'; reason: string };
   /** The dispatcher's latest look at the Book in this service's lifetime, and what it found; `null` before its first. */
@@ -6115,13 +6207,20 @@ export interface BackgroundAnalysisEnrollmentProjection {
     reason: string | null;
     /** The digest `enrollBackgroundAnalysis` must name; `null` while it cannot be enrolled. */
     disclosureDigest: string | null;
+    /** This Book's own scope, in words: what `范围` reads when only the Book is offered. */
     scope: string;
+    /** Every scope 登记 may cover, this Book's first, then each Series it is in, then every Book of the house. */
+    scopes: ReadonlyArray<BackgroundAnalysisScopeOffer>;
     what: string;
     when: string;
     binds: ReadonlyArray<{ label: string; value: string }>;
     startingPoints: ReadonlyArray<{ value: BackgroundAnalysisStartingPoint; label: string; note: string }>;
     notGranted: ReadonlyArray<string>;
+    /** How a Series or all-Books ceiling is shared among its Books, in words. */
+    ceilingRule: string;
   };
+  /** `暂停` and `续行` of the Enrollment: they hold and release what it would start, and change nothing else. */
+  hold: { canPause: boolean; canResume: boolean };
   revoke: { canRevoke: boolean; consequences: ReadonlyArray<string> };
 }
 
@@ -10558,6 +10657,7 @@ export type GlobalAttentionObjectProjection =
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
+  clarificationOrigin?: 'model';
   /** The Run in flight: its declared step and its Measured Run Progress (V2-UX-ATTN-004). */
   progress: null | { stage: RunReportUsageStageId; unitsSettled: number; unitsTotal: number };
   /**
@@ -10710,6 +10810,8 @@ export interface DialogueFragmentProjection {
 }
 
 export interface DialogueAttemptProjection {
+  /** Still waiting behind another answer; no request or new business state has been recorded. */
+  readonly queued?: boolean;
   readonly attemptId: string;
   readonly ordinal: number;
   readonly kind: DialogueAttemptKind;
@@ -11399,6 +11501,13 @@ export interface ServiceOperationMap {
     input: { bookId: string; taskIntentId: string };
     output: BaselineAnalysisProjection;
   };
+  controlTaskRun: { input: ControlTaskRunInput; output: TaskPlanProjection };
+  editTaskPlan: { input: EditTaskPlanInput; output: TaskPlanProjection };
+  redoTaskPlan: { input: Pick<ControlTaskRunInput, 'bookId' | 'kind' | 'ref'>; output: ServiceJobProjection };
+  quickStartReviewRun: {
+    input: { bookId: string; reviewRunId: string; planEnvelopeDigest: string; ruleVersionId: string };
+    output: { outcome: 'started' | 'fell-back'; reasons: ReadonlyArray<string>; projection: ReviewWorkspaceProjection };
+  };
   /**
    * 续行 (CONT-015, CONT-016): after lightweight revalidation, the same Run goes on in a new Harness Execution Span from
    * its continuation point, under its own authorization; material drift refuses it, and nothing is recorded.
@@ -11482,14 +11591,28 @@ export interface ServiceOperationMap {
     input: { bookId: string };
     output: BackgroundAnalysisEnrollmentProjection;
   };
-  /** `登记`: the Enrollment, from the disclosure the editor confirmed and the starting point they chose. */
+  /**
+   * `登记`: the Enrollment, from the disclosure the editor confirmed, the starting point they chose, the scope it covers and the
+   * tokens ceiling they set — required (Issue #864).
+   */
   enrollBackgroundAnalysis: {
-    input: { bookId: string; disclosureDigest: string; startingPoint: BackgroundAnalysisStartingPoint };
+    input: {
+      bookId: string;
+      disclosureDigest: string;
+      startingPoint: BackgroundAnalysisStartingPoint;
+      scope: { kind: BackgroundAnalysisScopeKind; seriesId: string | null };
+      ceilingTokens: number;
+    };
     output: BackgroundAnalysisEnrollmentProjection;
   };
   /** `撤销登记`: no new Run starts under it; everything already recorded stays. */
   revokeBackgroundAnalysisEnrollment: {
     input: { bookId: string; enrollmentId: string };
+    output: BackgroundAnalysisEnrollmentProjection;
+  };
+  /** `暂停` / `续行` of an Enrollment in force (Issue #864): holds or releases what it would start; Runs already started go on. */
+  holdBackgroundAnalysisEnrollment: {
+    input: { bookId: string; enrollmentId: string; hold: 'pause' | 'resume' };
     output: BackgroundAnalysisEnrollmentProjection;
   };
   /** 知识库 › 审阅规范文件 (Issue #427, S79a): every guideline document the review categories apply, with its versions. */
@@ -12172,6 +12295,10 @@ export interface RendererApi {
   cancelWaitingTask(input: Omit<CancelWaitingTaskInput, 'bookId'>): Promise<TaskPlanProjection>;
   cancelBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   pauseBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
+  controlTaskRun(input: Omit<ControlTaskRunInput, 'bookId'>): Promise<TaskPlanProjection>;
+  editTaskPlan(input: Omit<EditTaskPlanInput, 'bookId'>): Promise<TaskPlanProjection>;
+  redoTaskPlan(input: Pick<ControlTaskRunInput, 'kind' | 'ref'>): Promise<ServiceJobProjection>;
+  quickStartReviewRun(input: Omit<ServiceOperationMap['quickStartReviewRun']['input'], 'bookId'>): Promise<ServiceOperationMap['quickStartReviewRun']['output']>;
   resumeBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   /** 更新计划 (Issue #419): the next plan version of the Book's baseline analysis Task, as the editor left it. */
   editBaselineAnalysisPlan(input: {
@@ -12197,8 +12324,9 @@ export interface RendererApi {
   deactivateDefaultExecutionRule(input: { ruleId: string }): Promise<DefaultExecutionRuleProjection>;
   /** 后台分析登记 of the Book the window is showing (Issue #95, S39). */
   inspectBackgroundAnalysisEnrollment(): Promise<BackgroundAnalysisEnrollmentProjection>;
-  enrollBackgroundAnalysis(input: { disclosureDigest: string; startingPoint: BackgroundAnalysisStartingPoint }): Promise<BackgroundAnalysisEnrollmentProjection>;
+  enrollBackgroundAnalysis(input: Omit<ServiceOperationMap['enrollBackgroundAnalysis']['input'], 'bookId'>): Promise<BackgroundAnalysisEnrollmentProjection>;
   revokeBackgroundAnalysisEnrollment(input: { enrollmentId: string }): Promise<BackgroundAnalysisEnrollmentProjection>;
+  holdBackgroundAnalysisEnrollment(input: { enrollmentId: string; hold: 'pause' | 'resume' }): Promise<BackgroundAnalysisEnrollmentProjection>;
   /** 知识库 › 审阅规范文件 (Issue #427, S79a): names no Book; it reads every Book's Review Runs to say who used which version. */
   inspectReviewGuidelines(input?: { page?: ReviewGuidelinesPage }): Promise<ReviewGuidelinesProjection>;
   /** 导入新版本: the native picker, then the file's clauses as the next version would read them; `null` when the picker was cancelled. */

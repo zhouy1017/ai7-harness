@@ -6,7 +6,10 @@ import {
   BACKGROUND_ATTEMPTED,
   BACKGROUND_OUTCOME_UNKNOWN,
   BACKGROUND_CURRENT,
-  BACKGROUND_DEVELOPER_LIVE,
+  BACKGROUND_CEILING_RULE,
+  BACKGROUND_NO_CEILING,
+  BACKGROUND_NO_RULE,
+  BACKGROUND_PAUSED,
   BACKGROUND_EDITOR_TASK,
   BACKGROUND_FACTS_UNREADABLE,
   BACKGROUND_NOT_ENROLLED,
@@ -36,15 +39,26 @@ import {
   BACKGROUND_TASK_RUNNING,
   backgroundAnalysisDecision,
   backgroundAnalysisWhen,
+  backgroundCeilingShares,
+  backgroundCeilingTooLowReason,
   backgroundDriftReason,
   backgroundEnrollmentName,
   backgroundQuietReason,
+  backgroundRunReportLines,
+  backgroundScopeLabel,
   type BackgroundAnalysisFacts,
 } from '../../src/service/background-analysis-enrollments.js';
 import { parseBackgroundQuietMs } from '../../src/shared/protocol.js';
 import type { BackgroundAnalysisEnrollmentProjection } from '../../src/shared/protocol.js';
 import {
   BACKGROUND_ENROLL_OPEN,
+  BACKGROUND_PAUSE,
+  BACKGROUND_RESUME,
+  backgroundCeilingLine,
+  backgroundCeilingOf,
+  backgroundCeilingShares as rendererCeilingShares,
+  backgroundSharePreview,
+  backgroundSkippedLine,
   backgroundChangeKey,
   backgroundLookLine,
   backgroundNotStartedLine,
@@ -75,7 +89,9 @@ function rejectionFor(frame: Uint8Array): ProtocolError {
 /** Every condition holding for a start over a stale analysis. */
 const READY: BackgroundAnalysisFacts = {
   enrollment: 'active',
-  developerLive: false,
+  paused: false,
+  ceiling: true,
+  ruleAdmits: true,
   routeExecutable: true,
   share: 1,
   replacementWaiting: false,
@@ -112,7 +128,10 @@ describe('the 后台分析登记 decision', () => {
       [{ enrollment: 'damaged' }, 'stopped', BACKGROUND_RECORD_DAMAGED],
       [{ enrollment: 'revoked' }, 'stopped', BACKGROUND_REVOKED],
       [{ enrollment: 'suspended' }, 'stopped', BACKGROUND_SUSPENDED],
-      [{ developerLive: true }, 'stopped', BACKGROUND_DEVELOPER_LIVE],
+      // Issue #864: the editor's 暂停, a version made before a ceiling was required, a launch whose policy has no background rule.
+      [{ paused: true }, 'stopped', BACKGROUND_PAUSED],
+      [{ ceiling: false }, 'stopped', BACKGROUND_NO_CEILING],
+      [{ ruleAdmits: false }, 'stopped', BACKGROUND_NO_RULE],
       [{ routeExecutable: false }, 'stopped', BACKGROUND_NO_ROUTE],
       [{ replacementWaiting: true }, 'wait', BACKGROUND_REPLACEMENT_WAITING],
       [{ share: 0 }, 'stopped', BACKGROUND_NO_SHARE],
@@ -134,8 +153,11 @@ describe('the 后台分析登记 decision', () => {
       [{ backgroundRunning: 1 }, 'wait', backgroundShareFullReason(1)],
     ];
     for (const [facts, kind, reason] of cases) expect(backgroundAnalysisDecision({ ...READY, ...facts }), reason).toEqual({ kind, reason });
-    // Revoked outranks everything after it: a revoked Enrollment under developer-live says it is revoked.
-    expect(backgroundAnalysisDecision({ ...READY, enrollment: 'revoked', developerLive: true, placeFree: false }).reason).toBe(BACKGROUND_REVOKED);
+    // Revoked outranks everything after it: a revoked Enrollment under a policy with no background rule says it is revoked.
+    expect(backgroundAnalysisDecision({ ...READY, enrollment: 'revoked', ruleAdmits: false, placeFree: false }).reason).toBe(BACKGROUND_REVOKED);
+    // A paused Enrollment says it is paused before anything else about the launch or the Book; a suspended one says 待你确认.
+    expect(backgroundAnalysisDecision({ ...READY, paused: true, ceiling: false, ruleAdmits: false }).reason).toBe(BACKGROUND_PAUSED);
+    expect(backgroundAnalysisDecision({ ...READY, enrollment: 'suspended', paused: true }).reason).toBe(BACKGROUND_SUSPENDED);
     // A current analysis is said before any Task is read; a prospective Enrollment over an unmoved text never waits on the clock.
     expect(backgroundAnalysisDecision({ ...READY, taskUnfinished: 'run', analysis: 'current' }).reason).toBe(BACKGROUND_CURRENT);
     expect(backgroundAnalysisDecision({ ...READY, movedSinceEnrollment: false, sinceLastEditMs: 0 }).reason).toBe(BACKGROUND_NOT_MOVED);
@@ -155,7 +177,7 @@ describe('the 后台分析登记 decision', () => {
     }])) as unknown as Parameters<typeof backgroundAnalysisDecisionOf>[0];
     expect(backgroundAnalysisDecisionOf(read)).toEqual({ kind: 'none', reason: BACKGROUND_CURRENT });
     // Nothing after a current analysis is read: no Task, no editor's Task, no clock, no place.
-    expect(asked).toEqual(['enrollment', 'developerLive', 'routeExecutable', 'replacementWaiting', 'share', 'recoveryPending', 'drift', 'preparationInFlight', 'editorJobRunning', 'analysis']);
+    expect(asked).toEqual(['enrollment', 'paused', 'ceiling', 'ruleAdmits', 'routeExecutable', 'replacementWaiting', 'share', 'recoveryPending', 'drift', 'preparationInFlight', 'editorJobRunning', 'analysis']);
   });
 
   it('words a failed preparation step by its code, never by the engineering message', () => {
@@ -172,15 +194,46 @@ describe('the 后台分析登记 decision', () => {
     expect([backgroundAnalysisShare(1), backgroundAnalysisShare(2), backgroundAnalysisShare(3)]).toEqual([0, 1, 2]);
   });
 
+  it('splits a Series or all-Books ceiling equally among its Books in order, the remainder to the first (Issue #864)', () => {
+    // Three Books and a ceiling that does not divide: the first takes the remainder.
+    expect(backgroundCeilingShares(1000, 3)).toEqual([334, 333, 333]);
+    expect(backgroundCeilingShares(1001, 3)).toEqual([335, 333, 333]);
+    expect(backgroundCeilingShares(999, 3)).toEqual([333, 333, 333]);
+    expect(backgroundCeilingShares(5, 1)).toEqual([5]);
+    expect(backgroundCeilingShares(3, 3)).toEqual([1, 1, 1]);
+    for (const [ceiling, books] of [[1000, 3], [7, 4], [123_456_789, 11]] as const) {
+      const shares = backgroundCeilingShares(ceiling, books);
+      expect(shares.reduce((total, share) => total + share, 0)).toBe(ceiling);
+      expect(shares.slice(1).every((share) => share === shares[1])).toBe(true);
+      // The renderer says the same split before 登记.
+      expect(rendererCeilingShares(ceiling, books)).toEqual(shares);
+    }
+    expect(() => backgroundCeilingShares(0, 3)).toThrow();
+    expect(() => backgroundCeilingShares(10, 0)).toThrow();
+    expect(backgroundCeilingTooLowReason(3)).toBe('上限至少要有 3 tokens：范围里每本书至少分到 1 个。');
+    expect(BACKGROUND_CEILING_RULE).toContain('余数归范围里的第一本');
+  });
+
+  it('names the Enrollment, the share and the ceiling outcome in the Run Report (Issue #864)', () => {
+    expect(backgroundRunReportLines({ ordinal: 2, scopeLabel: '书系《乙》的 3 本书', ceilingTokens: 1000, shareTokens: 334, frozenTokens: 334, usedTokens: 120, reached: false }))
+      .toEqual(['由后台分析登记开始 · 按第 2 版登记', '范围：书系《乙》的 3 本书；登记上限 1000 tokens，本书份额 334 tokens', '没有达到上限：用了 120 tokens，这次运行的上限 334 tokens']);
+    expect(backgroundRunReportLines({ ordinal: 1, scopeLabel: '《甲》这一本书', ceilingTokens: 500, shareTokens: 500, frozenTokens: 400, usedTokens: 401, reached: true }))
+      .toEqual(['由后台分析登记开始 · 按第 1 版登记', '范围：《甲》这一本书；登记上限 500 tokens', '达到上限后停下：用了 401 tokens，这次运行的上限 400 tokens']);
+    expect(backgroundRunReportLines({ ordinal: null, scopeLabel: null, ceilingTokens: null, shareTokens: null, frozenTokens: null, usedTokens: 0, reached: false }))
+      .toEqual(['由后台分析登记开始（这份登记的版本不在本机记录里）']);
+    expect([backgroundScopeLabel('book', '甲', 1), backgroundScopeLabel('series', '乙', 3), backgroundScopeLabel('all-books', '', 5)])
+      .toEqual(['《甲》这一本书', '书系《乙》的 3 本书', '全部 5 本图书']);
+  });
+
   it('words what an Enrollment is, binds, never does, and keeps when revoked', () => {
-    expect(BACKGROUND_STATE_LABELS).toEqual({ none: '未登记', active: '已登记', suspended: '待你确认', revoked: '已撤销', damaged: '登记记录无法读取' });
+    expect(BACKGROUND_STATE_LABELS).toEqual({ none: '未登记', active: '已登记', paused: '已暂停', suspended: '待你确认', revoked: '已撤销', damaged: '登记记录无法读取' });
     expect(BACKGROUND_STARTING_POINT_LABELS).toEqual({ prospective: '只分析登记之后的改动', backfill: '现在也分析当前稿件' });
     expect(backgroundEnrollmentName(2)).toBe('后台分析登记 · 第 2 版');
     expect(backgroundAnalysisWhen(30_000)).toContain('停下 30 秒后开始');
     expect(backgroundAnalysisWhen(30_000)).toContain('运行名额总给你留一个');
     expect(backgroundQuietReason(30_000)).toBe('稿件刚改动过；停下 30 秒后开始。');
     expect(backgroundDriftReason(['模型服务', '工序'])).toBe('登记时定下的「模型服务」、「工序」已经变化，后台分析不会按旧的登记开始；请撤销后重新登记。');
-    expect(BACKGROUND_ANALYSIS_NOT_GRANTED.some((line) => line.includes('开发者实时模式下不开始'))).toBe(true);
+    expect(BACKGROUND_ANALYSIS_NOT_GRANTED.some((line) => line.includes('不超过登记时设下的预算上限'))).toBe(true);
     expect(BACKGROUND_REVOKE_CONSEQUENCES.some((line) => line.includes('不会撤回或改写'))).toBe(true);
   });
 });
@@ -192,17 +245,38 @@ describe('the 后台分析登记 frames', () => {
     expect(decodeRequest(frameOf(read))).toEqual(read);
     expect(rejectionFor(frameOf({ ...read, input: { bookId: 'not-a-uuid' } }))).toBeInstanceOf(ProtocolError);
     expect(rejectionFor(frameOf({ ...read, input: { bookId, extra: true } }))).toBeInstanceOf(ProtocolError);
-    const enroll = { id: randomUUID(), op: 'enrollBackgroundAnalysis', input: { bookId, disclosureDigest: 'a'.repeat(64), startingPoint: 'prospective' } };
+    const enroll = { id: randomUUID(), op: 'enrollBackgroundAnalysis', input: {
+      bookId, disclosureDigest: 'a'.repeat(64), startingPoint: 'prospective', scope: { kind: 'book', seriesId: null }, ceilingTokens: 1000,
+    } };
     expect(decodeRequest(frameOf(enroll))).toEqual(enroll);
     expect(decodeRequest(frameOf({ ...enroll, input: { ...enroll.input, startingPoint: 'backfill' } }))).toBeDefined();
+    expect(decodeRequest(frameOf({ ...enroll, input: { ...enroll.input, scope: { kind: 'series', seriesId: randomUUID() } } }))).toBeDefined();
+    expect(decodeRequest(frameOf({ ...enroll, input: { ...enroll.input, scope: { kind: 'all-books', seriesId: null } } }))).toBeDefined();
+    const { ceilingTokens: _ceiling, ...withoutCeiling } = enroll.input;
     for (const input of [
       { ...enroll.input, startingPoint: 'everything' },
       { ...enroll.input, startingPoint: null },
       { ...enroll.input, disclosureDigest: 'A'.repeat(64) },
       { ...enroll.input, disclosureDigest: 'a'.repeat(63) },
       { bookId, disclosureDigest: 'a'.repeat(64) },
+      // Issue #864: the ceiling is required, a whole number of tokens from 1; the scope names a Series only when it is one.
+      withoutCeiling,
+      { ...enroll.input, ceilingTokens: 0 },
+      { ...enroll.input, ceilingTokens: 1.5 },
+      { ...enroll.input, ceilingTokens: '1000' },
+      { ...enroll.input, ceilingTokens: 1_000_000_000_000 },
       { ...enroll.input, scope: 'all-books' },
+      { ...enroll.input, scope: { kind: 'series', seriesId: null } },
+      { ...enroll.input, scope: { kind: 'book', seriesId: randomUUID() } },
+      { ...enroll.input, scope: { kind: 'shelf', seriesId: null } },
+      { ...enroll.input, scope: { kind: 'book' } },
     ]) expect(rejectionFor(frameOf({ ...enroll, input }))).toBeInstanceOf(ProtocolError);
+    const hold = { id: randomUUID(), op: 'holdBackgroundAnalysisEnrollment', input: { bookId, enrollmentId: randomUUID(), hold: 'pause' } };
+    expect(decodeRequest(frameOf(hold))).toEqual(hold);
+    expect(decodeRequest(frameOf({ ...hold, input: { ...hold.input, hold: 'resume' } }))).toBeDefined();
+    for (const input of [{ ...hold.input, hold: 'stop' }, { bookId, enrollmentId: randomUUID() }, { ...hold.input, enrollmentId: 'x' }]) {
+      expect(rejectionFor(frameOf({ ...hold, input }))).toBeInstanceOf(ProtocolError);
+    }
     const revoke = { id: randomUUID(), op: 'revokeBackgroundAnalysisEnrollment', input: { bookId, enrollmentId: randomUUID() } };
     expect(decodeRequest(frameOf(revoke))).toEqual(revoke);
     expect(rejectionFor(frameOf({ ...revoke, input: { bookId, enrollmentId: 'x' } }))).toBeInstanceOf(ProtocolError);
@@ -216,10 +290,24 @@ describe('the 后台分析 block words', () => {
     expect([BACKGROUND_ENROLL_OPEN, BACKGROUND_REVOKE_OPEN]).toEqual(['登记后台分析…', '撤销登记…']);
     expect(backgroundNextLine({ kind: 'wait', reason: BACKGROUND_PLACE_BUSY })).toBe(`现在：${BACKGROUND_PLACE_BUSY}`);
     expect(backgroundNextLine({ kind: 'start', reason: BACKGROUND_START_SYNC })).toBe(`马上：${BACKGROUND_START_SYNC}`);
-    expect(backgroundEnrollmentLine({
-      enrollmentId: randomUUID(), enrollmentVersionId: randomUUID(), ordinal: 1, name: '后台分析登记 · 第 1 版', startingPoint: 'prospective',
-      startingPointLabel: '只分析登记之后的改动', enrolledBy: '本机编辑', enrolledAt: 'T', stateRecordedAt: 'T', binds: [],
-    }, instant)).toBe('后台分析登记 · 第 1 版 · 只分析登记之后的改动 · 本机编辑登记于 〈T〉');
+    const enrollment = {
+      enrollmentId: randomUUID(), enrollmentVersionId: randomUUID(), ordinal: 1, name: '后台分析登记 · 第 1 版', startingPoint: 'prospective' as const,
+      startingPointLabel: '只分析登记之后的改动', enrolledBy: '本机编辑' as const, enrolledAt: 'T', stateRecordedAt: 'T', binds: [],
+      ceilingTokens: 1000, shareTokens: 1000, scope: { kind: 'book' as const, label: '《甲》这一本书', books: [{ bookId: randomUUID(), title: '甲' }], position: 1 },
+    };
+    expect(backgroundEnrollmentLine(enrollment, instant)).toBe('后台分析登记 · 第 1 版 · 只分析登记之后的改动 · 本机编辑登记于 〈T〉');
+    // Issue #864: the scope and the ceiling each Run is held to.
+    expect(backgroundCeilingLine(enrollment)).toBe('范围：《甲》这一本书 · 预算上限 1000 tokens');
+    expect(backgroundCeilingLine({ ...enrollment, shareTokens: 333, scope: { ...enrollment.scope, kind: 'series', label: '书系《乙》的 3 本书', position: 2 } }))
+      .toBe('范围：书系《乙》的 3 本书 · 预算上限 1000 tokens，本书份额 333 tokens（第 2 本）');
+    expect(backgroundCeilingLine({ ...enrollment, ceilingTokens: null, shareTokens: null })).toBe('范围：《甲》这一本书 · 这份登记没有预算上限');
+    expect(backgroundSkippedLine([{ bookId: randomUUID(), title: '丙', reason: '登记之后稿件还没有改动。' }])).toBe('这次跳过：《丙》（登记之后稿件还没有改动。）');
+    expect([BACKGROUND_PAUSE, BACKGROUND_RESUME]).toEqual(['暂停', '续行']);
+    expect([backgroundCeilingOf('1000', 3, 10_000), backgroundCeilingOf(' 7 ', 1, 10), backgroundCeilingOf('2', 3, 10), backgroundCeilingOf('1e3', 1, 10_000),
+      backgroundCeilingOf('', 1, 10), backgroundCeilingOf('11', 1, 10), backgroundCeilingOf('-5', 1, 10)]).toEqual([1000, 7, null, null, null, null, null]);
+    expect(backgroundSharePreview(500, [{ title: '甲' }])).toBe('每次后台分析最多用 500 tokens，达到就停下。');
+    expect(backgroundSharePreview(1000, [{ title: '甲' }, { title: '乙' }, { title: '丙' }])).toBe('3 本书各 333 tokens，第一本《甲》334 tokens：每本书的每次后台分析最多用它那一份。');
+    expect(backgroundSharePreview(999, [{ title: '甲' }, { title: '乙' }, { title: '丙' }])).toBe('3 本书各 333 tokens：每本书的每次后台分析最多用它那一份。');
     expect(backgroundStartedLine({ taskIntentId: randomUUID(), modeLabel: '同步到当前稿件', enrollmentOrdinal: 1, authorizedAt: 'A' }, instant))
       .toBe('同步到当前稿件 · 按第 1 版登记 · 授权于 〈A〉');
     expect(backgroundStartedLine({ taskIntentId: randomUUID(), modeLabel: '首次基线分析', enrollmentOrdinal: null, authorizedAt: 'A' }, instant))

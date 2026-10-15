@@ -200,6 +200,7 @@ describe('结果待确认 over the real store', () => {
       const after = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
       expect(after.redo?.prepare).toMatchObject({ redoOf: runRecordId, update: { mode: 'sync-current' } });
       expect(after.resend).toBeNull();
+      if (after.redo === null || 'kind' in after.redo.prepare) throw new Error('Expected baseline redo');
       let progress = store.createBaselineAnalysisPreparationWork(bookId, after.redo!.prepare.goal, after.redo!.prepare.update, launchPolicy, false, runRecordId);
       while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
       const redo = progress.projection!;
@@ -566,7 +567,7 @@ describe('结果待确认 after 取消任务', () => {
       const runtime = (): BackgroundAnalysisRuntime => ({ routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 600_000, quietMs: 30_000 });
       const shown = store.inspectBackgroundAnalysisEnrollment(bookId, runtime());
       expect(shown.offer.canEnroll).toBe(true);
-      store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, 'prospective', runtime());
+      store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, 'prospective', { kind: 'book', seriesId: null }, 1_000_000, runtime());
       // A confirmed edit: the analysis is stale, the text moved since the editor's Task, and the quiet period has passed.
       const window = store.getManuscriptWindow(imported.manuscriptId, imported.branchId, null);
       const block = window.blocks.find((candidate) => candidate.kind === 'paragraph')!;
@@ -707,7 +708,7 @@ describe('结果待确认 carried forward', () => {
       // One more edit: the next 同步 still names unit 4, and the dispatcher still waits rather than re-sending it.
       const runtime = (): BackgroundAnalysisRuntime => ({ routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 600_000, quietMs: 30_000 });
       const shown = store.inspectBackgroundAnalysisEnrollment(bookId, runtime());
-      const enrollmentVersionId = store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, 'prospective', runtime()).enrollment!.enrollmentVersionId;
+      const enrollmentVersionId = store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, 'prospective', { kind: 'book', seriesId: null }, 1_000_000, runtime()).enrollment!.enrollmentVersionId;
       editFirstParagraph('〔再一次改动〕');
       expect(store.backgroundAnalysisDecisionFor(bookId, runtime()).decision).toEqual({ kind: 'wait', reason: BACKGROUND_OUTCOME_UNKNOWN });
       // Were the dispatcher to prepare a 同步 regardless — something changing between its look and its start — its start refuses
