@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 136 as const;
+export const SERVICE_PROTOCOL_VERSION = 137 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -10321,7 +10321,7 @@ export type BookDeliveryPackageExportOptions = Pick<ManuscriptExportOptions, 'in
  * One file as `导出…` reviews it (EXP-007 to EXP-009): how it is written, what its format keeps and each class's fidelity —
  * the Export Fidelity Review S64 shows for one file, so no loss in a package's file is silent.
  */
-export interface BookDeliveryPackageExportReviewFileProjection extends BookDeliveryPackageExportFileProjection {
+export interface BookDeliveryPackageExportReviewFileProjection extends BookDeliveryPackageExportFileProjection, ExportRetentionDisclosure {
   restoration: 'from-original' | 'regenerated';
   restorationLine: string;
   formatLine: string;
@@ -10946,6 +10946,20 @@ export interface ExportFidelityRowProjection {
   /** The 1-based manuscript positions where the class is not written as it was, in order. */
   positions: ReadonlyArray<number>;
   positionsTruncated: boolean;
+  /** Actual DOCX writer facts, frozen in the existing fidelity record; absent on older exports. */
+  retention?: ExportRetentionProjection;
+}
+
+export interface ExportRetentionProjection {
+  preserved: ReadonlyArray<string>;
+  rebuilt: ReadonlyArray<string>;
+  excluded: ReadonlyArray<string>;
+}
+
+export interface ExportRetentionDisclosure {
+  /** Null for other formats and for historical preparations without writer facts. */
+  retention: ExportRetentionProjection | null;
+  retentionSummary: string | null;
 }
 
 /**
@@ -10982,7 +10996,7 @@ export interface ManuscriptExportFormatProjection {
  * any destination is chosen. Nothing is recorded by reading it; a current revision whose working state held
  * unsaved edits was first saved as a revision for the export (`savedForExport`).
  */
-export interface ManuscriptExportReviewProjection {
+export interface ManuscriptExportReviewProjection extends ExportRetentionDisclosure {
   bookId: string;
   bookTitle: string;
   target: ManuscriptExportTargetProjection;
@@ -11014,7 +11028,7 @@ export type ManuscriptExportDisposition = 'create' | 'replace';
  * format, options, fidelity, file name, final local path as the system dialog returned it, create-or-replace
  * disposition and payload digest, recorded after the destination was chosen and before any approval.
  */
-export interface ManuscriptExportPreparationProjection {
+export interface ManuscriptExportPreparationProjection extends ExportRetentionDisclosure {
   bookId: string;
   preparationId: string;
   target: ManuscriptExportTargetProjection;
@@ -11037,7 +11051,7 @@ export interface ManuscriptExportPreparationProjection {
  * its Effect Receipt — `已导出到所选位置` — or a classified outcome: `未能导出` when nothing at the destination
  * changed, `结果待确认` when AI7 cannot tell, which never retries by itself.
  */
-export interface ManuscriptExportReceiptProjection {
+export interface ManuscriptExportReceiptProjection extends ExportRetentionDisclosure {
   bookId: string;
   preparationId: string;
   target: ManuscriptExportTargetProjection;

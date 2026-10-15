@@ -384,19 +384,19 @@ describe('DOCX export restores the original', () => {
     expect(fidelityOf(result.fidelity)).toEqual([
       ['inline-styles', 'degraded', 2, [2]],
       ['editor-notes', 'excluded', 0, []],
-      ['notes', 'degraded', 1, [3]],
+      ['notes', 'preserved', 1, []],
       ['tables', 'preserved', 1, []],
-      ['images-captions', 'degraded', 1, [6]],
+      ['images-captions', 'preserved', 1, []],
       ['sections', 'preserved', 1, []],
       ['headers-footers', 'preserved', 1, []],
-      ['text-boxes', 'degraded', 1, [5]],
+      ['text-boxes', 'preserved', 1, []],
       ['fields', 'degraded', 1, [4]],
     ]);
     const reread = await parseBytes(result.bytes!);
     expect(reread.blocks.map((block) => block.digest)).toEqual(changed.map((block) => block.digest));
     // The regenerated second paragraph kept its first run's properties — none — so no bold remains.
     expect(partOf(result.bytes!, 'word/document.xml')!.includes('<w:b/>')).toBe(false);
-    expect(reread.parsed.textBoxes).toHaveLength(0);
+    expect(reread.parsed.textBoxes).toHaveLength(1);
   });
 
   it('strips the file\'s own revisions and comments to the reading the import took', async () => {

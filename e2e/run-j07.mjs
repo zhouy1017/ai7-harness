@@ -1232,14 +1232,15 @@ async function main() {
         JSON.stringify(pills) === ${JSON.stringify(JSON.stringify(EXPORT_ROWS.map((row) => row.includes(':excluded:') ? '○ 本次不含' : '✓ 完整保留')))} &&
         fidelity.querySelector('h5')?.textContent === '导出保真审阅' && fidelity.dataset.exportDegraded === 'false' && fidelity.dataset.exportRestoration === 'from-original' &&
         fidelity.querySelector('.export-restoration-line')?.textContent === ${JSON.stringify(EXPORT_RESTORATION_LINE)} &&
+        fidelity.querySelector('.export-retention-summary')?.textContent.startsWith('本次 DOCX：原部件保留：') &&
         fidelity.querySelector('.export-absent-line')?.textContent === ${JSON.stringify(EXPORT_ABSENT_LINE)} &&
         fidelity.querySelector('li[data-export-fidelity="editor-notes"] .export-fidelity-detail')?.textContent === ${JSON.stringify(EXPORT_NOTE_EXCLUDED)} &&
         fidelity.querySelector('.export-degraded-note') === null && fidelity.querySelector('.export-fidelity-positions') === null;
     })()`, 'export-review-rows');
     // The page shows the service's review: the same review asked of the service directly — the edits saved
     // already, so nothing is saved again — carries the digest the card's technical layer names.
-    const reviewed = await renderer.evaluate(`window.ai7.reviewManuscriptExport({ target: { kind: 'current' }, options: { includeAnnotations: true, includeSuggestions: true, includeEditorNotes: false } }).then((review) => ({ savedForExport: review.savedForExport, revisionLabel: review.target.revisionLabel, reviewDigest: review.reviewDigest, rows: review.fidelity.filter((row) => row.count > 0 || row.status !== 'preserved').map((row) => row.key + ':' + row.status + ':' + row.count), suggestedFileName: review.suggestedFileName }))`);
-    requireJourney(reviewed?.savedForExport === false && reviewed.revisionLabel === 'r3' && JSON.stringify(reviewed.rows) === JSON.stringify(EXPORT_ROWS) &&
+    const reviewed = await renderer.evaluate(`window.ai7.reviewManuscriptExport({ target: { kind: 'current' }, options: { includeAnnotations: true, includeSuggestions: true, includeEditorNotes: false } }).then((review) => ({ savedForExport: review.savedForExport, revisionLabel: review.target.revisionLabel, reviewDigest: review.reviewDigest, rows: review.fidelity.filter((row) => row.count > 0 || row.status !== 'preserved').map((row) => row.key + ':' + row.status + ':' + row.count), suggestedFileName: review.suggestedFileName, retentionMatches: review.retention?.preserved.length > 0 && review.retention?.rebuilt.length > 0 && review.retention?.excluded.some((line) => line.includes('备注')) && window.__j07.exportCard()?.querySelector('.export-fidelity .export-retention-summary')?.textContent === review.retentionSummary }))`);
+    requireJourney(reviewed?.savedForExport === false && reviewed.retentionMatches === true && reviewed.revisionLabel === 'r3' && JSON.stringify(reviewed.rows) === JSON.stringify(EXPORT_ROWS) &&
       /^[0-9a-f]{64}$/.test(reviewed.reviewDigest ?? '') && reviewed.suggestedFileName === `${EXCERPT.title} · r3.docx`, 'service-agrees-review', reviewed);
     await assertRenderer(renderer, `window.__j07.exportFact('保真审阅摘要') === ${JSON.stringify(reviewed.reviewDigest)} && !window.__j07.exportCard().querySelector('details.technical-details').open`, 'export-review-is-the-service-review');
 
@@ -1291,12 +1292,12 @@ async function main() {
     // 交付物 lists the export with what it came to; the service's receipt names the file on disk byte for byte,
     // and the chosen folder holds that one file and nothing half-written.
     await waitFor(renderer, `window.__j07.block()?.querySelector('section.export-records-section')?.dataset.exportRecords === '1'`, 'export-record-listed', 30_000);
-    const recorded = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => deliverables.exports.map((record) => ({ preparationId: record.preparationId, outcome: record.outcome, outcomeLabel: record.outcomeLabel, fileName: record.fileName, destination: record.destination, target: record.target, byteLength: record.byteLength, revealAvailable: record.revealAvailable, fileSha256: record.technical.fileSha256 })))`);
+    const recorded = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => deliverables.exports.map((record) => ({ preparationId: record.preparationId, outcome: record.outcome, outcomeLabel: record.outcomeLabel, fileName: record.fileName, destination: record.destination, target: record.target, byteLength: record.byteLength, revealAvailable: record.revealAvailable, fileSha256: record.technical.fileSha256, retentionMatches: record.retention !== null && record.retentionSummary === window.__j07.exportCard()?.querySelector('.export-fidelity .export-retention-summary')?.textContent && record.retentionSummary === window.__j07.exportCard()?.querySelector('.export-receipt .export-retention-summary')?.textContent })))`);
     const written = await readFile(exportPath);
     requireJourney(Array.isArray(recorded) && recorded.length === 1 && recorded[0].outcome === 'created' && recorded[0].outcomeLabel === EXPORTED_LABEL &&
       recorded[0].fileName === EXPORT_FILE && recorded[0].destination === exportPath && recorded[0].target?.kind === 'current' && recorded[0].target.milestoneId === null &&
       recorded[0].target.revisionLabel === 'r3' && recorded[0].revealAvailable === true && recorded[0].byteLength === written.length &&
-      recorded[0].fileSha256 === createHash('sha256').update(written).digest('hex') && UUID_PATTERN.test(recorded[0].preparationId),
+      recorded[0].fileSha256 === createHash('sha256').update(written).digest('hex') && recorded[0].retentionMatches === true && UUID_PATTERN.test(recorded[0].preparationId),
     'service-receipt-names-the-file', Array.isArray(recorded) ? recorded.map((record) => ({ outcome: record.outcome, byteLength: record.byteLength, onDisk: written.length })) : recorded);
     requireJourney(JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'export-folder-holds-one-file');
     await assertRenderer(renderer, `(() => {

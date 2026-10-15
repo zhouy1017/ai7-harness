@@ -36,6 +36,7 @@ import {
   EDITOR_AUTHOR_LABEL,
   EDITOR_NOTE_AUTHOR_LABEL,
   renderDocxExport,
+  exportRetentionDisclosure,
   type DocxExportBlock,
   type DocxExportInput,
   type DocxExportMark,
@@ -1726,6 +1727,7 @@ export class ManuscriptExportStore {
       formatLine: target.manifest !== null ? PACKAGE_MEMBER_LINES[target.manifest.member].format : report === null ? FORMAT_LINES[format] : REPORT_FORMAT_LINES[format],
       fidelity,
       degraded: rendered.degraded,
+      ...exportRetentionDisclosure(fidelity),
       suggestedFileName: target.manifest !== null
         ? target.manifest.member === 'manifest' ? PACKAGE_MANIFEST_FILE_NAME : suggestedExportFileName(target.bookTitle, target.manifest.fileLabel, format)
         : suggestedExportFileName(
@@ -1853,6 +1855,7 @@ export class ManuscriptExportStore {
       format: requireFormat(text(row.format)),
       options,
       fidelity: fidelity as ExportFidelityRowProjection[],
+      ...exportRetentionDisclosure(fidelity as ExportFidelityRowProjection[]),
       degraded: integer(row.degraded) === 1,
       fileName: text(row.file_name),
       destination: text(row.destination),
@@ -1912,6 +1915,8 @@ export class ManuscriptExportStore {
       format: preparation.format,
       fileName: preparation.fileName,
       destination: preparation.destination,
+      retention: preparation.retention,
+      retentionSummary: preparation.retentionSummary,
     };
     if (outcome.receipt_id === null) {
       return {

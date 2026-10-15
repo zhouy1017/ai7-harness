@@ -1,0 +1,59 @@
+{
+  "sources": [
+    "synthetic",
+    "sample1"
+  ],
+  "pairs": {
+    "unchanged": {
+      "run-properties": "rebuilt",
+      "drawings": "rebuilt",
+      "text-boxes": "rebuilt",
+      "footnotes-endnotes": "preserved",
+      "fields": "rebuilt",
+      "comments-tracked-changes": "rebuilt",
+      "tables": "rebuilt",
+      "numbering": "preserved",
+      "sections": "rebuilt",
+      "headers-footers": "preserved",
+      "styles": "preserved",
+      "hyperlinks": "rebuilt",
+      "unrepresented-revisions": "intentionally-excluded"
+    },
+    "edited": {
+      "run-properties": "intentionally-excluded",
+      "drawings": "rebuilt",
+      "text-boxes": "rebuilt",
+      "footnotes-endnotes": "preserved",
+      "fields": "intentionally-excluded",
+      "comments-tracked-changes": "rebuilt",
+      "tables": "rebuilt",
+      "numbering": "preserved",
+      "sections": "rebuilt",
+      "headers-footers": "preserved",
+      "styles": "preserved",
+      "hyperlinks": "intentionally-excluded",
+      "unrepresented-revisions": "intentionally-excluded"
+    },
+    "mark-exported": {
+      "run-properties": "rebuilt",
+      "drawings": "rebuilt",
+      "text-boxes": "rebuilt",
+      "footnotes-endnotes": "preserved",
+      "fields": "intentionally-excluded",
+      "comments-tracked-changes": "rebuilt",
+      "tables": "rebuilt",
+      "numbering": "preserved",
+      "sections": "rebuilt",
+      "headers-footers": "preserved",
+      "styles": "preserved",
+      "hyperlinks": "intentionally-excluded",
+      "unrepresented-revisions": "intentionally-excluded"
+    }
+  },
+  "exclusions": {
+    "run-properties": "Edited paragraphs retain paragraph and first-run properties; other run formatting and rebuilt hyperlinks have no text-only mapping. Follow-up #874.",
+    "fields": "Rebuilt computed fields become their displayed text under ADR 0086/S64, with no update instruction. Follow-up #874.",
+    "hyperlinks": "Rebuilt paragraphs retain hyperlink text but lose clickable wrappers. Follow-up #874.",
+    "unrepresented-revisions": "Original formatting revisions are rejected; only imported/editorial marks are written as changes. ADR 0086/S64 and follow-up #874."
+  }
+}
