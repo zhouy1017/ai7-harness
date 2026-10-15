@@ -1,5 +1,6 @@
 import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
+import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
 import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
@@ -15540,6 +15541,16 @@ export class EditorialStore {
 
   getHistoricalRevision(revisionId: string, cursor: string | null): HistoricalRevisionProjection {
     return this.#boundedCall(() => this.#bounded.getHistoricalRevision(revisionId, cursor));
+  }
+
+  getModelServiceProxy(): Promise<import('../shared/protocol.js').ModelServiceProxySetting> {
+    this.#assertAvailable();
+    return readProxySetting(this.#dataRoot);
+  }
+
+  saveModelServiceProxy(input: import('../shared/protocol.js').ModelServiceProxySetting): Promise<import('../shared/protocol.js').ModelServiceProxySetting> {
+    this.#assertAvailable();
+    return writeProxySetting(this.#dataRoot, input);
   }
 
   getModelServiceConnection(): ModelServiceConnectionProjection | null {

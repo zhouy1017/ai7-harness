@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 129 as const;
+export const SERVICE_PROTOCOL_VERSION = 133 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -274,6 +274,7 @@ export const IPC_CHANNELS = {
   getProductDataLocation: 'ai7:j12:get-product-data-location',
   revealProductDataLocation: 'ai7:j12:reveal-product-data-location',
   getModelServiceSettings: 'ai7:j12:get-model-service-settings',
+  saveModelServiceProxy: 'ai7:j12:save-model-service-proxy',
   saveModelServiceCredential: 'ai7:j12:save-model-service-credential',
   removeModelServiceCredential: 'ai7:j12:remove-model-service-credential',
 } as const;
@@ -2170,6 +2171,7 @@ export interface LaunchPolicyProjection {
 }
 
 export interface ModelServiceStoredStateProjection {
+  proxy: ModelServiceProxySetting;
   connection: ModelServiceConnectionProjection | null;
   launchPolicy: LaunchPolicyProjection;
 }
@@ -2185,7 +2187,10 @@ export interface ModelRoleCardProjection {
   connection: ModelServiceConnectionProjection | null;
 }
 
+export type ModelServiceProxySetting = { mode: 'direct' } | { mode: 'proxy'; protocol: 'http' | 'https'; hostPort: string };
+
 export interface ModelServiceSettingsProjection {
+  proxy: ModelServiceProxySetting;
   roles: readonly ModelRoleCardProjection[];
   protectedSecretStore: {
     backend: 'windows-credential-manager' | 'macos-keychain';
@@ -5631,6 +5636,7 @@ export type TaskPlanStartReadiness = 'ready' | 'record-only' | 'no-route' | 'nee
  * when something material did, or left waiting — for the network, for the model connection, or for the slot.
  */
 export interface ReconnectPreflightProjection {
+  connectivity?: { classification: 'offline' | 'proxy-unreachable' | 'model-service-unreachable'; label: '离线' | '代理不可达' | '模型服务不可达' };
   admitted: number;
   blocked: number;
   waiting: number;
@@ -11931,6 +11937,10 @@ export interface ServiceOperationMap {
     input: Record<string, never>;
     output: ModelServiceStoredStateProjection;
   };
+  saveModelServiceProxy: {
+    input: ModelServiceProxySetting;
+    output: ModelServiceProxySetting;
+  };
   saveModelServiceConnection: {
     input: {
       connectionName: string;
@@ -12353,6 +12363,7 @@ export interface RendererApi {
   getProductDataLocation(): Promise<ProductDataLocationProjection>;
   revealProductDataLocation(): Promise<ProductDataLocationRevealProjection>;
   getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;
+  saveModelServiceProxy(input: ModelServiceProxySetting): Promise<ModelServiceSettingsProjection>;
   saveModelServiceCredential(input: { connectionName: string; secret: string }): Promise<ModelServiceSettingsProjection>;
   removeModelServiceCredential(): Promise<ModelServiceSettingsProjection>;
 }

@@ -636,6 +636,8 @@ const api: RendererApi = Object.freeze({
     invoke<Awaited<ReturnType<RendererApi['revealProductDataLocation']>>>(IPC_CHANNELS.revealProductDataLocation),
   getModelServiceSettings: () =>
     invoke<Awaited<ReturnType<RendererApi['getModelServiceSettings']>>>(IPC_CHANNELS.getModelServiceSettings),
+  saveModelServiceProxy: (input: Parameters<RendererApi['saveModelServiceProxy']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['saveModelServiceProxy']>>>(IPC_CHANNELS.saveModelServiceProxy, input),
   saveModelServiceCredential: (input: { connectionName: string; secret: string }) =>
     invoke<Awaited<ReturnType<RendererApi['saveModelServiceCredential']>>>(IPC_CHANNELS.saveModelServiceCredential, input),
   removeModelServiceCredential: () =>

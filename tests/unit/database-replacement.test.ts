@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { writeDatabasePackage } from '../../src/service/database-exports.js';
+import { writeDatabasePackage, databasePackageSources } from '../../src/service/database-exports.js';
+import { unzipSync, zipSync } from 'fflate';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { MAX_MANIFEST_BYTES } from '../../src/service/database-package-reader.js';
-import { sha256Hex } from '../../src/service/analysis/canonical.js';
+import { sha256Hex, canonicalJson } from '../../src/service/analysis/canonical.js';
 import {
   DatabaseReplacementError,
   completeReplacement,
@@ -110,6 +112,45 @@ const refuseThePackage = async (): Promise<string> => {
 };
 
 describe('applying a replacement of the local data', () => {
+  it('excludes only proxy environment files from export and backup enumeration', async () => {
+    mkdirSync(join(dataRoot, 'settings'));
+    for (const name of ['model-service-proxy.json', 'proxy-123.tmp', 'other.json']) writeFileSync(join(dataRoot, 'settings', name), '{}');
+    const members = (await databasePackageSources(dataRoot)).map((source) => source.member);
+    expect(members).toContain('settings/other.json');
+    expect(members).not.toContain('settings/model-service-proxy.json');
+    expect(members).not.toContain('settings/proxy-123.tmp');
+  });
+
+  it('ignores an imported proxy file and retains the local setting through replacement', async () => {
+    mkdirSync(join(dataRoot, 'settings'));
+    writeFileSync(join(dataRoot, 'settings', 'model-service-proxy.json'), 'local setting');
+    const { path } = await otherPackage();
+    const files = unzipSync(readFileSync(path));
+    const bytes = Buffer.from('imported setting');
+    files['settings/model-service-proxy.json'] = bytes;
+    const manifest = JSON.parse(Buffer.from(files['manifest.json']!).toString('utf8'));
+    manifest.members.push({ path: 'settings/model-service-proxy.json', bytes: bytes.length, sha256: sha256Hex(bytes) });
+    files['manifest.json'] = Buffer.from(canonicalJson(manifest));
+    writeFileSync(path, zipSync(files, { mtime: fixedArchiveTime() }));
+    const log = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const sha256 = sha256Hex(readFileSync(path));
+      const extracted = await extractReplacement(dataRoot, path, sha256);
+      expect(existsSync(join(staging(), 'incoming', 'settings', 'model-service-proxy.json'))).toBe(false);
+      expect(JSON.stringify(log.mock.calls)).not.toContain('imported setting');
+      expect(log).toHaveBeenCalled();
+      const packageMembersSha256 = await writeReplacementMembers(dataRoot, extracted.manifest.members);
+      const intent: ReplacementIntent = {
+        replacementId: '5f0c3c1e-9a8b-4c2d-8e1f-0a1b2c3d4e5f', kind: 'replace', packageFileName: 'proxy.ai7db',
+        packageSha256: sha256, packageCreatedAt: extracted.manifest.createdAt, packageOrigin: extracted.manifest.origin,
+        packageContents: extracted.manifest.contents, packageMembersSha256, preparedAt: T.toISOString(),
+        backupFileName: preReplaceBackupFileName(T), backupSha256: 'b'.repeat(64), mergeBooks: null, mergeNotices: [],
+      };
+      await writeReplacementIntent(dataRoot, intent);
+      expect((await openWithPendingReplacement(dataRoot, open)).replacement?.outcome).toBe('applied');
+      expect(readFileSync(join(dataRoot, 'settings', 'model-service-proxy.json'), 'utf8')).toBe('local setting');
+    } finally { log.mockRestore(); }
+  });
   it('moves the data aside, moves the package in, opens it, and keeps the places that are not data', async () => {
     const intent = await prepared();
     expect(await readPendingReplacement(dataRoot)).toEqual(intent);

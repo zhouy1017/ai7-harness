@@ -1,4 +1,5 @@
 import dgram from 'node:dgram';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import dns from 'node:dns';
 import dnsPromises from 'node:dns/promises';
 import http, { ClientRequest as namedClientRequest, request as namedHttpRequest } from 'node:http';
@@ -44,6 +45,41 @@ let perTicketAdmissionArmed = false;
  * A host stays reachable while any ticket holds it.
  */
 const ticketHolds = new Map<string, SingleHostAllowance>();
+
+/** A single admitted request's physical proxy connection; never a process host allowance. */
+interface ProxyConnectionToken {
+  readonly logical: SingleHostAllowance;
+  readonly proxy: SingleHostAllowance;
+  active: boolean;
+  used: boolean;
+  depth: number;
+}
+const proxyConnection = new AsyncLocalStorage<ProxyConnectionToken>();
+
+export function admittedProxyRequest(logicalUrl: string, proxy: SingleHostAllowance): {
+  run<T>(action: () => T): T;
+  revoke(): void;
+} {
+  const url = new URL(logicalUrl);
+  const logical = { host: url.hostname, port: Number(url.port || (url.protocol === 'https:' ? 443 : 80)) };
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password ||
+      !allowanceAdmitsConnection([logical])) return denyNetwork();
+  const token: ProxyConnectionToken = { logical, proxy, active: true, used: false, depth: 0 };
+  return {
+    run: (action) => {
+      if (!token.active) return denyNetwork();
+      return proxyConnection.run(token, action);
+    },
+    revoke: () => { token.active = false; },
+  };
+}
+
+function proxyAdmits(target: SingleHostAllowance | null): boolean {
+  const token = proxyConnection.getStore();
+  return token !== undefined && token.active && target !== null &&
+    token.proxy.host === target.host && token.proxy.port === target.port &&
+    (!token.used || token.depth > 0);
+}
 
 /** The part of a socket the release needs: closing it, and hearing that it closed. */
 interface TicketSocket {
@@ -373,6 +409,13 @@ function trackTicketSocket(args: readonly unknown[], socket: unknown): void {
  */
 export function guardedConnect(original: (...args: unknown[]) => unknown): (...args: unknown[]) => unknown {
   return function gatedConnect(this: unknown, ...args: unknown[]): unknown {
+    const token = proxyConnection.getStore();
+    if (proxyAdmits(connectionTargetOf(args)) && token !== undefined) {
+      token.used = true;
+      token.depth += 1;
+      try { return Reflect.apply(original, this, args); }
+      finally { token.depth -= 1; }
+    }
     if (!allowanceAdmitsConnection(args)) return denyNetwork();
     const result = Reflect.apply(original, this, args);
     trackTicketSocket(args, isTicketSocket(result) ? result : this);
@@ -415,6 +458,8 @@ export function allowanceAdmitsLookup(args: readonly unknown[]): boolean {
   const hostname = args[0];
   if (typeof hostname !== 'string') return false;
   const name = hostname.toLowerCase();
+  const token = proxyConnection.getStore();
+  if (token?.active && token.depth > 0 && token.proxy.host === name) return true;
   return admittedTargets().some((admitted) => admitted.host === name);
 }
 

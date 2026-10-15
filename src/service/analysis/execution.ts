@@ -1199,6 +1199,7 @@ export class BaselineAnalysisExecutionOwner {
     // Which of the two developer-live interruptions settled this Run, when one did; the closed CHECK
     // sets record both as `interrupted`, so the distinction lives in the detail, summary, and action.
     let liveInterruption: LiveInterruption | null = null;
+    let proxyFailure: string | null = null;
     let materialRefusal: MaterialGuardRefusal | null = null;
     // 模型服务账户限额 met under a Run that keeps its progress (Issue #51, S16b): the provider's words, and the unit it
     // refused — `null` for the reduction or a sampling turn — with what that refused attempt cost. The Run stops resumable
@@ -1583,6 +1584,11 @@ export class BaselineAnalysisExecutionOwner {
           }
         } else if (turn.terminal === 'interrupted') {
           const failure = turn.signals.find((signal) => signal.kind === 'interrupted');
+          if (failure?.kind === 'interrupted' && failure.failure.failureClass === 'proxy-unreachable' && active.resumableOnInterrupt) {
+            proxyFailure = failure.failure.reason;
+            active.interrupted = true;
+            return 'stop';
+          }
           const egress = failure?.kind === 'interrupted' && failure.failure.failureClass === 'egress-refused';
           gap(egress ? 'egress-refused' : 'interrupted', failure?.kind === 'interrupted' ? failure.failure.reason : '请求被中断。');
           // An egress refusal that names the ceiling is the ceiling settlement, not a bare interruption.
@@ -1925,7 +1931,8 @@ export class BaselineAnalysisExecutionOwner {
         }
         if (stopping) {
           ledger.recordRunState(facts.runRecordId, active.pauseRequested ? 'paused' : 'resumable', {
-            detail: active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length),
+            detail: proxyFailure ?? (active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length)),
+            ...(proxyFailure === null ? {} : { connectivityClassification: 'proxy-unreachable', stopReason: 'proxy-unreachable' }),
             unitsSettled: settled,
             unitsTotal: submittedUnits.length,
             carriedUsage,

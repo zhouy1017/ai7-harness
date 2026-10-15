@@ -63,6 +63,10 @@ export const DATABASE_PACKAGE_STORE_MEMBER = 'store/ai7.sqlite' as const;
 export const DATABASE_PACKAGE_MANIFEST_MEMBER = 'manifest.json' as const;
 /** The Agent Data Root's own directories a package never carries: the live store — copied consistently instead — the export staging area and the shell's browser profile. */
 export const DATABASE_PACKAGE_EXCLUDED_ROOTS: ReadonlySet<string> = new Set(['store', EXPORT_STAGING_DIRECTORY, 'shell']);
+/** Device environment settings never migrate with editorial databases or backups. */
+export function isProxyEnvironmentMember(member: string): boolean {
+  return /^settings\/(?:model-service-proxy\.json|proxy-[^/]+\.tmp)$/iu.test(member);
+}
 /** A ZIP without ZIP64 holds at most this many members, each and all below 4 GiB. */
 const MAX_PACKAGE_MEMBERS = 65_534;
 /** The most directories a package's walk visits: a data root with more is refused as too large (Issue #434 review). */
@@ -232,6 +236,7 @@ export async function databasePackageSources(dataRoot: string, bounds: DatabaseP
     const entries: Array<{ name: string; directory: boolean }> = [];
     for await (const entry of await opendir(directory)) {
       if (prefix === '' && DATABASE_PACKAGE_EXCLUDED_ROOTS.has(entry.name)) continue;
+      if (isProxyEnvironmentMember(`${prefix}/${entry.name}`.replace(/^\//u, ''))) continue;
       // The Agent Data Root holds no link; a link found there is not followed and not carried.
       if (entry.isSymbolicLink() || !(entry.isDirectory() || entry.isFile())) continue;
       entries.push({ name: entry.name, directory: entry.isDirectory() });

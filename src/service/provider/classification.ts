@@ -33,6 +33,7 @@ export const AI7_FAILURE_CODES = {
   PROVIDER_ERROR: 'PROVIDER_ERROR',
   INVALID_RESPONSE: 'INVALID_RESPONSE',
   TRANSPORT_FAILED: 'TRANSPORT_FAILED',
+  PROXY_UNREACHABLE: 'AI7_PROXY_UNREACHABLE',
 } as const;
 
 export interface ModelFailureFacts {
@@ -42,6 +43,7 @@ export interface ModelFailureFacts {
 }
 
 export type ModelFailureClass =
+  | 'proxy-unreachable'
   | 'provider-account-limit'
   | 'invalid-credential'
   | 'context-window-exceeded'
@@ -93,6 +95,9 @@ export function classifyModelFailure(failure: ModelFailureFacts, codes: DshFailu
   const status = typeof failure.status === 'number' && Number.isSafeInteger(failure.status) ? failure.status : null;
   const classified = (signal: ClassifiedModelFailure['signal'], failureClass: ModelFailureClass, reason: string): ClassifiedModelFailure =>
     ({ signal, failureClass, reason, code, status, retrySafe: isRetrySafeFailure(failure) });
+  if (code === AI7_FAILURE_CODES.PROXY_UNREACHABLE) {
+    return classified('interrupted', 'proxy-unreachable', '代理不可达：请检查网络代理设置后续行。');
+  }
   if (code === codes.QUOTA_EXCEEDED_CODE) {
     return classified('failed', 'provider-account-limit', 'Provider Account Limit：模型服务账户限额阻止了本次请求。');
   }

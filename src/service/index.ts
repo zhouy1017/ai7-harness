@@ -222,8 +222,10 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), launchPolicy },
+        result: { connection: store.getModelServiceConnection(), launchPolicy, proxy: await store.getModelServiceProxy() },
       };
+    case 'saveModelServiceProxy':
+      return { id: request.id, ok: true, op: request.op, result: await store.saveModelServiceProxy(request.input) };
     case 'saveModelServiceConnection':
       return {
         id: request.id,
@@ -1662,6 +1664,7 @@ async function run(): Promise<void> {
   let preflightTimer: NodeJS.Timeout | undefined;
   let backupTimer: NodeJS.Timeout | undefined;
   let background: BackgroundAnalysisDispatcher | undefined;
+  let transportFailure: 'proxy-unreachable' | 'model-service-unreachable' | null = null;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
@@ -1669,7 +1672,7 @@ async function run(): Promise<void> {
     // keeps the product provider-free exactly like development-ci, and the ceiling is never `unset` under
     // v5. The captured `fetch` travels with the launch facts and reaches no other owner.
     const developerLive: DeveloperLiveRuntime | null = launchPolicy.operationalScope === 'developer-live'
-      ? { launch: resolveDeveloperLiveLaunch(launchForm, resolve(codeRoot, '..')), nativeFetch }
+      ? { launch: resolveDeveloperLiveLaunch(launchForm, resolve(codeRoot, '..')), nativeFetch: (await import('./provider/proxy-setting.js')).proxyAwareFetch(nativeFetch, () => store!.getModelServiceProxy(), undefined, (failure) => { transportFailure = failure; }) }
       : null;
     // The J-04-only control resolves the hand-written synthetic fixture before the store opens, so the
     // frozen plan can pin the exact fixture identity, lineage, and digest; every other launch binds no route.
@@ -1703,6 +1706,7 @@ async function run(): Promise<void> {
       // J-11's calibration gate (Issue #429, EVAL-011a): the product's ten Books in every other launch.
       ...(calibrationMinBooks === undefined ? {} : { calibrationMinAdjustments: calibrationMinBooks }),
     });
+    await store.getModelServiceProxy();
     reachServiceStartup('owners');
     // The ledger learns the trusted launch once, before any frame is served, so every plan it freezes
     // names the binding this launch actually bound rather than re-deriving one at dispatch.
@@ -1832,6 +1836,7 @@ async function run(): Promise<void> {
           block: (run, reasons, cause) => openStore.blockWaitingTaskRun(run, reasons, cause),
           reachesNetwork: developerLive !== null || (connectivityPath !== undefined && fixture !== null),
           connectivity: reading,
+          transportFailure: () => transportFailure,
           credentialReadiness: () => owner.liveCredentialReadiness(),
           slotBusy: () => owner.busy,
           admit: (run) => {

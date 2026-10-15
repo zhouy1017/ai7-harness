@@ -22,6 +22,8 @@ export interface ReconnectPreflightDependencies<Run extends { readonly runRecord
   reachesNetwork: boolean;
   /** This device's reading now: local, never a probe. */
   connectivity(): Connectivity;
+  /** Last admitted transport's failure; this reading never sends a probe. */
+  transportFailure?(): 'proxy-unreachable' | 'model-service-unreachable' | null;
   /** The readiness the dispatch check itself reports; `null` when the route resolves no credential. */
   credentialReadiness(): Promise<'present' | 'missing' | null>;
   /** Whether the one execution slot is held. */
@@ -69,7 +71,11 @@ export function planDriftReason(changed: ReadonlyArray<string>): string {
  * only the readiness the dispatch check reports.
  */
 export async function reconnectPreflight<Run extends { readonly runRecordId: string }>(deps: ReconnectPreflightDependencies<Run>): Promise<ReconnectPreflightProjection> {
-  const outcome = { admitted: 0, blocked: 0, waiting: 0 };
+  const failure = deps.transportFailure?.() ?? null;
+  const connectivity: ReconnectPreflightProjection['connectivity'] = failure === null ? undefined :
+    deps.reachesNetwork && deps.connectivity() === 'offline' ? { classification: 'offline', label: '离线' } :
+      failure === 'proxy-unreachable' ? { classification: failure, label: '代理不可达' } : { classification: failure, label: '模型服务不可达' };
+  const outcome: ReconnectPreflightProjection = { admitted: 0, blocked: 0, waiting: 0, ...(connectivity === undefined ? {} : { connectivity }) };
   const runs = deps.waitingRuns();
   if (runs.length === 0) return outcome;
   if (deps.frozen()) return { ...outcome, waiting: runs.length };

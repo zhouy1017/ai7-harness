@@ -556,6 +556,7 @@ function registerRendererHandlers(
   getProductDataLocation: () => Promise<ProductDataLocationProjection>,
   revealProductDataLocation: () => ProductDataLocationRevealProjection,
   getModelServiceSettings: () => Promise<ModelServiceSettingsProjection>,
+  saveModelServiceProxy: (input: ServiceOperationMap['saveModelServiceProxy']['input']) => Promise<ModelServiceSettingsProjection>,
   saveModelServiceCredential: (input: { connectionName: string; secret: string }) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: () => Promise<ModelServiceSettingsProjection>,
   consumeLostApplyAcknowledgement: () => boolean,
@@ -2282,6 +2283,13 @@ function registerRendererHandlers(
     envelope(() => {
       requireSender(event);
       return revealProductDataLocation();
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveModelServiceProxy, (event, input: ServiceOperationMap['saveModelServiceProxy']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return serializeEffect(() => saveModelServiceProxy(input));
     }),
   );
   ipcMain.handle(IPC_CHANNELS.getModelServiceSettings, (event) =>
@@ -5669,6 +5677,7 @@ export async function runApplication(): Promise<void> {
         connection: null,
       });
       return {
+        proxy: state.proxy,
         roles: [
           unconfigured('fast-interaction', '快速交互角色', '快速交互与低风险候选生成'),
           {
@@ -5778,6 +5787,7 @@ export async function runApplication(): Promise<void> {
       getProductDataLocation,
       revealProductDataLocation,
       settingsProjection,
+      async (input) => { await service!.call('saveModelServiceProxy', input); return settingsProjection(); },
       saveModelServiceCredential,
       removeModelServiceCredential,
       (() => {
