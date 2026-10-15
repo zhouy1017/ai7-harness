@@ -225,7 +225,11 @@ export function evaluationMaterialsField(
   fieldset.dataset['evaluationMaterials'] = kind;
   fieldset.append(el('legend', undefined, '允许参考 · 资料库'));
   fieldset.append(el('p', 'field-note', page.materials?.statement ?? '暂无可参考的资料库资料。'));
-  fieldset.append(el('p', 'field-note', '资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'));
+  // 初评 carries no 定稿 of its own, so its row says what references never override there (Issue #795 item 3); 审稿意见, which
+  // drafts from a 定稿 record, keeps the 定稿 wording.
+  fieldset.append(el('p', 'field-note', kind === 'readersReport'
+    ? '资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'
+    : '资料只提供背景，不改变本社评估方案，也不覆盖初评的分数、评语与结论。'));
   const items = page.materials?.items ?? [];
   const retained = taskMaterialSelection(items, selected);
   selected.clear();

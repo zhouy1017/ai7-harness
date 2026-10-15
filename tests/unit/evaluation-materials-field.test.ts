@@ -55,7 +55,9 @@ describe('the 允许参考 rows of 评估', () => {
     expect(view.field.dataset['evaluationMaterials']).toBe('initial');
     expect(view.texts()).toContain('允许参考 · 资料库');
     expect(view.texts()).toContain('可以勾选资料库里这本书允许参考的资料');
-    expect(view.texts()).toContain('资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。');
+    // 初评 has no 定稿 of its own: its row says references never override the 初评's scores, comments and conclusion (Issue #795 item 3).
+    expect(view.texts()).toContain('资料只提供背景，不改变本社评估方案，也不覆盖初评的分数、评语与结论。');
+    expect(view.texts()).not.toContain('资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。');
     expect(view.texts()).toContain('《资料a》 · 已提取 1,234 字');
     expect(view.texts()).toContain('另有 3 份资料未列出。');
     expect(view.field.all().filter((node) => node.type === 'checkbox')).toHaveLength(2);
@@ -122,5 +124,8 @@ describe('the 允许参考 rows of 评估', () => {
     const report = mount([item('a')], { kind: 'readersReport' });
     expect(report.texts()).toContain(REFERENCES!.readersReport[0]);
     expect(report.texts()).not.toContain(REFERENCES!.initial[0]);
+    // 审稿意见 drafts from a 定稿 record, so its row keeps the 定稿 wording (Issue #795 item 3).
+    expect(report.texts()).toContain('资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。');
+    expect(report.texts()).not.toContain('资料只提供背景，不改变本社评估方案，也不覆盖初评的分数、评语与结论。');
   });
 });
