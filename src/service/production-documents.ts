@@ -113,11 +113,15 @@ export const REVIEW_DELIVERABLE_CHANGED = '跨交付物一致性所依据的交�
 /**
  * Issue #813 brief revision 3: delivery-origin versions take precedence; otherwise read the newest saved version no later
  * than completed finalization. Working text and subsequent saves never become participants implicitly. No write is made.
+ * Only the house's deliverable types are 交付物: a 审稿意见 draft (S81c) shares these tables and phases, but it is an
+ * Editorial Artifact made from an Evaluation Record, so it neither participates nor changes why the category is unavailable.
  */
 export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeliverableReading {
   const participants: ReviewDeliverableParticipant[] = [];
   const leftOut: Array<{ documentId: string; title: string; reason: string }> = [];
-  const rows = db.prepare('SELECT * FROM production_documents WHERE book_id = ? ORDER BY type_id, document_id LIMIT 17').all(bookId) as SqlRow[];
+  const houseTypes = BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.map((type) => type.typeId);
+  const rows = db.prepare(`SELECT * FROM production_documents WHERE book_id = ? AND type_id IN (${houseTypes.map(() => '?').join(', ')})
+    ORDER BY type_id, document_id LIMIT 17`).all(bookId, ...houseTypes) as SqlRow[];
   if (rows.length > 16) return { participants, leftOut, unavailableReason: '交付物数量超出本次比对边界。' };
   let corrupt: string | null = null;
   for (const row of rows) {
@@ -150,7 +154,9 @@ export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeli
       const chosen = delivery ?? (completed ? db.prepare("SELECT * FROM production_document_versions WHERE document_id = ? AND origin = 'saved' AND recorded_at <= ? ORDER BY version DESC LIMIT 1")
         .get(documentId, text(phase!.recorded_at)) as SqlRow | undefined : undefined);
       const titleRow = db.prepare("SELECT text FROM manuscript_block_versions WHERE revision_id = ? AND kind = 'title' ORDER BY position LIMIT 1").get(text(chosen?.revision_id ?? latest.revision_id)) as SqlRow | undefined;
-      title = titleRow === undefined ? typeLabel : sliceGraphemes(text(titleRow.text), 0, 80);
+      // The title is one prompt line: whitespace and control characters collapse, and an empty title falls back to the type.
+      const heading = titleRow === undefined ? '' : sliceGraphemes(text(titleRow.text).replace(/[\s\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').trim(), 0, 80).trim();
+      title = heading.length > 0 ? heading : typeLabel;
       if (decision?.decision === 'not-for-this-book') {
         leftOut.push({ documentId, title, reason: '本书不做' });
         continue;
@@ -175,15 +181,20 @@ export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeli
         const words = text(block.text);
         requireDocument(sha256Hex(canonicalJson({ kind: text(block.kind), level: block.level, text: words })) === text(block.digest),
           'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档段落与其摘要不一致。');
-        if (words.length === 0) continue;
+        if (words.trim().length === 0) continue;
         readableParagraphs += 1;
         if (remaining === 0 || paragraphs.length === 64) continue;
         const kept = sliceGraphemes(words, 0, Math.min(remaining, 2_000));
+        if (kept.trim().length === 0) continue;
         const position = integer(block.position);
         paragraphs.push({ ref: `deliverable/${typeId}/${position}`, position, text: kept, truncated: kept !== words });
         remaining -= graphemeCount(kept);
       }
-      requireDocument(paragraphs.length > 0, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档版本没有可读取的段落。');
+      // A finalized version the editor emptied is a state of the document, not a damaged record: it sits out, named.
+      if (paragraphs.length === 0) {
+        leftOut.push({ documentId, title, reason: '定稿版本没有可比对的文字' });
+        continue;
+      }
       const later = db.prepare("SELECT count(*) total FROM production_document_versions WHERE document_id = ? AND origin = 'saved' AND version > ?").get(documentId, integer(chosen.version)) as SqlRow;
       participants.push({ documentId, typeId, typeLabel, title, versionLabel: productionDocumentVersionLabel(integer(chosen.version)),
         revisionId, revisionDigest: text(chosen.revision_digest), sourceDigest: text(revision.source_digest), paragraphs,

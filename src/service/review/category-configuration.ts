@@ -2,7 +2,7 @@ import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import type { ReviewCategoryOutputKind } from '../../shared/protocol.js';
 import type { ReviewCategoryContractInput } from './review-category-contract.js';
 import type { DatabaseSync } from 'node:sqlite';
-import { reviewDeliverables, type ReviewDeliverableReading } from '../production-documents.js';
+import { REVIEW_DELIVERABLES_ABSENT, reviewDeliverables, type ReviewDeliverableReading } from '../production-documents.js';
 
 /**
  * The built-in Review Category configuration (Issue #417, plan slice S69; V2-UX-REV-002, REV-003,
@@ -263,6 +263,8 @@ export function reviewCategoryEntry(
 export function reviewCategoryEntryForBook(entry: ReviewCategoryConfigurationEntry, db: DatabaseSync, bookId: string): ReviewCategoryConfigurationEntry {
   if (entry.categoryId !== 'cross-deliverable-consistency') return entry;
   const deliverables = reviewDeliverables(db, bookId);
+  // A Book with no deliverable at all keeps the built-in entry exactly: its reason and basis read as they did before.
+  if (deliverables.unavailableReason === REVIEW_DELIVERABLES_ABSENT) return entry;
   return { ...entry, executor: deliverables.unavailableReason === null ? 'review-category-contract' : 'unavailable',
     unavailableReason: deliverables.unavailableReason, deliverables,
     guidelineDocuments: [builtinDocument('ai7-builtin/cross-deliverable-consistency', '跨交付物比对规则', [

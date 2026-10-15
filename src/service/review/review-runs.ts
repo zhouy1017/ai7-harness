@@ -8,6 +8,7 @@ import {
   HISTORICALLY_AFFECTED_RESULT_MARKER,
   HISTORICAL_MARKER_UNVERIFIABLE,
   SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL,
+  reviewCategoryKindId,
   MAX_FRAME_BYTES,
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
   MAX_REVIEW_FINDINGS_PER_PAGE,
@@ -2722,10 +2723,10 @@ export class ReviewRunStore {
    * the Book is in now (Issue #64, S29a). The house's own digest still names the configuration a Run was prepared under.
    */
   #forBook(bookId: string, house: ReviewCategoryConfiguration, readings?: SeriesKnowledgeReadings): ReviewCategoryConfiguration {
-    const resolution = resolveSeriesConsistency(this.#db, bookId, readings);
+    const resolution = house.categories.some((entry) => entry.executor === 'series-knowledge') ? resolveSeriesConsistency(this.#db, bookId, readings) : null;
     return {
       ...house,
-      categories: house.categories.map((entry) => entry.executor === 'series-knowledge' ? seriesConsistencyEntry(entry, resolution) : reviewCategoryEntryForBook(entry, this.#db, bookId)),
+      categories: house.categories.map((entry) => entry.executor === 'series-knowledge' ? seriesConsistencyEntry(entry, resolution!) : reviewCategoryEntryForBook(entry, this.#db, bookId)),
     };
   }
 
@@ -2749,12 +2750,16 @@ export class ReviewRunStore {
 
   /** Existing execution material-guard seam; finalized deliverables are compared again before every transmission. */
   deliverableGuard(runRecordId: string, live: boolean): MaterialGuardRefusal | null {
-    const row = this.#db.prepare(`SELECT r.* FROM review_runs r JOIN json_each(r.canonical_json, '$.categories') c
-      ON json_extract(c.value, '$.task.taskIntentId') = (SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?)
-      WHERE json_type(c.value, '$.entry.deliverables') = 'object'`).get(runRecordId) as SqlRow | undefined;
+    // Asked before every transmission of every kind: only a cross-deliverable Run reaches its own Book's Review Run snapshots.
+    const row = this.#db.prepare(`SELECT rr.*, i.task_intent_id AS guarded_task_intent_id FROM analysis_run_records r
+      JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id AND i.kind = ?
+      JOIN review_runs rr ON rr.book_id = i.book_id
+      JOIN json_each(rr.canonical_json, '$.categories') c ON json_extract(c.value, '$.task.taskIntentId') = i.task_intent_id
+      WHERE r.run_record_id = ? AND json_type(c.value, '$.entry.deliverables') = 'object' LIMIT 1`)
+      .get(reviewCategoryKindId('cross-deliverable-consistency'), runRecordId) as SqlRow | undefined;
     if (row === undefined) return null;
     const snapshot = this.#snapshotOf(row);
-    const category = snapshot.categories.find((candidate) => candidate.entry.deliverables !== undefined)!;
+    const category = snapshot.categories.find((candidate) => candidate.task?.taskIntentId === text(row.guarded_task_intent_id))!;
     let message = this.#deliverablesMoved(snapshot.bookId, category.entry);
     if (message === null && live) {
       const manuscript = this.#db.prepare('SELECT sv.source_digest FROM manuscript_revisions mr JOIN source_versions sv ON sv.source_version_id = mr.source_version_id WHERE mr.revision_id = ?').get(snapshot.manuscript.revisionId) as SqlRow | undefined;

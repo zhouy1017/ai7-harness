@@ -67,7 +67,6 @@ import {
 import { CARRIED_GAP_REASON, OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
 import { SERIES_SCOPE_STOP_SUMMARY } from '../series-exclusions.js';
 import { materialInterruptionMessage as referenceInterruptionMessage, type MaterialGuardRefusal } from '../task-material-references.js';
-
 import {
   RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
   buildRunReportReflectionMessage,

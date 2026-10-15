@@ -147,13 +147,21 @@ async function execution(afterFirst?: () => Promise<void>, recorded?: ResolvedMo
 
 /** Reproduce the live item's exact sample1-derived words through the editor's bounded edit API; no file or model supplies them. */
 async function recordedDocument(id: string) {
-  const doc = document(id);
   const passage = store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).find((block) =>
     block.kind === 'paragraph' && block.text.length > 100 && /[一二三四五六七八〇○]/u.test(block.text))!;
   const composed = sliceGraphemes(passage.text, 0, 200).replace(/[一二三四五六七八〇○]/u, '九');
   let placed = false;
+  rewrite(id, (kind) => kind === 'title' ? 'sample1 新闻稿（合成比对）' : !placed && kind === 'paragraph' ? (placed = true, composed) : '');
+  await store.saveProductionDocumentVersion({ bookId: book.bookId, documentId: id, branchId: document(id).branchId });
+  phase(id, 'start'); phase(id, 'complete');
+  return passage.blockId;
+}
+
+/** Replace every block's words through the editor's own edits, at most 256 graphemes each, as an editor would. */
+function rewrite(id: string, replacementOf: (kind: string) => string) {
+  const doc = document(id);
   for (const block of store.baselineAnalysisLedger.readWorkingBlocks(doc.branchId)) {
-    const replacement = block.kind === 'title' ? 'sample1 新闻稿（合成比对）' : !placed && block.kind === 'paragraph' ? (placed = true, composed) : '';
+    const replacement = replacementOf(block.kind);
     const replace = (from: number, to: number, insertText: string) => {
       const window = store.getManuscriptWindowAt(id, doc.branchId, { kind: 'block', blockId: block.blockId });
       const current = window.blocks.find((candidate) => candidate.blockId === block.blockId)!;
@@ -165,14 +173,12 @@ async function recordedDocument(id: string) {
     while (remaining > 0) { const from = Math.max(0, remaining - 256); replace(from, remaining, ''); remaining = from; }
     if (replacement.length > 0) replace(0, 0, replacement);
   }
-  await store.saveProductionDocumentVersion({ bookId: book.bookId, documentId: id, branchId: doc.branchId });
-  phase(id, 'start'); phase(id, 'complete');
-  return passage.blockId;
 }
 
 describe('cross-deliverable participants and revision lineage', () => {
   it('keeps the built-in entry and exact absence reason; excludes created-only drafts', async () => {
     expect(reviewCategoryEntry(CATEGORY)!.executor).toBe('unavailable');
+    expect(entry()).toEqual(reviewCategoryEntry(CATEGORY));
     expect(entry().unavailableReason).toBe(REVIEW_DELIVERABLES_ABSENT);
     await create();
     expect(entry().executor).toBe('unavailable');
@@ -217,6 +223,20 @@ describe('cross-deliverable participants and revision lineage', () => {
     await save(doc.documentId);
     expect(reading().participants.map((participant) => participant.revisionId)).toEqual([pin]);
     expect(entry().executor).toBe('review-category-contract');
+  });
+
+  it('names a finalized version the editor emptied as not taking part, under its type, without refusing the others', async () => {
+    const emptied = await create();
+    rewrite(emptied.documentId, () => '');
+    await store.saveProductionDocumentVersion({ bookId: book.bookId, documentId: emptied.documentId, branchId: document(emptied.documentId).branchId });
+    phase(emptied.documentId, 'start'); phase(emptied.documentId, 'complete');
+    expect(entry().executor).toBe('unavailable');
+    expect(entry().unavailableReason).toBe('「新闻稿」：定稿版本没有可比对的文字');
+    const other = await create('review-article');
+    await finalize(other.documentId);
+    expect(entry().executor).toBe('review-category-contract');
+    expect(reading().participants.map((participant) => participant.documentId)).toEqual([other.documentId]);
+    expect(reviewCategoryBasisStatement(entry()).includes('未参与《新闻稿》：定稿版本没有可比对的文字')).toBe(true);
   });
 
   it('refuses a corrupt eligible record with the record reason', async () => {
