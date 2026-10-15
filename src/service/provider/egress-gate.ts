@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
 import type { OutboundDataCategoryId } from '../../shared/protocol.js';
+import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES } from '../../shared/protocol.js';
+import { graphemeLength, writingMaterialDigest } from '../writing-tasks.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { assistantToolCalls, messageText, toolResultOf, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
 import {
@@ -123,6 +125,9 @@ export interface EgressBindingFacts {
    * every other binding, which then reads exactly as before.
    */
   readonly contractCategories?: ReadonlySet<OutboundDataCategory>;
+  /** Bounded material words assembled by the wrapper, checked against the Task's exact frozen pins. */
+  readonly materialExcerpts?: ReadonlyArray<{ readonly title: string; readonly paragraphs: ReadonlyArray<string> }>;
+  readonly frozenMaterialDigests?: ReadonlySet<string>;
   /**
    * The platform tools the binding's Provider Processing rule names (ADR 0080 §7.5), read from the rule by
    * `readPlatformToolsRule`; absent or `null` when the rule names none — as Provider Processing v9's one rule names none —
@@ -420,6 +425,20 @@ export function evaluateEgress(
   if (binding.route !== LOCAL_DETERMINISTIC_ROUTE && [...(binding.contractCategories ?? [])].some((category) =>
     !(binding.ruleOutboundCategories?.has(category) ?? false))) {
     return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
+  }
+  if (binding.contractCategories?.has('frozen-material-reference-excerpt') || binding.materialExcerpts !== undefined || binding.frozenMaterialDigests !== undefined) {
+    const materials = binding.materialExcerpts ?? [];
+    const pins = binding.frozenMaterialDigests ?? new Set<string>();
+    let total = 0;
+    if (!binding.contractCategories?.has('frozen-material-reference-excerpt') || materials.length < 1 || materials.length > MAX_WRITING_MATERIALS ||
+        pins.size < 1 || pins.size > MAX_WRITING_MATERIALS || materials.some((material) => {
+          const characters = material.paragraphs.reduce((count, paragraph) => count + graphemeLength(paragraph), 0);
+          total += characters;
+          return material.title.trim().length === 0 || characters < 1 || characters > MAX_WRITING_MATERIAL_GRAPHEMES ||
+            !pins.has(writingMaterialDigest(material.paragraphs));
+        }) || total > MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES) {
+      return refuse('payload-out-of-scope', '参考资料的文字不在计划冻结的资料摘要或字数范围内；未发送任何内容。');
+    }
   }
   if (payload.provider !== binding.route) return refuse('route-mismatch', '请求路由与执行绑定不一致；未发送任何内容。');
   if (payload.model !== binding.model) return refuse('model-mismatch', '请求模型与执行绑定不一致；未发送任何内容。');

@@ -11,6 +11,7 @@ import {
   type EgressBindingFacts,
 } from '../../src/service/provider/egress-gate.js';
 import type { AssembledModelPayload } from '../../src/service/provider/payload.js';
+import { writingMaterialDigest } from '../../src/service/writing-tasks.js';
 
 // The gate must see the complete assembled payload and compare every datum with the binding. These
 // payloads are synthetic: fixed system text, two admitted unit messages, and one accepted output.
@@ -60,6 +61,26 @@ function payload(overrides: Partial<AssembledModelPayload> = {}): AssembledModel
 }
 
 describe('evaluateEgress', () => {
+  it('admits bounded material only with its category and frozen digest, refusing other words or over-bound excerpts', () => {
+    const materials = [{ title: '合成资料', paragraphs: ['合成资料文字。'] }];
+    const live: EgressBindingFacts = { ...binding(DEEPSEEK_ROUTE),
+      policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v11', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+      ruleOutboundCategories: new Set(['public-or-synthetic', 'frozen-material-reference-excerpt']),
+      contractCategories: new Set(['frozen-material-reference-excerpt']), materialExcerpts: materials,
+      frozenMaterialDigests: new Set(materials.map((material) => writingMaterialDigest(material.paragraphs))) };
+    const remote = payload({ provider: live.route, model: live.model, messages: [user(UNIT_1)] });
+    const within = { ...scope(), ceilingState: () => 'within' as const };
+    expect(evaluateEgress(remote, live, within).decision).toBe('transmit-remote');
+    expect(evaluateEgress(remote, { ...live, ruleOutboundCategories: new Set(['public-or-synthetic']) }, within))
+      .toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
+    expect(evaluateEgress(remote, { ...live, frozenMaterialDigests: new Set(['f'.repeat(64)]) }, within))
+      .toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
+    expect(evaluateEgress(remote, { ...live, materialExcerpts: [{ title: '合成资料', paragraphs: ['另一份未冻结的文字。'] }] }, within).decision).toBe('refuse');
+    const tooLong = [{ title: '合成资料', paragraphs: ['合'.repeat(3_001)] }];
+    expect(evaluateEgress(remote, { ...live, materialExcerpts: tooLong, frozenMaterialDigests: new Set([writingMaterialDigest(tooLong[0]!.paragraphs)]) }, within).decision).toBe('refuse');
+    const many = Array.from({ length: 3 }, (_, index) => ({ title: `合成资料${index}`, paragraphs: ['合'.repeat(2_100)] }));
+    expect(evaluateEgress(remote, { ...live, materialExcerpts: many, frozenMaterialDigests: new Set(many.map((material) => writingMaterialDigest(material.paragraphs))) }, within).decision).toBe('refuse');
+  });
   it('admits the complete in-scope local-route payload as transmit-local with a payload digest', () => {
     const decision = evaluateEgress(payload(), binding(), scope());
     expect(decision).toEqual({ decision: 'transmit-local', payloadDigest: payloadDigest(payload()) });

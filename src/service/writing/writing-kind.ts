@@ -10,6 +10,7 @@ import {
   type WritingResultProjection,
 } from '../../shared/protocol.js';
 import { AnalysisError, canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { materialContractDefinition, taskMaterialSources, taskMaterialWords, type TaskMaterialSource } from '../task-material-references.js';
 import { countByClass, modeIndex, type AnalysisKindDefinition, type AnalysisModeDefinition } from '../analysis/kind-definition.js';
 import { PRE_ASSURANCE_SAMPLE, type ClosedUnitOutcome } from '../analysis/reducers.js';
 import { carryPositionalResult } from '../analysis/reused-result.js';
@@ -143,16 +144,14 @@ export function writingRecordedKindDefinition(
  * The writing kind of one frozen contract, under the copy rules it was recorded with: `/2` for every Task prepared now, `/1` for
  * a Task recorded under #688's contract, which its parse keeps judging under `/1`'s sizes (the Commander's ruling on #704 P2-2).
  */
-export function writingKindDefinition(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES): AnalysisKindDefinition {
+export function writingKindDefinition(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES, materialSources?: ReadonlyArray<TaskMaterialSource>): AnalysisKindDefinition {
   const contract = writingContract(input, rules);
   const promptContractDigest = writingContractDigest(contract);
   const frozen = contract.input;
   const exemplars = { count: frozen.exemplars.length, statement: writingExemplarLine(frozen.type.label, frozen.exemplars) };
-  return {
+  const definition: AnalysisKindDefinition = {
     kind: WRITING_KIND,
-    // Live validation items are numbered under writing's own slice (#810), and live admission re-derives the frozen contract. A
-    // contract carrying 资料库 text offers no derivation: no rule of this wave names frozen material (v11
-    // `materialReferencesAllowed: false`), so the shared admission refuses it beside the store's own refusal.
+    // A material contract needs the Task's exact pins as well as its frozen words to admit live transmission.
     liveItemSlice: 'S84',
     ...(frozen.materials === undefined ? { livePromptContractDigest: () => writingContractDigest(contract) } : {}),
     contractVersion: WRITING_CONTRACT_VERSION,
@@ -230,4 +229,25 @@ export function writingKindDefinition(input: WritingContractInput, rules: Writin
     conflictCountOf: () => 0,
     mode: modeIndex(MODES),
   };
+  if (frozen.materials === undefined || materialSources === undefined) return definition;
+  const sources = taskMaterialSources(materialSources);
+  requireMaterialPins();
+  function requireMaterialPins(): void {
+    if (sources.length !== frozen.materials!.length) throw new AnalysisError('TASK_MATERIAL_RECORD_INVALID', '写作参考资料与计划不一致。');
+    for (const [index, source] of sources.entries()) {
+      const material = frozen.materials![index]!;
+      if (source.title !== material.title) throw new AnalysisError('TASK_MATERIAL_RECORD_INVALID', '写作参考资料与计划不一致。');
+      taskMaterialWords(source, material.paragraphs);
+    }
+  }
+  return materialContractDefinition(definition, () => {
+    requireMaterialPins();
+    const { materials: _materials, ...baseInput } = frozen;
+    return {
+      sources, materials: frozen.materials!,
+      basePromptContractDigest: writingContractDigest(writingContract(baseInput, rules)),
+      promptContractDigest: writingContractDigest(writingContract(frozen, rules)),
+      systemPrompt: writingContract(frozen, rules).systemPrompt,
+    };
+  });
 }

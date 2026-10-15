@@ -3,6 +3,7 @@ import { EVALUATION_REWRITE_KIND, INITIAL_EVALUATION_KIND, READERS_REPORT_KIND, 
 import type { OutboundDataCategory } from '../provider/egress-gate.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../review/review-category-kind.js';
+import { liveMaterialContract } from '../task-material-references.js';
 
 /** The rule facts a live step reads from the one selected rule that admitted its kind. */
 export interface LiveKindRule {
@@ -27,6 +28,7 @@ export interface LiveKindDefinition {
   readonly promptContractDigest: string;
   readonly livePromptContractDigest?: () => string;
   readonly materialReferences?: unknown;
+  readonly systemPrompt?: string;
 }
 
 /** What the kind's own owner says its live contract must be. */
@@ -51,15 +53,21 @@ export function liveKindRule(
       policy.operationalScope !== 'developer-live' || !policy.providerProcessing.liveTransmissionAllowed ||
       policy.providerProcessing.decision !== 'eligible-only' ||
       policy.providerProcessing.authorizedLiveTransmissionCount !== 'bounded-by-run') return null;
-  const rules = (policy.providerProcessing.admittedRules ?? []).filter((rule) =>
-    rule.taskKinds.includes(kind) && requiredCategories.every((category) => rule.outboundDataCategories.includes(category)));
-  return rules.length === 1 ? rules[0]! : null;
+  const rules = (policy.providerProcessing.admittedRules ?? []).filter((rule) => rule.taskKinds.includes(kind));
+  const rule = rules.length === 1 ? rules[0]! : null;
+  return rule !== null && requiredCategories.every((category) => rule.outboundDataCategories.includes(category)) ? rule : null;
+}
+
+/** Material eligibility is a term of the kind's one selected rule, never a second rule. */
+export function liveMaterialRule(policy: LaunchPolicyProjection | undefined, kind: string): AdmittedProviderRule | null {
+  const rule = liveKindRule(policy, kind, ['frozen-material-reference-excerpt']);
+  // The successor policy owner projects this flag; absent in predecessor projections means denied.
+  return rule !== null && rule.materialReferencesAllowed === true ? rule : null;
 }
 
 /**
  * The shared execution owner admits a kind live only under its one rule, on that rule's exact Provider binding, for the
- * exact contract the kind's owner re-derives, and never with Material References: a material wrapper changes the
- * contract and no rule of this wave names frozen material.
+ * exact contract the kind's owner re-derives. Material wrappers additionally prove their base and frozen words.
  */
 export function liveKindAdmitted(
   policy: LaunchPolicyProjection | undefined,
@@ -68,9 +76,13 @@ export function liveKindAdmitted(
   binding: LiveKindBinding,
   expectation: LiveKindExpectation,
 ): LiveKindRule | null {
-  if (definition.kind !== kind || definition.materialReferences !== undefined || expectation.promptContractDigest === null ||
-      expectation.promptContractDigest !== definition.promptContractDigest) return null;
-  const rule = liveKindRule(policy, kind, expectation.payloadCategories);
+  const material = liveMaterialContract(definition);
+  if (definition.kind !== kind || (definition.materialReferences !== undefined && material === null) || expectation.promptContractDigest === null) return null;
+  if (material === null ? expectation.promptContractDigest !== definition.promptContractDigest
+    : material.promptContractDigest !== definition.promptContractDigest || material.systemPrompt !== definition.systemPrompt ||
+      material.basePromptContractDigest !== expectation.promptContractDigest) return null;
+  if (material !== null && liveMaterialRule(policy, kind) === null) return null;
+  const rule = liveKindRule(policy, kind, [...expectation.payloadCategories, ...(material === null ? [] : ['frozen-material-reference-excerpt'] as const)]);
   if (kind === reviewCategoryKindId('cross-deliverable-consistency') &&
       rule?.editorialDeliverablesAllowed !== true) return null;
   if (rule === null || rule.route !== binding.route || rule.endpoint !== binding.endpoint || rule.model !== binding.model ||
@@ -84,7 +96,7 @@ export function liveKindAdmitted(
   };
 }
 
-/** The outbound categories each evaluation contract's payload carries (#841 revision 2; no frozen material this wave). */
+/** The base evaluation payload categories; the material wrapper adds its category when present. */
 export const EVALUATION_PAYLOAD_CATEGORIES: Readonly<Record<string, readonly OutboundDataCategory[]>> = {
   // The house Evaluation Profile and the manuscript.
   [INITIAL_EVALUATION_KIND]: ['public-or-synthetic'],
@@ -96,8 +108,8 @@ export const EVALUATION_PAYLOAD_CATEGORIES: Readonly<Record<string, readonly Out
 
 /**
  * The outbound categories the writing contract's payload carries (#810, the v11 writing rule): the manuscript, the Book's frozen
- * metadata and synopsis with the editor's audience, channel and requirements, and the house's 范例 of the type. No frozen
- * material this wave.
+ * metadata and synopsis with the editor's audience, channel and requirements, and the house's 范例 of the type. The material
+ * wrapper adds its category when present.
  */
 export const WRITING_PAYLOAD_CATEGORIES: readonly OutboundDataCategory[] = ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt'];
 
@@ -127,7 +139,9 @@ function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectatio
     };
   }
   const planned = plannedPayloadCategories(definition.kind);
-  if (planned !== undefined) return { promptContractDigest: definition.livePromptContractDigest?.() ?? null, payloadCategories: planned };
+  // Only 初评 and 审稿意见 have evaluation material wrappers; rewriting an editor's scores has none.
+  if (definition.kind === EVALUATION_REWRITE_KIND && liveMaterialContract(definition) !== null) return null;
+  if (planned !== undefined) return { promptContractDigest: liveMaterialContract(definition)?.basePromptContractDigest ?? definition.livePromptContractDigest?.() ?? null, payloadCategories: planned };
   return null;
 }
 
@@ -142,6 +156,7 @@ export function liveKindAdmission(
 }
 
 /** The categories a kind's payload carries besides the binding's own public or synthetic material. */
-export function liveKindContractCategories(kind: string): readonly OutboundDataCategory[] {
-  return (plannedPayloadCategories(kind) ?? []).filter((category) => category !== 'public-or-synthetic');
+export function liveKindContractCategories(kind: string, definition?: LiveKindDefinition): readonly OutboundDataCategory[] {
+  return [...(plannedPayloadCategories(kind) ?? []).filter((category) => category !== 'public-or-synthetic'),
+    ...(definition === undefined || liveMaterialContract(definition) === null ? [] : ['frozen-material-reference-excerpt'] as const)];
 }
