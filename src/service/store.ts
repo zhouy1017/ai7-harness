@@ -8635,7 +8635,8 @@ export class EditorialStore {
         const unknown = this.#authority.prepare(
           `SELECT count(*) AS records, count(DISTINCT book_id) AS books FROM evaluation_records
            WHERE profile_sha256 <> ?
-             AND profile_sha256 NOT IN (SELECT json_extract(canonical_json, '$.profile.sha256') FROM evaluation_profile_versions)`,
+             AND profile_sha256 NOT IN (SELECT json_extract(canonical_json, '$.profile.sha256') FROM evaluation_profile_versions
+                                        WHERE json_extract(canonical_json, '$.profile.sha256') IS NOT NULL)`,
         ).get(evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE))!;
         if (Number(unknown.records) > 0) profiles.push({
           profileId: EVALUATION_PROFILE_UNKNOWN_ID, title: EVALUATION_PROFILE_UNKNOWN_TITLE, version: '—', issuer: '',
@@ -15886,7 +15887,7 @@ export class EditorialStore {
     // and past ten of them the house offset as the 定稿 evaluations give it now (EVAL-011a), recomputed at every read.
     const house = this.#evaluations.calibration();
     const { adjustments, unreadable: unreadableBooks } = house;
-    const profileItems = this.#evaluations.profile().items;
+    const profileItems = this.#evaluations.calibrationScale().items;
     const where = 'EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id)';
     const rows = (after === null
       ? this.#authority.prepare(`SELECT b.book_id, b.title FROM books b WHERE ${where} ORDER BY b.title, b.book_id LIMIT ?`).all(MAX_EVALUATION_CALIBRATION_BOOKS + 1)

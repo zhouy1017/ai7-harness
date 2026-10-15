@@ -985,8 +985,9 @@ export class EvaluationRecords {
    * The house profile the calibration offsets are scaled to (EVAL-011a). A damaged `evaluation_profile_versions` row must
    * not fail 设置's whole-house calibration read (Issue #798, P3-1): fall back to AI7's built-in scale, as the #702 review
    * kept a damaged version out of the count per Book. A start under such a profile still fails with the profile's own words.
+   * 设置's projection of the offsets reads the same scale, so the items it lists are the ones the offsets were computed on.
    */
-  #calibrationScale(): EvaluationProfileProjection {
+  calibrationScale(): EvaluationProfileProjection {
     try {
       return this.profile();
     } catch (error) {
@@ -1648,7 +1649,7 @@ export class EvaluationRecords {
     const damaged = new Set<string>();
     /** Each Book's (editor − AI7 raw) by item, of its latest 定稿 version begun from AI7's 初评 read so far. */
     const basis = new Map<string, ReadonlyMap<string, number>>();
-    const maxima = new Map(this.#calibrationScale().items.map((item) => [item.itemId, item.fullMarks]));
+    const maxima = new Map(this.calibrationScale().items.map((item) => [item.itemId, item.fullMarks]));
     const rows = this.#db.prepare(
       'SELECT r.* FROM evaluation_records r JOIN evaluation_initial_drafts d ON d.record_id = r.record_id ORDER BY r.book_id, r.ordinal',
     ).all() as SqlRow[];
