@@ -1733,13 +1733,14 @@ export class BaselineAnalysisStore {
      * a drift of it. The launch sets none outside developer-live, where the launch's is the one there is.
      */
     editorCeiling: RunBudgetCeilingState = 'unset',
+    frozenProductionBinding?: MaterialPlanInputsProjection['providerBinding'],
   ): MaterialPlanInputsProjection {
     const connection = this.#db.prepare(
       `SELECT provider_id, model_id, adapter_revision, configuration_revision, credential_reference
        FROM model_service_connections WHERE connection_id = 'main-editorial-deepseek-v4-pro'`,
     ).get() as SqlRow | undefined;
     // A live binding names its own route and reference; ordinary production's may be the Go row alone (Issue #811).
-    requireAnalysis(connection !== undefined || this.#launch.live !== null, 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的凭据引用元数据。');
+    requireAnalysis(frozenProductionBinding !== undefined || connection !== undefined || this.#launch.live !== null, 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的凭据引用元数据。');
     // Drift is a comparison of like with like: the re-derivation must name the binding this launch
     // binds, exactly as the freeze did. Under developer-live that is the live route, its development
     // Credential Reference, and the launch form's ceiling — not the production connection row, whose
@@ -1755,7 +1756,7 @@ export class BaselineAnalysisStore {
     requireAnalysis(pin !== undefined, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案。');
     const latest = this.#isInitial(mode) ? undefined : this.#revisionRows(bookId).at(-1);
     return {
-      providerBinding: live === null
+      providerBinding: frozenProductionBinding ?? (live === null
         ? {
             providerId: asString(connection!.provider_id),
             // The denied production binding a development-ci plan freezes names the model Issue #712 named; since revision 72
@@ -1771,7 +1772,7 @@ export class BaselineAnalysisStore {
             adapterRevision: 1,
             configurationRevision: 1,
             credentialReference: live.credentialReference,
-          },
+          }),
       artifactPin: {
         identity: asString(pin.native_artifact_id),
         version: asString(pin.artifact_version),
@@ -1782,7 +1783,7 @@ export class BaselineAnalysisStore {
       selectedRange: this.#definition.mode(mode).rangeBound ? selectedRange : null,
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
       runBudgetCeiling: live === null || live.scope === 'ordinary-production' ? editorCeiling : resolveDeveloperLiveCeiling(live.runBudgetCeiling, unitCount),
-      outboundDataCategory: live?.scope === 'ordinary-production' ? 'unpublished-excerpts' : 'public-or-synthetic',
+      outboundDataCategory: this.#launch.operationalScope === 'ordinary-production' ? 'unpublished-excerpts' : 'public-or-synthetic',
       expectedOutcome: this.#definition.expectedOutcome,
     };
   }
@@ -4353,7 +4354,9 @@ export class BaselineAnalysisStore {
     const frozen = materialPlanInputsOfComponents(plan, intent.record);
     const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
     const live = this.#currentMaterialInputs(intent.bookId, intent.mode, frozen.selectedRange, manifest.units.length,
-      planEditCeiling(this.#planEditsOf(intent.taskIntentId, version.ordinal)));
+      planEditCeiling(this.#planEditsOf(intent.taskIntentId, version.ordinal)),
+      // An authorized production Run owns its connection; settings select the next Task's connection (#811 revision 9).
+      this.#launch.operationalScope === 'ordinary-production' ? frozen.providerBinding : undefined);
     return diffMaterialPlanInputs(frozen, live).map((entry) => entry.label);
   }
 

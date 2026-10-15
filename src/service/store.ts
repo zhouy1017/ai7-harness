@@ -1,5 +1,6 @@
 import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
+import { allowedProductionBindingOf, type ConfiguredProviderBinding } from './launch-policy.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES } from '../shared/protocol.js';
 import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
@@ -5421,7 +5422,7 @@ export class EditorialStore {
     input: InspectTaskPlanInput,
     progress?: ProgressReader,
     carriesStoppedRun: (runRecordId: string) => boolean = () => true,
-  ): { plan: TaskPlanProjection; routeKind: string | null } {
+  ): { plan: TaskPlanProjection; routeKind: string | null; provider?: NonNullable<BaselineAnalysisProjection['providerResolutionPlan']> } {
     const found = this.#taskPlanOfKind(input, progress, carriesStoppedRun);
     // 结果待确认 a completed Run of this kind left on the Book (Issue #757): listed on whichever of its plans is open.
     if (input.kind === 'fixed-task') return found;
@@ -5432,7 +5433,7 @@ export class EditorialStore {
     input: InspectTaskPlanInput,
     progress?: ProgressReader,
     carriesStoppedRun: (runRecordId: string) => boolean = () => true,
-  ): { plan: TaskPlanProjection; routeKind: string | null } {
+  ): { plan: TaskPlanProjection; routeKind: string | null; provider?: NonNullable<BaselineAnalysisProjection['providerResolutionPlan']> } {
     this.#assertAvailable();
     requireStore(typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) && TASK_PLAN_KINDS.includes(input.kind) &&
       (input.ref === null || (typeof input.ref === 'string' && UUID_PATTERN.test(input.ref))), 'TASK_PLAN_INVALID', '任务计划请求无效。');
@@ -5463,7 +5464,7 @@ export class EditorialStore {
       // 结果待确认 (Issue #51, S16c): the ranges this Task would send again whose earlier result could not be known.
       const resendUnits = this.#analysisCall(() => this.#baselineAnalysis.resendUnitsOf(projection));
       const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, resendUnits, ...(stopped === null ? {} : { stopped }) }));
-      return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     if (input.kind === 'readers-report') {
       // 审稿意见 (Issue #429, S81c): the reader's report kind's latest Task, on the ledger of the contract its plan froze.
@@ -5490,7 +5491,7 @@ export class EditorialStore {
           }),
         },
       }));
-      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(latest.ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(latest.ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     if (input.kind === 'evaluation-rewrite') {
       // 按我的评分重写评语 (Issue #429, S81b2): the rewrite kind's latest Task, on the ledger of the contract its plan froze.
@@ -5511,7 +5512,7 @@ export class EditorialStore {
           scored: evaluationRewriteScoredItems(latest.task.input).map((item) => ({ label: item.label, score: item.score!, fullMarks: item.fullMarks })),
         },
       }));
-      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     if (input.kind === 'writing') {
       // 写作任务 (Issue #432, S84a): the writing kind's latest Task, on the ledger of the contract its plan froze.
@@ -5526,7 +5527,7 @@ export class EditorialStore {
         projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable, copyRules: latest.task.copyRules, defaultRule,
         materials: latest.task.materials,
       }));
-      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     if (input.kind === 'initial-evaluation') {
       // AI7 初评 (Issue #429, S81b1): the evaluation kind's latest Task, read as the baseline's is.
@@ -5539,7 +5540,7 @@ export class EditorialStore {
       // The profile the Task froze (Issue #427), never the house's current one, beside the references its plan froze (#428).
       const profile = this.#initialProfileForTask(projection.taskIntent.taskIntentId);
       const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
-      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
@@ -5556,7 +5557,8 @@ export class EditorialStore {
       .find((kind): kind is string => typeof kind === 'string');
     // Whether the Run can be offline is its route's to say, as the baseline's (Issue #760, S74c): a route that reaches its model
     // over the network — and only one — waits for it. Whether it needs a credential is `needsModelConnection`'s, decided apart.
-    return { plan, routeKind: frozenRoute ?? null };
+    const provider = facts.categories.map((category) => category.task?.components['provider-resolution-plan']).find((value) => value !== undefined);
+    return { plan, routeKind: frozenRoute ?? null, ...(provider === undefined ? {} : { provider: provider as NonNullable<BaselineAnalysisProjection['providerResolutionPlan']> }) };
   }
 
   /**
@@ -5568,13 +5570,14 @@ export class EditorialStore {
    */
   async inspectTaskPlanWithConnection(
     input: InspectTaskPlanInput,
-    credentialReadiness: () => Promise<'present' | 'missing' | null>,
+    credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>,
     connectivity: TaskPlanConnectivity = ALWAYS_ONLINE,
     progress?: ProgressReader,
   ): Promise<TaskPlanProjection> {
-    const { plan: frozen, routeKind } = this.#taskPlanWithRoute(input, progress, (runRecordId) => connectivity.carriesStoppedRun?.(runRecordId) ?? true);
+    const { plan: frozen, routeKind, provider } = this.#taskPlanWithRoute(input, progress, (runRecordId) => connectivity.carriesStoppedRun?.(runRecordId) ?? true);
+    const binding = this.#productionCredentialBinding(provider);
     let plan = frozen;
-    if (plan.start.needsModelConnection && plan.start.readiness === 'ready') plan = withConnectionReadiness(plan, await credentialReadiness());
+    if (plan.start.needsModelConnection && plan.start.readiness === 'ready') plan = withConnectionReadiness(plan, await credentialReadiness(binding));
     // Connectivity (Issue #502): only a plan whose route reaches its model over the network can be offline,
     // and only once its credential is known to be there — 模型未连接 is decided first.
     const reaches = routeKind !== null && connectivity.reachesNetwork(routeKind);
@@ -5585,7 +5588,7 @@ export class EditorialStore {
     if (plan.runControl?.resume != null) {
       const blockers: string[] = [];
       if (connectivity.slotBusy()) blockers.push(RESUME_BLOCKED_SLOT);
-      if (plan.start.needsModelConnection && (await credentialReadiness()) === 'missing') blockers.push(RESUME_BLOCKED_CONNECTION);
+      if (plan.start.needsModelConnection && (await credentialReadiness(binding)) === 'missing') blockers.push(RESUME_BLOCKED_CONNECTION);
       if (reaches && connectivity.reading() === 'offline') blockers.push(RESUME_BLOCKED_OFFLINE);
       plan = withResumeBlockers(plan, blockers);
     }
@@ -5594,14 +5597,40 @@ export class EditorialStore {
     // model over the network. A busy slot only queues it.
     if (plan.state.key === 'awaiting-clarification') {
       const blockers: string[] = [];
-      if (plan.start.needsModelConnection && (await credentialReadiness()) === 'missing') blockers.push(ANSWER_BLOCKED_CONNECTION);
+      if (plan.start.needsModelConnection && (await credentialReadiness(binding)) === 'missing') blockers.push(ANSWER_BLOCKED_CONNECTION);
       if (reaches && connectivity.reading() === 'offline') blockers.push(ANSWER_BLOCKED_OFFLINE);
       plan = withAnswerBlockers(plan, blockers);
     }
     if (plan.state.key !== 'waiting') return plan;
     if (reaches && connectivity.reading() === 'offline') return withWaitingReason(plan, 'network');
-    if ((await credentialReadiness()) === 'missing') return withWaitingReason(plan, 'connection');
+    if ((await credentialReadiness(binding)) === 'missing') return withWaitingReason(plan, 'connection');
     return withWaitingReason(plan, connectivity.slotBusy() ? 'slot' : 'admitting');
+  }
+
+  /** The frozen plan's credential metadata for production readiness; other scopes keep their launch binding. */
+  #productionCredentialBinding(provider: NonNullable<BaselineAnalysisProjection['providerResolutionPlan']> | undefined): ConfiguredProviderBinding | null | undefined {
+    if (this.#baselineAnalysis.launch.operationalScope !== 'ordinary-production') return undefined;
+    if (provider === undefined || !('endpoint' in provider.executionRoute)) return null;
+    const binding = { route: provider.executionRoute.kind, endpoint: provider.executionRoute.endpoint,
+      model: provider.executionRoute.model, credentialSlot: provider.remoteBinding.credentialSlot,
+      credentialReference: provider.remoteBinding.credentialReference };
+    return allowedProductionBindingOf(binding) === null ? null : binding;
+  }
+
+  /** Reconnect asks about this Run's frozen plan, never the currently selected connection (#811 revision 9). */
+  taskCredentialBinding(input: InspectTaskPlanInput, runRecordId?: string): ConfiguredProviderBinding | null | undefined {
+    if (this.#baselineAnalysis.launch.operationalScope !== 'ordinary-production') return undefined;
+    if (runRecordId !== undefined && input.kind !== 'review-run') {
+      // Read the authorized version even if a newer Task replaced it: the drift check must still be able to block that Run.
+      const row = this.#authority.prepare(`SELECT p.canonical_json FROM analysis_run_records r
+        JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
+        JOIN analysis_plan_versions v ON v.plan_envelope_sha256 = a.plan_envelope_sha256
+        JOIN analysis_plan_records p ON p.task_intent_id = v.task_intent_id AND p.plan_version = v.ordinal
+        WHERE r.run_record_id = ? AND p.component = 'provider-resolution-plan'`).get(runRecordId) as SqlRow | undefined;
+      requireStore(row !== undefined, 'ANALYSIS_RECORD_INVALID', '运行授权绑定的模型服务计划缺失。');
+      return this.#productionCredentialBinding(parseStoredJson(asString(row.canonical_json), '运行授权绑定的模型服务计划无效。') as NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>);
+    }
+    return this.#productionCredentialBinding(this.#taskPlanWithRoute(input).provider);
   }
 
   #taskPlanCall<T>(operation: () => T): T {
@@ -6286,7 +6315,7 @@ export class EditorialStore {
     taskIntentId: string,
     planEnvelopeDigest: string,
     ruleVersionId: string,
-    runtime: { credentialReadiness: () => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
+    runtime: { credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
   ): Promise<{ outcome: 'started' | 'fell-back'; reasons: ReadonlyArray<string>; dispatchRunRecordId: string | null }> {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) && UUID_PATTERN.test(ruleVersionId),
@@ -10118,7 +10147,7 @@ export class EditorialStore {
     taskIntentId: string,
     planEnvelopeDigest: string,
     ruleVersionId: string,
-    runtime: { credentialReadiness: () => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
+    runtime: { credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
   ): Promise<{ outcome: 'started' | 'fell-back'; reasons: ReadonlyArray<string>; dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore | null }> {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) && UUID_PATTERN.test(ruleVersionId),
@@ -15628,7 +15657,7 @@ export class EditorialStore {
     );
     const credentialReference = asString(row.credential_reference);
     requireStore(
-      UUID_PATTERN.test(credentialReference),
+      UUID_PATTERN.test(credentialReference) && !DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReference.toLowerCase()),
       'STORE_CORRUPT',
       '模型服务凭据引用无效。',
     );

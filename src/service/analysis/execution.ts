@@ -8,10 +8,12 @@ import {
   ACTIVE_SET_VERSION,
   DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION,
   ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION,
+  allowedProductionBindingOf,
   isOrdinaryProductionRuntime,
   type DeveloperLiveRuntime,
   type LiveRuntime,
   type OrdinaryProductionRuntime,
+  type ConfiguredProviderBinding,
 } from '../launch-policy.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { evaluateRunBudgetCeiling, totalTokens, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
@@ -157,6 +159,8 @@ export interface ExecutionOwnerDependencies {
    * Absent, `launchPolicy` is the launch's for good, as under every other scope.
    */
   readonly currentLaunchPolicy?: () => LaunchPolicyProjection;
+  /** Re-resolve the verified policy for an authorized production Run's frozen connection, independently of settings. */
+  readonly productionPolicyFor?: (binding: ConfiguredProviderBinding) => Promise<LaunchPolicyProjection>;
   /** J-10's unit hold (Issue #422); absent in every other launch, where a unit settles as soon as its turn returns. */
   readonly unitHold?: UnitHold | null;
   /**
@@ -624,7 +628,7 @@ export class BaselineAnalysisExecutionOwner {
   #requireLaunchOf(ledger: BaselineAnalysisStore): LiveRuntime | null {
     const live = this.#live();
     const production = isOrdinaryProductionRuntime(live);
-    if (live !== null && ledger.definition.kind !== BASELINE_ANALYSIS_KIND && liveRuleOf(ledger) === null) {
+    if (live !== null && !production && ledger.definition.kind !== BASELINE_ANALYSIS_KIND && liveRuleOf(ledger) === null) {
       throw new ExecutionAdmissionError('EXECUTION_KIND_NOT_ADMITTED', production
         ? (ledger.launch.live === null ? MODEL_SERVICE_SETUP_REQUIRED_REASON : 'ordinary-production 当前未准许该任务种类实时执行。')
         : 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
@@ -660,13 +664,14 @@ export class BaselineAnalysisExecutionOwner {
    * not start is never recorded. The value is resolved and discarded by the broker. `null` under
    * development-ci, whose routes transmit nothing and so need no credential.
    */
-  async liveCredentialReadiness(): Promise<'present' | 'missing' | null> {
+  async liveCredentialReadiness(binding?: ConfiguredProviderBinding | null): Promise<'present' | 'missing' | null> {
     const live = this.#live();
     if (live === null) return null;
     if (isOrdinaryProductionRuntime(live)) {
       // The editor's configured connection (Issue #811); none configured reads as missing, which is 需设置.
-      const configured = this.#deps.ledger.launch.live;
-      return configured === null ? 'missing' : this.#broker.checkPlanReadiness(configured.credentialSlot, configured.credentialReference);
+      const configured = binding === undefined ? this.#deps.ledger.launch.live : binding;
+      const allowed = allowedProductionBindingOf(configured);
+      return configured === null || allowed === null ? 'missing' : this.#broker.checkPlanReadiness(allowed.credentialSlot, configured.credentialReference);
     }
     return this.#broker.checkPlanReadiness(OPENCODE_GO_ROUTE_PROFILE.credentialSlot, DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE);
   }
@@ -1089,10 +1094,12 @@ export class BaselineAnalysisExecutionOwner {
     // suboperation at all. The owner itself is the same owner for every analysis kind.
     const definition: AnalysisKindDefinition = ledger.definition;
     const promptContractDigest = definition.promptContractDigest;
-    const policy = this.#policy();
     const live = this.#live();
     // Ordinary production (Issue #811): the Run's route is its plan's, from the editor's configured binding when it froze.
     const production = isOrdinaryProductionRuntime(live) ? live : null;
+    const policy = production !== null && facts.productionBinding !== null && this.#deps.productionPolicyFor !== undefined
+      ? await this.#deps.productionPolicyFor({ ...facts.productionBinding, credentialReference: facts.credentialReference })
+      : this.#policy();
     if (live === null) {
       if (policy.operationalScope !== 'development-ci' || policy.providerProcessing.version !== 'v1' || policy.providerProcessing.liveTransmissionAllowed !== false) {
         throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 development-ci · Provider Processing v1。');
@@ -1110,7 +1117,11 @@ export class BaselineAnalysisExecutionOwner {
     // The one selected rule that admitted a non-baseline kind live (Issue #429): its Model Role, its outbound categories and
     // whether the kind's own synthesis may be sent. `null` for the baseline, whose rule the policy-level terms read, and on
     // the deterministic route.
-    const admitted = live === null || definition.kind === BASELINE_ANALYSIS_KIND ? null : liveRuleOf(ledger);
+    const admitted = live === null || definition.kind === BASELINE_ANALYSIS_KIND ? null
+      : production !== null && facts.productionBinding !== null ? liveKindAdmission(policy, definition, facts.productionBinding) : liveRuleOf(ledger);
+    if (live !== null && definition.kind !== BASELINE_ANALYSIS_KIND && (admitted === null || admitted.modelRole !== 'Main Editorial Role')) {
+      throw new ExecutionAdmissionError('EXECUTION_KIND_NOT_ADMITTED', '当前策略未准许该任务种类实时执行。');
+    }
     const modelRole = admitted === null ? 'Main Editorial Role' : admitted.modelRole as CredentialSlotBinding['modelRole'];
     // The route the plan froze, resolved once — the deterministic fixture, or the live route profile — and the
     // ceiling it carries, already resolved: an explicit launch total, or the policy's per-frozen-unit default

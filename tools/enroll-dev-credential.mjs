@@ -159,6 +159,14 @@ async function readSecret(path) {
   return secret;
 }
 
+/** The silent store path, with injected carrier/file readers for provider-free tests; never used by the product. */
+export async function storeEnrollment(argv, deps = {}) {
+  const request = parseEnrollmentArguments(argv);
+  requireEnrollment(request.mode !== 'check' && !continuousIntegrationPresent(deps.env));
+  const entry = await openEntry(request.credentialReference, deps);
+  await entry.setPassword(await (deps.readSecret ?? readSecret)(request.fromFile));
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const request = parseEnrollmentArguments(argv);
@@ -168,9 +176,7 @@ async function main() {
     if (reading === 'unavailable') process.exitCode = 1;
     return;
   }
-  requireEnrollment(!continuousIntegrationPresent());
-  const entry = await openEntry(request.credentialReference);
-  await entry.setPassword(await readSecret(request.fromFile));
+  await storeEnrollment(argv);
 }
 
 const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);

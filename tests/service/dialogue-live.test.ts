@@ -3,9 +3,9 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
-import { DialogueExecutionOwner, dialogueLiveRoute, dialogueRouteRefusal, type DialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
+import { DialogueExecutionOwner, dialogueLiveRoute, dialogueRouteRefusal, productionDialogueRoute, type DialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import {
   DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL,
   DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL,
@@ -16,7 +16,7 @@ import { admittedDialogueRoute } from '../../src/service/dialogue/dialogue-route
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_SESSION_HEADER } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { PROVIDER_LEDGER_FILE, ProviderResultCache, isItemLine, type ProviderCacheEntry, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
@@ -135,6 +135,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const store of opened) {
     try { store.close(); } catch { /* closed by its test */ }
   }
@@ -337,6 +338,39 @@ describe('the admitted dialogue route, read from the selected policy', () => {
 });
 
 describe('就这段提问… on the live route (provider-free)', () => {
+  it('production dialogue sends repeated input twice without opening a development cache, then uses the newly selected route', async () => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '正式使用对话');
+    const go = store.saveModelServiceConnection('Go', null, 'ready', 'opencode-go');
+    const official = store.saveModelServiceConnection('官方', null, 'ready', 'deepseek-open-platform');
+    let reference = go.credentialReference;
+    let policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: reference });
+    const calls: StubCall[] = [];
+    const reads: string[] = [];
+    const cacheOpen = vi.spyOn(ProviderResultCache.prototype, 'open');
+    const dialogues = liveOwner(store, productionDialogueRoute({ scope: 'ordinary-production', nativeFetch: stubTransport(calls, () => ANSWER) },
+      () => policy, () => reference, { resolve: async (ref) => { reads.push(ref); return 'placeholder-production-key'; } }));
+    try {
+      const first = await ask(store, dialogues, book.bookId, selectionOf(store, book));
+      await next(store, dialogues, book.bookId, first.dialogueId, 'regenerate');
+      expect(calls).toHaveLength(2);
+      expect(calls[0]!.body === calls[1]!.body).toBe(true);
+      expect(calls.every((call) => call.url === ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0].endpoint)).toBe(true);
+      expect(reads.every((ref) => ref === go.credentialReference)).toBe(true);
+      reference = official.credentialReference;
+      policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[1], credentialReference: reference });
+      const last = await next(store, dialogues, book.bookId, first.dialogueId, 'regenerate');
+      expect(calls).toHaveLength(3);
+      expect(calls[2]!.url).toBe(ORDINARY_PRODUCTION_ALLOWED_BINDINGS[1].endpoint);
+      expect(reads.at(-1)).toBe(official.credentialReference);
+      expect(JSON.stringify(last).includes('placeholder-production-key')).toBe(false);
+      expect(cacheOpen).not.toHaveBeenCalled();
+      expect(await ledgerLines()).toEqual([]);
+    } finally {
+      await dialogues.dispose();
+    }
+  });
+
   it('streams before completion, keeps only complete stopped fragments, continues live, and holds an aborted request across cache reopen', async () => {
     const calls: StubCall[] = [];
     const first = '完整的第一句。';
@@ -792,6 +826,14 @@ describe('revision 72 (Issue #811)', () => {
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(LATEST_SCHEMA_VERSION).toBe(72);
+      // Revision 8 accepts nullable selection: two NULL rows coexist, but a second 1 or any other integer is refused.
+      expect(database.prepare('SELECT selected FROM model_service_connections ORDER BY connection_id').all()).toEqual([{ selected: 1 }, { selected: null }]);
+      expect(() => database.exec("UPDATE model_service_connections SET selected = 1 WHERE provider_id = 'opencode-go'")).toThrow();
+      expect(() => database.exec("UPDATE model_service_connections SET selected = 0 WHERE provider_id = 'opencode-go'")).toThrow();
+      database.exec('BEGIN');
+      database.exec('UPDATE model_service_connections SET selected = NULL');
+      expect(database.prepare('SELECT count(*) total FROM model_service_connections WHERE selected IS NULL').get()?.total).toBe(2);
+      database.exec('ROLLBACK');
       const sql = (database.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_execution_bindings'").get() as { sql: string }).sql;
       expect(sql.replace(/\s+/gu, ' ')).toBe(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings.replace(/\s+/gu, ' '));
       expect(database.prepare('SELECT rowid, * FROM dialogue_execution_bindings ORDER BY rowid').all().slice(0, rows.length)).toEqual(rows);

@@ -404,6 +404,7 @@ export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_c
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   credential_updated_at TEXT NOT NULL,
+  -- At most one selected row; unselected rows coexist as NULL (#811 brief revision 8).
   selected INTEGER UNIQUE CHECK(selected = 1),
   CHECK((connection_id = 'main-editorial-deepseek-v4-pro' AND provider_id = 'deepseek-open-platform' AND credential_slot = 'deepseek-api-key'
       AND model_id IN ('deepseek-v4-pro', 'deepseek-flash')) OR

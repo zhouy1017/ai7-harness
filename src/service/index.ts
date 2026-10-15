@@ -374,7 +374,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: await store.inspectTaskPlanWithConnection(request.input, () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
+        result: await store.inspectTaskPlanWithConnection(request.input, (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress),
       };
     // 保留为缺口 (Issue #757; Manual Outcome Resolution): recorded, and the plan read again as the drawer reads it.
     case 'resolveUnconfirmedOutcomes': {
@@ -386,7 +386,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: await store.inspectTaskPlanWithConnection(plan, () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
+        result: await store.inspectTaskPlanWithConnection(plan, (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress),
       };
     }
     case 'inspectForegroundExecutionBoundary':
@@ -485,7 +485,7 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: await store.inspectTaskPlanWithConnection({ bookId: request.input.bookId, kind: request.input.kind, ref: request.input.ref },
-          () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
+          (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress),
       };
     }
     case 'cancelWaitingTask': {
@@ -497,7 +497,7 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: await store.inspectTaskPlanWithConnection({ bookId: request.input.bookId, kind: request.input.kind, ref: request.input.ref },
-          () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
+          (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress),
       };
     }
     case 'cancelWaitingBaselineAnalysis': {
@@ -526,7 +526,7 @@ async function dispatch(
       try {
         const plan = await store.inspectTaskPlanWithConnection(
           { bookId: request.input.bookId, kind: 'baseline-analysis', ref: request.input.taskIntentId },
-          () => analysisExecution.liveCredentialReadiness(),
+          (binding) => analysisExecution.liveCredentialReadiness(binding),
           connectivity.planConnectivity,
           analysisProgress,
         );
@@ -565,7 +565,7 @@ async function dispatch(
       const runRecordId = store.continuableBaselineAnalysisRun(request.input.bookId, request.input.taskIntentId);
       const plan = await store.inspectTaskPlanWithConnection(
         { bookId: request.input.bookId, kind: 'baseline-analysis', ref: request.input.taskIntentId },
-        () => analysisExecution.liveCredentialReadiness(),
+        (binding) => analysisExecution.liveCredentialReadiness(binding),
         connectivity.planConnectivity,
         analysisProgress,
       );
@@ -606,7 +606,7 @@ async function dispatch(
         request.input.taskIntentId,
         request.input.planEnvelopeDigest,
         request.input.ruleVersionId,
-        { credentialReadiness: () => analysisExecution.liveCredentialReadiness(), connectivity: connectivity.planConnectivity },
+        { credentialReadiness: (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity: connectivity.planConnectivity },
       );
       if (started.dispatchRunRecordId !== null) {
         // Through the governor as 开始任务's start goes (Issue #49, S14): a quick start falls back while every place is
@@ -904,7 +904,7 @@ async function dispatch(
         request.input.taskIntentId,
         request.input.planEnvelopeDigest,
         request.input.ruleVersionId,
-        { credentialReadiness: () => analysisExecution.liveCredentialReadiness(), connectivity: connectivity.planConnectivity },
+        { credentialReadiness: (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity: connectivity.planConnectivity },
       );
       if (started.dispatchRunRecordId !== null && started.ledger !== null) {
         try {
@@ -1828,6 +1828,7 @@ async function run(): Promise<void> {
       developerLive,
       production,
       currentLaunchPolicy: () => launchPolicy,
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', binding),
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
       // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
       readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
@@ -1935,7 +1936,7 @@ async function run(): Promise<void> {
           block: (run, reasons, cause) => openStore.blockWaitingTaskRun(run, reasons, cause),
           reachesNetwork: developerLive !== null || production !== null || (connectivityPath !== undefined && fixture !== null),
           connectivity: reading,
-          credentialReadiness: () => owner.liveCredentialReadiness(),
+          credentialReadiness: (run) => owner.liveCredentialReadiness(openStore.taskCredentialBinding({ bookId: run.bookId, kind: run.kind, ref: run.ref }, run.runRecordId)),
           slotBusy: () => owner.busy,
           admit: (run) => {
             if (run.kind === 'review-run') {

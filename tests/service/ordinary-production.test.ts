@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -21,6 +24,10 @@ import {
   type ConfiguredProviderBinding,
 } from '../../src/service/launch-policy.js';
 import { loadModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
+import { ProviderResultCache } from '../../src/service/provider/provider-result-cache.js';
+import { transmitOnce } from '../../src/service/provider/live-transmission.js';
+import { OPENCODE_GO_ROUTE_PROFILE } from '../../src/service/provider/deepseek-adapter.js';
+import { OPENCODE_GO_V41_FLASH_PROFILE } from '../../src/service/provider/model-profile.js';
 import {
   ownBlockIdsOf,
   substituteAssuranceSamplingRefPlaceholders,
@@ -30,6 +37,7 @@ import {
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
+  BASELINE_ANALYSIS_MODE_GOALS,
   MODEL_SERVICE_SETUP_REQUIRED_REASON,
   type BaselineAnalysisProjection,
   type LaunchPolicyProjection,
@@ -64,6 +72,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  syncBuiltinESMExports();
   for (const owner of owners) await owner.dispose();
   for (const store of opened) {
     try {
@@ -147,6 +157,7 @@ function owner(store: EditorialStore, production: ProductionLaunch, nativeFetch:
     ledger: store.baselineAnalysisLedger,
     launchPolicy: production.policy,
     currentLaunchPolicy: () => production.policy,
+    productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding),
     fixture: null,
     // A local placeholder for the editor's own credential: the broker releases it to the transmit step alone.
     secretResolver: { resolve: async (reference) => { reads.push(reference); return 'placeholder-production-key'; } },
@@ -243,6 +254,20 @@ function code(operation: () => unknown): string {
 }
 
 describe('ordinary production over exact sample1 with a stub transport (Issue #811)', { timeout: 120_000 }, () => {
+  it.each(['opencode-go', 'deepseek-open-platform'] as const)('discloses %s transmission and metered usage with no default ceiling before authorization', async (route) => {
+    const { store, production } = await openProductionStore();
+    await configure(store, production, route);
+    const bookId = await sample1Book(store, 'L2 正式使用披露');
+    const prepared = prepare(store, bookId, production.policy);
+    const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: prepared.taskIntent!.taskIntentId });
+    expect(plan.start.needsModelConnection).toBe(true);
+    expect(plan.scope.send).not.toBe('不发送任何内容');
+    expect(plan.service.decision).toContain('本地正式生产');
+    expect(plan.service.send).toContain(route);
+    expect(plan.service.usage).toBe('发送到所选模型服务；模型用量按实际调用记录，未设任务运行预算上限');
+    const blocked = await store.inspectTaskPlanWithConnection({ bookId, kind: 'baseline-analysis', ref: prepared.taskIntent!.taskIntentId }, async () => 'missing');
+    expect(blocked.start.readiness).toBe('needs-connection');
+  });
   it('says 模型服务需设置 and prepares nothing until a route is configured', async () => {
     const { store, production } = await openProductionStore();
     expect(production.policy.providerProcessing).toMatchObject({ bindingState: 'setup-required', admittedRules: [], liveTransmissionAllowed: false });
@@ -294,35 +319,61 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v13' });
   });
 
-  it('never reads or writes a development cache beside it, and sends every request of two identical Tasks', async () => {
-    // A seeded development Provider Result Cache beside the instance, holding a ledger line; the production owner names no
-    // cache root at all, so it can neither read nor write one.
-    const cacheRoot = await mkdtemp(join(tmpdir(), 'ai7-provider-cache-seeded-'));
-    await mkdir(cacheRoot, { recursive: true });
-    await writeFile(join(cacheRoot, 'provider-test-ledger.jsonl'), '{"seeded":true}\n');
-    try {
-      const before = await readdir(cacheRoot);
-      const { store, production } = await openProductionStore();
-      await configure(store, production, 'opencode-go');
-      const first = await sample1Book(store, 'L2 相同输入甲');
-      const second = await sample1Book(store, 'L2 相同输入乙');
-      const calls: StubCall[] = [];
-      const preparedFirst = prepare(store, first, production.policy);
-      const answers = await chainAnswers(preparedFirst);
-      const execution = owner(store, production, stubTransport(calls, answers));
-      expect((await run(store, execution, first, preparedFirst)).run?.state).toBe('completed');
-      const preparedSecond = prepare(store, second, production.policy);
-      expect((await run(store, execution, second, preparedSecond)).run?.state).toBe('completed');
-      // Two Tasks on the same words: two full chains reach the transport; nothing answered the second from the first.
-      expect(calls).toHaveLength(2 * FULL_CHAIN_TURNS);
-      expect(calls.every((call) => call.url === GO.endpoint)).toBe(true);
-      expect(await readdir(cacheRoot)).toEqual(before);
-      expect(await readFile(join(cacheRoot, 'provider-test-ledger.jsonl'), 'utf8')).toBe('{"seeded":true}\n');
-      // Nothing under the Agent Data Root is a cache or a ledger either.
-      expect((await readdir(roots.dataRoot)).some((name) => /cache|ledger/u.test(name))).toBe(false);
-    } finally {
-      await rm(cacheRoot, { recursive: true, force: true });
+  it('restarts beside an exact seeded development response, reads no cache file, and sends identical Tasks twice', async () => {
+    const cacheRoot = join(dirname(roots.dataRoot), 'ai7-harness-provider-cache');
+    const first = await openProductionStore();
+    await configure(first.store, first.production, 'opencode-go');
+    const bookId = await sample1Book(first.store, 'L2 相同输入');
+    const prepared = prepare(first.store, bookId, first.production.policy);
+    const answers = await chainAnswers(prepared);
+    const firstCalls: StubCall[] = [];
+    const firstOwner = owner(first.store, first.production, stubTransport(firstCalls, answers));
+    expect((await run(first.store, firstOwner, bookId, prepared)).run?.state).toBe('completed');
+    await firstOwner.dispose();
+    first.store.close();
+    opened = opened.filter((candidate) => candidate !== first.store);
+
+    // Seed the real cache namespace with an exact request, using a synthetic transport only, and prove development replay.
+    const cache = new ProviderResultCache(cacheRoot);
+    await cache.open();
+    const request = firstCalls[0]!;
+    const item = { purpose: 'first-baseline', promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, taskPromptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST };
+    const validation = { intent: { family: 'baseline-analysis', case: 'sample1-whole-book', delta: null }, step: 'first-baseline/unit-1',
+      requestShape: OPENCODE_GO_V41_FLASH_PROFILE.capabilities.requestShape };
+    const init = { method: 'POST' as const, headers: {}, body: request.body };
+    await transmitOnce(cache, async () => ({ status: 200, json: async () => ({ choices: [{ message: { content: 'synthetic cache sentinel' } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 } }) }), item, validation, OPENCODE_GO_ROUTE_PROFILE, GO.model, request.url, init);
+    const replay = await transmitOnce(cache, async () => { throw new Error('development replay must not send'); },
+      item, validation, OPENCODE_GO_ROUTE_PROFILE, GO.model, request.url, init);
+    expect(replay.replayed).toBe(true);
+    const files = (await readdir(cacheRoot, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile())
+      .map((entry) => join(entry.parentPath, entry.name));
+    const before = await Promise.all(files.map((path) => readFile(path)));
+    const read = vi.spyOn(fs, 'readFile');
+    const open = vi.spyOn(fs, 'open');
+    const list = vi.spyOn(fs, 'readdir');
+    const cacheOpen = vi.spyOn(ProviderResultCache.prototype, 'open');
+    syncBuiltinESMExports();
+    const second = await openProductionStore();
+    let progress = second.store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'],
+      { mode: 'reanalyze-book', selectedRange: null }, second.production.policy);
+    while (!progress.done) progress = second.store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+    const secondCalls: StubCall[] = [];
+    const settled = await run(second.store, owner(second.store, second.production, stubTransport(secondCalls, answers)), bookId, progress.projection!);
+    expect(settled.run?.state).toBe('completed');
+    expect(firstCalls).toHaveLength(FULL_CHAIN_TURNS);
+    expect(secondCalls).toHaveLength(FULL_CHAIN_TURNS);
+    // Compare booleans so a failure cannot print manuscript-bearing request bodies.
+    expect(secondCalls.slice(0, SAMPLE1_UNITS).every((call, index) => call.body === firstCalls[index]!.body && call.url === GO.endpoint)).toBe(true);
+    expect(settled.resultSetRevision!.usage.inputTokens).toBeGreaterThan(0);
+    expect(cacheOpen).not.toHaveBeenCalled();
+    for (const calls of [read.mock.calls, open.mock.calls, list.mock.calls]) {
+      expect(calls.some(([path]) => String(path).startsWith(cacheRoot))).toBe(false);
     }
+    vi.restoreAllMocks();
+    syncBuiltinESMExports();
+    expect((await Promise.all(files.map((path) => readFile(path)))).every((bytes, index) => bytes.equals(before[index]!))).toBe(true);
+    expect((await readdir(roots.dataRoot)).some((name) => /cache|ledger/u.test(name))).toBe(false);
   });
 
   it('switches route for the next Task only: a planned Run keeps the binding its plan froze', async () => {
@@ -334,6 +385,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     const authorized = store.authorizeBaselineAnalysis(first, preparedFirst.taskIntent!.taskIntentId, preparedFirst.planEnvelope!.digest);
     // The editor switches to the official route while the first Task waits to run.
     const officialReference = await configure(store, production, 'deepseek-open-platform');
+    expect(store.baselineAnalysisLedger.preflightDrift(authorized.dispatchRunRecordId!)).toEqual([]);
     const second = await sample1Book(store, 'L2 切换后');
     const preparedSecond = prepare(store, second, production.policy);
     expect(preparedSecond.providerResolutionPlan).toMatchObject({ executionRoute: { kind: 'deepseek-open-platform' }, remoteBinding: { credentialReference: officialReference } });
@@ -350,18 +402,36 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
 
   it('stops on the account limit as 模型服务账户限额 with 续行: no retry, no fallback, the same route again', async () => {
     const { store, production } = await openProductionStore();
-    await configure(store, production, 'deepseek-open-platform');
+    const frozenReference = await configure(store, production, 'deepseek-open-platform');
     const bookId = await sample1Book(store, 'L2 账户限额');
     const prepared = prepare(store, bookId, production.policy);
     const calls: StubCall[] = [];
     let limited = true;
+    const reads: string[] = [];
     const execution = owner(store, production, stubTransport(calls, await chainAnswers(prepared),
-      (ordinal) => ordinal === 3 && limited ? { status: 402, body: { error: { message: 'Insufficient Balance' } } } : null));
+      (ordinal) => ordinal === 3 && limited ? { status: 402, body: { error: { message: 'Insufficient Balance' } } } : null), reads);
     const stopped = await run(store, execution, bookId, prepared);
     expect(stopped.state).toBe('resumable');
     expect(stopped.stateLabel).toBe('模型服务账户限额');
     expect(calls).toHaveLength(3);
     expect(calls.every((call) => call.url === OFFICIAL.endpoint)).toBe(true);
+    // The new selection has no credential; continuation must still inspect and use the old Run's reference.
+    const missing = store.saveModelServiceConnection('L2 Go missing', null, 'needs-attention', 'opencode-go');
+    store.setModelServiceCredentialState(missing.credentialReference, 'missing');
+    store.selectModelServiceRoute('opencode-go');
+    await production.rebind(store);
+    expect(production.live).toBeNull();
+    reads.length = 0;
+    const drawer = await store.inspectTaskPlanWithConnection({ bookId, kind: 'baseline-analysis', ref: prepared.taskIntent!.taskIntentId },
+      (binding) => execution.liveCredentialReadiness(binding));
+    expect(drawer.runControl?.resume?.reason).toBeNull();
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((reference) => reference === frozenReference)).toBe(true);
+    expect(await execution.liveCredentialReadiness(store.taskCredentialBinding(
+      { bookId, kind: 'baseline-analysis', ref: prepared.taskIntent!.taskIntentId }, stopped.run!.runRecordId))).toBe('present');
+    expect(await execution.liveCredentialReadiness()).toBe('missing');
+    const newBook = await sample1Book(store, 'L2 新任务需设置');
+    expect(code(() => prepare(store, newBook, production.policy))).toBe('ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED');
     limited = false;
     execution.admitAndDispatch(stopped.run!.runRecordId, store.baselineAnalysisLedger, { resume: true });
     await execution.whenIdle();
@@ -385,7 +455,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(calls).toHaveLength(1);
   });
 
-  it('plans the editor\'s own manuscript under production, which development-ci still refuses', async () => {
+  it('lifts exact-sample1 lineage only in production, with development-ci and developer-live still refusing', async () => {
     const selectedPath = join(roots.inputRoot, `${randomUUID()}.docx`);
     await composeManuscriptDocx(selectedPath, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 12, title: '编辑自己的书稿' });
     const importOwn = async (store: EditorialStore): Promise<string> => {
@@ -411,10 +481,31 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     ci.saveModelServiceConnection('L2 官方', null, 'needs-attention');
     const ciPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'development-ci');
     expect(code(() => ci.createBaselineAnalysisPreparationWork(own, BASELINE_ANALYSIS_TASK_GOAL, null, ciPolicy))).toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
+    const livePolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+    ci.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', policy: livePolicy, live: {
+      ...GO, credentialReference: CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['opencode-go'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 },
+    } });
+    expect(code(() => ci.createBaselineAnalysisPreparationWork(own, BASELINE_ANALYSIS_TASK_GOAL, null, livePolicy))).toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
   });
 });
 
 describe('schema 72 (Issue #811)', () => {
+  it('refuses a persisted development reference before model-service settings can inspect the protected store', async () => {
+    const { store, production } = await openProductionStore();
+    await configure(store, production, 'deepseek-open-platform');
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      for (const reference of Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)) {
+        for (const spelling of [reference, reference.toUpperCase()]) {
+          database.prepare('UPDATE model_service_connections SET credential_reference = ?').run(spelling);
+          expect(code(() => store.getModelServiceConnections())).toBe('STORE_CORRUPT');
+        }
+      }
+    } finally {
+      database.close();
+    }
+  });
+
   it('keeps the official row its reference and state, names the current model, and adds the Go row beside it', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'ai7-schema72-'));
     try {
@@ -427,6 +518,13 @@ describe('schema 72 (Issue #811)', () => {
         ['main-editorial-deepseek-v4-pro', 'deepseek-flash', false],
       ]);
       expect(new Set([official, go]).size).toBe(2);
+      const otherRoot = join(dirname(roots.dataRoot), 'other-production');
+      const other = await openProductionStore(otherRoot);
+      const otherReference = await configure(other.store, other.production, 'opencode-go');
+      expect([official, go]).not.toContain(otherReference);
+      other.store.close();
+      opened = opened.filter((candidate) => candidate !== other.store);
+      await rm(otherRoot, { recursive: true, force: true });
       // A route cannot be chosen before it has a connection, and a development reference is never stored.
       expect(code(() => store.saveModelServiceConnection('dev', CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['opencode-go'], 'ready', 'opencode-go'))).toBe('MODEL_SERVICE_CONNECTION_INVALID');
       store.close();

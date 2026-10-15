@@ -423,9 +423,11 @@ export function evaluateEgress(
   }
   // Under ordinary-production (Issue #811) the editor's own unpublished words leave only under the rule that names their
   // category; every other scope reads exactly as before.
-  if (binding.outboundDataCategory !== 'public-or-synthetic' && !(MANUSCRIPT_EXCERPT_CATEGORIES.has(binding.outboundDataCategory) &&
-      (binding.route === LOCAL_DETERMINISTIC_ROUTE || excerptAdmittedByRule(binding))) &&
-      !(binding.policy.operationalScope === 'ordinary-production' && (binding.ruleOutboundCategories?.has(binding.outboundDataCategory) ?? false))) {
+  const categoryAdmitted = binding.policy.operationalScope === 'ordinary-production'
+    ? (binding.ruleOutboundCategories?.has(binding.outboundDataCategory) ?? false)
+    : binding.outboundDataCategory === 'public-or-synthetic' || (MANUSCRIPT_EXCERPT_CATEGORIES.has(binding.outboundDataCategory) &&
+      (binding.route === LOCAL_DETERMINISTIC_ROUTE || excerptAdmittedByRule(binding)));
+  if (!categoryAdmitted) {
     return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
   }
   if (binding.route !== LOCAL_DETERMINISTIC_ROUTE && [...(binding.contractCategories ?? [])].some((category) =>

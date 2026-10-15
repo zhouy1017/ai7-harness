@@ -298,6 +298,18 @@ describe('the Egress Gate under ordinary production (Issue #811)', () => {
     expect(evaluateEgress(payload(OPENCODE_GO_ROUTE, 'deepseek-flash'), production(), attempt('unset'))).toMatchObject({ decision: 'refuse', reason: 'route-mismatch' });
     expect(evaluateEgress(payload(DEEPSEEK_ROUTE, 'deepseek-v4-pro'), production(), attempt('unset'))).toMatchObject({ decision: 'refuse', reason: 'model-mismatch' });
   });
+
+  it('requires the production rule to name every category, including public-or-synthetic', () => {
+    for (const outboundDataCategory of ['public-or-synthetic', 'unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content',
+      'editor-selected-manuscript-excerpt', 'manuscript-conflict-region-excerpt'] as const) {
+      const admitted = production({ outboundDataCategory });
+      const { ruleOutboundCategories: omitted, ...withoutRule } = admitted;
+      expect(omitted).toBeDefined();
+      for (const binding of [withoutRule, { ...admitted, ruleOutboundCategories: new Set<'public-or-synthetic'>() }]) {
+        expect(evaluateEgress(payload(DEEPSEEK_ROUTE, 'deepseek-flash'), binding, attempt('unset')).decision).toBe('refuse');
+      }
+    }
+  });
 });
 
 describe('the enrollment helper\'s named-reference form (Issue #811 item 5)', () => {
@@ -345,6 +357,6 @@ describe('the enrollment helper\'s named-reference form (Issue #811 item 5)', ()
     const source = await (await import('node:fs/promises')).readFile(fileURLToPath(new URL('../../tools/enroll-dev-credential.mjs', import.meta.url)), 'utf8');
     expect(source).toContain("export const PRODUCTION_CONNECTION_SLOTS = Object.freeze(['opencode-go', 'deepseek-api-key']);");
     // The named form reaches the store only past the same two refusals as the development store form.
-    expect(source).toMatch(/requireEnrollment\(!continuousIntegrationPresent\(\)\);\s*const entry = await openEntry\(request\.credentialReference\);/u);
+    expect(source).toMatch(/requireEnrollment\(request\.mode !== 'check' && !continuousIntegrationPresent\(deps\.env\)\);\s*const entry = await openEntry\(request\.credentialReference, deps\);/u);
   });
 });
