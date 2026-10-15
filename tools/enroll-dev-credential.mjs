@@ -6,11 +6,15 @@ import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.genera
 /**
  * The developer-host enrollment helper for the development credentials (ADR 0067, ADR 0073 §4).
  *
- * **Only `opencode-go` enrolment is authorized** (ADR 0067). The helper accepts every slot a provider
- * document fixes a development Credential Reference for, because ADR 0073 §4 makes its slot list
- * generated from the documents; but such a slot is a place for a key, not a permission to enrol one.
- * ADR 0073 §5 authorizes no credential and ADR 0080 §5 defers keys (「先支持后添加key」): no other
- * slot is enrolled until a record names it.
+ * **Authorized enrolment: `opencode-go` (ADR 0067), and the five search backend evaluation slots**
+ * `search-bochaai`, `search-brave`, `search-tinyfish`, `search-parallel` and `search-deepseek` under the ADR 0067
+ * amendment clause of Issue #883 (Owner authorization of 2026-10-13, DECISIONS-1.0.0 「密钥文件放置方式」): for the
+ * development search backend evaluation alone, each enrolled by path from its root `search-<name>.key.txt`, which no
+ * agent opens; the slots of backends the evaluation excludes are cleared by the Commander at wave end and the Owner
+ * revokes unused keys at each vendor. The helper accepts every slot a provider or search backend document fixes a
+ * development Credential Reference for, because ADR 0073 §4 makes its slot list generated from the documents; but such
+ * a slot is a place for a key, not a permission to enrol one. ADR 0073 §5 authorizes no credential and ADR 0080 §5
+ * defers keys (「先支持后添加key」): no other slot is enrolled until a record names it.
  *
  * It is the only thing that ever reads the Owner's key file, and it exists so that no agent, prompt,
  * log, or repository file has to. It writes the value straight into the OS Protected Secret Store

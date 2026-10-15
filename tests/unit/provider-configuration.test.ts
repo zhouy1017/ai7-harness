@@ -382,7 +382,11 @@ describe('recorded evidence and the Provider Test Ledger (Issue #715, ADR 0067)'
       expect(typeof document.displayName, file).toBe('string');
       expect(Array.isArray(document.routes), file).toBe(true);
     }
-    expect(readdirSync(join(providersDirectory, 'recorded-evidence')).sort()).toEqual(['recorded-evidence.json', 'recorded-evidence.v1.schema.json']);
+    // Beside the record: the search backend evaluation's measured profiles and their schema (Issue #883), which the
+    // generator does not read.
+    expect(readdirSync(join(providersDirectory, 'recorded-evidence')).sort()).toEqual([
+      'recorded-evidence.json', 'recorded-evidence.v1.schema.json', 'search-backend-profiles.json', 'search-backend-profiles.v1.schema.json',
+    ]);
     // A recorded item nobody cites yet is a fact about the ledger, not a document error, as long as its row is declared.
     expect(refusalAfter((input) => { input.recordedEvidence.data.liveTestItems.push({ itemId: 'S99/spare/1', route: 'opencode-go', model: 'glm-5.3', observedOn: '2026-10-09', issue: '#715' }); })).toBeNull();
   });
@@ -673,5 +677,61 @@ describe('the Credential Broker slot set (ADR 0073 §4)', () => {
       await expect(broker.checkPlanReadiness(slot, randomUUID()), slot).resolves.toBe('missing');
     }
     await expect(broker.checkPlanReadiness('bytedance-doubao' as never, randomUUID())).rejects.toMatchObject({ code: 'CREDENTIAL_BINDING_INVALID' });
+  });
+});
+
+describe('search backend documents (Issue #883; ADR 0073 §4)', () => {
+  type SearchInput = Input & { searchBackends: { schema: unknown; documents: Array<{ file: string; data: any }> } };
+  const searchInput = (): SearchInput => freshInput() as SearchInput;
+  const backend = (input: SearchInput, backendId: string): any => {
+    const found = input.searchBackends.documents.find((entry) => entry.data.backendId === backendId);
+    if (found === undefined) throw new Error(backendId);
+    return found.data;
+  };
+  const searchRefusalAfter = (mutate: (input: SearchInput) => void): string | null => refusalAfter((input) => mutate(input as SearchInput));
+  const SEARCH_SLOTS = ['search-bochaai', 'search-brave', 'search-deepseek', 'search-parallel', 'search-tinyfish'];
+
+  it('contributes exactly one credential slot per backend and no route, label or profile', () => {
+    const input = searchInput();
+    expect(input.searchBackends.documents.map((entry) => entry.file)).toEqual(SEARCH_SLOTS.map((slot) => `${slot}.json`));
+    const withoutSearch = generator.renderProviderConfiguration(generator.resolveProviderConfiguration({ ...freshInput(), searchBackends: undefined } as never));
+    const withSearch = generator.renderProviderConfiguration(generator.resolveProviderConfiguration(input));
+    // The model profiles do not move; the slots follow the providers'; the routes and labels are the providers' alone.
+    expect(withSearch['src/service/provider/provider-profiles.generated.ts']).toBe(withoutSearch['src/service/provider/provider-profiles.generated.ts']);
+    expect(CONFIGURED_CREDENTIAL_SLOTS.slice(-SEARCH_SLOTS.length)).toEqual(SEARCH_SLOTS);
+    expect(CONFIGURED_DEVELOPMENT_SLOTS.slice(-SEARCH_SLOTS.length)).toEqual(SEARCH_SLOTS);
+    for (const slot of SEARCH_SLOTS) {
+      expect(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[slot as keyof typeof CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES]).toBe(backend(input, slot).credential.developmentCredentialReference);
+      expect(CONFIGURED_ROUTE_IDS as readonly string[]).not.toContain(slot);
+    }
+    expect(Object.values(CONFIGURED_PROVIDER_LABELS).some((label) => input.searchBackends.documents.some((entry) => entry.data.displayName === label))).toBe(false);
+    expect(withSearch['docs/development/provider-support.md']).toContain('## Search backends');
+    expect(withoutSearch['docs/development/provider-support.md']).not.toContain('## Search backends');
+    // The search documents live in their own subdirectory, so nothing that reads `config/providers/*.json` (J-12) meets one.
+    expect(readdirSync(join(ROOT, 'config', 'providers')).filter((name) => name.startsWith('search-') && name.endsWith('.json'))).toEqual([]);
+  });
+
+  it('refuses a search backend document that breaks a rule, naming the rule and the place', () => {
+    expect(searchRefusalAfter(() => undefined)).toBeNull();
+    expect(searchRefusalAfter((input) => { backend(input, 'search-brave').service = 'brave2'; })).toContain('PROVIDER_CONFIGURATION/search-backend-id');
+    expect(searchRefusalAfter((input) => { backend(input, 'search-brave').credential.slot = 'opencode-go'; })).toContain('PROVIDER_CONFIGURATION/search-backend-slot');
+    expect(searchRefusalAfter((input) => {
+      backend(input, 'search-brave').credential.developmentCredentialReference = (documentOf(input, 'opencode-go') as any).credential.developmentCredentialReference;
+    })).toContain('PROVIDER_CONFIGURATION/reference-duplicate');
+    expect(searchRefusalAfter((input) => { backend(input, 'search-tinyfish').support = 'not-supported'; })).toContain('PROVIDER_CONFIGURATION/search-backend-request');
+    expect(searchRefusalAfter((input) => { backend(input, 'search-brave').request.endpoint = 'https://search.localhost/q'; })).toContain('PROVIDER_CONFIGURATION/endpoint-host');
+    expect(searchRefusalAfter((input) => { backend(input, 'search-brave').request.endpoint = 'https://api.search.brave.com/res/../web'; })).toContain('PROVIDER_CONFIGURATION/endpoint-path');
+    expect(searchRefusalAfter((input) => { backend(input, 'search-brave').evidence['brave-search-api-pricing'] = { kind: 'unverified' }; }))
+      .toContain('PROVIDER_CONFIGURATION/search-backend-unverified');
+    expect(searchRefusalAfter((input) => { backend(input, 'search-brave').evidence.spare = { kind: 'unverified' }; })).toContain('PROVIDER_CONFIGURATION/evidence-uncited');
+    expect(searchRefusalAfter((input) => { backend(input, 'search-brave').price.evidence = 'absent'; })).toContain('PROVIDER_CONFIGURATION/evidence-unknown');
+    expect(searchRefusalAfter((input) => { backend(input, 'search-deepseek').credential.anthropicVersion = null; })).toContain('PROVIDER_CONFIGURATION/anthropic-version');
+    expect(searchRefusalAfter((input) => { backend(input, 'search-brave').credential.anthropicVersion = '2023-06-01'; })).toContain('PROVIDER_CONFIGURATION/anthropic-version');
+    expect(searchRefusalAfter((input) => { backend(input, 'search-brave').routes = []; })).toContain('PROVIDER_CONFIGURATION/search-backend-schema');
+    // A backend the reading found no interface for is declared 尚未支持 with no endpoint, method or protocol.
+    expect(searchRefusalAfter((input) => {
+      Object.assign(backend(input, 'search-tinyfish'), { support: 'not-supported' });
+      Object.assign(backend(input, 'search-tinyfish').request, { endpoint: null, method: null, protocol: null });
+    })).toBeNull();
   });
 });

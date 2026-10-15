@@ -1,0 +1,186 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI7 measured search backend profiles, version 1 (Issue #883; Owner decisions 24⁵)",
+  "description": "What the development search backend evaluation (tools/search-backend-evaluation.mjs) measured for each search backend document, sanitized: counts, rates, latencies and the derived exclusion list and ranking, never a query result, a payload or a credential. The product reads it for the 设置 › 模型服务 › 联网检索 profile and the default order (src/service/provider/search-backends.ts); a provider-free unit test recomputes the ranking from the profiles and compares it with the one recorded here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "evaluation", "profiles", "outcome"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "evaluation": { "$ref": "#/definitions/evaluation" },
+    "profiles": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/profile" }
+    },
+    "outcome": { "$ref": "#/definitions/outcome" }
+  },
+  "definitions": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "label": {
+      "type": "string",
+      "pattern": "^\\S(.*\\S)?$"
+    },
+    "prose": {
+      "type": "string",
+      "pattern": "^\\S[\\s\\S]*\\S$"
+    },
+    "day": {
+      "type": "string",
+      "pattern": "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
+    "count": { "type": "integer", "minimum": 0 },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["measuredOn", "report", "querySet", "network", "cnyPerUsd", "tierWidth"],
+      "properties": {
+        "measuredOn": { "$ref": "#/definitions/day" },
+        "report": { "const": "docs/development/search-backend-evaluation.md" },
+        "querySet": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "queries", "chinese", "english", "international"],
+          "properties": {
+            "path": { "const": "tools/search-backend-evaluation/queries.json" },
+            "sha256": { "$ref": "#/definitions/sha256" },
+            "queries": { "$ref": "#/definitions/count" },
+            "chinese": { "$ref": "#/definitions/count" },
+            "english": { "$ref": "#/definitions/count" },
+            "international": { "$ref": "#/definitions/count" }
+          }
+        },
+        "network": {
+          "description": "The network condition of the measuring process as the tool observed it: proxy environment variables cleared inside the process, Node's environment proxy off, and the host's system proxy setting read, never changed.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["condition", "proxyEnvironment", "nodeEnvironmentProxy", "systemProxy"],
+          "properties": {
+            "condition": { "$ref": "#/definitions/prose" },
+            "proxyEnvironment": { "enum": ["unset", "cleared-in-process"] },
+            "nodeEnvironmentProxy": { "const": "off" },
+            "systemProxy": { "enum": ["disabled", "enabled-not-used", "unknown"] }
+          }
+        },
+        "cnyPerUsd": {
+          "description": "The fixed rate that orders CNY and USD prices inside a tier; it orders, it does not bill.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rate", "source", "readOn"],
+          "properties": {
+            "rate": { "type": "number", "minimum": 0 },
+            "source": { "$ref": "#/definitions/label" },
+            "readOn": { "$ref": "#/definitions/day" }
+          }
+        },
+        "tierWidth": {
+          "description": "Decision 24⁵: a backend whose overall hit rate is within this many points of the best is in the top tier.",
+          "const": 0.1
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backendId", "verdict", "queries", "answered", "transportErrors", "transportRetries", "statusClasses", "hits", "totals", "sourceQuality", "latencyMs", "costPerCallUsd", "note"],
+      "properties": {
+        "backendId": { "$ref": "#/definitions/identifier" },
+        "verdict": {
+          "description": "`measured`: answered with results; `unreachable`: no request reached the host; `no-authenticated-response`: reached, but no call answered with a usable result; `not-supported`: 尚未支持, nothing sent.",
+          "enum": ["measured", "unreachable", "no-authenticated-response", "not-supported"]
+        },
+        "queries": { "$ref": "#/definitions/count" },
+        "answered": { "$ref": "#/definitions/count" },
+        "transportErrors": { "$ref": "#/definitions/count" },
+        "transportRetries": { "$ref": "#/definitions/count" },
+        "statusClasses": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["2xx", "3xx", "4xx", "5xx", "none"],
+          "properties": {
+            "2xx": { "$ref": "#/definitions/count" },
+            "3xx": { "$ref": "#/definitions/count" },
+            "4xx": { "$ref": "#/definitions/count" },
+            "5xx": { "$ref": "#/definitions/count" },
+            "none": { "$ref": "#/definitions/count" }
+          }
+        },
+        "hits": { "$ref": "#/definitions/halves" },
+        "totals": { "$ref": "#/definitions/halves" },
+        "sourceQuality": {
+          "description": "primaryHits of primaryEligible queries had an official or primary source in the top five; listedResults of results came from a domain the rubric lists for the query.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["primaryHits", "primaryEligible", "listedResults", "results"],
+          "properties": {
+            "primaryHits": { "$ref": "#/definitions/count" },
+            "primaryEligible": { "$ref": "#/definitions/count" },
+            "listedResults": { "$ref": "#/definitions/count" },
+            "results": { "$ref": "#/definitions/count" }
+          }
+        },
+        "latencyMs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["p50", "p95"],
+          "properties": {
+            "p50": { "type": ["integer", "null"], "minimum": 0 },
+            "p95": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        },
+        "costPerCallUsd": {
+          "description": "The measured cost of one call where the vendor bills by tokens (DeepSeek), at the documented peak price; null where the document states a per-call price.",
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "note": { "type": ["string", "null"] }
+      }
+    },
+    "halves": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overall", "chinese", "international"],
+      "properties": {
+        "overall": { "$ref": "#/definitions/count" },
+        "chinese": { "$ref": "#/definitions/count" },
+        "international": { "$ref": "#/definitions/count" }
+      }
+    },
+    "outcome": {
+      "description": "Decision 24⁵ applied to the profiles: the exclusions with reasons, the ranking of the rest, and the default (the first ranked).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["excluded", "ranking", "default"],
+      "properties": {
+        "excluded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["backendId", "reason"],
+            "properties": {
+              "backendId": { "$ref": "#/definitions/identifier" },
+              "reason": { "enum": ["not-supported", "unreachable", "no-authenticated-response", "zero-hits-both-halves", "not-measured"] }
+            }
+          }
+        },
+        "ranking": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["backendId", "tier"],
+            "properties": {
+              "backendId": { "$ref": "#/definitions/identifier" },
+              "tier": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "default": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

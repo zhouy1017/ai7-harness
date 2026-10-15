@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "backendId": "search-tinyfish",
+  "service": "tinyfish",
+  "displayName": "TinyFish Search",
+  "support": "supported",
+  "supportEvidence": "tinyfish-search-api",
+  "request": {
+    "endpoint": "https://api.search.tinyfish.ai/",
+    "method": "GET",
+    "protocol": "tinyfish-search",
+    "evidence": "tinyfish-search-api"
+  },
+  "credential": {
+    "slot": "search-tinyfish",
+    "developmentCredentialReference": "59d3a3a4-d852-4b15-bbea-f1eefe4e63dd",
+    "headerForm": "x-api-key",
+    "anthropicVersion": null,
+    "keyRequired": true,
+    "evidence": "tinyfish-authentication"
+  },
+  "price": {
+    "amount": 0,
+    "currency": "USD",
+    "per": 1,
+    "basis": "Search is free: the pricing page prints $0.00 per request at 30 requests per minute and 500 per hour, while the Search API page says free up to 12,000 requests per day with a positive wallet balance beyond; Search never draws on the wallet",
+    "evidence": "tinyfish-pricing"
+  },
+  "reachability": {
+    "note": "The vendor's pages state no regional availability.",
+    "evidence": "tinyfish-pricing"
+  },
+  "evidence": {
+    "tinyfish-search-api": {
+      "kind": "vendor-documentation",
+      "source": "TinyFish documentation, Search API page, docs.tinyfish.ai/search-api",
+      "readOn": "2026-10-16",
+      "note": "A synchronous web search: GET https://api.search.tinyfish.ai?query=… with optional `location`, `language`, `recency_minutes` or `after_date`/`before_date`, `domain_type` (web, news, research_paper) and `purpose`; JSON `{query, results[], total_results, page}`, each result `position`, `site_name`, `title`, `snippet`, `url`; the example returns 10 results. \"Search is free up to 12,000 requests per day.\""
+    },
+    "tinyfish-authentication": {
+      "kind": "vendor-documentation",
+      "source": "TinyFish documentation, Authentication page, docs.tinyfish.ai/authentication",
+      "readOn": "2026-10-16",
+      "note": "\"All REST API requests require an API key passed in the `X-API-Key` header.\""
+    },
+    "tinyfish-pricing": {
+      "kind": "vendor-documentation",
+      "source": "TinyFish pricing page, www.tinyfish.ai/pricing, with the Agent API and runs pages (docs.tinyfish.ai/agent-api, docs.tinyfish.ai/key-concepts/runs)",
+      "readOn": "2026-10-16",
+      "note": "Search \"$0.00 per request\", \"30 requests / min · 500 requests / hour\"; Fetch (POST https://api.fetch.tinyfish.ai) free; the Agent API (POST https://agent.tinyfish.ai/v1/automation/run, run-async, run-sse; `url` + `goal`; 150 steps by default, 500 at most) $0.016 per step with 2 concurrent runs; Browser $0.002 per minute; new accounts receive $8 of wallet funds. No regional statement."
+    }
+  },
+  "openQuestions": [
+    "The two pages state different free limits for Search (12,000 per day against 500 per hour); the evaluation stays far below both.",
+    "The accepted values of `language` and `location` are not listed; the evaluation sends the query alone."
+  ],
+  "notes": [
+    "TinyFish's interface reading (Issue #883): TinyFish is primarily a web-agent platform, but it documents a plain keyed search endpoint beside the agent, so the evaluation measures that endpoint and never the per-step Agent API."
+  ]
+}

@@ -809,6 +809,100 @@ Open:
 
 A credential slot is a logical slot of the Main Editorial Role, one per configured provider; the Credential Broker's closed set and `tools/enroll-dev-credential.mjs`'s slot list are generated from the documents, so a slot cannot exist without a reviewed document. Enrolment, where a record authorizes it, is the one way ADR 0067 established for `opencode-go`: from an untracked key file the enrollment helper alone reads, into the Protected Secret Store under the slot's development Credential Reference. A Credential Reference names a store entry and is not a secret. See [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) for the live-once ledger and the Provider Result Cache.
 
+## Search backends
+
+Generated from the search backend documents under [`config/providers/search-backends/`](../../config/providers/search-backends/), validated by [`search-backend.v1.schema.json`](../../config/providers/search-backends/search-backend.v1.schema.json) (Issue #883; Owner decisions 24⁵). Each declares one vendor's web search interface, its per-call price, whether a key is required and its credential slot. The generator contributes the slot to the Credential Broker's closed set and the enrollment helper's list and nothing else: no route id, provider label or model profile, so no search backend is a Model Role binding. A document authorizes no transmission and admits no host in the Egress Gate; the measured profile, the exclusions and the ranking are the [search backend evaluation](search-backend-evaluation.md)'s.
+
+| Backend | Support | Endpoint | Key | Price | Slot | Development Credential Reference |
+| --- | --- | --- | --- | --- | --- | --- |
+| 博查 Bocha Web Search | supported | `POST https://api.bochaai.com/v1/web-search` (`bocha-web-search`) | required, `authorization: Bearer` | 0.036 CNY per 1 call — list price of Web Search per call, tiered down by average daily volume; AI Search (/v1/ai-search) is ¥0.060 per call and is not this interface | `search-bochaai` | `6e655b12-b3b0-430e-811c-911b5d0f2ccd` |
+| Brave Search API | supported | `GET https://api.search.brave.com/res/v1/web/search` (`brave-web-search`) | required, `x-subscription-token` | 5 USD per 1,000 calls — the Search plan's price per 1,000 requests, with $5 of free credit every month and 50 queries per second; the Answers plan ($4 per 1,000 plus tokens) is not this interface | `search-brave` | `3f0f367d-f343-4123-b86d-31d0bfac556e` |
+| DeepSeek 服务端搜索（官方） | supported | `POST https://api.deepseek.com/anthropic/v1/messages` (`anthropic-messages-web-search`) | required, `x-api-key` with `anthropic-version: 2023-06-01` | no per-call price — billed by tokens alone, with no per-search fee: deepseek-flash input $0.15 off-peak / $0.30 peak and output $0.60 / $1.20 per million tokens (cache hits $0.003 / $0.006); the search's own extra model requests are billed as tokens too, so the evaluation records the measured token cost per call | `search-deepseek` | `5d835534-e000-4b72-91c8-1dd986a6fcc7` |
+| Parallel Search | supported | `POST https://api.parallel.ai/v1/search` (`parallel-search`) | required, `x-api-key` | 5 USD per 1,000 calls — the default `advanced` mode with 10 results per request, which is what the evaluation sends; `basic` is also $5, `fast` and `turbo` $1 per 1,000, extra results $1 per 1,000; 5,000 requests a month are free | `search-parallel` | `983793e7-f281-4767-b5e6-9342a2d00202` |
+| TinyFish Search | supported | `GET https://api.search.tinyfish.ai/` (`tinyfish-search`) | required, `x-api-key` | 0 USD per 1 call — Search is free: the pricing page prints $0.00 per request at 30 requests per minute and 500 per hour, while the Search API page says free up to 12,000 requests per day with a positive wallet balance beyond; Search never draws on the wallet | `search-tinyfish` | `59d3a3a4-d852-4b15-bbea-f1eefe4e63dd` |
+
+### `search-bochaai`
+
+- Document: [`config/providers/search-backends/search-bochaai.json`](../../config/providers/search-backends/search-bochaai.json); service name `bochaai`.
+- Reachability as the vendor states it: A mainland-China service: the vendor states its data and results stay in China (数据不出海) and that it serves up to 2000 QPS at about one second. Reachability from outside China is not stated.
+- The vendor states it is DeepSeek's official web-search supplier; that is a statement, not evidence that DeepSeek's server-side search uses it.
+
+Readings:
+
+- `bocha-product-document` — `vendor-documentation`, 博查搜索API、排序API 产品服务文档 (杭州博查搜索科技有限公司, PDF of 2025-05-27, mkp-res.hc-cdn.com marketplace attachment 0000000000FE5A9696F), read 2026-10-16. States 请求方式 POST, 请求接口 https://api.bochaai.com/v1/web-search, `Authorization: Bearer` with the API key, request fields `query`, `summary`, `freshness`, `count` (至多 50 条), a response compatible with the Bing Search API whose web results carry `name`, `url`, `snippet`, `summary`, `siteName`, and list prices Web Search ¥0.036 and AI Search ¥0.060 per call.
+- `bocha-open-platform` — `vendor-documentation`, 博查 AI 开放平台, open.bochaai.com and open.bochaai.com/overview, read 2026-10-16. The portal grants new users a free package of 1,000 calls and links its API documentation and pricing to Feishu wiki pages (bocha-ai.feishu.cn) that require a Feishu login, so the live documentation was not read and the product document above is the reading.
+
+Open:
+
+- Whether the response wraps the Bing-compatible object in a `data` field is not stated in the product document; the evaluation reads `data.webPages.value` and `webPages.value` alike and records which one answered.
+- The live pricing page sits behind a Feishu login; the price is the product document's list price.
+
+### `search-brave`
+
+- Document: [`config/providers/search-backends/search-brave.json`](../../config/providers/search-backends/search-brave.json); service name `brave`.
+- Reachability as the vendor states it: The vendor's pages state no regional availability for mainland China; its list of unavailable jurisdictions could not be read (HTTP 403).
+
+Readings:
+
+- `brave-web-search-reference` — `vendor-documentation`, Brave Search API documentation: web search get-started, query parameters and the GET /res/v1/web/search reference (api-dashboard.search.brave.com), read 2026-10-16. GET https://api.search.brave.com/res/v1/web/search with the `X-Subscription-Token` header as the only required header; `q`, `count` (1–20, default 20), `offset`, `country` (includes CN), `search_lang` (includes zh-hans, zh-hant), `ui_lang`, `freshness`, `safesearch`; results at `web.results[]` with `title` and `url`.
+- `brave-search-api-pricing` — `vendor-documentation`, Brave Search API product and pricing page, brave.com/search/api, read 2026-10-16. Search: "$5 per 1,000 requests", "Includes $5 in free credits every month", "50 queries per second". The page says nothing about availability in China.
+
+Open:
+
+- Whether the API is reachable from mainland China without a proxy is the evaluation's measurement, not a vendor statement.
+
+### `search-deepseek`
+
+- Document: [`config/providers/search-backends/search-deepseek.json`](../../config/providers/search-backends/search-deepseek.json); service name `deepseek`.
+- Reachability as the vendor states it: DeepSeek's official API is a mainland-China service; its pages state no regional restriction.
+- DeepSeek server-side web_search reading (Issue #883): listed — the Anthropic-compatible endpoint documents the server-tool result blocks as Supported and its Claude Code guide says web search runs through DeepSeek's API, but no page names the tool type or states the feature for a generic Anthropic client.
+- Searching here costs model tokens on the same DeepSeek key the production route uses, and the query reaches a model before any search; the evaluation sends only the public query.
+
+Readings:
+
+- `deepseek-anthropic-api` — `vendor-documentation`, DeepSeek official Anthropic API guide, api-docs.deepseek.com/guides/anthropic_api, read 2026-10-16. Base URL https://api.deepseek.com/anthropic; `x-api-key` Fully Supported and `anthropic-version` Ignored. The field-compatibility table lists the content blocks `server_tool_use` Supported and `web_search_tool_result` Supported (`search_result`, `mcp_tool_use`, `mcp_tool_result` Not Supported, `mcp_servers` Ignored); its `tools` rows cover `name`, `input_schema`, `description` (Fully Supported) and `cache_control` (Ignored) and name no tool `type`, so no server tool type string is stated on this page.
+- `deepseek-claude-code-web-search` — `vendor-documentation`, DeepSeek official Claude Code integration guide, api-docs.deepseek.com/quick_start/agent_integrations/claude_code, read 2026-10-16. "The DeepSeek API natively supports the Web Search feature in Claude Code … if the model determines that your question requires a web search, it will invoke the Web Search tool and perform the search through the API provided by DeepSeek. Because invoking the Web Search tool generates additional LLM API requests … additional model token costs will be incurred." The tool type Claude Code sends is not named.
+- `deepseek-pricing` — `vendor-documentation`, DeepSeek official models and pricing page, api-docs.deepseek.com/quick_start/pricing, read 2026-10-16. Token prices per million for deepseek-flash: cache-hit input $0.003 / $0.006, cache-miss input $0.15 / $0.30, output $0.60 / $1.20 (off-peak / peak); no per-search charge is listed.
+
+Open:
+
+- The server tool type is not named by DeepSeek. The evaluation sends Anthropic's `web_search_20250305` server tool on `deepseek-flash`; whether the endpoint runs it for a client other than Claude Code is what the measurement settles, and its outcome is this backend's verdict.
+
+### `search-parallel`
+
+- Document: [`config/providers/search-backends/search-parallel.json`](../../config/providers/search-backends/search-parallel.json); service name `parallel`.
+- Keyless interface: `https://search.parallel.ai/mcp` (`mcp-tools-call`, tool `web_search`).
+- Reachability as the vendor states it: The vendor's pages state no regional availability.
+
+Readings:
+
+- `parallel-search-reference` — `vendor-documentation`, Parallel documentation: Search quickstart (docs.parallel.ai/search/search-quickstart) and Search API reference (docs.parallel.ai/api-reference/search/search), read 2026-10-16. POST https://api.parallel.ai/v1/search (generally available; no beta header on /v1) with the `x-api-key` header; `search_queries` (required), `objective`, `mode` (turbo, fast, basic, advanced; default advanced), `max_chars_total`, `advanced_settings` (max_results default 10, excerpt settings, source policy, fetch policy, location); unknown fields are rejected. The response is `{search_id, results[], warnings, usage, session_id}`, each result `url`, `title` (nullable), `publish_date`, `excerpts[]`.
+- `parallel-pricing` — `vendor-documentation`, Parallel pricing page (parallel.ai/pricing) and rate limits page (docs.parallel.ai/resources/rate-limits), read 2026-10-16. Search per 1,000 requests with 10 results: Turbo $1 (~200 ms), Fast $1 (~700 ms), Basic $5 (~1 s), Advanced $5 (~3 s); extra results $1 per 1,000; up to 5,000 requests a month free; 600 requests per minute. No regional statement.
+- `parallel-search-mcp` — `vendor-documentation`, Parallel Search MCP page, docs.parallel.ai/integrations/mcp/search-mcp, read 2026-10-16. https://search.parallel.ai/mcp, tools `web_search` and `web_fetch`, "no API key required" and free to use anonymously at lower rate limits in `fast` mode; with a key, `Authorization: Bearer`. This is the keyless service ADR 0080 §7 names and the existing search forwarder speaks.
+
+Open:
+
+- The anonymous MCP's rate limit is not published; the evaluation measures the keyed /v1/search interface, not the MCP.
+
+### `search-tinyfish`
+
+- Document: [`config/providers/search-backends/search-tinyfish.json`](../../config/providers/search-backends/search-tinyfish.json); service name `tinyfish`.
+- Reachability as the vendor states it: The vendor's pages state no regional availability.
+- TinyFish's interface reading (Issue #883): TinyFish is primarily a web-agent platform, but it documents a plain keyed search endpoint beside the agent, so the evaluation measures that endpoint and never the per-step Agent API.
+
+Readings:
+
+- `tinyfish-search-api` — `vendor-documentation`, TinyFish documentation, Search API page, docs.tinyfish.ai/search-api, read 2026-10-16. A synchronous web search: GET https://api.search.tinyfish.ai?query=… with optional `location`, `language`, `recency_minutes` or `after_date`/`before_date`, `domain_type` (web, news, research_paper) and `purpose`; JSON `{query, results[], total_results, page}`, each result `position`, `site_name`, `title`, `snippet`, `url`; the example returns 10 results. "Search is free up to 12,000 requests per day."
+- `tinyfish-authentication` — `vendor-documentation`, TinyFish documentation, Authentication page, docs.tinyfish.ai/authentication, read 2026-10-16. "All REST API requests require an API key passed in the `X-API-Key` header."
+- `tinyfish-pricing` — `vendor-documentation`, TinyFish pricing page, www.tinyfish.ai/pricing, with the Agent API and runs pages (docs.tinyfish.ai/agent-api, docs.tinyfish.ai/key-concepts/runs), read 2026-10-16. Search "$0.00 per request", "30 requests / min · 500 requests / hour"; Fetch (POST https://api.fetch.tinyfish.ai) free; the Agent API (POST https://agent.tinyfish.ai/v1/automation/run, run-async, run-sse; `url` + `goal`; 150 steps by default, 500 at most) $0.016 per step with 2 concurrent runs; Browser $0.002 per minute; new accounts receive $8 of wallet funds. No regional statement.
+
+Open:
+
+- The two pages state different free limits for Search (12,000 per day against 500 per hour); the evaluation stays far below both.
+- The accepted values of `language` and `location` are not listed; the evaluation sends the query alone.
+
+**The five search slots are enrolled for the development evaluation alone**, under the ADR 0067 amendment clause of Issue #883 (Owner authorization of 2026-10-13): the enrollment helper enrols each from its root key file by path only, no agent reads a key file, the evaluation tool reads a value only in-process on a developer host, the slots of excluded backends are cleared at wave end, and the Owner revokes unused keys at each vendor. Guests and CI hold no search key.
+
 ## Recorded evidence
 
 The evidence no page can supply — the live test items the ADR 0067 Provider Test Ledger holds and the production route's frozen request baseline — is recorded row by row in [`config/providers/recorded-evidence/recorded-evidence.json`](../../config/providers/recorded-evidence/recorded-evidence.json), validated by [`recorded-evidence.v1.schema.json`](../../config/providers/recorded-evidence/recorded-evidence.v1.schema.json) (its own subdirectory, because the record is not a provider document and everything that reads `config/providers/*.json` reads one). A document cites an item or a baseline only from the row it was observed on: a route for its route-wide facts only when every item was sent on that route, a model only when every item was sent to that model on that route. The ledger itself lives outside every checkout and CI has none, so the record is its reviewed mirror: the pull request that records a new live item adds it here and runs `node tools/generate-provider-configuration.mjs --ledger <cache root>` on the developer host, which compares the record with the ledger's transmitted, non-stale model-call lines by item, model and UTC day and prints every difference. CI never runs it. A ledger line is never withdrawn, but a model row can leave the documents: its items then stay in the record marked `withdrawn` with the Issue that took the row out, are listed below as a row no longer declared, and keep `--ledger` comparing every transmitted line; an undeclared row without the marker is refused.

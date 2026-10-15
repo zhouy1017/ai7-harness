@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "backendId": "search-deepseek",
+  "service": "deepseek",
+  "displayName": "DeepSeek 服务端搜索（官方）",
+  "support": "supported",
+  "supportEvidence": "deepseek-claude-code-web-search",
+  "request": {
+    "endpoint": "https://api.deepseek.com/anthropic/v1/messages",
+    "method": "POST",
+    "protocol": "anthropic-messages-web-search",
+    "evidence": "deepseek-anthropic-api"
+  },
+  "credential": {
+    "slot": "search-deepseek",
+    "developmentCredentialReference": "5d835534-e000-4b72-91c8-1dd986a6fcc7",
+    "headerForm": "x-api-key",
+    "anthropicVersion": "2023-06-01",
+    "keyRequired": true,
+    "evidence": "deepseek-anthropic-api"
+  },
+  "price": {
+    "amount": null,
+    "currency": "USD",
+    "per": 1,
+    "basis": "billed by tokens alone, with no per-search fee: deepseek-flash input $0.15 off-peak / $0.30 peak and output $0.60 / $1.20 per million tokens (cache hits $0.003 / $0.006); the search's own extra model requests are billed as tokens too, so the evaluation records the measured token cost per call",
+    "evidence": "deepseek-pricing"
+  },
+  "reachability": {
+    "note": "DeepSeek's official API is a mainland-China service; its pages state no regional restriction.",
+    "evidence": "deepseek-pricing"
+  },
+  "evidence": {
+    "deepseek-anthropic-api": {
+      "kind": "vendor-documentation",
+      "source": "DeepSeek official Anthropic API guide, api-docs.deepseek.com/guides/anthropic_api",
+      "readOn": "2026-10-16",
+      "note": "Base URL https://api.deepseek.com/anthropic; `x-api-key` Fully Supported and `anthropic-version` Ignored. The field-compatibility table lists the content blocks `server_tool_use` Supported and `web_search_tool_result` Supported (`search_result`, `mcp_tool_use`, `mcp_tool_result` Not Supported, `mcp_servers` Ignored); its `tools` rows cover `name`, `input_schema`, `description` (Fully Supported) and `cache_control` (Ignored) and name no tool `type`, so no server tool type string is stated on this page."
+    },
+    "deepseek-claude-code-web-search": {
+      "kind": "vendor-documentation",
+      "source": "DeepSeek official Claude Code integration guide, api-docs.deepseek.com/quick_start/agent_integrations/claude_code",
+      "readOn": "2026-10-16",
+      "note": "\"The DeepSeek API natively supports the Web Search feature in Claude Code … if the model determines that your question requires a web search, it will invoke the Web Search tool and perform the search through the API provided by DeepSeek. Because invoking the Web Search tool generates additional LLM API requests … additional model token costs will be incurred.\" The tool type Claude Code sends is not named."
+    },
+    "deepseek-pricing": {
+      "kind": "vendor-documentation",
+      "source": "DeepSeek official models and pricing page, api-docs.deepseek.com/quick_start/pricing",
+      "readOn": "2026-10-16",
+      "note": "Token prices per million for deepseek-flash: cache-hit input $0.003 / $0.006, cache-miss input $0.15 / $0.30, output $0.60 / $1.20 (off-peak / peak); no per-search charge is listed."
+    }
+  },
+  "openQuestions": [
+    "The server tool type is not named by DeepSeek. The evaluation sends Anthropic's `web_search_20250305` server tool on `deepseek-flash`; whether the endpoint runs it for a client other than Claude Code is what the measurement settles, and its outcome is this backend's verdict."
+  ],
+  "notes": [
+    "DeepSeek server-side web_search reading (Issue #883): listed — the Anthropic-compatible endpoint documents the server-tool result blocks as Supported and its Claude Code guide says web search runs through DeepSeek's API, but no page names the tool type or states the feature for a generic Anthropic client.",
+    "Searching here costs model tokens on the same DeepSeek key the production route uses, and the query reaches a model before any search; the evaluation sends only the public query."
+  ]
+}

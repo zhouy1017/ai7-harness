@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "description": "The fixed query set of the development search backend evaluation (Issue #883; Owner decisions 24″, 24⁵). Every query is authored from a public fact for this evaluation; none quotes, paraphrases or derives from a manuscript. 15 Chinese queries whose best sources are Chinese sites and 15 English queries whose best sources are international sites.",
+  "rubric": {
+    "topK": 5,
+    "hit": "A query is a hit when at least one of the top five results is on a judged-correct domain: one of the query's `primary` domains or one of the reference domains of its language (`referenceDomains`) or the query's own `reference` domains. A URL is on a domain when its host is the domain or ends with `.` followed by it.",
+    "primary": "Source quality: a query with `primary` domains counts a primary hit when one of the top five results is on an official or issuing-body domain it lists; listed results count the top-five results on any judged-correct domain against all results returned (at most five per query).",
+    "halves": "The Chinese half is the queries with `language` zh; the international half is the queries with `international` true (here every English query). Decision 24⁵ excludes a backend that hits on neither half."
+  },
+  "referenceDomains": {
+    "zh": ["baike.baidu.com", "zh.wikipedia.org", "baike.sogou.com", "people.com.cn", "xinhuanet.com", "news.cn", "cctv.com", "chinanews.com.cn", "gmw.cn", "thepaper.cn", "chinadaily.com.cn", "cnr.cn", "ce.cn"],
+    "en": ["en.wikipedia.org", "britannica.com", "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "theguardian.com", "nytimes.com"]
+  },
+  "probe": {
+    "query": "UNESCO World Book and Copyright Day April 23",
+    "note": "The one fixed public query of `--probe <backend>` (slice 6b's 测试检索): reachability, latency, result count and at most three titles and URLs."
+  },
+  "queries": [
+    { "id": "zh-01", "language": "zh", "international": false, "query": "中华人民共和国宪法 2018年 修正案 通过日期", "primary": ["npc.gov.cn", "gov.cn"], "reference": ["chinacourt.org"] },
+    { "id": "zh-02", "language": "zh", "international": false, "query": "第七次全国人口普查 全国总人口 公报", "primary": ["stats.gov.cn", "gov.cn"], "reference": [] },
+    { "id": "zh-03", "language": "zh", "international": false, "query": "鲁迅 狂人日记 首次发表 新青年 1918年", "primary": [], "reference": ["luxunmuseum.com.cn", "bjlxbwg.cn"] },
+    { "id": "zh-04", "language": "zh", "international": false, "query": "故宫博物院 成立时间 1925年", "primary": ["dpm.org.cn"], "reference": [] },
+    { "id": "zh-05", "language": "zh", "international": false, "query": "中国国家图书馆 前身 京师图书馆 创建年份", "primary": ["nlc.cn"], "reference": [] },
+    { "id": "zh-06", "language": "zh", "international": false, "query": "著作权法 第三次修正 施行日期 2021年6月1日", "primary": ["npc.gov.cn", "gov.cn", "ncac.gov.cn"], "reference": [] },
+    { "id": "zh-07", "language": "zh", "international": false, "query": "第十一届茅盾文学奖 获奖作品", "primary": ["chinawriter.com.cn"], "reference": [] },
+    { "id": "zh-08", "language": "zh", "international": false, "query": "嫦娥六号 月球背面 采样返回 着陆日期", "primary": ["cnsa.gov.cn", "gov.cn"], "reference": [] },
+    { "id": "zh-09", "language": "zh", "international": false, "query": "中国人民银行 成立 1948年 石家庄", "primary": ["pbc.gov.cn"], "reference": [] },
+    { "id": "zh-10", "language": "zh", "international": false, "query": "现代汉语词典 第7版 商务印书馆 出版时间", "primary": ["cp.com.cn"], "reference": [] },
+    { "id": "zh-11", "language": "zh", "international": false, "query": "图书在版编目数据 国家标准 GB/T 12451", "primary": ["samr.gov.cn", "nppa.gov.cn", "gov.cn"], "reference": ["sac.gov.cn"] },
+    { "id": "zh-12", "language": "zh", "international": false, "query": "敦煌莫高窟 列入世界遗产名录 年份", "primary": ["dha.ac.cn"], "reference": ["whc.unesco.org"] },
+    { "id": "zh-13", "language": "zh", "international": false, "query": "三峡工程 整体竣工验收 年份", "primary": ["ctg.com.cn", "mwr.gov.cn", "gov.cn"], "reference": [] },
+    { "id": "zh-14", "language": "zh", "international": false, "query": "中国作家协会 现任 主席", "primary": ["chinawriter.com.cn"], "reference": [] },
+    { "id": "zh-15", "language": "zh", "international": false, "query": "汉语拼音方案 1958年 全国人民代表大会 批准", "primary": ["moe.gov.cn", "npc.gov.cn", "gov.cn"], "reference": [] },
+    { "id": "en-01", "language": "en", "international": true, "query": "Universal Declaration of Human Rights adopted General Assembly resolution 217 date", "primary": ["un.org", "ohchr.org"], "reference": [] },
+    { "id": "en-02", "language": "en", "international": true, "query": "Nobel Prize in Literature 2012 laureate", "primary": ["nobelprize.org"], "reference": [] },
+    { "id": "en-03", "language": "en", "international": true, "query": "Berne Convention for the Protection of Literary and Artistic Works year adopted", "primary": ["wipo.int"], "reference": [] },
+    { "id": "en-04", "language": "en", "international": true, "query": "ISBN 13 digit format introduced 2007 ISO 2108", "primary": ["isbn-international.org", "iso.org"], "reference": [] },
+    { "id": "en-05", "language": "en", "international": true, "query": "James Webb Space Telescope launch date", "primary": ["nasa.gov", "esa.int", "stsci.edu"], "reference": [] },
+    { "id": "en-06", "language": "en", "international": true, "query": "Chicago Manual of Style 18th edition publication year", "primary": ["chicagomanualofstyle.org", "press.uchicago.edu"], "reference": [] },
+    { "id": "en-07", "language": "en", "international": true, "query": "Gutenberg Bible printed Mainz year", "primary": ["loc.gov", "bl.uk", "gutenberg-museum.de"], "reference": [] },
+    { "id": "en-08", "language": "en", "international": true, "query": "Oxford English Dictionary first edition completed 1928", "primary": ["oed.com", "oup.com"], "reference": [] },
+    { "id": "en-09", "language": "en", "international": true, "query": "UNESCO World Book and Copyright Day date origin", "primary": ["unesco.org", "un.org"], "reference": [] },
+    { "id": "en-10", "language": "en", "international": true, "query": "Library of Congress founded year", "primary": ["loc.gov"], "reference": [] },
+    { "id": "en-11", "language": "en", "international": true, "query": "Frankfurt Book Fair 2024 guest of honour country", "primary": ["buchmesse.de"], "reference": [] },
+    { "id": "en-12", "language": "en", "international": true, "query": "Booker Prize 2023 winner", "primary": ["thebookerprizes.com"], "reference": [] },
+    { "id": "en-13", "language": "en", "international": true, "query": "Pulitzer Prize for Fiction 2024 winner", "primary": ["pulitzer.org"], "reference": [] },
+    { "id": "en-14", "language": "en", "international": true, "query": "Unicode 15.1 release date CJK Unified Ideographs Extension I", "primary": ["unicode.org"], "reference": [] },
+    { "id": "en-15", "language": "en", "international": true, "query": "World Health Organization constitution entered into force 7 April 1948", "primary": ["who.int"], "reference": [] }
+  ]
+}

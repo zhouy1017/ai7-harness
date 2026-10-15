@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "backendId": "search-brave",
+  "service": "brave",
+  "displayName": "Brave Search API",
+  "support": "supported",
+  "supportEvidence": "brave-web-search-reference",
+  "request": {
+    "endpoint": "https://api.search.brave.com/res/v1/web/search",
+    "method": "GET",
+    "protocol": "brave-web-search",
+    "evidence": "brave-web-search-reference"
+  },
+  "credential": {
+    "slot": "search-brave",
+    "developmentCredentialReference": "3f0f367d-f343-4123-b86d-31d0bfac556e",
+    "headerForm": "x-subscription-token",
+    "anthropicVersion": null,
+    "keyRequired": true,
+    "evidence": "brave-web-search-reference"
+  },
+  "price": {
+    "amount": 5,
+    "currency": "USD",
+    "per": 1000,
+    "basis": "the Search plan's price per 1,000 requests, with $5 of free credit every month and 50 queries per second; the Answers plan ($4 per 1,000 plus tokens) is not this interface",
+    "evidence": "brave-search-api-pricing"
+  },
+  "reachability": {
+    "note": "The vendor's pages state no regional availability for mainland China; its list of unavailable jurisdictions could not be read (HTTP 403).",
+    "evidence": "brave-search-api-pricing"
+  },
+  "evidence": {
+    "brave-web-search-reference": {
+      "kind": "vendor-documentation",
+      "source": "Brave Search API documentation: web search get-started, query parameters and the GET /res/v1/web/search reference (api-dashboard.search.brave.com)",
+      "readOn": "2026-10-16",
+      "note": "GET https://api.search.brave.com/res/v1/web/search with the `X-Subscription-Token` header as the only required header; `q`, `count` (1–20, default 20), `offset`, `country` (includes CN), `search_lang` (includes zh-hans, zh-hant), `ui_lang`, `freshness`, `safesearch`; results at `web.results[]` with `title` and `url`."
+    },
+    "brave-search-api-pricing": {
+      "kind": "vendor-documentation",
+      "source": "Brave Search API product and pricing page, brave.com/search/api",
+      "readOn": "2026-10-16",
+      "note": "Search: \"$5 per 1,000 requests\", \"Includes $5 in free credits every month\", \"50 queries per second\". The page says nothing about availability in China."
+    }
+  },
+  "openQuestions": [
+    "Whether the API is reachable from mainland China without a proxy is the evaluation's measurement, not a vendor statement."
+  ]
+}
