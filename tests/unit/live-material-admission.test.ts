@@ -38,6 +38,13 @@ function admitting(kind: string): LaunchPolicyProjection {
 }
 
 describe('material-bearing live kind admission (#809)', () => {
+  it.each([() => wrap(review), () => wrap(initial), () => wrap(report), writing])('is admitted by the selected Provider Processing v12 rule exactly as projected', (make) => {
+    const definition = make();
+    expect(selected.providerProcessing.version).toBe('v12');
+    expect(liveMaterialRule(selected, definition.kind)).not.toBeNull();
+    expect(liveKindAdmission(selected, definition, binding)).not.toBeNull();
+  });
+
   it.each([() => wrap(review), () => wrap(initial), () => wrap(report), writing])('requires both policy terms and one rule, and re-derives the wrapper digest', (make) => {
     const definition = make();
     const policy = admitting(definition.kind);
