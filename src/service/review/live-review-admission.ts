@@ -26,6 +26,11 @@ export function liveReviewRule(
   entry: ReviewCategoryConfigurationEntry,
 ): ReviewProviderRule | null {
   if (entry.executor !== 'review-category-contract' || entry.searchEngine || entry.seriesKnowledge !== undefined) return null;
+  if (entry.categoryId === 'cross-deliverable-consistency') {
+    if (entry.deliverables?.unavailableReason !== null || entry.deliverables.participants.length === 0) return null;
+    const rule = liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic', 'editorial-deliverable-excerpt']);
+    return rule?.editorialDeliverablesAllowed === true ? rule : null;
+  }
   const implemented = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => category.categoryId === entry.categoryId);
   if (implemented?.executor !== 'review-category-contract' || implemented.searchEngine) return null;
   return liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic']);

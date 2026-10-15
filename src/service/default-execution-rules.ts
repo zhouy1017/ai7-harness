@@ -537,6 +537,8 @@ export const QUICK_START_NOT_READY = '这份计划现在不能开始；请看过
 export const SET_RULE_FIRST_BASELINE = '首次基线分析只做一次，不能设为快速开始默认。';
 export const SET_RULE_RANGE = '重新分析所选范围每次都要先选范围，不能设为快速开始默认。';
 export const SET_RULE_DEVELOPER_LIVE = '开发者实时模式下不能设快速开始默认：每次都先看计划，再开始任务。';
+/** Ordinary production admits no default-execution-rule origin yet (Issue #811; v13): every Task starts from its own plan. */
+export const SET_RULE_ORDINARY_PRODUCTION = '本机正式使用中暂不能设快速开始默认：每次都先看计划，再开始任务。';
 export const SET_RULE_CHANGED = '计划的关键内容已变化；重新确认计划后才能设为快速开始默认。';
 /**
  * A rule binds a plan's allowed variability and outcome classes exactly (TASK-022), and a quick start prepares the plan

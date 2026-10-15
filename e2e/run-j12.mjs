@@ -296,23 +296,26 @@ async function findRenderer(manager, expression, name) {
 
 /**
  * What would name a configured provider a Model Role cannot bind (ADR 0073 §3), read from the checked-in provider
- * documents: each provider's and route's display name, each route id and each endpoint host — everything but the
- * production connection's DeepSeek official document, which the role card names.
+ * documents: each provider's and route's display name, each route id and each endpoint host — everything but the two
+ * documents whose routes the Main Editorial Role may be configured to (Issue #811: DeepSeek official and OpenCode Go). Their
+ * provider display names are what the 尚未支持 list may name, and nothing else on the screen.
  */
 async function configuredUnboundProviderNames() {
   const directory = resolve(ROOT, 'config', 'providers');
   const names = new Set();
+  const listed = new Set();
   for (const file of (await readdir(directory)).filter((name) => name.endsWith('.json') && !name.endsWith('.schema.json')).sort()) {
     const document = JSON.parse(await readFile(join(directory, file), 'utf8'));
-    if (document.providerId === 'deepseek-open-platform') continue;
+    if (document.providerId === 'deepseek-open-platform' || document.providerId === 'opencode-go') continue;
     names.add(document.displayName);
+    listed.add(document.displayName);
     for (const route of document.routes) {
       names.add(route.displayName);
       names.add(route.routeId);
       names.add(new URL(route.endpoint).hostname);
     }
   }
-  return [...names];
+  return { names: [...names], listed: [...listed] };
 }
 
 async function assertRenderer(renderer, expression, name) {
@@ -1231,8 +1234,10 @@ async function main() {
       return roles.length===4 &&
         JSON.stringify(ids)===JSON.stringify(['fast-interaction','main-editorial','difficult-escalation','frontier']) &&
         main?.dataset.modelRoleStatus==='setup-required' &&
-        main.textContent.includes('DeepSeek 开放平台（官方）') && main.textContent.includes('DeepSeek V4 Pro High') &&
+        main.textContent.includes('DeepSeek 开放平台（官方）') && main.textContent.includes('OpenCode Go') && main.textContent.includes('DeepSeek V4.1 Flash') &&
         main.textContent.includes('已批准备用链') && main.textContent.includes('无') &&
+        JSON.stringify(Array.from(main.querySelectorAll('[data-model-route]')).map((node)=>node.dataset.modelRoute))===JSON.stringify(['opencode-go','deepseek-open-platform']) &&
+        Array.from(main.querySelectorAll('[data-model-route]')).every((node)=>node.dataset.modelRouteInUse==='false'&&node.dataset.modelRouteStatus==='setup-required') &&
         roles.filter((node)=>node.dataset.modelRole!=='main-editorial').every((node)=>node.dataset.modelRoleStatus==='setup-required'&&!node.textContent.includes('DeepSeek')) &&
         statuses.length===4 && statuses.every((node)=>node.getAttribute('aria-label')?.includes(node.textContent??'')) &&
         document.querySelector('.model-service-settings')?.dataset.policyIntegrity==='verified' &&
@@ -1242,15 +1247,21 @@ async function main() {
         document.body.textContent.includes('公开发布许可：不存在');
     })()`, 'four-role-first-policy-semantics');
     // ADR 0073 §3 and V2-UX-MSET-007 (Issue #435): a configured provider appears as a connection only when a Model Role
-    // can bind to it, and no provider document makes one bindable, so no configured provider but the production
-    // connection's is named on this screen.
-    const unboundProviderNames = await configuredUnboundProviderNames();
-    requireJourney(unboundProviderNames.length > 0, 'model-service-configured-providers-read');
+    // can bind to it. Since Issue #811 the two production routes are bindable; every other configured provider is named once,
+    // in the 尚未支持 list, offers nothing to choose or fill in, and its routes and hosts are named nowhere.
+    const unbound = await configuredUnboundProviderNames();
+    requireJourney(unbound.names.length > 0 && unbound.listed.length > 0, 'model-service-configured-providers-read');
     await assertRenderer(primary, `(() => {
       const screen=document.querySelector('[data-screen="model-service"]');
-      if(!(screen instanceof HTMLElement)||!screen.textContent?.includes('DeepSeek 开放平台（官方）'))return false;
-      const text=screen.textContent;
-      return ${JSON.stringify(unboundProviderNames)}.every((name)=>!text.includes(name));
+      const list=screen?.querySelector('[data-unsupported-providers]');
+      if(!(screen instanceof HTMLElement)||!(list instanceof HTMLElement)||!screen.textContent?.includes('DeepSeek 开放平台（官方）'))return false;
+      const outside=screen.cloneNode(true);
+      outside.querySelector('[data-unsupported-providers]')?.remove();
+      const listed=list.textContent??'';
+      return ${JSON.stringify(unbound.names)}.every((name)=>!outside.textContent.includes(name)) &&
+        ${JSON.stringify(unbound.listed)}.every((name)=>listed.includes(name)) &&
+        list.querySelectorAll('input,button,select,textarea,a').length===0 &&
+        Array.from(list.querySelectorAll('li')).every((item)=>item.textContent.endsWith('尚未支持'));
     })()`, 'model-service-unbound-provider-absent');
     await tabUntil(primary, `document.activeElement?.id==='main-editorial-connection-name' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-connection');
     await dispatchTab(primary);
@@ -1270,6 +1281,8 @@ async function main() {
       roleIds:settings.roles.map((role)=>role.roleId),
       connection:settings.roles.find((role)=>role.roleId==='main-editorial')?.connection,
       binding:settings.roles.find((role)=>role.roleId==='main-editorial')?.binding,
+      routes:settings.routeChoice.routes,
+      unsupported:settings.routeChoice.unsupportedProviders,
       policy:settings.launchPolicy,
     }))`);
     requireJourney(
@@ -1279,13 +1292,17 @@ async function main() {
         firstConnection.connection?.connectionName === 'J12 主编辑连接' &&
         firstConnection.connection?.credentialOperationState === 'ready' &&
         firstConnection.binding?.providerId === 'deepseek-open-platform' &&
-        firstConnection.binding?.modelId === 'deepseek-v4-pro' &&
+        firstConnection.binding?.modelId === 'deepseek-flash' &&
+        firstConnection.connection?.selected === true &&
+        JSON.stringify(firstConnection.routes?.map((route) => [route.route, route.isDefault, route.inUse, route.status])) ===
+          JSON.stringify([['opencode-go', true, false, 'setup-required'], ['deepseek-open-platform', false, true, 'available']]) &&
+        firstConnection.unsupported?.length > 0 && firstConnection.unsupported.every((provider) => provider.statusLabel === '尚未支持') &&
         firstConnection.binding?.adapterRevision === 1 &&
         firstConnection.binding?.configurationRevision === 1 &&
         firstConnection.binding?.credentialSlot === 'deepseek-api-key' &&
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
-        firstConnection.policy?.activePolicySetVersion === 'v9' &&
+        firstConnection.policy?.activePolicySetVersion === 'v10' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&

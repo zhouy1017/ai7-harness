@@ -25,7 +25,7 @@ export interface ReconnectPreflightDependencies<Run extends { readonly runRecord
   /** Last admitted transport's failure; this reading never sends a probe. */
   transportFailure?(): 'proxy-unreachable' | 'model-service-unreachable' | null;
   /** The readiness the dispatch check itself reports; `null` when the route resolves no credential. */
-  credentialReadiness(): Promise<'present' | 'missing' | null>;
+  credentialReadiness(run: Run): Promise<'present' | 'missing' | null>;
   /** Whether the one execution slot is held. */
   slotBusy(): boolean;
   /** Admit the Run to the slot and dispatch it, through the execution owner; throws its admission error. */
@@ -80,8 +80,9 @@ export async function reconnectPreflight<Run extends { readonly runRecordId: str
   if (runs.length === 0) return outcome;
   if (deps.frozen()) return { ...outcome, waiting: runs.length };
   const offline = deps.reachesNetwork && deps.connectivity() === 'offline';
-  const credential = offline ? null : await deps.credentialReadiness();
   for (const run of runs) {
+    if (!deps.stillWaiting(run)) continue;
+    const credential = offline || deps.frozen() ? null : await deps.credentialReadiness(run);
     // Read again after the await: the editor may have cancelled, or another preflight admitted, meanwhile — or a replacement
     // may have begun, which nothing admitted or blocked may cross (Issue #434 review).
     if (deps.frozen()) {

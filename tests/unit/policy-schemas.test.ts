@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all twenty current and historical pairs and validates every one at this base', () => {
+  it('discovers all twenty-three current and historical pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(20);
+    expect(pairs).toHaveLength(23);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(20);
+    expect(results).toHaveLength(23);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -226,5 +226,92 @@ describe('Provider Processing v11 and active-set v9 schemas', () => {
     const pinned = clone(v8.policyData) as { activePolicies: { 'provider-processing-policy': { scopePins: Record<string, Record<string, unknown>> } } };
     pinned.activePolicies['provider-processing-policy'].scopePins['developer-live']!.version = 'v11';
     expect(() => validatePolicyDocument(pinned, v8.schemaData)).toThrowError(/does not equal the required const/);
+  });
+});
+
+describe('Provider Processing v12, v13 and active-set v10 schemas (Issue #853)', () => {
+  type Rules = { decision: { providerAllowRules: Array<Record<string, unknown>> } };
+  const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+  const v12 = () => readPair('provider-processing-policy.v12.json', 'provider-processing-policy.v12.schema.json');
+  const v13 = () => readPair('provider-processing-policy.v13.json', 'provider-processing-policy.v13.schema.json');
+
+  it('validates v12\'s seven-rule tuple and rejects an eighth rule, a missing one, or a review rule that gives up cross-deliverable consistency', () => {
+    const { policyData, schemaData } = v12();
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    const widened = clone(policyData) as Rules;
+    widened.decision.providerAllowRules.push(clone(widened.decision.providerAllowRules[5]!));
+    expect(() => validatePolicyDocument(widened, schemaData)).toThrowError(/has more than 7 allowed items/);
+    const narrowed = clone(policyData) as Rules;
+    narrowed.decision.providerAllowRules.splice(3, 1);
+    expect(() => validatePolicyDocument(narrowed, schemaData)).toThrowError();
+    const review = clone(policyData) as Rules;
+    (review.decision.providerAllowRules[2]!.allowedTaskKinds as string[]).pop();
+    expect(() => validatePolicyDocument(review, schemaData)).toThrowError(/developerLiveReviewRule\/properties\/allowedTaskKinds does not equal the required const/);
+  });
+
+  it('rejects a v12 rule that withdraws a material term, widens past Series Knowledge or drops one of the two new categories', () => {
+    const { policyData, schemaData } = v12();
+    for (const [index, definition] of [[2, 'developerLiveReviewRule'], [3, 'developerLiveWritingRule'], [4, 'developerLiveEvaluationRule']] as const) {
+      const withdrawn = clone(policyData) as Rules;
+      (withdrawn.decision.providerAllowRules[index]!.source as Record<string, unknown>).materialReferencesAllowed = false;
+      expect(() => validatePolicyDocument(withdrawn, schemaData)).toThrowError(new RegExp(`${definition}/properties/source does not equal the required const`));
+      const series = clone(policyData) as Rules;
+      (series.decision.providerAllowRules[index]!.source as Record<string, unknown>).seriesKnowledgeAllowed = true;
+      expect(() => validatePolicyDocument(series, schemaData)).toThrowError(new RegExp(`${definition}/properties/source does not equal the required const`));
+    }
+    const categories = clone(policyData) as { outboundDataCategories: Record<string, unknown> };
+    delete categories.outboundDataCategories['editorial-deliverable-excerpt'];
+    expect(() => validatePolicyDocument(categories, schemaData)).toThrowError(/outboundDataCategories does not equal the required const/);
+  });
+
+  it('validates v13\'s seven rules and rejects a background rule, a user-binding that fixes a route, or a cache switched on', () => {
+    const { policyData, schemaData } = v13();
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    const background = clone(policyData) as Rules;
+    background.decision.providerAllowRules.push(clone(background.decision.providerAllowRules[0]!));
+    expect(() => validatePolicyDocument(background, schemaData)).toThrowError(/has more than 7 allowed items/);
+    const fixed = clone(policyData) as Rules;
+    (fixed.decision.providerAllowRules[0]!.providerBinding as Record<string, unknown>).route = 'opencode-go';
+    expect(() => validatePolicyDocument(fixed, schemaData)).toThrowError(/productionBaselineAnalysisRule\/properties\/providerBinding does not equal the required const/);
+    const cache = clone(policyData) as Rules;
+    (cache.decision.providerAllowRules[2]!.capture as Record<string, unknown>).providerResultCacheAllowed = true;
+    expect(() => validatePolicyDocument(cache, schemaData)).toThrowError(/productionReviewRule\/properties\/capture does not equal the required const/);
+    const origin = clone(policyData) as Rules;
+    (origin.decision.providerAllowRules[3]!.authorityOrigin as Record<string, unknown>).matchingActiveDefaultExecutionRuleAllowed = true;
+    expect(() => validatePolicyDocument(origin, schemaData)).toThrowError(/productionWritingRule\/properties\/authorityOrigin does not equal the required const/);
+  });
+
+  it('rejects a v13 document that binds a role by default, drops a selectable binding or lets a binding authorize transmission', () => {
+    const { policyData, schemaData } = v13();
+    const bound = clone(policyData) as { roleBindings: Record<string, Record<string, unknown>> };
+    bound.roleBindings['Frontier Model Role']!.bindingState = 'bound';
+    expect(() => validatePolicyDocument(bound, schemaData)).toThrowError(/roleBindings does not equal the required const/);
+    const fewer = clone(policyData) as { roleBindings: Record<string, { allowedBindings: unknown[] }> };
+    fewer.roleBindings['Main Editorial Role']!.allowedBindings.pop();
+    expect(() => validatePolicyDocument(fewer, schemaData)).toThrowError(/roleBindings does not equal the required const/);
+    const authorizes = clone(policyData) as { roleBindings: Record<string, Record<string, unknown>> };
+    authorizes.roleBindings['Fast Interaction Role']!.userConfiguredBindingAuthorizesTransmission = true;
+    expect(() => validatePolicyDocument(authorizes, schemaData)).toThrowError(/roleBindings does not equal the required const/);
+  });
+
+  it('rejects an active-set v10 whose ordinary-production or developer-live pin is not the exact v13 or v12 document', () => {
+    const { policyData, schemaData } = readPair('active-policy-set.v10.json', 'active-policy-set.v10.schema.json');
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    type Pins = { activePolicies: { 'provider-processing-policy': { scopePins: Record<string, Record<string, unknown>> } } };
+    for (const [scope, field, value] of [
+      ['ordinary-production', 'version', 'v6'],
+      ['ordinary-production', 'sha256', '1f2e1381b40ce2a91eba2c92af3cd883d6df5f574980d6f182e49d02856d86e9'],
+      ['developer-live', 'version', 'v11'],
+      ['developer-live', 'sha256', '38cc8044f10517bd3c152237256cd0cd7fe6cf8a4ef7ad340099a087ac8a8634'],
+    ] as const) {
+      const mutated = clone(policyData) as Pins;
+      mutated.activePolicies['provider-processing-policy'].scopePins[scope]![field] = value;
+      expect(() => validatePolicyDocument(mutated, schemaData), `${scope} ${field}`).toThrowError(/does not equal the required const/);
+    }
+    // v9 keeps pinning the old pair, so a v9 whose pins moved to the successors is not v9.
+    const v9 = readPair('active-policy-set.v9.json', 'active-policy-set.v9.schema.json');
+    const moved = clone(v9.policyData) as Pins;
+    moved.activePolicies['provider-processing-policy'].scopePins['ordinary-production']!.version = 'v13';
+    expect(() => validatePolicyDocument(moved, v9.schemaData)).toThrowError();
   });
 });

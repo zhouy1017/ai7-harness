@@ -18,15 +18,17 @@ import {
   type ProductionDocumentVersionProjection,
   type SourceFormat,
 } from '../shared/protocol.js';
-import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
+import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex, isRecord } from './analysis/canonical.js';
 import type { PackageDeliveryReading, PackageDocumentReading } from './book-delivery-packages.js';
 import { ProductionDocumentOriginError, productionDocumentOriginMarks } from './production-document-origins.js';
 import { WRITING_DRAFT_PARSER_IDENTITY } from './writing-tasks.js';
 import type { ProductionDocumentWorkflow } from './production-document-workflow.js';
+import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import {
   BUILTIN_PRODUCTION_DOCUMENT_TYPES,
   BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST,
   productionDocumentType,
+  documentTypeLabel,
   type ProductionDocumentTypeConfiguration,
 } from './production-document-types.js';
 
@@ -81,6 +83,132 @@ export function productionDocumentMarksNotCarried(count: number): string {
 /** `版本 N`: a document's version names its place in the document's own history, never a milestone (MILE-014). */
 export function productionDocumentVersionLabel(ordinal: number): string {
   return `版本 ${ordinal}`;
+}
+
+/** A bounded, read-only view of the exact finalized version compared by a Review Run (#813). */
+export interface ReviewDeliverableParticipant {
+  readonly documentId: string;
+  readonly typeId: string;
+  readonly typeLabel: string;
+  readonly title: string;
+  readonly versionLabel: string;
+  readonly revisionId: string;
+  readonly revisionDigest: string;
+  readonly sourceDigest: string;
+  readonly laterSaves: number;
+  readonly omittedParagraphs: number;
+  readonly paragraphs: ReadonlyArray<{ readonly ref: string; readonly position: number; readonly text: string; readonly truncated: boolean }>;
+}
+
+export interface ReviewDeliverableReading {
+  readonly participants: readonly ReviewDeliverableParticipant[];
+  readonly leftOut: ReadonlyArray<{ readonly documentId: string; readonly title: string; readonly reason: string }>;
+  readonly unavailableReason: string | null;
+}
+
+export const REVIEW_DELIVERABLES_ABSENT = '这本书还没有编辑交付物；有了交付物后才能选。';
+export const REVIEW_DELIVERABLES_DRAFT = '这本书的交付物还没有定稿；定稿或发稿后才能选';
+export const REVIEW_DELIVERABLE_CHANGED = '跨交付物一致性所依据的交付物定稿版本或参与状态已经变化；请重新准备这次审阅。';
+
+/**
+ * Issue #813 brief revision 3: delivery-origin versions take precedence; otherwise read the newest saved version no later
+ * than completed finalization. Working text and subsequent saves never become participants implicitly. No write is made.
+ * Only the house's deliverable types are 交付物: a 审稿意见 draft (S81c) shares these tables and phases, but it is an
+ * Editorial Artifact made from an Evaluation Record, so it neither participates nor changes why the category is unavailable.
+ */
+export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeliverableReading {
+  const participants: ReviewDeliverableParticipant[] = [];
+  const leftOut: Array<{ documentId: string; title: string; reason: string }> = [];
+  const houseTypes = BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.map((type) => type.typeId);
+  const rows = db.prepare(`SELECT * FROM production_documents WHERE book_id = ? AND type_id IN (${houseTypes.map(() => '?').join(', ')})
+    ORDER BY type_id, document_id LIMIT 17`).all(bookId, ...houseTypes) as SqlRow[];
+  if (rows.length > 16) return { participants, leftOut, unavailableReason: '交付物数量超出本次比对边界。' };
+  let corrupt: string | null = null;
+  for (const row of rows) {
+    const documentId = text(row.document_id);
+    const typeId = text(row.type_id);
+    const typeLabel = documentTypeLabel(typeId);
+    let title = typeLabel;
+    try {
+      const recordDigest = sha256Hex(canonicalJson({
+        schema: 'ai7.production-document/1', documentId, bookId, typeId,
+        typeConfiguration: { version: text(row.type_configuration_version), digest: text(row.type_configuration_digest) },
+        originSourceVersionId: text(row.origin_source_version_id), parserIdentity: text(row.parser_identity), createdAt: text(row.created_at),
+      }));
+      requireDocument(recordDigest === text(row.record_digest), 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档记录与其摘要不一致。');
+      const identity = db.prepare("SELECT manuscript_id FROM manuscripts WHERE manuscript_id = ? AND book_id = ? AND role = 'production-document'").get(documentId, bookId);
+      requireDocument(identity !== undefined, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档的图书身份无效。');
+      const decision = db.prepare('SELECT decision FROM production_document_type_decisions WHERE book_id = ? AND type_id = ? ORDER BY sequence DESC LIMIT 1').get(bookId, typeId) as SqlRow | undefined;
+      const latest = db.prepare('SELECT * FROM production_document_versions WHERE document_id = ? ORDER BY version DESC LIMIT 1').get(documentId) as SqlRow | undefined;
+      requireDocument(latest !== undefined, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档没有版本。');
+      const phase = db.prepare("SELECT * FROM production_document_phase_transitions WHERE document_id = ? AND phase_id = 'finalization' ORDER BY ordinal DESC LIMIT 1").get(documentId) as SqlRow | undefined;
+      if (phase !== undefined) {
+        requireDocument(sha256Hex(text(phase.canonical_json)) === text(phase.sha256), 'PRODUCTION_DOCUMENT_RECORD_INVALID', '工作流程记录与其摘要不一致。');
+        let body: unknown;
+        try { body = JSON.parse(text(phase.canonical_json)) as unknown; } catch { /* Refuse the unreadable record below. */ }
+        requireDocument(isRecord(body) && body.documentId === documentId && body.phaseId === 'finalization' && body.toState === phase.to_state &&
+          body.recordedAt === phase.recorded_at && body.ordinal === phase.ordinal, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '工作流程记录与其阶段状态不一致。');
+      }
+      const delivery = db.prepare("SELECT * FROM production_document_versions WHERE document_id = ? AND origin = 'delivery' ORDER BY version DESC LIMIT 1").get(documentId) as SqlRow | undefined;
+      const completed = phase?.to_state === 'completed';
+      const chosen = delivery ?? (completed ? db.prepare("SELECT * FROM production_document_versions WHERE document_id = ? AND origin = 'saved' AND recorded_at <= ? ORDER BY version DESC LIMIT 1")
+        .get(documentId, text(phase!.recorded_at)) as SqlRow | undefined : undefined);
+      const titleRow = db.prepare("SELECT text FROM manuscript_block_versions WHERE revision_id = ? AND kind = 'title' ORDER BY position LIMIT 1").get(text(chosen?.revision_id ?? latest.revision_id)) as SqlRow | undefined;
+      // The title is one prompt line: whitespace and control characters collapse, and an empty title falls back to the type.
+      const heading = titleRow === undefined ? '' : sliceGraphemes(text(titleRow.text).replace(/[\s\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').trim(), 0, 80).trim();
+      title = heading.length > 0 ? heading : typeLabel;
+      if (decision?.decision === 'not-for-this-book') {
+        leftOut.push({ documentId, title, reason: '本书不做' });
+        continue;
+      }
+      if (chosen === undefined) {
+        leftOut.push({ documentId, title, reason: phase?.to_state === 'reopened' || phase?.to_state === 'skipped'
+          ? `「${title}」已重新打开定稿阶段，尚无可用的定稿版本` : REVIEW_DELIVERABLES_DRAFT });
+        continue;
+      }
+      const revisionId = text(chosen.revision_id);
+      const revision = db.prepare(`SELECT mr.*, sv.source_digest FROM manuscript_revisions mr
+        JOIN source_versions sv ON sv.source_version_id = mr.source_version_id AND sv.book_id = ?
+        WHERE mr.revision_id = ? AND mr.manuscript_id = ?`).get(bookId, revisionId, documentId) as SqlRow | undefined;
+      requireDocument(revision !== undefined && revision.revision_digest === chosen.revision_digest, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档版本与其修订版不一致。');
+      const blocks = db.prepare(`SELECT v.* FROM manuscript_block_versions v JOIN manuscript_blocks b ON b.block_id = v.block_id
+        AND b.manuscript_id = ? WHERE v.revision_id = ? ORDER BY v.position`).iterate(documentId, revisionId) as IterableIterator<SqlRow>;
+      // Bound each document to 10,000 graphemes and 64 paragraphs. Every retained paragraph states whether it was cut.
+      let remaining = 10_000;
+      let readableParagraphs = 0;
+      const paragraphs: ReviewDeliverableParticipant['paragraphs'][number][] = [];
+      for (const block of blocks) {
+        const words = text(block.text);
+        requireDocument(sha256Hex(canonicalJson({ kind: text(block.kind), level: block.level, text: words })) === text(block.digest),
+          'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档段落与其摘要不一致。');
+        if (words.trim().length === 0) continue;
+        readableParagraphs += 1;
+        if (remaining === 0 || paragraphs.length === 64) continue;
+        const kept = sliceGraphemes(words, 0, Math.min(remaining, 2_000));
+        if (kept.trim().length === 0) continue;
+        const position = integer(block.position);
+        paragraphs.push({ ref: `deliverable/${typeId}/${position}`, position, text: kept, truncated: kept !== words });
+        remaining -= graphemeCount(kept);
+      }
+      // A finalized version the editor emptied is a state of the document, not a damaged record: it sits out, named.
+      if (paragraphs.length === 0) {
+        leftOut.push({ documentId, title, reason: '定稿版本没有可比对的文字' });
+        continue;
+      }
+      const later = db.prepare("SELECT count(*) total FROM production_document_versions WHERE document_id = ? AND origin = 'saved' AND version > ?").get(documentId, integer(chosen.version)) as SqlRow;
+      participants.push({ documentId, typeId, typeLabel, title, versionLabel: productionDocumentVersionLabel(integer(chosen.version)),
+        revisionId, revisionDigest: text(chosen.revision_digest), sourceDigest: text(revision.source_digest), paragraphs,
+        laterSaves: integer(later.total),
+        omittedParagraphs: readableParagraphs - paragraphs.length });
+    } catch (error) {
+      if (!(error instanceof ProductionDocumentError)) throw error;
+      corrupt ??= error.message;
+      leftOut.push({ documentId, title, reason: error.message });
+    }
+  }
+  return { participants, leftOut, unavailableReason: corrupt ?? (participants.length > 0 ? null : rows.length === 0 ? REVIEW_DELIVERABLES_ABSENT
+    : leftOut.every((entry) => entry.reason === REVIEW_DELIVERABLES_DRAFT) ? REVIEW_DELIVERABLES_DRAFT
+      : leftOut.map((entry) => `「${entry.title}」：${entry.reason}`).join('；')) };
 }
 
 /** A document's row as the ledger holds it. */

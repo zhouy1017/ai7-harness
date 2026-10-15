@@ -18,7 +18,7 @@ import { journeyCheckFailure } from './controller.mjs';
  * `tests/unit/credential-cleanup.test.ts` holds it equal to the highest `*_SCHEMA_VERSION` in
  * `src/service/task-authorization.ts`, so a schema slice moves it in the same pull request or a unit test fails.
  */
-export const CREDENTIAL_CLEANUP_SCHEMA_VERSION = 71;
+export const CREDENTIAL_CLEANUP_SCHEMA_VERSION = 72;
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -198,20 +198,27 @@ export async function recoverSyntheticCredentialCleanupState(journey, dataRoot, 
        FROM model_service_connections
        LIMIT 2`,
     ).all();
-    requireCleanup(journey, rows.length <= 1, 'credential-cleanup-metadata-cardinality');
+    // Revision 72 (Issue #811): one row per production route, the DeepSeek 官方 row and the Go row; a Journey saves the first.
+    requireCleanup(journey, rows.length <= 2, 'credential-cleanup-metadata-cardinality');
     if (rows.length === 0) return { kind: 'not-started' };
+    for (const candidate of rows) {
+      const official = candidate.connection_id === 'main-editorial-deepseek-v4-pro' && candidate.provider_id === 'deepseek-open-platform' &&
+        candidate.credential_slot === 'deepseek-api-key' && candidate.model_id === 'deepseek-flash';
+      const go = candidate.connection_id === 'main-editorial-opencode-go' && candidate.provider_id === 'opencode-go' &&
+        candidate.credential_slot === 'opencode-go' && candidate.model_id === 'deepseek-v4.1-flash';
+      requireCleanup(
+        journey,
+        (official || go) && candidate.role_id === 'main-editorial' &&
+        typeof candidate.connection_name === 'string' && candidate.connection_name.isWellFormed() &&
+        candidate.connection_name.trim().length >= 1 && candidate.connection_name.trim().length <= 80 &&
+        candidate.adapter_revision === 1 && candidate.configuration_revision === 1 && candidate.approved_fallback_chain === '[]' &&
+        typeof candidate.credential_reference === 'string' &&
+        UUID_PATTERN.test(candidate.credential_reference) && ['ready', 'missing', 'needs-attention'].includes(candidate.credential_operation_state),
+        'credential-cleanup-metadata-binding',
+      );
+    }
+    requireCleanup(journey, rows.length === 1, 'credential-cleanup-metadata-cardinality');
     const row = rows[0];
-    requireCleanup(
-      journey,
-      row.connection_id === 'main-editorial-deepseek-v4-pro' && row.role_id === 'main-editorial' &&
-      typeof row.connection_name === 'string' && row.connection_name.isWellFormed() &&
-      row.connection_name.trim().length >= 1 && row.connection_name.trim().length <= 80 &&
-      row.provider_id === 'deepseek-open-platform' && row.model_id === 'deepseek-v4-pro' &&
-      row.adapter_revision === 1 && row.configuration_revision === 1 && row.approved_fallback_chain === '[]' &&
-      row.credential_slot === 'deepseek-api-key' && typeof row.credential_reference === 'string' &&
-      UUID_PATTERN.test(row.credential_reference) && ['ready', 'missing', 'needs-attention'].includes(row.credential_operation_state),
-      'credential-cleanup-metadata-binding',
-    );
     return row.credential_operation_state === 'missing'
       ? { kind: 'removed' }
       : { kind: 'reference', credentialReference: row.credential_reference };

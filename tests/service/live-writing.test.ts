@@ -149,13 +149,15 @@ describe('reference-free writing on the Go execution path (#810)', () => {
     expect(sent).toBe(0);
   });
 
-  it('keeps provider-free wording and refuses material-bearing live plans in their existing words', async () => {
+  it('keeps provider-free wording and the material refusal under a rule without the category', async () => {
     const imported = await book();
     const live = store.baselineAnalysisLedger.launch;
     store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
     expect(store.inspectWritingTask(imported.bookId).consequences.send).toBe(WRITING_SEND_CONSEQUENCE);
-    store.baselineAnalysisLedger.bindLaunch(live);
-    expect(() => store.createWritingPreparationWork(imported.bookId, { ...WRITING_REQUEST, materialIds: [imported.bookId] }, policy)).toThrowError(WRITING_MATERIAL_LIVE_UNAVAILABLE);
+    const predecessor = withRuleFor(policy, 'writing', { materialReferencesAllowed: false,
+      outboundDataCategories: ruleFor(policy, 'writing').outboundDataCategories.filter((category) => category !== 'frozen-material-reference-excerpt') });
+    store.baselineAnalysisLedger.bindLaunch({ ...live, policy: predecessor });
+    expect(() => store.createWritingPreparationWork(imported.bookId, { ...WRITING_REQUEST, materialIds: [imported.bookId] }, predecessor)).toThrowError(WRITING_MATERIAL_LIVE_UNAVAILABLE);
     expect(sent).toBe(0);
   });
 
@@ -273,7 +275,7 @@ describe('reference-free writing on the Go execution path (#810)', () => {
     const definition = writingKindDefinition(input);
     const binding = ruleFor(policy, 'writing');
     expect(liveKindAdmission(policy, definition, DEVELOPER_LIVE_POLICY_BINDING)).toEqual({ ruleId: 'developer-live-public-samplebook-writing',
-      modelRole: 'Main Editorial Role', outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt'],
+      modelRole: 'Main Editorial Role', outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
       crossUnitSynthesisAllowed: true });
     expect(liveKindContractCategories('writing')).toEqual(['book-metadata-and-synopsis', 'house-exemplar-excerpt']);
     // A replaced digest, a recorded contract the owner cannot rebuild, a missing derivation, a 资料库-bearing contract or a

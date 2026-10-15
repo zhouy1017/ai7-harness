@@ -1,7 +1,7 @@
-import type { DeveloperLiveProviderProcessingVersion, LaunchPolicyProjection } from '../../shared/protocol.js';
+import type { LaunchPolicyProjection, ProviderProcessingVersion } from '../../shared/protocol.js';
 import type { CredentialSlotBinding } from '../provider/credential-broker.js';
 import { PROVIDER_ROUTE_PROFILES, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
-import { OPENCODE_GO_ROUTE, type OutboundDataCategory, type RemoteExecutionRoute } from '../provider/egress-gate.js';
+import { DEEPSEEK_ROUTE, OPENCODE_GO_ROUTE, type OutboundDataCategory, type RemoteExecutionRoute } from '../provider/egress-gate.js';
 import { modelProfileFor, type ProviderModelProfile } from '../provider/model-profile.js';
 
 /**
@@ -20,7 +20,9 @@ export const DIALOGUE_OUTBOUND_CATEGORY = 'editor-selected-manuscript-excerpt' a
 /** The live route one admitted rule binds, resolved against the declared route and model profiles. */
 export interface AdmittedFastRoleRoute {
   readonly ruleId: string;
-  readonly providerProcessingVersion: DeveloperLiveProviderProcessingVersion;
+  /** The live scope whose policy admitted it: developer-live, or ordinary production on the editor's route (Issue #811). */
+  readonly operationalScope: 'developer-live' | 'ordinary-production';
+  readonly providerProcessingVersion: Exclude<ProviderProcessingVersion, 'v1'>;
   readonly modelRole: CredentialSlotBinding['modelRole'];
   readonly profile: ProviderRouteProfile;
   readonly modelProfile: ProviderModelProfile;
@@ -30,6 +32,15 @@ export interface AdmittedFastRoleRoute {
 
 /** The dialogue's admitted route: the fast-role route its rule binds. */
 export type AdmittedDialogueRoute = AdmittedFastRoleRoute;
+
+/**
+ * The routes each live scope hands its captured transport to: developer-live the Go route only; ordinary production the two
+ * routes an editor may configure (Issue #811). A rule naming any other route admits nothing.
+ */
+const LIVE_ROUTES: Readonly<Record<'developer-live' | 'ordinary-production', ReadonlyArray<RemoteExecutionRoute>>> = {
+  'developer-live': [OPENCODE_GO_ROUTE],
+  'ordinary-production': [OPENCODE_GO_ROUTE, DEEPSEEK_ROUTE],
+};
 
 /** The categories the Egress Gate reads; a rule naming any other carries it to no binding. */
 const OUTBOUND_CATEGORIES: ReadonlyArray<OutboundDataCategory> = ['public-or-synthetic', 'editor-selected-manuscript-excerpt', 'manuscript-conflict-region-excerpt'];
@@ -57,7 +68,8 @@ export function admittedDialogueRoute(policy: LaunchPolicyProjection): AdmittedD
  */
 export function admittedFastRoleRoute(policy: LaunchPolicyProjection, kindId: string, category: OutboundDataCategory): AdmittedFastRoleRoute | null {
   const processing = policy.providerProcessing;
-  if (policy.integrityState !== 'verified' || policy.operationalScope !== 'developer-live' ||
+  const scope = policy.operationalScope;
+  if (policy.integrityState !== 'verified' || (scope !== 'developer-live' && scope !== 'ordinary-production') ||
       processing.decision !== 'eligible-only' || processing.liveTransmissionAllowed !== true ||
       processing.version === null || processing.version === 'v1') return null;
   // The selected policy's allow rules, as the launch verified them; a projection that carries none admits nothing.
@@ -72,14 +84,15 @@ export function admittedFastRoleRoute(policy: LaunchPolicyProjection, kindId: st
   if (typeof ruleId !== 'string' || ruleId.length === 0 || ruleId.length > 128 || typeof route !== 'string' ||
       typeof endpoint !== 'string' || typeof model !== 'string' || typeof credentialSlot !== 'string') return null;
   if (!BINDABLE_ROLES.includes(modelRole as CredentialSlotBinding['modelRole'])) return null;
-  // The developer-live runtime hands its captured transport to the Go route only, and the dialogue ledger records no other.
-  if (route !== OPENCODE_GO_ROUTE) return null;
+  // A live runtime hands its captured transport only to its scope's routes, and the dialogue ledger records no other.
+  if (!(LIVE_ROUTES[scope] as ReadonlyArray<string>).includes(route)) return null;
   const profile = (PROVIDER_ROUTE_PROFILES as Readonly<Record<string, ProviderRouteProfile>>)[route];
   if (profile === undefined || profile.endpoint !== endpoint || profile.credentialSlot !== credentialSlot) return null;
   const modelProfile = modelProfileFor(route as RemoteExecutionRoute, model);
   if (modelProfile === null) return null;
   return {
     ruleId,
+    operationalScope: scope,
     providerProcessingVersion: processing.version,
     modelRole: modelRole as CredentialSlotBinding['modelRole'],
     profile,

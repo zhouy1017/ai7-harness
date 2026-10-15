@@ -129,6 +129,7 @@ import {
   IMPORTED_EXEMPLAR_SCHEMA_VERSION,
   EVALUATION_PROFILE_SCHEMA_VERSION,
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
+  MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
@@ -210,7 +211,13 @@ import { SCHEDULED_BACKUP_FOREIGN_KEYS, SCHEDULED_BACKUP_SCHEMA_SQL, SCHEDULED_B
 import { DATABASE_REPLACEMENT_FOREIGN_KEYS, DATABASE_REPLACEMENT_SCHEMA_SQL, DATABASE_REPLACEMENT_TRIGGER_SQL } from './database-replacement.js';
 import { DATABASE_MERGE_FOREIGN_KEYS, DATABASE_MERGE_SCHEMA_SQL, DATABASE_MERGE_TRIGGER_SQL } from './database-merge.js';
 import { EVALUATION_INITIAL_DRAFT_FOREIGN_KEYS, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL, EVALUATION_INITIAL_DRAFT_TRIGGER_SQL } from './evaluation-records.js';
-import { DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL, DIALOGUE_FOREIGN_KEYS, DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL } from './dialogue/dialogue-ledger.js';
+import {
+  DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL,
+  DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL,
+  DIALOGUE_FOREIGN_KEYS,
+  DIALOGUE_SCHEMA_SQL,
+  DIALOGUE_TRIGGER_SQL,
+} from './dialogue/dialogue-ledger.js';
 import { CAPTURED_PROCEDURE_FOREIGN_KEYS, CAPTURED_PROCEDURE_SCHEMA_SQL, CAPTURED_PROCEDURE_TRIGGER_SQL } from './captured-procedures.js';
 import { EVALUATION_REWRITE_FOREIGN_KEYS, EVALUATION_REWRITE_SCHEMA_SQL, EVALUATION_REWRITE_TRIGGER_SQL } from './evaluation-rewrites.js';
 import { WRITING_TASK_FOREIGN_KEYS, WRITING_TASK_SCHEMA_SQL, WRITING_TASK_TRIGGER_SQL } from './writing-tasks.js';
@@ -358,7 +365,8 @@ const MANUSCRIPT_REIMPORT_NON_EFFECTS = [
 const REPLACEMENT_MATCHING_RULE = '精确字素匹配；从左向右；重叠时保留最早匹配' as const;
 const REPLACEMENT_INCLUSION_RULE = '仅提交冻结时明确纳入的非重叠精确匹配' as const;
 
-export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_connections (
+/** `model_service_connections` as revision 11 created it: the one DeepSeek 官方 `deepseek-v4-pro` row. Kept to recognise and migrate such a store. */
+export const MODEL_SERVICE_CONNECTION_REVISION_11_SQL = `CREATE TABLE model_service_connections (
   connection_id TEXT PRIMARY KEY CHECK(connection_id = 'main-editorial-deepseek-v4-pro'),
   role_id TEXT NOT NULL CHECK(role_id = 'main-editorial'),
   connection_name TEXT NOT NULL CHECK(length(connection_name) BETWEEN 1 AND 80),
@@ -373,6 +381,34 @@ export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_c
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   credential_updated_at TEXT NOT NULL
+) STRICT`;
+
+/**
+ * Revision 72 (Issue #811): the two ordinary-production route connections of the Main Editorial Role — the DeepSeek 开放平台（官方）
+ * row, which keeps its revision-11 identity and moves to the current model id, and an OpenCode Go row — each with its own
+ * Credential Reference, and `selected` naming the one the editor chose: `1` on at most one row (a unique column whose other
+ * rows hold `NULL`, so the at-most-one rule needs no separate index).
+ */
+export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_connections (
+  connection_id TEXT PRIMARY KEY CHECK(connection_id IN ('main-editorial-deepseek-v4-pro', 'main-editorial-opencode-go')),
+  role_id TEXT NOT NULL CHECK(role_id = 'main-editorial'),
+  connection_name TEXT NOT NULL CHECK(length(connection_name) BETWEEN 1 AND 80),
+  provider_id TEXT NOT NULL CHECK(provider_id IN ('deepseek-open-platform', 'opencode-go')),
+  model_id TEXT NOT NULL CHECK(model_id IN ('deepseek-v4-pro', 'deepseek-flash', 'deepseek-v4.1-flash')),
+  adapter_revision INTEGER NOT NULL CHECK(adapter_revision = 1),
+  configuration_revision INTEGER NOT NULL CHECK(configuration_revision = 1),
+  approved_fallback_chain TEXT NOT NULL CHECK(approved_fallback_chain = '[]'),
+  credential_slot TEXT NOT NULL CHECK(credential_slot IN ('deepseek-api-key', 'opencode-go')),
+  credential_reference TEXT NOT NULL UNIQUE CHECK(length(credential_reference) = 36),
+  credential_operation_state TEXT NOT NULL CHECK(credential_operation_state IN ('ready', 'missing', 'needs-attention')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  credential_updated_at TEXT NOT NULL,
+  -- At most one selected row; unselected rows coexist as NULL (#811 brief revision 8).
+  selected INTEGER UNIQUE CHECK(selected = 1),
+  CHECK((connection_id = 'main-editorial-deepseek-v4-pro' AND provider_id = 'deepseek-open-platform' AND credential_slot = 'deepseek-api-key'
+      AND model_id IN ('deepseek-v4-pro', 'deepseek-flash')) OR
+    (connection_id = 'main-editorial-opencode-go' AND provider_id = 'opencode-go' AND credential_slot = 'opencode-go' AND model_id = 'deepseek-v4.1-flash'))
 ) STRICT`;
 
 /**
@@ -2674,7 +2710,13 @@ function requireManuscriptReimportTargetSchema(
     db,
     {
       ...FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL,
-      ...(includeModelServiceTable ? { model_service_connections: MODEL_SERVICE_CONNECTION_SCHEMA_SQL } : {}),
+      // Revision 72 (Issue #811) widens the model-service connections for the two production routes: a store below it may
+      // still hold revision 11's text.
+      ...(includeModelServiceTable
+        ? { model_service_connections: Number(db.prepare('PRAGMA user_version').get()?.user_version) < MODEL_SERVICE_ROUTES_SCHEMA_VERSION
+          ? [MODEL_SERVICE_CONNECTION_REVISION_11_SQL, MODEL_SERVICE_CONNECTION_SCHEMA_SQL]
+          : MODEL_SERVICE_CONNECTION_SCHEMA_SQL }
+        : {}),
       ...(includeNativeArtifactTables
         ? {
             native_artifact_installations: NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL,
@@ -2782,11 +2824,16 @@ function requireManuscriptReimportTargetSchema(
       ...(includeDatabaseMergeTables ? DATABASE_MERGE_SCHEMA_SQL : {}),
       // Revision 59 (Issue #429, S81b1) adds the AI7 初评 each Evaluation Record version began from.
       ...(includeEvaluationInitialDraftTables ? EVALUATION_INITIAL_DRAFT_SCHEMA_SQL : {}),
-      // Revision 60 (Issue #52, S17a) adds the dialogue Tasks, their attempts, bindings, spans, outcomes and conversions, and
-      // revision 71 (S17c) widens the bindings for the live route: a store below it may still hold revision 60's text.
+      // Revision 60 (Issue #52, S17a) adds the dialogue Tasks, their attempts, bindings, spans, outcomes and conversions;
+      // revision 71 (S17c) widens the bindings for the live route, and revision 72 (Issue #811) for ordinary production: a store
+      // below 71 may still hold revision 60's or 71's text, and one at 71 revision 71's.
       ...(includeDialogueTables ? DIALOGUE_SCHEMA_SQL : {}),
-      ...(includeDialogueTables && Number(db.prepare('PRAGMA user_version').get()?.user_version) < DIALOGUE_LIVE_BINDING_SCHEMA_VERSION
-        ? { dialogue_execution_bindings: [DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL, DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings] }
+      ...(includeDialogueTables && Number(db.prepare('PRAGMA user_version').get()?.user_version) < MODEL_SERVICE_ROUTES_SCHEMA_VERSION
+        ? {
+            dialogue_execution_bindings: Number(db.prepare('PRAGMA user_version').get()?.user_version) < DIALOGUE_LIVE_BINDING_SCHEMA_VERSION
+              ? [DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL, DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL, DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings]
+              : [DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL, DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings],
+          }
         : {}),
       // Revision 61 (Issue #64, S29b) adds the revisions of the Series Retrieval Exclusions.
       ...(includeSeriesRetrievalExclusionTables ? SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL : {}),
@@ -5783,7 +5830,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5834,7 +5881,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(

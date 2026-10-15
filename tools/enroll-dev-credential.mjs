@@ -19,6 +19,14 @@ import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.genera
  *
  *   node tools/enroll-dev-credential.mjs --slot opencode-go --from-file <path>   (silent; exit 0)
  *   node tools/enroll-dev-credential.mjs --slot opencode-go --check              (prints `present`, `absent`, or `unavailable`)
+ *   node tools/enroll-dev-credential.mjs --slot <slot> --credential-reference <uuid> --from-file <path>   (silent; exit 0)
+ *
+ * The third form (Issue #811 brief item 5, an ADR 0067 extension recorded there) writes one Owner-supplied development key
+ * under a production connection's own Credential Reference — the one the product minted when its 模型服务 connection was
+ * configured on a throwaway data root — so one live evidence Task can run through the ordinary-production path. It accepts
+ * only the two slots an ordinary-production binding configures, a well-formed reference, and never a reference any provider
+ * document fixes for development; it refuses CI and a native-carrier override exactly as the other two forms do, and it is
+ * silent exactly as the store form is. The product never invokes this helper.
  *
  * Silence is the contract on the store path: it prints nothing on stdout and nothing on stderr,
  * because anything it printed would be one process away from the value itself, and a failure there
@@ -41,6 +49,14 @@ import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.genera
 const PROTECTED_SECRET_SERVICE_NAME = 'io.github.zhouy1017.ai7.model-service';
 
 const SLOTS = new Map(DEVELOPMENT_CREDENTIAL_SLOTS);
+/** Every development Credential Reference a document fixes: the named-reference form never writes under one of these. */
+const DEVELOPMENT_REFERENCES = new Set([...SLOTS.values()].map((reference) => reference.toLowerCase()));
+/**
+ * The slots an ordinary-production binding configures (Issue #811): Go and DeepSeek 开放平台（官方）. Duplicated from the
+ * service's allowed bindings because this file runs before any build; `tests/unit/enroll-dev-credential.test.ts` pins them equal.
+ */
+export const PRODUCTION_CONNECTION_SLOTS = Object.freeze(['opencode-go', 'deepseek-api-key']);
+const CREDENTIAL_REFERENCE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_SECRET_BYTES = 16_384;
 
 class EnrollmentError extends Error {}
@@ -61,13 +77,21 @@ export function parseEnrollmentArguments(argv) {
       check = true;
       continue;
     }
-    requireEnrollment(key === '--slot' || key === '--from-file');
+    requireEnrollment(key === '--slot' || key === '--from-file' || key === '--credential-reference');
     const value = argv[index + 1];
     requireEnrollment(typeof value === 'string' && value.length > 0 && !values.has(key));
     values.set(key, value);
     index += 1;
   }
   const slot = values.get('--slot');
+  const named = values.get('--credential-reference');
+  if (named !== undefined) {
+    // The named-reference form: a production connection's own reference, never a development one, and only a store.
+    const fromFile = values.get('--from-file');
+    requireEnrollment(!check && typeof fromFile === 'string' && typeof slot === 'string' && PRODUCTION_CONNECTION_SLOTS.includes(slot) &&
+      CREDENTIAL_REFERENCE_PATTERN.test(named) && !DEVELOPMENT_REFERENCES.has(named.toLowerCase()));
+    return { mode: 'store-named', slot, credentialReference: named.toLowerCase(), fromFile: resolve(fromFile) };
+  }
   requireEnrollment(typeof slot === 'string' && SLOTS.has(slot));
   const fromFile = values.get('--from-file');
   requireEnrollment(check ? fromFile === undefined : typeof fromFile === 'string');
@@ -135,6 +159,14 @@ async function readSecret(path) {
   return secret;
 }
 
+/** The silent store path, with injected carrier/file readers for provider-free tests; never used by the product. */
+export async function storeEnrollment(argv, deps = {}) {
+  const request = parseEnrollmentArguments(argv);
+  requireEnrollment(request.mode !== 'check' && !continuousIntegrationPresent(deps.env));
+  const entry = await openEntry(request.credentialReference, deps);
+  await entry.setPassword(await (deps.readSecret ?? readSecret)(request.fromFile));
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const request = parseEnrollmentArguments(argv);
@@ -144,9 +176,7 @@ async function main() {
     if (reading === 'unavailable') process.exitCode = 1;
     return;
   }
-  requireEnrollment(!continuousIntegrationPresent());
-  const entry = await openEntry(request.credentialReference);
-  await entry.setPassword(await readSecret(request.fromFile));
+  await storeEnrollment(argv);
 }
 
 const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);

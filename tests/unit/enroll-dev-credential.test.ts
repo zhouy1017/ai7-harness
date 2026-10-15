@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   CREDENTIAL_REFERENCE_PATTERN,
   DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
@@ -26,6 +28,11 @@ type Helper = {
   parseEnrollmentArguments: (argv: string[]) => { mode: 'store' | 'check'; slot: string; credentialReference: string; fromFile: string | null };
   continuousIntegrationPresent: (env?: NodeJS.ProcessEnv) => boolean;
   resolveCheckReading: (credentialReference: string, deps?: CheckDependencies) => Promise<'present' | 'absent' | 'unavailable'>;
+  storeEnrollment: (argv: string[], deps: {
+    env: NodeJS.ProcessEnv; platform: NodeJS.Platform; architecture: string;
+    readSecret: (path: string) => Promise<string>;
+    importKeyring: () => Promise<{ AsyncEntry: new (service: string, account: string) => { setPassword: (value: string) => Promise<void> } }>;
+  }) => Promise<void>;
 };
 
 const SUPPORTED_HOST: Required<Pick<CheckDependencies, 'platform' | 'architecture'>> =
@@ -121,6 +128,51 @@ describe('parseEnrollmentArguments', () => {
     expect(helper.continuousIntegrationPresent({ CI: 'true' })).toBe(true);
     expect(helper.continuousIntegrationPresent({ GITHUB_ACTIONS: 'true' })).toBe(true);
     expect(helper.continuousIntegrationPresent({ AI7_E2E_JOURNEY: 'J-04' })).toBe(true);
+  });
+});
+
+describe('named production enrollment refusals', () => {
+  it('stops blocked named enrollments before either injected carrier or file reader is reached', async () => {
+    for (const env of [{ CI: 'true' }, { GITHUB_ACTIONS: 'true' }, { AI7_E2E_JOURNEY: 'J-12' },
+      { NAPI_RS_NATIVE_LIBRARY_PATH: 'refused' }, { NAPI_RS_FORCE_WASI: '1' }]) {
+      const importKeyring = vi.fn(async () => { throw new Error('carrier must not open'); });
+      const readSecret = vi.fn(async () => { throw new Error('file must not open'); });
+      await expect(helper.storeEnrollment(['--slot', 'deepseek-api-key', '--credential-reference', randomUUID(), '--from-file', ABSOLUTE],
+        { env, ...SUPPORTED_HOST, importKeyring, readSecret })).rejects.toThrowError('AI7_ENROLLMENT_INVALID');
+      expect(importKeyring).not.toHaveBeenCalled();
+      expect(readSecret).not.toHaveBeenCalled();
+    }
+  });
+
+  it('writes the named reference only to an injected carrier and returns no value', async () => {
+    const reference = randomUUID();
+    const accounts: string[] = [];
+    const setPassword = vi.fn(async (_value: string) => undefined);
+    const result = await helper.storeEnrollment(['--slot', 'deepseek-api-key', '--credential-reference', reference, '--from-file', ABSOLUTE], {
+      env: {}, ...SUPPORTED_HOST, readSecret: async () => 'synthetic-enrollment-value',
+      importKeyring: async () => ({ AsyncEntry: class {
+        constructor(_service: string, account: string) { accounts.push(account); }
+        setPassword = setPassword;
+      } }),
+    });
+    expect(accounts).toEqual([protectedSecretEntryName(reference)]);
+    expect(setPassword).toHaveBeenCalledExactlyOnceWith('synthetic-enrollment-value');
+    expect(result).toBeUndefined();
+  });
+
+  it('refuses CI, Journey and native override launches silently before reading a file or opening a real store', () => {
+    for (const blocked of [{ CI: 'true' }, { GITHUB_ACTIONS: 'true' }, { AI7_E2E_JOURNEY: 'J-12' },
+      { NAPI_RS_NATIVE_LIBRARY_PATH: 'refused-native-override' }, { NAPI_RS_FORCE_WASI: '1' }]) {
+      const env = { ...process.env };
+      for (const key of ['CI', 'GITHUB_ACTIONS', 'AI7_E2E_JOURNEY', 'NAPI_RS_NATIVE_LIBRARY_PATH', 'NAPI_RS_FORCE_WASI']) delete env[key];
+      Object.assign(env, blocked);
+      const result = spawnSync(process.execPath, [HELPER_PATH, '--slot', 'deepseek-api-key', '--credential-reference', randomUUID(),
+        '--from-file', 'nonexistent-enrollment-input'], { env, encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toBe('');
+    }
   });
 });
 

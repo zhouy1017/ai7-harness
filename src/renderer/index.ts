@@ -44,6 +44,7 @@ import type {
   HistoricalRevisionProjection,
   ManuscriptConversionProjection,
   ManuscriptWindowProjection,
+  ModelServiceRouteOptionProjection,
   ModelServiceSettingsProjection,
   OutlineProjection,
   PriorWorkItemProjection,
@@ -5401,6 +5402,110 @@ function renderModelServiceProxyBlock(projection: ModelServiceSettingsProjection
   return section;
 }
 
+/**
+ * One route of 设置 › 模型服务 (Issue #811): its binding, whether new Tasks use it, and its own connection name and credential.
+ * The DeepSeek 开放平台（官方） form keeps the field identities and action words S55a gave it; the Go form names its route.
+ */
+function renderModelRouteOption(option: ModelServiceRouteOptionProjection): HTMLElement {
+  const official = option.route === 'deepseek-open-platform';
+  const section = element('article', 'model-route-option');
+  section.dataset['modelRoute'] = option.route;
+  section.dataset['modelRouteStatus'] = option.status;
+  section.dataset['modelRouteInUse'] = String(option.inUse);
+  const heading = element('div', 'model-role-heading');
+  const title = element('h5', undefined, `${option.binding.providerLabel} · ${option.binding.modelLabel}`);
+  const status = element('span', `status-pill model-status-${option.status}`, option.statusLabel);
+  status.setAttribute('aria-label', `${option.binding.providerLabel}：${option.statusLabel}`);
+  heading.append(title, status);
+  section.append(heading);
+  const notes: string[] = [];
+  if (option.isDefault) notes.push('默认路线');
+  notes.push(option.inUse ? '新任务使用这条路线' : '新任务不使用这条路线');
+  section.append(element('p', 'field-note', notes.join(' · ')));
+  const prefix = official ? 'main-editorial' : `main-editorial-${option.route}`;
+  const suffix = official ? '' : `（${option.binding.providerLabel}）`;
+  const form = element('form', 'model-credential-form');
+  const nameLabel = element('label', undefined, '连接名称');
+  nameLabel.htmlFor = `${prefix}-connection-name`;
+  const connectionName = element('input');
+  connectionName.id = `${prefix}-connection-name`;
+  connectionName.name = 'connection-name';
+  connectionName.type = 'text';
+  connectionName.maxLength = 80;
+  connectionName.required = true;
+  connectionName.autocomplete = 'off';
+  connectionName.value = option.connection?.connectionName ?? '';
+  const credentialLabel = element('label', undefined, option.connection === null ? 'API 凭据' : '重新输入 API 凭据');
+  credentialLabel.htmlFor = `${prefix}-credential`;
+  const credential = element('input');
+  credential.id = `${prefix}-credential`;
+  credential.name = 'credential';
+  credential.type = 'password';
+  credential.required = true;
+  credential.autocomplete = 'off';
+  credential.setAttribute('aria-describedby', `${prefix}-credential-help`);
+  const help = element('p', 'field-note', '凭据只发送到本机主进程并写入操作系统安全凭据库；保存后不会显示、复制或导出。');
+  help.id = `${prefix}-credential-help`;
+  const save = button(`${option.connection === null ? '保护并保存' : '重新输入'}${suffix}`, 'primary', () => undefined);
+  save.type = 'submit';
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    save.disabled = true;
+    const pending = window.ai7.saveModelServiceCredential(official
+      ? { connectionName: connectionName.value, secret: credential.value }
+      : { route: option.route, connectionName: connectionName.value, secret: credential.value });
+    credential.value = '';
+    setStatus('正在写入操作系统安全凭据库…', 'busy');
+    try {
+      renderModelServiceSettingsProjection(await pending);
+      setStatus('连接名称与凭据保护状态已更新', 'success');
+    } catch (error) {
+      save.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法更新模型服务凭据。'), 'error');
+    }
+  });
+  form.append(nameLabel, connectionName, credentialLabel, credential, help, save);
+  section.append(form);
+  if (option.connection !== null) {
+    const stored = element('p', 'success-note', `连接名称：${option.connection.connectionName} · 凭据值不再显示`);
+    stored.dataset['credentialState'] = option.connection.credentialOperationState;
+    const actions = element('div', 'button-row');
+    if (!option.inUse && option.connection.credentialOperationState === 'ready') {
+      const use = button(`改用${option.binding.providerLabel}`, 'secondary', async () => {
+        use.disabled = true;
+        setStatus('正在切换新任务使用的模型服务路线…', 'busy');
+        try {
+          renderModelServiceSettingsProjection(await window.ai7.saveModelServiceCredential({ route: option.route, select: true }));
+          setStatus('之后开始的任务使用这条路线；已在进行的任务不受影响', 'success');
+        } catch (error) {
+          use.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法切换模型服务路线。'), 'error');
+        }
+      });
+      use.dataset['action'] = 'select-model-service-route';
+      actions.append(use);
+    }
+    const remove = button(`移除${suffix}`, 'secondary', async () => {
+      remove.disabled = true;
+      setStatus('正在从操作系统安全凭据库移除凭据…', 'busy');
+      try {
+        renderModelServiceSettingsProjection(await (official
+          ? window.ai7.removeModelServiceCredential()
+          : window.ai7.removeModelServiceCredential({ route: option.route })));
+        setStatus('凭据已移除；连接保留为需设置状态', 'success');
+      } catch (error) {
+        remove.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法移除模型服务凭据。'), 'error');
+      }
+    });
+    remove.dataset['action'] = 'remove-model-service-credential';
+    remove.dataset['modelRoute'] = option.route;
+    actions.append(remove);
+    section.append(stored, actions);
+  }
+  return section;
+}
+
 function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
   const content = panel();
   content.classList.add('model-service-settings');
@@ -5439,76 +5544,31 @@ function renderModelServiceSettingsProjection(projection: ModelServiceSettingsPr
       );
       details.append(summary, values);
       card.append(details);
-      const form = element('form', 'model-credential-form');
-      const connectionNameId = 'main-editorial-connection-name';
-      const credentialId = 'main-editorial-credential';
-      const credentialHelpId = 'main-editorial-credential-help';
-      const nameLabel = element('label', undefined, '连接名称');
-      nameLabel.htmlFor = connectionNameId;
-      const connectionName = element('input');
-      connectionName.id = connectionNameId;
-      connectionName.name = 'connection-name';
-      connectionName.type = 'text';
-      connectionName.maxLength = 80;
-      connectionName.required = true;
-      connectionName.autocomplete = 'off';
-      connectionName.value = role.connection?.connectionName ?? '';
-      const credentialLabel = element('label', undefined, role.connection === null ? 'API 凭据' : '重新输入 API 凭据');
-      credentialLabel.htmlFor = credentialId;
-      const credential = element('input');
-      credential.id = credentialId;
-      credential.name = 'credential';
-      credential.type = 'password';
-      credential.required = true;
-      credential.autocomplete = 'off';
-      credential.setAttribute('aria-describedby', credentialHelpId);
-      const help = element(
-        'p',
-        'field-note',
-        '凭据只发送到本机主进程并写入操作系统安全凭据库；保存后不会显示、复制或导出。',
-      );
-      help.id = credentialHelpId;
-      const save = button(role.connection === null ? '保护并保存' : '重新输入', 'primary', () => undefined);
-      save.type = 'submit';
-      form.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        save.disabled = true;
-        const pending = window.ai7.saveModelServiceCredential({
-          connectionName: connectionName.value,
-          secret: credential.value,
-        });
-        credential.value = '';
-        setStatus('正在写入操作系统安全凭据库…', 'busy');
-        try {
-          renderModelServiceSettingsProjection(await pending);
-          setStatus('连接名称与凭据保护状态已更新', 'success');
-        } catch (error) {
-          save.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法更新模型服务凭据。'), 'error');
-        }
-      });
-      form.append(nameLabel, connectionName, credentialLabel, credential, help, save);
-      card.append(form);
-      if (role.connection !== null) {
-        const stored = element('p', 'success-note', `连接名称：${role.connection.connectionName} · 凭据值不再显示`);
-        stored.dataset['credentialState'] = role.connection.credentialOperationState;
-        const remove = button('移除', 'secondary', async () => {
-          remove.disabled = true;
-          setStatus('正在从操作系统安全凭据库移除凭据…', 'busy');
-          try {
-            renderModelServiceSettingsProjection(await window.ai7.removeModelServiceCredential());
-            setStatus('凭据已移除；连接保留为需设置状态', 'success');
-          } catch (error) {
-            remove.disabled = false;
-            setStatus(rendererErrorMessage(error, '无法移除模型服务凭据。'), 'error');
-          }
-        });
-        remove.dataset['action'] = 'remove-model-service-credential';
-        card.append(stored, remove);
-      }
+    }
+    // The Main Editorial Role's two routes (Issue #811): each its own connection and credential, one in use for new Tasks.
+    if (role.roleId === 'main-editorial') {
+      const routes = element('section', 'model-route-list');
+      routes.setAttribute('aria-label', '模型服务路线');
+      routes.append(element('h4', undefined, '模型服务路线'), element('p', 'field-note', projection.routeChoice.effectLabel));
+      for (const option of projection.routeChoice.routes) routes.append(renderModelRouteOption(option));
+      card.append(routes);
     }
     roles.append(card);
   }
+  const unsupported = element('section', 'review-section model-unsupported-providers');
+  unsupported.dataset['unsupportedProviders'] = 'true';
+  unsupported.setAttribute('aria-label', '尚未支持的模型服务');
+  const unsupportedList = element('ul');
+  for (const provider of projection.routeChoice.unsupportedProviders) {
+    const item = element('li', undefined, `${provider.providerLabel} · ${provider.statusLabel}`);
+    item.dataset['providerId'] = provider.providerId;
+    unsupportedList.append(item);
+  }
+  unsupported.append(
+    element('h3', undefined, '尚未支持'),
+    element('p', 'field-note', '这些模型服务已登记，但当前版本不能选择，也不会收到任何内容。'),
+    unsupportedList,
+  );
   const policy = element('section', 'review-section model-policy-summary');
   const policyIntegrity = element(
     'p',
@@ -5533,7 +5593,7 @@ function renderModelServiceSettingsProjection(projection: ModelServiceSettingsPr
   );
   const actions = element('div', 'button-row');
   actions.append(button('返回', 'quiet', () => void initializeStartup()));
-  content.append(roles, renderModelServiceProxyBlock(projection), policy, protectedStore, actions);
+  content.append(roles, unsupported, renderModelServiceProxyBlock(projection), policy, protectedStore, actions);
   replaceScreen('model-service', content);
 }
 

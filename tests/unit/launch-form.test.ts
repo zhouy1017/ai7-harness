@@ -68,7 +68,7 @@ describe('parseTrustedLaunchForm', () => {
   });
 
   it('fails closed on an unknown or unselectable scope, a malformed ceiling, a relative root, or a ceiling without developer-live', () => {
-    for (const scope of ['fixture-recording', 'ordinary-production', 'production', 'Developer-Live', ' developer-live', '']) {
+    for (const scope of ['fixture-recording', 'production', 'Developer-Live', 'Ordinary-Production', ' developer-live', ' ordinary-production', '']) {
       expect(parseTrustedLaunchForm({ trustedOperationalScope: scope })).toBeNull();
     }
     for (const ceiling of ['0', '-1', '01', '1.5', '1e6', '500_000', '500,000', 'unset', '', '1000000000000']) {
@@ -79,6 +79,17 @@ describe('parseTrustedLaunchForm', () => {
     expect(parseTrustedLaunchForm({ runBudgetCeiling: '500000' })).toBeNull();
     expect(parseTrustedLaunchForm({ providerCacheRoot: ABSOLUTE })).toBeNull();
     expect(parseTrustedLaunchForm({ trustedOperationalScope: 'development-ci', runBudgetCeiling: '500000' })).toBeNull();
+  });
+
+  it('selects ordinary-production only by its explicit argument, with none of the developer-live launch facts (Issue #853)', () => {
+    // Absent arguments still select development-ci; ordinary-production is never a default.
+    expect(parseTrustedLaunchForm({})?.trustedOperationalScope).toBe('development-ci');
+    expect(parseTrustedLaunchForm({ trustedOperationalScope: 'ordinary-production' })).toEqual({
+      trustedOperationalScope: 'ordinary-production', runBudgetCeiling: null, providerCacheRoot: null, validation: null,
+    });
+    for (const extra of [{ runBudgetCeiling: '500000' }, { providerCacheRoot: ABSOLUTE }, { validationCase: VALIDATION_CASE }, { validationDelta: 'input:edited-chapter-dialogue' }]) {
+      expect(parseTrustedLaunchForm({ trustedOperationalScope: 'ordinary-production', ...extra })).toBeNull();
+    }
   });
 });
 
@@ -156,7 +167,7 @@ describe('start-built launch arguments', () => {
       ['--data-root', 'relative'],
       ['--data-root', dataRoot, '--data-root', dataRoot],
       ['--data-root', dataRoot, '--trusted-operational-scope', 'fixture-recording'],
-      ['--data-root', dataRoot, '--trusted-operational-scope', 'ordinary-production'],
+      ['--data-root', dataRoot, '--trusted-operational-scope', 'ordinary-production', '--run-budget-ceiling', '1000'],
       ['--data-root', dataRoot, '--run-budget-ceiling', '1000'],
       ['--data-root', dataRoot, '--trusted-operational-scope', 'developer-live'],
       ['--data-root', dataRoot, '--trusted-operational-scope', 'developer-live', '--validation-case', 'Baseline'],

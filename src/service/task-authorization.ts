@@ -37,7 +37,7 @@ import {
   MAX_REVIEW_CATEGORY_GOAL_LENGTH,
 } from '../shared/protocol.js';
 import { canonicalRecord as analysisCanonicalRecord } from './analysis/canonical.js';
-import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION } from './launch-policy.js';
+import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION } from './launch-policy.js';
 import {
   ANALYSIS_RESULT_SET_REVISION_58_SQL,
   ANALYSIS_RESULT_SET_REVISION_59_SQL,
@@ -441,7 +441,13 @@ export const IMPORTED_EXEMPLAR_SCHEMA_VERSION = 69;
 export const EVALUATION_PROFILE_SCHEMA_VERSION = 70;
 /** The dialogue's Execution Bindings widened for the live Go route under developer-live (Issue #52, S17c). */
 export const DIALOGUE_LIVE_BINDING_SCHEMA_VERSION = 71;
-export const LATEST_SCHEMA_VERSION = DIALOGUE_LIVE_BINDING_SCHEMA_VERSION;
+/**
+ * The model-service connections widened to the two ordinary-production routes (Issue #811): `model_service_connections`
+ * rebuilt to hold a Go row beside the DeepSeek 开放平台（官方） row, and which one is selected. Every existing row is kept, the
+ * official row moving to the current model id. No task-authorization or analysis relation changes. This is the terminal version.
+ */
+export const MODEL_SERVICE_ROUTES_SCHEMA_VERSION = 72;
+export const LATEST_SCHEMA_VERSION = MODEL_SERVICE_ROUTES_SCHEMA_VERSION;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -1387,10 +1393,12 @@ function transact<T>(db: DatabaseSync, body: () => T): T {
 const PROVIDER_PROCESSING_PINS: Readonly<Record<TrustedOperationalScope, ProviderProcessingPin>> = {
   'development-ci': { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
   'developer-live': { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+  // The editor's own model service under the local production launch (Issue #811): Provider Processing v13, bounded by the Run.
+  'ordinary-production': { operationalScope: 'ordinary-production', version: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
 };
 
 /** The developer-live versions earlier launches selected, whose retained records stay readable after a successor is selected. */
-const RETAINED_DEVELOPER_LIVE_VERSIONS: readonly DeveloperLiveProviderProcessingVersion[] = ['v5', 'v9', 'v10'];
+const RETAINED_DEVELOPER_LIVE_VERSIONS: readonly DeveloperLiveProviderProcessingVersion[] = ['v5', 'v9', 'v10', 'v11'];
 
 /**
  * The pin a stored value carries, or `null` when it is not exactly the pin of the scope it names.
@@ -2206,11 +2214,13 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === READERS_REPORT_SCHEMA_VERSION || version === CAPTURED_PROCEDURE_SCHEMA_VERSION || version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION || version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION || version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
-      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
+      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION) {
+  if (version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // Revision 72 (Issue #811) moves no task-authorization or analysis relation, so a revision-71 store carries the terminal ledger.
+  if (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
+      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     validateAnalysisLedgerSchema(db);
     return advanceToTerminalRevision(db);

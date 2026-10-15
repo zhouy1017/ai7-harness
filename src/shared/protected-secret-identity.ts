@@ -19,6 +19,15 @@ export const CREDENTIAL_REFERENCE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a
  */
 export const DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE: string = CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['opencode-go'];
 
+/**
+ * Every fixed development Credential Reference a provider document names (ADR 0067, ADR 0073 §4), lower-cased: the closed
+ * generated list. A production connection's reference is never one of them, and an ordinary-production Credential Broker
+ * refuses to read one (Issue #811).
+ */
+export const DEVELOPMENT_CREDENTIAL_REFERENCES: ReadonlySet<string> = new Set(
+  Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES).map((reference) => reference.toLowerCase()),
+);
+
 /** The exact keyring account name for one opaque Credential Reference. */
 export function protectedSecretEntryName(credentialReference: string): string {
   if (!CREDENTIAL_REFERENCE_PATTERN.test(credentialReference)) throw new Error('PROTECTED_SECRET_REFERENCE_INVALID');
