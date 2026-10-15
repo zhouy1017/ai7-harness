@@ -4077,11 +4077,13 @@ export class BaselineAnalysisStore {
     'ANALYSIS_CLARIFICATION_INVALID', `说明最多 ${CLARIFICATION_NOTE_MAX} 字。`);
     const model = request.modelQuestion;
     const selected = typeof input.optionId === 'string' ? /^model-option-([0-3])$/u.exec(input.optionId)?.[1] : undefined;
+    // A safe-retry question keeps S76d's words; only a model question offers its own options and free text.
+    requireAnalysis(model !== undefined || (typeof input.optionId === 'string' && (CLARIFICATION_OPTION_IDS as ReadonlyArray<string>).includes(input.optionId)),
+      'ANALYSIS_CLARIFICATION_INVALID', '请选择一个回答。');
     requireAnalysis(model === undefined
-      ? typeof input.optionId === 'string' && (CLARIFICATION_OPTION_IDS as ReadonlyArray<string>).includes(input.optionId)
-      : input.optionId === 'no-answer' ? note === null || note === ''
+      || (input.optionId === 'no-answer' ? note === null || note === ''
         : input.optionId === 'free-text' ? model.freeTextAllowed && note !== null && note !== ''
-          : selected !== undefined && model.options?.[Number(selected)] !== undefined && (note === null || note === ''),
+          : selected !== undefined && model.options?.[Number(selected)] !== undefined && (note === null || note === '')),
     'ANALYSIS_CLARIFICATION_INVALID', '请选择一个回答，或在允许时自行说明。');
     const requestRow = this.#db.prepare('SELECT sha256 FROM analysis_clarification_requests WHERE request_id = ?').get(input.requestId) as SqlRow;
     const answerId = randomUUID();

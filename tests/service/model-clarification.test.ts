@@ -98,6 +98,10 @@ describe('one model question per Run unit', () => {
       expect(read.prepare('SELECT request_id, canonical_json, sha256 FROM analysis_clarification_requests').all()).toEqual(before);
       expect(read.prepare('SELECT model_question_json FROM analysis_clarification_requests').get()!.model_question_json).toBeNull();
     } finally { read.close(); }
+    // SQLite records the added column's text in place, not as revision 73 creates it; the migrated store must still open.
+    store!.close(); store = undefined;
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(store.baselineAnalysisLedger.clarificationsOf(run.runRecordId)).toHaveLength(1);
   });
   it('keeps the other seven units, releases its slot, answers once and removes only the decision item', async () => {
     const run = await start();
@@ -120,6 +124,21 @@ describe('one model question per Run unit', () => {
     expect(done.run!.adaptations).toHaveLength(0);
     expect(store!.inspectGlobalAttention(() => null, false).groups.find((group) => group.key === 'decisions')!.items).toHaveLength(0);
     expect(() => store!.answerBaselineAnalysisClarification({ ...run, requestId: card.requestId, optionId: 'model-option-1', note: null })).toThrow();
+  });
+  it('keeps a safe-retry question to its own two answers and S76d words beside a model question', async () => {
+    const run = await start();
+    const ledger = store!.baselineAnalysisLedger;
+    const facts = ledger.loadExecutionPlan(run.runRecordId);
+    const requestId = ledger.recordClarificationRequest({ runRecordId: run.runRecordId, taskIntentId: run.taskIntentId, attemptId: randomUUID(), unitOrdinal: 2,
+      planVersion: facts.planVersionOrdinal, planEnvelopeDigest: facts.planEnvelopeDigest, requestDigest: 'a'.repeat(64),
+      failure: { code: 'SYNTHETIC_RETRY', failureClass: 'provider', status: 503, reason: '合成暂时错误' },
+      firstPayloadDigest: null, firstUnitMessageDigest: 'b'.repeat(64), firstUsage: null, firstWallMs: 1 });
+    for (const optionId of ['model-option-0', 'free-text', 'no-answer'] as const) {
+      expect(() => store!.answerBaselineAnalysisClarification({ ...run, requestId, optionId, note: optionId === 'free-text' ? '合成说明' : null }))
+        .toThrowError('请选择一个回答。');
+    }
+    expect(ledger.clarificationsOf(run.runRecordId).find((entry) => entry.requestId === requestId)).toMatchObject({ answer: null });
+    expect(ledger.clarificationsOf(run.runRecordId).find((entry) => entry.requestId === requestId)!.origin).toBeUndefined();
   });
   it('treats a second model question as contract-invalid', async () => {
     const run = await start();

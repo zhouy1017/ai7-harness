@@ -747,10 +747,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 提交回答 (Issue #422, S76d): the question and the Task it belongs to, the one option chosen, and a note or none.
     case 'answerBaselineAnalysisClarification': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'requestId', 'optionId', 'note'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !validUuid(input.requestId) ||
-          (input.optionId !== 'retry' && input.optionId !== 'record-gap' && input.optionId !== 'free-text' && input.optionId !== 'no-answer' &&
-            !(typeof input.optionId === 'string' && /^model-option-[0-3]$/u.test(input.optionId))) ||
-          !(input.note === null || (typeof input.note === 'string' && input.note.isWellFormed() && clarificationGraphemes(input.note) <= 500))) {
+      // A safe-retry answer keeps S76d's exact note bound; a model question's note is counted in graphemes (Issue #865).
+      const product = input.optionId === 'retry' || input.optionId === 'record-gap';
+      const model = input.optionId === 'free-text' || input.optionId === 'no-answer' ||
+        (typeof input.optionId === 'string' && /^model-option-[0-3]$/u.test(input.optionId));
+      if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !validUuid(input.requestId) || !(product || model) ||
+          !(input.note === null || (product ? isBoundedString(input.note, 500)
+            : typeof input.note === 'string' && input.note.isWellFormed() && clarificationGraphemes(input.note) <= 500))) {
         throw new ProtocolError(tentativeId);
       }
       break;

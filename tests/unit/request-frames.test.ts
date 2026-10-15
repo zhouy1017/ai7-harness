@@ -310,6 +310,29 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
+  it('answers a model question by option, free text or 不回答 in graphemes, and keeps the safe-retry note bound exactly (Issue #865)', () => {
+    const answer = {
+      id: randomUUID(),
+      op: 'answerBaselineAnalysisClarification',
+      input: { bookId: randomUUID(), taskIntentId: randomUUID(), requestId: randomUUID(), optionId: 'model-option-3', note: null },
+    } satisfies ServiceRequest;
+    // 500 composed graphemes are 3,500 UTF-16 code units: a model answer counts graphemes.
+    const composed = '👩🏽‍💻'.repeat(500);
+    for (const input of [answer.input, { ...answer.input, optionId: 'no-answer' }, { ...answer.input, optionId: 'free-text', note: composed }] as const) {
+      const request = { ...answer, input } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
+    }
+    for (const input of [
+      { ...answer.input, optionId: 'model-option-4' },
+      { ...answer.input, optionId: 'free-text', note: `${composed}a` },
+      // S76d's own answers keep their predecessor bound: at most 500 UTF-16 code units and never an empty note.
+      { ...answer.input, optionId: 'retry', note: '👩🏽‍💻'.repeat(72) },
+      { ...answer.input, optionId: 'record-gap', note: '' },
+    ]) {
+      expect(rejectionFor(frameOf({ ...answer, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 暂停 and 续行 by the Task Intent within the route\'s Book, and nothing more (Issue #422, S76b)', () => {
     for (const op of ['pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun'] as const) {
       const request = { id: randomUUID(), op, input: { bookId: randomUUID(), taskIntentId: randomUUID() } } satisfies ServiceRequest;
