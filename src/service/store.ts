@@ -5451,7 +5451,11 @@ export class EditorialStore {
         const projection = task.ledger.inspect(input.bookId, progress);
         return projection.taskIntent?.taskIntentId === task.taskIntentId && runIsActive(projection.run?.state ?? null);
       });
-      const controlling = active ?? tasks.find((task) => task.ledger.inspect(input.bookId).run?.state === 'cancelled') ?? tasks[0];
+      // Only this Review Run's own category Task, never a later Task of the same kind on the Book.
+      const controlling = active ?? tasks.find((task) => {
+        const projection = task.ledger.inspect(input.bookId);
+        return projection.taskIntent?.taskIntentId === task.taskIntentId && projection.run?.state === 'cancelled';
+      }) ?? tasks[0];
       if (controlling !== undefined) {
         const projection = this.#analysisCall(() => controlling.ledger.inspect(input.bookId, progress)) as unknown as BaselineAnalysisProjection;
         if (projection.taskIntent?.taskIntentId === controlling.taskIntentId) {
@@ -5762,7 +5766,10 @@ export class EditorialStore {
         const projection = this.#analysisCall(() => task.ledger.inspect(input.bookId));
         return projection.taskIntent?.taskIntentId === task.taskIntentId && runIsActive(projection.run?.state ?? null);
       });
-      const controlled = active ?? tasks.find((task) => task.ledger.inspect(input.bookId).run?.state === 'cancelled');
+      const controlled = active ?? tasks.find((task) => {
+        const projection = this.#analysisCall(() => task.ledger.inspect(input.bookId));
+        return projection.taskIntent?.taskIntentId === task.taskIntentId && projection.run?.state === 'cancelled';
+      });
       requireStore(controlled !== undefined, 'TASK_CONTROL_STALE', '这次审阅没有可控制的类别运行。');
       return controlled.ledger;
     }

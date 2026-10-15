@@ -9,7 +9,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { EditorialStore } from '../../src/service/store.js';
-import type { AnalysisProjection, StartWhenOnlineTaskKind } from '../../src/shared/protocol.js';
+import type { AnalysisProjection, GlobalAttentionProjection, StartWhenOnlineTaskKind } from '../../src/shared/protocol.js';
 import { beginRewriteAsJ11 } from '../support/evaluation-rewrite.js';
 import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
@@ -94,12 +94,18 @@ for (const [kind, identity] of CASES) it(`${kind}: pause checkpoints, resume the
     let plan = store.inspectTaskPlan(input);
     expect(plan.edit.editable).toBe(true);
     expect(() => store.editTaskPlan({ ...input, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, removedSteps: ['invented'], disallowedAdaptations: [] })).toThrow();
+    // Only Run-honoured edits: these kinds' Runs ask the editor nothing yet, so 先问你 is neither offered nor recorded.
+    expect(plan.boundary.adaptable.map((entry) => [entry.id, entry.removable, entry.movable])).toEqual([['safe-retry', true, false]]);
+    expect(() => store.editTaskPlan({ ...input, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, removedSteps: [], disallowedAdaptations: [],
+      askFirstAdaptations: ['safe-retry'] })).toThrowError(expect.objectContaining({ code: 'ANALYSIS_PLAN_EDIT_INVALID' }));
     plan = store.editTaskPlan({ ...input, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, removedSteps: [], disallowedAdaptations: ['safe-retry'] });
     const revisedCategoryDigests = plan.start.categoryDigests;
     expect(plan.boundary.adaptable.find((entry) => entry.id === 'safe-retry')?.removed).toBe(true);
     // A retry-safe first-unit failure proves the edited restriction is honoured by each real kind's Run.
     for (const [key, entry] of entries) if (entry.unitOrdinal === 1) entries.set(key, { ...entry,
       response: { kind: 'adapter-failure', code: 'PROVIDER_ERROR', message: '模型服务暂时出错。', status: 503 } });
+    const recentOf = (view: GlobalAttentionProjection): number => view.groups.find((group) => group.key === 'recent')?.total ?? 0;
+    const recentBefore = recentOf(store.inspectGlobalAttention(() => null, false));
     block();
     let driven: Promise<void> | null = null;
     if (kind === 'review-run') {
@@ -128,8 +134,16 @@ for (const [kind, identity] of CASES) it(`${kind}: pause checkpoints, resume the
     plan = store.inspectTaskPlan(input, (id) => execution.progressFor(id));
     expect(plan.state.key).toBe('paused');
     expect(plan.runControl?.resume?.reason).toBeNull();
+    // 待我处理 and the 任务 panel compose the paused Run under the kind's own target in the existing analysis state key;
+    // completed items are counted as before (brief revision 5).
+    const target = kind === 'review-run' ? { kind: 'review', bookId, reviewRunId: ref } : { kind: 'task-plan', bookId, taskKind: kind, ref };
+    const attention = store.inspectGlobalAttention((id) => execution.progressFor(id), execution.busy);
+    expect(attention.groups.filter((group) => group.key !== 'recent').flatMap((group) => group.items)
+      .filter((item) => item.book.bookId === bookId).map((item) => [item.state, item.target])).toEqual([['analysis-paused', target]]);
+    expect(recentOf(attention)).toBe(recentBefore);
     const panel = store.inspectBookTasks(bookId, (id) => execution.progressFor(id));
-    expect(panel).toBeDefined();
+    expect(panel.groups.find((group) => group.key === 'running')?.items.map((entry) => [entry.item.state, entry.item.target]))
+      .toEqual([['analysis-paused', target]]);
     if (kind === 'review-run') {
       const reviewed = store.inspectReviewWorkspace(bookId, ref).run!;
       expect(reviewed.categories[1]!.state).toBe('waiting');
@@ -171,6 +185,18 @@ for (const [kind, identity] of CASES) it(`${kind}: pause checkpoints, resume the
     expect(next.start.readiness).toBe('ready');
     expect(next.boundary.adaptable.find((entry) => entry.id === 'safe-retry')?.removed).toBe(true);
     expect(next.runControl).toBeNull();
+    if (kind === 'review-run') {
+      // A later Review Run of the same categories, started and cancelled, is never controlled through the earlier one.
+      store.authorizeReviewRun(bookId, nextRef!, next.start.categoryDigests);
+      block();
+      const later = driver.drive(nextRef!);
+      await until(() => waiting);
+      const stopping = store.requestTaskRunControl({ ...input, ref: nextRef!, action: 'cancel' });
+      execution.cancelRun(stopping.runRecordId!, stopping.ledger);
+      hold = false; release();
+      await later;
+      expect(() => store.requestTaskRunControl({ ...input, action: 'cancel' })).toThrowError(expect.objectContaining({ code: 'TASK_CONTROL_STALE' }));
+    }
     if (kind === 'initial-evaluation') {
       // A dirty checkpoint makes redo a cooperative preparation; cancelling it sends nothing and leaves the old Run cancelled.
       block();

@@ -543,7 +543,15 @@ async function dispatch(
         if (request.input.action === 'pause') analysisExecution.pauseRun(runRecordId, ledger);
         else if (request.input.action === 'cancel') analysisExecution.cancelRun(runRecordId, ledger);
         else if (request.input.kind === 'review-run') driveReviewRun(reviewRuns, request.input.ref, true);
-        else analysisExecution.admitAndDispatch(runRecordId, ledger, { resume: true });
+        else {
+          // As 续行 of a baseline Run: a refusal from the owner reaches the drawer in its own words, the Run left as it was.
+          try {
+            analysisExecution.admitAndDispatch(runRecordId, ledger, { resume: true });
+          } catch (error) {
+            const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+            throw new StoreErrorClass(code, error instanceof Error ? error.message : '续行未能进入调度。');
+          }
+        }
         if (request.input.kind === 'review-run' && request.input.action === 'cancel') {
           void analysisExecution.whenDone(runRecordId).then(() => store.finishCancelledReviewRun(runRecordId)).catch(() => undefined);
         }
