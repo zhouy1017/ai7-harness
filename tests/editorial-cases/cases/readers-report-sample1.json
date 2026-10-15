@@ -1,0 +1,25 @@
+{
+  "schema": "ai7.editorial-case/1",
+  "id": "readers-report-sample1",
+  "kind": "readers-report",
+  "title": "审稿意见（给作者）· sample1",
+  "manuscript": { "source": "sample1" },
+  "bookTitle": "sample1 编辑价值证据 · 评估",
+  "input": { "template": "author", "evaluationRecord": "j11" },
+  "fixture": "sample1-recorded-v41-editorial-readers-report",
+  "measuredPass": "readers-report",
+  "expectedConcerns": [
+    { "id": "r-strength-letter-hook", "passageKind": "strength", "paragraphs": [20, 21, 22, 44, 45, 48, 49, 50], "concern": "长处：甲骨文来信的悬念" },
+    { "id": "r-problem-language", "passageKind": "problem", "paragraphs": [10, 15, 16, 21, 56, 64, 72, 73, 79], "concern": "问题：个别脱字、衍字与生硬搭配" },
+    { "id": "r-suggestion-language", "passageKind": "suggestion", "paragraphs": [10, 15, 16, 21, 56, 64, 72, 73, 79], "concern": "建议：逐句校读语言细部" },
+    { "id": "r-conclusion-follows-record", "section": "conclusion", "keywords": ["修改后再议"], "concern": "结论与编辑定稿的“修改后再议”一致" }
+  ],
+  "falsePositiveChecks": [
+    { "id": "r-inscription-as-problem", "passageKind": "problem", "paragraphs": [48, 49], "keywords": ["错", "误", "不通"], "reason": "甲骨文原文与印章人名不是问题" },
+    { "id": "r-unfounded-accusation", "keywords": ["抄袭", "剽窃"], "reason": "书稿中没有依据的指控" }
+  ],
+  "observations": {
+    "acceptance": "五个部分齐全、引文落在相应段落、结论与编辑定稿一致，编辑可直接据此修改后交作者。",
+    "rework": "结构不全、结论与定稿不符，或问题与建议没有书稿依据。"
+  }
+}

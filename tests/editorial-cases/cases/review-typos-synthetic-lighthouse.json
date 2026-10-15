@@ -1,0 +1,29 @@
+{
+  "schema": "ai7.editorial-case/1",
+  "id": "review-typos-synthetic-lighthouse",
+  "kind": "review",
+  "title": "错别字与规范用语 · 合成稿甲《灯塔守望人》",
+  "manuscript": { "source": "synthetic", "id": "synthetic-lighthouse" },
+  "bookTitle": "合成稿甲 · 灯塔守望人",
+  "input": { "categories": ["typos-and-usage"], "scope": "whole" },
+  "fixture": "synthetic-editorial-review-authored",
+  "measuredPass": null,
+  "expectedConcerns": [
+    { "id": "lh-de-di", "defect": "lh-de-di" },
+    { "id": "lh-du-du", "defect": "lh-du-du" },
+    { "id": "lh-ji-ji", "defect": "lh-ji-ji" },
+    { "id": "lh-bu-fen", "defect": "lh-bu-fen" },
+    { "id": "lh-xiang", "defect": "lh-xiang" },
+    { "id": "lh-bi-jing", "defect": "lh-bi-jing" },
+    { "id": "lh-jie-zhi", "defect": "lh-jie-zhi" }
+  ],
+  "falsePositiveChecks": [
+    { "id": "lh-dialect", "trap": "lh-dialect" },
+    { "id": "lh-di-que", "trap": "lh-di-que" },
+    { "id": "lh-jie-zhi-ri-qi", "trap": "lh-jie-zhi-ri-qi" }
+  ],
+  "observations": {
+    "acceptance": "七处注入的错别字全部定位并给出正确写法；方言对白与正确用法不被改动。",
+    "rework": "漏报注入的错误，或把方言对白、“的确”“截止日期”当作错误。"
+  }
+}
