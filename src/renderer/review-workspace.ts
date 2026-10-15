@@ -193,6 +193,7 @@ export interface ReviewWorkspaceSurface {
 type ReviewApi = Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' |
+  'inspectTaskPlan' | 'quickStartReviewRun' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' |
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
@@ -1863,8 +1864,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const quickReason = el('p', 'field-note review-quick-start-reason', REVIEW_QUICK_START_REASON);
     quickReason.id = uid('quick-start-reason');
     const prepare = actionButton('prepare', 'primary', () => void prepareRun(state));
-    const quick = actionButton('quick-start', 'secondary', () => undefined);
-    quick.disabled = true;
+    const quick = actionButton('quick-start', 'secondary', () => void prepareRun(state, true));
     quick.setAttribute('aria-describedby', quickReason.id);
     const cancelPreparation = actionButton('cancel-preparation', 'quiet', () => void cancelJob(state, cancelPreparation));
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
@@ -1928,6 +1928,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       progress.hidden = state.job === null;
       progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
       prepare.disabled = preparing || loading || (state.materialIds.size > 0 && !acceptsMaterials);
+      quick.disabled = prepare.disabled || state.categories.size === 0 || state.scope === null;
       close.disabled = preparing;
       cancelPreparation.hidden = !preparing;
       cancelPreparation.disabled = !preparing;
@@ -1953,7 +1954,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
   }
 
-  async function prepareRun(state: SheetState): Promise<void> {
+  async function prepareRun(state: SheetState, quick = false): Promise<void> {
     if (destroyed || state.job !== null || projection === null) return;
     // The version on show is the version pinned, and never while a choice is still loading (S31 review P2-1; REUSE-054).
     const resolved = state.procedure?.resolved ?? null;
@@ -2002,10 +2003,24 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         options.setStatus(REVIEW_STATUS_LINES.preparationCancelled, 'success');
         return;
       }
-      const result = completed.result;
+      let result = completed.result;
       if (completed.kind !== 'review-run-preparation' || result === null || !('scopeOptions' in result) || result.bookId !== bookId || result.run === null) {
         throw new Error(REVIEW_STATUS_LINES.preparationFailed);
       }
+      let quickNote: string | null = null;
+      if (quick) {
+        const plan = await api.inspectTaskPlan({ kind: 'review-run', ref: result.run.reviewRunId });
+        const rule = plan.defaultRule.current;
+        const digest = plan.edit.planEnvelopeDigest;
+        if (rule === null || rule.state !== 'active' || digest === null) {
+          quickNote = plan.defaultRule.reason ?? '这本书没有匹配所选类别的默认执行规则；请先看计划，可以在完整计划里设为快速开始默认。';
+        } else {
+          const started = await api.quickStartReviewRun({ reviewRunId: result.run.reviewRunId, ruleVersionId: rule.ruleVersionId, planEnvelopeDigest: digest });
+          result = started.projection;
+          quickNote = started.outcome === 'started' ? '已按默认执行规则开始审阅。' : started.reasons.join('');
+        }
+      }
+      if (result.run === null) throw new Error(REVIEW_STATUS_LINES.preparationFailed);
       query.reviewRunId = result.run.reviewRunId;
       query.filters = { ...NO_FILTERS };
       query.pages = 1;
@@ -2018,7 +2033,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       generation += 1;
       stableKey = '';
       if (host.isConnected) show(result);
-      options.setStatus(REVIEW_STATUS_LINES.prepared, 'success');
+      options.setStatus(quickNote ?? REVIEW_STATUS_LINES.prepared, 'success');
       // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer, which takes focus; closing
       // it brings focus back to this Run's 查看计划.
       options.openPlan(result.run.reviewRunId);

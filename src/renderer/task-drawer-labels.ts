@@ -188,6 +188,7 @@ export const TASK_PLAN_DEFAULT_RULE_LEAD =
 export const TASK_PLAN_WRITING_DEFAULT_RULE_LEAD =
   '以后在「交付物」的新建文档里选下面「适用于」这一类文档、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。';
 export function taskPlanDefaultRuleLead(kind: TaskPlanProjection['kind']): string {
+  if (kind === 'review-run') return '以后对这本书选择相同的审阅类别并点快速开始时，AI7 会先准备计划：与下面这些一致时直接开始，有任何不同都停在计划上，等你看过再开始。规则不会自己开始任何任务。';
   return kind === 'writing' ? TASK_PLAN_WRITING_DEFAULT_RULE_LEAD : TASK_PLAN_DEFAULT_RULE_LEAD;
 }
 export const TASK_PLAN_DEFAULT_RULE_CONFIRM = '设为默认';
@@ -355,7 +356,7 @@ export const TASK_BAR_WAITING_FOR_SLOT = '已联网 · 名额已满';
 export const TASK_BAR_WAITING_SLOT_NOTE = '已记录这次授权。已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始，之后开始的任务可能先开始；在此之前不会发送任何内容';
 /** AUTH-010's three controls of a Run under way (Issue #422): 暂停 and 改计划重做 are shown with why they wait. */
 export const TASK_BAR_PAUSE = '暂停';
-export const TASK_BAR_CANCEL_RUN = '取消任务';
+export const TASK_BAR_CANCEL_RUN = '停止任务';
 export const TASK_BAR_REDO = '改计划重做';
 /**
  * 改计划重做 on a stopped Run (Issue #422, S76c; AUTH-010): its summary says, before anything is recorded, what stops,

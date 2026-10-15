@@ -490,14 +490,14 @@ function runningWith(settled) {
 /** The bar of a Run under way (AUTH-010): 暂停 and 取消任务 act on it, 改计划重做 says it waits for 暂停. */
 const RUNNING_ACTIONS = Object.freeze([
   ['pause', '暂停', 'enabled', null],
-  ['cancel-run', '取消任务', 'enabled', null],
+  ['cancel-run', '停止任务', 'enabled', null],
   ['redo', '改计划重做', 'disabled', REDO_REASON],
   ['run-link', '查看运行', 'enabled', null],
 ]);
 /** The bar of a stopped Run that can go on (CONT-015): 续行 first, then 取消任务, 改计划重做 and the way to the Run. */
 const STOPPED_ACTIONS = Object.freeze([
   ['resume', '续行', 'enabled', null],
-  ['cancel-run', '取消任务', 'enabled', null],
+  ['cancel-run', '停止任务', 'enabled', null],
   ['redo', '改计划重做', 'enabled', null],
   ['run-link', '查看运行', 'enabled', null],
 ]);
@@ -1281,7 +1281,7 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'run-waits', 60_000);
     await waitForBar(renderer, {
       state: 'awaiting-clarification', pill: SCOPE_WAITING, status: '等你回答', note: '已读完 7 / 8 个阅读范围；1 个问题等你回答，回答后接着做',
-      actions: [['cancel-run', '取消任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+      actions: [['cancel-run', '停止任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
     }, 'waiting-bar', 30_000);
     const waitingRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(waitingRun?.state === 'awaiting-clarification' && waitingRun.stateLabel === SCOPE_WAITING &&
@@ -1572,7 +1572,7 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(sixthIntentId)} && analysis.run?.state==='resumable')`, 'account-limit-stopped', 180_000);
     await waitForBar(renderer, {
       state: 'account-limit', pill: '模型服务账户限额', status: '模型服务账户限额', note: ACCOUNT_LIMIT_NOTE,
-      actions: [['connect', '处理模型服务', 'enabled', null], ['resume', '续行', 'enabled', null], ['cancel-run', '取消任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+      actions: [['connect', '处理模型服务', 'enabled', null], ['resume', '续行', 'enabled', null], ['cancel-run', '停止任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
     }, 'account-limit-bar', 30_000);
     const limited = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(limited?.state === 'resumable' && limited.stateLabel === '模型服务账户限额' && limited.run?.stateLabel === '模型服务账户限额' &&
@@ -1644,7 +1644,7 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(seventhIntentId)} && analysis.run?.state==='resumable')`, 'outcome-unknown-stopped', 180_000);
     await waitForBar(renderer, {
       state: 'outcome-unknown', pill: '结果待确认', status: '结果待确认', note: OUTCOME_UNKNOWN_NOTE,
-      actions: [['view-unconfirmed', '查看未确认的部分', 'enabled', null], ['cancel-run', '取消任务', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+      actions: [['view-unconfirmed', '查看未确认的部分', 'enabled', null], ['cancel-run', '停止任务', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
     }, 'outcome-unknown-bar', 30_000);
     requireJourney(await renderer.evaluate(`document.querySelector('#task-drawer [data-task-drawer-control="resume"]')===null && document.querySelector('#task-drawer [data-task-drawer-control="redo"]')===null`) === true, 'outcome-unknown-no-repeat');
     const unconfirmed = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1770,6 +1770,59 @@ async function main() {
       afterKept?.taskOutcome?.report?.reportDigest === reductionUnknown.taskOutcome.report.reportDigest, 'unconfirmed-kept-unmoved');
     const keptAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
     requireJourney(keptAttention?.groups?.every((group) => group.items.every((entry) => entry.itemId !== unconfirmedItemId)) === true, 'unconfirmed-left-attention', keptAttention?.groups ?? null);
+
+    // #866 synchronized delta: the shared drawer controls a category Run inside a multi-category review.
+    at('review-controls-prepare');
+    await closeOwnedBrowser();
+    adapterFixture = 'sample1-review-authored';
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-controls-ready');
+    const reviewBookId = await importSample1(renderer, '审阅任务控制旅程', true, 'review-controls-import');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'review-controls-profile');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'review-controls-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'review-controls-enabled');
+    await click(renderer, '返回图书列表', 'review-controls-library');
+    await clickSelector(renderer, `button[data-book-id=${JSON.stringify(reviewBookId)}]`, 'review-controls-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(reviewBookId)}]')`, 'review-controls-editor');
+    await clickSelector(renderer, '[data-records-destination="review"]', 'review-controls-destination');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')`, 'review-controls-workspace');
+    await clickSelector(renderer, '[data-review-action="new-review"]', 'review-controls-new');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-controls-sheet');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-controls-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='review-run' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, 'review-controls-drawer');
+    const reviewRef = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef`);
+    requireJourney(UUID_PATTERN.test(reviewRef ?? ''), 'review-controls-ref');
+    await writeFile(holdPath, '0', 'utf8');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'review-controls-start');
+    await waitFor(renderer, `window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}}).then((plan)=>plan.runControl?.activity?.currentUnitOrdinal===1)`, 'review-controls-first-unit');
+    const reviewStarted = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}})`);
+
+    at('review-controls-pause-resume');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'review-controls-pause');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='pausing'`, 'review-controls-pausing');
+    await writeFile(holdPath, '1', 'utf8');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='paused'`, 'review-controls-paused');
+    const reviewPaused = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}})`);
+    const pausedWorkspace = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(reviewRef)}})`);
+    requireJourney(reviewPaused.runControl?.runRecordId===reviewStarted.runControl?.runRecordId && reviewPaused.runControl?.continuation?.unitsSettled===1 &&
+      pausedWorkspace.run?.categories?.[1]?.state==='waiting', 'review-controls-checkpoint');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'review-controls-resume');
+    await waitFor(renderer, `window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}}).then((plan)=>plan.runControl?.activity?.currentUnitOrdinal===2 && plan.runControl.runRecordId===${JSON.stringify(reviewStarted.runControl.runRecordId)})`, 'review-controls-same-run');
+
+    at('review-controls-cancel-impact');
+    await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.textContent==='停止任务'`, 'review-controls-stop-wording');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="cancel-run"]', 'review-controls-impact');
+    await waitFor(renderer, `document.querySelector('#task-drawer-cancel-impact') && document.querySelector('#task-drawer [data-task-drawer-control="confirm-cancel-run"]')?.textContent==='确认取消任务'`, 'review-controls-confirm-wording');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="confirm-cancel-run"]', 'review-controls-cancel');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='cancelling'`, 'review-controls-cancelling');
+    await writeFile(holdPath, '2', 'utf8');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='cancelled-after-start'`, 'review-controls-cancelled');
+    const cancelledReview = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}})`);
+    requireJourney(cancelledReview.redo!==null && cancelledReview.runControl===null, 'review-controls-redo-offered');
+
+    at('review-controls-redo-plan');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="redo"]', 'review-controls-redo');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='review-run' && document.querySelector('#task-drawer')?.dataset.taskPlanRef!==${JSON.stringify(reviewRef)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready'`, 'review-controls-redo-prepared');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

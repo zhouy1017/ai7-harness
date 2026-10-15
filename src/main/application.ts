@@ -2794,6 +2794,35 @@ function registerRendererHandlers(
     );
   }
   // Reconnect Preflight names no Book: it only ever admits Runs the editor already authorized to start when
+  ipcMain.handle(IPC_CHANNELS.quickStartReviewRun, (event, input: Omit<ServiceOperationMap['quickStartReviewRun']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('quickStartReviewRun', { ...input, bookId: route.bookId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.projection.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '审阅结果不属于当前图书工作台。');
+        return result;
+      });
+    }));
+  for (const operation of ['controlTaskRun', 'editTaskPlan', 'redoTaskPlan'] as const) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: Omit<ServiceOperationMap['controlTaskRun']['input'], 'bookId'> | Omit<ServiceOperationMap['editTaskPlan']['input'], 'bookId'> | Omit<ServiceOperationMap['redoTaskPlan']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call(operation, { ...input, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if ('bookId' in result && result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务控制的结果不属于当前图书工作台。');
+          return result;
+        });
+      }));
+  }
+  // Reconnect Preflight names no Book: it only ever admits Runs the editor already authorized to start when
   // online. It is serialized with every other effect, because an admission dispatches.
   ipcMain.handle(
     IPC_CHANNELS.runReconnectPreflight,

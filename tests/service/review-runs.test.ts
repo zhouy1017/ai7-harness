@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { REPORT_EXPORT_FORMATS, REPORT_FORMAT_LINES } from '../../src/service/manuscript-export.js';
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
+import { ALWAYS_ONLINE } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { PROCEDURE_STEP_NOT_CHOSEN } from '../../src/service/captured-procedures.js';
@@ -380,6 +381,28 @@ function eventTrail(reviewRunId: string): Array<[string, string]> {
   }
 }
 describe('a Review Run over the real store on exact sample1', () => {
+  it('quick-starts only a matching review category-set rule and records that origin on its category Runs', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const run = prepare(session, book, [TYPOS], WHOLE);
+      const input = { bookId: book.bookId, reviewRunId: run.reviewRunId };
+      const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
+      const runtime = { credentialReadiness: async () => null, connectivity: ALWAYS_ONLINE };
+      expect((await session.store.quickStartReviewRun({ ...input, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, ruleVersionId: randomUUID() }, runtime)).outcome).toBe('fell-back');
+      expect(session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!.authorization).toBeNull();
+      const rule = session.store.setDefaultExecutionRule(book.bookId, run.reviewRunId, plan.defaultRule.planEnvelopeDigest!);
+      expect(rule.taskKind).toBe('review-run');
+      expect((await session.store.quickStartReviewRun({ ...input, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, ruleVersionId: rule.ruleVersionId }, runtime)).outcome).toBe('started');
+      await session.driver.drive(run.reviewRunId);
+      const category = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(category.authorization).toMatchObject({ origin: 'default-execution-rule', ruleVersionId: rule.ruleVersionId });
+      const other = prepare(session, book, [STYLE], WHOLE);
+      const otherPlan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: other.reviewRunId });
+      expect((await session.store.quickStartReviewRun({ bookId: book.bookId, reviewRunId: other.reviewRunId,
+        planEnvelopeDigest: otherPlan.edit.planEnvelopeDigest!, ruleVersionId: rule.ruleVersionId }, runtime)).outcome).toBe('fell-back');
+      expect(session.store.inspectReviewWorkspace(book.bookId, other.reviewRunId).run!.authorization).toBeNull();
+    });
+  });
+
   it('reviews several categories and the baseline leads one after another and puts every finding on the manuscript as one record with its mark', async () => {
     await withBook('sample1-review-authored', async (session, book) => {
       const before = workspace(session, book);

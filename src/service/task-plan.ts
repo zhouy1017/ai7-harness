@@ -617,6 +617,54 @@ function baselinePlanEdit(
   };
 }
 
+/** Shared drawer controls; kind-specific scope, outcomes and material disclosures stay on their own plan. */
+export function withLedgerRunControls(
+  plan: TaskPlanProjection,
+  projection: BaselineAnalysisProjection,
+  blocks: ReadonlyArray<ManifestBlockInput>,
+  stopped?: BaselineStoppedRunFacts,
+  developerLive = false,
+): TaskPlanProjection {
+  const version = projection.planVersion;
+  if (version === null || projection.providerResolutionPlan === null) return plan;
+  const edits = version.edits;
+  const run = projection.run;
+  const impactWords = (lines: ReadonlyArray<string>): string[] => lines.map((line) => line === CANCELLATION_NO_EFFECTS
+    ? plan.kind === 'review-run' ? '已经形成的审阅批注与修改建议会保留；取消不会撤回已完成的受控动作。'
+      : '这项任务只形成草稿或建议，不会自动采用、改稿或发稿。'
+    : line.replace('这本书最新的分析', '这项任务最新的结果'));
+  const canRedo = run !== null && runBegan(run) &&
+    (run.state === 'paused' || run.state === 'resumable' || run.state === 'cancelled');
+  const redo = !canRedo || plan.kind === 'fixed-task' || plan.kind === 'baseline-analysis' ? null : {
+    summary: run.state === 'cancelled' ? [] : [
+      ...impactWords(baselineCancellationImpact(run, null, stopped === undefined ? null : {
+        unitsSettled: stopped.unitsSettled, unitsTotal: stopped.unitsTotal, bindingHolds: stopped.bindingHolds,
+      })),
+      '然后准备一项新任务；开始之前可以先改计划。新任务由你开始，不会自己运行。',
+    ],
+    prepare: { kind: plan.kind, ref: plan.ref, redoOf: run.runRecordId },
+  };
+  return {
+    ...plan,
+    state: run !== null && ['pausing', 'paused', 'resumable', 'awaiting-clarification', 'cancelling', 'cancelled'].includes(run.state)
+      ? baselineState(projection, stopped) : plan.state,
+    edit: baselinePlanEdit(projection, version.ordinal, blocks, projection.providerResolutionPlan.runBudgetCeiling,
+      developerLive),
+    boundary: {
+      ...plan.boundary,
+      adaptable: PLAN_EDITABLE_ADAPTATIONS.map((id) => ({
+        id, label: PLAN_EDIT_ADAPTATION_LABELS[id], removable: true, movable: false,
+        removed: edits.disallowedAdaptations.includes(id), askFirst: (edits.askFirstAdaptations ?? []).includes(id),
+      })),
+    },
+    runControl: (() => {
+      const control = baselineRunControl(projection, stopped);
+      return control === null ? null : { ...control, cancel: { ...control.cancel, impact: impactWords(control.cancel.impact) } };
+    })(),
+    redo,
+  };
+}
+
 type ReadUnit = { readonly unitOrdinal: number; readonly startPosition: number; readonly endPosition: number; readonly disposition: string };
 type ReadManifest = { readonly units: ReadonlyArray<{ readonly ordinal: number; readonly overlapBlockIds: ReadonlyArray<string> }> };
 

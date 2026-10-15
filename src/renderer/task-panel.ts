@@ -37,7 +37,7 @@ import {
  * plan or its own surface. The panel reads; it grants nothing.
  */
 export interface TaskPanelOptions {
-  readonly api: Pick<RendererApi, 'inspectBookTasks' | 'inspectBaselineAnalysis' | 'pauseBaselineAnalysisRun' | 'resumeBaselineAnalysisRun'>;
+  readonly api: Pick<RendererApi, 'inspectBookTasks' | 'inspectBaselineAnalysis' | 'pauseBaselineAnalysisRun' | 'resumeBaselineAnalysisRun' | 'controlTaskRun'>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
   /** A Task's plan in the drawer; `cancel` opens it with 取消任务's Cancellation Impact Summary open. */
@@ -281,7 +281,8 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       case 'pause':
       case 'resume': {
         const taskIntentId = taskIntentOf(target);
-        if (taskIntentId === null) return;
+        const planned = planOf(target);
+        if (taskIntentId === null && (planned === null || planned.kind === 'fixed-task' || planned.kind === 'baseline-analysis')) return;
         const book = bookId;
         working = true;
         painted = '';
@@ -289,8 +290,12 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
         const pausing = entryAction.key === 'pause';
         options.setStatus(pausing ? '正在暂停任务…' : '正在续行…', 'busy');
         try {
-          if (pausing) await api.pauseBaselineAnalysisRun({ taskIntentId });
-          else await api.resumeBaselineAnalysisRun({ taskIntentId });
+          if (taskIntentId !== null) {
+            if (pausing) await api.pauseBaselineAnalysisRun({ taskIntentId });
+            else await api.resumeBaselineAnalysisRun({ taskIntentId });
+          } else if (planned !== null && planned.kind !== 'fixed-task' && planned.kind !== 'baseline-analysis') {
+            await api.controlTaskRun({ kind: planned.kind, ref: planned.ref, action: pausing ? 'pause' : 'resume' });
+          }
           options.setStatus(pausing ? TASK_BAR_PAUSING_NOTE : '已续行，从已保存的进度接着读。', 'success');
           options.onRecorded(book);
         } catch (error) {

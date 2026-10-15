@@ -781,7 +781,7 @@ export class BaselineAnalysisExecutionOwner {
       interrupted: false,
       cancelRequested: options.cancel === true,
       pauseRequested: false,
-      resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND,
+      resumableOnInterrupt: true,
       done: Promise.resolve(),
     };
     this.#active.set(runRecordId, active);
