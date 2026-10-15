@@ -231,6 +231,8 @@ export function applyAssuranceSample(reduction: AnalysisReductionResult, sample:
 }
 
 export interface AnalysisKindDefinition {
+  /** The exact result contract beneath the optional provider clarification instruction /2. */
+  readonly clarificationBase?: AnalysisKindDefinition;
   /** Optional exact Material Index pins, frozen into this Task’s execution plan (Issue #428). */
   readonly materialReferences?: {
     readonly sources: ReadonlyArray<import('../task-material-references.js').TaskMaterialSource>;

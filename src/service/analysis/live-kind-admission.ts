@@ -4,6 +4,8 @@ import type { OutboundDataCategory } from '../provider/egress-gate.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../review/review-category-kind.js';
 import { liveMaterialContract } from '../task-material-references.js';
+import { withModelClarification } from '../provider/clarification-contract.js';
+import type { AnalysisKindDefinition } from './kind-definition.js';
 
 /** The rule facts a live step reads from the one selected rule that admitted its kind. */
 export interface LiveKindRule {
@@ -156,6 +158,14 @@ export function liveKindAdmission(
   definition: LiveKindDefinition,
   binding: LiveKindBinding,
 ): LiveKindRule | null {
+  const wrapped = definition as LiveKindDefinition & { clarificationBase?: AnalysisKindDefinition };
+  if (wrapped.clarificationBase !== undefined) {
+    const expected = withModelClarification(wrapped.clarificationBase);
+    const rule = liveKindRule(policy, definition.kind);
+    if (rule?.clarificationQuestionAllowed !== true ||
+        expected.promptContractDigest !== definition.promptContractDigest || expected.systemPrompt !== definition.systemPrompt) return null;
+    return liveKindAdmission(policy, wrapped.clarificationBase, binding);
+  }
   const expectation = liveKindExpectation(definition);
   return expectation === null ? null : liveKindAdmitted(policy, definition.kind, definition, binding, expectation);
 }

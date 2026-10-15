@@ -1,0 +1,935 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-model-clarification-live-baseline",
+  "description": "Recorded exact sample1 developer-live /2 baseline Run on 2026-10-15; every entry retains original model, contract, usage, cache identity, request/response hashes and frozen sample1 source proof. This is a recorded validation capture, not an editorial-quality claim.",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "c3caace51ba401d52d94413c33ff315c53eb66cae05c5cfb73220cd418662df9",
+      "contentDigest": "582fd4c3541fa6f2cfc613106f45b9713aeeeeacfb82ffbbcd940853533b9981",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":1,\"synopsis\":\"本单元为长篇《青铜重器》之一《蟠虺》的开篇第一章“壹”，先以题名、丛书名与作者名起首，随后引出中心人物曾本之：他刚过完六十五岁生日，反复书写又反复撕碎一封以“识时务者为俊杰，不识时务者为圣贤”开头的信，意在写给钟爱的弟子。叙事交代当下达到这一级别的弟子只有女婿郑雄，并由郑雄操办其“七十小寿”寿宴，借寿宴与曾侯乙尊盘的比附写出曾本之的学界地位；随即倒叙八年前另一位同级别弟子被警察带走、其名在曾本之话语中消失，交代曾本之撕信困惑的真正缘由。末尾以一九九○年代巴黎女子望玫瑰兴叹欲嫁写信求爱者的传闻，反衬当下无人手写书信的时代风气。全章以“寄信—撕信”的悬置状态收束。\",\"entities\":[{\"name\":\"蟠虺\",\"kind\":\"term\",\"aliases\":[],\"note\":\"本单元首行题名，亦为本篇标题\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"《青铜重器》\",\"kind\":\"object\",\"aliases\":[],\"note\":\"本篇所属的系列名，“之一”表明本篇为该系列中的一部长篇\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"刘醒龙\",\"kind\":\"person\",\"aliases\":[],\"note\":\"题名之下标注的作者名\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"曾本之\",\"kind\":\"person\",\"aliases\":[],\"note\":\"中心人物，刚过完六十五岁生日，被人视为楚学界泰斗，写信托付钟爱弟子又屡屡撕信\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"郑雄\",\"kind\":\"person\",\"aliases\":[],\"note\":\"曾本之的女婿兼弟子，当下唯一达到“钟爱”级别者，为曾本之操办七十小寿寿宴\",\"sourceRanges\":[{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"安静\",\"kind\":\"person\",\"aliases\":[],\"note\":\"文中以“妻子安静”出现，相信郑雄老家的寿宴规矩；与曾本之、郑雄的具体亲属关系本单元未确定\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"曾侯乙尊盘\",\"kind\":\"object\",\"aliases\":[],\"note\":\"青铜重器中的极品，王者用来盛酒和温酒的一套器皿，被视为国宝中的国宝，被“老省长”用来评价寿宴档次\",\"sourceRanges\":[{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"老省长\",\"kind\":\"person\",\"aliases\":[],\"note\":\"寿宴上的不速之客，称寿宴为“曾侯乙尊盘级”；真实姓名未出现\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚学界\",\"kind\":\"organization\",\"aliases\":[],\"note\":\"曾本之被称“楚学界泰斗”，此为该学界共同体\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"东湖\",\"kind\":\"place\",\"aliases\":[],\"note\":\"巴黎玫瑰传闻“传来传去”后抵达之地\",\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"巴黎香榭丽舍大街\",\"kind\":\"place\",\"aliases\":[],\"note\":\"一九九○年代某天时尚女子望玫瑰兴叹之处\",\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"一九九○年代\",\"kind\":\"term\",\"aliases\":[\"从前\"],\"note\":\"叙述所指“可以称为从前”的时段，玫瑰传闻发生于此\",\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"曾本之用尽全身力气写出“识时务者为俊杰。不识时务者为圣贤。”两句，为写这封信累得又喘气又叹气，写满两张信笺后突然丢下毛笔，把纸撕碎到找不到一个完整的字\",\"chronology\":\"本单元现时，曾本之刚过完六十五岁生日\",\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":2,\"summary\":\"郑雄为曾本之操办所谓七十小寿寿宴，办得简朴温馨又不失学界泰斗的端庄典雅，席开不超过两桌，不速之客“老省长”评价其为“曾侯乙尊盘级”\",\"chronology\":\"“前些日子”，早于撕信当下\",\"participants\":[\"郑雄\",\"曾本之\",\"安静\",\"老省长\"],\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":3,\"summary\":\"八年前，一群文质彬彬的警察当着曾本之的面将另一位同级别弟子带走，此后该弟子的名字在曾本之的话语体系中消失\",\"chronology\":\"八年前，早于寿宴与撕信\",\"participants\":[\"曾本之\",\"另一位弟子\",\"警察\"],\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":4,\"summary\":\"后来曾本之多次尝试重写以那两句话开头的书信，重写内容几乎与先前一字不差；临到要写下收信弟子姓名时陷入困惑，无法确定是写给女婿郑雄还是另一位不肯记起名字的弟子，只得再次撕碎写好的每个字，只留满屋叹息\",\"chronology\":\"承接撕信之后，多次反复发生\",\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":5,\"summary\":\"可称为从前的一九九○年代某天，一位时尚女子在巴黎香榭丽舍大街上望玫瑰兴叹，称若有男士以写信方式求爱便会毫不犹豫嫁给他；该故事辗转二十年传到东湖，此时世人已宁送玫瑰懒写情书，手写书信稀罕如买彩票中大奖\",\"chronology\":\"一九九○年代起，至今约二十年\",\"participants\":[\"时尚女子\"],\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[{\"subject\":\"郑雄\",\"object\":\"曾本之\",\"relation\":\"女婿兼弟子，当下唯一达到“钟爱”级别的弟子，并为曾本之操办七十小寿\",\"sourceRanges\":[{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"安静\",\"object\":\"郑雄\",\"relation\":\"文中称“妻子安静很相信郑雄的这一套”，表明二人为夫妻\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"安静\",\"object\":\"曾本之\",\"relation\":\"曾本之最终“拗不过安静”，因安静相信郑雄老家的寿宴规矩而同意办七十小寿\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"另一位弟子\",\"relation\":\"曾本之曾有的同级别钟爱弟子，八年前被警察带走，其名字在曾本之话语体系中消失，却仍使他重写信时陷入困惑\",\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"老省长\",\"object\":\"曾本之七十小寿寿宴\",\"relation\":\"作为不速之客给出“曾侯乙尊盘级”的评价\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"settingClaims\":[{\"subject\":\"郑雄老家的寿俗\",\"claim\":\"非常强调六十五岁生日，称之为七十小寿，是七十大寿的预演\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"其他所有地方的寿俗\",\"claim\":\"奉行男做虚岁、女做实岁，男人六十九岁时做七十大寿\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"六十五岁做七十小寿的条件\",\"claim\":\"并非所有男人皆可，需通过一种比较特别的卜算确定，能在六十五岁做七十小寿的男人都被视为众人眼里的有福之人\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾侯乙尊盘\",\"claim\":\"是青铜重器中极品的王者用来盛酒和温酒的一套器皿，其存在的意义被视为国宝中的国宝\",\"sourceRanges\":[{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之的学界地位\",\"claim\":\"被称为楚学界泰斗，其寿宴被要求既有普通老人家的简朴温馨气氛，又不失端庄典雅风范\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之寿宴的规模限制\",\"claim\":\"曾本之同意办寿宴时有言在先，连家人一起不许超过两桌\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之弟子的级别\",\"claim\":\"倒回去八年，达到“钟爱”级别、算上郑雄共有两位弟子；而当下只有女婿郑雄一人\",\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"书信的时代境况\",\"claim\":\"近二十年来满世界男人已习惯宁肯每天上门送一束玫瑰花，也懒得写情书求爱，连带其他书信都不愿动笔手写；此时收到经邮筒、邮局、邮递员之手且有墨香墨彩的书信比两元彩票中大奖还稀罕\",\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"conflicts\":[],\"unresolved\":[{\"description\":\"“妻子安静”具体是谁的妻子：若为郑雄之妻，则安静是曾本之的女儿；若为曾本之之妻，则与后文“曾本之拗不过安静”同样通顺。本单元未给出可判定依据\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"八年前被警察带走的另一位弟子姓名，以及其被带走的原因，本单元明确称其名字已在曾本之话语体系中消失，未予交代\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"曾本之反复书写的这封信最终要写给郑雄还是另一位不肯记起的弟子，以及信是否写出、是否寄出，本单元始终悬置\",\"sourceRanges\":[{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"“老省长”的真实姓名、身份来历及其与曾本之的关系，本单元只给出口头称谓\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"巴黎女子望玫瑰兴叹的传闻与曾本之书信主线之间是否存在情节关联，本单元仅称该故事“传来传去”抵达东湖，未作说明\",\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"题名“蟠虺”的具体所指及其与正文内容的关系，本单元仅出现标题未作任何解释\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1861,
+          "outputTokens": 5718
+        }
+      },
+      "capture": {
+        "subject": "unit",
+        "itemId": "S40/first-baseline/21",
+        "selectedItemId": "S40/first-baseline/21",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:29:21.775Z",
+        "providerRequestDigest": "5cd20def5e26e18c93686fe14fa914e3cd0b7f574c940ced50c2a3d4f82924cc",
+        "providerResponseDigest": "58a25b4d501d58609dafe8e4a71836ed4f830efcfaa6cdc0ad580604a86a416c",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "f5d13b2b28a985f81f7522ceb79e95ac32eca0b8ff817594e7aff1c63e997bd0",
+        "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/unit-1"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{block:1}}",
+            "identity": "blk_dd3d25caf84dda32d88c6d6a"
+          },
+          {
+            "placeholder": "{{block:2}}",
+            "identity": "blk_1761ef44698a6d963d75249a"
+          },
+          {
+            "placeholder": "{{block:3}}",
+            "identity": "blk_bdd86a9ede262ad4b1ea17bc"
+          },
+          {
+            "placeholder": "{{block:7}}",
+            "identity": "blk_f2b0881ec5d313961ee2b3b9"
+          },
+          {
+            "placeholder": "{{block:8}}",
+            "identity": "blk_dff1f760fc805870f94181bb"
+          },
+          {
+            "placeholder": "{{block:9}}",
+            "identity": "blk_51028cc0e467a4dee22f46b1"
+          },
+          {
+            "placeholder": "{{block:10}}",
+            "identity": "blk_693c2b8a0b5df936f9c200d5"
+          },
+          {
+            "placeholder": "{{block:11}}",
+            "identity": "blk_416aead8cff0114d9807d147"
+          },
+          {
+            "placeholder": "{{block:12}}",
+            "identity": "blk_a3d75f935b8abaed0d9ac84e"
+          },
+          {
+            "placeholder": "{{block:13}}",
+            "identity": "blk_792364765489ab35ee37b6d6"
+          },
+          {
+            "placeholder": "{{block:14}}",
+            "identity": "blk_68b9ed4cf1b02a257bbd34d8"
+          },
+          {
+            "placeholder": "{{block:15}}",
+            "identity": "blk_1cf40be51b82e1943e6094c6"
+          }
+        ],
+        "fixtureResponseDigest": "6ae590ff5922647544fbeee1ae3459f6badb2143ccf92b0e93c3c4460ce59e8c"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "b2ac20431f20e1389ff1b0fd95fbd851e307f90a2ba3635050d59de26e3a03fd",
+      "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":2,\"synopsis\":\"本单元聚焦曾本之收信一事：先交代他皓首苍颜、只以纸笔书信对外联系的习惯，随即点出他刚收到一封用甲骨文写的信，而写信人早死于一九八○年代最后的夏天、曾本之曾全程参加其无仪式的告别。信封未寄往他工作的楚学院，而是用楷体打印出他在东湖公园先月亭一带固定时间独坐的私密地点，除家人外外人不该知道。末段转入他在先月亭独坐、抛掷蚌壳打水漂，并联想到当年随州擂鼓墩发掘曾侯乙大墓时村中女孩跳房子的情景。\",\"entities\":[{\"name\":\"曾本之\",\"kind\":\"person\",\"aliases\":[\"曾本之先生\"],\"note\":\"皓首苍颜，仍以写信收信为日常对外联系方式；研究专业与众不同，用繁体字写回信；不爱打电话、电子邮件，手机短信只看不写；在楚学院工作，固定时间在东湖公园先月亭一带独坐放松。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚学院\",\"kind\":\"organization\",\"aliases\":[],\"note\":\"曾本之的工作单位；信封未寄往此处。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"先月亭\",\"kind\":\"place\",\"aliases\":[],\"note\":\"东湖公园内一处亭子；曾本之固定时间独坐之处，其阴影被描述为随太阳由右移到左。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"东湖公园\",\"kind\":\"place\",\"aliases\":[],\"note\":\"信封所述路线中提及，进大门后过小梅岭、可竹轩至老鼠尾半岛。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"小梅岭\",\"kind\":\"place\",\"aliases\":[],\"note\":\"信封所述路线途经处。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"可竹轩\",\"kind\":\"place\",\"aliases\":[],\"note\":\"信封所述路线途经处。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"老鼠尾\",\"kind\":\"place\",\"aliases\":[],\"note\":\"俗称，指道路尽头半岛最前端。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"省博物馆\",\"kind\":\"place\",\"aliases\":[],\"note\":\"信封所述路线的起点参照物（“省博物馆背后”）。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"随州擂鼓墩\",\"kind\":\"place\",\"aliases\":[],\"note\":\"曾本之回忆中当年发掘曾侯乙大墓之处。\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"曾侯乙大墓\",\"kind\":\"place\",\"aliases\":[],\"note\":\"随州擂鼓墩的大墓，曾本之当年参与/在场发掘。\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"甲骨文\",\"kind\":\"term\",\"aliases\":[],\"note\":\"本单元中曾本之所收信件正文使用的文字；与信封上打印的楷体汉字相对。\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"繁体字\",\"kind\":\"term\",\"aliases\":[],\"note\":\"曾本之与大多数写信人使用的字形，与一般人通信用的简体字相对。\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"简体字\",\"kind\":\"term\",\"aliases\":[],\"note\":\"一般人通信往来所用字形。\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"跳房子\",\"kind\":\"term\",\"aliases\":[],\"note\":\"随州擂鼓墩周边村子小女孩玩的游戏，用花布沙包抛掷并跳跃。\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"蚌壳\",\"kind\":\"object\",\"aliases\":[],\"note\":\"曾本之在先月亭身边随手拾取之物，被他抛掷、打水漂。\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"用甲骨文写信的人\",\"kind\":\"person\",\"aliases\":[],\"note\":\"本单元未给出姓名；已于一九八○年代最后的夏天死去，曾本之全程参加其无仪式的生命告别。\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"曾本之收到一封信，这封信把平常的事变得极不平常；它用甲骨文写成，而信封上的地址并非他工作的楚学院，而是以打印机打印的标准楷体汉字写明他在省博物馆背后、进东湖公园、过小梅岭与可竹轩、老鼠尾半岛最前端先月亭前的固定时间独坐之处。\",\"chronology\":\"当下（叙述现在）\",\"participants\":[\"曾本之\",\"用甲骨文写信的人\"],\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":2,\"summary\":\"用甲骨文写信的人死于一九八○年代最后的那个夏天；二十多年前那次没有仪式的生命告别，从灵魂放飞、孤灯守灵到扶棺下葬、清明立碑，曾本之从头到尾都在现场。\",\"chronology\":\"二十多年前（一九八○年代最后的夏天）\",\"participants\":[\"曾本之\",\"用甲骨文写信的人\"],\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":3,\"summary\":\"曾本之在先月亭独坐，看亭尖阴影随太阳由身右移到身左，无聊中拾蚌壳投掷，正落在亭影顶尖处；由此想起当年在随州擂鼓墩发掘曾侯乙大墓时，周边村子里小女孩用花布沙包玩跳房子的情景。他连投三次命中后改用蚌壳打水漂，蚌壳在水面弹起落下，划出弧线推向湖心，最终沉入湖底。\",\"chronology\":\"当下（此前/同时于收信一事，先月亭独坐时段）\",\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[{\"subject\":\"曾本之\",\"object\":\"楚学院\",\"relation\":\"工作于（信中称为“曾本之工作的楚学院”）\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"用甲骨文写信的人\",\"relation\":\"收信人（收到其以甲骨文写的信）\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"用甲骨文写信的人\",\"relation\":\"全程参加其从灵魂放飞、守灵到下葬、立碑的生命告别\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"先月亭\",\"relation\":\"固定时间在此独坐放松（其私密处所）\",\"sourceRanges\":[{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"随州擂鼓墩曾侯乙大墓\",\"relation\":\"当年在此参与发掘（回忆中在场）\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"settingClaims\":[{\"subject\":\"曾本之\",\"claim\":\"皓首苍颜，是如今仍将写信与收信作为日常对外联系方式的极端少数之人；不喜欢打电话、不习惯发电子邮件，手机短信只看不写、只收不发。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"书信使用文字\",\"claim\":\"一般人通信往来用简体字；曾本之因专业与众不同，收到的信偶尔有英法德日等文字，大多数写信人用繁体字，他也用繁体字写回信。\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之收到的这封信\",\"claim\":\"正文用甲骨文写成；信封上的地址文字不是甲骨文，而是打印机打印出来的标准楷体汉字。\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"信封地址所述地点\",\"claim\":\"正是曾本之在固定时间、固定地点放松神经的地方，除了家人，外人不应当知道。\",\"sourceRanges\":[{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"用甲骨文写信的人\",\"claim\":\"死于一九八○年代最后的那个夏天。\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之在先月亭的作息\",\"claim\":\"周一下午四点十分独坐在先月亭前（据信封所写）。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"conflicts\":[],\"unresolved\":[{\"description\":\"用甲骨文写信之人的姓名与身份在本单元未予说明，仅以“用甲骨文写信的人”“这个早已死去的人”指称。\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"“一九八○年代最后的那个夏天”未给出确切年份，“二十多年前”亦为相对表述，本单元无法确定具体时间点。\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"甲骨文信件的内容、寄出方式与寄件人署名等均未披露；已死者如何寄出此信亦未说明。\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"“楚学院”的性质与曾本之在其中所任职务本单元未作说明（仅称其为“曾本之工作的楚学院”）。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1729,
+          "outputTokens": 5703
+        }
+      },
+      "capture": {
+        "subject": "unit",
+        "itemId": "S40/first-baseline/22",
+        "selectedItemId": "S40/first-baseline/22",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:29:57.835Z",
+        "providerRequestDigest": "74aae6852316a8715b87dfdeae1d1c147847a6ead22dadb1140972358217590d",
+        "providerResponseDigest": "8cd2812c63ea0ef4ff859c458a8ee603d164988bd472a01d0a93f22a9c682fb1",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "e2988c6667dd41e77bb6b01197c47b21066ba28b6407268da8ed00c28afe39cd",
+        "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/unit-2"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{block:1}}",
+            "identity": "blk_47b625567f26e339d707a404"
+          },
+          {
+            "placeholder": "{{block:2}}",
+            "identity": "blk_db3d64ef4340c4c5e3bda988"
+          },
+          {
+            "placeholder": "{{block:3}}",
+            "identity": "blk_79919afebc8bd89c36ac374c"
+          },
+          {
+            "placeholder": "{{block:4}}",
+            "identity": "blk_d323e9633be979fb914f97aa"
+          },
+          {
+            "placeholder": "{{block:5}}",
+            "identity": "blk_d4af51421aeae08edbda9737"
+          },
+          {
+            "placeholder": "{{block:6}}",
+            "identity": "blk_ebb7be82bd3126ca066bc653"
+          },
+          {
+            "placeholder": "{{block:7}}",
+            "identity": "blk_36c9fc9d4f6c9012cca994f0"
+          },
+          {
+            "placeholder": "{{block:8}}",
+            "identity": "blk_fed6d7d36b7b73acff07f163"
+          },
+          {
+            "placeholder": "{{block:9}}",
+            "identity": "blk_054e49187e3b00aa16dca8c5"
+          },
+          {
+            "placeholder": "{{block:10}}",
+            "identity": "blk_87e6ea108f4f7681edfe6a33"
+          }
+        ],
+        "fixtureResponseDigest": "09f640a06c403a3f07c4cca743c091d2ee0ac239ceb5d46b67398824ad90fbe2"
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "0efa150a4fe99c56282761b088501c75d7f8f776c154b7a55f1edf521856f64c",
+      "contentDigest": "a961d6dc02f89d79d932b93f7d23398f5ae6d205901f48adc2ba7e8b682b0d29",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":3,\"synopsis\":\"本单元以曾本之在伸向湖心的半岛顶端小憩入梦开篇：他梦见遍是青铜重器的大殿与成堆甲骨，并看中最大的一块龟甲片，一声沉雷将梦惊醒，回到东湖碧水。随后叙述这种载有甲骨文的梦每周一到两次造访他。紧接着一个穿邮递员制服的男人出现，反复确认他的姓名，将一封收信地址古怪的信交给他；邮递员自称在东亭邮局当了三十几年，邮政局的人都认为这封信是恶作剧。曾本之拆开信封，取出旧得发黄的信笺，认出上面的四个字是甲骨文，且字迹气韵与纸张气息令他极为熟悉；他因此想到自己最后一片安宁之地不再属于自己。他耐心向邮递员说明那是甲骨文，却以通信自由与隐私权为由拒绝透露内容，邮递员离开时嘟哝着嘲讽。全单元未揭示寄信人身份与四字内容。\",\"entities\":[{\"name\":\"曾本之\",\"kind\":\"person\",\"aliases\":[\"他\"],\"note\":\"本单元主人公；在半岛顶端入梦，收到寄给自己的古怪信件，能辨识甲骨文并熟悉其字迹与纸张气息\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"邮递员\",\"kind\":\"person\",\"aliases\":[\"穿邮递员制服的男人\",\"男人\"],\"note\":\"东亭邮局邮递员，自称在该局当了三十几年；因好奇而决定投递这封古怪信件\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"东亭邮局\",\"kind\":\"organization\",\"aliases\":[],\"note\":\"邮递员任职三十几年的邮政机构\",\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"邮政局\",\"kind\":\"organization\",\"aliases\":[],\"note\":\"邮递员口中“邮政局的人”一致认为该信是恶作剧\",\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"甲骨文\",\"kind\":\"term\",\"aliases\":[],\"note\":\"本单元的核心文字符号；既出现在曾本之反复做的梦中，也出现在来信上\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:17}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"东湖\",\"kind\":\"place\",\"aliases\":[\"湖\"],\"note\":\"曾本之所在的水域，梦中沉雷后化为东湖碧水\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"细长半岛\",\"kind\":\"place\",\"aliases\":[],\"note\":\"伸向湖心的细长半岛，曾本之坐在其顶端\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"信件\",\"kind\":\"object\",\"aliases\":[\"信\",\"信封\"],\"note\":\"寄给曾本之的信，收信地址古怪，被邮政局认为是恶作剧\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"信笺\",\"kind\":\"object\",\"aliases\":[],\"note\":\"信封中取出的旧得发黄的信笺\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"四个字\",\"kind\":\"term\",\"aliases\":[],\"note\":\"信笺上出现的四个甲骨文字，字迹气韵与纸张气息令曾本之感到极为熟悉\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"龟甲片\",\"kind\":\"object\",\"aliases\":[],\"note\":\"梦中最大的一块龟甲片，曾本之一眼相中并伸手去拿\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"青铜重器\",\"kind\":\"object\",\"aliases\":[],\"note\":\"梦中大殿中满是青铜重器\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"野鸭\",\"kind\":\"other\",\"aliases\":[],\"note\":\"从曾本之面前游过的两只野鸭\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"鲤鱼\",\"kind\":\"other\",\"aliases\":[\"一条金色的鲤鱼\"],\"note\":\"从水底钻出、绕尾转圈的鲤鱼\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"曾本之坐在伸向湖心的细长半岛顶端，静观春雷后的湖面、野鸭、鲤鱼与春风，在舒适中入梦；他梦见自己从满是青铜重器的大殿深入到黄土掩埋的甲骨堆中，一眼看中最大的龟甲片，伸手去拿时一声沉雷落地，梦境化为东湖碧水。\",\"chronology\":\"单元开端\",\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":2,\"summary\":\"交代惯例：每隔一阵，每周不少于一次、不多于两次，载有甲骨文的梦就会造访睡意正浓的曾本之。\",\"chronology\":\"单元开端梦境之后\",\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":3,\"summary\":\"曾本之怔怔地将眼前景物看过几遍，醒后梦中的那一声沉雷没有留下任何痕迹。\",\"chronology\":\"梦醒之后\",\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":4,\"summary\":\"一个穿邮递员制服的男人出现在曾本之身后，先问“你是不是姓曾”，再问“你叫曾本之吗”，并表示有一封寄给曾本之的信。\",\"chronology\":\"醒来之后\",\"participants\":[\"曾本之\",\"邮递员\"],\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":5,\"summary\":\"曾本之从错愕中清醒，肯定地点头，并按邮递员的要求出示身份证。\",\"chronology\":\"确认身份时\",\"participants\":[\"曾本之\",\"邮递员\"],\"sourceRanges\":[{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":6,\"summary\":\"邮递员交信前讲述：自己在东亭邮局当了三十几年邮递员，这一带尽是文化单位，古怪信件本就多，但这一封比以往的都古怪；邮政局的人一致认为是恶作剧，他因好奇才决定试试投递。\",\"chronology\":\"交信之前\",\"participants\":[\"邮递员\"],\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":7,\"summary\":\"曾本之接过信件只看一眼便忍俊不禁，当面迫不及待地拆开信封，取出一张旧得发黄的信笺。\",\"chronology\":\"交信之后\",\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":8,\"summary\":\"看清内容后，曾本之马上想到，世界上最后一片安宁之地终于不再属于自己。\",\"chronology\":\"读信之后\",\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":9,\"summary\":\"信上突然出现的四个字让旁观的邮递员不知是画还是字；曾本之盯着四字发呆，并非不认识，而是一眼看出其字迹气韵与纸张气息实在太熟悉。\",\"chronology\":\"读信同时\",\"participants\":[\"曾本之\",\"邮递员\"],\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":10,\"summary\":\"曾本之没有乱方寸，告知并耐心向邮递员解释“这是甲骨文”。\",\"chronology\":\"读信之后\",\"participants\":[\"曾本之\",\"邮递员\"],\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":11,\"summary\":\"邮递员好奇信上甲骨文写的是什么、是否解开了世上某个不解之谜，曾本之拒绝满足其好奇，称邮政法的核心是确保公民通信自由，而这种自由的核心是确保公民隐私权。\",\"chronology\":\"解释之后\",\"participants\":[\"曾本之\",\"邮递员\"],\"sourceRanges\":[{\"blockId\":\"{{block:17}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":12,\"summary\":\"邮递员已离开好几步，仍忍不住嘟哝：“别拿甲骨文吓唬人，我看你也是睁眼瞎。”\",\"chronology\":\"邮递员离开时\",\"participants\":[\"邮递员\"],\"sourceRanges\":[{\"blockId\":\"{{block:17}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:18}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[{\"subject\":\"邮递员\",\"object\":\"东亭邮局\",\"relation\":\"在此任职三十几年邮递员\",\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"信件\",\"relation\":\"收信人（信中收信地址古怪，邮政局认为是恶作剧）\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"四个字\",\"relation\":\"辨认出其为甲骨文，且熟悉其字迹气韵与纸张气息\",\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"东湖\",\"relation\":\"身处其中，坐在伸向湖心的细长半岛顶端\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"甲骨文\",\"relation\":\"反复梦见载有甲骨文的梦境（每周一至两次）\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"邮递员\",\"object\":\"曾本之\",\"relation\":\"核验身份后递交信件，并追问信中内容（被拒绝）\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:17}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"settingClaims\":[{\"subject\":\"曾本之\",\"claim\":\"每隔一阵，每周不少于一次、不多于两次，他就会做载有甲骨文的梦\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"东亭邮局一带\",\"claim\":\"这一带尽是文化单位，文化人一多稀奇古怪的信件就多\",\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"寄给曾本之的信\",\"claim\":\"收信地址极为古怪，邮政局的人一致认为是恶作剧\",\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"信笺上的四个字\",\"claim\":\"是甲骨文；其字迹气韵与纸张气息令曾本之感到极其熟悉\",\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"湖面\",\"claim\":\"刚刚响过一声春雷，湖面因此呈现特有的静\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之的梦境\",\"claim\":\"梦境由满是青铜重器的大殿深入到被黄土掩埋的甲骨文中，并出现最大的龟甲片\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"conflicts\":[],\"unresolved\":[{\"description\":\"寄信人身份未揭示；曾本之推断写信人对自己各方面情况相当了解，但信中未见署名或来源说明。\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"信上四个甲骨文字的具体内容及其含义在本单元未说明，邮递员的追问也被曾本之拒绝回应。\",\"sourceRanges\":[{\"blockId\":\"{{block:17}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"曾本之为何认定“世界上最后一片安宁之地终于不再属于自己”，其具体缘由本单元未交代。\",\"sourceRanges\":[{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"曾本之与四字字迹“太熟悉”的对象是谁，本单元未指明。\",\"sourceRanges\":[{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"邮递员姓名及其追问的最终结果（是否另作打探）在本单元未给出。\",\"sourceRanges\":[{\"blockId\":\"{{block:18}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 2145,
+          "outputTokens": 6774
+        }
+      },
+      "capture": {
+        "subject": "unit",
+        "itemId": "S40/first-baseline/23",
+        "selectedItemId": "S40/first-baseline/23",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:30:32.472Z",
+        "providerRequestDigest": "e9301c6948c18f9f4249e17ae86188401a37d66636dbd6e4c8cd06bb36f16de0",
+        "providerResponseDigest": "0c3bfd2947d1fac0f3a3192e7720a1ce02a2e0f1bb19df95e40cc1ae25ac88ef",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "c0e631e7a8176058782d434fab9c2c55009e173e5f4b13c6bb82e8975dddc972",
+        "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/unit-3"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{block:1}}",
+            "identity": "blk_d08149550fac52c01f1d5bde"
+          },
+          {
+            "placeholder": "{{block:2}}",
+            "identity": "blk_37b75f0b1faee2edeae6b06a"
+          },
+          {
+            "placeholder": "{{block:3}}",
+            "identity": "blk_02c365dc5db3b7614ccc8758"
+          },
+          {
+            "placeholder": "{{block:4}}",
+            "identity": "blk_e4f249b281f0749ca98cd76a"
+          },
+          {
+            "placeholder": "{{block:5}}",
+            "identity": "blk_05086b5b7b60fe6a93e403db"
+          },
+          {
+            "placeholder": "{{block:6}}",
+            "identity": "blk_75717781f99cebbbc54a0782"
+          },
+          {
+            "placeholder": "{{block:7}}",
+            "identity": "blk_869fc71a905fb5d0bc001b71"
+          },
+          {
+            "placeholder": "{{block:8}}",
+            "identity": "blk_74372e43bf877f4640e5d0ba"
+          },
+          {
+            "placeholder": "{{block:9}}",
+            "identity": "blk_90ae9e79435650c3a9795325"
+          },
+          {
+            "placeholder": "{{block:10}}",
+            "identity": "blk_ae77284b5f6d1a853e3ecfe2"
+          },
+          {
+            "placeholder": "{{block:11}}",
+            "identity": "blk_542d4f72529e62cec9bb2ba6"
+          },
+          {
+            "placeholder": "{{block:12}}",
+            "identity": "blk_72c52f29ba2a02141b3aa15d"
+          },
+          {
+            "placeholder": "{{block:13}}",
+            "identity": "blk_3b7cc0d44df857eb3a096b4e"
+          },
+          {
+            "placeholder": "{{block:14}}",
+            "identity": "blk_53928ceaae6c2f4d70b4cc13"
+          },
+          {
+            "placeholder": "{{block:15}}",
+            "identity": "blk_da3577c2dbc5ed3d8d1462f8"
+          },
+          {
+            "placeholder": "{{block:16}}",
+            "identity": "blk_f441b4b68e9faeebc1d7721d"
+          },
+          {
+            "placeholder": "{{block:17}}",
+            "identity": "blk_48129e50812f0e2c227ba738"
+          },
+          {
+            "placeholder": "{{block:18}}",
+            "identity": "blk_205fb91ca637443dc255abd0"
+          }
+        ],
+        "fixtureResponseDigest": "97dd6b9ce7bfa50d079fe91e7a24c798e6ea260a61104ebef6751c3397b3f00c"
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "34568207a072202ef17ea4dbcf3ca28a7d5eaedb2913dbe215a1605cce22a7e3",
+      "contentDigest": "12743a413d0267626854136350c016a039416f2f096dca9decfd5c7d4f8956cc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":4,\"synopsis\":\"本单元由前节收尾与新的“贰”节构成。前半：曾本之独自琢磨那封突然出现的甲骨文书信，判断信中所指是某件中断之事要重新开始、或某种未说出的论述如今必须说出；信件竖写四个甲骨文“拯之承启！”，左下有“郝嘉”红印章，曾本之对此名的熟悉程度仅次于自己的名字。后半转入“贰”节：曾本之揣着信件在家等女婿郑雄，距下班半小时时一位老朋友来电令他改变主意；家中电话多由安静接听，她把话筒塞给曾本之并说“马先生找你”，来电者是楚学院同事马跃之。其间以补叙交代楚学院两句评语、马跃之与曾本之各自的研究方向与互不轻言对方领域的默契、两人因研究方向不同而形成的心结，以及马跃之与柳琴、曾本之与安静各自的婚姻。末尾三句为电话对白：两人以“丝绸般的声音”“满身铜臭”互谑，安静插话指出他们上周才见过面，马跃之当时还对着曾侯乙尊盘照片发呆。\",\"entities\":[{\"name\":\"曾本之\",\"kind\":\"person\",\"aliases\":[\"曾先生\"],\"note\":\"楚学院学者，研究甲骨文与青铜重器；四十岁时与安静结婚；被称“开口闭口都是重器”\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"郝嘉\",\"kind\":\"person\",\"aliases\":[],\"note\":\"甲骨文书信左下方红印章上的名字，曾本之对其熟悉程度仅次于自己的名字；具体身份本单元未说明\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"马跃之\",\"kind\":\"person\",\"aliases\":[\"马先生\"],\"note\":\"楚学院栋梁之材、同事，专攻漆器和丝绸；妻为柳琴\",\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"安静\",\"kind\":\"person\",\"aliases\":[],\"note\":\"曾本之之妻，水果湖一家银行的出纳员；家中电话多由她接\",\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"柳琴\",\"kind\":\"person\",\"aliases\":[],\"note\":\"马跃之之妻，被戏称水果湖“湖花”\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"郑雄\",\"kind\":\"person\",\"aliases\":[],\"note\":\"曾本之的女婿；曾本之原在家等他回来说话\",\"sourceRanges\":[{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚学院\",\"kind\":\"organization\",\"aliases\":[],\"note\":\"曾本之与马跃之供职的机构，院内流传两句评语“知之者之之也，不知者之之乎”\",\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"甲骨文书信\",\"kind\":\"object\",\"aliases\":[\"古怪的信件\",\"那封古怪的信件\"],\"note\":\"一张薄纸，竖写四个甲骨文字“拯之承启！”，左下有一方红色印章“郝嘉”\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"曾侯乙尊盘\",\"kind\":\"object\",\"aliases\":[\"曾侯乙尊盘照片\"],\"note\":\"马跃之上周曾在曾本之家对着其照片发呆\",\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"甲骨文\",\"kind\":\"term\",\"aliases\":[],\"note\":\"信件所用文字，也是曾本之的研究方向之一\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚学\",\"kind\":\"term\",\"aliases\":[],\"note\":\"楚学院的研究领域\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"漆器\",\"kind\":\"term\",\"aliases\":[],\"note\":\"马跃之专攻的方向之一\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"丝绸\",\"kind\":\"term\",\"aliases\":[],\"note\":\"马跃之专攻的方向之一，被曾本之戏说为“研究女人”\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"两周重器\",\"kind\":\"term\",\"aliases\":[],\"note\":\"马跃之必须提及“青铜重器”时的替代说法\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"青铜重器\",\"kind\":\"term\",\"aliases\":[\"重器\"],\"note\":\"曾本之研究的领域之一；马跃之对其从不轻言\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"水果湖\",\"kind\":\"place\",\"aliases\":[],\"note\":\"柳琴被称“湖花”的来处；安静在此一家银行做出纳员\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"曾本之没有接话，独自琢磨那封如晴空霹雳般来到眼前的甲骨文书信，判断信意为某件中途停止的事要重新开始，或某种想说而未说的论述如今必须说出，总之有事要大变样\",\"chronology\":null,\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":2,\"summary\":\"信上竖写四个甲骨文字，被辨读为“拯之承启！”，其言简意赅符合曾本之的职业习惯，也表明写信人与他有相同的职业素养\",\"chronology\":null,\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":3,\"summary\":\"信上四个文字左下方有一方红彤彤的印章“郝嘉”，曾本之认出这是人名，且过去二十多年里对此名的熟悉程度仅次于自己的名字\",\"chronology\":\"此前二十多年形成对这名字的熟悉\",\"participants\":[\"曾本之\",\"郝嘉\"],\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":4,\"summary\":\"曾本之揣着那封古怪的信件坐在家里，本是等女婿郑雄回来说话；离政府规定的下班时间还有半小时，一位老朋友打来的电话让他改了主意\",\"chronology\":\"距下班时间还有半小时\",\"participants\":[\"曾本之\",\"郑雄\"],\"sourceRanges\":[{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":5,\"summary\":\"电话铃响，安静从阳台跑回客厅，非常客气地说了几句后把话筒塞给曾本之，说“马先生找你”；本对电话麻木的曾本之听见楚学院同事马跃之的声音后情绪才振作一些\",\"chronology\":null,\"participants\":[\"安静\",\"曾本之\",\"马跃之\"],\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":6,\"summary\":\"曾本之与马跃之通电话，互相以“好久没听到马先生丝绸般的声音”“好久没有闻到曾先生满身的铜臭”调侃\",\"chronology\":null,\"participants\":[\"曾本之\",\"马跃之\"],\"sourceRanges\":[{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":7,\"summary\":\"一旁听着的安静冲着话筒反驳“什么好久”，指出上个星期马跃之还来家里对着曾侯乙尊盘照片发呆，柳琴还笑他是不是从那上面看出一个大美人来\",\"chronology\":\"上个星期（先于本单元当前通话）\",\"participants\":[\"安静\",\"马跃之\",\"柳琴\"],\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[{\"subject\":\"曾本之\",\"object\":\"郑雄\",\"relation\":\"岳父与女婿（郑雄为其女婿）\",\"sourceRanges\":[{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"安静\",\"relation\":\"夫妻（曾本之四十岁时安静答应嫁给他）\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之\",\"object\":\"曾本之\",\"relation\":\"楚学院同事，研究方向不同（漆器丝绸 对 甲骨文青铜重器），彼此不在对方领域轻言\",\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之\",\"object\":\"柳琴\",\"relation\":\"夫妻（马跃之第一次谈恋爱就与柳琴结婚）\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"柳琴\",\"object\":\"安静\",\"relation\":\"彼此相识，安静转述柳琴的话\",\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"郝嘉\",\"relation\":\"曾本之对郝嘉之名极为熟悉（二十多年过去仍仅次于自己的名字），具体关系未明\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"settingClaims\":[{\"subject\":\"甲骨文书信\",\"claim\":\"一张薄纸上竖写四个甲骨文字“拯之承启！”，左下方另有一方红色印章“郝嘉”\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"楚学院\",\"claim\":\"院中流传两句评语“知之者之之也，不知者之之乎”，前一句表示对曾本之和马跃之的尊崇，后一句形容楚学研究者各有所长、同时各有所短\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之\",\"claim\":\"专攻漆器和丝绸，是该方向上声名显赫的学术权威；对甲骨文和青铜重器从不轻言，必须说话时以“两周重器”代替“青铜重器”\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"claim\":\"凡与漆器、丝绸相关的问题，任何时候都不会乱说一个字\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"安静\",\"claim\":\"在水果湖一家银行做出纳员；曾本之四十岁前未相中任何女人，四十岁时与安静结婚\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"打电话的时机\",\"claim\":\"存在政府规定的下班时间，本单元场景距该下班时间还有半小时\",\"sourceRanges\":[{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"家中电话\",\"claim\":\"家里的电话铃响一般都是找安静\",\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之与写信习惯\",\"claim\":\"马跃之属于不爱打电话而喜欢写信的一类人，此次因着急才费力找出曾本之的电话号码\",\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"conflicts\":[{\"description\":\"曾本之与马跃之在电话中互称“好久没听到/没闻到”，暗示久未相见；安静却当场指出“什么好久”，说上个星期马跃之还来家中对着曾侯乙尊盘照片发呆，二人的说法与该事实相互抵触（文本借安静之口点出）。\",\"sourceRanges\":[{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"unresolved\":[{\"description\":\"“拯之承启！”四字中“拯之”指谁、整句的确切含义，以及信件想表达的具体“重新开始”之事，本单元未说明。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"郝嘉的身份、与曾本之的具体关系及“过去二十多年”的起算点，本单元只给出熟悉程度，未作交代。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"甲骨文书信由谁寄来、如何送达曾本之手中（“像晴空霹雳一样来到眼前”），本单元未提供经过。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"郑雄是曾本之的女婿，但曾本之的女儿（郑雄之妻）在本单元未出现也未提及其情况。\",\"sourceRanges\":[{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"楚学院及故事发生地的具体地点未在本单元明确，只出现“水果湖”这一地名。\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"曾本之当前的年龄未直接给出，仅知其四十岁前未成婚、四十岁与安静结婚。\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1946,
+          "outputTokens": 8170
+        }
+      },
+      "capture": {
+        "subject": "unit",
+        "itemId": "S40/first-baseline/24",
+        "selectedItemId": "S40/first-baseline/24",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:31:52.543Z",
+        "providerRequestDigest": "5e50ebf1b43644ff9cbf7ca919b61baf59bf78827cedfcc54f95be9245e3e5a1",
+        "providerResponseDigest": "c7a05eac7ae801f8a1385c3ecdf56ebc4f182bdd9186ccb7583d39765aa97050",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "06bdc9cd57f35c0a7fe22a4fd647ed3aa1f6c3d4316705b42d18b31791004c76",
+        "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/unit-4"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{block:1}}",
+            "identity": "blk_e00b4ab9a2abe9dff2802da5"
+          },
+          {
+            "placeholder": "{{block:2}}",
+            "identity": "blk_92d4f8074305f38db249cdec"
+          },
+          {
+            "placeholder": "{{block:3}}",
+            "identity": "blk_a11893baabae9dc0a0645344"
+          },
+          {
+            "placeholder": "{{block:4}}",
+            "identity": "blk_bf1bde904553459de2eb35b4"
+          },
+          {
+            "placeholder": "{{block:5}}",
+            "identity": "blk_04258225fe0ae3fe52febd71"
+          },
+          {
+            "placeholder": "{{block:6}}",
+            "identity": "blk_64409db7081e02555a461e34"
+          },
+          {
+            "placeholder": "{{block:7}}",
+            "identity": "blk_cf9bf262bb1521c52b46933b"
+          },
+          {
+            "placeholder": "{{block:11}}",
+            "identity": "blk_d587dbae42cce6b717c96289"
+          },
+          {
+            "placeholder": "{{block:12}}",
+            "identity": "blk_77f6dc990bd4605c8223b742"
+          },
+          {
+            "placeholder": "{{block:13}}",
+            "identity": "blk_c93e0e629d533d49c91e7583"
+          },
+          {
+            "placeholder": "{{block:14}}",
+            "identity": "blk_216b05c2282f8bbb1581a06e"
+          },
+          {
+            "placeholder": "{{block:15}}",
+            "identity": "blk_ab81f3624b50508e7676c2ab"
+          },
+          {
+            "placeholder": "{{block:16}}",
+            "identity": "blk_15e89353a0eb2138daab7a43"
+          }
+        ],
+        "fixtureResponseDigest": "3d7c40e00ccd842c365839bd512cd49a25d625dc837896c474efad6ed0d895f0"
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "c203d816b6f3a77f2909e7e2df3fd78fe40874ac47bc5d1d323db56db0d1a4b6",
+      "contentDigest": "48fb4b784e0dd65b543799e015af64f0abe448d8913011525d29bf328972394b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":5,\"synopsis\":\"本单元是曾本之与马跃之的一次电话通话及其间插叙。开场是延续前一单元的互相打趣：马跃之笑说彩色照片上的曾侯乙尊盘比黑白照片上皱纹多、打翻了两只醋坛子，安静抢话反唇相讥，曾本之与马跃之隔着电话对笑。随后插叙交代两人说话的渊源——马跃之当年结婚时曾本之做伴郎，一句“研究青铜重器就找个浑身铜臭的女人”的玩笑竟成真，曾本之当了半辈子光棍后娶了一个银行出纳。接着马跃之说出正事：宁波有个活动可以去两个人，邀请方想让他俩去，他要曾本之这次破例不要带郑雄，随后又转折说曾本之去他才去。曾本之把安静已替他答应、以及安静给出的理由一并转述，并点出安静一向要郑雄陪同、这次却破例要拉上马跃之这一反常。马跃之笑说想患老年痴呆、不想活得太明白。二人敲定宁波之行后，马跃之迟迟不挂电话，曾本之察觉他还有话，便直截了当地问，马跃之于是认真地反问：郑雄下午是不是参加了省里的一个会议。\",\"entities\":[{\"name\":\"马跃之\",\"kind\":\"person\",\"aliases\":[\"马先生\"],\"note\":\"研究丝绸；与曾本之关系很好的老友，在电话另一端；已娶妻\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"曾本之\",\"kind\":\"person\",\"aliases\":[],\"note\":\"研究青铜重器；安静之夫、郑雄之岳父；外出参加活动一向由郑雄作陪；曾收到一封用甲骨文写的信\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"安静\",\"kind\":\"person\",\"aliases\":[],\"note\":\"曾本之的妻子；在电话旁插话；已不等曾本之回来商量就替他答应了宁波之行\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"柳琴\",\"kind\":\"person\",\"aliases\":[],\"note\":\"被安静打趣“活到九十岁脸上肯定全是丝绸”；与马跃之的关系本单元未直接点明\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"郑雄\",\"kind\":\"person\",\"aliases\":[],\"note\":\"曾本之的女婿；曾本之这些年外出参加活动都由他作陪；本单元结尾被问及是否参加了省里的会议\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"马跃之的妻子\",\"kind\":\"person\",\"aliases\":[\"银行出纳\"],\"note\":\"文中未出现姓名；整天与钞票打交道的银行出纳，据叙述为马跃之的妻子\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"曾侯乙尊盘\",\"kind\":\"object\",\"aliases\":[],\"note\":\"青铜器，有彩色照片与黑白照片；通话中被拿来打趣\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"用甲骨文写的信\",\"kind\":\"object\",\"aliases\":[],\"note\":\"曾本之揣着它回家；其内容与来历本单元未说明\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚学院\",\"kind\":\"organization\",\"aliases\":[],\"note\":\"打电话通知曾本之宁波活动相关事宜\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"宁波\",\"kind\":\"place\",\"aliases\":[],\"note\":\"有一个可以去两个人的活动，邀请方想请马跃之与曾本之二人前往\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"水果湖\",\"kind\":\"place\",\"aliases\":[],\"note\":\"马跃之提到可站到其十字街头喊口号骂谁\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"通话中互相打趣：马跃之笑说彩色照片上的曾侯乙尊盘比黑白照片上皱纹多、打翻了两只醋坛子；安静抢过话筒反唇相讥，说柳琴活到九十岁脸上全是丝绸，并说两人在别人面前是老顽固、单独在一起就是一对老顽童；曾本之与马跃之隔着电话对笑\",\"chronology\":\"通话当下，承接上一单元\",\"participants\":[\"马跃之\",\"曾本之\",\"安静\",\"柳琴\"],\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":2,\"summary\":\"插叙旧事：当年马跃之结婚时，曾本之作伴郎，在婚礼上开玩笑说马跃之研究丝绸就找了个丝绸般美丽的妻子，自己研究青铜重器将来就找个浑身铜臭的女人做老婆；玩笑一语成谶，曾本之当了半辈子光棍，最后娶了一个整天与钞票打交道的银行出纳\",\"chronology\":\"过去（马跃之结婚之时，及此后半辈子）\",\"participants\":[\"曾本之\",\"马跃之\",\"马跃之的妻子\"],\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":3,\"summary\":\"马跃之说正事：他刚听说宁波有个活动可以去两个人，邀请方想让他俩去；他自然很想去，也希望路上能与对方聊天；他清楚曾本之这些年外出活动都由郑雄作陪，要曾本之破例一次不要带郑雄，算是给自己一个机会；随后又转折说，自己打电话来只是想确认——曾本之若去他就去，曾本之不去他也懒得去\",\"chronology\":\"通话当下\",\"participants\":[\"马跃之\",\"曾本之\",\"郑雄\"],\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":4,\"summary\":\"曾本之把宁波之行的经过连同安静的原话一并告诉马跃之：他揣着那封用甲骨文写的信回家时安静就说这事，也是楚学院打电话来通知的；安静不等他回来商量就替他答应了，理由是男人到这个年纪要多多外出走动、让外面的新鲜东西刺激神经，否则老年痴呆来得更快；曾本之还点出反常之处——安静一向只要女婿郑雄陪同他出差，这一次竟破例要他拉上马跃之\",\"chronology\":\"宁波活动通知之后、本次电话之前（转述）\",\"participants\":[\"曾本之\",\"安静\",\"马跃之\",\"郑雄\",\"楚学院\"],\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":5,\"summary\":\"马跃之笑着说自己现在太想患老年痴呆症，不想活得太明白，痴痴呆呆反而什么都可以说——较真的话、难听刺耳的话、装疯卖傻倚老卖老的话，哪怕站到水果湖的十字街头喊口号骂谁也不会有人计较\",\"chronology\":\"通话当下\",\"participants\":[\"马跃之\",\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":6,\"summary\":\"两人在电话里把去宁波的事敲定，但马跃之仍无挂断之意；曾本之觉得奇怪，认为拖泥带水并非马跃之的性格，便打住闲话直截了当地问他是否还有不方便说的话要对自己说\",\"chronology\":\"通话当下\",\"participants\":[\"曾本之\",\"马跃之\"],\"sourceRanges\":[{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":7,\"summary\":\"曾本之认真发问，马跃之也认真回答：问郑雄下午是不是参加了省里的一个会议\",\"chronology\":\"通话当下（本单元结尾）\",\"participants\":[\"马跃之\",\"曾本之\",\"郑雄\"],\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[{\"subject\":\"曾本之\",\"object\":\"马跃之\",\"relation\":\"老友，关系很好；马跃之说的再难听的话曾本之也不会计较，反过来也一样\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"马跃之\",\"relation\":\"当年马跃之结婚时曾本之做伴郎\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"安静\",\"relation\":\"夫妻；安静可替他做主张罗外出活动\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄\",\"object\":\"曾本之\",\"relation\":\"女婿与岳父；曾本之这些年外出参加活动都由郑雄作陪\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"安静\",\"object\":\"郑雄\",\"relation\":\"岳母与女婿；安静一向只要郑雄陪同曾本之出差\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之\",\"object\":\"马跃之的妻子\",\"relation\":\"夫妻；其妻是整天与钞票打交道的银行出纳\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之\",\"object\":\"柳琴\",\"relation\":\"关系密切（由安静“等柳琴活到九十岁”的调笑推知，疑为夫妻，本单元未直接点明）\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"settingClaims\":[{\"subject\":\"曾本之\",\"claim\":\"研究青铜重器\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之\",\"claim\":\"研究丝绸\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之与安静\",\"claim\":\"两人是夫妻\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄\",\"claim\":\"是曾本之的女婿；曾本之这些年外出参加活动都由郑雄作陪\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"安静\",\"claim\":\"一向只要女婿郑雄陪同曾本之出差，这次却破例要曾本之拉上马跃之\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"claim\":\"当了半辈子光棍，最后和一个整天与钞票打交道的银行出纳做了夫妻\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"宁波活动\",\"claim\":\"可以去两个人，邀请方想让他俩去；此事也由楚学院打电话通知\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之与马跃之\",\"claim\":\"难听的话只要是对方说的就不计较\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"claim\":\"曾揣着一封用甲骨文写的信回家\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾侯乙尊盘\",\"claim\":\"有彩色照片与黑白照片两种影像\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之与曾本之\",\"claim\":\"已通过电话敲定去宁波的事\",\"sourceRanges\":[{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"conflicts\":[],\"unresolved\":[{\"description\":\"“可以一路上与好好聊聊天”中的“好好”指谁（是否人名或笔误），本单元其它内容块未提供依据\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"马跃之在结尾询问“郑雄下午是不是参加了省里的一个会议”，其用意本单元未说明\",\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"郑雄究竟是否参加了省里的会议，本单元未给出答案\",\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"柳琴与马跃之的确切关系（疑为夫妻）本单元未直接点明\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"宁波活动的邀请方、活动内容与具体时间本单元未说明\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"安静这次破例要曾本之拉上马跃之的原因本单元未说明，只交代了她给出的让曾本之外出走动的理由\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"曾本之所揣那封用甲骨文写的信的内容与来历本单元未说明\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1777,
+          "outputTokens": 8519
+        }
+      },
+      "capture": {
+        "subject": "unit",
+        "itemId": "S40/first-baseline/25",
+        "selectedItemId": "S40/first-baseline/25",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:32:40.236Z",
+        "providerRequestDigest": "4cbc744d42effa6d57532a6db6f80641993b4b79005b769baf5dd4f091f6d11a",
+        "providerResponseDigest": "eb68968ef5fc8ca5ac69de326f267e3fb17eeff962bde198cdb913e9925dc644",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "8e6a50c76f2a5c41c8a7a8f48b2d744c0641aa5b4373bf981f56c9002ae48757",
+        "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/unit-5"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{block:1}}",
+            "identity": "blk_680154741bebaa841f851ebb"
+          },
+          {
+            "placeholder": "{{block:2}}",
+            "identity": "blk_473e05b066497422f31d01a9"
+          },
+          {
+            "placeholder": "{{block:3}}",
+            "identity": "blk_c7adaebacca0300072475384"
+          },
+          {
+            "placeholder": "{{block:4}}",
+            "identity": "blk_0303688dda1239929856cf73"
+          },
+          {
+            "placeholder": "{{block:5}}",
+            "identity": "blk_a8d8109a24b77283ad96a769"
+          },
+          {
+            "placeholder": "{{block:6}}",
+            "identity": "blk_f52ea95944c57cc151175dd8"
+          },
+          {
+            "placeholder": "{{block:7}}",
+            "identity": "blk_e0900ce2e492612bd095faf2"
+          },
+          {
+            "placeholder": "{{block:8}}",
+            "identity": "blk_84a445e3a5522fd50b23d968"
+          },
+          {
+            "placeholder": "{{block:9}}",
+            "identity": "blk_366cfa456969997bcbc8a5b7"
+          }
+        ],
+        "fixtureResponseDigest": "068ea3389d1351526ab8dc8943d98143cf415922cfa4431d3e7ace797f6a07ff"
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "9c47b01cced7e1d635887f62a200c2794366ab4b7d75ff2f441982448f224374",
+      "contentDigest": "81cda8000df69574b2084ed55f80191148b5a479aa2c9916d8c463f40555a804",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":6,\"synopsis\":\"本单元以曾本之与马跃之的对话为主体：马跃之转述郑雄在省长上任后首个会议上的发言（恭维新省长为“二十一世纪的楚庄王”）并加以批评，曾本之以楚庄王与溜须小吏作比表达不满，马跃之转而劝其不必苛责郑雄，最终曾本之暗下决定暂不向郑雄提及那封用甲骨文写的信，并约马跃之次日上午在楚学院见面。中间穿插对曾本之记忆特殊、郑雄翻检楚学新书并贬低马跃之专著、以及马跃之消息来源（妻子柳琴）等背景交代。\",\"entities\":[{\"name\":\"曾本之\",\"kind\":\"person\",\"aliases\":[],\"note\":\"对行政会议不感兴趣，楚学学者，郑雄的老师与岳父\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"郑雄\",\"kind\":\"person\",\"aliases\":[],\"note\":\"曾本之的得意门生与住家女婿，现任副厅长，在会上发言\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"马跃之\",\"kind\":\"person\",\"aliases\":[],\"note\":\"楚学学者，著有关于保护春秋墓葬出土丝绸的专著，与曾本之友情数十年\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"柳琴\",\"kind\":\"person\",\"aliases\":[],\"note\":\"马跃之的妻子，在水果湖一带有众多朋友和熟人，是消息来源\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"新上任的省长\",\"kind\":\"person\",\"aliases\":[\"省长\"],\"note\":\"未具名，被郑雄在会上比作楚庄王；主持其上任后第一个会\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"省委书记\",\"kind\":\"person\",\"aliases\":[],\"note\":\"未具名，被描述为管理并领导省长的人\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚庄王\",\"kind\":\"person\",\"aliases\":[],\"note\":\"春秋五霸之一，三年不鸣一鸣惊人、三年不飞一飞冲天；父为楚穆王\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚穆王\",\"kind\":\"person\",\"aliases\":[],\"note\":\"楚庄王之父，死得突然\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"省委书记（太上皇之喻）\",\"kind\":\"other\",\"aliases\":[\"太上皇\"],\"note\":\"马跃之评论中以“太上皇”作比的对象，楚国历史中并无此职\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚学院\",\"kind\":\"organization\",\"aliases\":[],\"note\":\"曾本之约马跃之次日上午见面的地点\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"水果湖\",\"kind\":\"place\",\"aliases\":[],\"note\":\"柳琴有众多朋友和熟人的一带\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"大别山\",\"kind\":\"place\",\"aliases\":[],\"note\":\"曾本之发感慨时提及“大别山前”\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"长江\",\"kind\":\"place\",\"aliases\":[],\"note\":\"与“大别山前”对举的“长江两岸”\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"武珞路\",\"kind\":\"place\",\"aliases\":[],\"note\":\"长约十公里，被曾本之用来形容溜须小吏之多\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"光谷大道\",\"kind\":\"place\",\"aliases\":[],\"note\":\"武珞路东端\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"汉阳大道\",\"kind\":\"place\",\"aliases\":[],\"note\":\"武珞路西端\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"越王勾践剑\",\"kind\":\"object\",\"aliases\":[],\"note\":\"国宝级文物，被用来比喻马跃之话语对曾本之的刺痛\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"用甲骨文写的那封信\",\"kind\":\"object\",\"aliases\":[\"甲骨文写的那封信\"],\"note\":\"已发生之事，曾本之决定暂不向郑雄提及，本单元未说明内容\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"马跃之的专著\",\"kind\":\"object\",\"aliases\":[\"马跃之的书\",\"如何保护春秋墓葬中出土丝绸的专著\"],\"note\":\"被郑雄贬为“炒剩饭”，曾本之评价其学术水平相当高\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚学\",\"kind\":\"term\",\"aliases\":[\"楚学研究\"],\"note\":\"曾本之、郑雄、马跃之所属的学术领域\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"副厅长\",\"kind\":\"term\",\"aliases\":[],\"note\":\"郑雄现任职务\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"郑雄在家提到下午的会是新省长上任后的第一个会，随后找出几本楚学研究新书翻阅，嫌其只会炒剩饭，其中包含马跃之关于保护春秋墓葬出土丝绸的专著；曾本之拿起该书提醒郑雄必须好好读，郑雄未表态读或不读，只说十本马跃之的书也比不上曾本之的一本书。\",\"chronology\":\"早于本单元主体对话（倒叙交代，发生于下午的会之前）\",\"participants\":[\"郑雄\",\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":2,\"summary\":\"马跃之转述：下午的会原本没安排郑雄发言，因时间宽裕才让他在最后时刻讲几分钟；郑雄一开口便恭维新上任的省长是“二十一世纪的楚庄王”。\",\"chronology\":\"当天下午，早于本单元对话\",\"participants\":[\"郑雄\",\"新上任的省长\"],\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":3,\"summary\":\"马跃之把郑雄的话原原本本讲给曾本之，并评论：省长不能与统辖数省的中原霸主楚庄王相比，如今综合实力排名每况愈下、要向二十名看齐；即便省长可称楚庄王，其上的省委书记又算什么，楚国历史上从无太上皇；楚庄王是因楚穆王死得突然才无奈接管权力，故郑雄乱用比喻有僭越和礼坏之嫌。\",\"chronology\":null,\"participants\":[\"马跃之\",\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":4,\"summary\":\"叙述交代马跃之修养深厚、说话顺畅透彻，甚至故意自贬，称若非妻子柳琴在水果湖一带朋友熟人多，半年后也未必听到这类消息；他认为既已听到就必须告知曾本之，否则对不起几十年友情；曾本之听来字字如越王勾践剑戳心。\",\"chronology\":null,\"participants\":[\"马跃之\",\"柳琴\",\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":5,\"summary\":\"曾本之因郑雄既是得意门生又是住家女婿，不便显得太生气又不能不表示生气，遂感叹楚庄王已不知去了哪里，溜须小吏车水马龙，十公里长的武珞路都容不下，怕要连起光谷大道与汉阳大道才够用。\",\"chronology\":null,\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":6,\"summary\":\"马跃之转而劝导，认为新官上任说几句祝贺的话并非没有道理，不必太责备郑雄，并提醒郑雄现在是副厅长，哪怕在家里也要给他留点面子。\",\"chronology\":null,\"participants\":[\"马跃之\",\"曾本之\",\"郑雄\"],\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":7,\"summary\":\"正是“留点面子”这句话让曾本之暗下决定，暂时不在郑雄面前提及用甲骨文写的那封信；但独自憋着难受，便约马跃之次日上午在楚学院见面。\",\"chronology\":\"承接对话，指向次日\",\"participants\":[\"曾本之\",\"马跃之\"],\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[{\"subject\":\"郑雄\",\"object\":\"曾本之\",\"relation\":\"得意门生，且为住家女婿\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之\",\"object\":\"曾本之\",\"relation\":\"数十年友情\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"柳琴\",\"object\":\"马跃之\",\"relation\":\"妻子\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄\",\"object\":\"新上任的省长\",\"relation\":\"在会上发言恭维对方为“二十一世纪的楚庄王”\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"省委书记\",\"object\":\"新上任的省长\",\"relation\":\"管理与领导关系\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"楚穆王\",\"object\":\"楚庄王\",\"relation\":\"父子，父死突然，楚庄王无奈接管楚国权力\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之\",\"object\":\"马跃之的专著\",\"relation\":\"作者，该书被郑雄贬为炒剩饭，被曾本之评为学术水平相当高\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"郑雄\",\"relation\":\"决定暂不向其提及那封用甲骨文写的信\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"settingClaims\":[{\"subject\":\"会议\",\"claim\":\"郑雄下午参加的会是新省长上任后的第一个会，郑雄原未安排发言，因时间宽裕才在最后时刻说了几分钟\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄\",\"claim\":\"现任副厅长\",\"sourceRanges\":[{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄\",\"claim\":\"是曾本之的得意门生，又是住家女婿\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"claim\":\"一向对行政上的会议不感兴趣，记不住报道与宣讲，此次偏偏记住今天下午的会\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之与马跃之\",\"claim\":\"两人有几十年的友情，且修养同样深厚\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之\",\"claim\":\"消息来源部分依靠妻子柳琴在水果湖一带的朋友和熟人\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"楚庄王\",\"claim\":\"春秋五霸之一，中原霸主，统辖范围有好几个省；三年不鸣一鸣惊人，三年不飞一飞冲天；少年登位，楚国历史中从无太上皇\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"当下形势\",\"claim\":\"综合实力排名每况愈下，要向二十名看齐（马跃之评论中的说法）\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"武珞路\",\"claim\":\"长约十公里，东端为光谷大道，西端为汉阳大道\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"越王勾践剑\",\"claim\":\"国宝级文物\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"楚学新书\",\"claim\":\"郑雄翻检后认为这些书只会炒剩饭，其中包含马跃之的专著；曾本之认为该专著学术水平相当高，不读会在楚学界掉队落伍\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"约定\",\"claim\":\"曾本之约马跃之明天上午在楚学院见面\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"conflicts\":[],\"unresolved\":[{\"description\":\"那封用甲骨文写的信是谁写的、内容为何、与郑雄有何关联，本单元均未说明，只提到曾本之决定暂不向郑雄提及。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"郑雄是否知道自己关于“二十一世纪的楚庄王”的发言传到曾本之耳中，以及曾本之的不满是否会传达给他，尚未确定。\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"曾本之约马跃之次日上午在楚学院见面要谈何事，结果如何，本单元未交代。\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"新省长与省委书记的具体身份、姓名未在本单元给出。\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1754,
+          "outputTokens": 5790
+        }
+      },
+      "capture": {
+        "subject": "unit",
+        "itemId": "S40/first-baseline/31",
+        "selectedItemId": "S40/first-baseline/31",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:33:32.109Z",
+        "providerRequestDigest": "7bd9a6e1df9e65589c09b4c4165d07dbed29729ca2b00cc0a35c4cf397ad1f09",
+        "providerResponseDigest": "856209fb7dea4da30cf8ade3702f1496906079d30baa1b9976e33cfa87ad2568",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "a0bec8030e4e021dbd9bb94613e5cbc846efe885c352db5932284f68d01376d1",
+        "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/unit-6"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{block:1}}",
+            "identity": "blk_c9318fa533277cabb58a50eb"
+          },
+          {
+            "placeholder": "{{block:2}}",
+            "identity": "blk_2f93b477b7009b770a56ad25"
+          },
+          {
+            "placeholder": "{{block:3}}",
+            "identity": "blk_8bedb983b1bf6da0b5dc3d24"
+          },
+          {
+            "placeholder": "{{block:4}}",
+            "identity": "blk_811712ebcf77ea779a72e848"
+          },
+          {
+            "placeholder": "{{block:5}}",
+            "identity": "blk_42f7254e026a40387d6ee12f"
+          },
+          {
+            "placeholder": "{{block:6}}",
+            "identity": "blk_38eb27f9859001bea17d2625"
+          },
+          {
+            "placeholder": "{{block:7}}",
+            "identity": "blk_4cfe3656d1cd23452fbd6fed"
+          }
+        ],
+        "fixtureResponseDigest": "d937a84bb1cfac033864c7be0e0472b6441aff1ccf9a8c2bc838c741b6032576"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "7696b4f3a299e3c6b98cecf7c36d0cb5386327094b4a3616933b580ba7173020",
+      "contentDigest": "ff158e0f8eec32fdf485f964e2c66d92fed84cbf57de527a97b67c515b9aad50",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":7,\"synopsis\":\"本单元为一次家庭场景的连续叙述：曾本之放下电话回到书房，对着墙上的曾侯乙尊盘黑白照片呆坐后用放大镜细看照片上的透空蟠虺纹饰附件；妻子安静因喊他开门无果而跑来夺下放大镜并抱怨；女儿曾小安带外孙楚楚进门，楚楚扑向曾本之，安静、曾本之与楚楚之间有一段关于“管什么就只管什么”的玩笑式对话；门铃再响，下班回家的郑雄入场，家中气氛微妙变化。随后转入曾本之与郑雄的对话：曾本之问郑雄开了几个会并劝其抓紧做研究，郑雄以楚学研究已被做透、弟子共识是反击谬论作答，曾本之则以九鼎七簋、天兽御尊两处疑点相质，郑雄以“占住副厅长这个位置”的重要性回应。整体由“书房—家人—师徒对话”三段推进，几乎全部为现场场景，仅照片拍摄时间、两件青铜器出土年份、郑雄职务等以对白或叙述方式带出。\",\"entities\":[{\"name\":\"曾本之\",\"kind\":\"person\",\"aliases\":[\"外公\"],\"note\":\"本单元中被外孙楚楚称“外公”，在书房端详曾侯乙尊盘照片并以放大镜察看纹饰附件，与郑雄为师承关系中的师长\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"安静\",\"kind\":\"person\",\"aliases\":[\"外婆\"],\"note\":\"在厨房喊曾本之并跑出来夺下放大镜，被楚楚称为“外婆”，与曾本之关系未在本单元明写\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"曾小安\",\"kind\":\"person\",\"aliases\":[],\"note\":\"曾本之的女儿，带儿子楚楚到来\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚楚\",\"kind\":\"person\",\"aliases\":[\"小东西\"],\"note\":\"曾小安的孩子、曾本之的外孙，进门即扑向曾本之，说出“管青铜的，就不要管丝绸，管甲骨文的，就不要管漆器”\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"郑雄\",\"kind\":\"person\",\"aliases\":[\"副厅长\"],\"note\":\"下班回家后到场，自称曾本之“门下弟子”，任副厅长，与曾本之就楚学与职位有一番对答\",\"sourceRanges\":[{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:17}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"书房\",\"kind\":\"place\",\"aliases\":[],\"note\":\"曾本之端详照片、放有曾侯乙尊盘照片的场所，门未关\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"厨房\",\"kind\":\"place\",\"aliases\":[],\"note\":\"安静所在并喊曾本之之处\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"曾侯乙尊盘\",\"kind\":\"object\",\"aliases\":[],\"note\":\"本单元出现的是其黑白照片，比实物大几倍，拍摄于一九七八年刚刚出土之时\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"九鼎七簋\",\"kind\":\"object\",\"aliases\":[],\"note\":\"一九六六年出土，曾本之以其簋数与礼制所要求的八簋不合相质\",\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"天兽御尊\",\"kind\":\"object\",\"aliases\":[],\"note\":\"一九六五年出土，曾本之称其孤孤单单埋在荒野之上\",\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"放大镜\",\"kind\":\"object\",\"aliases\":[],\"note\":\"曾本之从抽屉取出，用来细看照片纹饰，被安静夺下\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"透空蟠虺纹饰附件\",\"kind\":\"term\",\"aliases\":[\"蟠虺纹\"],\"note\":\"曾侯乙尊盘照片上比女人烫发还复杂的纹饰部分，为曾本之放大细看之处\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚学\",\"kind\":\"term\",\"aliases\":[],\"note\":\"郑雄口中“就那么多东西”的研究领域，及其所称需反击的“谬论”所在\",\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"青铜重器\",\"kind\":\"term\",\"aliases\":[],\"note\":\"曾本之被指“天天抱着”的研究对象，郑雄主张使其“成为当代重器”\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"甲骨文\",\"kind\":\"term\",\"aliases\":[],\"note\":\"在楚楚的玩笑话中作为与青铜器并列的另一门类出现\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"漆器\",\"kind\":\"term\",\"aliases\":[],\"note\":\"楚楚玩笑话中与甲骨文并列的门类\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"丝绸\",\"kind\":\"term\",\"aliases\":[],\"note\":\"楚楚玩笑话中与青铜并列的门类\",\"sourceRanges\":[{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"曾本之放下电话回到书房，对着墙上那幅曾侯乙尊盘黑白照片呆坐一阵，随后从抽屉取出放大镜，走到照片前仔细察看上面复杂的透空蟠虺纹饰附件\",\"chronology\":\"承接上一单元“放下电话”之后，同一时段\",\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":2,\"summary\":\"书房门未关，曾本之没有听见门铃声；安静在厨房喊了几声无回应，便跑过来一把夺下放大镜，抱怨他回家还用放大镜看照片\",\"chronology\":null,\"participants\":[\"安静\",\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":3,\"summary\":\"弄明白安静只是让他去开门时，女儿曾小安已带着外孙楚楚推门进来，楚楚一个前扑挂到曾本之脖子上\",\"chronology\":null,\"participants\":[\"曾本之\",\"安静\",\"曾小安\",\"楚楚\"],\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":4,\"summary\":\"安静转而对楚楚说只有他能把外公的魂从破铜烂铁上找回来；楚楚正要说话被曾本之捂嘴，仍呜呜说出“管青铜的，就不要管丝绸，管甲骨文的，就不要管漆器”，几个人笑个不停\",\"chronology\":null,\"participants\":[\"安静\",\"楚楚\",\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:7}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":5,\"summary\":\"笑声中门铃又响，下班回家的郑雄进门，家中气氛随即出现微妙变化\",\"chronology\":\"郑雄下班回家之时\",\"participants\":[\"郑雄\",\"曾本之\",\"安静\",\"曾小安\",\"楚楚\"],\"sourceRanges\":[{\"blockId\":\"{{block:9}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":6,\"summary\":\"郑雄还在门后换拖鞋，曾本之便问今天开了几个会；郑雄答只下午一个会，是一位先前的副省长超越常务副省长升级为省长后第一次公开露面，大家都去捧场\",\"chronology\":null,\"participants\":[\"曾本之\",\"郑雄\"],\"sourceRanges\":[{\"blockId\":\"{{block:12}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":7,\"summary\":\"曾本之斥这种会没什么好开的，劝郑雄不再年轻、应抓紧做自己的研究；郑雄不慌不忙回答楚学的东西已被曾本之研究透并著书立说，自己这一代弟子的共识是反击不信楚学真理的谬论、让青铜重器成为当代重器\",\"chronology\":null,\"participants\":[\"曾本之\",\"郑雄\"],\"sourceRanges\":[{\"blockId\":\"{{block:14}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":8,\"summary\":\"曾本之讽刺郑雄当副厅长只长于狡辩，并抛出两个疑点：一九六六年出土的九鼎七簋为何不是礼制所要求的八簋，一九六五年出土的天兽御尊为何孤孤单单埋在荒野；郑雄嘴角咧两下、眉梢扬两下，答称只有占住副厅长这个位置，才知有些研究是如何研究出来的、这个位置有多么重要\",\"chronology\":null,\"participants\":[\"曾本之\",\"郑雄\"],\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:17}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[{\"subject\":\"曾本之\",\"object\":\"曾小安\",\"relation\":\"父女（曾小安为曾本之的女儿）\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾小安\",\"object\":\"楚楚\",\"relation\":\"母子（楚楚为曾小安之子、曾本之的外孙）\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"楚楚\",\"relation\":\"外祖父与外孙（楚楚称曾本之为外公）\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"安静\",\"object\":\"楚楚\",\"relation\":\"外祖母与外孙（安静被称外婆）\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄\",\"object\":\"曾本之\",\"relation\":\"门下弟子与师长（郑雄自称“您门下的弟子”）\",\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄\",\"object\":\"副厅长\",\"relation\":\"担任副厅长职务\",\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:17}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之\",\"object\":\"曾侯乙尊盘\",\"relation\":\"以照片为个人生活唯一饰物并反复端详、放大细看\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"settingClaims\":[{\"subject\":\"曾侯乙尊盘照片\",\"claim\":\"墙上那幅精心装饰的曾侯乙尊盘黑白照片比实物大几倍，拍摄于一九七八年曾侯乙尊盘刚刚出土之时\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾侯乙尊盘照片\",\"claim\":\"是曾本之最喜欢的，也是他个人生活中的唯一饰物\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"九鼎七簋\",\"claim\":\"一九六六年出土，其簋数不合礼制所要求的八簋\",\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"天兽御尊\",\"claim\":\"一九六五年出土，孤孤单单地埋在荒野之上\",\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄\",\"claim\":\"已任副厅长数年，并以“占住这个位置”作为防患于未然的必要条件\",\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:17}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄及其门下弟子\",\"claim\":\"从郑雄开始，曾本之门下弟子已达成共识：这辈子最重要的研究是反击那些不相信楚学真理的谬论，让青铜重器成为当代重器\",\"sourceRanges\":[{\"blockId\":\"{{block:15}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"省长人事\",\"claim\":\"先前的副省长超越常务副省长升级为省长，并第一次公开露面\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"家庭称谓\",\"claim\":\"曾本之被楚楚称为外公，安静被称为外婆，家中另有女儿曾小安\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之的观物状态\",\"claim\":\"别人看到的是老男人对既往辉煌的留恋，看不到其胸膛深处涌动的心潮比龙王庙下长江与汉水交汇的暗流还汹涌\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"conflicts\":[],\"unresolved\":[{\"description\":\"安静与曾本之的具体关系（夫妻/配偶身份）在本单元未被明确写出，仅能由楚楚称曾本之为“外公”、安静被称“外婆”间接推知\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:6}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"郑雄所任“副厅长”所属的单位或系统，本单元未予交代\",\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"郑雄提到的“先前的副省长超越常务副省长升级为省长”所指人物的姓名及具体职务变动经过，本单元未交代\",\"sourceRanges\":[{\"blockId\":\"{{block:13}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"九鼎七簋、天兽御尊的出土地点与本单元所述疑点的答案，本单元只有提问，未给出解释\",\"sourceRanges\":[{\"blockId\":\"{{block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"曾本之取出放大镜细看照片纹饰附件的动机（“大约是内心有了别的想法”）在本单元未说明为何\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"“郑雄一进门，家里的气氛就有了微妙变化”的具体缘由，本单元未作解释\",\"sourceRanges\":[{\"blockId\":\"{{block:11}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1997,
+          "outputTokens": 8472
+        }
+      },
+      "capture": {
+        "subject": "unit",
+        "itemId": "S40/first-baseline/33",
+        "selectedItemId": "S40/first-baseline/33",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:34:04.207Z",
+        "providerRequestDigest": "be61bf0ccf2fc252887b40e4d46b9134128da228b5850b6f3c5441f2be9a1852",
+        "providerResponseDigest": "79ec01625b84c6bd9a331d4342e14b5e8fcc2569bc89680fecdfdfe60690b7e3",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "8703f6a446394b43920fd3f94f3e7ec505837ed1e3f4999dbede2826888c1d06",
+        "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/unit-7"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{block:1}}",
+            "identity": "blk_7788e1877309e8e23e9573ee"
+          },
+          {
+            "placeholder": "{{block:2}}",
+            "identity": "blk_ae0bf9761934237f9302aa28"
+          },
+          {
+            "placeholder": "{{block:3}}",
+            "identity": "blk_0f60f6d671875045ceea4986"
+          },
+          {
+            "placeholder": "{{block:4}}",
+            "identity": "blk_9e0b209c10e372fb59f5843f"
+          },
+          {
+            "placeholder": "{{block:5}}",
+            "identity": "blk_debef04ad0ae6b1695835209"
+          },
+          {
+            "placeholder": "{{block:6}}",
+            "identity": "blk_dbe4b66dd8cd9e3f13784c07"
+          },
+          {
+            "placeholder": "{{block:7}}",
+            "identity": "blk_8be4a8e5c11f4621ea9ef502"
+          },
+          {
+            "placeholder": "{{block:8}}",
+            "identity": "blk_d208dbbb1e5e70f10ca7aea4"
+          },
+          {
+            "placeholder": "{{block:9}}",
+            "identity": "blk_d561cf12f460b32128680c91"
+          },
+          {
+            "placeholder": "{{block:10}}",
+            "identity": "blk_af1487538d78a64bdbbd3235"
+          },
+          {
+            "placeholder": "{{block:11}}",
+            "identity": "blk_2b49f8f78016a09cdea86cf3"
+          },
+          {
+            "placeholder": "{{block:12}}",
+            "identity": "blk_96582a73785e59bb556b4222"
+          },
+          {
+            "placeholder": "{{block:13}}",
+            "identity": "blk_e5ad4c2741502bad9c0f5d83"
+          },
+          {
+            "placeholder": "{{block:14}}",
+            "identity": "blk_de8757aa072e0d826e0c26d5"
+          },
+          {
+            "placeholder": "{{block:15}}",
+            "identity": "blk_06677441bf1d85385d298797"
+          },
+          {
+            "placeholder": "{{block:16}}",
+            "identity": "blk_2425430b827136dc6d084329"
+          },
+          {
+            "placeholder": "{{block:17}}",
+            "identity": "blk_d94efff9627bbd45f0d69db5"
+          }
+        ],
+        "fixtureResponseDigest": "8e4248bdb79c3b87c0e88c4fd096a63a26599b158a0b9d2202c0384f926e243e"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "6d902e25b6bb9da2bc5ea309c9c6cf2b7eafb350294ece0e39a670afd53d4a31",
+      "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":8,\"synopsis\":\"本单元集中于某个夜晚曾家宅内的收束场景：曾本之在书房内以放大镜察看一片带甲骨文的龟甲，家人依次在门外问安（郑雄称其「先生」、安静与他拥抱道晚安），家中彻底安静后，曾本之才取出下午在东湖边收到的古怪来信，摊在写字台上细看良久。插叙交代郑雄八年来始终称岳父为「先生」及其学界权威背景，并提及马跃之与柳琴的闲话。\",\"entities\":[{\"name\":\"曾本之\",\"kind\":\"person\",\"aliases\":[\"曾先生\",\"外公\"],\"note\":\"学界人物；书房中独处，先看龟甲，最后取出并细看那封古怪来信；家中人进书房前须在门外叫几声。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"郑雄\",\"kind\":\"person\",\"aliases\":[],\"note\":\"曾小安的丈夫；在家中用手指敲两下门并道晚安；八年来始终称曾本之为「先生」。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"楚楚\",\"kind\":\"person\",\"aliases\":[],\"note\":\"年幼，称曾本之为「外公」；会在门外一遍遍叫外公，听到声音才推门进去。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"安静\",\"kind\":\"person\",\"aliases\":[],\"note\":\"在郑雄之后敲门；曾本之会起身，在书房中央与她拥抱、脸贴脸互道晚安。\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"曾小安\",\"kind\":\"person\",\"aliases\":[],\"note\":\"与郑雄结婚，为其妻子；文本由「与曾小安结婚起」提及。\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"马跃之\",\"kind\":\"person\",\"aliases\":[],\"note\":\"曾酸溜溜地说柳琴没给他生女儿，否则也要女婿称自己为先生。\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"柳琴\",\"kind\":\"person\",\"aliases\":[],\"note\":\"与马跃之相关；被说成没有给他生女儿。\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"曾侯乙尊盘照片\",\"kind\":\"object\",\"aliases\":[],\"note\":\"曾本之重新拿起放大镜后不再看的那张照片。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"龟甲\",\"kind\":\"object\",\"aliases\":[],\"note\":\"半个巴掌大小，上面有一串甲骨文；曾本之以放大镜盯看。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"放大镜\",\"kind\":\"object\",\"aliases\":[],\"note\":\"曾本之在书房中反复使用的观察工具；最后也用于细看那封来信。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"古怪的来信\",\"kind\":\"object\",\"aliases\":[\"信\"],\"note\":\"曾本之下午在东湖边收到；他几度想取出品一品又缩手，直到家中彻底安静才摊在写字台上用放大镜细看很久。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"书房\",\"kind\":\"place\",\"aliases\":[],\"note\":\"曾本之的书房；门关上后家人须在门外小声叫几次；他与安静在书房中央拥抱。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"写字台\",\"kind\":\"place\",\"aliases\":[],\"note\":\"曾本之将来信摊开细看之处。\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"东湖\",\"kind\":\"place\",\"aliases\":[],\"note\":\"曾本之下午在此处收到那封来信。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"甲骨文\",\"kind\":\"term\",\"aliases\":[],\"note\":\"龟甲上的一串文字。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"name\":\"先生\",\"kind\":\"term\",\"aliases\":[],\"note\":\"郑雄对岳父曾本之的固定称呼；文本称将岳父或丈夫称作先生的先例不少，这样称呼的人无一不是学界权威。\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"events\":[{\"ordinal\":1,\"summary\":\"曾本之盯着郑雄不再说话，待郑雄去了卫生间后转身回书房，重新拿起放大镜，改看一片带甲骨文的龟甲，并交代书房门关上后家人须在门外叫几次才能进来的习惯；他几次想取出下午在东湖边收到的信，最终又把伸进口袋的手原样退出。\",\"chronology\":\"当晚，安静下来之前；信中提及下午在东湖边收到\",\"participants\":[\"曾本之\",\"郑雄\",\"楚楚\"],\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":2,\"summary\":\"家中各种声音渐次消失，郑雄照多年习惯用手指在门上轻敲两下，小声说请曾先生早点休息、他们先睡了。\",\"chronology\":\"当晚，夜深\",\"participants\":[\"郑雄\",\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":3,\"summary\":\"插叙：自与曾小安结婚起八年，郑雄无论在家还是在外都称曾本之为先生、从未叫过爸爸，众人由觉得怪到习惯；马跃之曾酸溜溜地说柳琴没给他生女儿，否则也要女婿称自己为先生；曾本之对这类闲话一向不作反应。\",\"chronology\":\"过去八年，插叙\",\"participants\":[\"郑雄\",\"曾小安\",\"曾本之\",\"马跃之\",\"柳琴\"],\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":4,\"summary\":\"接下来安静在外面敲门，曾本之一定站起来走上几步，正好在书房中央与推门进来的安静轻轻拥抱，脸贴着脸互道晚安。\",\"chronology\":\"当晚，郑雄之后\",\"participants\":[\"安静\",\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"ordinal\":5,\"summary\":\"家里彻底安静后，曾本之才取出那封古怪的来信，摊在写字台上，用放大镜细细看了很久。\",\"chronology\":\"当晚，家人入睡之后\",\"participants\":[\"曾本之\"],\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[{\"subject\":\"郑雄\",\"object\":\"曾本之\",\"relation\":\"女婿与岳父；郑雄八年如一日称其为「先生」而不叫爸爸，并负责夜间敲门问安\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄\",\"object\":\"曾小安\",\"relation\":\"夫妻（由「与曾小安结婚起，一晃八年」推知）\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾小安\",\"object\":\"曾本之\",\"relation\":\"父女（曾小安之父为曾本之）\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"楚楚\",\"object\":\"曾本之\",\"relation\":\"称曾本之为「外公」，为孙辈\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"安静\",\"object\":\"曾本之\",\"relation\":\"家人关系；夜间敲门后与曾本之在书房中央拥抱、贴脸互道晚安\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之\",\"object\":\"柳琴\",\"relation\":\"夫妻（据「柳琴没有给他生个女儿」推知）\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"马跃之\",\"object\":\"曾本之\",\"relation\":\"对曾本之被女婿称「先生」一事说过酸话\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"settingClaims\":[{\"subject\":\"曾本之的书房\",\"claim\":\"只要书房门关起来，家里人想进来说话或看他是否需要添茶水，必须在门外小声叫上几次；连楚楚也不例外，要听到外公的声音才敢推门进来。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄的称呼习惯\",\"claim\":\"自与曾小安结婚起八年，郑雄无论在家里还是外面总称曾本之为「先生」，从未叫过爸爸。\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"「先生」这一称谓\",\"claim\":\"将岳父称作先生或将丈夫称作先生的先例不少，这样称呼的人无一不是学界权威。\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"郑雄的睡前习惯\",\"claim\":\"郑雄多少年如一日地用手指在门上轻轻敲两下，然后小声说请曾先生早点休息、他们先睡了。\",\"sourceRanges\":[{\"blockId\":\"{{block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"与安静的道晚安方式\",\"claim\":\"安静敲门时，曾本之一定要站起来走上几步，正好在书房中央与推门进来的安静轻轻拥抱一下，脸贴着脸互说晚安。\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"subject\":\"曾本之对闲话的态度\",\"claim\":\"无论配得上或配不上「先生」这样的雅称，曾本之一向不会对这类闲话做出反应。\",\"sourceRanges\":[{\"blockId\":\"{{block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"conflicts\":[],\"unresolved\":[{\"description\":\"安静与曾本之的具体亲属关系未在本单元说明（是否为其女儿或其他家人），仅知她敲门后与他拥抱道晚安。\",\"sourceRanges\":[{\"blockId\":\"{{block:4}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"楚楚与曾小安、郑雄的辈分关系未在本单元说明，仅知其称曾本之为外公。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"那封「古怪的来信」的寄信人、内容与古怪之处未在本单元交代。\",\"sourceRanges\":[{\"blockId\":\"{{block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"曾本之为何数次将手伸进口袋想取信又原样退出，其顾虑未在本单元说明。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"description\":\"那片带甲骨文的龟甲与曾侯乙尊盘照片对曾本之的意义未在本单元说明。\",\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"high\"}",
+        "usage": {
+          "inputTokens": 1366,
+          "outputTokens": 4603
+        }
+      },
+      "capture": {
+        "subject": "unit",
+        "itemId": "S40/first-baseline/35",
+        "selectedItemId": "S40/first-baseline/35",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:34:55.525Z",
+        "providerRequestDigest": "3c49aeefb0d81fcd1841fe8090477d95923a943883e4d718a6af3f1dd6c50539",
+        "providerResponseDigest": "b2fa3be9c6f1a87863e6394b861b6e5203c7dc890ce207937d70d7f11d03d7ce",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "497c58a2c2acd32bb832f379e7c79fc8b7bd545cce561d8d490f1692921e47ed",
+        "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/unit-8"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{block:1}}",
+            "identity": "blk_f3beda0009a195b7a052a4e0"
+          },
+          {
+            "placeholder": "{{block:2}}",
+            "identity": "blk_d1f79c7cbee47b80a65e02bc"
+          },
+          {
+            "placeholder": "{{block:3}}",
+            "identity": "blk_0fd6811c4b7e5dae8f792b38"
+          },
+          {
+            "placeholder": "{{block:4}}",
+            "identity": "blk_59ec8fe747f1a694e8ea4a6f"
+          },
+          {
+            "placeholder": "{{block:5}}",
+            "identity": "blk_2728bdfe25f64fd6cc409451"
+          }
+        ],
+        "fixtureResponseDigest": "015552f284a81c9ebd01a12103c9e6a36c2462686fa952fe61a8a723e93945c5"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "473a6060eb00969a1d78448454f5daaed37d6c09f747757d9510a2c582a936f9",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.cross-unit-result/1\",\"findings\":[{\"kind\":\"alias-identity-divergence\",\"description\":\"单元1的关系记录把「妻子安静」与郑雄连为夫妻；单元7、单元8则表明安静是曾本之之妻（被楚楚称外婆、与曾本之拥抱互道晚安），而郑雄之妻是曾本之的女儿曾小安（与曾小安结婚八年）。三种关系无法同时成立。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":7,\"sourceRanges\":[{\"blockId\":\"{{unit:7:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{unit:7:block:5}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":8,\"sourceRanges\":[{\"blockId\":\"{{unit:8:block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"medium\"},{\"kind\":\"alias-identity-divergence\",\"description\":\"「银行出纳」的归属分歧：单元4明确安静在水果湖一家银行做出纳员，单元5叙述曾本之最终娶的银行出纳；但单元5同时把「银行出纳」列为马跃之妻子的别名，而单元4与单元6均以柳琴为马跃之的妻子。\",\"sides\":[{\"unitOrdinal\":4,\"sourceRanges\":[{\"blockId\":\"{{unit:4:block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":5,\"sourceRanges\":[{\"blockId\":\"{{unit:5:block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":6,\"sourceRanges\":[{\"blockId\":\"{{unit:6:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"low\"},{\"kind\":\"chronology-conflict\",\"description\":\"同一场会（单元6称「新省长上任后的第一个会」，单元7称先前副省长升级为省长后第一次公开露面）在家庭的提及时序不一致：单元6标注郑雄在家提到该会发生在会前，单元7则是郑雄下班回家（会后）才回答当天只开一个会。\",\"sides\":[{\"unitOrdinal\":6,\"sourceRanges\":[{\"blockId\":\"{{unit:6:block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":7,\"sourceRanges\":[{\"blockId\":\"{{unit:7:block:3}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{unit:7:block:16}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"low\"}],\"notes\":[\"单元1关系分歧可能与该单元「妻子安静很相信郑雄的这一套」一句的断句歧义有关：安静疑指曾本之的妻子，而非郑雄的妻子。\",\"单元5未直接点明柳琴与马跃之的夫妻关系（仅由调笑推知），单元4、单元6明确为夫妻；属信息缺失，不构成矛盾。\",\"单元1的「老省长」与单元6、单元7的「新上任的省长（先前副省长升级为省长）」在已归纳内容中未标明是否同一人，无法判定二者关系。\",\"单元2称「用甲骨文写信的人」死于一九八○年代最后的夏天；单元4称印章「郝嘉」一名为曾本之熟悉二十余年，两处均未说明是否为同一人。\",\"单元4把「曾侯乙尊盘照片」列为「曾侯乙尊盘」的别名，单元8则把「曾侯乙尊盘照片」列为独立对象；两支所指均为墙上照片，未见实质分歧。\"]}",
+        "usage": {
+          "inputTokens": 20396,
+          "outputTokens": 18054
+        }
+      },
+      "capture": {
+        "subject": "reduction",
+        "itemId": "S40/first-baseline/36",
+        "selectedItemId": "S40/first-baseline/36",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:35:21.318Z",
+        "providerRequestDigest": "d32032c88e21931a94eaf191dede061386766c85e33c65e51540ad472e68b50c",
+        "providerResponseDigest": "1400b138a486becbc8a2f6d07b19325a3a67e4c9b8c25c442092863855334f72",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "de12246c82b67c0bac54645a21cbae6d532c3cc257b00d658f5ffe7284618915",
+        "generation": "7e7b3d5e801ff99a5d6824ea795fe916d8db09f25df8b50350627ee14d72e400",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/reduction"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{unit:1:block:8}}",
+            "identity": "blk_693c2b8a0b5df936f9c200d5"
+          },
+          {
+            "placeholder": "{{unit:4:block:3}}",
+            "identity": "blk_c93e0e629d533d49c91e7583"
+          },
+          {
+            "placeholder": "{{unit:5:block:3}}",
+            "identity": "blk_0303688dda1239929856cf73"
+          },
+          {
+            "placeholder": "{{unit:6:block:1}}",
+            "identity": "blk_c9318fa533277cabb58a50eb"
+          },
+          {
+            "placeholder": "{{unit:6:block:2}}",
+            "identity": "blk_811712ebcf77ea779a72e848"
+          },
+          {
+            "placeholder": "{{unit:7:block:2}}",
+            "identity": "blk_9e0b209c10e372fb59f5843f"
+          },
+          {
+            "placeholder": "{{unit:7:block:3}}",
+            "identity": "blk_96582a73785e59bb556b4222"
+          },
+          {
+            "placeholder": "{{unit:7:block:5}}",
+            "identity": "blk_debef04ad0ae6b1695835209"
+          },
+          {
+            "placeholder": "{{unit:7:block:16}}",
+            "identity": "blk_e5ad4c2741502bad9c0f5d83"
+          },
+          {
+            "placeholder": "{{unit:8:block:3}}",
+            "identity": "blk_0fd6811c4b7e5dae8f792b38"
+          }
+        ],
+        "fixtureResponseDigest": "7f8824cce6bfcfaabaafcfeedbbb4db64e6bd2c61c419d2a2f6885e443bee9e1"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "f8d6165bd682a15d18b8cdf5c8467a74c5050bf5e3b186bc82c3cd23ef67681b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"需降级\",\"reason\":\"本单元仅见「妻子安静很相信郑雄的这一套，曾本之拗不过安静」，并未明言安静与郑雄是夫妻；紧接的「曾本之拗不过安静」反而更近于指示安静为曾本之之妻。该发现所指三重关系冲突须依托单元7、8内容，而这两单元的内容块未在本消息给出，无法核对。故本单元至多支持「安静配偶归属表述不明、易被误连到郑雄」这一较弱说法，而非三种关系确凿冲突。\",\"sourceRanges\":[{\"blockId\":\"{{sample-block:10}}\",\"fromGrapheme\":null,\"toGrapheme\":null},{\"blockId\":\"{{sample-block:8}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}]}",
+        "usage": {
+          "inputTokens": 2255,
+          "outputTokens": 3077
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/first-baseline/39",
+        "selectedItemId": "S40/first-baseline/39",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:37:33.779Z",
+        "providerRequestDigest": "d2ad58c1dd0f0323cd96cef580693c252b009cc27b0c0b97ddb2ee1d9efed7f1",
+        "providerResponseDigest": "3ae0f89bd090485d2dd21de3ad41184fd5f1147c846d46baeca8c8a46b072cbe",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "b6cbf7a000b52bc60167236532dc504857fcd58f667680361d0c554ae17df76a",
+        "generation": "a76fbcb24b49e99fd8714a8bdd9d2289efc2a44c71d834188b3c21d460c2b14b",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/sampling-1-unit-1"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "0"
+          },
+          {
+            "placeholder": "{{sample-block:8}}",
+            "identity": "blk_dff1f760fc805870f94181bb"
+          },
+          {
+            "placeholder": "{{sample-block:10}}",
+            "identity": "blk_693c2b8a0b5df936f9c200d5"
+          }
+        ],
+        "fixtureResponseDigest": "92d46086a006d7b67b96bf1eb6eb255f6d30fe45ad9625b3644d2355fb3ddceb"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "3937382d04c72fbfa56626632f2b45556eaec138bd8bef9e2790661d88620029",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"应删除\",\"reason\":\"本单元内容块只显示安静是水果湖一家银行出纳员、柳琴是马跃之的妻子，并未出现「银行出纳」被列为马跃之妻子别名的记载；发现所指的别名归属分歧依赖本消息未列出的单元5，本单元内容块不支持该发现。\"}]}",
+        "usage": {
+          "inputTokens": 2320,
+          "outputTokens": 763
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/first-baseline/40",
+        "selectedItemId": "S40/first-baseline/40",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:37:52.921Z",
+        "providerRequestDigest": "cdfb8c4e24232c593f763ce1c3280aa6515cdca90865b4a170d0e30dc6ab8c5b",
+        "providerResponseDigest": "5919252bff05f94a43f09400c92b6df581d03af1243a667999615ead4647fc94",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "3457bb1922582413e4a9a8c1d4f8eb8875402f447484739554a17a1494e49c0d",
+        "generation": "a76fbcb24b49e99fd8714a8bdd9d2289efc2a44c71d834188b3c21d460c2b14b",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/sampling-2-unit-4"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "1"
+          }
+        ],
+        "fixtureResponseDigest": "c76d2efadeeb702e9b8945264d8936152da6c051a329b822a6fff308dad03e1b"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "d1687849d78f4438e3e6861f1d0a2564146ab46afd1b4dd25e483f4a65051b7c",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"应删除\",\"reason\":\"本单元内容块只说郑雄在家说过该会是新省长上任后的第一个会，未标明此提及在会前还是会后，也未出现其下班回家回答当天只开一个会的内容；所依赖的两单元时序对比在本单元无依据。\"}]}",
+        "usage": {
+          "inputTokens": 2132,
+          "outputTokens": 1083
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/first-baseline/41",
+        "selectedItemId": "S40/first-baseline/41",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:37:58.808Z",
+        "providerRequestDigest": "55f4ae28bb18137adc62050fe61b057f88a6b63fef25a8f1035803a1abdc6259",
+        "providerResponseDigest": "9ff99402cb992500cbb51647cc8326df9f4ed8a4785032194a0974719aa9a845",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "3478200d47efffd6a924d366de8d41a8b8fe8b7adc70343276ee28b8d509ad62",
+        "generation": "a76fbcb24b49e99fd8714a8bdd9d2289efc2a44c71d834188b3c21d460c2b14b",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/sampling-3-unit-6"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "2"
+          }
+        ],
+        "fixtureResponseDigest": "cc0a1b05c4b3d9557af536b5812d34946cc749b99511cfe537013421c1d9d90e"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "815ded972e0e93c451a88dfb8a50bd895141434238603cfc1651739110a774fc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"把 assurance-sampling 的抽样规模提高，低档候选不要只抽 2 条，至少覆盖全部 3 条候选或按类别分层抽样。\",\"basis\":\"assurance.candidateCount=3、sampled=2、tier=low、precision estimate=0，且 state=closed-with-gaps。\"},{\"suggestion\":\"对声明为冲突类的发现（conflict:setting-claim-divergence 等）在下一次运行中默认降低信任，先做一轮定向复核再计入结论。\",\"basis\":\"findingCounts 中 conflict:setting-claim-divergence 达 7 条，为单类最多，而 assurance upheld=0。\"},{\"suggestion\":\"把别名/身份类发现（alias-identity-divergence、alias-collision）单列一类并安排交叉单元重读，避免仅靠归约阶段判定。\",\"basis\":\"findingCounts 中 alias-identity-divergence 2 条、conflict:alias-collision 1 条。\"},{\"suggestion\":\"下一次运行保持 units 阶段预算不变，因为 8 个单元全部提交、0 缺口、0 重试、0 复用。\",\"basis\":\"units.submitted=8、gaps=0、retried=0、reused=0、recomputed=8，stages.units=closed。\"},{\"suggestion\":\"为 assurance-sampling 预留更多输出预算，避免因预算受限提前结束而留下缺口。\",\"basis\":\"assurance-sampling 阶段 inputTokens=6707、outputTokens=4923、requests=3，结果仍为 closed-with-gaps 且 failureCodes 含 closed-with-gaps 1 次。\"},{\"suggestion\":\"减少 cross-unit-reduction 的输出膨胀，下一次改为分批归约或多轮小请求以降低单次输出压力。\",\"basis\":\"cross-unit-reduction 用 requests=1 完成，outputTokens=18054，接近 units 阶段 53749/8 的单次量级且远超 assurance 阶段输出。\"},{\"suggestion\":\"把 chronology-conflict 与 entity-kind-divergence 这两类各仅 1 条的发现标记为低样本类别，下一次运行需额外取证或明确标注不确定性。\",\"basis\":\"findingCounts 中 cross-unit-finding:chronology-conflict=1、conflict:entity-kind-divergence=1。\"},{\"suggestion\":\"下一次运行在归约后增加一次抽样复核，重点覆盖 upheld=0 的全部候选，而不是仅按低档抽样 2 条。\",\"basis\":\"assurance.state=closed-with-gaps、upheld=0、sampled=2、candidateCount=3。\"},{\"suggestion\":\"保持 adaptationCount 为 0 的前提下，把计划内调整名额用于抽样阶段而非单元阶段。\",\"basis\":\"adaptationCount=0，且唯一失败代码 closed-with-gaps 出现在 assurance-sampling 阶段。\"}]}",
+        "usage": {
+          "inputTokens": 1338,
+          "outputTokens": 636
+        }
+      },
+      "capture": {
+        "subject": "reflection",
+        "itemId": "S40/first-baseline/43",
+        "selectedItemId": "S40/first-baseline/43",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676",
+        "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+        "capturedAt": "2026-10-15T11:38:06.654Z",
+        "providerRequestDigest": "047996dd89ceb547c53de12a408c2e5626452a937869a6cc8575cc99f8988941",
+        "providerResponseDigest": "879e5a524aa6b18585fbc48c7f4e38bbce8d933bd84e3d6e480c3cfae450722c",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "8d21a5dfab437bd87decbcdbb74ab087293ea1263d91df6d41cc830a4b12e386",
+        "generation": "ad0eef422ec8522301cc6b2e166dacfc8ef697b430d2cc97db2a5b9eb951a9b9",
+        "validation": {
+          "family": "model-clarification",
+          "case": "sample1-instruction2",
+          "step": "first-baseline/reflection"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "61cfdf4788dd18497817b7ac2f311429edd75a2fb4b0b566095776da5416f690"
+      }
+    }
+  ]
+}

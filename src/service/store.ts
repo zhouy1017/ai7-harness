@@ -486,6 +486,7 @@ import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
 import { RecentCache } from './recent-cache.js';
 import {
   baselineAnalysisPlan,
+  baselineClarifications,
   initialEvaluationPlan,
   evaluationMaterialPlan,
   analysisTaskStateLabel,
@@ -618,6 +619,7 @@ import {
   type BackgroundAnalysisEnrollmentRecord,
 } from './background-analysis-enrollments.js';
 import { initializeClarificationSchema } from './analysis/clarifications.js';
+import { clarificationPlanBaseDigest } from './provider/clarification-contract.js';
 import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import { initializeProductionDocumentDeliverySchema, initializeProductionDocumentSchema } from './production-document-ledger.js';
 import {
@@ -981,6 +983,7 @@ import {
   EVALUATION_PROFILE_SCHEMA_VERSION,
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
+  MODEL_CLARIFICATION_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -1596,6 +1599,14 @@ function unconfirmedSurfaceOf(kind: string): TaskPlanKind | null {
   if (kind === EVALUATION_REWRITE_KIND) return 'evaluation-rewrite';
   if (kind === WRITING_KIND) return 'writing';
   return null;
+}
+
+/** Material readers rebuild the exact inner contract before the optional clarification instruction is restored. */
+function unwrappedPlanPromptDigest(execution: Record<string, unknown>, envelope: Record<string, unknown>): string {
+  const base = clarificationPlanBaseDigest(execution, envelope);
+  requireStore(base !== null,
+  'ANALYSIS_RECORD_INVALID', '任务澄清指令的基础契约与计划不一致。');
+  return base;
 }
 
 /** What 保留为缺口 names: the digest of exactly the outcomes listed, in key order (Issue #757). */
@@ -2263,7 +2274,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2327,7 +2338,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2705,7 +2716,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2758,7 +2769,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2903,7 +2914,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2955,7 +2966,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3432,7 +3443,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3484,7 +3495,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -5189,7 +5200,7 @@ export class EditorialStore {
           materials = { bookId: latestForBook, references: this.#analysisCall(() => taskMaterialSources(pins)) };
           const envelope = components.get('plan-envelope');
           requireStore(envelope !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录不完整。');
-          frozenPromptDigest = asString(envelope.promptContractDigest as SqlRow[string]);
+          frozenPromptDigest = unwrappedPlanPromptDigest(components.get('execution-plan')!, envelope);
         }
       }
     }
@@ -5442,6 +5453,19 @@ export class EditorialStore {
     carriesStoppedRun: (runRecordId: string) => boolean = () => true,
   ): { plan: TaskPlanProjection; routeKind: string | null; provider?: NonNullable<BaselineAnalysisProjection['providerResolutionPlan']> } {
     const found = this.#taskPlanOfKind(input, progress, carriesStoppedRun);
+    if (input.kind !== 'baseline-analysis' && input.kind !== 'fixed-task') {
+      const tasks = input.kind === 'review-run'
+        ? this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, found.plan.ref)).categories.flatMap((category) => category.task === null ? [] : [category.task.taskIntentId])
+        : [found.plan.ref];
+      const cards = tasks.filter((taskIntentId) => this.#authority.prepare(`SELECT 1 FROM analysis_clarification_requests q
+        JOIN analysis_run_records r ON r.run_record_id = q.run_record_id WHERE r.task_intent_id = ? AND q.model_question_json IS NOT NULL LIMIT 1`)
+        .get(taskIntentId) !== undefined).flatMap((taskIntentId) => {
+        const ledger = this.clarificationLedger(input.bookId, taskIntentId);
+        const projection = this.#analysisCall(() => ledger.inspect(input.bookId, progress));
+        return baselineClarifications({ run: projection.run }, projection.run === null ? [] : ledger.clarificationsOf(projection.run.runRecordId));
+      });
+      found.plan = { ...found.plan, clarifications: cards };
+    }
     // 结果待确认 a completed Run of this kind left on the Book (Issue #757): listed on whichever of its plans is open.
     if (input.kind === 'fixed-task') return found;
     let plan = found.plan;
@@ -5869,8 +5893,57 @@ export class EditorialStore {
     runState: BaselineAnalysisRunState;
   } {
     this.#assertAvailable();
-    const answered = this.#analysisCall(() => this.#baselineAnalysis.recordClarificationAnswer(input.bookId, input));
+    const ledger = this.clarificationLedger(input.bookId, input.taskIntentId);
+    const answered = this.#analysisCall(() => ledger.recordClarificationAnswer(input.bookId, input));
     return { runRecordId: answered.runRecordId, runState: answered.runState };
+  }
+
+  /** Resolve the existing Run ledger from its Task, never from a client-selected model or kind. */
+  clarificationLedger(bookId: string, taskIntentId: string): BaselineAnalysisStore {
+    this.#assertAvailable();
+    const row = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE book_id = ? AND task_intent_id = ?').get(bookId, taskIntentId) as SqlRow | undefined;
+    requireStore(row !== undefined, 'ANALYSIS_CLARIFICATION_STALE', '这个问题不是这本书当前任务提的。');
+    const kind = asString(row.kind);
+    if (kind === BASELINE_ANALYSIS_KIND) return this.#baselineAnalysis;
+    if (kind === FACTUAL_REVIEW_KIND) return this.#factualReview;
+    if (isReviewCategoryKindId(kind)) {
+      const entry = reviewCategoryEntry(kind.slice(kind.indexOf('/') + 1));
+      requireStore(entry !== null, 'ANALYSIS_CLARIFICATION_STALE', '这个审阅类别已经变化。');
+      return this.#reviewLedgerOf(entry, undefined, undefined, bookId);
+    }
+    const surface = unconfirmedSurfaceOf(kind);
+    requireStore(surface === 'initial-evaluation' || surface === 'readers-report' || surface === 'evaluation-rewrite' || surface === 'writing',
+      'ANALYSIS_CLARIFICATION_STALE', '这个任务种类不能回答模型问题。');
+    return this.#currentLedgerOf(surface, bookId, taskIntentId);
+  }
+
+  /** Waiting model questions survive restart; this read supplies the existing service timer, not a new scheduler. */
+  modelClarificationRuns(): Array<{ bookId: string; taskIntentId: string; runRecordId: string; ledger: BaselineAnalysisStore }> {
+    const rows = this.#authority.prepare(`SELECT DISTINCT i.book_id, i.task_intent_id, q.run_record_id
+      FROM analysis_clarification_requests q JOIN analysis_task_intents i ON i.task_intent_id =
+        (SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = q.run_record_id)
+      WHERE q.model_question_json IS NOT NULL AND
+        (SELECT state FROM analysis_run_states s WHERE s.run_record_id = q.run_record_id ORDER BY sequence DESC LIMIT 1) = 'awaiting-clarification'`).all() as SqlRow[];
+    // A Run whose ledger no longer resolves is left to its own surface; the others still time out and continue.
+    return rows.flatMap((row) => {
+      try {
+        return [{ bookId: asString(row.book_id), taskIntentId: asString(row.task_intent_id), runRecordId: asString(row.run_record_id),
+          ledger: this.clarificationLedger(asString(row.book_id), asString(row.task_intent_id)) }];
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+        return [];
+      }
+    });
+  }
+
+  clarificationPlanTarget(bookId: string, taskIntentId: string): InspectTaskPlanInput {
+    const ledger = this.clarificationLedger(bookId, taskIntentId);
+    const kind = unconfirmedSurfaceOf(ledger.kind)!;
+    if (kind !== 'review-run') return { bookId, kind, ref: taskIntentId };
+    const row = this.#authority.prepare(`SELECT rr.review_run_id FROM review_runs rr
+      JOIN json_each(rr.canonical_json, '$.categories') c ON json_extract(c.value, '$.task.taskIntentId') = ? WHERE rr.book_id = ?`).get(taskIntentId, bookId) as SqlRow | undefined;
+    requireStore(row !== undefined, 'ANALYSIS_CLARIFICATION_STALE', '这个审阅任务已经变化。');
+    return { bookId, kind, ref: asString(row.review_run_id) };
   }
 
   /**
@@ -6232,6 +6305,31 @@ export class EditorialStore {
           readings.push({ kind, bookId: control.bookId, bookTitle: control.bookTitle, taskIntentId: control.taskIntentId,
             runRecordId: run.runRecordId, state: run.state, stateAt: run.stateAt, control });
         }
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+      }
+    }
+    const questions = this.#authority.prepare(`SELECT DISTINCT q.run_record_id, q.raised_at, i.book_id, i.task_intent_id, i.kind, b.title
+      FROM analysis_clarification_requests q JOIN analysis_run_records r ON r.run_record_id = q.run_record_id
+      JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id JOIN books b ON b.book_id = i.book_id
+      LEFT JOIN analysis_clarification_answers a ON a.request_id = q.request_id
+      WHERE q.model_question_json IS NOT NULL AND a.answer_id IS NULL AND i.kind <> ? AND (? IS NULL OR i.book_id = ?)
+      AND (SELECT state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY sequence DESC LIMIT 1)
+        IN ('admitted','executing','pausing','paused','resumable','awaiting-clarification') LIMIT ?`).all(BASELINE_ANALYSIS_KIND, bookId, bookId, limit) as SqlRow[];
+    // A Task the control readings above already carry shows its open question there, as the baseline's does (#870).
+    const seen = new Set<string>(readings.map((reading) => reading.taskIntentId));
+    for (const row of questions) {
+      const taskIntentId = asString(row.task_intent_id);
+      if (seen.has(taskIntentId)) continue;
+      seen.add(taskIntentId);
+      // As above: a Task whose records no longer read is said on its own surface, never by taking 待我处理 down with it.
+      try {
+        const target = this.clarificationPlanTarget(asString(row.book_id), taskIntentId);
+        if (target.kind === 'fixed-task' || target.kind === 'baseline-analysis') continue;
+        const reviewOrdinal = target.kind === 'review-run' ? this.#reviewCall(() => this.#reviewRuns.planFacts(asString(row.book_id), target.ref!)).ordinal : null;
+        readings.push({ kind: target.kind, bookId: asString(row.book_id), bookTitle: asString(row.title), taskIntentId,
+          ...(reviewOrdinal === null ? {} : { reviewOrdinal }),
+          ref: target.ref!, runRecordId: asString(row.run_record_id), state: 'clarification', stateAt: asString(row.raised_at) });
       } catch (error) {
         if (!(error instanceof StoreError)) throw error;
       }
@@ -9018,12 +9116,13 @@ export class EditorialStore {
     requireStore(row !== undefined && typeof execution.materialReferenceBasePromptContractDigest === 'string' && DIGEST_PATTERN.test(execution.materialReferenceBasePromptContractDigest) &&
       typeof envelope?.promptContractDigest === 'string' && DIGEST_PATTERN.test(envelope.promptContractDigest), 'ANALYSIS_RECORD_INVALID', '任务参考资料的基础契约记录无效。');
     return { boundary: { bookId: asString(row.book_id), references: this.#analysisCall(() => taskMaterialSources(execution.materialReferences)) },
-      baseDigest: execution.materialReferenceBasePromptContractDigest, promptDigest: envelope.promptContractDigest };
+      baseDigest: execution.materialReferenceBasePromptContractDigest, promptDigest: unwrappedPlanPromptDigest(execution, envelope) };
   }
 
   /** The 初评 contract of one profile: the built-in ledger's own for AI7's default profile, else the house version's (Issue #427). */
   #initialBaseDefinition(profile: EvaluationProfileProjection): AnalysisKindDefinition {
-    return profile.sha256 === evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) ? this.#initialEvaluation.definition : initialEvaluationKindDefinition(profile);
+    const builtIn = this.#initialEvaluation.definition;
+    return profile.sha256 === evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) ? builtIn.clarificationBase ?? builtIn : initialEvaluationKindDefinition(profile);
   }
 
   /**
@@ -9033,7 +9132,7 @@ export class EditorialStore {
   #initialLedger(profile: EvaluationProfileProjection, materials?: TaskMaterialBoundary, frozenPromptDigest?: string): BaselineAnalysisStore {
     const base = this.#initialBaseDefinition(profile);
     const readings = materials === undefined || materials.references.length === 0 ? [] : this.#taskMaterialReadings(materials, '评估');
-    if (readings.length === 0 && base === this.#initialEvaluation.definition) return this.#initialEvaluation;
+    if (readings.length === 0 && base === (this.#initialEvaluation.definition.clarificationBase ?? this.#initialEvaluation.definition)) return this.#initialEvaluation;
     const definition = readings.length === 0 ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, frozenPromptDigest));
     const make = (): BaselineAnalysisStore => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);

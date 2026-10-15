@@ -568,7 +568,7 @@ async function dispatch(
       let blocked: string | null = null;
       try {
         const plan = await store.inspectTaskPlanWithConnection(
-          { bookId: request.input.bookId, kind: 'baseline-analysis', ref: request.input.taskIntentId },
+          store.clarificationPlanTarget(request.input.bookId, request.input.taskIntentId),
           (binding) => analysisExecution.liveCredentialReadiness(binding),
           connectivity.planConnectivity,
           analysisProgress,
@@ -582,7 +582,7 @@ async function dispatch(
       const answered = store.answerBaselineAnalysisClarification(request.input);
       if (answered.runState === 'awaiting-clarification') {
         try {
-          analysisExecution.continueAnswered(answered.runRecordId, store.baselineAnalysisLedger);
+          analysisExecution.continueAnswered(answered.runRecordId, store.clarificationLedger(request.input.bookId, request.input.taskIntentId));
         } catch (error) {
           const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
           throw new StoreErrorClass(code, error instanceof Error ? error.message : '回答已记下，但这项任务未能按回答接着做。');
@@ -2010,6 +2010,20 @@ async function run(): Promise<void> {
     // (Issue #434 review). A preflight under way checks again itself.
     preflightTimer = setInterval(() => {
       if (!openStore.replacementFrozen()) void connectivity.preflight().catch(() => undefined);
+      if (!openStore.replacementFrozen()) {
+        // A timer callback that throws would end the service: whatever one tick cannot read, it reads again on the next.
+        try {
+          for (const run of openStore.modelClarificationRuns()) {
+            try {
+              run.ledger.expireModelClarifications(run.runRecordId);
+              const kept = new Set(run.ledger.unitCheckpoints(run.runRecordId).map((entry) => entry.unit.unitOrdinal));
+              if (run.ledger.clarificationsOf(run.runRecordId).some((entry) => entry.origin === 'model' && entry.answer !== null && !kept.has(entry.unitOrdinal))) {
+                owner.continueAnswered(run.runRecordId, run.ledger);
+              }
+            } catch { /* A busy or unavailable binding, or a record that does not read, is checked again next tick. */ }
+          }
+        } catch { /* The store itself could not be read this tick. */ }
+      }
     }, RECONNECT_PREFLIGHT_INTERVAL_MS);
     preflightTimer.unref();
     // 定期自动备份 (Issue #434, S86b): asked at start, then hourly while the service runs; a backup is made only when one is due.

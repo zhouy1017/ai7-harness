@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { BASELINE_ANALYSIS_KIND, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
 import { liveKindAdmission, liveKindContractCategories, liveKindRule, type LiveKindRule } from './live-kind-admission.js';
 import { liveMaterialContract } from '../task-material-references.js';
+import { buildClarificationAnswerMessage } from '../provider/clarification-contract.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { describeComposition, prepareExecution, type HarnessExecutionSpan, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
@@ -55,6 +56,7 @@ import {
   CLARIFICATION_ENDED_UNANSWERED,
   CLARIFICATION_RECORD_GAP,
   awaitingClarificationDetail,
+  parseModelClarification,
   type ClarificationFacts,
 } from './clarifications.js';
 import {
@@ -139,6 +141,8 @@ function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
  * flight, so a launch there holds one.
  */
 export const EXECUTION_RUN_CAPACITY = 2;
+/** Waiting units retain their records and hold no governor place; all other admission semantics stay with the governor. */
+export function holdsGovernorSlot(state: string): boolean { return state !== 'awaiting-clarification'; }
 /** A bounded waiting set; excess starts are recorded as refused before dispatch, never silently dropped. */
 export const EXECUTION_WAITING_CAPACITY = 64;
 export { remapReusedResult } from './reused-result.js';
@@ -536,7 +540,7 @@ export class BaselineAnalysisExecutionOwner {
    * its queue (`admitOrQueue`); a quick start, a Review Run's approval and a 续行 wait for a place with their reasons.
    */
   get busy(): boolean {
-    return this.#active.size >= this.#capacity;
+    return [...this.#active.values()].filter((run) => holdsGovernorSlot(run.ledger.currentRunState(run.runRecordId))).length >= this.#capacity;
   }
 
   /** Whether nothing runs, waits for a place, or waits to finish its cancellation: no Run will write until another starts. */
@@ -1314,7 +1318,7 @@ export class BaselineAnalysisExecutionOwner {
       }
       currentBindingDigest = bindingDigest;
       bindingDigestForSlot = bindingDigest;
-      const frozenMaterial = liveMaterialContract(definition);
+      const frozenMaterial = liveMaterialContract(definition.clarificationBase ?? definition);
       bindingFacts = {
         bindingDigest,
         route,
@@ -1326,7 +1330,7 @@ export class BaselineAnalysisExecutionOwner {
         // sends an evaluation's editor-authored record or house exemplars only where the rule names them.
         ...(admitted === null ? {} : {
           ruleOutboundCategories: new Set(admitted.outboundDataCategories),
-          contractCategories: new Set(liveKindContractCategories(definition.kind, definition)),
+          contractCategories: new Set(liveKindContractCategories(definition.kind, definition.clarificationBase ?? definition)),
           ...(frozenMaterial === null ? {} : {
             materialExcerpts: frozenMaterial.materials,
             frozenMaterialDigests: new Set(frozenMaterial.sources.map((source) => source.sha256)),
@@ -1524,11 +1528,11 @@ export class BaselineAnalysisExecutionOwner {
         if (unit === undefined || checkpointed.has(unit.ordinal)) continue;
         waiting.set(unit.ordinal, {
           unit, requestDigest: request.requestDigest, failure: request.failure, firstPayloadDigest: request.firstPayloadDigest,
-          firstUnitMessageDigest: request.firstUnitMessageDigest, attempts: 1, usage: request.firstUsage, wallMs: request.firstWallMs,
+          firstUnitMessageDigest: request.firstUnitMessageDigest, attempts: request.firstAttempts ?? 1, usage: request.firstUsage, wallMs: request.firstWallMs,
         });
-        usage.requests += 1;
-        stageUsage.units.requests += 1;
-        active.progress.completedAttempts += 1;
+        usage.requests += request.firstAttempts ?? 1;
+        stageUsage.units.requests += request.firstAttempts ?? 1;
+        active.progress.completedAttempts += request.firstAttempts ?? 1;
         if (request.firstUsage !== null) {
           usage.inputTokens += request.firstUsage.inputTokens;
           usage.outputTokens += request.firstUsage.outputTokens;
@@ -1547,14 +1551,15 @@ export class BaselineAnalysisExecutionOwner {
       // One technical turn for one unit attempt: the span is recorded by reference with the attempt index, the admitted
       // payload digest and the digest of the unit message it submitted — and a safe retry's, the adaptation it carries out
       // (Issue #286) — and every attempt's usage counts toward the Run.
-      const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number, attemptState: RunAttemptState, adaptationId: string | null = null) => {
+      const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number, attemptState: RunAttemptState, adaptationId: string | null = null, answerMessage?: string) => {
         admittedPayloadDigest = null;
         // The baseline this attempt's `awaiting-response` is derived against, taken before the harness
         // can enter the transport, so the reading belongs to this attempt and not the previous one.
         active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
         active.progress.attemptState = attemptState;
-        active.validationStep = `unit-${unit.ordinal}`;
-        const message = unitMessages.get(unit.ordinal)!;
+        active.validationStep = `unit-${unit.ordinal}${answerMessage === undefined ? '' : '-clarification-answer'}`;
+        const message = answerMessage ?? unitMessages.get(unit.ordinal)!;
+        admittedUserMessages.add(message);
         const unitMessageDigest = sha256Hex(message);
         const turn = await harness.submitUnit(message);
         // Read before anything else can start a turn: the adapter clears this at the start of every
@@ -1618,7 +1623,7 @@ export class BaselineAnalysisExecutionOwner {
         readonly wallMs: number;
         readonly firstFailure: { readonly reason: string; readonly code: string } | null;
         readonly withheld: string | null;
-      }): 'settled' | 'end' | 'stop' => {
+      }): 'settled' | 'end' | 'stop' | 'waiting' => {
         const { unit, requestDigest } = s;
         const { turn, unitUsage } = s.attempt;
         const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
@@ -1632,6 +1637,30 @@ export class BaselineAnalysisExecutionOwner {
           acceptedOutputDigests.add(candidate.digest);
           gap('contract-invalid', emptyAnswerGapReason(s.attempt.canonical.reasoningPresent));
         } else if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
+          const question = parseModelClarification(candidate.text);
+          if (question !== null) {
+            acceptedOutputDigests.add(candidate.digest);
+            const origin = ledger.inspect(facts.manifest.manuscript.bookId).authorization?.origin === 'background-analysis-enrollment' ? 'background' : 'foreground';
+            const rule = live === null ? null : liveKindRule(policy, definition.kind, [], origin);
+            const allowed = live === null ? definition.clarificationBase !== undefined
+              : rule?.clarificationQuestionAllowed === true && rule.clarificationTimeoutHours === 24;
+            if (!allowed || ledger.clarificationsOf(facts.runRecordId).some((entry) => entry.unitOrdinal === unit.ordinal)) {
+              gap('contract-invalid', allowed ? '同一阅读范围只能提问一次；模型再次提问，记为契约无效缺口。' : '该任务的准许规则不允许模型提问，记为契约无效缺口。');
+              keepSettled(unit, s.wallMs);
+              return 'settled';
+            }
+            const failure = { code: 'MODEL_CLARIFICATION', failureClass: 'model-question', status: null, reason: '模型提出一个需要你决定的问题。' };
+            ledger.recordClarificationRequest({ runRecordId: facts.runRecordId, attemptId, taskIntentId: facts.taskIntentId,
+              unitOrdinal: unit.ordinal, planVersion: facts.planVersionOrdinal, planEnvelopeDigest: facts.planEnvelopeDigest,
+              requestDigest, failure, modelQuestion: question, firstAttempts: s.attempts, firstPayloadDigest: s.attempt.payloadDigest,
+              firstUnitMessageDigest: s.attempt.unitMessageDigest, firstUsage: s.usage, firstWallMs: s.wallMs });
+            waiting.set(unit.ordinal, { unit, requestDigest, failure, firstPayloadDigest: s.attempt.payloadDigest,
+              firstUnitMessageDigest: s.attempt.unitMessageDigest, attempts: s.attempts, usage: s.usage, wallMs: s.wallMs });
+            active.progress.currentUnitOrdinal = null;
+            active.progress.currentUnitStartedAt = null;
+            active.progress.attemptState = null;
+            return 'waiting';
+          }
           const parsed = definition.parseUnitResult(candidate.text, unit);
           if (parsed.ok) {
             unitObservations.set(unit.ordinal, observation);
@@ -1768,6 +1797,7 @@ export class BaselineAnalysisExecutionOwner {
        */
       const applyAnswers = async (): Promise<'none' | 'applied' | 'stopped' | 'end'> => {
         if (waiting.size === 0) return 'none';
+        ledger.expireModelClarifications(facts.runRecordId);
         const answered = ledger.clarificationsOf(facts.runRecordId).filter((entry) => entry.answer !== null && waiting.has(entry.unitOrdinal));
         if (answered.length === 0) return 'none';
         let spent = false;
@@ -1775,6 +1805,30 @@ export class BaselineAnalysisExecutionOwner {
           // A cancellation outranks every answer (CTRL-005).
           if (active.cancelRequested) return spent ? 'end' : 'stopped';
           const w = waiting.get(entry.unitOrdinal)!;
+          if (entry.origin === 'model') {
+            if (active.interrupted || active.pauseRequested) return spent ? 'end' : 'stopped';
+            if (scopeChanged() || ceilingState() === 'reached') {
+              if (ceilingState() === 'reached') { liveInterruption = 'run-budget-ceiling-reached'; terminalClassification = 'interrupted'; }
+              return 'end';
+            }
+            waiting.delete(entry.unitOrdinal);
+            // An append-only pre-send claim prevents a restart or a repeated answer from sending this turn twice.
+            if (!ledger.claimModelClarificationAnswer(facts.runRecordId, entry.requestId)) {
+              settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
+                'outcome-unknown', '澄清回答回合已提交，结果尚未确认；这次运行不会再次发送。');
+              keepSettled(w.unit, w.wallMs);
+              continue;
+            }
+            active.progress.currentUnitOrdinal = w.unit.ordinal;
+            active.progress.currentUnitStartedAt = new Date().toISOString();
+            const startedAt = Date.now();
+            const attempt = await submitAttempt(w.unit, w.attempts + 1, 'dispatched', null,
+              buildClarificationAnswerMessage(unitMessages.get(w.unit.ordinal)!, entry));
+            const settled = settleFromTurn({ unit: w.unit, requestDigest: w.requestDigest, attempt, attempts: w.attempts + 1,
+              usage: addUsage(w.usage, attempt.unitUsage), wallMs: w.wallMs + Date.now() - startedAt, firstFailure: null, withheld: null });
+            if (settled === 'end' || settled === 'stop') return 'end';
+            continue;
+          }
           const retry = entry.answer!.optionId !== 'record-gap';
           // 再试一次 once the ceiling is spent (Issue #51, S16a): the retry is not sent, and the Run stops as the ceiling reached
           // — once every other answer given is applied too, each as the editor chose. The ceiling is read before a pause or
@@ -2352,6 +2406,11 @@ export class BaselineAnalysisExecutionOwner {
           unitOrdinal: entry.unitOrdinal,
           classifiedReason: entry.classifiedReason,
           recordedAt: entry.recordedAt,
+        })),
+        modelClarifications: ledger.clarificationsOf(facts.runRecordId).filter((entry) => entry.origin === 'model').map((entry) => ({
+          unitOrdinal: entry.unitOrdinal, outcome: entry.answer === null ? 'unanswered' as const
+            : entry.answer.timedOut === true ? 'timed-out' as const
+              : entry.answer.optionId === 'no-answer' ? 'no-answer' as const : 'answered' as const,
         })),
         gaps: reduction.gaps,
         crossUnit: { state: crossUnit.state, reason: crossUnit.state === 'closed' ? null : crossUnit.reason },

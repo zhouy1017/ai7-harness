@@ -105,8 +105,17 @@ export interface RunReportAccounting {
   readonly findingCounts: ReadonlyArray<RunReportFindingCountProjection>;
 }
 
+/** How each model question of the Run ended (Issue #865): the editor's 不回答 and the 24-hour timeout are told apart. */
+const MODEL_CLARIFICATION_REPORT_WORDS = {
+  'answered': '已回答',
+  'no-answer': '你选择了不回答，按已有信息接着做',
+  'timed-out': '24 小时未回答，已按「不回答」接着做',
+  'unanswered': '运行结束时未回答',
+} as const;
+
 /** Everything the report is built from, apart from what the reflection turn itself produces. */
 export interface RunReportFacts {
+  readonly modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'timed-out' | 'unanswered' }>;
   readonly runRecordId: string;
   readonly taskIntentId: string;
   readonly attemptId: string | null;
@@ -250,6 +259,11 @@ function assembleRunReport(
     },
     unitRows: facts.unitRows,
     adaptations: facts.adaptations,
+    ...(facts.modelClarifications === undefined || facts.modelClarifications.length === 0 ? {} : {
+      modelClarifications: facts.modelClarifications.map((entry) => ({ ...entry,
+        line: `第 ${entry.unitOrdinal} 个阅读范围的模型问题：${MODEL_CLARIFICATION_REPORT_WORDS[entry.outcome]}。`,
+      })),
+    }),
     failures: failureRows(facts),
     usagePerStage: { ...facts.usage, 'run-report-reflection': reflection.usage },
     findingCounts: facts.findingCounts,

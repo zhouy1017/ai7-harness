@@ -897,7 +897,7 @@ async function main() {
       ];
       if (!forCleanup && launchControls.picker) args.push('--j09-picker-path', SAMPLE1_PATH);
       if (!forCleanup && launchControls.adapter) {
-        args.push('--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', holdPath, '--j09-background-quiet-ms', String(BACKGROUND_QUIET_MS));
+        args.push('--j04-model-adapter', launchControls.fixture ?? FIXTURE_IDENTITY, '--j10-unit-hold-path', holdPath, '--j09-background-quiet-ms', String(BACKGROUND_QUIET_MS));
       }
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       return args;
@@ -1538,6 +1538,53 @@ async function main() {
     const unchanged = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify({ task: unchanged?.taskIntent, authorization: unchanged?.authorization, run: unchanged?.run?.state, revision: unchanged?.resultSetRevision?.revisionId }) === keptRecord &&
       unchanged.resultSetRevision.freshness?.state === 'stale', 'background-history-intact', { task: unchanged?.taskIntent?.taskIntentId, freshness: unchanged?.resultSetRevision?.freshness?.state });
+
+    // #865 synchronized delta: the same clarification family carries one model-originated question, only its unit waits.
+    at('model-question-launch');
+    await closeOwnedBrowser();
+    launchControls = { picker: true, adapter: true, fixture: 'sample1-model-clarification' };
+    await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'model-question-ready');
+    const questionBook = await importSample1(renderer, '模型提问旅程', true, 'model-question-import');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'model-question-artifact-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'model-question-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'model-question-artifact-enabled');
+    await click(renderer, '返回图书列表', 'model-question-library');
+    await openAnalysisOf(renderer, questionBook, 'model-question-analysis');
+    const beforeQuestion = await readSettledAttention(renderer);
+    const recentBeforeQuestion = beforeQuestion.groups.find((group) => group.key === 'recent').items.map((item) => item.itemId);
+    await startFirstBaseline(renderer, 'ready', 'model-question-baseline');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='awaiting-clarification'`, 'model-question-waits', 120_000);
+    const questionRun = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    const questionTask = questionRun.taskIntent.taskIntentId;
+    requireJourney(questionRun.run?.state === 'awaiting-clarification' && questionRun.run?.progress === null, 'model-question-no-slot');
+
+    at('model-question-decision-item');
+    await openAttention(renderer, 'model-question-attention');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]')?.textContent.includes('模型有一个需要你决定的问题')`, 'model-question-own-reason', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-attention-item=${JSON.stringify(`analysis:${questionTask}`)}]') || document.querySelector('[data-attention-open=${JSON.stringify(`analysis:${questionTask}`)}]')`, 'model-question-item-visible', 30_000);
+    const questionAttention = await readSettledAttention(renderer);
+    const questionItem = questionAttention.groups.find((group) => group.key === 'decisions').items.find((item) => item.bookId === questionBook);
+    const questionPage = await renderer.evaluate(READ_PAGE);
+    const shownQuestion = questionPage.groups.find((group) => group.key === 'decisions').items.find((item) => item.itemId === questionItem?.itemId);
+    requireJourney(questionItem?.state === 'analysis-clarification' && questionItem.nextStep === 'answer-clarification' && shownQuestion?.blocked === 'true' &&
+      JSON.stringify(questionAttention.groups.find((group) => group.key === 'recent').items.map((item) => item.itemId)) === JSON.stringify(recentBeforeQuestion), 'model-question-decision-and-completed-counts');
+    await openItem(renderer, questionItem.itemId, 'model-question-open');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('.task-plan-clarification-question')?.textContent==='本范围按哪个阅读重点处理？'`, 'model-question-drawer', 30_000);
+    const questionPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'baseline-analysis',ref:${JSON.stringify(questionTask)}})`);
+    const questionCard = questionPlan.clarifications.find((card) => card.origin === 'model' && card.state === 'open');
+    requireJourney(questionCard?.options.filter((option) => option.id.startsWith('model-option-')).length === 2 && questionCard.freeTextAllowed === true, 'model-question-options');
+
+    at('model-question-answer-turn');
+    await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(`[data-task-drawer-control="clarification-option:${questionCard.requestId}:model-option-0"]`)}); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return input.checked; })()`, 'model-question-choose');
+    await clickSelector(renderer, `[data-task-drawer-control="clarification-submit:${questionCard.requestId}"]`, 'model-question-submit');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((p)=>p.taskIntent?.taskIntentId===${JSON.stringify(questionTask)} && ['completed','completed-with-gaps'].includes(p.run?.state))`, 'model-question-completes', 120_000);
+    const questionDone = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    requireJourney(questionDone.resultSetRevision?.units.filter((unit) => unit.state === 'closed').length === SAMPLE1_UNITS && questionDone.run?.attempt?.spans.length === SAMPLE1_UNITS + 1, 'model-question-one-follow-up');
+    await openAttention(renderer, 'model-question-answered-attention');
+    const answeredAttention = await readSettledAttention(renderer);
+    requireJourney(!answeredAttention.groups.find((group) => group.key === 'decisions').items.some((item) => item.itemId === questionItem.itemId), 'model-question-item-removed');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
