@@ -498,6 +498,9 @@ export async function verifySample1Capture(request, selection, parsed) {
         // request key, which pins every participant; fresh-import regression replays this response through controlled transport.
         parsed.contentDigest = null;
         parsed.exactParticipantsOnly = true;
+        parsed.participantContentDigest = sha256Hex(canonicalJson(input.deliverables.map(({ typeId, title, paragraphs }) => ({
+          typeId, title, paragraphs: paragraphs.map(({ position, text, truncated }) => ({ position, text, truncated })),
+        }))));
       }
       const prompt = owners.reviewCategoryContract(input);
       contract = { prompt, digest: owners.reviewCategoryContractDigest(prompt) };
@@ -1311,7 +1314,7 @@ export async function generateModelFixture(request, now = new Date()) {
   return assembleFixture({
     identity: request.identity,
     description: parsed.exactParticipantsOnly
-      ? `${request.description} Exact request key only: a manuscript-only content key could replay against different deliverable text; fresh-import regression uses controlled recorded-response transport with the same sample1-derived document words.`
+      ? `${request.description} Exact request key only: a manuscript-only content key could replay against different deliverable text; fresh-import regression uses controlled recorded-response transport with the same sample1-derived document words. Participant excerpt digest: ${parsed.participantContentDigest ?? 'unproved'}.`
       : request.description,
     itemId: selection.itemId,
     model: selection.model,

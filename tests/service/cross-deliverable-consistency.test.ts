@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -13,9 +14,11 @@ import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/r
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
 import { reviewDeliverables, REVIEW_DELIVERABLES_ABSENT, REVIEW_DELIVERABLES_DRAFT, REVIEW_DELIVERABLE_CHANGED } from '../../src/service/production-documents.js';
-import { sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
+import { graphemeCount, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { ProviderResultCache, isModelCallLine } from '../../src/service/provider/provider-result-cache.js';
-import { parseModelFixture } from '../../src/service/provider/model-fixture.js';
+import { parseModelFixture, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { ownBlockIdsOf, substituteBlockPlaceholders, substituteAssuranceSamplingRefPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
 import type { LaunchPolicyProjection, ReviewRunProjection, ReviewCategoryResultSetRevisionProjection } from '../../src/shared/protocol.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -90,14 +93,14 @@ function phase(id: string, action: 'start' | 'complete' | 'reopen' | 'skip') {
 }
 
 async function finalize(id: string) { await save(id); phase(id, 'start'); phase(id, 'complete'); }
-function prepare() {
-  let work = store.createReviewRunPreparationWork(book.bookId, [CATEGORY], WHOLE, policy);
+function prepare(scope: typeof WHOLE | { kind: 'selection'; fromChapterBlockId: string; toChapterBlockId: string } = WHOLE) {
+  let work = store.createReviewRunPreparationWork(book.bookId, [CATEGORY], scope, policy);
   while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
   return work.projection!.run!;
 }
 function approvals(run: ReviewRunProjection) { return run.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })); }
 
-async function execution(afterFirst?: () => Promise<void>) {
+async function execution(afterFirst?: () => Promise<void>, recorded?: ResolvedModelFixture) {
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
   const live = { ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
     runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 500_000 } };
@@ -108,6 +111,15 @@ async function execution(afterFirst?: () => Promise<void>) {
     const message = payload.messages.at(-1)!.content;
     const header = parseReviewCategoryUnitMessageHeader(message);
     let result: unknown;
+    let usage = { inputTokens: 40, outputTokens: 20 };
+    const capture = recorded === undefined ? undefined : [...recorded.entries.values()].find((entry) => entry.capture?.subject ===
+      (header !== null ? 'review-unit' : message.startsWith('保证抽样 ') ? 'sampling' : 'reflection') && (header === null || entry.unitOrdinal === header.ordinal));
+    if (recorded !== undefined && (capture === undefined || capture.response.kind !== 'unit-result')) throw new Error('RECORDED_COMPARISON_RESPONSE_MISSING');
+    if (capture?.response.kind === 'unit-result') {
+      usage = capture.response.usage;
+      result = JSON.parse(substituteAssuranceSamplingRefPlaceholders(substituteBlockPlaceholders(capture.response.text, ownBlockIdsOf(message)), parseAssuranceSamplingListedRefs(message))) as unknown;
+      if (header !== null) sent.push(header.ordinal);
+    } else
     if (header !== null) {
       sent.push(header.ordinal);
       const blocks = message.split('\n').flatMap((line) => {
@@ -122,7 +134,7 @@ async function execution(afterFirst?: () => Promise<void>) {
       result = { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message).map((ref) => ({ ref, disposition: '成立', reason: '合成回归。' })) };
     } else result = { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] };
     return new Response(JSON.stringify({ model: live.model, choices: [{ message: { content: JSON.stringify(result), reasoning_content: '合成回归。' }, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
+      usage: { prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens } }), { status: 200 });
   };
   owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     materialGuard: (runRecordId, ledger) => store.materialGuard(runRecordId, ledger),
@@ -131,6 +143,31 @@ async function execution(afterFirst?: () => Promise<void>) {
       validation: { family: 'cross-deliverable-consistency', case: 'sample1-finalized-document', delta: null } }, nativeFetch } });
   driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   return sent;
+}
+
+/** Reproduce the live item's exact sample1-derived words through the editor's bounded edit API; no file or model supplies them. */
+async function recordedDocument(id: string) {
+  const doc = document(id);
+  const passage = store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).find((block) =>
+    block.kind === 'paragraph' && block.text.length > 100 && /[一二三四五六七八〇○]/u.test(block.text))!;
+  const composed = sliceGraphemes(passage.text, 0, 200).replace(/[一二三四五六七八〇○]/u, '九');
+  let placed = false;
+  for (const block of store.baselineAnalysisLedger.readWorkingBlocks(doc.branchId)) {
+    const replacement = block.kind === 'title' ? 'sample1 新闻稿（合成比对）' : !placed && block.kind === 'paragraph' ? (placed = true, composed) : '';
+    const replace = (from: number, to: number, insertText: string) => {
+      const window = store.getManuscriptWindowAt(id, doc.branchId, { kind: 'block', blockId: block.blockId });
+      const current = window.blocks.find((candidate) => candidate.blockId === block.blockId)!;
+      store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: id, branchId: doc.branchId, baseRevisionId: window.revisionId,
+        windowStartBlockId: window.blocks[0]!.blockId, expectedJournalSequence: window.journalSequence,
+        blockId: current.blockId, baseBlockDigest: current.digest, fromGrapheme: from, toGrapheme: to, insertText });
+    };
+    let remaining = graphemeCount(block.text);
+    while (remaining > 0) { const from = Math.max(0, remaining - 256); replace(from, remaining, ''); remaining = from; }
+    if (replacement.length > 0) replace(0, 0, replacement);
+  }
+  await store.saveProductionDocumentVersion({ bookId: book.bookId, documentId: id, branchId: doc.branchId });
+  phase(id, 'start'); phase(id, 'complete');
+  return passage.blockId;
 }
 
 describe('cross-deliverable participants and revision lineage', () => {
@@ -299,5 +336,29 @@ describe('cross-deliverable participants and revision lineage', () => {
     const settled = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
     expect(settled.categories[0]!.detail?.includes(REVIEW_DELIVERABLE_CHANGED) && settled.categories[0]!.detail?.includes('已完成的单元保留')).toBe(true);
     expect(settled.categories[0]!.state).toBe('interrupted');
+  });
+
+  it('replays the captured responses only against the exact captured participant words, preserving grounding and selection limits', async () => {
+    const fixture = await loadModelFixture(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), 'sample1-recorded-v41-review-cross-deliverable-consistency');
+    expect(fixture.provenance).toBe('recorded');
+    expect([...fixture.entries.values()].every((entry) => entry.contentDigest === null)).toBe(true);
+    const doc = await create();
+    const selected = await recordedDocument(doc.documentId);
+    const frozen = entry();
+    const digest = sha256Hex(canonicalJson(frozen.deliverables!.participants.map(({ typeId, title, paragraphs }) => ({
+      typeId, title, paragraphs: paragraphs.map(({ position, text, truncated }) => ({ position, text, truncated })),
+    }))));
+    expect(fixture.description.includes(`Participant excerpt digest: ${digest}.`)).toBe(true);
+    const sent = await execution(undefined, fixture);
+    const run = prepare({ kind: 'selection', fromChapterBlockId: selected, toChapterBlockId: selected });
+    store.authorizeReviewRun(book.bookId, run.reviewRunId, approvals(run));
+    await driver!.drive(run.reviewRunId);
+    expect(sent).toEqual([1, 2]);
+    const revision = store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(frozen))).resultSetRevision as ReviewCategoryResultSetRevisionProjection;
+    expect(revision.findingCounts).toMatchObject({ listed: 2, located: 1, excluded: 1 });
+    expect(revision.coverage.unitsClosed).toBe(2);
+    const result = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
+    expect(result.categories[0]!.state).toBe('settled');
+    expect(result.findings.length).toBe(0);
   });
 });
