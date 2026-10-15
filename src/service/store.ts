@@ -9769,8 +9769,11 @@ export class EditorialStore {
     // A row is written once per contract, so re-preparing under a digest already recorded would keep its first note. When only
     // the damage set changed — a damaged exemplar repaired or replaced — prepare a new Task, whose fresh row names the current
     // set, as the frozen plan's exemplar line must (Issue #803).
-    const noteChanged = latest !== null && latest.task.promptContractSha256 === promptContractSha256 &&
-      canonicalJson(latest.task.skippedExemplars) !== canonicalJson(skippedExemplars);
+    // An interrupted preparation can record several contracts before any plan freezes. Compare the requested contract's
+    // row, even when another template's contract was recorded more recently on that same Task.
+    const recorded = latest === null ? null : this.#readersReportCall(() =>
+      this.#readersReports.task(latest.task.taskIntentId, promptContractSha256));
+    const noteChanged = recorded !== null && canonicalJson(recorded.skippedExemplars) !== canonicalJson(skippedExemplars);
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
       bookId,

@@ -609,11 +609,49 @@ describe('审稿意见 over the real store on exact sample1', () => {
       const planLine = (ref: string): string => book.store.inspectTaskPlan({ bookId, kind: 'readers-report', ref }).scope.reference[1]!;
       const first = prepare();
       expect(planLine(first)).toBe(recordStatement);
+      expect(prepare()).toBe(first);
       // The record is repaired and the same item's ledger damaged instead: the readable set is unchanged, only the damage is.
       replaceRecordDamageWithLedgerDamage(damaged, canonicalJson, sha256);
       const second = prepare();
       expect(second).not.toBe(first);
       expect(planLine(second)).toBe(`${prefix}的学习准入记录已损坏，无法读取，本次不参考：《a书 · 审稿意见 · 给作者的修改意见 · 版本 1》`);
+      expect(prepare()).toBe(second);
+    });
+  }, 300_000);
+
+  it('refreshes a previously recorded contract after interrupted preparation under another template (Issue #803)', async () => {
+    await withBook(async (book) => {
+      const { bookId } = book;
+      await runInitialEvaluationToEnd(book.store, book.owner, bookId, launchPolicy);
+      finalizeAsJ11(book.store, bookId);
+      await importReadersReportExemplar(book.store, 'b书', '虚构审稿意见，可读。');
+      const damaged = await importReadersReportExemplar(book.store, 'a书', '虚构审稿意见，先记录不可读。');
+      const database = exemplarDb();
+      const original = database.prepare('SELECT canonical_json, sha256 FROM earlier_exemplar_versions WHERE revision_id = ?').get(damaged)!;
+      database.close();
+      damageVersionRecord(damaged);
+      // Keep the preparation cooperative, before a Task Input checkpoint or plan has frozen.
+      const window = book.store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = window.blocks[0]!;
+      book.store.flushJournalEdit({
+        clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+        blockId: block.blockId, windowStartBlockId: block.blockId, baseBlockDigest: block.digest,
+        expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '（编辑）',
+      });
+      const interrupt = (template: 'author' | 'editorial'): void => {
+        const started = book.store.createReadersReportPreparationWork(bookId, template, launchPolicy);
+        expect(started.done).toBe(false);
+        expect(book.store.cancelReadersReportPreparationWork(started.workId!)).toBe(true);
+      };
+      interrupt('author');
+      interrupt('editorial');
+      replaceRecordDamageWithLedgerDamage(damaged, String(original.canonical_json), String(original.sha256));
+      let progress = book.store.createReadersReportPreparationWork(bookId, 'author', launchPolicy);
+      while (!progress.done) progress = book.store.advanceReadersReportPreparationWork(progress.workId!);
+      const ref = progress.projection!.taskIntent!.taskIntentId;
+      expect(book.store.inspectTaskPlan({ bookId, kind: 'readers-report', ref }).scope.reference[1])
+        .toBe('参考本社 1 份审稿意见范例：《b书 · 审稿意见 · 给作者的修改意见 · 版本 1》；'
+          + '另有 1 份范例的学习准入记录已损坏，无法读取，本次不参考：《a书 · 审稿意见 · 给作者的修改意见 · 版本 1》');
     });
   }, 300_000);
 
