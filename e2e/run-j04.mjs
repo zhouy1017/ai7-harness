@@ -2897,7 +2897,7 @@ async function main() {
     requireJourney(reviewDrawer.bar?.state === 'ready' && reviewDrawer.bar.start === 'ready' &&
       reviewDrawer.bar.summary === `《${bookName}》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：审阅发现与审阅报告 · 不改稿` &&
       reviewDrawer.bar.statement === BAR_STATEMENT && reviewDrawer.bar.note === null &&
-      barActions(reviewDrawer) === 'start:开始任务:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled',
+      barActions(reviewDrawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
     'review-bar-ready', reviewDrawer.bar);
 
     // ---- 联网后开始任务 of a Review Run (Issue #760, plan slice S74c; editor-surfaces §6 离线 / 等待网络; V2-UX-AUTH-002,
@@ -2911,7 +2911,7 @@ async function main() {
     requireJourney(reviewOffline?.kind === 'review-run' && reviewOffline.pill === '离线' && reviewOffline.bar?.state === 'offline' &&
       reviewOffline.bar.start === 'offline' && reviewOffline.bar.statement === BAR_STATEMENT &&
       reviewOffline.bar.note === '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容' &&
-      barActions(reviewOffline) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:disabled',
+      barActions(reviewOffline) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:enabled',
     'review-offline-bar', reviewOffline?.bar);
     await assertRenderer(renderer, `(() => { const bar=document.querySelector('#task-drawer .task-drawer-bar'); return bar instanceof HTMLElement && !bar.contains(document.activeElement) && [...bar.querySelectorAll('button')].every((button)=>!button.textContent.includes('授权')); })()`, 'review-offline-nothing-preselected');
 
