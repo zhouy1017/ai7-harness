@@ -526,8 +526,8 @@ async function dispatch(
       const started = await store.quickStartReviewRun(request.input, {
         credentialReadiness: (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity: connectivity.planConnectivity,
       }, analysisProgress);
-      if (started.outcome === 'started') driveReviewRun(reviewRuns, request.input.reviewRunId);
-      return { id: request.id, ok: true, op: request.op, result: { ...started,
+      if (started.dispatch) driveReviewRun(reviewRuns, request.input.reviewRunId);
+      return { id: request.id, ok: true, op: request.op, result: { outcome: started.outcome, reasons: started.reasons,
         projection: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress) } };
     }
     case 'controlTaskRun': {

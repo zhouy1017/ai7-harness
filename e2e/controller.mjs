@@ -1081,6 +1081,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // Impact Summary, 正在取消, and 已取消 with what it read kept; and a Run AI7 closed under, 任务已中断 · 可续行 on the
   // next launch, and 续行 to its end.
   'J-10': Object.freeze([
+    'review-controls-prepare',
+    'review-controls-pause-resume',
+    'review-controls-cancel-impact',
+    'review-controls-redo-plan',
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1279,6 +1283,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-16 (Issue #423, plan slice S77a): the 任务 panel — the Book's Tasks beside the manuscript, controlled from their cards,
   // a finished Task's result in a window beside the text, and the 回到<位置> chip a jump leaves.
   'J-16': Object.freeze([
+    'panel-stop-wording',
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',

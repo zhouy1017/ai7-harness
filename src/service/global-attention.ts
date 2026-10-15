@@ -655,6 +655,8 @@ function reviewObject(reading: ReviewRunAttentionReading): GlobalAttentionObject
 function reviewRunItem(reading: ReviewRunAttentionReading, waitingFor: WaitingFor = 'admitting'): GlobalAttentionItemProjection | null {
   const controlled = reading.control === undefined ? null : analysisTaskItem(reading.control, waitingFor);
   if (controlled !== null) return { ...controlled, itemId: `review:${reading.reviewRunId}`, object: reviewObject(reading),
+    facts: { ...controlled.facts, categories: reading.categories.map(categoryFact) },
+    nextStep: controlled.state === 'analysis-running' || controlled.state === 'analysis-queued' ? 'view-review' : controlled.nextStep,
     target: { kind: 'review', bookId: reading.bookId, reviewRunId: reading.reviewRunId } };
   const book = { bookId: reading.bookId, title: reading.bookTitle };
   const object = reviewObject(reading);

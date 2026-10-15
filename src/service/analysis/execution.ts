@@ -781,7 +781,7 @@ export class BaselineAnalysisExecutionOwner {
       interrupted: false,
       cancelRequested: options.cancel === true,
       pauseRequested: false,
-      resumableOnInterrupt: true,
+      resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND,
       done: Promise.resolve(),
     };
     this.#active.set(runRecordId, active);
@@ -1579,7 +1579,7 @@ export class BaselineAnalysisExecutionOwner {
       // reader sees the count move and nothing in flight.
       const keepSettled = (unit: CoverageManifestUnitProjection, wallMs: number): void => {
         const settledRecord = unitRecords.find((record) => record.unitOrdinal === unit.ordinal);
-        if (active.resumableOnInterrupt && settledRecord !== undefined) {
+        if (settledRecord !== undefined) {
           ledger.recordUnitCheckpoint({ runRecordId: facts.runRecordId, attemptId, unit: settledRecord, observation: unitObservations.get(unit.ordinal) ?? null });
         }
         active.progress.unitsSettled += 1;

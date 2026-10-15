@@ -2793,7 +2793,7 @@ function registerRendererHandlers(
         }),
     );
   }
-  // Reconnect Preflight names no Book: it only ever admits Runs the editor already authorized to start when
+  // Shared controls are bound to the sender's current Book and serialized with its other effects.
   ipcMain.handle(IPC_CHANNELS.quickStartReviewRun, (event, input: Omit<ServiceOperationMap['quickStartReviewRun']['input'], 'bookId'>) =>
     envelope(async () => {
       const owned = requireSender(event);

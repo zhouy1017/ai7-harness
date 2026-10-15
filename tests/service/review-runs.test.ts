@@ -1465,15 +1465,14 @@ describe('a Review Run over the real store on exact sample1', () => {
           expect(['completed', 'completed-with-gaps']).toContain(typos().run!.state);
         } else {
           expect(second.store.reconcileStoppedReviewCategoryRuns()).toEqual({ settled: 1 });
-          // A review category cannot resume: 已中断 with its outcome, no revision.
-          expect(typos().run).toMatchObject({ runRecordId, state: 'interrupted' });
-          expect(typos().taskOutcome).toMatchObject({ classification: 'interrupted', resultSetRevisionId: null, safeNextAction: RECONCILED_INTERRUPTED_DETAIL });
+          expect(typos().run).toMatchObject({ runRecordId, state: 'resumable' });
+          expect(typos().taskOutcome).toBeNull();
           expect(second.store.reconcileStoppedReviewCategoryRuns()).toEqual({ settled: 0 });
-          // 继续审阅 then records what the Run came to, sending nothing, and the category can be reviewed again.
+          // The same category Run resumes on its explicit continuation, then forms its original result.
           await second.driver.continue(reviewRunId);
           const continued = workspace(second, opened, reviewRunId).run!;
-          expect(continued.categories.map((category) => category.state)).toEqual(['interrupted']);
-          expect(typos().run).toMatchObject({ runRecordId, state: 'interrupted' });
+          expect(continued.categories.map((category) => category.state)).toEqual(['settled']);
+          expect(typos().run).toMatchObject({ runRecordId, state: 'completed' });
         }
       } finally {
         await close(second);

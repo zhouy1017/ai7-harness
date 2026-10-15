@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
@@ -35,7 +36,9 @@ async function until(read: () => boolean): Promise<void> {
 for (const [kind, identity] of CASES) it(`${kind}: pause checkpoints, resume the attempt, cancel keeps units, and redo edits a fresh plan`, async () => {
   const roots = await createServiceTestRoots('ai7-kind-controls-');
   const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
-  const fixture = await loadModelFixture(FIXTURES, identity);
+  const authored = await loadModelFixture(FIXTURES, identity);
+  const entries = new Map(authored.entries);
+  const fixture = { ...authored, entries };
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false,
@@ -92,7 +95,11 @@ for (const [kind, identity] of CASES) it(`${kind}: pause checkpoints, resume the
     expect(plan.edit.editable).toBe(true);
     expect(() => store.editTaskPlan({ ...input, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, removedSteps: ['invented'], disallowedAdaptations: [] })).toThrow();
     plan = store.editTaskPlan({ ...input, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, removedSteps: [], disallowedAdaptations: ['safe-retry'] });
+    const revisedCategoryDigests = plan.start.categoryDigests;
     expect(plan.boundary.adaptable.find((entry) => entry.id === 'safe-retry')?.removed).toBe(true);
+    // A retry-safe first-unit failure proves the edited restriction is honoured by each real kind's Run.
+    for (const [key, entry] of entries) if (entry.unitOrdinal === 1) entries.set(key, { ...entry,
+      response: { kind: 'adapter-failure', code: 'PROVIDER_ERROR', message: '模型服务暂时出错。', status: 503 } });
     block();
     let driven: Promise<void> | null = null;
     if (kind === 'review-run') {
@@ -115,13 +122,19 @@ for (const [kind, identity] of CASES) it(`${kind}: pause checkpoints, resume the
     if (driven !== null) await driven;
     expect(ledger.currentRunState(runId)).toBe('paused');
     expect(ledger.unitCheckpoints(runId)).toHaveLength(1);
+    expect(ledger.unitAttemptsOf(runId).get(1)).toBe(1);
+    expect(ledger.unitCheckpoints(runId)[0]!.unit.closed).toMatchObject({ state: 'gap' });
     const attempt = ledger.executionBindingOf(runId)!.attemptId;
     plan = store.inspectTaskPlan(input, (id) => execution.progressFor(id));
     expect(plan.state.key).toBe('paused');
     expect(plan.runControl?.resume?.reason).toBeNull();
     const panel = store.inspectBookTasks(bookId, (id) => execution.progressFor(id));
     expect(panel).toBeDefined();
-    if (kind === 'review-run') expect(store.inspectReviewWorkspace(bookId, ref).run!.categories[1]!.state).toBe('waiting');
+    if (kind === 'review-run') {
+      const reviewed = store.inspectReviewWorkspace(bookId, ref).run!;
+      expect(reviewed.categories[1]!.state).toBe('waiting');
+      expect(reviewed.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest }))).toEqual(revisedCategoryDigests);
+    }
     block();
     const resume = store.requestTaskRunControl({ ...input, action: 'resume' });
     if (kind === 'review-run') driven = driver.continue(ref);
@@ -158,6 +171,27 @@ for (const [kind, identity] of CASES) it(`${kind}: pause checkpoints, resume the
     expect(next.start.readiness).toBe('ready');
     expect(next.boundary.adaptable.find((entry) => entry.id === 'safe-retry')?.removed).toBe(true);
     expect(next.runControl).toBeNull();
+    if (kind === 'initial-evaluation') {
+      // A dirty checkpoint makes redo a cooperative preparation; cancelling it sends nothing and leaves the old Run cancelled.
+      block();
+      const started = store.authorizeInitialEvaluation(bookId, nextRef!, next.start.planEnvelopeDigest!);
+      execution.admitAndDispatch(started.dispatchRunRecordId!, started.ledger);
+      await until(() => waiting);
+      const stopped = store.requestTaskRunControl({ bookId, kind, ref: nextRef!, action: 'cancel' });
+      execution.cancelRun(stopped.runRecordId!, stopped.ledger);
+      hold = false; release();
+      await execution.whenDone(stopped.runRecordId!);
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const first = window.blocks[0]!;
+      store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId,
+        baseRevisionId: window.revisionId, blockId: first.blockId, windowStartBlockId: first.blockId,
+        baseBlockDigest: first.digest, expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '（编辑）' });
+      const preparing = jobs.startTaskRedo({ bookId, kind, ref: nextRef! }, policy);
+      expect(preparing.state).toBe('queued');
+      expect(jobs.cancel(preparing.jobId).state).toBe('cancelled');
+      expect(stopped.ledger.currentRunState(stopped.runRecordId!)).toBe('cancelled');
+      expect(execution.progressFor(stopped.runRecordId!)).toBeNull();
+    }
     store.markCleanShutdown();
   } finally {
     hold = false; release?.();

@@ -201,9 +201,20 @@ export class DialogueExecutionOwner {
     void this.#run(active, turn).finally(() => {
       if (this.#active === active) this.#active = null;
       settle();
-      const next = this.#queued.shift();
-      if (next !== undefined && !this.#disposed) this.begin(next);
+      this.#beginQueued();
     });
+  }
+
+  #beginQueued(): void {
+    while (!this.#disposed && this.#active === null) {
+      const next = this.#queued.shift();
+      if (next === undefined) return;
+      try { this.begin(next); }
+      catch (error) {
+        const code = error instanceof DialogueError ? error.code : 'DIALOGUE_DISPATCH_FAILED';
+        this.#deps.records.settleDialogueAttempt(next.attemptId, 'failed', null, code);
+      }
+    }
   }
 
   /** 停止回答: interrupt the answer in flight and wait until it has settled as stopped. */
@@ -225,12 +236,12 @@ export class DialogueExecutionOwner {
   /** AI7 is closing: the answer in flight is interrupted and settles 回答中断 before the store closes. */
   async dispose(): Promise<void> {
     this.#disposed = true;
-    for (const queued of this.#queued) this.#deps.records.settleDialogueAttempt(queued.attemptId, 'interrupted', null, DIALOGUE_CLOSED_CAUSE);
-    this.#queued.length = 0;
-    const active = this.#active;
-    if (active === null) return;
-    active.harness?.interrupt();
-    await active.done;
+    try {
+      for (const queued of this.#queued.splice(0)) this.#deps.records.settleDialogueAttempt(queued.attemptId, 'interrupted', null, DIALOGUE_CLOSED_CAUSE);
+    } finally {
+      const active = this.#active;
+      if (active !== null) { active.harness?.interrupt(); await active.done; }
+    }
   }
 
   async #run(active: ActiveAnswer, turn: DialogueTurnStart): Promise<void> {

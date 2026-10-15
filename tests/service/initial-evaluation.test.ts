@@ -366,10 +366,16 @@ describe('AI7 初评 over the real store on exact sample1', () => {
           expect(settled.run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
           expect(settled.taskOutcome).toBeNull();
         } else {
-          // This kind cannot resume: 已中断, with its outcome, no revision — and never 可续行.
-          expect(settled.state).toBe('interrupted');
-          expect(settled.run).toMatchObject({ runRecordId, state: 'interrupted' });
-          expect(settled.taskOutcome).toMatchObject({ classification: 'interrupted', resultSetRevisionId: null, safeNextAction: RECONCILED_INTERRUPTED_DETAIL });
+          expect(settled.state).toBe('resumable');
+          expect(settled.run).toMatchObject({ runRecordId, state: 'resumable' });
+          expect(settled.taskOutcome).toBeNull();
+          const owner = new BaselineAnalysisExecutionOwner({ ledger: second.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+          try {
+            const ledger = second.executionLedgerForRun(runRecordId);
+            ledger.requestCancel(bookId, settled.taskIntent!.taskIntentId);
+            owner.cancelRun(runRecordId, ledger);
+            await owner.whenIdle();
+          } finally { await owner.dispose(); }
         }
         // The latest settled 初评 is still the one AI7 drafted from, and 重新初评 is offered at once.
         const initial = second.inspectEvaluation(bookId, null).initial;

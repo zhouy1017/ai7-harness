@@ -78,6 +78,25 @@ function flushJournalEditInput(insertText: string): InputOf<'flushJournalEdit'> 
 }
 
 describe('decodeRequest accepts well-formed frames', () => {
+  it('routes controls, edits and redo for every planned kind with bounded identities', () => {
+    for (const kind of ['review-run', 'writing', 'initial-evaluation', 'readers-report', 'evaluation-rewrite'] as const) {
+      const target = { bookId: randomUUID(), kind, ref: randomUUID() };
+      for (const action of ['pause', 'resume', 'cancel'] as const) {
+        const request = { id: randomUUID(), op: 'controlTaskRun', input: { ...target, action } } satisfies ServiceRequest;
+        expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
+        expect(() => decodeRequest(frameOf({ ...request, input: { ...request.input, action: 'rewind' } }))).toThrow(ProtocolError);
+      }
+      const edit = { id: randomUUID(), op: 'editTaskPlan', input: { ...target, planEnvelopeDigest: 'a'.repeat(64),
+        removedSteps: [], disallowedAdaptations: ['safe-retry'] } } satisfies ServiceRequest;
+      const redo = { id: randomUUID(), op: 'redoTaskPlan', input: target } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(edit))).toEqual(edit);
+      expect(decodeRequest(acceptedFrameOf(redo))).toEqual(redo);
+      expect(() => decodeRequest(frameOf({ ...redo, input: { ...target, kind: 'fixed-task' } }))).toThrow(ProtocolError);
+    }
+    const quick = { id: randomUUID(), op: 'quickStartReviewRun', input: { bookId: randomUUID(), reviewRunId: randomUUID(),
+      planEnvelopeDigest: 'b'.repeat(64), ruleVersionId: randomUUID() } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(quick))).toEqual(quick);
+  });
   it('accepts an operation that takes no input', () => {
     const request = { id: randomUUID(), op: 'ready', input: {} } satisfies ServiceRequest;
     expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);

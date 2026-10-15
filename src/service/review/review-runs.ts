@@ -1342,7 +1342,9 @@ export class ReviewRunStore {
     requireReview(row !== undefined, 'REVIEW_RUN_NOT_FOUND', '这次审阅不存在。');
     const snapshot = this.#snapshotOf(row);
     // An editor's plan revision belongs to the same category Task. Historical approvals retain their exact digests.
-    if (this.#authorizationOf(reviewRunId) !== null) return snapshot;
+    const authorized = this.#authorizationOf(reviewRunId);
+    if (authorized !== null) return { ...snapshot, categories: snapshot.categories.map((category) =>
+      this.#withPlanDigest(category, authorized.approvals.get(category.categoryId) ?? category.task?.planEnvelopeDigest ?? '')) };
     const newest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(snapshot.bookId) as SqlRow;
     if (text(newest.review_run_id) !== reviewRunId) return snapshot;
     return { ...snapshot, categories: snapshot.categories.map((category) => {
@@ -1350,8 +1352,21 @@ export class ReviewRunStore {
       const version = this.#db.prepare(`SELECT v.plan_envelope_sha256 FROM analysis_plan_versions v
         JOIN analysis_plan_revisions r ON r.plan_revision_id = v.plan_revision_id
         WHERE v.task_intent_id = ? AND r.trigger_kind = 'plan-edit' ORDER BY v.ordinal DESC LIMIT 1`).get(category.task.taskIntentId) as SqlRow | undefined;
-      return version === undefined ? category : { ...category, task: { ...category.task, planEnvelopeDigest: text(version.plan_envelope_sha256) } };
+      return version === undefined ? category : this.#withPlanDigest(category, text(version.plan_envelope_sha256));
     }) };
+  }
+
+  #withPlanDigest(category: SnapshotCategory, digest: string): SnapshotCategory {
+    const task = category.task;
+    if (task === null || task.planEnvelopeDigest === digest) return category;
+    const frozen = this.#categoryLedger(category).frozenPlan(task.taskIntentId, digest);
+    const provider = frozen.components['provider-resolution-plan'];
+    requireReview(isRecord(provider), 'REVIEW_RECORD_INVALID', '审阅类别的模型服务计划缺失。');
+    const ceiling = provider.runBudgetCeiling;
+    requireReview(ceiling === 'unset' || (isRecord(ceiling) && typeof ceiling.maxTotalTokens === 'number'),
+      'REVIEW_RECORD_INVALID', '审阅类别的预算上限无效。');
+    return { ...category, task: { ...task, planEnvelopeDigest: digest, plan: { ...task.plan,
+      budgetCeilingLabel: ceiling === 'unset' ? '未设置任务预算上限' : `任务运行预算上限：${ceiling.maxTotalTokens} tokens` } } };
   }
 
   /**
@@ -2127,8 +2142,8 @@ export class ReviewRunStore {
   /**
    * Startup reconciliation of the review-category kinds (Issue #657): a category Run a stopped service left admitted,
    * executing or pausing has nothing running it. Unsettled, it reads as under way for good — the category's next Task is
-   * refused, and a page may poll — until the editor happens on 继续审阅. Each kind's ledger settles it as it settles every
-   * kind with no 续行: `interrupted` with its outcome. A category Run left `authorized` sent nothing and stays as it is:
+   * refused, and a page may poll — until the editor happens on 继续审阅. Each kind's ledger keeps its
+   * continuation point for explicit 续行, without forming a terminal outcome. A category Run left `authorized` sent nothing and stays as it is:
    * its Review Run owns it, and 继续审阅 — the editor's own choice — dispatches it (ADR 0034; Issue #657 review). One
    * no Review Run owns is blocked before dispatch with why.
    *
@@ -3359,6 +3374,7 @@ export class ReviewRunStore {
 
   /** A Run's categories and its own state, from the records alone: everything `#runView` reads but the findings. */
   #runStateView(snapshot: RunSnapshot): Omit<RunView, 'findings' | 'historicallyAffected'> {
+    snapshot = this.#run(snapshot.reviewRunId);
     const authorization = this.#authorizationOf(snapshot.reviewRunId);
     const driving = this.#driving.has(snapshot.reviewRunId);
     const stop = this.#stoppedFor(snapshot.reviewRunId);

@@ -5762,8 +5762,9 @@ export class EditorialStore {
         const projection = this.#analysisCall(() => task.ledger.inspect(input.bookId));
         return projection.taskIntent?.taskIntentId === task.taskIntentId && runIsActive(projection.run?.state ?? null);
       });
-      requireStore(active !== undefined, 'TASK_CONTROL_STALE', '这次审阅没有可控制的类别运行。');
-      return active.ledger;
+      const controlled = active ?? tasks.find((task) => task.ledger.inspect(input.bookId).run?.state === 'cancelled');
+      requireStore(controlled !== undefined, 'TASK_CONTROL_STALE', '这次审阅没有可控制的类别运行。');
+      return controlled.ledger;
     }
     return this.#currentLedgerOf(input.kind, input.bookId, input.ref);
   }
@@ -5786,7 +5787,8 @@ export class EditorialStore {
     if (input.kind === 'review-run') return { kind: input.kind, ...this.#reviewCall(() => this.#reviewRuns.redoRequest(input.bookId, input.ref)) };
     const ledger = this.taskRunLedger(input);
     const projection = this.#analysisCall(() => ledger.inspect(input.bookId));
-    requireStore(projection.taskIntent?.taskIntentId === input.ref && projection.run?.state === 'cancelled' &&
+    requireStore(projection.taskIntent?.taskIntentId === input.ref && projection.run !== null &&
+      (projection.run.state === 'cancelled' || (projection.run.state === 'interrupted' && projection.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached')) &&
       projection.run.transitions.some((entry) => entry.state === 'executing'), 'ANALYSIS_REDO_STALE', '只有开始后取消的运行可以改计划重做。');
     const redoOf = projection.run.runRecordId;
     const materialIds = ledger.definition.materialReferences?.sources.map((source) => source.materialId) ?? [];
@@ -5903,22 +5905,13 @@ export class EditorialStore {
     }
   }
 
-  /**
-   * Startup reconciliation of the evaluation kind's ledger (Issue #429 review, P1): a 初评 left admitted or executing has nothing
-   * running it and cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before
-   * dispatch with why. Either way 评估 offers 重新初评 at once instead of reading a Run under way for good.
-   */
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedInitialEvaluationRuns(): { settled: number } {
     this.#assertAvailable();
     return { settled: this.#analysisCall(() => this.#initialEvaluation.reconcileStoppedRuns()).settled };
   }
 
-  /**
-   * Startup reconciliation of the factual kind's ledger (Issue #657): its Runs — 事实核查's own, and a Review Run's 事实核查
-   * category — cannot resume either, so one left admitted, executing or pausing ends 已中断 with its outcome, and one left
-   * waiting for a place is blocked before dispatch with why. The Book can then check facts again at once. A Review Run's
-   * 事实核查 left authorized sent nothing and is left for 继续审阅 to dispatch, as every category of a Review Run is.
-   */
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedFactualReviewRuns(): { settled: number } {
     this.#assertAvailable();
     return {
@@ -5927,11 +5920,7 @@ export class EditorialStore {
     };
   }
 
-  /**
-   * Startup reconciliation of the review categories' ledgers (Issue #657), as the factual kind's: a category Run a stopped
-   * service left under way is settled now, not only when the editor happens on 继续审阅, which then records what it came
-   * to; one left authorized is 继续审阅's to dispatch.
-   */
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedReviewCategoryRuns(): { settled: number } {
     this.#assertAvailable();
     return { settled: this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns())) };
@@ -6494,10 +6483,16 @@ export class EditorialStore {
 
   async quickStartReviewRun(input: { bookId: string; reviewRunId: string; planEnvelopeDigest: string; ruleVersionId: string },
     runtime: { credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
-    progress?: ProgressReader): Promise<{ outcome: 'started' | 'fell-back'; reasons: string[] }> {
+    progress?: ProgressReader): Promise<{ outcome: 'started' | 'fell-back'; reasons: string[]; dispatch: boolean }> {
     const facts = this.#reviewRuleFacts(input.bookId, input.reviewRunId);
+    const startedBy = this.#reviewCall(() => this.#reviewRuns.defaultRuleVersion(input.reviewRunId));
+    if (startedBy !== null) {
+      requireStore(startedBy === input.ruleVersionId && facts.digest === input.planEnvelopeDigest,
+        'ANALYSIS_AUTHORIZATION_STALE', '这次审阅已经按另一份计划或规则开始。');
+      return { outcome: 'started', reasons: [], dispatch: false };
+    }
     const rule = this.#ruleCall(() => this.#rules.activeFor(input.bookId, facts.pattern));
-    const fallBack = (reason: string) => ({ outcome: 'fell-back' as const, reasons: [reason] });
+    const fallBack = (reason: string) => ({ outcome: 'fell-back' as const, reasons: [reason], dispatch: false });
     if (rule === null || rule.version.ruleVersionId !== input.ruleVersionId) return fallBack(quickStartNoRuleReason(facts.pattern));
     if (!facts.allowed) return fallBack('当前模型处理规则未允许审阅快速开始；请先看计划。');
     if (facts.digest !== input.planEnvelopeDigest || facts.binding === null ||
@@ -6514,7 +6509,7 @@ export class EditorialStore {
     const active = this.#ruleCall(() => this.#rules.activeFor(input.bookId, now.pattern));
     if (active?.version.ruleVersionId !== input.ruleVersionId || now.digest !== facts.digest || !now.allowed) return fallBack(QUICK_START_RULE_CHANGED);
     this.#reviewCall(() => this.#reviewRuns.recordAuthorization(input.bookId, input.reviewRunId, plan.start.categoryDigests, false, 'now', input.ruleVersionId));
-    return { outcome: 'started', reasons: [] };
+    return { outcome: 'started', reasons: [], dispatch: true };
   }
 
   /** 停用 (S75 D7): the rule stays on record with every version, and quick start stops using it. */
@@ -9515,11 +9510,7 @@ export class EditorialStore {
     return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
   }
 
-  /**
-   * Startup reconciliation of the reader's report kind (as 初评's): a draft left admitted or executing has nothing running it and
-   * cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before dispatch with
-   * why. The kind's Runs are reconciled by kind, so any of its ledgers does it.
-   */
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedReadersReportRuns(): { settled: number } {
     this.#assertAvailable();
     const any = this.#readersReportCall(() => this.#readersReports.anyTask());
@@ -10130,11 +10121,7 @@ export class EditorialStore {
     return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
   }
 
-  /**
-   * Startup reconciliation of the writing kind (as 审稿意见's): a draft left admitted or executing has nothing running it and
-   * cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before dispatch with
-   * why. The kind's Runs are reconciled by kind, so any of its ledgers does it.
-   */
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedWritingRuns(): { settled: number } {
     this.#assertAvailable();
     const any = this.#writingCall(() => this.#writingTasks.anyTask());
@@ -10801,11 +10788,7 @@ export class EditorialStore {
     return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger, recordId: this.#latestEvaluationRewrite(bookId)!.task.recordId };
   }
 
-  /**
-   * Startup reconciliation of the rewrite kind (as 初评's and 审稿意见's): a rewrite left admitted or executing has nothing running it
-   * and cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before dispatch with
-   * why. The kind's Runs are reconciled by kind, so any of its ledgers does it.
-   */
+  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedEvaluationRewriteRuns(): { settled: number } {
     this.#assertAvailable();
     const any = this.#evaluationRewriteCall(() => this.#evaluationRewrites.anyTask());
