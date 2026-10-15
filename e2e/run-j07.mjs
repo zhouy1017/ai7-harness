@@ -1232,7 +1232,8 @@ async function main() {
         JSON.stringify(pills) === ${JSON.stringify(JSON.stringify(EXPORT_ROWS.map((row) => row.includes(':excluded:') ? '○ 本次不含' : '✓ 完整保留')))} &&
         fidelity.querySelector('h5')?.textContent === '导出保真审阅' && fidelity.dataset.exportDegraded === 'false' && fidelity.dataset.exportRestoration === 'from-original' &&
         fidelity.querySelector('.export-restoration-line')?.textContent === ${JSON.stringify(EXPORT_RESTORATION_LINE)} &&
-        fidelity.querySelector('.export-retention-summary')?.textContent.startsWith('本次 DOCX：原部件保留：') &&
+        fidelity.querySelector('.export-retention-summary')?.textContent.startsWith('本次 DOCX：') &&
+        fidelity.querySelector('.export-retention-summary')?.textContent.includes('本次未包含：备注') &&
         fidelity.querySelector('.export-absent-line')?.textContent === ${JSON.stringify(EXPORT_ABSENT_LINE)} &&
         fidelity.querySelector('li[data-export-fidelity="editor-notes"] .export-fidelity-detail')?.textContent === ${JSON.stringify(EXPORT_NOTE_EXCLUDED)} &&
         fidelity.querySelector('.export-degraded-note') === null && fidelity.querySelector('.export-fidelity-positions') === null;

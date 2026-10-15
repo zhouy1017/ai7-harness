@@ -10,6 +10,7 @@ import {
   DocxExportError,
   EDITOR_AUTHOR_LABEL,
   EDITOR_NOTE_AUTHOR_LABEL,
+  exportRetentionDisclosure,
   renderDocxExport,
   type DocxExportBlock,
   type DocxExportInput,
@@ -396,7 +397,69 @@ describe('DOCX export restores the original', () => {
     expect(reread.blocks.map((block) => block.digest)).toEqual(changed.map((block) => block.digest));
     // The regenerated second paragraph kept its first run's properties — none — so no bold remains.
     expect(partOf(result.bytes!, 'word/document.xml')!.includes('<w:b/>')).toBe(false);
-    expect(reread.parsed.textBoxes).toHaveLength(1);
+    expect(reread.parsed.textBoxes.length).toBe(1);
+  });
+
+  it('writes a rebuilt paragraph’s picture and text box at its end, and names the paragraph whose anchors moved (Issue #814)', async () => {
+    const box = await runXml({ span: { block: 11 } });
+    // A picture and a box ahead of the paragraph's words, the way Word anchors a floating figure; the note reference
+    // already closes the paragraph, so writing it at the end moves nothing.
+    const ahead = `<w:r><w:drawing><wp:inline ${WP}><a:graphic ${A}><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+      `<pic:pic ${PIC}/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>` +
+      `<w:r><w:pict><v:shape ${V}><v:textbox><w:txbxContent><w:p>${box}</w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r>`;
+    const path = join(sandbox, 'anchors.docx');
+    const original = await composeSource(path, { body: [
+      { runs: [{ span: { block: 3 } }] },
+      { runs: [{ span: { block: 13, from: 0, to: 6 } }, { span: { block: 13, from: 6 }, bold: true }], before: ahead, footnote: true },
+    ] });
+    const { blocks } = await parse(path);
+    const input: DocxExportInput = {
+      title: '锚点', marks: [], options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
+      blocks: exportBlocks(blocks).map((block, index) => index === 1 ? edited(block, `${block.text}（改）`) : block),
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+    };
+    const result = renderDocxExport(input, { emit: true });
+    expect(fidelityOf(result.fidelity).filter(([key]) => ['notes', 'images-captions', 'text-boxes'].includes(key))).toEqual([
+      ['notes', 'preserved', 1, []],
+      ['images-captions', 'degraded', 1, [2]],
+      ['text-boxes', 'degraded', 1, [2]],
+    ]);
+    expect(result.degraded).toBe(true);
+    // Both are written once, after every word of their paragraph, the box with its own content as it was.
+    const document = partOf(result.bytes!, 'word/document.xml')!;
+    const lastWords = document.lastIndexOf('（改）');
+    expect([document.split('<w:drawing>').length, document.split('<w:txbxContent>').length]).toEqual([2, 2]);
+    expect(lastWords >= 0 && lastWords < document.indexOf('<w:drawing>') && document.indexOf('<w:drawing>') < document.indexOf('<w:txbxContent>')).toBe(true);
+    const { retentionSummary } = exportRetentionDisclosure(result.fidelity);
+    expect(retentionSummary).toContain('正文 1 段从原文件恢复，1 段按稿件文字重新写出，重建段落中的图片、文本框移到该段末尾；');
+    const reread = await parseBytes(result.bytes!);
+    expect(reread.blocks.map((block) => block.digest)).toEqual(input.blocks.map((block) => block.digest));
+    expect(reread.parsed.textBoxes.length).toBe(1);
+
+    // Unedited, the same paragraph is restored where it stood: nothing moved, nothing is named.
+    const restored = renderDocxExport({ ...input, blocks: exportBlocks(blocks) }, { emit: false });
+    expect(fidelityOf(restored.fidelity).filter(([key]) => ['notes', 'images-captions', 'text-boxes'].includes(key))).toEqual([
+      ['notes', 'preserved', 1, []],
+      ['images-captions', 'preserved', 1, []],
+      ['text-boxes', 'preserved', 1, []],
+    ]);
+    expect(exportRetentionDisclosure(restored.fidelity).retentionSummary).not.toContain('移到');
+  });
+
+  it('copies a retained part whose words merely spell comment markup byte for byte, and names it so (Issue #814)', async () => {
+    const path = join(sandbox, 'header-words.docx');
+    const composed = unzipSync(await composeSource(path, { body: [{ runs: [{ span: { block: 3 } }] }], header: { block: 20 } }));
+    // A header written differently from AI7's own XML, whose words happen to read like a comment element's name.
+    composed['word/header1.xml'] = strToU8(`<?xml version='1.0' encoding='UTF-8'?>\n<w:hdr xmlns:w="${W}"><w:p><w:r><w:t>commentReference</w:t></w:r></w:p></w:hdr>`);
+    const original = zipSync(composed, { level: 6, mtime: fixedArchiveTime() });
+    await writeFile(path, original);
+    const { blocks } = await parse(path);
+    const result = renderDocxExport({
+      title: '页眉', marks: [], options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS }, blocks: exportBlocks(blocks),
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+    }, { emit: true });
+    expect(digest(unzipSync(result.bytes!)['word/header1.xml']!)).toBe(digest(composed['word/header1.xml']!));
+    expect(exportRetentionDisclosure(result.fidelity).retention?.preserved).toContain('页眉页脚（1 个，与原文件逐字节相同）');
   });
 
   it('strips the file\'s own revisions and comments to the reading the import took', async () => {
@@ -680,6 +743,10 @@ describe('DOCX export of text boxes and fresh builds', () => {
       '[Content_Types].xml', '_rels/.rels', 'docProps/core.xml', 'word/document.xml', 'word/_rels/document.xml.rels', 'word/styles.xml',
       'word/comments.xml', 'word/commentsExtended.xml',
     ]);
+    // Issue #814: the disclosure claims no retained part, and names each class it could not restore.
+    expect(exportRetentionDisclosure(result.fidelity).retentionSummary).toBe(
+      `本次 DOCX：没有与原文件逐字节相同的部分；正文 ${input.blocks.length} 段全部按稿件文字重新生成；` +
+      '未能原样写出：行内样式、脚注与尾注、表格、图片与图注、分节、页眉与页脚、文本框、域。数量、原因与段落位置见导出保真审阅。');
   });
 
   it('says why a mapped original is written fresh when AI7 cannot restore it in place, apart from having no mapping', async () => {
@@ -948,5 +1015,11 @@ describe('PDF and the Markdown 备用格式 lay the version out from its words',
     }, { emit: false });
     expect(fidelityOf(plain.fidelity)).toEqual([['annotations', 'excluded', 4, []], ['change-suggestions', 'excluded', 4, []], ['editor-notes', 'excluded', 1, []]]);
     expect(plain.degraded).toBe(false);
+
+    // Issue #814: only the DOCX writer states what it retained; another format, like a record written before the
+    // disclosure existed, projects none.
+    for (const rows of [pdf.fidelity, markdown.fidelity, plain.fidelity, renderDocxExport(input, { emit: false }).fidelity.map(({ retention: _, ...row }) => row)]) {
+      expect(exportRetentionDisclosure(rows)).toEqual({ retention: null, retentionSummary: null });
+    }
   });
 });

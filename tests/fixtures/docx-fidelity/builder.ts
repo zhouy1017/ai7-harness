@@ -20,13 +20,15 @@ export async function buildCorpusSource(source: CorpusSource): Promise<Uint8Arra
     ? await Promise.all([8, 10, 12, 14, 15, 16, 17].map(async (block) => graphemesOf(await sourceSpanText(ADMITTED_BASELINE_DOCX, { block })).slice(0, 18).join('')))
     : ['AABBCCDDEEFF', 'FIELD01', 'CELL01', 'BEFORE01', 'AFTER01', 'BOX01', 'NOTE01'];
   const split = graphemesOf(words[0]!);
-  const rich = run(split.slice(0, 3).join(''), '<w:b/><w:rFonts w:ascii="Arial"/><w:rPrChange w:id="30" w:author="示例作者" w:date="2026-10-15T00:00:00Z"><w:rPr><w:i/></w:rPr></w:rPrChange>') +
-    run(split.slice(3, 6).join(''), '<w:i/><w:color w:val="336699"/>') +
-    `<w:hyperlink r:id="rLink">${run(split.slice(6).join(''), '<w:u w:val="single"/><w:vertAlign w:val="superscript"/>')}</w:hyperlink>`;
   const drawing = '<w:r><w:drawing><wp:inline><wp:extent cx="9525" cy="9525"/><wp:docPr id="1" name="pixel"/>' +
     '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic>' +
     '<pic:blipFill><a:blip r:embed="rImage"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>';
-  const box = `<w:r><w:pict><v:shape id="box1"><v:textbox><w:txbxContent><w:p>${run(words[5]!)}</w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r>`;
+  // The picture stands between the first two runs, so a rebuilt paragraph moves it to its end; the box and the note
+  // references already close the paragraph, so writing them at its end moves nothing.
+  const rich = run(split.slice(0, 3).join(''), '<w:b/><w:rFonts w:ascii="Arial"/><w:rPrChange w:id="30" w:author="示例作者" w:date="2026-10-15T00:00:00Z"><w:rPr><w:i/></w:rPr></w:rPrChange>') +
+    drawing + run(split.slice(3, 6).join(''), '<w:i/><w:color w:val="336699"/>') +
+    `<w:hyperlink r:id="rLink">${run(split.slice(6).join(''), '<w:u w:val="single"/><w:vertAlign w:val="superscript"/>')}</w:hyperlink>`;
+  const box =`<w:r><w:pict><v:shape id="box1"><v:textbox><w:txbxContent><w:p>${run(words[5]!)}</w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r>`;
   const properties = '<w:pPr><w:pStyle w:val="Normal"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>';
   const field = `<w:p><w:fldSimple w:instr=" DATE ">${run(words[1]!)}</w:fldSimple>` +
     '<w:r><w:fldChar w:fldCharType="begin"/><w:instrText> PAGE </w:instrText><w:fldChar w:fldCharType="separate"/></w:r>' +
@@ -52,7 +54,7 @@ export async function buildCorpusSource(source: CorpusSource): Promise<Uint8Arra
   add('_rels/.rels', `<Relationships xmlns="${PR}"><Relationship Id="rDoc" Type="${R}/officeDocument" Target="word/document.xml"/></Relationships>`);
   add('word/_rels/document.xml.rels', `<Relationships xmlns="${PR}">${relationships}<Relationship Id="rLink" Type="${R}/hyperlink" Target="https://example.org/" TargetMode="External"/></Relationships>`);
   add('word/document.xml', `<w:document xmlns:w="${W}" xmlns:r="${R}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:v="urn:schemas-microsoft-com:vml"><w:body>` +
-    `<w:p>${properties}${rich}${drawing}${box}<w:r><w:footnoteReference w:id="1"/><w:endnoteReference w:id="1"/></w:r></w:p>` +
+    `<w:p>${properties}${rich}${box}<w:r><w:footnoteReference w:id="1"/><w:endnoteReference w:id="1"/></w:r></w:p>` +
     field + `<w:tbl><w:tblPr><w:tblW w:w="4000" w:type="dxa"/></w:tblPr><w:tblGrid><w:gridCol w:w="4000"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:w="4000" w:type="dxa"/></w:tcPr><w:p>${run(words[2]!)}</w:p></w:tc></w:tr></w:tbl>` +
     revised + '<w:sectPr><w:headerReference w:type="default" r:id="rHeader"/><w:footerReference w:type="default" r:id="rFooter"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:bottom="1440"/></w:sectPr></w:body></w:document>');
   add('word/styles.xml', `<w:styles xmlns:w="${W}"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>`);

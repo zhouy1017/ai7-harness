@@ -168,8 +168,9 @@ describe('the words of 发稿', () => {
         byteLength: null,
         recordedAt: time,
         revealAvailable: false,
-        retention: { preserved: ['字'.repeat(300)], rebuilt: ['字'.repeat(300)], excluded: ['字'.repeat(300)] },
-        retentionSummary: '字'.repeat(200),
+        // Issue #814: the disclosure at its widest — every retained part, every class rebuilt and every reason.
+        retention: { preserved: ['字'.repeat(150)], rebuilt: ['字'.repeat(450)], excluded: ['字'.repeat(350)] },
+        retentionSummary: '字'.repeat(220),
         technical: { approvalId: identity, receiptId: identity, receiptDigest: digest, fileSha256: null, failureCode: 'EXPORT_COMMIT_UNCERTAIN' },
       })),
     };
@@ -309,11 +310,13 @@ describe('the words of 发稿', () => {
     ];
     const file = (key: string, rows: ReadonlyArray<ExportFidelityRowProjection['key']>): BookDeliveryPackageExportReviewFileProjection => ({
       key, label: wide(120), fileName: wide(120), format: 'docx', restoration: 'from-original', restorationLine: words(100), formatLine: words(100),
-      fidelity: rows.map(row).map((entry) => key.startsWith('document:')
-        ? { ...entry, retention: { preserved: [words(25)], rebuilt: [words(50)], excluded: [words(60)] } } : entry), degraded: true,
+      // Issue #814: a manuscript DOCX file's rows each freeze their facts; the first also the parts, the body and the summary line.
+      fidelity: rows.map(row).map((entry, index) => !key.startsWith('document:') ? entry : index === 0
+        ? { ...entry, retention: { preserved: [words(150)], rebuilt: [words(250)], excluded: [words(60)], summary: words(220) } }
+        : { ...entry, retention: { preserved: [], rebuilt: [words(30)], excluded: [words(60)] } }), degraded: true,
       // Only manuscript DOCX files carry the new disclosure; report formats keep null.
-      retention: key.startsWith('document:') ? { preserved: [words(300)], rebuilt: [words(300)], excluded: [words(300)] } : null,
-      retentionSummary: key.startsWith('document:') ? words(200) : null,
+      retention: key.startsWith('document:') ? { preserved: [words(150)], rebuilt: [words(450)], excluded: [words(350)] } : null,
+      retentionSummary: key.startsWith('document:') ? words(220) : null,
     });
     // The 发稿版本 and the five house types carry the manuscript's classes; every other listed file is a report's four.
     const files = [

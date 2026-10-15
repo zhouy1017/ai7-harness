@@ -51,9 +51,148 @@
     }
   },
   "exclusions": {
-    "run-properties": "Edited paragraphs retain paragraph and first-run properties; other run formatting and rebuilt hyperlinks have no text-only mapping. Follow-up #874.",
+    "run-properties": "Edited paragraphs, and mark-only rebuilds whose runs no longer map exactly to the normalized text, retain paragraph and first-run properties; other run formatting and rebuilt hyperlinks have no text-only mapping. Follow-up #874.",
     "fields": "Rebuilt computed fields become their displayed text under ADR 0086/S64, with no update instruction. Follow-up #874.",
     "hyperlinks": "Rebuilt paragraphs retain hyperlink text but lose clickable wrappers. Follow-up #874.",
-    "unrepresented-revisions": "Original formatting revisions are rejected; only imported/editorial marks are written as changes. ADR 0086/S64 and follow-up #874."
+    "unrepresented-revisions": "Original formatting revisions and other revisions AI7 did not import as marks are not written: their revision markup is dropped, the run keeps its current formatting and the text keeps the rejected reading the import took (ADR 0086/S64). Follow-up #874."
+  },
+  "disclosures": {
+    "unchanged": {
+      "summary": "本次 DOCX：样式表、编号格式、脚注注文、尾注注文、页眉页脚、图片等媒体文件与原文件逐字节相同；正文 3 段从原文件恢复，1 段按稿件文字重新写出；未能原样写出：原文件中的修订。数量、原因与段落位置见导出保真审阅。",
+      "preserved": [
+        "样式表（1 个，与原文件逐字节相同）",
+        "编号格式（1 个，与原文件逐字节相同）",
+        "脚注注文（1 个，与原文件逐字节相同）",
+        "尾注注文（1 个，与原文件逐字节相同）",
+        "页眉页脚（2 个，与原文件逐字节相同）",
+        "图片等媒体文件（1 个，与原文件逐字节相同）"
+      ],
+      "rebuilt": [
+        "正文：3 段从原文件恢复，1 段按稿件文字重新写出",
+        "行内样式（4 项）",
+        "批注（1 项）",
+        "修改建议（1 项）",
+        "脚注与尾注（2 项）",
+        "表格（1 项）",
+        "图片与图注（1 项）",
+        "分节（含页面设置）（1 项）",
+        "文本框（1 项）",
+        "域（目录等）（2 项）"
+      ],
+      "excluded": [
+        "原文件中的修订：1 处未转为稿件标记，修订记号不写出"
+      ],
+      "anchors": [
+        [
+          "notes",
+          "preserved",
+          []
+        ],
+        [
+          "images-captions",
+          "preserved",
+          []
+        ],
+        [
+          "text-boxes",
+          "preserved",
+          []
+        ]
+      ]
+    },
+    "edited": {
+      "summary": "本次 DOCX：样式表、编号格式、脚注注文、尾注注文、页眉页脚、图片等媒体文件与原文件逐字节相同；正文 4 段都按稿件文字重新写出，重建段落中的图片移到该段末尾；未能原样写出：行内样式、域、原文件中的修订。数量、原因与段落位置见导出保真审阅。",
+      "preserved": [
+        "样式表（1 个，与原文件逐字节相同）",
+        "编号格式（1 个，与原文件逐字节相同）",
+        "脚注注文（1 个，与原文件逐字节相同）",
+        "尾注注文（1 个，与原文件逐字节相同）",
+        "页眉页脚（2 个，与原文件逐字节相同）",
+        "图片等媒体文件（1 个，与原文件逐字节相同）"
+      ],
+      "rebuilt": [
+        "正文：4 段都按稿件文字重新写出",
+        "行内样式（4 项）",
+        "批注（1 项）",
+        "修改建议（1 项）",
+        "脚注与尾注（2 项）",
+        "表格（1 项）",
+        "图片与图注：1 项，其中 1 项随重建段落移到该段末尾",
+        "分节（含页面设置）（1 项）",
+        "文本框（1 项）",
+        "域（目录等）（2 项）"
+      ],
+      "excluded": [
+        "行内样式：改过或带标记的段落中 3 处未能恢复，超链接只保留文字",
+        "域（目录等）：改过或带标记的段落中 2 个只写出当前显示的文字，不再更新",
+        "原文件中的修订：1 处未转为稿件标记，修订记号不写出"
+      ],
+      "anchors": [
+        [
+          "notes",
+          "preserved",
+          []
+        ],
+        [
+          "images-captions",
+          "degraded",
+          [
+            1
+          ]
+        ],
+        [
+          "text-boxes",
+          "preserved",
+          []
+        ]
+      ]
+    },
+    "mark-exported": {
+      "summary": "本次 DOCX：样式表、编号格式、脚注注文、尾注注文、页眉页脚、图片等媒体文件与原文件逐字节相同；正文 4 段都按稿件文字重新写出，重建段落中的图片移到该段末尾；未能原样写出：行内样式、域、原文件中的修订。数量、原因与段落位置见导出保真审阅。",
+      "preserved": [
+        "样式表（1 个，与原文件逐字节相同）",
+        "编号格式（1 个，与原文件逐字节相同）",
+        "脚注注文（1 个，与原文件逐字节相同）",
+        "尾注注文（1 个，与原文件逐字节相同）",
+        "页眉页脚（2 个，与原文件逐字节相同）",
+        "图片等媒体文件（1 个，与原文件逐字节相同）"
+      ],
+      "rebuilt": [
+        "正文：4 段都按稿件文字重新写出",
+        "行内样式（4 项）",
+        "批注（4 项）",
+        "修改建议（1 项）",
+        "脚注与尾注（2 项）",
+        "表格（1 项）",
+        "图片与图注：1 项，其中 1 项随重建段落移到该段末尾",
+        "分节（含页面设置）（1 项）",
+        "文本框（1 项）",
+        "域（目录等）（2 项）"
+      ],
+      "excluded": [
+        "行内样式：改过或带标记的段落中 1 处未能恢复，超链接只保留文字",
+        "域（目录等）：改过或带标记的段落中 2 个只写出当前显示的文字，不再更新",
+        "原文件中的修订：1 处未转为稿件标记，修订记号不写出"
+      ],
+      "anchors": [
+        [
+          "notes",
+          "preserved",
+          []
+        ],
+        [
+          "images-captions",
+          "degraded",
+          [
+            1
+          ]
+        ],
+        [
+          "text-boxes",
+          "preserved",
+          []
+        ]
+      ]
+    }
   }
 }

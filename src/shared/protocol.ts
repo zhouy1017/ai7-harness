@@ -10946,8 +10946,11 @@ export interface ExportFidelityRowProjection {
   /** The 1-based manuscript positions where the class is not written as it was, in order. */
   positions: ReadonlyArray<number>;
   positionsTruncated: boolean;
-  /** Actual DOCX writer facts, frozen in the existing fidelity record; absent on older exports. */
-  retention?: ExportRetentionProjection;
+  /**
+   * Actual DOCX writer facts, frozen in the existing fidelity record; absent on older exports. The first row also
+   * freezes the export's summary line, so a receipt reads the words the review showed.
+   */
+  retention?: ExportRetentionProjection & { summary?: string };
 }
 
 export interface ExportRetentionProjection {
