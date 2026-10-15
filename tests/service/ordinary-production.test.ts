@@ -298,7 +298,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(prepared.planEnvelope).toMatchObject({ providerStatus: 'remote-eligible-ordinary-production', dispatchAllowed: true });
     expect(prepared.providerResolutionPlan).toMatchObject({
       remoteBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-flash', credentialSlot: 'deepseek-api-key', credentialReference: reference,
-        providerProcessing: { operationalScope: 'ordinary-production', version: 'v13' } },
+        providerProcessing: { operationalScope: 'ordinary-production', version: 'v15' } },
       executionRoute: { kind: 'deepseek-open-platform', model: 'deepseek-flash', endpoint: OFFICIAL.endpoint },
       outboundDataCategory: 'unpublished-excerpts',
       runBudgetCeiling: 'unset',
@@ -315,8 +315,8 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)).not.toContain(reference);
     const binding = store.baselineAnalysisLedger.executionBindingOf(settled.run!.runRecordId)!;
     expect(binding.binding).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', outboundDataCategory: 'unpublished-excerpts',
-      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v13' } });
-    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v13' });
+      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v15' } });
+    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v15' });
   });
 
   it('restarts beside an exact seeded development response, reads no cache file, and sends identical Tasks twice', async () => {

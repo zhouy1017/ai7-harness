@@ -80,6 +80,37 @@ describe('live kind admission (#429)', () => {
     expect(liveKindRule(policy, 'editorial-review/typos-and-usage', ['public-or-synthetic'])?.ruleId).toBe('developer-live-public-samplebook-reference-free-review');
   });
 
+  it('selects the enrolled-background rule only for the background origin and skips it for the foreground one (#863)', () => {
+    const categories = ['public-or-synthetic'] as const;
+    const rules = policy.providerProcessing.admittedRules;
+    const foregroundRule = rules.find((rule) => rule.ruleId === 'developer-live-public-samplebook-analysis')!;
+    const backgroundRule = rules.find((rule) => rule.ruleId === 'enrolled-background-manuscript-analysis-processing')!;
+    // Both rules list the baseline kind truthfully; the origin decides which one a lookup selects.
+    expect(foregroundRule.taskKinds).toEqual(backgroundRule.taskKinds);
+    expect(foregroundRule.backgroundOrigin).toBe(false);
+    expect(backgroundRule.backgroundOrigin).toBe(true);
+    expect(liveKindRule(policy, BASELINE_ANALYSIS_KIND, categories)).toEqual(foregroundRule);
+    expect(liveKindRule(policy, BASELINE_ANALYSIS_KIND, categories, 'foreground')).toEqual(foregroundRule);
+    expect(liveKindRule(policy, BASELINE_ANALYSIS_KIND, categories, 'background')).toEqual(backgroundRule);
+    // Still exactly one match or nothing, in either branch.
+    const withRules = (admittedRules: typeof rules): typeof policy => ({ ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules } });
+    const twiceForeground = withRules([...rules, foregroundRule]);
+    expect(liveKindRule(twiceForeground, BASELINE_ANALYSIS_KIND, categories)).toBeNull();
+    expect(liveKindRule(twiceForeground, BASELINE_ANALYSIS_KIND, categories, 'background')).toEqual(backgroundRule);
+    const twiceBackground = withRules([...rules, backgroundRule]);
+    expect(liveKindRule(twiceBackground, BASELINE_ANALYSIS_KIND, categories, 'background')).toBeNull();
+    expect(liveKindRule(twiceBackground, BASELINE_ANALYSIS_KIND, categories)).toEqual(foregroundRule);
+    const withoutBackground = withRules(rules.filter((rule) => !rule.backgroundOrigin));
+    expect(liveKindRule(withoutBackground, BASELINE_ANALYSIS_KIND, categories, 'background')).toBeNull();
+    expect(liveKindRule(withoutBackground, BASELINE_ANALYSIS_KIND, categories)).toEqual(foregroundRule);
+    // A projection that lacks the field (a predecessor's) is foreground; no foreground kind has a background rule.
+    const unflagged = withRules(rules.map((rule) => { const { backgroundOrigin: _origin, ...rest } = rule; return rest as typeof rule; }));
+    expect(liveKindRule(unflagged, BASELINE_ANALYSIS_KIND, categories)).toBeNull();
+    expect(liveKindRule(unflagged, BASELINE_ANALYSIS_KIND, categories, 'background')).toBeNull();
+    expect(liveKindRule(policy, 'editorial-review/typos-and-usage', [], 'background')).toBeNull();
+    expect(liveKindRule(policy, 'writing', [], 'background')).toBeNull();
+  });
+
   it('names the categories an evaluation contract carries beside the SampleBook', () => {
     expect(liveKindContractCategories('evaluation')).toEqual([]);
     expect(liveKindContractCategories('readers-report')).toEqual(['editor-authored-evaluation-text', 'house-exemplar-excerpt']);
