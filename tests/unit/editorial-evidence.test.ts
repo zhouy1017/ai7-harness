@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parseModelFixture } from '../../src/service/provider/model-fixture.js';
 import { providerEvidenceGeneration } from '../../src/service/provider/provider-result-cache.js';
-import { clarificationPromptContractDigest } from '../../src/service/provider/clarification-contract.js';
+import { CLARIFICATION_INSTRUCTION, clarificationPromptContractDigest } from '../../src/service/provider/clarification-contract.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 
@@ -29,5 +29,15 @@ describe('the fixture loader', () => {
     expect(() => parseModelFixture({ ...recorded, entries: [withTask(synthesis, 'ab'.repeat(32))] })).toThrow('夹具条目的任务与阶段契约不一致。');
     const unitBase = unit.capture.promptContractDigest as string;
     expect(() => parseModelFixture({ ...recorded, entries: [withTask(unit, clarificationPromptContractDigest(unitBase))] })).toThrow('夹具条目的任务与阶段契约不一致。');
+  });
+});
+
+// The fixture generator's duplicate of the model-question instruction (its #812 case-family branch) agrees with the product's.
+describe('the fixture generator branch', () => {
+  it('derives the wrapped contract exactly as the product does', async () => {
+    // @ts-expect-error Plain ESM tool has no declarations.
+    const generator = await import('../../tools/generate-model-fixture.mjs') as { CLARIFICATION_INSTRUCTION: unknown; clarificationPromptContractDigest(base: string): string };
+    expect(generator.CLARIFICATION_INSTRUCTION).toEqual(CLARIFICATION_INSTRUCTION);
+    for (const base of ['3e8bb0c6'.padEnd(64, '0'), 'ab'.repeat(32)]) expect(generator.clarificationPromptContractDigest(base)).toBe(clarificationPromptContractDigest(base));
   });
 });
