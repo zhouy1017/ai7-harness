@@ -10,20 +10,22 @@ import { resolveSourceCheckoutLaunchPolicy, DEVELOPER_LIVE_POLICY_BINDING } from
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { MATERIAL_INDEX_TRIGGER_SQL } from '../../src/service/material-index.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { ownBlockIdsOf, ownBlockTextsOf, substituteBlockPlaceholders, unitContentDigest } from '../../src/service/provider/local-deterministic-adapter.js';
+import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { TASK_MATERIAL_LIVE_UNAVAILABLE } from '../../src/service/task-material-references.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { WRITING_MATERIAL_LIVE_UNAVAILABLE, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
-import { WRITING_REQUEST } from '../support/writing-task.js';
 import { withRuleFor } from '../support/policy-rules.js';
 
 // Real material import, pins, ledgers, per-step re-check, adapter and egress; the transport is socket-free.
 type Kind = 'review' | 'writing' | 'initial-evaluation' | 'readers-report';
 const kinds = ['review', 'writing', 'initial-evaluation', 'readers-report'] as const;
 const kindId = (kind: Kind) => kind === 'review' ? 'editorial-review/typos-and-usage' : kind === 'initial-evaluation' ? 'evaluation' : kind;
-const title = '合成背景资料';
+const title = 'sample1 背景摘录';
 let materialText: string;
+let materialParagraphs: string[];
 // @ts-expect-error Plain ESM tool has no declarations.
 const fixtureTool = await import('../../tools/generate-model-fixture.mjs') as {
   parseCachedRequest(body: string, contract: string): unknown;
@@ -40,6 +42,10 @@ let sent: string[];
 let atUnit: ((settled: number) => void) | null;
 let reportFixture: ResolvedModelFixture;
 let evaluationFixture: ResolvedModelFixture;
+let recorded: ResolvedModelFixture | null;
+let recordedUnits: Set<number>;
+const writingRequest = { typeId: 'promotion-article', audience: '文学作品读者', channel: '图书介绍',
+  requirements: '依据稿件与允许参考的资料起草，资料只参照、不照抄。' } as const;
 
 function bind(): void {
   const launch = { operationalScope: 'developer-live' as const, policy, live: { ...DEVELOPER_LIVE_POLICY_BINDING,
@@ -61,9 +67,10 @@ beforeEach(async () => {
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
   bind();
-  const book = await importSample1Book(store, roots.codeRoot, '合成实时参考测试');
+  const book = await importSample1Book(store, roots.codeRoot, 'sample1 · 资料参考验证');
   bookId = book.bookId;
-  materialText = store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).find((block) => block.kind === 'paragraph' && block.text.length > 40)!.text;
+  materialParagraphs = store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).filter((block) => block.kind === 'paragraph' && block.text.length > 40).slice(0, 2).map((block) => block.text);
+  materialText = materialParagraphs.join('\n\n');
   await pinEditorialWorkspaceProfileRevision2(store, bookId);
   recordMissingCredentialConnection(store, '合成参考连接');
   const path = join(roots.inputRoot, `${randomUUID()}.txt`);
@@ -78,12 +85,14 @@ beforeEach(async () => {
   const page = store.startEvaluation(bookId);
   const record = page.record!;
   store.saveEvaluation({ bookId, recordId: record.recordId, expectedEntries: record.entries, finalize: true, content: {
-    ...record.content, items: record.content.items.map((item) => ({ ...item, score: 12, notRated: null, comment: '合成定稿评语' })),
-    risks: record.content.risks.map((risk) => ({ ...risk, level: 'low', statement: '合成风险说明' })), conclusion: 'revise',
+    ...record.content, items: record.content.items.map((item) => ({ ...item, score: 12, notRated: null, comment: '本次验证使用编辑填写的定稿评分，须结合稿件复核。' })),
+    risks: record.content.risks.map((risk) => ({ ...risk, level: 'low', statement: '本次未作联网核查，风险判断待编辑复核。' })), conclusion: 'revise',
   } });
   reportFixture = await loadModelFixture(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), 'sample1-readers-report-authored');
   evaluationFixture = await loadModelFixture(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), 'sample1-evaluation-authored');
   sent = [];
+  recorded = null;
+  recordedUnits = new Set();
   atUnit = null;
   const nativeFetch: typeof fetch = async (_url, init) => {
     const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
@@ -93,7 +102,17 @@ beforeEach(async () => {
     const writing = /^写作单元 (\d+)\//u.exec(message);
     const report = /^(审稿意见|评估)(单元|综合) (\d+)\//u.exec(message);
     let text: string;
-    if (report !== null) {
+    let usage = { inputTokens: 40, outputTokens: 20 };
+    const ordinal = review !== null ? Number(review[1]) : writing !== null ? Number(writing[1]) : report?.[2] === '单元' ? Number(report[3]) : null;
+    const captured = recorded === null ? undefined : [...recorded.entries.values()].find((entry) => ordinal !== null
+      ? entry.unitOrdinal === ordinal && entry.contentDigest === unitContentDigest(ownBlockTextsOf(message))
+      : (message.startsWith('写作综合 ') || report?.[2] === '综合') && entry.capture?.subject === 'task-synthesis');
+    if (recorded !== null && ordinal !== null && captured === undefined) throw new Error('RECORDED_MATERIAL_UNIT_MISSING');
+    if (captured?.response.kind === 'unit-result') {
+      text = substituteBlockPlaceholders(captured.response.text, ownBlockIdsOf(message));
+      usage = captured.response.usage;
+      if (ordinal !== null) recordedUnits.add(ordinal);
+    } else if (report !== null) {
       const schema = `"schema":"ai7.${report[1] === '评估' ? 'evaluation' : 'readers-report'}.${report[2] === '综合' ? 'synthesis' : 'unit'}-result/`;
       const entry = [...(report[1] === '评估' ? evaluationFixture : reportFixture).entries.values()].find((candidate) => candidate.unitOrdinal === (report[2] === '综合' ? 0 : Number(report[3])) &&
         candidate.response.kind === 'unit-result' && candidate.response.text.includes(schema));
@@ -103,12 +122,13 @@ beforeEach(async () => {
       const result = review !== null ? { schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: Number(review[1]), findings: [] }
         : writing !== null ? { schema: 'ai7.writing.unit-result/1', unitOrdinal: Number(writing[1]), passages: [{ kind: 'highlight', note: '合成看点。', blockOrdinals: [1] }] }
         : message.startsWith('写作综合 ') ? { schema: 'ai7.writing.synthesis-result/1', title: '合成草稿', sections: [{ heading: '合成部分', paragraphs: ['合成草稿待编辑修改。'] }] }
+        : message.startsWith('保证抽样 ') ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message).map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
         : { schema: 'ai7.analysis.run-report-reflection-result/1', items: [{ suggestion: '复查草稿。', basis: '合成账目。' }] };
       text = JSON.stringify(result);
     }
     return new Response(JSON.stringify({ model: DEVELOPER_LIVE_POLICY_BINDING.model,
       choices: [{ message: { content: text, reasoning_content: '合成推理。' }, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
+      usage: { prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens } }), { status: 200 });
   };
   owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' }, materialGuard: (id, ledger) => store.materialGuard(id, ledger),
@@ -137,7 +157,7 @@ function prepare(kind: Kind) {
     };
   }
   if (kind === 'writing') {
-    let work = store.createWritingPreparationWork(bookId, { ...WRITING_REQUEST, materialIds: [materialId] }, policy);
+    let work = store.createWritingPreparationWork(bookId, { ...writingRequest, materialIds: [materialId] }, policy);
     while (!work.done) work = store.advanceWritingPreparationWork(work.workId!);
     const prepared = work.projection!;
     assertPlan(prepared.taskIntent!.taskIntentId);
@@ -178,7 +198,7 @@ describe('live material references (#809)', () => {
   it.each(kinds)('runs reference-bearing %s through the real adapter and material wrapper', async (kind) => {
     await prepare(kind)();
     expect(sent.length).toBeGreaterThan(1);
-    expect(sent.some((body) => body.includes(title) && body.includes(materialText))).toBe(true);
+    expect(sent.some((body) => body.includes(title) && materialParagraphs.every((paragraph) => body.includes(paragraph)))).toBe(true);
     const states = database((db) => db.prepare('SELECT state FROM analysis_run_states ORDER BY rowid DESC LIMIT 1').get()!);
     expect(states.state).toBe('completed');
     const task = database((db) => db.prepare('SELECT task_intent_id FROM analysis_task_intents WHERE kind = ? ORDER BY rowid DESC LIMIT 1').get(kindId(kind))!);
@@ -189,9 +209,29 @@ describe('live material references (#809)', () => {
     const proof = { sample1Store: join(roots.dataRoot, 'store', 'ai7.sqlite'), sample1Task: taskId };
     expect(await fixtureTool.verifySample1Capture(proof, selection, fixtureTool.parseCachedRequest(sent[0]!, envelope.promptContractDigest))).toBe(true);
     if (kind !== 'writing') {
-      const altered = sent[0]!.replace(materialText, '另一份未冻结的合成资料。');
+      const altered = sent[0]!.replace(materialParagraphs[0]!, '另一份未冻结的合成资料。');
       await expect(fixtureTool.verifySample1Capture(proof, selection, fixtureTool.parseCachedRequest(altered, envelope.promptContractDigest)))
         .rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+    }
+  });
+
+  it.each(['review', 'writing', 'readers-report'] as const)('replays recorded %s units and any synthesis without a socket or credential', async (kind) => {
+    recorded = await loadModelFixture(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), `sample1-recorded-v41-material-${kind}`);
+    await prepare(kind)();
+    expect(recordedUnits.size).toBe(8);
+    expect(sent.some((body) => materialParagraphs.every((paragraph) => body.includes(paragraph)))).toBe(true);
+    // Sampling and reflection use synthetic control answers; the actual unit/synthesis texts and usage come from their capture.
+    expect(database((db) => db.prepare("SELECT count(*) AS n FROM analysis_unit_results WHERE state = 'closed'").get()!.n)).toBeGreaterThan(0);
+    expect([...recorded.entries.values()].every((entry) => entry.capture?.model === DEVELOPER_LIVE_POLICY_BINDING.model && entry.capture.evidenceScope === 'namespaced')).toBe(true);
+    if (kind === 'writing') {
+      const revision = database((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_result_set_revisions ORDER BY rowid DESC LIMIT 1').get()!.canonical_json)));
+      expect(revision.writing.draft).toBeNull();
+      expect(revision.writing.synthesis.reason.includes('material-copied')).toBe(true);
+    }
+    if (kind === 'readers-report') {
+      const revision = database((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_result_set_revisions ORDER BY rowid DESC LIMIT 1').get()!.canonical_json)));
+      expect(revision.readersReport.sections).toBeNull();
+      expect(revision.readersReport.synthesis.reason.includes('schema-invalid')).toBe(true);
     }
   });
 
