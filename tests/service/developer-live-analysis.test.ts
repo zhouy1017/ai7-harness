@@ -418,10 +418,15 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
         prepared.planEnvelope!.digest, 'now', origin))).toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
     }
     expect(store.inspectBaselineAnalysis(bookId).authorization).toBeNull();
+    // A background preparation needs the enrolled-background rule (Issue #864): refused by its origin where the policy has none,
+    // and under v14 let past the origin, to be refused only because the editor's own plan waits.
+    const background = { enrollmentVersionId: randomUUID(), runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 1_000 } };
     expect(refusalCode(() => store.baselineAnalysisLedger.prepare({ phase: 'start', bookId,
-      goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, launchPolicy,
-      background: { enrollmentVersionId: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1_000 } },
+      goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, launchPolicy: withoutBackgroundRule(launchPolicy), background,
     }))).toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
+    expect(refusalCode(() => store.baselineAnalysisLedger.prepare({ phase: 'start', bookId,
+      goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, launchPolicy, background,
+    }))).toBe('ANALYSIS_TASK_PREPARED');
   });
   it('freezes the selected plan and transmits the full declared chain through the gate', async () => {
     const calls: StubCall[] = [];
@@ -1301,18 +1306,15 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
 });
 
 /**
- * The developer-live projection as Provider Processing v14 will read (Issue #863, mirrored by #864 until it merges): the baseline
- * rule's binding and categories again under the enrolled-background rule, the one rule that admits a 后台分析登记's Run.
+ * The developer-live projection without the enrolled-background rule — as Provider Processing v12 read before v14 (Issue #863):
+ * every other rule exactly as the selected policy projects it.
  */
-function withBackgroundRule(policy: LaunchPolicyProjection): LaunchPolicyProjection {
-  const baseline = policy.providerProcessing.admittedRules.find((rule) => rule.ruleId === DEVELOPER_LIVE_POLICY_BINDING.ruleId)!;
-  expect(baseline).toBeDefined();
+function withoutBackgroundRule(policy: LaunchPolicyProjection): LaunchPolicyProjection {
+  expect(policy.providerProcessing.admittedRules.filter((rule) => rule.backgroundOrigin).map((rule) => rule.ruleId))
+    .toEqual(['enrolled-background-manuscript-analysis-processing']);
   return {
     ...policy,
-    providerProcessing: {
-      ...policy.providerProcessing,
-      admittedRules: [...policy.providerProcessing.admittedRules, { ...baseline, ruleId: 'enrolled-background-manuscript-analysis-processing', backgroundOrigin: true }],
-    },
+    providerProcessing: { ...policy.providerProcessing, admittedRules: policy.providerProcessing.admittedRules.filter((rule) => !rule.backgroundOrigin) },
   };
 }
 
@@ -1365,7 +1367,8 @@ describe('后台分析登记 under developer-live with a stub transport (Issue #
   });
 
   it('starts an enrolled background Run only under the enrolled-background rule, held to the lower of its share and the launch ceiling', async () => {
-    const v14 = withBackgroundRule(launchPolicy);
+    // The selected developer-live policy (v14) projects the enrolled-background rule.
+    const v14 = launchPolicy;
     const { store, bookId, answers } = await enrolledLive(v14, 900_000);
     const calls: StubCall[] = [];
     const execution = owner(store, stubTransport({ calls, responses: answers.units, named: answers.named }), CEILING, v14);
@@ -1389,7 +1392,7 @@ describe('后台分析登记 under developer-live with a stub transport (Issue #
   });
 
   it('refuses a background Run at admission under a policy with no enrolled-background rule, sending nothing', async () => {
-    const v14 = withBackgroundRule(launchPolicy);
+    const v14 = launchPolicy;
     const { store, bookId } = await enrolledLive(v14, 400_000);
     // The start is recorded under v14 and left for its place; the owner then runs under v12, which has no such rule.
     const dispatcher = new BackgroundAnalysisDispatcher({
@@ -1403,7 +1406,7 @@ describe('后台分析登记 under developer-live with a stub transport (Issue #
     expect([waiting.authorization!.origin, waiting.run!.state, waiting.planVersion!.materialInputs.runBudgetCeiling])
       .toEqual(['background-analysis-enrollment', 'authorized', { kind: 'tokens', maxTotalTokens: 400_000 }]);
     const calls: StubCall[] = [];
-    const execution = owner(store, stubTransport({ calls, responses: new Map() }));
+    const execution = owner(store, stubTransport({ calls, responses: new Map() }), CEILING, withoutBackgroundRule(launchPolicy));
     try {
       expect(refusalCode(() => execution.admitOrQueue(waiting.run!.runRecordId, undefined, 'background'))).toBe('EXECUTION_ORIGIN_NOT_ADMITTED');
       expect(store.inspectBaselineAnalysis(bookId, () => null).run!.state).toBe('blocked-before-dispatch');
