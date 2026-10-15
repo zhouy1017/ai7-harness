@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { BASELINE_ANALYSIS_KIND } from '../../shared/protocol.js';
 import { liveKindAdmission, liveKindContractCategories, type LiveKindRule } from './live-kind-admission.js';
+import { liveMaterialContract } from '../task-material-references.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { describeComposition, prepareExecution, type HarnessExecutionSpan, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
@@ -1236,6 +1237,7 @@ export class BaselineAnalysisExecutionOwner {
       }
       currentBindingDigest = bindingDigest;
       bindingDigestForSlot = bindingDigest;
+      const frozenMaterial = liveMaterialContract(definition);
       bindingFacts = {
         bindingDigest,
         route,
@@ -1246,7 +1248,11 @@ export class BaselineAnalysisExecutionOwner {
         // sends an evaluation's editor-authored record or house exemplars only where the rule names them.
         ...(admitted === null ? {} : {
           ruleOutboundCategories: new Set(admitted.outboundDataCategories),
-          contractCategories: new Set(liveKindContractCategories(definition.kind)),
+          contractCategories: new Set(liveKindContractCategories(definition.kind, definition)),
+          ...(frozenMaterial === null ? {} : {
+            materialExcerpts: frozenMaterial.materials,
+            frozenMaterialDigests: new Set(frozenMaterial.sources.map((source) => source.sha256)),
+          }),
         }),
         policy: live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }

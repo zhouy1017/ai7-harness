@@ -2094,6 +2094,7 @@ export type OutboundDataCategoryId =
   | 'editor-authored-evaluation-text'
   | 'house-exemplar-excerpt'
   | 'book-metadata-and-synopsis'
+  | 'frozen-material-reference-excerpt'
   | 'manuscript-conflict-region-excerpt';
 
 /**
@@ -2110,6 +2111,8 @@ export interface AdmittedProviderRule {
   readonly model: string;
   readonly credentialSlot: string;
   readonly outboundDataCategories: readonly OutboundDataCategoryId[];
+  readonly materialReferencesAllowed?: boolean;
+  readonly editorialDeliverablesAllowed?: boolean;
   /**
    * Whether the rule names the kind's one book-level synthesis turn (全书综合 / 综合) as a transmission (Provider Processing
    * v11). `true` only for writing and the three evaluation contracts; `false` for every rule that does not name the turn,

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading } from '../task-material-references.js';
+import { liveMaterialRule } from '../analysis/live-kind-admission.js';
+import { reviewCategoryKindId } from '../../shared/protocol.js';
 import { liveReviewRule, liveReviewUnavailableReason } from './live-review-admission.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -1259,7 +1261,7 @@ export class ReviewRunStore {
       tasks.every((category) => approved.get(category.categoryId) === category.task!.planEnvelopeDigest),
     'REVIEW_AUTHORIZATION_STALE', '授权所依据的计划与这次审阅准备的计划不一致；请重新查看计划。');
     if (existing !== null) return;
-    requireReview(snapshot.materialReferences === undefined || this.#ledgers.baseline().launch.live === null, 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
+    requireReview(!this.#materialsRefusedLive(snapshot), 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
     const unavailableMaterial = this.#materialReadings(snapshot).find((reading) => reading.refusal !== null)?.refusal;
     requireReview(unavailableMaterial === undefined, unavailableMaterial?.code ?? 'REVIEW_PLAN_CHANGED', unavailableMaterial?.message ?? '');
     const latest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(bookId) as SqlRow;
@@ -1388,7 +1390,7 @@ export class ReviewRunStore {
     });
     const staleReasons: string[] = [];
     if (view.authorization === null) {
-      if (snapshot.materialReferences !== undefined && this.#ledgers.baseline().launch.live !== null) staleReasons.push(TASK_MATERIAL_LIVE_UNAVAILABLE);
+      if (this.#materialsRefusedLive(snapshot)) staleReasons.push(TASK_MATERIAL_LIVE_UNAVAILABLE);
       staleReasons.push(...this.#materialReadings(snapshot).flatMap((reading) => reading.refusal === null ? [] : [reading.refusal.message]));
       const latest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(bookId) as SqlRow;
       if (text(latest.review_run_id) !== reviewRunId) {
@@ -1419,7 +1421,7 @@ export class ReviewRunStore {
     const firstCheckpoint = categories.find((category) => category.checkpoint !== null)?.checkpoint ?? null;
     const firstTask = snapshot.categories.find((category) => category.task !== null);
     return {
-      ...(snapshot.materialReferences !== undefined && this.#ledgers.baseline().launch.live !== null ? { materialsRefusedLive: true } : {}),
+      ...(this.#materialsRefusedLive(snapshot) ? { materialsRefusedLive: true } : {}),
       ...(snapshot.materialReferences === undefined ? {} : { materials: this.#materialReadings(snapshot).map((reading) => view.authorization === null ? reading : { ...reading, refusal: null }) }),
       reviewRunId: snapshot.reviewRunId,
       ordinal: snapshot.ordinal,
@@ -2553,6 +2555,19 @@ export class ReviewRunStore {
   materialReferencesAllowed(bookId: string, categoryIds: ReadonlyArray<string>): boolean {
     this.#requireBook(bookId);
     return this.#forBook(bookId, this.#configuration()).categories.some((entry) => categoryIds.includes(entry.categoryId) && entry.executor === 'review-category-contract');
+  }
+
+  /** Only Task-backed readers transmit material; each must carry its own admitting rule. */
+  materialReferencesLiveAllowed(bookId: string, categoryIds: ReadonlyArray<string>): boolean {
+    this.#requireBook(bookId);
+    const readers = this.#forBook(bookId, this.#configuration()).categories.filter((entry) => categoryIds.includes(entry.categoryId) && entry.executor === 'review-category-contract');
+    return readers.length > 0 && readers.every((entry) => liveMaterialRule(this.#ledgers.baseline().launch.policy, reviewCategoryKindId(entry.categoryId)) !== null);
+  }
+
+  #materialsRefusedLive(snapshot: RunSnapshot): boolean {
+    const launch = this.#ledgers.baseline().launch;
+    return snapshot.materialReferences !== undefined && launch.live !== null && snapshot.categories.some((category) =>
+      category.entry.executor === 'review-category-contract' && liveMaterialRule(launch.policy, reviewCategoryKindId(category.categoryId)) === null);
   }
 
   workspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page: ReviewFindingPageRequest = FIRST_FINDING_PAGE): ReviewWorkspaceProjection {
