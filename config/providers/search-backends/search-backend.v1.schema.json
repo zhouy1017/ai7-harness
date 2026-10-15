@@ -1,0 +1,159 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI7 search backend configuration, version 1 (ADR 0073 §4; Issue #883)",
+  "description": "One web search backend AI7 may offer as a search tool, declared by the vendor's documented request shape, price and key requirement (Owner decisions 24⁵). A document is a claim about the vendor's interface and nothing else: it authorizes no transmission, admits no host in the Egress Gate, and enrolls no credential. tools/generate-provider-configuration.mjs validates every document against this schema and the semantic rules it states and contributes exactly one credential slot per document; it generates no route, label or model profile from it. The documents live in their own subdirectory because everything that reads config/providers/*.json reads a model provider document.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "backendId", "service", "displayName", "support", "supportEvidence", "request", "credential", "price", "reachability", "evidence", "openQuestions"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "backendId": {
+      "description": "The backend's id: the file's base name and its credential slot, always `search-<service>`.",
+      "$ref": "#/definitions/identifier"
+    },
+    "service": {
+      "description": "The short service name a Provider Processing rule's `platformTools.websearch.service` uses for this vendor.",
+      "$ref": "#/definitions/identifier"
+    },
+    "displayName": {
+      "description": "The backend's name as the editor reads it in 设置 › 模型服务 › 联网检索.",
+      "$ref": "#/definitions/label"
+    },
+    "support": {
+      "description": "`supported` when the vendor documents an HTTPS search interface AI7 can speak with a key; `not-supported` (尚未支持) when the reading found none, with the request fields null.",
+      "enum": ["supported", "not-supported"]
+    },
+    "supportEvidence": { "$ref": "#/definitions/evidenceKey" },
+    "request": { "$ref": "#/definitions/request" },
+    "anonymousRequest": {
+      "description": "A keyless interface the same vendor documents beside the keyed one (Parallel's Search MCP, ADR 0080 §7.1), which the existing search forwarder speaks. Optional.",
+      "$ref": "#/definitions/anonymousRequest"
+    },
+    "credential": { "$ref": "#/definitions/credential" },
+    "price": { "$ref": "#/definitions/price" },
+    "reachability": {
+      "description": "What the vendor states about where its service is reachable; the measured reachability is the evaluation's (config/providers/recorded-evidence/search-backend-profiles.json).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["note", "evidence"],
+      "properties": {
+        "note": { "$ref": "#/definitions/prose" },
+        "evidence": { "$ref": "#/definitions/evidenceKey" }
+      }
+    },
+    "evidence": {
+      "description": "Every evidence record the document cites, by key; every key is cited at least once.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/evidenceRecord" }
+    },
+    "openQuestions": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/prose" }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/prose" }
+    }
+  },
+  "definitions": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "label": {
+      "type": "string",
+      "pattern": "^\\S(.*\\S)?$"
+    },
+    "prose": {
+      "type": "string",
+      "pattern": "^\\S[\\s\\S]*\\S$"
+    },
+    "evidenceKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "day": {
+      "type": "string",
+      "pattern": "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
+    "endpoint": {
+      "description": "https only, no port, userinfo, query or fragment; the host is DNS labels joined by dots, the last beginning with a letter. The generator also refuses local and internal names.",
+      "type": "string",
+      "pattern": "^https://([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]([a-z0-9-]*[a-z0-9])?(/[A-Za-z0-9._~-]+)*/?$"
+    },
+    "evidenceRecord": {
+      "description": "How one value was established: vendor-documentation names the page and the day it was read; unverified is the honest record behind an absent value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["vendor-documentation", "unverified"] },
+        "source": { "$ref": "#/definitions/label" },
+        "readOn": { "$ref": "#/definitions/day" },
+        "note": { "$ref": "#/definitions/prose" }
+      }
+    },
+    "request": {
+      "description": "The keyed search interface: its endpoint, method and the wire protocol AI7 speaks to it. All three are null on a `not-supported` document.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint", "method", "protocol", "evidence"],
+      "properties": {
+        "endpoint": {
+          "type": ["string", "null"],
+          "pattern": "^https://([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]([a-z0-9-]*[a-z0-9])?(/[A-Za-z0-9._~-]+)*/?$"
+        },
+        "method": { "enum": ["GET", "POST", null] },
+        "protocol": {
+          "description": "The request and response shape, one per vendor interface AI7 implements an adapter for (slice 6b).",
+          "enum": ["bocha-web-search", "brave-web-search", "tinyfish-search", "parallel-search", "anthropic-messages-web-search", null]
+        },
+        "evidence": { "$ref": "#/definitions/evidenceKey" }
+      }
+    },
+    "anonymousRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint", "protocol", "tool", "evidence"],
+      "properties": {
+        "endpoint": { "$ref": "#/definitions/endpoint" },
+        "protocol": { "enum": ["mcp-tools-call"] },
+        "tool": { "$ref": "#/definitions/label" },
+        "evidence": { "$ref": "#/definitions/evidenceKey" }
+      }
+    },
+    "credential": {
+      "description": "The backend's one credential slot (ADR 0073 §4): the slot id, the development Credential Reference the enrollment helper writes under, the header form the vendor documents and whether a key is required. No value is ever here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slot", "developmentCredentialReference", "headerForm", "anthropicVersion", "keyRequired", "evidence"],
+      "properties": {
+        "slot": { "$ref": "#/definitions/identifier" },
+        "developmentCredentialReference": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "headerForm": { "enum": ["authorization-bearer", "x-api-key", "x-subscription-token"] },
+        "anthropicVersion": {
+          "description": "The anthropic-version header value an anthropic-messages-web-search request travels with; null for every other protocol.",
+          "type": ["string", "null"]
+        },
+        "keyRequired": { "type": "boolean" },
+        "evidence": { "$ref": "#/definitions/evidenceKey" }
+      }
+    },
+    "price": {
+      "description": "The vendor page's price for one search call, as `amount` in `currency` per `per` calls; null amount where the vendor bills otherwise (tokens, credits) and `basis` says how.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "currency", "per", "basis", "evidence"],
+      "properties": {
+        "amount": { "type": ["number", "null"], "minimum": 0 },
+        "currency": { "enum": ["USD", "CNY"] },
+        "per": { "type": "integer", "minimum": 1 },
+        "basis": { "$ref": "#/definitions/prose" },
+        "evidence": { "$ref": "#/definitions/evidenceKey" }
+      }
+    }
+  }
+}

@@ -39,6 +39,11 @@ export const CONFIGURED_CREDENTIAL_SLOTS = [
   'tencent-hunyuan',
   'xiaomi-mimo',
   'zhipu-glm',
+  'search-bochaai',
+  'search-brave',
+  'search-deepseek',
+  'search-parallel',
+  'search-tinyfish',
 ] as const;
 export type ConfiguredCredentialSlot = (typeof CONFIGURED_CREDENTIAL_SLOTS)[number];
 
@@ -77,6 +82,11 @@ export const CONFIGURED_DEVELOPMENT_SLOTS = [
   'tencent-hunyuan',
   'xiaomi-mimo',
   'zhipu-glm',
+  'search-bochaai',
+  'search-brave',
+  'search-deepseek',
+  'search-parallel',
+  'search-tinyfish',
 ] as const;
 export type ConfiguredDevelopmentSlot = (typeof CONFIGURED_DEVELOPMENT_SLOTS)[number];
 
@@ -99,4 +109,9 @@ export const CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES: Readonly<Record<Confi
   'tencent-hunyuan': 'ed50a5e5-47d7-4477-bac6-6eb0237f3327',
   'xiaomi-mimo': 'e03b8ea8-2a10-4c60-909e-82a5976e2810',
   'zhipu-glm': '1bfa4e14-ce91-4666-bc69-eb72709379f0',
+  'search-bochaai': '6e655b12-b3b0-430e-811c-911b5d0f2ccd',
+  'search-brave': '3f0f367d-f343-4123-b86d-31d0bfac556e',
+  'search-deepseek': '5d835534-e000-4b72-91c8-1dd986a6fcc7',
+  'search-parallel': '983793e7-f281-4767-b5e6-9342a2d00202',
+  'search-tinyfish': '59d3a3a4-d852-4b15-bbea-f1eefe4e63dd',
 };

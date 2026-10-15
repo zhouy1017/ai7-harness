@@ -2,30 +2,32 @@ import { isRecord } from '../analysis/canonical.js';
 import { redeemEgressTicket, type EgressTicketBook, type SearchServiceTicket } from './egress-gate.js';
 import { toolArgumentsDigest, type PlatformToolArguments, type PlatformToolsRule } from './platform-tools.js';
 import { PlatformToolHttpError, deadlineSignal, readBoundedBody, type PlatformToolFetch } from './platform-tool-http.js';
+import { anonymousSearchInterface } from './search-backends.js';
 
 /**
  * The `websearch` forwarder (ADR 0080 §7.1, §7.2; Issue #473 S87-f3a). The model emits the call; AI7 composes no query of
  * its own and forwards exactly that one as one JSON-RPC `tools/call` to the search service the binding's rule names, the
  * way the opencode client does (ADR 0080 §3): HTTP POST, `Accept: application/json, text/event-stream`, the first text
- * content block back, 25 seconds, no retry. The host, the service, and the service's tool name are the rule's; the rule
- * declares the service anonymous, so no credential exists to send. Nothing is sent without a redeemed
- * `call-search-service` ticket for exactly this host and this query.
+ * content block back, 25 seconds, no retry. The host, the service, and the service's tool name are the rule's; the path on
+ * that host is the one the service's search backend document declares for its keyless interface (the registry, Issue #883;
+ * ADR 0080 §5.3: an endpoint is configuration, not a source constant), and a service no document declares a keyless
+ * interface for is refused. The rule declares the service anonymous, so no credential exists to send. Nothing is sent
+ * without a redeemed `call-search-service` ticket for exactly this host and this query.
  */
 
-/** How AI7 speaks to one named search service: the MCP path on the rule's host, and the arguments its tool takes. */
+/** How AI7 speaks to one named search service's tool: the arguments it takes. */
 interface SearchServiceProtocol {
-  readonly path: string;
   argumentsOf(query: string): Record<string, unknown>;
 }
 
 /**
- * The wire contract of each search service a rule may name, keyed by the rule's `service`. This is how a service is
- * spoken to, not which one is used: the host and the tool name stay the rule's, and a service the table does not know is
- * a refusal. Parallel's Search MCP (docs.parallel.ai/integrations/mcp/search-mcp, read 2026-09-11) takes an `objective`
- * and `search_queries[]`.
+ * The tool-argument contract of each search service a rule may name, keyed by the rule's `service`. This is how a service
+ * is spoken to, not which one is used or where it is: the host and the tool name are the rule's, the path the registry's,
+ * and a service the table or the registry does not know is a refusal. Parallel's Search MCP
+ * (docs.parallel.ai/integrations/mcp/search-mcp, read 2026-09-11) takes an `objective` and `search_queries[]`.
  */
 const SEARCH_SERVICE_PROTOCOLS: Readonly<Record<string, SearchServiceProtocol>> = Object.freeze({
-  parallel: Object.freeze({ path: '/mcp', argumentsOf: (query: string) => ({ objective: query, search_queries: [query] }) }),
+  parallel: Object.freeze({ argumentsOf: (query: string) => ({ objective: query, search_queries: [query] }) }),
 });
 
 /** The search result's cap before it enters the model's context (ADR 0080 §7.4). */
@@ -45,10 +47,11 @@ export class SearchServiceError extends Error {
 /** The one request a `websearch` call becomes, without sending it. */
 export function searchServiceRequest(rule: PlatformToolsRule, query: string): { url: string; headers: Record<string, string>; body: string } {
   const protocol = SEARCH_SERVICE_PROTOCOLS[rule.websearch.service];
-  if (protocol === undefined) throw new SearchServiceError('SEARCH_SERVICE_UNKNOWN', '处理规则命名的搜索服务没有已实现的协议。');
+  const declared = anonymousSearchInterface(rule.websearch.service);
+  if (protocol === undefined || declared === null) throw new SearchServiceError('SEARCH_SERVICE_UNKNOWN', '处理规则命名的搜索服务没有已实现的协议。');
   if (rule.websearch.anonymous !== true) throw new SearchServiceError('SEARCH_SERVICE_CREDENTIAL_REQUIRED', '只实现匿名搜索服务。');
   return {
-    url: `https://${rule.websearch.host}${protocol.path}`,
+    url: `https://${rule.websearch.host}${new URL(declared.endpoint).pathname}`,
     headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
     body: JSON.stringify({
       jsonrpc: '2.0',

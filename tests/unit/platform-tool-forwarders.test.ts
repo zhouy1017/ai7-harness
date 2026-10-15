@@ -91,6 +91,9 @@ describe('the websearch forwarder', () => {
     expect(moved.url).toBe('https://search.example.net/mcp');
     expect(JSON.parse(moved.body).params.name).toBe('other_search');
     expect(() => searchServiceRequest({ ...rule, websearch: { ...rule.websearch, service: 'exa' } }, 'q')).toThrowError(/协议/u);
+    // A declared keyed backend still has no keyless interface for this forwarder (Issue #883).
+    expect(() => searchServiceRequest({ ...rule, websearch: { ...rule.websearch, service: 'brave' } }, 'q'))
+      .toThrowError(expect.objectContaining({ code: 'SEARCH_SERVICE_UNKNOWN' }));
   });
 
   it('reads the first text block of a JSON or event-stream answer, capped, and nothing from an error', () => {

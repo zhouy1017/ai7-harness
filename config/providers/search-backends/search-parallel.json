@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "backendId": "search-parallel",
+  "service": "parallel",
+  "displayName": "Parallel Search",
+  "support": "supported",
+  "supportEvidence": "parallel-search-reference",
+  "request": {
+    "endpoint": "https://api.parallel.ai/v1/search",
+    "method": "POST",
+    "protocol": "parallel-search",
+    "evidence": "parallel-search-reference"
+  },
+  "anonymousRequest": {
+    "endpoint": "https://search.parallel.ai/mcp",
+    "protocol": "mcp-tools-call",
+    "tool": "web_search",
+    "evidence": "parallel-search-mcp"
+  },
+  "credential": {
+    "slot": "search-parallel",
+    "developmentCredentialReference": "983793e7-f281-4767-b5e6-9342a2d00202",
+    "headerForm": "x-api-key",
+    "anthropicVersion": null,
+    "keyRequired": true,
+    "evidence": "parallel-search-reference"
+  },
+  "price": {
+    "amount": 5,
+    "currency": "USD",
+    "per": 1000,
+    "basis": "the default `advanced` mode with 10 results per request, which is what the evaluation sends; `basic` is also $5, `fast` and `turbo` $1 per 1,000, extra results $1 per 1,000; 5,000 requests a month are free",
+    "evidence": "parallel-pricing"
+  },
+  "reachability": {
+    "note": "The vendor's pages state no regional availability.",
+    "evidence": "parallel-pricing"
+  },
+  "evidence": {
+    "parallel-search-reference": {
+      "kind": "vendor-documentation",
+      "source": "Parallel documentation: Search quickstart (https://docs.parallel.ai/search/search-quickstart) and Search API reference (https://docs.parallel.ai/api-reference/search/search)",
+      "readOn": "2026-10-16",
+      "note": "POST https://api.parallel.ai/v1/search (generally available; no beta header on /v1) with the `x-api-key` header; `search_queries` (required), `objective`, `mode` (turbo, fast, basic, advanced; default advanced), `max_chars_total`, `advanced_settings` (max_results default 10, excerpt settings, source policy, fetch policy, location); unknown fields are rejected. The response is `{search_id, results[], warnings, usage, session_id}`, each result `url`, `title` (nullable), `publish_date`, `excerpts[]`."
+    },
+    "parallel-pricing": {
+      "kind": "vendor-documentation",
+      "source": "Parallel pricing page (https://parallel.ai/pricing) and rate limits page (https://docs.parallel.ai/resources/rate-limits)",
+      "readOn": "2026-10-16",
+      "note": "Search per 1,000 requests with 10 results: Turbo $1 (~200 ms), Fast $1 (~700 ms), Basic $5 (~1 s), Advanced $5 (~3 s); extra results $1 per 1,000; up to 5,000 requests a month free; 600 requests per minute. No regional statement."
+    },
+    "parallel-search-mcp": {
+      "kind": "vendor-documentation",
+      "source": "Parallel Search MCP page, https://docs.parallel.ai/integrations/mcp/search-mcp",
+      "readOn": "2026-10-16",
+      "note": "https://search.parallel.ai/mcp, tools `web_search` and `web_fetch`, \"no API key required\" and free to use anonymously at lower rate limits in `fast` mode; with a key, `Authorization: Bearer`. This is the keyless service ADR 0080 §7 names and the existing search forwarder speaks."
+    }
+  },
+  "openQuestions": [
+    "The anonymous MCP's rate limit is not published; the evaluation measures the keyed /v1/search interface, not the MCP."
+  ]
+}

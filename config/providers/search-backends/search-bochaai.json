@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "backendId": "search-bochaai",
+  "service": "bochaai",
+  "displayName": "博查 Bocha Web Search",
+  "support": "supported",
+  "supportEvidence": "bocha-open-platform",
+  "request": {
+    "endpoint": "https://api.bochaai.com/v1/web-search",
+    "method": "POST",
+    "protocol": "bocha-web-search",
+    "evidence": "bocha-open-platform"
+  },
+  "credential": {
+    "slot": "search-bochaai",
+    "developmentCredentialReference": "6e655b12-b3b0-430e-811c-911b5d0f2ccd",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "keyRequired": true,
+    "evidence": "bocha-open-platform"
+  },
+  "price": {
+    "amount": 0.036,
+    "currency": "CNY",
+    "per": 1,
+    "basis": "historical list-price input retained from the evaluation; source unverified, re-verify before display in 设置",
+    "evidence": "bocha-price-unverified"
+  },
+  "reachability": {
+    "note": "The public portal states no regional availability; reachability is the recorded host measurement, not a vendor promise.",
+    "evidence": "bocha-open-platform"
+  },
+  "evidence": {
+    "bocha-open-platform": {
+      "kind": "vendor-documentation",
+      "source": "Bocha open-platform interface documentation, https://open.bochaai.com/",
+      "readOn": "2026-10-16",
+      "note": "The public example uses POST https://api.bochaai.com/v1/web-search, Authorization Bearer authentication, query/freshness/summary/count fields and webPages.value results with name and url. The linked pricing page https://bocha-ai.feishu.cn/wiki/JYSbwzdPIiFnz4kDYPXcHSDrnZb and documentation page https://bocha-ai.feishu.cn/wiki/HmtOw1z6vik14Fkdu5uc9VaInBb were inaccessible at review time."
+    },
+    "bocha-price-unverified": {
+      "kind": "unverified",
+      "note": "Vendor PDF attachment read by the Worker on 2026-10-16, exact URL not retained; portal pricing page unreachable at review time (redirects to Feishu); re-verify before the price is shown in 设置."
+    }
+  },
+  "openQuestions": [
+    "The public portal shows an unwrapped webPages object; the measured response used data.webPages.value, which the evaluation also reads.",
+    "Re-verify the historical ¥0.036 per-call price against a retrievable vendor pricing source before it is displayed in 设置."
+  ]
+}

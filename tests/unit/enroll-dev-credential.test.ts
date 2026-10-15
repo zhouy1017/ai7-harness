@@ -68,8 +68,10 @@ describe('enrol-dev-credential identity', () => {
     // The production connection's slot has no development reference: its reference is per connection row.
     expect(CONFIGURED_CREDENTIAL_SLOTS).toContain('deepseek-api-key');
     expect(SLOT_LIST.map(([slot]) => slot)).not.toContain('deepseek-api-key');
-    // The helper says, where it is read, that only opencode-go enrolment is authorized.
-    expect(source).toContain('**Only `opencode-go` enrolment is authorized** (ADR 0067)');
+    // The helper says, where it is read, which enrolment is authorized: opencode-go, and the five search evaluation slots
+    // under the ADR 0067 amendment clause of Issue #883.
+    expect(source).toContain('**Authorized enrolment: `opencode-go` (ADR 0067), and the five search backend evaluation slots**');
+    expect(source).toContain('amendment clause of Issue #883');
     expect(new Map(SLOT_LIST).get('opencode-go')).toBe(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE);
     for (const [, reference] of SLOT_LIST) expect(CREDENTIAL_REFERENCE_PATTERN.test(reference)).toBe(true);
     // The helper composes the same entry name the store writes and the resolver reads.
