@@ -1704,7 +1704,7 @@ export class BaselineAnalysisExecutionOwner {
         spans.push(turn.span);
         ledger.recordSpan(attemptId, spanOrdinal, turn.span, unit.ordinal, { attemptIndex, payloadDigest, unitMessageDigest, adaptationId });
         const usageSignal = turn.signals.find((signal) => signal.kind === 'usage');
-        const unitUsage = usageSignal?.kind === 'usage' ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens } : null;
+        const unitUsage = usageSignal?.kind === 'usage' ? (platformSession === null ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens } : { ...usageSignal.usage }) : null;
         countTurn('units', unitUsage);
         // One model turn came back. It counts whether it transmitted, replayed from the Provider Result
         // Cache, or read the deterministic fixture: what the reader learns is that the Run is moving.

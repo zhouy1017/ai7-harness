@@ -333,7 +333,10 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     const recordUsage = (usage: TokenUsage): void => {
       const prior = signals.find((signal) => signal.kind === 'usage');
       if (prior?.kind === 'usage') {
-        const total = { inputTokens: prior.usage.inputTokens + usage.inputTokens, outputTokens: prior.usage.outputTokens + usage.outputTokens };
+        const total: TokenUsage = { inputTokens: prior.usage.inputTokens + usage.inputTokens, outputTokens: prior.usage.outputTokens + usage.outputTokens };
+        for (const key of ['cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const) {
+          if (prior.usage[key] !== undefined || usage[key] !== undefined) total[key] = (prior.usage[key] ?? 0) + (usage[key] ?? 0);
+        }
         signals[signals.indexOf(prior)] = { kind: 'usage', usage: total };
       } else signals.push({ kind: 'usage', usage: { ...usage } });
     };
