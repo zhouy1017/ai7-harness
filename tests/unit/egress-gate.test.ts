@@ -125,11 +125,11 @@ describe('evaluateEgress', () => {
       .toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
   });
 
-  it('sends an evaluation contract\'s further categories remotely only under a rule naming each, within the Run ceiling (Issue #429)', () => {
+  it.each(['house-exemplar-excerpt', 'editorial-deliverable-excerpt'] as const)('sends the contract category %s only under an exact rule and the Run ceiling', (category) => {
     const live = {
       ...binding(DEEPSEEK_ROUTE),
       policy: { operationalScope: 'developer-live' as const, providerProcessingVersion: 'v10' as const, liveTransmissionAllowed: true as const, authorizedLiveTransmissionCount: 'bounded-by-run' as const },
-      contractCategories: new Set(['editor-authored-evaluation-text', 'house-exemplar-excerpt'] as const),
+      contractCategories: new Set(['editor-authored-evaluation-text', category] as const),
     };
     const remotePayload = payload({ provider: DEEPSEEK_ROUTE, model: DEEPSEEK_MODEL, messages: [user(UNIT_1)] });
     const within = { ...scope(), ceilingState: () => 'within' as const };
@@ -137,7 +137,7 @@ describe('evaluateEgress', () => {
     expect(evaluateEgress(remotePayload, live, within)).toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
     expect(evaluateEgress(remotePayload, { ...live, ruleOutboundCategories: new Set(['public-or-synthetic', 'editor-authored-evaluation-text'] as const) }, within))
       .toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
-    const admitted = { ...live, ruleOutboundCategories: new Set(['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt'] as const) };
+    const admitted = { ...live, ruleOutboundCategories: new Set(['public-or-synthetic', 'editor-authored-evaluation-text', category] as const) };
     expect(evaluateEgress(remotePayload, admitted, within)).toMatchObject({ decision: 'transmit-remote' });
     // Their bound is the Run's: `not-applicable` is the dialogue's alone and reads as unset, and a spent ceiling refuses.
     expect(evaluateEgress(remotePayload, admitted, { ...scope(), ceilingState: () => 'not-applicable' as const }))

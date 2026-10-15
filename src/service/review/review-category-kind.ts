@@ -100,6 +100,7 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
   const category = contract.category;
   const promptContractDigest = reviewCategoryContractDigest(contract);
   const clauseIds = category.clauses.map((clause) => clause.clauseId);
+  const deliverableRefs = category.deliverables?.flatMap((document) => document.paragraphs.map((paragraph) => paragraph.ref));
   const identity: ReviewCategoryIdentityProjection = {
     categoryId: category.categoryId,
     label: category.label,
@@ -129,6 +130,7 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
     outOfScope: 'leave-unreviewed',
     systemPrompt: contract.systemPrompt,
     promptContractDigest,
+    ...(category.deliverables === undefined ? {} : { livePromptContractDigest: () => reviewCategoryContractDigest(reviewCategoryContract(input)) }),
     unitResultSchema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
     revisionSchema: REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA,
     successorRevisionSchema: REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA,
@@ -152,9 +154,13 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
           ref: finding.findingId,
           unitOrdinal: finding.unitOrdinal,
           tier: finding.severity,
-          text: finding.replacement === null
+          text: (finding.replacement === null
             ? `「${finding.quote}」${finding.note}`
-            : `「${finding.quote}」→「${finding.replacement}」${finding.note}`,
+            : `「${finding.quote}」→「${finding.replacement}」${finding.note}`)
+            + (category.deliverables === undefined ? '' : category.deliverables.flatMap((document) => document.paragraphs
+              .filter((paragraph) => paragraph.ref === finding.clauseId)
+              .map((paragraph) => `\n交付物（只读比对数据）：${JSON.stringify({ documentId: document.documentId, title: document.title,
+                version: document.versionLabel, revisionId: document.revisionId, ...paragraph })}`)).join('')),
         })),
     },
     assuranceAbsentReason: '',
@@ -186,7 +192,8 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
       unitOrdinal: unit.ordinal,
       blockCount: reviewCategoryMessageBlockIds(unit).length,
       output: category.output,
-      clauseIds,
+      clauseIds: [...clauseIds, ...(deliverableRefs ?? [])],
+      ...(deliverableRefs === undefined ? {} : { deliverableRefs }),
     }),
     reduce: (reductionInput) => {
       const reduction = reduceReviewCategory({

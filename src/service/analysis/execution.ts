@@ -66,7 +66,8 @@ import {
 } from './reducers.js';
 import { CARRIED_GAP_REASON, OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
 import { SERIES_SCOPE_STOP_SUMMARY } from '../series-exclusions.js';
-import { materialInterruptionMessage, type MaterialGuardRefusal } from '../task-material-references.js';
+import { materialInterruptionMessage as referenceInterruptionMessage, type MaterialGuardRefusal } from '../task-material-references.js';
+
 import {
   RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
   buildRunReportReflectionMessage,
@@ -116,6 +117,11 @@ import {
  * authorized and not yet admitted — 等待运行名额 — and is admitted in its turn as a place frees.
  */
 export { ExecutionAdmissionError };
+
+/** Deliverable guards supply their own stop reason; existing material and Series guard semantics stay with their owners. */
+function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
+  return refusal.code === 'REVIEW_DELIVERABLE_CHANGED' ? refusal.message : referenceInterruptionMessage(refusal);
+}
 
 /**
  * How many Runs the governor executes at once (Issue #49, S14; ADR 0021): two under development-ci. Under

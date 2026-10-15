@@ -345,6 +345,7 @@ async function loadSample1Owners() {
         "export { reviewCategoryKindDefinition } from './src/service/review/review-category-kind.ts';",
         "export { reviewCategoryContract, reviewCategoryContractDigest } from './src/service/review/review-category-contract.ts';",
         "export { reviewCategoryContractInput } from './src/service/review/category-configuration.ts';",
+        "export { reviewDeliverables } from './src/service/production-documents.ts';",
         "export { initialEvaluationKindDefinition } from './src/service/evaluation/initial-evaluation-kind.ts';",
         "export { readersReportKindDefinition } from './src/service/evaluation/readers-report-kind.ts';",
         "export { evaluationRewriteKindDefinition } from './src/service/evaluation/evaluation-rewrite-kind.ts';",
@@ -487,6 +488,13 @@ export async function verifySample1Capture(request, selection, parsed) {
       if (category.executor !== 'review-category-contract' || category.entry.searchEngine ||
           category.entry.seriesKnowledge !== undefined || category.task.planEnvelopeDigest !== sha256Hex(canonicalJson(envelope))) fail();
       const input = owners.reviewCategoryContractInput(category.entry);
+      if (input.deliverables !== undefined) {
+        // #813: prove each read-only participant from S66's records and the admitted sample1 source, not caller text.
+        const current = owners.reviewDeliverables(database, manifest.manuscript.bookId);
+        if (category.entry.categoryId !== 'cross-deliverable-consistency' || current.unavailableReason !== null ||
+            canonicalJson(current.participants) !== canonicalJson(input.deliverables) ||
+            input.deliverables.some((document) => document.sourceDigest !== SAMPLE1_SOURCE_SHA256)) fail();
+      }
       const prompt = owners.reviewCategoryContract(input);
       contract = { prompt, digest: owners.reviewCategoryContractDigest(prompt) };
       definition = owners.reviewCategoryKindDefinition(input);

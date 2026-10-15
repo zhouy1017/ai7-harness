@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading } from '../task-material-references.js';
+import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading, type MaterialGuardRefusal } from '../task-material-references.js';
+import { reviewDeliverables, REVIEW_DELIVERABLE_CHANGED } from '../production-documents.js';
 import { liveReviewRule, liveReviewUnavailableReason } from './live-review-admission.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -58,6 +59,7 @@ import {
   DIGEST_PATTERN,
   UUID_PATTERN,
   canonicalRecord,
+  canonicalJson,
   hasExactKeys,
   isRecord,
   parseCanonicalJson,
@@ -85,6 +87,7 @@ import {
   houseGuidelineDocuments,
   reviewCategoryBasisStatement,
   reviewCategoryConfigurationDigest,
+  reviewCategoryEntryForBook,
   type ReviewCategoryConfiguration,
   type ReviewCategoryConfigurationEntry,
   type ReviewCategoryExecutor,
@@ -1272,6 +1275,8 @@ export class ReviewRunStore {
     // A 当前选区 whose paragraphs were removed or reordered since it was prepared is chosen again, never started (P2-2).
     requireReview(!this.#selectionMoved(snapshot), 'REVIEW_PLAN_CHANGED', SELECTION_MOVED_REASON);
     for (const category of tasks) {
+      const moved = this.#deliverablesMoved(bookId, category.entry);
+      requireReview(moved === null, 'REVIEW_PLAN_CHANGED', moved ?? '');
       const projection = this.#categoryLedger(category).inspect(bookId);
       requireReview(projection.taskIntent?.taskIntentId === category.task!.taskIntentId && projection.state === 'prepared' &&
         projection.actions.canAuthorize && projection.planEnvelope?.digest === category.task!.planEnvelopeDigest,
@@ -1413,6 +1418,8 @@ export class ReviewRunStore {
           } else if (this.#seriesKnowledgeMoved(bookId, category)) {
             staleReasons.push(seriesKnowledgeMovedReason(category.entry.label));
           }
+          const deliverablesMoved = this.#deliverablesMoved(bookId, category.entry);
+          if (deliverablesMoved !== null) staleReasons.push(deliverablesMoved);
         }
       }
     }
@@ -1652,7 +1659,8 @@ export class ReviewRunStore {
       const stands = current !== null && current.taskIntent?.taskIntentId === category.task.taskIntentId && current.state === 'prepared' &&
         current.actions.canAuthorize && current.planEnvelope?.digest === category.task.planEnvelopeDigest &&
         approvals.get(category.categoryId) === category.task.planEnvelopeDigest &&
-        this.#unverifiedTargets(category, snapshot.createdAt) === null && !this.#seriesKnowledgeMoved(snapshot.bookId, category);
+        this.#unverifiedTargets(category, snapshot.createdAt) === null && !this.#seriesKnowledgeMoved(snapshot.bookId, category) &&
+        this.#deliverablesMoved(snapshot.bookId, category.entry) === null;
       if (!stands) moved.push(`「${category.entry.label}」的计划`);
     }
     return moved;
@@ -2163,6 +2171,9 @@ export class ReviewRunStore {
    * guideline documents its category applies.
    */
   #clauseBasis(entry: ReviewCategoryConfigurationEntry, clauseId: string | null): EditorialMarkBasisProjection[] {
+    const deliverable = this.#deliverableReference(entry, clauseId);
+    if (deliverable !== null) return [{ label: `交付物（只读） · ${deliverable.documentTitle} · ${deliverable.clauseId}`,
+      quote: deliverable.text, blockId: null, fromGrapheme: null, toGrapheme: null }];
     for (const document of entry.guidelineDocuments) {
       const clause = document.clauses.find((candidate) => candidate.clauseId === clauseId);
       if (clause !== undefined) {
@@ -2711,12 +2722,48 @@ export class ReviewRunStore {
    * the Book is in now (Issue #64, S29a). The house's own digest still names the configuration a Run was prepared under.
    */
   #forBook(bookId: string, house: ReviewCategoryConfiguration, readings?: SeriesKnowledgeReadings): ReviewCategoryConfiguration {
-    if (!house.categories.some((entry) => entry.executor === 'series-knowledge')) return house;
     const resolution = resolveSeriesConsistency(this.#db, bookId, readings);
     return {
       ...house,
-      categories: house.categories.map((entry) => entry.executor === 'series-knowledge' ? seriesConsistencyEntry(entry, resolution) : entry),
+      categories: house.categories.map((entry) => entry.executor === 'series-knowledge' ? seriesConsistencyEntry(entry, resolution) : reviewCategoryEntryForBook(entry, this.#db, bookId)),
     };
+  }
+
+  #deliverablesMoved(bookId: string, entry: ReviewCategoryConfigurationEntry): string | null {
+    if (entry.deliverables === undefined) return null;
+    const current = reviewDeliverables(this.#db, bookId);
+    if (current.unavailableReason !== null) return `${REVIEW_DELIVERABLE_CHANGED} ${current.unavailableReason}`;
+    const pins = (reading: typeof current): string => canonicalJson(reading.participants.map(({ documentId, revisionId, revisionDigest, sourceDigest, paragraphs }) =>
+      ({ documentId, revisionId, revisionDigest, sourceDigest, paragraphs })));
+    return pins(current) === pins(entry.deliverables) ? null : REVIEW_DELIVERABLE_CHANGED;
+  }
+
+  #deliverableReference(entry: ReviewCategoryConfigurationEntry, ref: string | null): ReviewFindingProjection['clauseRefs'][number] | null {
+    for (const document of entry.deliverables?.participants ?? []) {
+      const paragraph = document.paragraphs.find((candidate) => candidate.ref === ref);
+      if (paragraph !== undefined) return { documentTitle: `${document.typeLabel}《${document.title}》${document.versionLabel} · 文档 ${document.documentId} · 修订 ${document.revisionId} · 第 ${paragraph.position} 段（只读）`,
+        clauseId: paragraph.ref, text: paragraph.text };
+    }
+    return null;
+  }
+
+  /** Existing execution material-guard seam; finalized deliverables are compared again before every transmission. */
+  deliverableGuard(runRecordId: string, live: boolean): MaterialGuardRefusal | null {
+    const row = this.#db.prepare(`SELECT r.* FROM review_runs r JOIN json_each(r.canonical_json, '$.categories') c
+      ON json_extract(c.value, '$.task.taskIntentId') = (SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?)
+      WHERE json_type(c.value, '$.entry.deliverables') = 'object'`).get(runRecordId) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const snapshot = this.#snapshotOf(row);
+    const category = snapshot.categories.find((candidate) => candidate.entry.deliverables !== undefined)!;
+    let message = this.#deliverablesMoved(snapshot.bookId, category.entry);
+    if (message === null && live) {
+      const manuscript = this.#db.prepare('SELECT sv.source_digest FROM manuscript_revisions mr JOIN source_versions sv ON sv.source_version_id = mr.source_version_id WHERE mr.revision_id = ?').get(snapshot.manuscript.revisionId) as SqlRow | undefined;
+      if (manuscript === undefined || category.entry.deliverables!.participants.some((participant) => participant.sourceDigest !== manuscript.source_digest)) {
+        message = '开发者实时模式只允许与本次获准稿件同源的交付物片段；交付物来源未获准，未发送任何内容。';
+      }
+    }
+    return message === null ? null : { code: 'REVIEW_DELIVERABLE_CHANGED', materialTitle: category.entry.label,
+      message: `${message} 运行已停止；已完成的单元保留。` };
   }
 
   /**
@@ -3494,6 +3541,8 @@ export class ReviewRunStore {
     });
     const clauseRefs = (categoryId: string, clauseId: string | null): ReviewFindingProjection['clauseRefs'] => {
       const entry = snapshot.categories.find((category) => category.categoryId === categoryId)?.entry;
+      const deliverable = entry === undefined ? null : this.#deliverableReference(entry, clauseId);
+      if (deliverable !== null) return [deliverable];
       for (const document of entry?.guidelineDocuments ?? []) {
         const clause = document.clauses.find((candidate) => candidate.clauseId === clauseId);
         if (clause !== undefined) return [{ documentTitle: document.title, clauseId: clause.clauseId, text: clause.text }];
