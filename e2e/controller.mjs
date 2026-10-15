@@ -1070,6 +1070,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-background-focus-kept',
     'background-change-dispatches',
     'background-run-record',
+    // Issue #864: 暂停 holds what the Enrollment would start, and 续行 puts it back in force.
+    'background-enrollment-paused',
+    'background-enrollment-resumed',
     'background-revoke',
     'background-revoked-no-dispatch',
     'model-question-launch',

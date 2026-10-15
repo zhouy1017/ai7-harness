@@ -2945,6 +2945,9 @@ function registerRendererHandlers(
           const result = await service.call('enrollBackgroundAnalysis', {
             disclosureDigest: input.disclosureDigest,
             startingPoint: input.startingPoint,
+            // The scope and the required tokens ceiling (Issue #864), copied field by field.
+            scope: { kind: input.scope?.kind, seriesId: input.scope?.seriesId } as ServiceOperationMap['enrollBackgroundAnalysis']['input']['scope'],
+            ceilingTokens: input.ceilingTokens,
             bookId: route.bookId,
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
@@ -2965,6 +2968,25 @@ function registerRendererHandlers(
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
           const result = await service.call('revokeBackgroundAnalysisEnrollment', { enrollmentId: input.enrollmentId, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '后台分析登记不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
+  // `暂停` / `续行` of the route's Book's Enrollment (Issue #864), serialized like its other two decisions.
+  ipcMain.handle(
+    IPC_CHANNELS.holdBackgroundAnalysisEnrollment,
+    (event, input: Omit<ServiceOperationMap['holdBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('holdBackgroundAnalysisEnrollment', { enrollmentId: input.enrollmentId, hold: input.hold, bookId: route.bookId });
           requireCurrentRouteGeneration(owned, routeGeneration);
           if (result.bookId !== route.bookId) {
             throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '后台分析登记不属于当前图书工作台。');

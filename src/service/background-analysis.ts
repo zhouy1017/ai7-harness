@@ -23,7 +23,7 @@ export interface BackgroundAnalysisDispatcherDependencies {
     'backgroundAnalysisBooks' | 'backgroundAnalysisDecisionFor' | 'createBackgroundBaselineAnalysisPreparationWork' |
     'advanceBaselineAnalysisPreparationWork' | 'cancelBaselineAnalysisPreparationWork' | 'backgroundMayContinue' |
     'startEnrolledBaselineAnalysis' | 'noteBackgroundNotStarted' | 'replacementFrozen'>;
-  readonly execution: Pick<BaselineAnalysisExecutionOwner, 'busy' | 'routeExecutable' | 'admitOrQueue' | 'capacity'>;
+  readonly execution: Pick<BaselineAnalysisExecutionOwner, 'full' | 'routeExecutable' | 'admitOrQueue' | 'capacity'>;
   /** Whether a job the editor asked for is queued or under way: the dispatcher never steps in beside one. */
   readonly editorWorkBusy?: () => boolean;
   readonly launchPolicy: LaunchPolicyProjection;
@@ -52,7 +52,8 @@ export class BackgroundAnalysisDispatcher {
   runtime(): BackgroundAnalysisRuntime {
     return {
       routeExecutable: this.#deps.execution.routeExecutable,
-      placeFree: !this.#deps.execution.busy,
+      // A place of any kind: under a live launch the editor's own place is never the one a background Run takes (Issue #864).
+      placeFree: !this.#deps.execution.full,
       capacity: this.#deps.execution.capacity,
       editorWorkBusy: this.#deps.editorWorkBusy?.() ?? false,
       now: (this.#deps.now ?? Date.now)(),
@@ -163,7 +164,7 @@ export class BackgroundAnalysisDispatcher {
     const started = store.startEnrolledBaselineAnalysis(bookId, prepared.taskIntent.taskIntentId, prepared.planEnvelope.digest,
       enrollmentVersionId, mode, this.runtime());
     // Admitted at once: the place it was asked for before the last step is still free in this turn, so it never queues.
-    if (started.dispatchRunRecordId !== null) this.#deps.execution.admitOrQueue(started.dispatchRunRecordId);
+    if (started.dispatchRunRecordId !== null) this.#deps.execution.admitOrQueue(started.dispatchRunRecordId, undefined, 'background');
   }
 }
 

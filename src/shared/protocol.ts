@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 135 as const;
+export const SERVICE_PROTOCOL_VERSION = 136 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -87,6 +87,7 @@ export const IPC_CHANNELS = {
   inspectBackgroundAnalysisEnrollment: 'ai7:j09:inspect-background-analysis-enrollment',
   enrollBackgroundAnalysis: 'ai7:j09:enroll-background-analysis',
   revokeBackgroundAnalysisEnrollment: 'ai7:j09:revoke-background-analysis-enrollment',
+  holdBackgroundAnalysisEnrollment: 'ai7:j09:hold-background-analysis-enrollment',
   inspectReviewGuidelines: 'ai7:j15:inspect-review-guidelines',
   previewReviewGuidelineVersion: 'ai7:j15:preview-review-guideline-version',
   importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
@@ -2769,6 +2770,12 @@ export interface RunReportRecordProjection {
 /** The report as a reader receives it: the recorded record with the digest of its own canonical JSON. */
 export interface RunReportProjection extends RunReportRecordProjection {
   reportDigest: string;
+  /**
+   * A Run a 后台分析登记 started (Issue #864): which Enrollment version started it, the share of its ceiling the Run was held to,
+   * and how the Run ended against that ceiling, in the reader's words. Read beside the recorded report, never part of its digest;
+   * absent for every Run the editor started.
+   */
+  background?: ReadonlyArray<string>;
 }
 
 export interface AnalysisUnresolvedProjection {
@@ -6125,15 +6132,35 @@ export interface DefaultExecutionRuleProjection extends DefaultExecutionRuleRefe
 /** Where an Enrollment starts: only what changes after it is made, or the text as it stands too. */
 export type BackgroundAnalysisStartingPoint = 'prospective' | 'backfill';
 
-/** One Book's 后台分析登记 on ②A: what it is, its state, what it would do now and why, and the two decisions it offers. */
+/**
+ * What an Enrollment covers (Issue #864): this one Book, every Book of one Series it is in, or every Book of the house. A Series or
+ * all-Books Enrollment is scheduled per Book in the scope's Book order, each Book's Runs held to its equal share of the ceiling.
+ */
+export type BackgroundAnalysisScopeKind = 'book' | 'series' | 'all-books';
+
+/** The largest tokens ceiling 登记 takes, the same bound as a plan's own 设置上限 (Issue #51). */
+export const BACKGROUND_ANALYSIS_CEILING_MAX = 999_999_999_999;
+
+/** One scope `登记…` offers: its words and its Books in the scope's order, the first of which takes the ceiling's remainder. */
+export interface BackgroundAnalysisScopeOffer {
+  kind: BackgroundAnalysisScopeKind;
+  /** The Series, for a `series` scope; `null` otherwise. */
+  seriesId: string | null;
+  /** `《甲》这一本书`, `书系《乙》的 3 本书`, `全部 5 本图书`. */
+  label: string;
+  books: ReadonlyArray<{ bookId: string; title: string }>;
+}
+
+/** One Book's 后台分析登记 on ②A: what it is, its state, what it would do now and why, and the decisions it offers. */
 export interface BackgroundAnalysisEnrollmentProjection {
   bookId: string;
   bookTitle: string;
   /**
-   * `suspended`: AI7 suspended it when the local data was replaced or rolled back, and it starts nothing until the editor confirms
-   * it again; `damaged`: its record does not read back, and only this Book's background analysis stops.
+   * `paused`: the editor paused it, and it starts nothing until they resume it (Issue #864); `suspended`: AI7 suspended it when the
+   * local data was replaced or rolled back, and it starts nothing until the editor confirms it again (待你确认); `damaged`: its
+   * record does not read back, and only this Book's background analysis stops.
    */
-  state: 'none' | 'active' | 'suspended' | 'revoked' | 'damaged';
+  state: 'none' | 'active' | 'paused' | 'suspended' | 'revoked' | 'damaged';
   stateLabel: string;
   statement: string;
   /** The version in force — or the last one, once revoked; `null` before the Book was ever enrolled. */
@@ -6150,10 +6177,21 @@ export interface BackgroundAnalysisEnrollmentProjection {
     stateRecordedAt: string;
     /** What the version binds, in the words its disclosure listed. */
     binds: ReadonlyArray<{ label: string; value: string }>;
+    /** The tokens ceiling set at 登记 for the whole scope; `null` for a version made before a ceiling was required. */
+    ceilingTokens: number | null;
+    /** This Book's share of it, which each of its background Runs is held to; `null` with the ceiling. */
+    shareTokens: number | null;
+    /** What the version covers, its Books in order, and where this Book stands among them (1 is the first). */
+    scope: { kind: BackgroundAnalysisScopeKind; label: string; books: ReadonlyArray<{ bookId: string; title: string }>; position: number };
   };
   /** The Enrollment's newest states, newest first (at most 10); revoking never shortens it. */
-  history: ReadonlyArray<{ state: 'active' | 'suspended' | 'revoked'; stateLabel: string; ordinal: number; recordedAt: string }>;
+  history: ReadonlyArray<{ state: 'active' | 'paused' | 'suspended' | 'revoked'; stateLabel: string; ordinal: number; recordedAt: string }>;
   historyCount: number;
+  /**
+   * A Series or all-Books Enrollment's Books the dispatcher's latest look skipped, in the scope's order, each with why: their
+   * working text has nothing new to analyse. Empty for a Book scope and before the dispatcher has looked.
+   */
+  skipped: ReadonlyArray<{ bookId: string; title: string; reason: string }>;
   /** What the Enrollment would do now, and why — `start` only while every condition holds. */
   next: { kind: 'start' | 'none' | 'wait' | 'stopped'; reason: string };
   /** The dispatcher's latest look at the Book in this service's lifetime, and what it found; `null` before its first. */
@@ -6169,13 +6207,20 @@ export interface BackgroundAnalysisEnrollmentProjection {
     reason: string | null;
     /** The digest `enrollBackgroundAnalysis` must name; `null` while it cannot be enrolled. */
     disclosureDigest: string | null;
+    /** This Book's own scope, in words: what `范围` reads when only the Book is offered. */
     scope: string;
+    /** Every scope 登记 may cover, this Book's first, then each Series it is in, then every Book of the house. */
+    scopes: ReadonlyArray<BackgroundAnalysisScopeOffer>;
     what: string;
     when: string;
     binds: ReadonlyArray<{ label: string; value: string }>;
     startingPoints: ReadonlyArray<{ value: BackgroundAnalysisStartingPoint; label: string; note: string }>;
     notGranted: ReadonlyArray<string>;
+    /** How a Series or all-Books ceiling is shared among its Books, in words. */
+    ceilingRule: string;
   };
+  /** `暂停` and `续行` of the Enrollment: they hold and release what it would start, and change nothing else. */
+  hold: { canPause: boolean; canResume: boolean };
   revoke: { canRevoke: boolean; consequences: ReadonlyArray<string> };
 }
 
@@ -11546,14 +11591,28 @@ export interface ServiceOperationMap {
     input: { bookId: string };
     output: BackgroundAnalysisEnrollmentProjection;
   };
-  /** `登记`: the Enrollment, from the disclosure the editor confirmed and the starting point they chose. */
+  /**
+   * `登记`: the Enrollment, from the disclosure the editor confirmed, the starting point they chose, the scope it covers and the
+   * tokens ceiling they set — required (Issue #864).
+   */
   enrollBackgroundAnalysis: {
-    input: { bookId: string; disclosureDigest: string; startingPoint: BackgroundAnalysisStartingPoint };
+    input: {
+      bookId: string;
+      disclosureDigest: string;
+      startingPoint: BackgroundAnalysisStartingPoint;
+      scope: { kind: BackgroundAnalysisScopeKind; seriesId: string | null };
+      ceilingTokens: number;
+    };
     output: BackgroundAnalysisEnrollmentProjection;
   };
   /** `撤销登记`: no new Run starts under it; everything already recorded stays. */
   revokeBackgroundAnalysisEnrollment: {
     input: { bookId: string; enrollmentId: string };
+    output: BackgroundAnalysisEnrollmentProjection;
+  };
+  /** `暂停` / `续行` of an Enrollment in force (Issue #864): holds or releases what it would start; Runs already started go on. */
+  holdBackgroundAnalysisEnrollment: {
+    input: { bookId: string; enrollmentId: string; hold: 'pause' | 'resume' };
     output: BackgroundAnalysisEnrollmentProjection;
   };
   /** 知识库 › 审阅规范文件 (Issue #427, S79a): every guideline document the review categories apply, with its versions. */
@@ -12265,8 +12324,9 @@ export interface RendererApi {
   deactivateDefaultExecutionRule(input: { ruleId: string }): Promise<DefaultExecutionRuleProjection>;
   /** 后台分析登记 of the Book the window is showing (Issue #95, S39). */
   inspectBackgroundAnalysisEnrollment(): Promise<BackgroundAnalysisEnrollmentProjection>;
-  enrollBackgroundAnalysis(input: { disclosureDigest: string; startingPoint: BackgroundAnalysisStartingPoint }): Promise<BackgroundAnalysisEnrollmentProjection>;
+  enrollBackgroundAnalysis(input: Omit<ServiceOperationMap['enrollBackgroundAnalysis']['input'], 'bookId'>): Promise<BackgroundAnalysisEnrollmentProjection>;
   revokeBackgroundAnalysisEnrollment(input: { enrollmentId: string }): Promise<BackgroundAnalysisEnrollmentProjection>;
+  holdBackgroundAnalysisEnrollment(input: { enrollmentId: string; hold: 'pause' | 'resume' }): Promise<BackgroundAnalysisEnrollmentProjection>;
   /** 知识库 › 审阅规范文件 (Issue #427, S79a): names no Book; it reads every Book's Review Runs to say who used which version. */
   inspectReviewGuidelines(input?: { page?: ReviewGuidelinesPage }): Promise<ReviewGuidelinesProjection>;
   /** 导入新版本: the native picker, then the file's clauses as the next version would read them; `null` when the picker was cancelled. */

@@ -977,12 +977,19 @@ async function dispatch(
     case 'inspectBackgroundAnalysisEnrollment':
       return { id: request.id, ok: true, op: request.op, result: store.inspectBackgroundAnalysisEnrollment(request.input.bookId, background.runtime()) };
     case 'enrollBackgroundAnalysis': {
-      const result = store.enrollBackgroundAnalysis(request.input.bookId, request.input.disclosureDigest, request.input.startingPoint, background.runtime());
+      const result = store.enrollBackgroundAnalysis(request.input.bookId, request.input.disclosureDigest, request.input.startingPoint,
+        request.input.scope, request.input.ceilingTokens, background.runtime());
       background.nudge();
       return { id: request.id, ok: true, op: request.op, result };
     }
     case 'revokeBackgroundAnalysisEnrollment':
       return { id: request.id, ok: true, op: request.op, result: store.revokeBackgroundAnalysisEnrollment(request.input.bookId, request.input.enrollmentId, background.runtime()) };
+    // `暂停` / `续行` (Issue #864): a resumed Enrollment is looked at once, as a new one is.
+    case 'holdBackgroundAnalysisEnrollment': {
+      const result = store.holdBackgroundAnalysisEnrollment(request.input.bookId, request.input.enrollmentId, request.input.hold, background.runtime());
+      if (request.input.hold === 'resume') background.nudge();
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so
     // a category executing now carries its Measured Run Progress.
     case 'inspectReviewWorkspace':

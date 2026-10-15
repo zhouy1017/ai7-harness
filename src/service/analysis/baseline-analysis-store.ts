@@ -444,8 +444,21 @@ interface PendingIntent {
   readonly mode: AnalysisTaskMode;
   readonly redoOf: string | null;
   readonly preparedByEnrollmentVersionId: string | null;
+  /** The Book's share of the Enrollment's ceiling the dispatcher's Task is held to (Issue #864); `null` for the editor's. */
+  readonly backgroundRunBudgetCeiling: BackgroundRunBudgetCeiling | null;
   readonly predecessor: { readonly revisionId: string; readonly digest: string } | null;
   readonly selectedRange: BaselineAnalysisSelectedRange | null;
+}
+
+/** The tokens ceiling a 后台分析登记 holds each Run it starts to: the Book's share of the Enrollment's ceiling (Issue #864). */
+export interface BackgroundRunBudgetCeiling {
+  readonly kind: 'tokens';
+  readonly maxTotalTokens: number;
+}
+
+function isBackgroundRunBudgetCeiling(value: unknown): value is BackgroundRunBudgetCeiling {
+  return isRecord(value) && value.kind === 'tokens' && Number.isSafeInteger(value.maxTotalTokens) && (value.maxTotalTokens as number) >= 1 &&
+    Object.keys(value).length === 2;
 }
 
 /** The facts one `analysis_task_intents` row carries, with the canonical record they were read from. */
@@ -464,6 +477,8 @@ interface IntentFacts {
   readonly redoOfRunRecordId: string | null;
   /** The 后台分析登记 version whose dispatcher created this Task Intent (Issue #95, S39); `null` for every Task the editor asked for. */
   readonly preparedByEnrollmentVersionId: string | null;
+  /** The ceiling that dispatcher holds the Task's Run to (Issue #864); `null` for the editor's Tasks and for one made before #864. */
+  readonly backgroundRunBudgetCeiling: BackgroundRunBudgetCeiling | null;
 }
 
 /**
@@ -555,7 +570,7 @@ export type BaselineAnalysisPrepareInput =
      * its own, marked with the enrollment version, never one the editor asked for; refused while any preparation of the Book is
      * under way or the editor's own Task is prepared and not started; its checkpoint gives way to any other the Book asks for.
      */
-    background?: { enrollmentVersionId: string };
+    background?: { enrollmentVersionId: string; runBudgetCeiling: BackgroundRunBudgetCeiling };
     /**
      * A new Task Intent even where the latest prepared one would be revised in place (Issue #428): 写作任务's preparation when
      * the 资料库 builds it pins differ from the ones the prepared Task froze. Its contract holds words only, so the same words
@@ -641,6 +656,11 @@ export interface ExecutionPlanFacts {
   /** The exact plan version the Run Authorization bound. */
   readonly planVersionId: string;
   readonly planVersionOrdinal: number;
+  /**
+   * Who started the Run, as its Run Authorization records it (Issue #864): a Run a 后台分析登记 started is admitted live only
+   * under the selected policy's enrolled-background rule.
+   */
+  readonly origin: 'standard-direct' | 'default-execution-rule' | 'background-analysis-enrollment';
   readonly checkpoint: ManuscriptCheckpointBinding;
   readonly manifest: CoverageManifestProjection;
   readonly manifestDigest: string;
@@ -1203,7 +1223,7 @@ export class BaselineAnalysisStore {
       planRevision = revisions.filter((entry) => entry.state === 'pending' && entry.priorPlanVersionId === currentVersion.planVersionId).at(-1) ?? null;
       if (planRevision === null) {
         const live = this.#currentMaterialInputs(bookId, intent.mode, materialInputs.selectedRange, manifest.units.length,
-          planEditCeiling(this.#planEditsOf(intent.taskIntentId, currentVersion.ordinal)));
+          planEditCeiling(this.#planEditsOf(intent.taskIntentId, currentVersion.ordinal)), undefined, intent.backgroundRunBudgetCeiling);
         const diff = diffMaterialPlanInputs(materialInputs, live);
         if (diff.length > 0) {
           const changedFields = diff.map((entry) => entry.field);
@@ -1554,7 +1574,7 @@ export class BaselineAnalysisStore {
       const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
       const frozen = materialPlanInputsOfComponents(plan, intent.record);
       const diff = diffMaterialPlanInputs(frozen, this.#currentMaterialInputs(intent.bookId, intent.mode, frozen.selectedRange, manifest.units.length,
-        planEditCeiling(this.#planEditsOf(intent.taskIntentId, current.ordinal))));
+        planEditCeiling(this.#planEditsOf(intent.taskIntentId, current.ordinal)), undefined, intent.backgroundRunBudgetCeiling));
       revision = diff.length === 0 ? null : { planRevisionId: null, at: current.createdAt, changedFields: diff.map((entry) => entry.field) };
     }
     if (revision === null || revision.changedFields.includes('predecessorRevision')) return null;
@@ -1751,6 +1771,8 @@ export class BaselineAnalysisStore {
      */
     editorCeiling: RunBudgetCeilingState = 'unset',
     frozenProductionBinding?: MaterialPlanInputsProjection['providerBinding'],
+    /** A 后台分析登记's Task: the Book's share of the Enrollment's ceiling, which replaces the editor's (Issue #864). */
+    backgroundCeiling: BackgroundRunBudgetCeiling | null = null,
   ): MaterialPlanInputsProjection {
     const connection = this.#db.prepare(
       `SELECT provider_id, model_id, adapter_revision, configuration_revision, credential_reference
@@ -1799,10 +1821,23 @@ export class BaselineAnalysisStore {
       },
       selectedRange: this.#definition.mode(mode).rangeBound ? selectedRange : null,
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
-      runBudgetCeiling: live === null || live.scope === 'ordinary-production' ? editorCeiling : resolveDeveloperLiveCeiling(live.runBudgetCeiling, unitCount),
+      runBudgetCeiling: this.#planCeiling(unitCount, editorCeiling, backgroundCeiling),
       outboundDataCategory: this.#launch.operationalScope === 'ordinary-production' ? 'unpublished-excerpts' : 'public-or-synthetic',
       expectedOutcome: this.#definition.expectedOutcome,
     };
+  }
+
+  /**
+   * The ceiling a plan freezes (Issue #51; ADR 0070; Issue #864): a 后台分析登记's Task its Book's share of the Enrollment's
+   * ceiling — under developer-live the lower of that share and the launch's own — and every other Task the editor's outside
+   * developer-live and the launch's under it.
+   */
+  #planCeiling(unitCount: number, editorCeiling: RunBudgetCeilingState, background: BackgroundRunBudgetCeiling | null): RunBudgetCeilingState {
+    const live = this.#launch.live;
+    const share = background === null ? null : { kind: 'tokens' as const, maxTotalTokens: background.maxTotalTokens };
+    if (live === null || live.scope === 'ordinary-production') return share ?? editorCeiling;
+    const launch = resolveDeveloperLiveCeiling(live.runBudgetCeiling, unitCount);
+    return share === null || launch.maxTotalTokens < share.maxTotalTokens ? launch : share;
   }
 
   /**
@@ -1909,7 +1944,10 @@ export class BaselineAnalysisStore {
   currentRuleFacts(bookId: string, mode: AnalysisTaskMode): MaterialPlanInputsProjection {
     const live = this.#launch.live;
     const liveWriting = live !== null && this.#definition.kind === WRITING_KIND && liveKindRule(this.#launch.policy, WRITING_KIND) !== null;
-    requireAnalysis(UUID_PATTERN.test(bookId) && (live === null || liveWriting) && !this.#definition.mode(mode).rangeBound,
+    // What a 后台分析登记 binds, under the selected policy's enrolled-background rule (Issue #864).
+    const liveBackground = live !== null && this.#definition.kind === BASELINE_ANALYSIS_KIND &&
+      liveKindRule(this.#launch.policy, BASELINE_ANALYSIS_KIND, [], 'background') !== null;
+    requireAnalysis(UUID_PATTERN.test(bookId) && (live === null || liveWriting || liveBackground) && !this.#definition.mode(mode).rangeBound,
       'ANALYSIS_RULE_FACTS_INVALID', '无法读取默认执行规则所需的当前事实。');
     return this.#currentMaterialInputs(bookId, mode, null, liveWriting ? this.#workingUnitCount(bookId) : 0);
   }
@@ -2015,7 +2053,7 @@ export class BaselineAnalysisStore {
     const instant = new Date().toISOString();
     const manifest = existing.coverageManifest;
     const proposed = this.#currentMaterialInputs(bookId, intent.mode, requestedRange, manifest.units.length,
-      planEditCeiling(this.#planEditsOf(intent.taskIntentId, current.ordinal)));
+      planEditCeiling(this.#planEditsOf(intent.taskIntentId, current.ordinal)), undefined, intent.backgroundRunBudgetCeiling);
     const storedCounts = existing.update?.reusePlan?.counts ?? null;
     const countsFor = (inputs: MaterialPlanInputsProjection): AnalysisReusePlanCounts | null =>
       this.#reusePlanCountsFor(bookId, intent.mode, manifest, inputs.selectedRange);
@@ -2272,7 +2310,10 @@ export class BaselineAnalysisStore {
     requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string' &&
       (record.redoOfRunRecordId === undefined || (typeof record.redoOfRunRecordId === 'string' && UUID_PATTERN.test(record.redoOfRunRecordId))) &&
       (record.preparedByEnrollmentVersionId === undefined ||
-        (typeof record.preparedByEnrollmentVersionId === 'string' && UUID_PATTERN.test(record.preparedByEnrollmentVersionId) && record.redoOfRunRecordId === undefined)),
+        (typeof record.preparedByEnrollmentVersionId === 'string' && UUID_PATTERN.test(record.preparedByEnrollmentVersionId) && record.redoOfRunRecordId === undefined)) &&
+      // Only the dispatcher's Task carries the ceiling its Enrollment holds it to (Issue #864).
+      (record.backgroundRunBudgetCeiling === undefined ||
+        (record.preparedByEnrollmentVersionId !== undefined && isBackgroundRunBudgetCeiling(record.backgroundRunBudgetCeiling))),
     'ANALYSIS_RECORD_INVALID', '任务意图记录无效。');
     const start = row.selected_start_position;
     const end = row.selected_end_position;
@@ -2288,6 +2329,7 @@ export class BaselineAnalysisStore {
       expectedOutcome: record.expectedOutcome,
       redoOfRunRecordId: record.redoOfRunRecordId === undefined ? null : record.redoOfRunRecordId as string,
       preparedByEnrollmentVersionId: record.preparedByEnrollmentVersionId === undefined ? null : record.preparedByEnrollmentVersionId as string,
+      backgroundRunBudgetCeiling: record.backgroundRunBudgetCeiling === undefined ? null : record.backgroundRunBudgetCeiling as BackgroundRunBudgetCeiling,
     };
   }
 
@@ -3157,7 +3199,9 @@ export class BaselineAnalysisStore {
       const scope = this.#launch.operationalScope;
       requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || plannedRunAdmission(input.launchPolicy, this.#definition, this.#launch.live) !== null,
         'ANALYSIS_KIND_NOT_ADMITTED', `${scope} 当前只允许基线稿件分析；该任务种类尚未获准实时执行。`);
-      requireAnalysis(input.background == null,
+      // A 后台分析登记's preparation only under the selected policy's enrolled-background rule (Issue #864; Provider Processing v14/v15).
+      requireAnalysis(input.background == null ||
+          (this.#definition.kind === BASELINE_ANALYSIS_KIND && liveKindRule(input.launchPolicy, BASELINE_ANALYSIS_KIND, [], 'background') !== null),
         'ANALYSIS_ORIGIN_NOT_ADMITTED', `${scope} 当前只允许直接发起的分析任务。`);
     }
     const update = this.#resolveSelectedBlocks(input.bookId, input.update);
@@ -3177,7 +3221,8 @@ export class BaselineAnalysisStore {
         if (work.background && work.bookId === input.bookId) this.prepare({ phase: 'cancel', workId: work.workId });
       }
     } else {
-      requireAnalysis(UUID_PATTERN.test(background.enrollmentVersionId) && input.redoOf == null && !input.reconfirm,
+      requireAnalysis(UUID_PATTERN.test(background.enrollmentVersionId) && isBackgroundRunBudgetCeiling(background.runBudgetCeiling) &&
+        input.redoOf == null && !input.reconfirm,
         'ANALYSIS_BACKGROUND_INVALID', '后台分析的准备参数无效。');
       requireAnalysis(!this.preparationInFlight(input.bookId), 'ANALYSIS_PREPARATION_IN_FLIGHT', '这本书正在准备一项任务；后台分析不接手。');
     }
@@ -3288,6 +3333,7 @@ export class BaselineAnalysisStore {
     const pendingIntent: PendingIntent | null = reusable ? null : {
       taskIntentId, bookId: input.bookId, goal: input.goal, mode, redoOf,
       preparedByEnrollmentVersionId: background?.enrollmentVersionId ?? null,
+      backgroundRunBudgetCeiling: background === null ? null : { kind: 'tokens', maxTotalTokens: background.runBudgetCeiling.maxTotalTokens },
       predecessor: initial ? null : { revisionId: latest!.revisionId, digest: latest!.digest },
       selectedRange,
     };
@@ -3325,6 +3371,7 @@ export class BaselineAnalysisStore {
       taskIntentId: intent.taskIntentId,
       ...(intent.redoOf === null ? {} : { redoOfRunRecordId: intent.redoOf }),
       ...(intent.preparedByEnrollmentVersionId === null ? {} : { preparedByEnrollmentVersionId: intent.preparedByEnrollmentVersionId }),
+      ...(intent.backgroundRunBudgetCeiling === null ? {} : { backgroundRunBudgetCeiling: { ...intent.backgroundRunBudgetCeiling } }),
     };
     // A whole first Task's record is the base alone, as it has been since revision 15. Every Task that
     // carries a plan also states its mode, its predecessor and its range — and a range-bound first
@@ -3545,7 +3592,7 @@ export class BaselineAnalysisStore {
               fixtureLineage: this.#route.fixtureLineage,
             },
       outboundDataCategory: production !== null ? 'unpublished-excerpts' : 'public-or-synthetic',
-      runBudgetCeiling: live === null || live.scope === 'ordinary-production' ? planEditCeiling(edits) : resolveDeveloperLiveCeiling(live.runBudgetCeiling, manifest.units.length),
+      runBudgetCeiling: this.#planCeiling(manifest.units.length, planEditCeiling(edits), intent.backgroundRunBudgetCeiling),
     };
     const dispatchAllowed = live !== null || this.#route !== null;
     const stopCondition = production !== null
@@ -3673,12 +3720,14 @@ export class BaselineAnalysisStore {
       const admitted = this.#definition.kind === BASELINE_ANALYSIS_KIND ? null : plannedRunAdmission(this.#launch.policy, this.#definition, this.#launch.live);
       requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || admitted !== null,
         'ANALYSIS_KIND_NOT_ADMITTED', `${scope} 当前只允许基线稿件分析；该任务种类尚未获准实时执行。`);
-      // Every admitted kind starts by a direct authorization; writing's quick start also starts under its default execution
-      // rule (#810), under developer-live only: ordinary production admits no default-rule origin yet (Issue #811, wave 4).
-      // Background enrollment stays refused live.
+      // Every admitted kind starts by a direct authorization; writing's developer-live quick start and a kind whose
+      // selected rule admits a matching active default execution rule may also start under that rule (Issue #866).
+      // A 后台分析登记's start only under the selected policy's enrolled-background rule (Issue #864; Provider Processing v14/v15).
       requireAnalysis(origin.kind === 'standard-direct' || (origin.kind === 'default-execution-rule' && admitted !== null &&
           ((this.#definition.kind === WRITING_KIND && scope === 'developer-live') ||
-            liveKindRule(this.#launch.policy, this.#definition.kind)?.matchingActiveDefaultExecutionRuleAllowed === true)),
+            liveKindRule(this.#launch.policy, this.#definition.kind)?.matchingActiveDefaultExecutionRuleAllowed === true)) ||
+          (origin.kind === 'background-analysis-enrollment' && this.#definition.kind === BASELINE_ANALYSIS_KIND &&
+            liveKindRule(this.#launch.policy, BASELINE_ANALYSIS_KIND, [], 'background') !== null),
         'ANALYSIS_ORIGIN_NOT_ADMITTED', `${scope} 当前只允许直接授权的基线稿件分析。`);
     }
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) &&
@@ -4385,7 +4434,7 @@ export class BaselineAnalysisStore {
     const live = this.#currentMaterialInputs(intent.bookId, intent.mode, frozen.selectedRange, manifest.units.length,
       planEditCeiling(this.#planEditsOf(intent.taskIntentId, version.ordinal)),
       // An authorized production Run owns its connection; settings select the next Task's connection (#811 revision 9).
-      this.#launch.operationalScope === 'ordinary-production' ? frozen.providerBinding : undefined);
+      this.#launch.operationalScope === 'ordinary-production' ? frozen.providerBinding : undefined, intent.backgroundRunBudgetCeiling);
     return diffMaterialPlanInputs(frozen, live).map((entry) => entry.label);
   }
 
@@ -4446,7 +4495,7 @@ export class BaselineAnalysisStore {
   loadExecutionPlan(runRecordId: string): ExecutionPlanFacts {
     requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
     const run = this.#db.prepare(
-      `SELECT r.run_record_id, r.task_intent_id, a.plan_envelope_sha256
+      `SELECT r.run_record_id, r.task_intent_id, a.plan_envelope_sha256, a.origin, a.canonical_json
        FROM analysis_run_records r
        JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
        WHERE r.run_record_id = ?`,
@@ -4455,6 +4504,10 @@ export class BaselineAnalysisStore {
     const intentRow = this.#db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ?').get(asString(run.task_intent_id)) as SqlRow | undefined;
     requireAnalysis(intentRow !== undefined, 'ANALYSIS_RECORD_INVALID', '任务意图缺失。');
     const intent = this.#intentFacts(intentRow);
+    // Who started the Run (Issue #864): a 后台分析登记's Run is only ever the Task its dispatcher created under that very version.
+    const origin = authorizationOrigin(run);
+    requireAnalysis(origin.origin !== 'background-analysis-enrollment' || intent.preparedByEnrollmentVersionId === origin.enrollmentVersionId,
+      'ANALYSIS_RECORD_INVALID', '运行授权的来源与任务意图不一致。');
     const checkpointRow = this.#db.prepare('SELECT * FROM analysis_task_input_checkpoints WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
     requireAnalysis(checkpointRow !== undefined, 'ANALYSIS_RECORD_INVALID', '任务输入固定点缺失。');
     // The Run executes exactly the plan version its authorization bound, never a later one.
@@ -4485,7 +4538,7 @@ export class BaselineAnalysisStore {
       requireAnalysis(providerPlan.executionRoute.kind === live.route && providerPlan.executionRoute.model === live.model &&
         providerPlan.executionRoute.endpoint === live.endpoint, 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');
       requireAnalysis(providerPlan.remoteBinding.credentialReference === live.credentialReference &&
-        canonicalJson(runBudgetCeiling) === canonicalJson(resolveDeveloperLiveCeiling(live.runBudgetCeiling, manifest.units.length)),
+        canonicalJson(runBudgetCeiling) === canonicalJson(this.#planCeiling(manifest.units.length, 'unset', intent.backgroundRunBudgetCeiling)),
       'ANALYSIS_ROUTE_STALE', '当前启动的凭据引用或运行预算上限与冻结计划不一致。');
     } else {
       requireAnalysis(providerPlan.executionRoute.kind === LOCAL_DETERMINISTIC_ROUTE, 'ANALYSIS_ROUTE_ABSENT', '计划没有可执行的本地路由。');
@@ -4512,7 +4565,9 @@ export class BaselineAnalysisStore {
       asked.every((adaptationClass) => (split.askFirst ?? []).some((entry) => entry.adaptationClass === adaptationClass))),
       'ANALYSIS_RECORD_INVALID', '计划信封与计划修改不一致。');
     // Outside developer-live the ceiling the Run is held to is the one the editor set in this version, or none (Issue #51).
-    requireAnalysis(live !== null || canonicalJson(runBudgetCeiling) === canonicalJson(planEditCeiling(editorEdits)),
+    // A 后台分析登记's Task is held to its Book's share under every scope (Issue #864).
+    requireAnalysis((live !== null && intent.backgroundRunBudgetCeiling === null) ||
+      canonicalJson(runBudgetCeiling) === canonicalJson(this.#planCeiling(manifest.units.length, planEditCeiling(editorEdits), intent.backgroundRunBudgetCeiling)),
       'ANALYSIS_RECORD_INVALID', '计划的预算上限与计划修改不一致。');
     let update: ExecutionUpdateFacts | null = null;
     if (this.#carriesPlan(intent.mode)) {
@@ -4554,6 +4609,7 @@ export class BaselineAnalysisStore {
       runRecordId,
       planVersionId: version.planVersionId,
       planVersionOrdinal: version.ordinal,
+      origin: origin.origin,
       checkpoint: {
         bookId: intent.bookId,
         manuscriptId: asString(checkpointRow.manuscript_id),

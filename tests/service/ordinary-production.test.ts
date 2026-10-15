@@ -8,6 +8,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { BackgroundAnalysisDispatcher } from '../../src/service/background-analysis.js';
+import { liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
 import type { LaunchBinding, OrdinaryProductionLaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import {
@@ -254,6 +256,60 @@ function code(operation: () => unknown): string {
 }
 
 describe('ordinary production over exact sample1 with a stub transport (Issue #811)', { timeout: 120_000 }, () => {
+  it.each(['opencode-go', 'deepseek-open-platform'] as const)('dispatches an enrolled background Run under v15 on %s with its mandatory frozen ceiling (#864)', async (route) => {
+    const { store, production } = await openProductionStore();
+    await configure(store, production, route);
+    const reference = await sample1Book(store, 'L2 后台合成回答参照');
+    const answers = await chainAnswers(prepare(store, reference, production.policy));
+    const bookId = await sample1Book(store, 'L2 正式后台分析');
+    const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
+    const selected = production.policy;
+    expect(selected.providerProcessing.version).toBe('v15');
+    expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'])?.backgroundOrigin).toBe(false);
+    expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'], 'background')?.ruleId)
+      .toBe('enrolled-background-manuscript-analysis-processing');
+    // The predecessor v13 has no background rule. This in-memory projection isolates that origin boundary.
+    production.policy = { ...selected, providerProcessing: { ...selected.providerProcessing,
+      admittedRules: selected.providerProcessing.admittedRules.filter((rule) => !rule.backgroundOrigin) } };
+    expect(store.inspectBackgroundAnalysisEnrollment(bookId, runtime).offer.canEnroll).toBe(false);
+    expect(liveKindRule(production.policy, 'baseline-manuscript-analysis', ['unpublished-excerpts'], 'background')).toBeNull();
+    production.policy = selected;
+    const shown = store.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+    // One token proves the ceiling actually stops subsequent sends, even though a production foreground ceiling may be unset.
+    const ceiling = route === 'opencode-go' ? 1 : 400_000;
+    store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, 'backfill', { kind: 'book', seriesId: null }, ceiling, runtime);
+    const calls: StubCall[] = [];
+    const execution = owner(store, production, stubTransport(calls, answers));
+    const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: selected, now: () => runtime.now });
+    try {
+      production.policy = { ...selected, providerProcessing: { ...selected.providerProcessing,
+        admittedRules: selected.providerProcessing.admittedRules.filter((rule) => !rule.backgroundOrigin) } };
+      dispatcher.nudge();
+      await dispatcher.settled();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).taskIntent).toBeNull();
+      expect(calls).toHaveLength(0);
+      production.policy = selected;
+      dispatcher.nudge();
+      await dispatcher.settled();
+      await execution.whenIdle();
+      const after = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(after.authorization!.origin).toBe('background-analysis-enrollment');
+      expect(after.planVersion!.materialInputs.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: ceiling });
+      expect(store.baselineAnalysisLedger.loadExecutionPlan(after.run!.runRecordId).runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: ceiling });
+      expect(after.taskOutcome!.report!.background![0]).toBe('由后台分析登记开始 · 按第 1 版登记');
+      if (ceiling === 1) {
+        expect(calls).toHaveLength(1);
+        expect(after.taskOutcome!.stop?.reason).toBe('run-budget-ceiling-reached');
+        expect(after.taskOutcome!.report!.background![2]).toMatch(/^达到上限后停下/u);
+      } else {
+        expect(after.run!.state).toBe('completed');
+        expect(calls).toHaveLength(FULL_CHAIN_TURNS);
+      }
+    } finally {
+      await dispatcher.dispose();
+    }
+  });
+
   it.each(['opencode-go', 'deepseek-open-platform'] as const)('discloses %s transmission and metered usage with no default ceiling before authorization', async (route) => {
     const { store, production } = await openProductionStore();
     await configure(store, production, route);
@@ -376,13 +432,27 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect((await readdir(roots.dataRoot)).some((name) => /cache|ledger/u.test(name))).toBe(false);
   });
 
-  it('switches route for the next Task only: a planned Run keeps the binding its plan froze', async () => {
+  it.each(['foreground', 'background'] as const)('keeps a %s Run on its frozen binding when settings switch route', async (origin) => {
     const { store, production } = await openProductionStore();
     await configure(store, production, 'opencode-go');
     const first = await sample1Book(store, 'L2 切换前');
-    const preparedFirst = prepare(store, first, production.policy);
+    const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
+    let version: string | null = null;
+    let preparedFirst: BaselineAnalysisProjection;
+    if (origin === 'background') {
+      const shown = store.inspectBackgroundAnalysisEnrollment(first, runtime);
+      version = store.enrollBackgroundAnalysis(first, shown.offer.disclosureDigest!, 'backfill', { kind: 'book', seriesId: null }, 400_000, runtime)
+        .enrollment!.enrollmentVersionId;
+      let work = store.createBackgroundBaselineAnalysisPreparationWork(first, 'first-baseline', version, production.policy);
+      while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+      preparedFirst = work.projection!;
+    } else {
+      preparedFirst = prepare(store, first, production.policy);
+    }
     expect(preparedFirst.providerResolutionPlan?.executionRoute).toMatchObject({ kind: 'opencode-go' });
-    const authorized = store.authorizeBaselineAnalysis(first, preparedFirst.taskIntent!.taskIntentId, preparedFirst.planEnvelope!.digest);
+    const authorized = version === null
+      ? store.authorizeBaselineAnalysis(first, preparedFirst.taskIntent!.taskIntentId, preparedFirst.planEnvelope!.digest)
+      : store.startEnrolledBaselineAnalysis(first, preparedFirst.taskIntent!.taskIntentId, preparedFirst.planEnvelope!.digest, version, 'first-baseline', runtime);
     // The editor switches to the official route while the first Task waits to run.
     const officialReference = await configure(store, production, 'deepseek-open-platform');
     expect(store.baselineAnalysisLedger.preflightDrift(authorized.dispatchRunRecordId!)).toEqual([]);

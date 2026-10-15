@@ -269,6 +269,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['enrollBackgroundAnalysis']['output']>(IPC_CHANNELS.enrollBackgroundAnalysis, input),
   revokeBackgroundAnalysisEnrollment: (input: Omit<ServiceOperationMap['revokeBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['revokeBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.revokeBackgroundAnalysisEnrollment, input),
+  holdBackgroundAnalysisEnrollment: (input: Omit<ServiceOperationMap['holdBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['holdBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.holdBackgroundAnalysisEnrollment, input),
   inspectReviewGuidelines: (input?: ServiceOperationMap['inspectReviewGuidelines']['input']) =>
     invoke<ServiceOperationMap['inspectReviewGuidelines']['output']>(IPC_CHANNELS.inspectReviewGuidelines, input ?? {}),
   previewReviewGuidelineVersion: (input: { documentId: string; previewId?: string; clausePage?: number }) =>
