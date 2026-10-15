@@ -1886,25 +1886,28 @@ export interface ModelServiceConnectionProjection {
 }
 
 /**
- * The trusted operational scopes the source checkout can bind from its launch form (ADR 0065):
- * `development-ci` by default, `developer-live` only through `--trusted-operational-scope`.
- * `fixture-recording` and `ordinary-production` stay unselectable from the source checkout.
+ * The trusted operational scopes the source checkout can bind from its launch form (ADR 0065, ADR 0046):
+ * `development-ci` by default; `developer-live` and `ordinary-production` only through
+ * `--trusted-operational-scope`. `fixture-recording` stays unselectable from the source checkout.
  */
-export type TrustedOperationalScope = 'development-ci' | 'developer-live';
+export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ordinary-production';
 /**
- * Historical v5, v9, v10 and the superseded web reservation v8 remain readable identities; selected v11 admits baseline
- * analysis, editorial dialogue, reference-free review, writing, the three evaluation contracts, and 润色 and conflict
- * regeneration Suggestions on V4.1. A type member does not select or activate a policy.
+ * Historical v5, v9, v10, v11 and the superseded web reservation v8 remain readable identities; selected v12 admits baseline
+ * analysis, editorial dialogue, review (with cross-deliverable consistency and frozen Material References), writing and the
+ * three evaluation contracts (with frozen Material References), and 润色 and conflict regeneration Suggestions on V4.1. A type
+ * member does not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11';
-/** Historical v5, v7 and v8, the superseded web reservation v6, and selected v9. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9';
-export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion;
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
+/** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
+export type OrdinaryProductionProviderProcessingVersion = 'v13';
+/** Historical v5, v7, v8 and v9, the superseded web reservation v6, and selected v10. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10';
+export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
- * Provider Processing v11 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
+ * Provider Processing v12 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
  * resolved once the manifest freezes and before the plan does.
  */
 export type DeveloperLiveCeiling =
@@ -1965,7 +1968,7 @@ export const PROVIDER_CACHE_ROOT_ARGUMENT = '--provider-cache-root';
 export const VALIDATION_CASE_ARGUMENT = '--validation-case';
 /** The substantive delta a developer-live launch declares beside its validation case: `<kind>:<rationale>`, optional. */
 export const VALIDATION_DELTA_ARGUMENT = '--validation-delta';
-export const LAUNCH_SELECTABLE_SCOPES: ReadonlyArray<TrustedOperationalScope> = ['development-ci', 'developer-live'];
+export const LAUNCH_SELECTABLE_SCOPES: ReadonlyArray<TrustedOperationalScope> = ['development-ci', 'developer-live', 'ordinary-production'];
 /** A positive decimal token count without sign, separators, or leading zeros; twelve digits stay well inside the safe-integer range. */
 export const RUN_BUDGET_CEILING_PATTERN = /^[1-9][0-9]{0,11}$/u;
 /** Windows drive-rooted, UNC, or POSIX-rooted; every process on the launch path re-checks with its own path owner. */
@@ -2086,7 +2089,10 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
  * The outbound data categories a Provider Processing rule may name (Issue #841). The Egress Gate recognises these identifiers;
  * naming one in a rule declares what the gate must accept, and the consuming slices decide when a binding carries it.
  * `public-or-synthetic` and `editor-selected-manuscript-excerpt` are the original two; the other four arrive with Provider
- * Processing v11 for writing, evaluation and conflict regeneration (frozen inputs and manuscript excerpts).
+ * Processing v11 for writing, evaluation and conflict regeneration (frozen inputs and manuscript excerpts); the last two,
+ * `frozen-material-reference-excerpt` and `editorial-deliverable-excerpt`, arrive with v12 for Material-Reference-bearing
+ * review, writing and evaluation and for cross-deliverable consistency. A declaration only: the gate's logic is the consuming
+ * slices' to change.
  */
 export type OutboundDataCategoryId =
   | 'public-or-synthetic'
@@ -2094,7 +2100,9 @@ export type OutboundDataCategoryId =
   | 'editor-authored-evaluation-text'
   | 'house-exemplar-excerpt'
   | 'book-metadata-and-synopsis'
-  | 'manuscript-conflict-region-excerpt';
+  | 'manuscript-conflict-region-excerpt'
+  | 'frozen-material-reference-excerpt'
+  | 'editorial-deliverable-excerpt';
 
 /**
  * One allow rule of the selected Provider Processing policy, as the launch verified it from the pinned bytes: the task kinds it
@@ -2131,27 +2139,40 @@ export interface LaunchPolicyProjection {
     liveTransmissionAllowed: boolean;
     /**
      * Whether the active Provider Processing policy names the cross-unit reduction's transmission
-     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v11 document it
+     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v12 document it
      * is `true`, and anything else — absent included — means the reduction does not dispatch.
      */
     crossUnitReductionAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the assurance sampling suboperation's
-     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v11
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v12
      * document it is `true`; anything else — absent included — means the suboperation does not
      * dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
-     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v11 document it is
+     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v12 document it is
      * `true`; anything else — absent included — means the turn does not dispatch and the report
      * records `policy-bounded` with its reason.
      */
     runReportReflectionAllowed?: boolean;
-    /** One entry per allow rule of the verified policy, in policy order; empty under development-ci and every denial. */
+    /**
+     * One entry per allow rule of the verified policy, in policy order; empty under development-ci, every denial and an
+     * ordinary-production launch whose configured binding is still missing.
+     */
     readonly admittedRules: readonly AdmittedProviderRule[];
-    label: '开发与持续集成：零次实时传输' | '开发者实时：实时传输受运行边界约束';
+    /**
+     * Only under `ordinary-production` (Provider Processing v13): `setup-required` while the editor's own model service is not
+     * configured, so no rule is admitted; `configured` once the launch supplied a binding the policy allows, which fills every
+     * admitted rule's route, endpoint, model and credential slot. Absent under every other scope.
+     */
+    bindingState?: 'setup-required' | 'configured';
+    label:
+      | '开发与持续集成：零次实时传输'
+      | '开发者实时：实时传输受运行边界约束'
+      | '本机生产：需先设置模型服务，当前不会传输'
+      | '本机生产：实时传输受运行边界约束';
   };
   externalExport: {
     version: 'v2' | null;

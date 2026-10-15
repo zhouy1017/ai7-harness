@@ -59,7 +59,7 @@ export function admittedFastRoleRoute(policy: LaunchPolicyProjection, kindId: st
   const processing = policy.providerProcessing;
   if (policy.integrityState !== 'verified' || policy.operationalScope !== 'developer-live' ||
       processing.decision !== 'eligible-only' || processing.liveTransmissionAllowed !== true ||
-      processing.version === null || processing.version === 'v1') return null;
+      processing.version === null || processing.version === 'v1' || processing.version === 'v13') return null;
   // The selected policy's allow rules, as the launch verified them; a projection that carries none admits nothing.
   const rules: ReadonlyArray<unknown> = processing.admittedRules ?? [];
   const kindRules = rules.filter((rule) => isRecord(rule) &&
