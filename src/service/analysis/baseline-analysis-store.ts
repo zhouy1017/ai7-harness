@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { liveKindAdmission, liveKindRule } from './live-kind-admission.js';
+import { withModelClarification } from '../provider/clarification-contract.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   BASELINE_ANALYSIS_KIND,
@@ -87,8 +88,12 @@ import {
   CLARIFICATION_NOTE_MAX,
   CLARIFICATION_OPTION_IDS,
   CLARIFICATION_REQUEST_SCHEMA,
+  clarificationGraphemes,
+  modelClarificationExpired,
+  parseModelClarification,
+  type ModelClarificationQuestion,
+  type AnyClarificationOptionId,
   type ClarificationFacts,
-  type ClarificationOptionId,
 } from './clarifications.js';
 import {
   AnalysisError,
@@ -996,7 +1001,7 @@ export class BaselineAnalysisStore {
   readonly #db: DatabaseSync;
   readonly #checkpointOwner: CheckpointOwner;
   readonly #route: BaselineAnalysisRouteFacts | null;
-  readonly #definition: AnalysisKindDefinition;
+  #definition: AnalysisKindDefinition;
   readonly #work = new Map<string, PreparationWork>();
   /**
    * The unread-changes walk of each latest revision, and each revision as the walk reads it (Issue #709; #711 review P2-2).
@@ -1019,7 +1024,7 @@ export class BaselineAnalysisStore {
     this.#db = db;
     this.#checkpointOwner = checkpointOwner;
     this.#route = route;
-    this.#definition = definition;
+    this.#definition = route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ? withModelClarification(definition) : definition;
   }
 
   get route(): BaselineAnalysisRouteFacts | null {
@@ -1028,6 +1033,7 @@ export class BaselineAnalysisStore {
 
   /** The analysis kind this ledger serves; the execution owner reads its contract through this. */
   get definition(): AnalysisKindDefinition {
+    this.#refreshClarificationDefinition();
     return this.#definition;
   }
 
@@ -1071,6 +1077,17 @@ export class BaselineAnalysisStore {
         UUID_PATTERN.test(live.credentialReference)),
     'ANALYSIS_LAUNCH_BINDING_INVALID', '开发者实时绑定缺少必需的运行预算上限或凭据引用。');
     this.#launch = launch;
+    this.#refreshClarificationDefinition();
+  }
+
+  #refreshClarificationDefinition(): void {
+    const launch = this.#launch;
+    const rules = launch.policy?.providerProcessing.admittedRules?.filter((rule) => rule.taskKinds.includes(this.#definition.kind)) ?? [];
+    // Absent terms deny. The policy owner declares these fields in slice 4d; this local structural mirror is temporary.
+    if (this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ||
+        (rules.length === 1 && (rules[0] as { clarificationQuestionAllowed?: boolean }).clarificationQuestionAllowed === true)) {
+      this.#definition = withModelClarification(this.#definition);
+    } else this.#definition = this.#definition.clarificationBase ?? this.#definition;
   }
 
   /** The launch's binding as its sentences read it: under ordinary-production without a route, 模型服务需设置. */
@@ -3921,6 +3938,9 @@ export class BaselineAnalysisStore {
    * and what the first attempt cost. One request per unit and Run; the unit waits until it is answered.
    */
   recordClarificationRequest(input: {
+    modelQuestion?: ModelClarificationQuestion;
+    firstAttempts?: number;
+    raisedAt?: string;
     runRecordId: string;
     attemptId: string;
     taskIntentId: string;
@@ -3940,16 +3960,19 @@ export class BaselineAnalysisStore {
       (input.firstPayloadDigest === null || DIGEST_PATTERN.test(input.firstPayloadDigest)),
     'ANALYSIS_RECORD_INVALID', '澄清请求记录无效。');
     const requestId = randomUUID();
-    const raisedAt = new Date().toISOString();
+    const raisedAt = input.raisedAt ?? new Date().toISOString();
+    const modelJson = input.modelQuestion === undefined ? null : canonicalJson(input.modelQuestion);
+    requireAnalysis(modelJson === null || parseModelClarification(modelJson) !== null, 'ANALYSIS_RECORD_INVALID', '模型澄清问题无效。');
     const record = canonicalRecord({
       schema: CLARIFICATION_REQUEST_SCHEMA,
+      ...(modelJson === null ? {} : { origin: 'model', modelQuestion: input.modelQuestion, firstAttempts: input.firstAttempts ?? 1 }),
       requestId,
       runRecordId: input.runRecordId,
       attemptId: input.attemptId,
       taskIntentId: input.taskIntentId,
       unitOrdinal: input.unitOrdinal,
-      kind: 'ask-first-adaptation',
-      adaptationClass: 'safe-retry',
+      kind: modelJson === null ? 'ask-first-adaptation' : 'model-question',
+      ...(modelJson === null ? { adaptationClass: 'safe-retry' } : {}),
       planVersion: input.planVersion,
       planEnvelopeDigest: input.planEnvelopeDigest,
       requestDigest: input.requestDigest,
@@ -3962,8 +3985,8 @@ export class BaselineAnalysisStore {
       raisedAt,
     });
     this.#db.prepare(
-      'INSERT INTO analysis_clarification_requests(request_id, run_record_id, unit_ordinal, kind, raised_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ).run(requestId, input.runRecordId, input.unitOrdinal, 'ask-first-adaptation', raisedAt, record.json, record.digest);
+      'INSERT INTO analysis_clarification_requests(request_id, run_record_id, unit_ordinal, kind, raised_at, canonical_json, sha256, model_question_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(requestId, input.runRecordId, input.unitOrdinal, 'ask-first-adaptation', raisedAt, record.json, record.digest, modelJson);
     return requestId;
   }
 
@@ -3971,7 +3994,7 @@ export class BaselineAnalysisStore {
   clarificationsOf(runRecordId: string): ClarificationFacts[] {
     requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
     const rows = this.#db.prepare(
-      `SELECT q.request_id, q.unit_ordinal, q.canonical_json q_json, q.sha256 q_sha, a.answer_id, a.option_id, a.canonical_json a_json, a.sha256 a_sha
+      `SELECT q.request_id, q.unit_ordinal, q.model_question_json, q.canonical_json q_json, q.sha256 q_sha, a.answer_id, a.option_id, a.canonical_json a_json, a.sha256 a_sha
        FROM analysis_clarification_requests q
        LEFT JOIN analysis_clarification_answers a ON a.request_id = q.request_id
        WHERE q.run_record_id = ? ORDER BY q.unit_ordinal`,
@@ -3981,21 +4004,27 @@ export class BaselineAnalysisStore {
       requireAnalysis(canonicalRecord(request).digest === asString(row.q_sha) && request.schema === CLARIFICATION_REQUEST_SCHEMA &&
         request.requestId === asString(row.request_id) && request.runRecordId === runRecordId && request.unitOrdinal === asNumber(row.unit_ordinal),
       'ANALYSIS_RECORD_INVALID', '澄清请求记录与其摘要不一致。');
+      const modelQuestion = row.model_question_json === null ? null : parseModelClarification(asString(row.model_question_json));
+      requireAnalysis(row.model_question_json === null ? request.origin === undefined && request.modelQuestion === undefined
+        : modelQuestion !== null && request.origin === 'model' && canonicalJson(request.modelQuestion) === asString(row.model_question_json),
+      'ANALYSIS_RECORD_INVALID', '模型澄清问题与其摘要不一致。');
       let answer: ClarificationFacts['answer'] = null;
       if (row.answer_id !== null) {
         const record = parseCanonicalJson(asString(row.a_json)) as Record<string, unknown>;
         requireAnalysis(canonicalRecord(record).digest === asString(row.a_sha) && record.schema === CLARIFICATION_ANSWER_SCHEMA &&
-          record.answerId === asString(row.answer_id) && record.requestId === request.requestId && record.optionId === asString(row.option_id) &&
+          record.answerId === asString(row.answer_id) && record.requestId === request.requestId &&
+          (modelQuestion === null ? record.optionId === asString(row.option_id) : row.option_id === 'retry') &&
           record.requestSha256 === asString(row.q_sha),
         'ANALYSIS_RECORD_INVALID', '澄清回答记录与其摘要不一致。');
         answer = {
           answerId: record.answerId as string,
-          optionId: record.optionId as ClarificationOptionId,
+          optionId: record.optionId as AnyClarificationOptionId,
           note: record.note as string | null,
           answeredAt: record.answeredAt as string,
         };
       }
       return {
+        ...(modelQuestion === null ? {} : { origin: 'model' as const, modelQuestion, firstAttempts: request.firstAttempts as number }),
         requestId: request.requestId as string,
         runRecordId,
         attemptId: request.attemptId as string,
@@ -4026,11 +4055,7 @@ export class BaselineAnalysisStore {
   } {
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(input.taskIntentId) && UUID_PATTERN.test(input.requestId),
       'ANALYSIS_CLARIFICATION_INVALID', '回答的参数无效。');
-    requireAnalysis(typeof input.optionId === 'string' && (CLARIFICATION_OPTION_IDS as ReadonlyArray<string>).includes(input.optionId),
-      'ANALYSIS_CLARIFICATION_INVALID', '请选择一个回答。');
     const note = typeof input.note === 'string' ? input.note.trim() : null;
-    requireAnalysis(input.note === null || (typeof input.note === 'string' && input.note.isWellFormed() && input.note.length <= CLARIFICATION_NOTE_MAX),
-      'ANALYSIS_CLARIFICATION_INVALID', `说明最多 ${CLARIFICATION_NOTE_MAX} 字。`);
     const current = this.inspect(bookId);
     const run = current.run;
     requireAnalysis(current.taskIntent?.taskIntentId === input.taskIntentId && run !== null,
@@ -4041,6 +4066,18 @@ export class BaselineAnalysisStore {
     const request = this.clarificationsOf(run.runRecordId).find((entry) => entry.requestId === input.requestId);
     requireAnalysis(request !== undefined, 'ANALYSIS_CLARIFICATION_STALE', '这个问题不是这次运行提的。');
     requireAnalysis(request.answer === null, 'ANALYSIS_CLARIFICATION_ANSWERED', '这个问题已经回答过了。');
+    requireAnalysis(!modelClarificationExpired(request, Date.now()), 'ANALYSIS_CLARIFICATION_EXPIRED', '这个问题已超过 24 小时，按「不回答」接着做。');
+    requireAnalysis(input.note === null || (typeof input.note === 'string' && input.note.isWellFormed() &&
+      (request.origin === 'model' ? clarificationGraphemes(input.note) : input.note.length) <= CLARIFICATION_NOTE_MAX),
+    'ANALYSIS_CLARIFICATION_INVALID', `说明最多 ${CLARIFICATION_NOTE_MAX} 字。`);
+    const model = request.modelQuestion;
+    const selected = typeof input.optionId === 'string' ? /^model-option-([0-3])$/u.exec(input.optionId)?.[1] : undefined;
+    requireAnalysis(model === undefined
+      ? typeof input.optionId === 'string' && (CLARIFICATION_OPTION_IDS as ReadonlyArray<string>).includes(input.optionId)
+      : input.optionId === 'no-answer' ? note === null || note === ''
+        : input.optionId === 'free-text' ? model.freeTextAllowed && note !== null && note !== ''
+          : selected !== undefined && model.options?.[Number(selected)] !== undefined && (note === null || note === ''),
+    'ANALYSIS_CLARIFICATION_INVALID', '请选择一个回答，或在允许时自行说明。');
     const requestRow = this.#db.prepare('SELECT sha256 FROM analysis_clarification_requests WHERE request_id = ?').get(input.requestId) as SqlRow;
     const answerId = randomUUID();
     const answeredAt = new Date().toISOString();
@@ -4057,8 +4094,32 @@ export class BaselineAnalysisStore {
     });
     this.#db.prepare(
       'INSERT INTO analysis_clarification_answers(answer_id, request_id, option_id, answered_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(answerId, input.requestId, input.optionId, answeredAt, record.json, record.digest);
+    ).run(answerId, input.requestId, model === undefined ? input.optionId as string : 'retry', answeredAt, record.json, record.digest);
     return { answerId, runRecordId: run.runRecordId, runState: run.state };
+  }
+
+  /** Service-clock timeout, append-only and idempotent; an editor answer already recorded wins. */
+  expireModelClarifications(runRecordId: string, now = Date.now()): number {
+    let expired = 0;
+    for (const request of this.clarificationsOf(runRecordId)) {
+      if (!modelClarificationExpired(request, now)) continue;
+      const requestRow = this.#db.prepare('SELECT sha256 FROM analysis_clarification_requests WHERE request_id = ?').get(request.requestId)!;
+      const answerId = randomUUID();
+      const answeredAt = new Date(now).toISOString();
+      const record = canonicalRecord({ schema: CLARIFICATION_ANSWER_SCHEMA, answerId, requestId: request.requestId,
+        requestSha256: asString(requestRow.sha256), runRecordId, optionId: 'no-answer', note: null, actor: 'service-timeout', answeredAt });
+      this.#db.prepare('INSERT INTO analysis_clarification_answers(answer_id, request_id, option_id, answered_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(answerId, request.requestId, 'retry', answeredAt, record.json, record.digest);
+      expired += 1;
+    }
+    return expired;
+  }
+
+  claimModelClarificationAnswer(runRecordId: string, requestId: string): boolean {
+    const rows = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ?').all(runRecordId);
+    if (rows.some((row) => (parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>).modelClarificationAnswerClaim === requestId)) return false;
+    this.recordRunState(runRecordId, 'executing', { detail: '按澄清回答接着处理这个阅读范围。', modelClarificationAnswerClaim: requestId });
+    return true;
   }
 
   /**
@@ -4158,11 +4219,12 @@ export class BaselineAnalysisStore {
   }
 
   /** The first question of a Run under way or stopped that still waits for its answer; `null` when none does. */
-  #openClarificationOf(runRecordId: string, state: BaselineAnalysisRunState): { requestId: string; unitOrdinal: number; raisedAt: string } | null {
+  #openClarificationOf(runRecordId: string, state: BaselineAnalysisRunState): { requestId: string; unitOrdinal: number; raisedAt: string; origin?: 'model' } | null {
     if (!(state === 'admitted' || state === 'executing' || state === 'pausing' || state === 'paused' || state === 'resumable' ||
       state === 'awaiting-clarification')) return null;
     const open = this.clarificationsOf(runRecordId).find((entry) => entry.answer === null);
-    return open === undefined ? null : { requestId: open.requestId, unitOrdinal: open.unitOrdinal, raisedAt: open.raisedAt };
+    return open === undefined ? null : { requestId: open.requestId, unitOrdinal: open.unitOrdinal, raisedAt: open.raisedAt,
+      ...(open.origin === 'model' ? { origin: 'model' } : {}) };
   }
 
   /** How many turns each unit of a Run was given across its executions so far, from the spans its attempt recorded. */
@@ -4900,6 +4962,7 @@ export class BaselineAnalysisStore {
     credentialOperationState: ModelCredentialOperationState;
   } {
     requireAnalysis(UUID_PATTERN.test(bookId), 'ANALYSIS_BOOK_INVALID', '任务所属图书无效。');
+    this.#refreshClarificationDefinition();
     // Under ordinary production (Issue #811) the Book is the editor's own manuscript, of any source, and the connection whose
     // credential a plan names is the configured route's; under every other scope exact sample1 and the official row, as before.
     const live = this.#launch.live;

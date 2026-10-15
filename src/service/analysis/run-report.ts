@@ -107,6 +107,7 @@ export interface RunReportAccounting {
 
 /** Everything the report is built from, apart from what the reflection turn itself produces. */
 export interface RunReportFacts {
+  readonly modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'unanswered' }>;
   readonly runRecordId: string;
   readonly taskIntentId: string;
   readonly attemptId: string | null;
@@ -250,6 +251,11 @@ function assembleRunReport(
     },
     unitRows: facts.unitRows,
     adaptations: facts.adaptations,
+    ...(facts.modelClarifications === undefined || facts.modelClarifications.length === 0 ? {} : {
+      modelClarifications: facts.modelClarifications.map((entry) => ({ ...entry,
+        line: `第 ${entry.unitOrdinal} 个阅读范围的模型问题：${entry.outcome === 'no-answer' ? '不回答（未答复的问题在 24 小时后自动按不回答继续）' : entry.outcome === 'answered' ? '已回答' : '运行结束时未回答'}。`,
+      })),
+    }),
     failures: failureRows(facts),
     usagePerStage: { ...facts.usage, 'run-report-reflection': reflection.usage },
     findingCounts: facts.findingCounts,

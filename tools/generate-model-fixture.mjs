@@ -342,6 +342,7 @@ async function loadSample1Owners() {
         "export { buildCrossUnitMessage } from './src/service/analysis/cross-unit-contract.ts';",
         "export { buildAssuranceSamplingMessage, drawAssuranceSample, assuranceSamplingTurns } from './src/service/analysis/assurance-sampling-contract.ts';",
         "export { baselineAnalysisKindDefinition } from './src/service/analysis/kind-definition.ts';",
+        "export { withModelClarification, buildClarificationAnswerMessage } from './src/service/provider/clarification-contract.ts';",
         "export { reviewCategoryKindDefinition } from './src/service/review/review-category-kind.ts';",
         "export { reviewCategoryContract, reviewCategoryContractDigest } from './src/service/review/review-category-contract.ts';",
         "export { reviewCategoryContractInput } from './src/service/review/category-configuration.ts';",
@@ -439,6 +440,11 @@ export async function verifySample1Capture(request, selection, parsed) {
     const pin = plan('manuscript-pin');
     const manifest = plan('coverage-manifest');
     const envelope = plan('plan-envelope');
+    const clarification = /^AI7 单元指令\/2 · 请求摘要 [0-9a-f]{64}$/mu.test(parsed.unitMessage);
+    if (clarification) {
+      const wrapped = owners.withModelClarification(owners.baselineAnalysisKindDefinition());
+      contracts.push({ selection: 'current', prompt: { systemPrompt: wrapped.systemPrompt }, digest: wrapped.promptContractDigest });
+    }
     let contract = contracts.find((candidate) => candidate.digest === selection.taskPromptContractDigest);
     let definition;
     // A Task's kind is read only when no baseline contract matched; a store without Task Intents holds no evaluation Task.
@@ -476,14 +482,14 @@ export async function verifySample1Capture(request, selection, parsed) {
     if (contract === undefined && kind === 'writing') {
       // #810: a writing contract is the exact input its Task froze, its 范例 rebuilt from their pinned delivered revisions — never
       // today's metadata or words. Material words must also prove their exact sample1 source and frozen index pins.
-      const snapshot = checked(database.prepare('SELECT canonical_json, sha256 FROM writing_tasks WHERE task_intent_id = ? AND prompt_contract_sha256 = ?')
-        .get(request.sample1Task, selection.taskPromptContractDigest));
+      const snapshotRow = database.prepare('SELECT canonical_json, sha256, prompt_contract_sha256 FROM writing_tasks WHERE task_intent_id = ?').get(request.sample1Task);
+      const snapshot = checked(snapshotRow);
       if (snapshot.taskIntentId !== request.sample1Task) fail();
       const readings = snapshot.materialSources === undefined ? [] : materialReadings(snapshot.materialSources);
       writingTask = new owners.WritingTasks(database, (_book, pin) => {
         const reading = readings.find((item) => item.source.materialId === pin.materialId && item.source.indexDigest === pin.indexDigest);
         return reading === undefined ? { refusal: { code: 'MATERIAL_INDEX_MOVED', message: '' } } : { paragraphs: reading.paragraphs };
-      }).task(request.sample1Task, selection.taskPromptContractDigest);
+      }).task(request.sample1Task, snapshotRow.prompt_contract_sha256);
       if (writingTask === null || !writingTask.exemplarsReadable || writingTask.materials.some((item) => item.refusal !== null) ||
           writingTask.bookId !== manifest.manuscript.bookId || writingTask.input.book.editors.length !== 0) fail();
       const prompt = owners.writingContract(writingTask.input, writingTask.copyRules);
@@ -545,6 +551,10 @@ export async function verifySample1Capture(request, selection, parsed) {
       definition = wrapMaterials(definition);
       contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
     } else definition = owners.baselineAnalysisKindDefinition(contract.selection);
+    if (clarification) {
+      definition = owners.withModelClarification(definition);
+      contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
+    }
     if (contract.digest !== selection.taskPromptContractDigest || parsed.carriedMessageCount !== 1 ||
         parsed.systemMessages.length !== 1 || parsed.systemMessages[0] !== contract.prompt.systemPrompt) fail();
     if (pin.sourceDigest !== SAMPLE1_SOURCE_SHA256 || pin.revisionDigest !== manifest.manuscript.revisionDigest ||
@@ -569,6 +579,15 @@ export async function verifySample1Capture(request, selection, parsed) {
       const unit = manifest.units[parsed.unitOrdinal - 1];
       if (unit === undefined) fail();
       expected = definition.buildUnitMessage(unit, manifest.units.length, byId);
+      if (clarification && parsed.unitMessage.includes('\n澄清回答 /2：\n')) {
+        const questionRow = database.prepare(`SELECT q.canonical_json, q.sha256, q.model_question_json, q.request_id FROM analysis_clarification_requests q
+          JOIN analysis_run_records r ON r.run_record_id = q.run_record_id WHERE r.task_intent_id = ? AND q.unit_ordinal = ?`).get(request.sample1Task, unit.ordinal);
+        const question = checked(questionRow);
+        if (question.origin !== 'model' || canonicalJson(question.modelQuestion) !== questionRow.model_question_json) fail();
+        const answer = checked(database.prepare('SELECT canonical_json, sha256 FROM analysis_clarification_answers WHERE request_id = ?').get(questionRow.request_id));
+        if (answer.requestSha256 !== questionRow.sha256 || answer.requestId !== question.requestId) fail();
+        expected = owners.buildClarificationAnswerMessage(expected, { ...question, answer });
+      }
     } else if (parsed.subject === 'task-synthesis' && (evaluation !== null || writingTask !== undefined)) {
       // The kind's book-level synthesis over the closed units the revision kept, read back by the kind's own record reader.
       const rows = database.prepare("SELECT canonical_json, sha256, unit_ordinal FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed' ORDER BY unit_ordinal").all(revision.revisionId);
@@ -948,8 +967,8 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
     return {
       subject: task?.subject ?? 'unit', unitMessage, header, ownBlockTexts, carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages,
       unitOrdinal: header.ordinal,
-      requestDigest: task?.requestDigest ?? (promptContractDigest === undefined ? null : unitRequestDigest(promptContractDigest, header.ordinal, header.unitDigest)),
-      contentDigest: unitContentDigest(ownBlockTexts),
+      requestDigest: /^AI7 单元指令\/2 · 请求摘要 ([0-9a-f]{64})$/mu.exec(unitMessage)?.[1] ?? task?.requestDigest ?? (promptContractDigest === undefined ? null : unitRequestDigest(promptContractDigest, header.ordinal, header.unitDigest)),
+      contentDigest: unitMessage.includes('\n澄清回答 /2：\n') ? null : unitContentDigest(ownBlockTexts),
       identities: ownBlockIdsOf(unitMessage).map((identity, index) => ({ placeholder: `{{block:${index + 1}}}`, identity })),
     };
   }

@@ -21,7 +21,8 @@ import { initialEvaluationKindDefinition } from '../../src/service/evaluation/in
 import { readersReportKindDefinition } from '../../src/service/evaluation/readers-report-kind.js';
 import { evaluationRewriteKindDefinition } from '../../src/service/evaluation/evaluation-rewrite-kind.js';
 import { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from '../../src/service/evaluation-records.js';
-import type { AnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
+import { baselineAnalysisKindDefinition, type AnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
+import { withModelClarification, buildClarificationAnswerMessage } from '../../src/service/provider/clarification-contract.js';
 import { WritingTasks } from '../../src/service/writing-tasks.js';
 import { buildWritingUnitMessage, buildWritingSynthesisMessage, writingContract, writingContractDigest, type WritingContractInput } from '../../src/service/writing/writing-contract.js';
 import type { CoverageManifestProjection } from '../../src/shared/protocol.js';
@@ -76,6 +77,43 @@ describe('exact sample1 fixture exemption source proof', () => {
     const text = JSON.stringify({ synopsis: own.find((paragraph) => paragraph.length > 40)!.slice(0, 20) });
     expect(tool.redactUnitResultText(text, own, own, verified) === text).toBe(true);
     expect(() => tool.redactUnitResultText(text, own, own)).toThrowError(/FIXTURE_GEN\/manuscript-echo/);
+  });
+
+  it('proves instruction /2 and its one recorded answer turn, refusing a changed answer', async () => {
+    const definition = withModelClarification(baselineAnalysisKindDefinition());
+    const digest = definition.promptContractDigest;
+    const row = database.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component='coverage-manifest'").get()!;
+    const manifest = JSON.parse(String(row.canonical_json)) as CoverageManifestProjection;
+    const blocks: ManifestBlockInput[] = [];
+    await parseDocx(resolve(root, 'SampleBooks/sample1.docx'), 'sample1.docx', (block) => blocks.push({ ...block, graphemes: block.graphemeLength }), { digest: sourceDigest, bytes: 29_550 });
+    const ids = manifest.units.flatMap((unit) => unit.blockIds);
+    const byId = new Map(blocks.map((block, index) => [ids[index]!, { ...block, blockId: ids[index]! }]));
+    const first = definition.buildUnitMessage(manifest.units[0]!, manifest.units.length, byId);
+    const envelope = canonicalJson({ promptContractDigest: digest });
+    database.prepare("UPDATE analysis_plan_records SET canonical_json=?,sha256=? WHERE component='plan-envelope'").run(envelope, sha256Hex(envelope));
+    const previous = JSON.parse(String(database.prepare('SELECT canonical_json FROM analysis_result_set_revisions').get()!.canonical_json)) as object;
+    const revision = canonicalJson({ ...previous, bindingPin: { promptContractDigest: digest } });
+    database.prepare('UPDATE analysis_result_set_revisions SET canonical_json=?,sha256=?').run(revision, sha256Hex(revision));
+    const chosen = { ...selection, taskPromptContractDigest: digest };
+    const capture = (user: string) => tool.parseCachedRequest(JSON.stringify({ messages: [
+      { role: 'system', content: definition.systemPrompt }, { role: 'user', content: user },
+    ] }), digest);
+    expect(await tool.verifySample1Capture(request, chosen, capture(first))).toBe(true);
+    const modelQuestion = { question: '请选择阅读重点', options: ['人物', '事件'], freeTextAllowed: true };
+    const requestId = randomUUID();
+    const runRecordId = randomUUID();
+    const question = { origin: 'model' as const, modelQuestion, requestId };
+    const questionJson = canonicalJson(question);
+    const answer = { answerId: randomUUID(), answeredAt: new Date().toISOString(), requestId, requestSha256: sha256Hex(questionJson), optionId: 'model-option-0' as const, note: null };
+    const answerJson = canonicalJson(answer);
+    database.exec('CREATE TABLE analysis_run_records (run_record_id TEXT, task_intent_id TEXT); CREATE TABLE analysis_clarification_requests (run_record_id TEXT, unit_ordinal INTEGER, canonical_json TEXT, sha256 TEXT, model_question_json TEXT, request_id TEXT); CREATE TABLE analysis_clarification_answers (request_id TEXT, canonical_json TEXT, sha256 TEXT)');
+    database.prepare('INSERT INTO analysis_run_records VALUES (?,?)').run(runRecordId, request.sample1Task);
+    database.prepare('INSERT INTO analysis_clarification_requests VALUES (?,1,?,?,?,?)').run(runRecordId, questionJson, sha256Hex(questionJson), canonicalJson(modelQuestion), requestId);
+    database.prepare('INSERT INTO analysis_clarification_answers VALUES (?,?,?)').run(requestId, answerJson, sha256Hex(answerJson));
+    const followUp = buildClarificationAnswerMessage(first, { ...question, answer });
+    expect(await tool.verifySample1Capture(request, chosen, capture(followUp))).toBe(true);
+    await expect(tool.verifySample1Capture(request, chosen, capture(followUp.replace('"answer":"人物"', '"answer":"事件"'))))
+      .rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
   });
 
   it.each(['source', 'manifest', 'digest', 'task', 'model', 'message'] as const)('refuses %s mismatch rather than exempting another capture', async (damage) => {

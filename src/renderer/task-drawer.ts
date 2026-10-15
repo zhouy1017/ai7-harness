@@ -2097,7 +2097,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     // A drawer whose service stopped offers nothing; the card says why it cannot be answered only when the Run says so.
     const blocked = card.answerable.reason ?? (interrupted ? '' : null);
     const ready = (): void => {
-      submit.disabled = draft.optionId === null || working || blocked !== null;
+      const validText = card.origin !== 'model' || draft.optionId !== 'free-text' ||
+        (draft.note.trim() !== '' && [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(draft.note)].length <= 500);
+      submit.disabled = draft.optionId === null || !validText || working || blocked !== null;
       submitWhy.textContent = blocked ?? TASK_PLAN_CLARIFICATION_SUBMIT_REASON;
       submitWhy.hidden = !submit.disabled;
       if (submit.disabled) submit.setAttribute('aria-describedby', submitWhy.id);
@@ -2117,6 +2119,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       input.addEventListener('change', () => {
         if (!input.checked) return;
         draft.optionId = option.id;
+        if (card.origin === 'model') { draft.noteOpen = false; draft.note = ''; }
         clarificationDrafts.set(id, draft);
         ready();
       });
@@ -2132,8 +2135,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const noteToggle = control(card.note.label, 'quiet', `clarification-note-toggle:${id}`);
     noteToggle.setAttribute('aria-expanded', draft.noteOpen ? 'true' : 'false');
     noteToggle.disabled = blocked !== null;
+    noteToggle.hidden = card.origin === 'model' && card.freeTextAllowed !== true;
     noteToggle.addEventListener('click', () => {
       draft.noteOpen = !draft.noteOpen;
+      if (card.origin === 'model') draft.optionId = draft.noteOpen ? 'free-text' : null;
       clarificationDrafts.set(id, draft);
       repaintQuestions(draft.noteOpen ? `clarification-note:${id}` : `clarification-note-toggle:${id}`);
     });
@@ -2144,7 +2149,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const note = document.createElement('textarea');
       note.className = 'task-plan-clarification-note';
       note.rows = 3;
-      note.maxLength = card.note.maxLength;
+      if (card.origin !== 'model') note.maxLength = card.note.maxLength;
       note.value = draft.note;
       note.disabled = blocked !== null;
       note.dataset['taskDrawerControl'] = `clarification-note:${id}`;
@@ -2155,6 +2160,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       note.addEventListener('input', () => {
         draft.note = note.value;
         clarificationDrafts.set(id, draft);
+        ready();
       });
       parts.push(note, hint);
     }
@@ -2200,7 +2206,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     options.setStatus('正在提交回答…', 'busy');
     try {
       const note = draft.noteOpen && draft.note.trim().length > 0 ? draft.note.trim() : null;
-      await api.answerBaselineAnalysisClarification({ taskIntentId: current.ref, requestId: card.requestId, optionId, note });
+      await api.answerBaselineAnalysisClarification({ taskIntentId: card.taskIntentId ?? current.ref, requestId: card.requestId, optionId,
+        note: card.origin === 'model' && optionId !== 'free-text' ? null : note });
       clarificationDrafts.delete(card.requestId);
       deferredQuestions.delete(card.requestId);
       options.setStatus(TASK_PLAN_CLARIFICATION_SUBMITTED, 'success');

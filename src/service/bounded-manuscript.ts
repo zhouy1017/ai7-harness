@@ -130,6 +130,7 @@ import {
   EVALUATION_PROFILE_SCHEMA_VERSION,
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
+  MODEL_CLARIFICATION_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
@@ -158,7 +159,7 @@ import {
   DEFAULT_EXECUTION_RULE_TRIGGER_SQL,
 } from './default-execution-rules.js';
 import { RUN_CHECKPOINT_FOREIGN_KEYS, RUN_CHECKPOINT_SCHEMA_SQL, RUN_CHECKPOINT_TRIGGER_SQL } from './analysis/run-checkpoints.js';
-import { CLARIFICATION_FOREIGN_KEYS, CLARIFICATION_SCHEMA_SQL, CLARIFICATION_TRIGGER_SQL } from './analysis/clarifications.js';
+import { CLARIFICATION_FOREIGN_KEYS, CLARIFICATION_SCHEMA_SQL, CLARIFICATION_REVISION_72_SQL, CLARIFICATION_TRIGGER_SQL } from './analysis/clarifications.js';
 import { REIMPORT_GROUP_FOREIGN_KEYS, REIMPORT_GROUP_SCHEMA_SQL } from './reimport-group-ledger.js';
 import {
   MANUSCRIPTS_REVISION_37_SQL,
@@ -2776,7 +2777,13 @@ function requireManuscriptReimportTargetSchema(
       ...(includeDefaultExecutionRuleTables ? DEFAULT_EXECUTION_RULE_SCHEMA_SQL : {}),
       ...(includeRunCheckpointTables ? RUN_CHECKPOINT_SCHEMA_SQL : {}),
       // Revision 35 (Issue #422) the Run's Clarification Requests and answers.
-      ...(includeClarificationTables ? CLARIFICATION_SCHEMA_SQL : {}),
+      ...(includeClarificationTables ? {
+        ...CLARIFICATION_SCHEMA_SQL,
+        // Revision 73 is additive; accept the predecessor only before the terminal version is stamped.
+        analysis_clarification_requests: Number(db.prepare('PRAGMA user_version').get()!.user_version) < 73
+          ? [CLARIFICATION_REVISION_72_SQL.analysis_clarification_requests, CLARIFICATION_SCHEMA_SQL.analysis_clarification_requests]
+          : CLARIFICATION_SCHEMA_SQL.analysis_clarification_requests,
+      } : {}),
       // Revision 36 (Issue #412) the chapter-level Reimport Comparison's groups, verbs and mark outcomes.
       ...(includeReimportGroupTables ? REIMPORT_GROUP_SCHEMA_SQL : {}),
       // Revision 37 (Issue #415) rebuilt `manuscripts` for Production Documents beside the two ledgers it created.
@@ -5830,7 +5837,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5881,7 +5888,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(

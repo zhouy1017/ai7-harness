@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path';
+import { clarificationGraphemes } from './analysis/clarifications.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   START_WHEN_ONLINE_TASK_KINDS,
@@ -747,8 +748,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'answerBaselineAnalysisClarification': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'requestId', 'optionId', 'note'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !validUuid(input.requestId) ||
-          (input.optionId !== 'retry' && input.optionId !== 'record-gap') ||
-          !(input.note === null || isBoundedString(input.note, 500))) {
+          (input.optionId !== 'retry' && input.optionId !== 'record-gap' && input.optionId !== 'free-text' && input.optionId !== 'no-answer' &&
+            !(typeof input.optionId === 'string' && /^model-option-[0-3]$/u.test(input.optionId))) ||
+          !(input.note === null || (typeof input.note === 'string' && input.note.isWellFormed() && clarificationGraphemes(input.note) <= 500))) {
         throw new ProtocolError(tentativeId);
       }
       break;

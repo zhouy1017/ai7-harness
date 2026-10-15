@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 131 as const;
+export const SERVICE_PROTOCOL_VERSION = 133 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -2734,6 +2734,8 @@ export type RunReportIfRedoneProjection =
 
 /** The Run Report as it is recorded inside the Task Outcome, before its own digest is taken. */
 export interface RunReportRecordProjection {
+  /** Editorial choices only; no question or answer content enters the Run Report. */
+  modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'unanswered'; line: string }>;
   schema: 'ai7.analysis.run-report/1';
   runRecordId: string;
   taskIntentId: string;
@@ -5981,7 +5983,7 @@ export interface TaskPlanProjection {
 }
 
 /** The answers a question about a safe retry can have (Issue #422, S76d; CLAR-006, INPUT-002). */
-export type ClarificationOptionId = 'retry' | 'record-gap';
+export type ClarificationOptionId = 'retry' | 'record-gap' | `model-option-${0 | 1 | 2 | 3}` | 'free-text' | 'no-answer';
 
 /**
  * One Clarification Request of the Task's Run as the drawer's card shows it (Issue #422, S76d; V2-UX-CLAR-001 to
@@ -5990,6 +5992,9 @@ export type ClarificationOptionId = 'retry' | 'record-gap';
  * answer as it was recorded. `unanswered` is a question whose Run ended before an answer came.
  */
 export interface TaskPlanClarificationProjection {
+  origin?: 'product' | 'model';
+  freeTextAllowed?: boolean;
+  taskIntentId?: string;
   requestId: string;
   unitOrdinal: number;
   planVersion: number;
@@ -10582,6 +10587,7 @@ export type GlobalAttentionObjectProjection =
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
+  clarificationOrigin?: 'model';
   /** The Run in flight: its declared step and its Measured Run Progress (V2-UX-ATTN-004). */
   progress: null | { stage: RunReportUsageStageId; unitsSettled: number; unitsTotal: number };
   /**

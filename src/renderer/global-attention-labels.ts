@@ -413,6 +413,7 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '它等待联网时，计划依据的内容已经变化；这次授权不再对应当前的情况，它不会开始。';
     // Issue #422 (S76d; CLAR-004): whether only that step waits, or the whole Task.
     case 'analysis-clarification':
+      if (item.facts.clarificationOrigin === 'model') return '模型有一个需要你决定的问题；回答后接着处理这个阅读范围。24 小时未回答将按「不回答」接着做。';
       return item.blocked
         ? `${GLOBAL_ATTENTION_CLARIFICATION_WAITING}：它想知道要不要把一个阅读范围安全地再试一次。`
         : `${GLOBAL_ATTENTION_CLARIFICATION_CONTINUING}：它想知道要不要把一个阅读范围安全地再试一次。`;

@@ -1721,8 +1721,8 @@ export function clarificationAnsweredLine(label: string, note: string | null): s
 }
 
 /** What the Run asked the editor, as the drawer's cards show it, open questions first. */
-function baselineClarifications(
-  projection: BaselineAnalysisProjection,
+export function baselineClarifications(
+  projection: Pick<BaselineAnalysisProjection, 'run'>,
   facts: ReadonlyArray<ClarificationFacts>,
   stopped?: BaselineStoppedRunFacts,
 ): TaskPlanClarificationProjection[] {
@@ -1738,6 +1738,28 @@ function baselineClarifications(
         : CLARIFICATION_SCOPE_CONTINUING;
   const cards = facts.filter((entry) => entry.runRecordId === run.runRecordId).map((entry): TaskPlanClarificationProjection => {
     const answered = entry.answer;
+    if (entry.origin === 'model' && entry.modelQuestion !== undefined) {
+      const model = entry.modelQuestion;
+      const options: TaskPlanClarificationProjection['options'] = [
+        ...(model.options ?? []).map((label, index) => ({ id: `model-option-${index}` as `model-option-${0 | 1 | 2 | 3}`, label,
+          consequence: '把这个回答发送给模型，接着处理这个阅读范围。', recommended: null })),
+        { id: 'no-answer', label: '不回答', consequence: '告诉模型你不回答，按已有信息接着做。', recommended: null },
+      ];
+      const open = answered === null && answerableStates.has(run.state);
+      const label = answered?.optionId === 'free-text' ? '自行说明' : options.find((option) => option.id === answered?.optionId)?.label ?? '不回答';
+      return {
+        origin: 'model', freeTextAllowed: model.freeTextAllowed, taskIntentId: entry.taskIntentId,
+        requestId: entry.requestId, unitOrdinal: entry.unitOrdinal, planVersion: entry.planVersion, raisedAt: entry.raisedAt,
+        question: model.question, why: '模型需要你的决定来处理这个阅读范围。',
+        detail: '每个阅读范围最多提问一次；24 小时未回答将按「不回答」接着做。', scope,
+        after: '回答后：把你的回答发送给模型一次，接着处理这个阅读范围；已完成的部分保留。', options,
+        note: { label: '自行说明…', hint: '直接回答这个问题，最多 500 字素。', maxLength: 500 },
+        state: answered !== null ? 'answered' : open ? 'open' : 'unanswered',
+        answer: answered === null ? null : { optionId: answered.optionId, label, note: answered.note, answeredAt: answered.answeredAt,
+          line: clarificationAnsweredLine(label, answered.note) },
+        answerable: { reason: open ? blocked : answered !== null ? '这个问题已经回答过了' : CLARIFICATION_UNANSWERABLE_ENDED },
+      };
+    }
     const option = answered === null ? null : CLARIFICATION_OPTIONS.find((candidate) => candidate.id === answered.optionId)!;
     const open = answered === null && answerableStates.has(run.state);
     return {

@@ -8,7 +8,7 @@ import type { DatabaseSync } from 'node:sqlite';
  * option chosen, the note that qualifies it, and when. Neither is ever rewritten; an answer grants no authority, and
  * the Run it continues goes on inside its unchanged envelope.
  */
-export const CLARIFICATION_SCHEMA_SQL = {
+export const CLARIFICATION_REVISION_72_SQL = {
   analysis_clarification_requests: `CREATE TABLE analysis_clarification_requests (
   request_id TEXT PRIMARY KEY,
   run_record_id TEXT NOT NULL REFERENCES analysis_run_records(run_record_id),
@@ -27,6 +27,13 @@ export const CLARIFICATION_SCHEMA_SQL = {
   canonical_json TEXT NOT NULL,
   sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
 ) STRICT`,
+} as const;
+
+/** Revision 73 adds one nullable column; the original CHECK carriers and every old row stay intact. */
+export const CLARIFICATION_SCHEMA_SQL = {
+  ...CLARIFICATION_REVISION_72_SQL,
+  analysis_clarification_requests: CLARIFICATION_REVISION_72_SQL.analysis_clarification_requests
+    .replace('  UNIQUE(run_record_id, unit_ordinal)', '  model_question_json TEXT,\n  UNIQUE(run_record_id, unit_ordinal)'),
 } as const;
 
 /** A request and its answer are appended once and never rewritten or removed, like every ledger row. */
@@ -65,7 +72,13 @@ export class ClarificationSchemaError extends Error {
  */
 export function initializeClarificationSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_clarification_requests'").get();
-  if (existing !== undefined) return;
+  if (existing !== undefined) {
+    const columns = db.prepare('PRAGMA table_info(analysis_clarification_requests)').all();
+    if (!columns.some((column) => column.name === 'model_question_json')) {
+      db.exec('ALTER TABLE analysis_clarification_requests ADD COLUMN model_question_json TEXT');
+    }
+    return;
+  }
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const sql of Object.values(CLARIFICATION_SCHEMA_SQL)) db.exec(sql);
@@ -87,6 +100,9 @@ export function initializeClarificationSchema(db: DatabaseSync): void {
  * waits, the failure that raised it, what its first attempt cost, and the editor's answer once there is one.
  */
 export interface ClarificationFacts {
+  /** Absent on legacy/product requests; model data is covered by the request's canonical digest. */
+  readonly origin?: 'product' | 'model';
+  readonly modelQuestion?: ModelClarificationQuestion;
   readonly requestId: string;
   readonly runRecordId: string;
   readonly attemptId: string;
@@ -105,9 +121,10 @@ export interface ClarificationFacts {
   readonly firstUsage: { readonly inputTokens: number; readonly outputTokens: number } | null;
   /** How long the first attempt took, so the unit's wall time counts it once it settles. */
   readonly firstWallMs: number;
+  readonly firstAttempts?: number;
   readonly answer: null | {
     readonly answerId: string;
-    readonly optionId: ClarificationOptionId;
+    readonly optionId: AnyClarificationOptionId;
     readonly note: string | null;
     readonly answeredAt: string;
   };
@@ -137,3 +154,39 @@ export const CLARIFICATION_OPTION_IDS = ['retry', 'record-gap'] as const;
 export type ClarificationOptionId = (typeof CLARIFICATION_OPTION_IDS)[number];
 /** The longest note an answer may carry, in UTF-16 code units. */
 export const CLARIFICATION_NOTE_MAX = 500;
+
+export interface ModelClarificationQuestion {
+  readonly question: string;
+  readonly options?: ReadonlyArray<string>;
+  readonly freeTextAllowed: boolean;
+}
+
+export type ModelClarificationOptionId = `model-option-${0 | 1 | 2 | 3}` | 'free-text' | 'no-answer';
+export type AnyClarificationOptionId = ClarificationOptionId | ModelClarificationOptionId;
+export const MODEL_CLARIFICATION_TIMEOUT_HOURS = 24;
+export const MODEL_CLARIFICATION_NO_ANSWER = '不回答';
+
+export function clarificationGraphemes(text: string): number {
+  return [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(text)].length;
+}
+
+/** Questions are a closed alternative to a unit result, never an extra field on one. */
+export function parseModelClarification(text: string): ModelClarificationQuestion | null {
+  let value: unknown;
+  try { value = JSON.parse(/^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text)?.[1] ?? text) as unknown; } catch { return null; }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (!keys.every((key) => ['question', 'options', 'freeTextAllowed'].includes(key)) ||
+      typeof record.question !== 'string' || !record.question.isWellFormed() || record.question.trim() === '' || clarificationGraphemes(record.question) > 500 ||
+      typeof record.freeTextAllowed !== 'boolean') return null;
+  const options = record.options;
+  if (options !== undefined && (!Array.isArray(options) || options.length > 4 || options.some((option) =>
+    typeof option !== 'string' || !option.isWellFormed() || option.trim() === '' || clarificationGraphemes(option) > 100) || new Set(options).size !== options.length)) return null;
+  if (!record.freeTextAllowed && (options === undefined || (options as string[]).length === 0)) return null;
+  return { question: record.question, ...(options === undefined ? {} : { options: options as string[] }), freeTextAllowed: record.freeTextAllowed };
+}
+
+export function modelClarificationExpired(request: ClarificationFacts, now: number): boolean {
+  return request.origin === 'model' && request.answer === null && now >= Date.parse(request.raisedAt) + MODEL_CLARIFICATION_TIMEOUT_HOURS * 3_600_000;
+}

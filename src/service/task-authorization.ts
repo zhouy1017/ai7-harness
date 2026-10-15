@@ -447,7 +447,8 @@ export const DIALOGUE_LIVE_BINDING_SCHEMA_VERSION = 71;
  * official row moving to the current model id. No task-authorization or analysis relation changes. This is the terminal version.
  */
 export const MODEL_SERVICE_ROUTES_SCHEMA_VERSION = 72;
-export const LATEST_SCHEMA_VERSION = MODEL_SERVICE_ROUTES_SCHEMA_VERSION;
+export const MODEL_CLARIFICATION_SCHEMA_VERSION = 73;
+export const LATEST_SCHEMA_VERSION = MODEL_CLARIFICATION_SCHEMA_VERSION;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -2214,13 +2215,13 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === READERS_REPORT_SCHEMA_VERSION || version === CAPTURED_PROCEDURE_SCHEMA_VERSION || version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION || version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION || version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
-      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
+      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === MODEL_CLARIFICATION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
   // Revision 72 (Issue #811) moves no task-authorization or analysis relation, so a revision-71 store carries the terminal ledger.
   if (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
-      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION) {
+      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     validateAnalysisLedgerSchema(db);
     return advanceToTerminalRevision(db);

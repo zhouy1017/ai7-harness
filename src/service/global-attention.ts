@@ -128,7 +128,7 @@ export interface AnalysisTaskAttentionReading {
     /** The execution owner's reading while the Run is in flight; `null` when nothing executes it. */
     readonly progress: RunProgress | null;
     /** The first question the Run asked that still waits for the editor's answer (Issue #422, S76d); `null` when none. */
-    readonly openClarification?: null | { readonly requestId: string; readonly unitOrdinal: number; readonly raisedAt: string };
+    readonly openClarification?: null | { readonly requestId: string; readonly unitOrdinal: number; readonly raisedAt: string; readonly origin?: 'model' };
     /** An interrupted Run the Run Budget Ceiling stopped (Issue #51, S16a): 已停止 · 预算已达上限. */
     readonly budgetReached?: boolean;
     /** Whether the launch set that ceiling, under developer-live, rather than the editor's plan (Issue #541). */
@@ -177,13 +177,15 @@ export interface UnconfirmedAttentionReading {
  * kinds: their own surfaces follow them, and only the wait is one the editor may have left behind.
  */
 export interface WaitingTaskAttentionReading {
-  readonly kind: 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite' | 'writing';
+  readonly kind: 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite' | 'writing' | 'review-run';
   readonly bookId: string;
   readonly bookTitle: string;
   readonly taskIntentId: string;
   readonly runRecordId: string;
   /** `launch-blocked` is a waiting Run Reconnect Preflight blocked because this launch cannot start it (CONC-006). */
-  readonly state: 'awaiting-connectivity' | 'plan-moved' | 'launch-blocked';
+  readonly state: 'awaiting-connectivity' | 'plan-moved' | 'launch-blocked' | 'clarification';
+  readonly ref?: string;
+  readonly reviewOrdinal?: number;
   /** When the Run's last state was recorded. */
   readonly stateAt: string;
 }
@@ -385,6 +387,7 @@ function item(
     book: fields.book,
     object: fields.object,
     facts: {
+      ...(fields.facts?.clarificationOrigin === undefined ? {} : { clarificationOrigin: fields.facts.clarificationOrigin }),
       progress: fields.facts?.progress ?? null,
       categories: fields.facts?.categories ?? [],
       revisionOrdinal: fields.facts?.revisionOrdinal ?? null,
@@ -504,7 +507,7 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
       at: asked.raisedAt,
       book,
       object,
-      ...(run.progress === null ? {} : { facts: { progress: progressFact(run.progress) } }),
+      facts: { ...(run.progress === null ? {} : { progress: progressFact(run.progress) }), ...(asked.origin === 'model' ? { clarificationOrigin: 'model' } : {}) },
       nextStep: 'answer-clarification',
       target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
       technical: [...technical, { key: 'clarification', label: '澄清请求', value: `${asked.requestId} · 第 ${asked.unitOrdinal} 个阅读范围` }],
@@ -712,9 +715,9 @@ function waitingTaskItem(reading: WaitingTaskAttentionReading, waitingFor: Waiti
     itemId: `task:${reading.taskIntentId}`,
     at: reading.stateAt,
     book: { bookId: reading.bookId, title: reading.bookTitle },
-    object: { kind: 'task', taskKind: reading.kind } as const,
+    object: reading.kind === 'review-run' ? { kind: 'review' as const, ordinal: reading.reviewOrdinal! } : { kind: 'task' as const, taskKind: reading.kind },
     nextStep: 'view-run' as const,
-    target: { kind: 'task-plan', bookId: reading.bookId, taskKind: reading.kind, ref: reading.taskIntentId } as const,
+    target: { kind: 'task-plan', bookId: reading.bookId, taskKind: reading.kind, ref: reading.ref ?? reading.taskIntentId } as const,
     technical: [
       { key: 'task-intent', label: '任务意图', value: reading.taskIntentId },
       { key: 'run-record', label: '运行记录', value: `${reading.runRecordId} · ${reading.state}` },
@@ -722,7 +725,8 @@ function waitingTaskItem(reading: WaitingTaskAttentionReading, waitingFor: Waiti
     ],
   };
   // A Run this launch could not start never ran either: an exception the editor acts on, as a baseline Run blocked so is (CONC-006).
-  return reading.state === 'plan-moved' ? item('decisions', 'analysis-plan-moved', { ...fields, blocked: true })
+  return reading.state === 'clarification' ? item('decisions', 'analysis-clarification', { ...fields, facts: { clarificationOrigin: 'model' }, nextStep: 'answer-clarification', blocked: true })
+    : reading.state === 'plan-moved' ? item('decisions', 'analysis-plan-moved', { ...fields, blocked: true })
     : reading.state === 'launch-blocked' ? item('exceptions', 'analysis-blocked', { ...fields, blocked: true })
       : item('active', WAITING_STATES[waitingFor], { ...fields, blocked: waitingFor === 'connection' });
 }
