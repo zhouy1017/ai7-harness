@@ -119,7 +119,7 @@ const REFLECTION = {
 
 describe('Run Report', () => {
   it('accounts backend calls and fetched bytes with the full tool-chain usage', () => {
-    const tools = { requests: 3, inputTokens: 20, outputTokens: 10, searchCalls: { 'search-tinyfish': 2 }, fetchCount: 1, fetchBytes: 1024 };
+    const tools = { requests: 3, inputTokens: 20, outputTokens: 10, searchCalls: { 'search-tinyfish': 2 }, refusedSearchCalls: 1, fetchCount: 1, fetchBytes: 1024 };
     const report = buildRunReport(facts({ platformTools: tools }), REFLECTION);
     expect(report.usagePerStage['platform-tools']).toEqual(tools);
     expect(runReportUsageReconciles(report, { requests: 8, inputTokens: 820, outputTokens: 140 })).toBe(true);

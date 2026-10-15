@@ -44,6 +44,12 @@ describe('frozen backend egress and per-Run tool accounting', () => {
     });
     const search = { tool: 'websearch' as const, arguments: { query: 'public fact' }, signal: new AbortController().signal };
     const first = await session.execute({ ...search, callId: 'one' });
+    expect(await session.execute({ ...search, callId: 'repeat' })).toEqual(first);
+    const second = await session.execute({ ...search, callId: 'different', arguments: { query: 'a different public fact' } });
+    expect(second).toMatchObject({ sourceUrl: null, text: expect.stringContaining('本单元的检索次数已用完') });
+    expect(session.breakerState).toBe('intact');
+    expect(session.unitDisclosure).toBe('联网核查已完成');
+    expect(session.usage.refusedSearchCalls).toBe(1);
     session.admit({ ...first, tool: 'websearch', callId: 'one' });
     expect([...session.egressScope.admittedToolResults!.values()][0]).toMatchObject({ sourceKind: 'tool', backendId: frozen.id, host: frozen.host });
     session.startUnit();
@@ -57,5 +63,37 @@ describe('frozen backend egress and per-Run tool accounting', () => {
     expect(session.usage.fetchBytes).toBeGreaterThan(0);
     expect(session.provenance).toHaveLength(2);
     expect(session.provenance.every((entry) => /^[0-9a-f]{64}$/u.test(entry.argumentsDigest) && /^[0-9a-f]{64}$/u.test(entry.responseDigest))).toBe(true);
+    // A new unit has its own query allowance; the Run still freezes the same backend.
+    session.startUnit();
+    await session.execute({ ...search, callId: 'new-unit-query', arguments: { query: 'another public fact' } });
+    expect(searches).toBe(2);
+  });
+
+  it('discloses incomplete research when the unit exhausted its query without obtaining a result', async () => {
+    let sends = 0;
+    const session = new PlatformToolSession({ binding, scope, broker: new CredentialBroker({ resolve: async () => 'synthetic-key' }),
+      purpose: 'provider-free-empty', admitHost: admitTicketHost, fetch: async () => { sends += 1; return new Response(JSON.stringify({ results: [] })); },
+    });
+    const call = { tool: 'websearch' as const, signal: new AbortController().signal };
+    await session.execute({ ...call, callId: 'first', arguments: { query: 'public empty fact' } });
+    const refused = await session.execute({ ...call, callId: 'second', arguments: { query: 'different public fact' } });
+    expect(refused.text).toContain('联网核查未完成');
+    expect(session.unitDisclosure).toBe('联网核查未完成');
+    expect(session.breakerState).toBe('intact');
+    expect(sends).toBe(1);
+    expect(session.usage.refusedSearchCalls).toBe(1);
+  });
+
+  it('still counts cached query round trips toward the unit breaker', async () => {
+    let sends = 0;
+    const session = new PlatformToolSession({ binding, scope, broker: new CredentialBroker({ resolve: async () => 'synthetic-key' }),
+      purpose: 'provider-free-breaker', admitHost: admitTicketHost, fetch: async () => { sends += 1; return new Response(JSON.stringify({ results: [] })); },
+    });
+    for (let n = 0; n < 128; n += 1) await session.execute({ tool: 'websearch', callId: `call-${n}`, arguments: { query: 'public fact' }, signal: new AbortController().signal });
+    expect(session.breakerState).toBe('intact');
+    const last = await session.execute({ tool: 'websearch', callId: 'call-128', arguments: { query: 'public fact' }, signal: new AbortController().signal });
+    expect(last.text).toContain('联网核查未完成');
+    expect(session.breakerState).toBe('tripped');
+    expect(sends).toBe(1);
   });
 });

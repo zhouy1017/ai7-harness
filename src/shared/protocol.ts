@@ -2739,6 +2739,7 @@ export type RunReportUsageStageId = (typeof RUN_REPORT_USAGE_STAGES)[number];
 
 export interface RunReportUsageProjection {
   searchCalls?: Readonly<Record<string, number>>;
+  refusedSearchCalls?: number;
   fetchCount?: number;
   fetchBytes?: number;
   requests: number;

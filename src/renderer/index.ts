@@ -3303,7 +3303,7 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
   const usageRows = (Object.keys(report.usagePerStage) as Array<keyof typeof report.usagePerStage>).flatMap((stage) => {
     const usage = report.usagePerStage[stage];
     if (stage === 'platform-tools') return [element('dt', undefined, '用量 · 联网检索'), element('dd', undefined,
-      `${Object.entries(usage.searchCalls ?? {}).map(([id, calls]) => `${id}：${calls} 次检索`).join(' · ') || '0 次检索'} · 网页取回 ${usage.fetchCount ?? 0} 次 / ${usage.fetchBytes ?? 0} 字节 · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}`)];
+      `${Object.entries(usage.searchCalls ?? {}).map(([id, calls]) => `${id}：${calls} 次检索`).join(' · ') || '0 次检索'} · 已拒绝检索 ${usage.refusedSearchCalls ?? 0} 次 · 网页取回 ${usage.fetchCount ?? 0} 次 / ${usage.fetchBytes ?? 0} 字节 · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}`)];
     return [element('dt', undefined, `用量 · ${stage}`), element('dd', 'technical-identity', `${usage.requests} 次模型请求 · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}`)];
   });
   disclosure.append(

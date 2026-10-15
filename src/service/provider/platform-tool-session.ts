@@ -60,9 +60,13 @@ export class PlatformToolSession implements PlatformToolOwner {
   readonly #onUsage: ((usage: { inputTokens: number; outputTokens: number }) => void) | undefined;
   readonly #runResults = new Map<string, { readonly text: string; readonly sourceUrl: string | null }>();
   #inFlight = false;
+  readonly #oneQueryPerUnit: boolean;
+  #unitSearchQuery: string | null = null;
+  #unitSearchHasResult = false;
+  #unitSearchRefused = false;
   readonly #evidenceOnly: boolean;
   evidenceNeedsCommander = false;
-  readonly usage = { requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: {} as Record<string, number>, fetchCount: 0, fetchBytes: 0 };
+  readonly usage = { requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: {} as Record<string, number>, refusedSearchCalls: 0, fetchCount: 0, fetchBytes: 0 };
   readonly provenance: Array<{ sourceKind: 'tool'; backendId: string | null; host: string; capturedAt: string; argumentsDigest: string; responseDigest: string }> = [];
   /** Where a search goes, as the rule names it: the Research Snapshot Cache never answers one service's query with another's. */
   readonly #searchOrigin: string;
@@ -91,6 +95,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     const rule = deps.binding.platformTools ?? null;
     if (rule === null || !['developer-live', 'ordinary-production'].includes(deps.binding.policy.operationalScope)) throw new Error('PLATFORM_TOOLS_NOT_NAMED');
     this.#binding = deps.binding;
+    this.#oneQueryPerUnit = 'backends' in rule.websearch;
     this.#base = deps.scope;
     this.#fetch = deps.fetch;
     this.#admitHost = deps.admitHost;
@@ -127,8 +132,9 @@ export class PlatformToolSession implements PlatformToolOwner {
    * refuses the unit's next model call (`circuit-breaker-tripped`), so its turn ends `failed` with the distinct
    * `AI7_PLATFORM_TOOL_BREAKER_TRIPPED`, and the execution owner settles the unit through `unitEnd` instead of retrying.
    */
-  get unitDisclosure(): '联网核查未完成' | null {
-    return this.#breaker.state === 'tripped' ? '联网核查未完成' : null;
+  get unitDisclosure(): '联网核查已完成' | '联网核查未完成' | null {
+    if (this.#breaker.state === 'tripped') return '联网核查未完成';
+    return this.#unitSearchRefused ? this.#unitSearchHasResult ? '联网核查已完成' : '联网核查未完成' : null;
   }
 
   /**
@@ -149,6 +155,9 @@ export class PlatformToolSession implements PlatformToolOwner {
   /** Start a unit: its breaker is intact and no call is a duplicate yet. Citations persist across the attempt. */
   startUnit(): void {
     this.#breaker.startUnit();
+    this.#unitSearchQuery = null;
+    this.#unitSearchHasResult = false;
+    this.#unitSearchRefused = false;
   }
 
   /** Record a URL the model cited; only a cited or search-returned URL may be fetched (ADR 0079 §4.3). */
@@ -225,10 +234,25 @@ export class PlatformToolSession implements PlatformToolOwner {
     const args = canonicalToolArguments(call.tool, call.arguments);
     if (args === null) return refusal('参数不是这个工具接受的形式。');
     if (this.#evidenceOnly && args.tool === 'webfetch') return refusal('此最小证据项只执行一次检索往返；不取回网页。');
+    const digest = toolArgumentsDigest(args);
+    if (args.tool === 'websearch' && this.#oneQueryPerUnit) {
+      if (this.#unitSearchQuery !== null && this.#unitSearchQuery !== digest) {
+        this.usage.refusedSearchCalls += 1;
+        this.#unitSearchRefused = true;
+        const disclosure = this.unitDisclosure!;
+        return refusal(`本单元的检索次数已用完；请使用已有结果。${disclosure}。`);
+      }
+      this.#unitSearchQuery = digest;
+      const reused = this.#runResults.get(digest);
+      if (reused !== undefined) {
+        if (this.#breaker.observe(digest) === 'tripped') return refusal('联网核查未完成：本单元的工具往返已达到熔断上限。');
+        this.#unitSearchHasResult = reused.sourceUrl !== null && reused.text !== '[]';
+        return reused;
+      }
+    }
     const verdict = this.#breaker.observe(toolArgumentsDigest(args));
     if (verdict === 'duplicate') return refusal('同一工具调用已在本单元内执行过；不再重复。请使用已有结果。');
     if (verdict === 'tripped') return refusal('联网核查未完成：本单元的工具往返已达到熔断上限。');
-    const digest = toolArgumentsDigest(args);
     const prior = this.#runResults.get(digest);
     if (prior !== undefined && !(this.#cache !== null && this.#snapshots !== null && prior.sourceUrl !== null)) return prior;
     const scope = this.egressScope;
@@ -248,6 +272,7 @@ export class PlatformToolSession implements PlatformToolOwner {
         if (settled.snapshot === null) return refusal(`搜索服务没有返回可用结果（状态 ${settled.status}）。`);
         for (const url of urlsIn(settled.snapshot.text)) this.cite(url);
         const result = { text: settled.snapshot.text, sourceUrl: settled.snapshot.url };
+        this.#unitSearchHasResult = result.text !== '[]';
         this.#runResults.set(digest, result);
         return result;
       }
