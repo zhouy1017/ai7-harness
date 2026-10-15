@@ -33,6 +33,8 @@ let db: DatabaseSync;
 let records: EvaluationRecords;
 let activeProfile: EvaluationProfileProjection;
 let calibrationOn: boolean;
+/** Whether the house's current profile version cannot be read, as a damaged `evaluation_profile_versions` row (P3-1). */
+let profileDamaged: boolean;
 /** Each Book's manuscript revision, stable per Book. */
 let revisions: Map<string, string>;
 /** AI7's raw scores per Book, where a Book's differ from `RAW`. */
@@ -80,6 +82,7 @@ beforeEach(() => {
   initializeEvaluationInitialDraftSchema(db);
   activeProfile = { ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) };
   calibrationOn = true;
+  profileDamaged = false;
   revisions = new Map();
   rawOf = new Map();
   records = new EvaluationRecords(
@@ -88,7 +91,10 @@ beforeEach(() => {
     { latest: (bookId) => facts(bookId), task: () => ({ task: null, prepare: { allowed: false, reason: '' } }) },
     undefined, undefined, undefined,
     { calibrationEnabled: () => calibrationOn },
-    10, () => activeProfile,
+    10, () => {
+      if (profileDamaged) throw new EvaluationError('EVALUATION_PROFILE_DAMAGED', '评估方案记录已损坏，请恢复数据后再试。');
+      return activeProfile;
+    },
   );
 });
 
@@ -263,6 +269,17 @@ describe('the house calibration offset (EVAL-011a)', () => {
     expect(records.calibration()).toEqual({ adjustments: 9, unreadable: 1, basisBooks: 9, booksWithoutBasis: 0, offsets: null });
     const next = randomUUID();
     expect(records.workspace(next, '书', records.start(next, true)).record).toMatchObject({ calibration: null });
+  });
+
+  it('still reads 设置\'s house calibration when the current profile version is damaged (Issue #798, P3-1)', () => {
+    tenBooks();
+    expect(records.calibration()).toMatchObject({ adjustments: 10, basisBooks: 10 });
+    // The house's own profile version cannot be read: 设置 keeps counting the Books and their offsets on AI7's built-in
+    // scale instead of failing the whole read, as a damaged version is kept out per Book (Issue #702 review).
+    profileDamaged = true;
+    expect(records.calibration()).toMatchObject({ adjustments: 10, unreadable: 0, basisBooks: 10, booksWithoutBasis: 0 });
+    expect(offsetsOf()).toEqual({ [LITERARY]: [0.5, 10], [THEME]: [0, 9], [ITEMS[2]!]: [0, 10], [CHINESE]: [6, 10], [READERS]: [-2, 10] });
+    profileDamaged = false;
   });
 
   it('keeps the gate and the basis apart: an agreeing Book joins the basis, a Book with no value is left out, and a damaged adjusted Book counts for the gate alone (P3-1, P3-2)', () => {

@@ -36,7 +36,12 @@ export const EVALUATION_PROFILE_FOREIGN_KEYS = {
   initial_evaluation_tasks: ['task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE'],
 };
 export function initializeEvaluationProfileSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'evaluation_profile_versions'").get() !== undefined) return;
+  // The pair is created in one transaction, so a store holding only one of them is a state this code never wrote. Leave
+  // that partial state for the exact-schema check to refuse, rather than attempting the missing relation and surfacing
+  // SQLite's raw "already exists" (Issue #798, P3-3).
+  const present = Object.keys(EVALUATION_PROFILE_SCHEMA_SQL).filter((name) =>
+    db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(name) !== undefined);
+  if (present.length > 0) return;
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const sql of Object.values(EVALUATION_PROFILE_SCHEMA_SQL)) db.exec(sql);
@@ -55,10 +60,10 @@ type Row = Record<string, SQLOutputValue>;
 function requireProfile(condition: unknown, message: string, code = 'EVALUATION_PROFILE_INVALID'): asserts condition {
   if (!condition) throw new EvaluationError(code, message);
 }
-function line(value: unknown, max: number, empty = false): string {
+function line(value: unknown, max: number, field: string, empty = false): string {
   requireProfile(typeof value === 'string' && value.isWellFormed() && (empty || value.trim().length > 0) &&
     !/[\p{Cc}\p{Zl}\p{Zp}]/u.test(value) && graphemeCount(value) <= max && withinEvaluationBytes(value, max),
-  `请填写有效的文字，且不超过 ${max} 字。`);
+  `请填写有效的${field}，且不超过 ${max} 字。`);
   return value.trim().normalize('NFC');
 }
 function read(row: Row): Record<string, unknown> {
@@ -84,15 +89,15 @@ export function checkedEvaluationProfile(value: unknown): EvaluationProfileProje
     requireProfile(isRecord(item) && typeof item.itemId === 'string' && /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(item.itemId) &&
       !ids.has(item.itemId) && item.fullMarks === 100 / profile.items.length, '评估方案评分项无效。');
     ids.add(item.itemId);
-    line(item.label, 40);
-    if (item.description !== undefined) line(item.description, 500, true);
+    line(item.label, 40, '名称');
+    if (item.description !== undefined) line(item.description, 500, '说明', true);
   }
   requireProfile(canonicalJson(profile.risks) === canonicalJson(BUILTIN_EVALUATION_PROFILE.risks) &&
     canonicalJson(profile.bands) === canonicalJson(BUILTIN_EVALUATION_PROFILE.bands) &&
     canonicalJson(profile.conclusions) === canonicalJson(BUILTIN_EVALUATION_PROFILE.conclusions), '风险项、档位和结论不能修改。');
   if (profile.readiness !== undefined) {
     requireProfile(Array.isArray(profile.readiness) && profile.readiness.length <= 20, '就绪清单最多 20 项。');
-    for (const entry of profile.readiness) line(entry, 200);
+    for (const entry of profile.readiness) line(entry, 200, '就绪清单');
   }
   return value as unknown as EvaluationProfileProjection;
 }
@@ -131,12 +136,12 @@ export class EvaluationProfiles {
     requireProfile(COUNTS.includes(input.items.length), EVALUATION_PROFILE_COUNT_REASON);
     const ids = new Set(current.items.map((item) => item.itemId));
     const items = input.items.map((item) => {
-      requireProfile(isRecord(item) && hasExactKeys(item, ['itemId', 'label', 'description']) && (item.itemId === null || (typeof item.itemId === 'string' && ids.has(item.itemId))), '评分项标识无效，请重新打开方案。');
-      return { itemId: item.itemId ?? `item-${randomUUID()}`, label: line(item.label, 40), description: line(item.description, 500, true), fullMarks: 100 / input.items.length };
+      requireProfile(isRecord(item) && hasExactKeys(item, ['itemId', 'label', 'description']) && (item.itemId === null || (typeof item.itemId === 'string' && ids.has(item.itemId))), '评分项编号无效，请重新打开方案。');
+      return { itemId: item.itemId ?? `item-${randomUUID()}`, label: line(item.label, 40, '名称'), description: line(item.description, 500, '说明', true), fullMarks: 100 / input.items.length };
     });
-    requireProfile(new Set(items.map((item) => item.itemId)).size === items.length && new Set(items.map((item) => item.label)).size === items.length, '评分项名称或标识不能重复。');
+    requireProfile(new Set(items.map((item) => item.itemId)).size === items.length && new Set(items.map((item) => item.label)).size === items.length, '评分项名称或编号不能重复。');
     requireProfile(input.readiness.length <= 20, '就绪清单最多 20 项。');
-    const readiness = input.readiness.map((entry) => line(entry, 200));
+    const readiness = input.readiness.map((entry) => line(entry, 200, '就绪清单'));
     requireProfile(new Set(readiness).size === readiness.length, '就绪清单不能重复。');
     const old = current.items.map((item) => ({ ...item, description: item.description ?? '' }));
     requireProfile(canonicalJson({ items, readiness }) !== canonicalJson({ items: old, readiness: current.readiness ?? [] }), '评估方案没有变化。', 'EVALUATION_PROFILE_UNCHANGED');
@@ -154,7 +159,7 @@ export class EvaluationProfiles {
 
   snapshotTask(taskIntentId: string, promptContractSha256: string, profile: EvaluationProfileProjection): void {
     checkedEvaluationProfile(profile);
-    requireProfile(UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(promptContractSha256), '初评方案快照标识无效。');
+    requireProfile(UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(promptContractSha256), '初评方案快照编号无效。');
     const existing = this.taskProfile(taskIntentId, promptContractSha256);
     if (existing !== null) {
       requireProfile(existing.sha256 === profile.sha256, '初评方案快照不能更换。');
