@@ -732,7 +732,7 @@ function productionAdmittedRules(binding: ConfiguredProviderBinding): AdmittedPr
     taskKinds: rule.taskKinds,
     modelRole: rule.modelRole,
     ...routing,
-    outboundDataCategories: rule.outboundDataCategories,
+    outboundDataCategories: [...rule.outboundDataCategories, 'unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content'],
     crossUnitSynthesisAllowed: rule.crossUnitSynthesisAllowed,
     materialReferencesAllowed: rule.materialReferencesAllowed,
     editorialDeliverablesAllowed: rule.editorialDeliverablesAllowed,
@@ -972,8 +972,11 @@ describe('Provider Processing v13 (ordinary-production, Issue #853)', () => {
     // One binding serves the Main Editorial and the Fast Interaction rules alike; the credential reference never enters the projection.
     expect(new Set(projection.providerProcessing.admittedRules.map((rule) => `${rule.route}|${rule.endpoint}|${rule.model}|${rule.credentialSlot}`)).size).toBe(1);
     expect(JSON.stringify(projection)).not.toContain(binding.credentialReference);
-    // The gate recognises none of the policy's three unpublished classes as a binding category, so the projection carries v12's list.
-    for (const rule of projection.providerProcessing.admittedRules) expect(rule.outboundDataCategories.some((category) => category.startsWith('unpublished'))).toBe(false);
+    // Production admission must retain every policy category, including all three unpublished classes.
+    const policyRules = rulesOf(await readPolicy(V13_PATH));
+    for (const rule of projection.providerProcessing.admittedRules) {
+      expect(rule.outboundDataCategories, rule.ruleId).toEqual(policyRules.find((candidate) => candidate.ruleId === rule.ruleId)!.allowedOutboundDataCategories);
+    }
   });
 
   it('denies a binding the policy does not allow, a malformed one, or one with another route\'s slot, as binding-not-allowed', async () => {
