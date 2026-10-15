@@ -1,5 +1,6 @@
 import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
+import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
 import { allowedProductionBindingOf, type ConfiguredProviderBinding } from './launch-policy.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES } from '../shared/protocol.js';
@@ -15661,6 +15662,16 @@ export class EditorialStore {
 
   getHistoricalRevision(revisionId: string, cursor: string | null): HistoricalRevisionProjection {
     return this.#boundedCall(() => this.#bounded.getHistoricalRevision(revisionId, cursor));
+  }
+
+  getModelServiceProxy(): Promise<import('../shared/protocol.js').ModelServiceProxySetting> {
+    this.#assertAvailable();
+    return readProxySetting(this.#dataRoot);
+  }
+
+  saveModelServiceProxy(input: import('../shared/protocol.js').ModelServiceProxySetting): Promise<import('../shared/protocol.js').ModelServiceProxySetting> {
+    this.#assertAvailable();
+    return writeProxySetting(this.#dataRoot, input);
   }
 
   /** The DeepSeek 开放平台（官方） connection, as Issue #712 has always read it. */

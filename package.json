@@ -55,6 +55,7 @@
     "prosemirror-transform": "1.12.0",
     "prosemirror-view": "1.42.3",
     "saxes": "6.0.0",
+    "undici": "7.30.0",
     "word-extractor": "1.0.4"
   },
   "devDependencies": {

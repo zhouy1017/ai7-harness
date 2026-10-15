@@ -5350,6 +5350,58 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
   panelNode.append(list);
 }
 
+function renderModelServiceProxyBlock(projection: ModelServiceSettingsProjection): HTMLElement {
+  const section = element('section', 'review-section');
+  section.dataset['modelServiceProxy'] = projection.proxy.mode;
+  section.append(element('h3', undefined, '网络代理'));
+  const form = element('form');
+  const mode = element('select');
+  mode.setAttribute('aria-label', '网络代理方式');
+  for (const [value, label] of [['direct', '不使用代理'], ['proxy', '使用 HTTP(S) 代理']]) {
+    const option = element('option', undefined, label);
+    option.value = value!;
+    mode.append(option);
+  }
+  mode.value = projection.proxy.mode;
+  const input = element('input');
+  input.type = 'text';
+  input.setAttribute('aria-label', '代理 URL');
+  input.placeholder = 'http://host:port 或 https://host:port';
+  input.autocomplete = 'off';
+  input.maxLength = 320;
+  input.value = projection.proxy.mode === 'proxy' ? `${projection.proxy.protocol}://${projection.proxy.hostPort}` : '';
+  input.disabled = mode.value === 'direct';
+  mode.addEventListener('change', () => { input.disabled = mode.value === 'direct'; });
+  const save = button('保存网络代理', 'secondary', () => undefined);
+  save.type = 'submit';
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      let setting: ModelServiceSettingsProjection['proxy'] = { mode: 'direct' };
+      if (mode.value === 'proxy') {
+        let url: URL;
+        try { url = new URL(input.value); } catch { throw new Error('代理地址必须是 http://host:port 或 https://host:port。'); }
+        if (url.username || url.password || input.value.includes('@')) throw new Error('代理地址不能包含用户名或密码；代理认证将在后续版本提供。');
+        const authority = /^https?:\/\/([^/?#]+)$/u.exec(input.value);
+        if (!authority || !['http:', 'https:'].includes(url.protocol) || !url.hostname ||
+            !/^(?:\[[^\]]+\]|[^:]+):[0-9]+$/u.test(authority[1]!)) throw new Error('代理地址必须是 http://host:port 或 https://host:port。');
+        const port = Number(authority[1]!.slice(authority[1]!.lastIndexOf(':') + 1));
+        if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error('代理端口必须在 1 到 65535 之间。');
+        setting = { mode: 'proxy', protocol: url.protocol === 'http:' ? 'http' : 'https', hostPort: `${url.hostname}:${port}` };
+      }
+      save.disabled = true;
+      renderModelServiceSettingsProjection(await window.ai7.saveModelServiceProxy(setting));
+      setStatus('网络代理已保存；下一次请求生效。', 'success');
+    } catch (error) {
+      save.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法保存网络代理。'), 'error');
+    }
+  });
+  form.append(mode, input, save);
+  section.append(form, element('p', 'field-note', '仅用于获准的模型服务请求。此设备的网络代理设置不随数据库导入、导出或备份迁移。代理认证将在后续版本提供。'));
+  return section;
+}
+
 /**
  * One route of 设置 › 模型服务 (Issue #811): its binding, whether new Tasks use it, and its own connection name and credential.
  * The DeepSeek 开放平台（官方） form keeps the field identities and action words S55a gave it; the Go form names its route.
@@ -5541,7 +5593,7 @@ function renderModelServiceSettingsProjection(projection: ModelServiceSettingsPr
   );
   const actions = element('div', 'button-row');
   actions.append(button('返回', 'quiet', () => void initializeStartup()));
-  content.append(roles, unsupported, policy, protectedStore, actions);
+  content.append(roles, unsupported, renderModelServiceProxyBlock(projection), policy, protectedStore, actions);
   replaceScreen('model-service', content);
 }
 

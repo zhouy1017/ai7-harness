@@ -53,6 +53,7 @@ import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { readBookTasks, readGlobalAttention } from './global-attention.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
+import { proxyAwareFetch } from './provider/proxy-setting.js';
 import type { DormantHarnessRuntime } from './runtime.js';
 import type { EditorialStore, WaitingTaskRun } from './store.js';
 import type { CooperativeJobOwner } from './cooperative-jobs.js';
@@ -235,8 +236,10 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy() },
       };
+    case 'saveModelServiceProxy':
+      return { id: request.id, ok: true, op: request.op, result: await store.saveModelServiceProxy(request.input) };
     case 'saveModelServiceConnection': {
       const result = store.saveModelServiceConnection(
         request.input.connectionName,
@@ -255,7 +258,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy, proxy: await store.getModelServiceProxy() },
       };
     }
     case 'setModelServiceCredentialState': {
@@ -1725,6 +1728,7 @@ async function run(): Promise<void> {
   let preflightTimer: NodeJS.Timeout | undefined;
   let backupTimer: NodeJS.Timeout | undefined;
   let background: BackgroundAnalysisDispatcher | undefined;
+  let transportFailure: 'proxy-unreachable' | 'model-service-unreachable' | null = null;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
     // Under ordinary-production the policy is resolved again with the editor's configured binding once the store is open, and
@@ -1732,14 +1736,16 @@ async function run(): Promise<void> {
     let launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
     // The developer-live runtime exists only when the requested scope actually verified; a denied policy
     // keeps the product provider-free exactly like development-ci, and the ceiling is never `unset` under
-    // v5. The captured `fetch` travels with the launch facts and reaches no other owner.
+    // v5. The captured `fetch` travels with the launch facts and reaches no other owner. Either live scope reaches it through
+    // the device's 网络代理 setting (Issue #854), read again for every request.
+    const modelServiceFetch = proxyAwareFetch(nativeFetch, () => store!.getModelServiceProxy(), undefined, (failure) => { transportFailure = failure; });
     const developerLive: DeveloperLiveRuntime | null = launchPolicy.operationalScope === 'developer-live'
-      ? { launch: resolveDeveloperLiveLaunch(launchForm, resolve(codeRoot, '..')), nativeFetch }
+      ? { launch: resolveDeveloperLiveLaunch(launchForm, resolve(codeRoot, '..')), nativeFetch: modelServiceFetch }
       : null;
     // Ordinary production (Issue #811): the captured transport and nothing of development — no Provider Result Cache, no
     // Provider Test Ledger and no validation intent is ever constructed under this scope.
     const production: OrdinaryProductionRuntime | null = launchPolicy.operationalScope === 'ordinary-production'
-      ? { scope: 'ordinary-production', nativeFetch }
+      ? { scope: 'ordinary-production', nativeFetch: modelServiceFetch }
       : null;
     // The J-04-only control resolves the hand-written synthetic fixture before the store opens, so the
     // frozen plan can pin the exact fixture identity, lineage, and digest; every other launch binds no route.
@@ -1773,6 +1779,7 @@ async function run(): Promise<void> {
       // J-11's calibration gate (Issue #429, EVAL-011a): the product's ten Books in every other launch.
       ...(calibrationMinBooks === undefined ? {} : { calibrationMinAdjustments: calibrationMinBooks }),
     });
+    await store.getModelServiceProxy();
     reachServiceStartup('owners');
     // Under ordinary-production the binding is the editor's configured route (Issue #811), read now and after every settings
     // change; a plan freezes whichever binding is configured when it is frozen, so a route switch reaches new Tasks only.
@@ -1936,6 +1943,7 @@ async function run(): Promise<void> {
           block: (run, reasons, cause) => openStore.blockWaitingTaskRun(run, reasons, cause),
           reachesNetwork: developerLive !== null || production !== null || (connectivityPath !== undefined && fixture !== null),
           connectivity: reading,
+          transportFailure: () => transportFailure,
           credentialReadiness: (run) => owner.liveCredentialReadiness(openStore.taskCredentialBinding({ bookId: run.bookId, kind: run.kind, ref: run.ref }, run.runRecordId)),
           slotBusy: () => owner.busy,
           admit: (run) => {

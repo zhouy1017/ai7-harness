@@ -412,6 +412,15 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'saveModelServiceProxy': {
+      const input = value.input;
+      if (!isRecord(input) || !(input.mode === 'direct' && hasExactKeys(input, ['mode']) ||
+          input.mode === 'proxy' && hasExactKeys(input, ['mode', 'protocol', 'hostPort']) &&
+          (input.protocol === 'http' || input.protocol === 'https') && isBoundedString(input.hostPort, 300))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'saveModelServiceConnection': {
       const input = requireInput(
         value.input,

@@ -567,6 +567,7 @@ function registerRendererHandlers(
   getProductDataLocation: () => Promise<ProductDataLocationProjection>,
   revealProductDataLocation: () => ProductDataLocationRevealProjection,
   getModelServiceSettings: () => Promise<ModelServiceSettingsProjection>,
+  saveModelServiceProxy: (input: ServiceOperationMap['saveModelServiceProxy']['input']) => Promise<ModelServiceSettingsProjection>,
   saveModelServiceCredential: (input: ModelServiceCredentialInput) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: (input?: { route: ModelServiceRouteId }) => Promise<ModelServiceSettingsProjection>,
   consumeLostApplyAcknowledgement: () => boolean,
@@ -2293,6 +2294,13 @@ function registerRendererHandlers(
     envelope(() => {
       requireSender(event);
       return revealProductDataLocation();
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveModelServiceProxy, (event, input: ServiceOperationMap['saveModelServiceProxy']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return serializeEffect(() => saveModelServiceProxy(input));
     }),
   );
   ipcMain.handle(IPC_CHANNELS.getModelServiceSettings, (event) =>
@@ -5716,6 +5724,7 @@ export async function runApplication(): Promise<void> {
         unsupportedProviders.push({ providerId: route, providerLabel, statusLabel: '尚未支持' });
       }
       return {
+        proxy: state.proxy,
         roles: [
           fastInteraction,
           {
@@ -5853,6 +5862,7 @@ export async function runApplication(): Promise<void> {
       getProductDataLocation,
       revealProductDataLocation,
       settingsProjection,
+      async (input) => { await service!.call('saveModelServiceProxy', input); return settingsProjection(); },
       saveModelServiceCredential,
       removeModelServiceCredential,
       (() => {
