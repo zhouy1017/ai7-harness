@@ -59,9 +59,9 @@ export type RemoteExecutionRoute = ConfiguredRouteId;
 export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
- * The trusted scope's Provider Processing pin: selected v11 admits baseline analysis, editorial dialogue, reference-free
- * review, writing, evaluation, and 润色 and conflict-regeneration Suggestions on V4.1. Historical v5, v9 and v10 and the
- * superseded web reservation v8 are readable identities, not launch selections.
+ * The trusted scope's Provider Processing pin: selected v12 admits baseline analysis, editorial dialogue, review (with
+ * cross-deliverable consistency), writing, evaluation, and 润色 and conflict-regeneration Suggestions on V4.1. Historical v5,
+ * v9, v10 and v11 and the superseded web reservation v8 are readable identities, not launch selections.
  */
 export type EgressPolicyPin =
   | {
@@ -72,7 +72,7 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11';
+      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     };
@@ -96,7 +96,7 @@ export type EgressCeilingState = 'unset' | 'within' | 'reached' | 'not-applicabl
  * Processing v11 names (Issue #841) never stand as a binding's own category: a contract that
  * carries one beside the SampleBook names it in `contractCategories`, sent remotely only under a rule naming each (#429).
  */
-export type OutboundDataCategory = OutboundDataCategoryId | 'frozen-material-reference-excerpt';
+export type OutboundDataCategory = OutboundDataCategoryId;
 
 /** The categories that carry the editor's own manuscript words: never public, so a remote route needs a rule naming each. */
 const MANUSCRIPT_EXCERPT_CATEGORIES: ReadonlySet<OutboundDataCategory> = new Set(['editor-selected-manuscript-excerpt', 'manuscript-conflict-region-excerpt']);
