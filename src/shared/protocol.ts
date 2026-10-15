@@ -1912,7 +1912,7 @@ export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ord
  * baseline analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable
  * consistency and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and
  * 润色 and conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules, and AI7's platform
- * tools (websearch through the user-selected backend, webfetch) on review, writing, evaluation and dialogue. A type member does
+ * tools (websearch through the user-selected backend, webfetch) on review, writing and evaluation. A type member does
  * not select or activate a policy.
  */
 export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16';
@@ -2194,8 +2194,8 @@ export interface AdmittedProviderRule {
   readonly matchingActiveDefaultExecutionRuleAllowed: boolean;
   /**
    * The rule's web switch (`transmissions.webSearchToolAllowed`, Provider Processing v16 and v17): `true` exactly for the rules that may
-   * research — review (事实核查 and 学术道德与引用 among its kinds), writing, the three evaluation contracts and editorial
-   * dialogue — and `false` for baseline analysis, 润色, conflict regeneration and enrolled background analysis.
+   * research — review (事实核查 and 学术道德与引用 among its kinds), writing, the three evaluation contracts — and `false` for editorial
+   * dialogue, baseline analysis, 润色, conflict regeneration and enrolled background analysis.
    */
   readonly webSearchToolAllowed: boolean;
   /** The rule's platform tools as the launch verified them, or `null` exactly when `webSearchToolAllowed` is `false`. */

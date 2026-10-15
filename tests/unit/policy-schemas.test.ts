@@ -441,7 +441,7 @@ describe('Provider Processing v14 to v17 and active-set v11 schemas (Issues #863
 describe('Provider Processing v16, v17 and active-set v12 schemas: platform tools (Issue #473, slice 6d)', () => {
   type Rules = { decision: { providerAllowRules: Array<Record<string, unknown>> } };
   const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-  const RESEARCH = [1, 2, 3, 4];
+  const RESEARCH = [2, 3, 4];
   const pair = (version: string) => readPair(`provider-processing-policy.${version}.json`, `provider-processing-policy.${version}.schema.json`);
 
   it.each([['v16', 'v14'], ['v17', 'v15']] as const)('validates %s and keeps its predecessor\'s role, credential, separation and selection consts', (now, before) => {
@@ -476,7 +476,7 @@ describe('Provider Processing v16, v17 and active-set v12 schemas: platform tool
       }
     }
     // A rule that does not research cannot carry the block.
-    for (const index of [0, 5, 6, 7]) {
+    for (const index of [0, 1, 5, 6, 7]) {
       const mutated = clone(policyData) as Rules;
       mutated.decision.providerAllowRules[index]!.platformTools = clone(mutated.decision.providerAllowRules[2]!.platformTools);
       expect(() => validatePolicyDocument(mutated, schemaData), String(index)).toThrowError(/additional properties|platformTools/i);

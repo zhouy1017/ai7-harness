@@ -24,7 +24,7 @@ const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
 export const ACTIVE_SET_VERSION = 'v12' as const;
 const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v12.json';
-const ACTIVE_SET_SHA256 = 'f177551d15b55b0009617d0d8f22fe8806d5635f0bdb5064fa31f6e449839dcd';
+const ACTIVE_SET_SHA256 = 'e841b438da109d866d990cc788ffd7c45edcb38a5121d8b18c41a0345e75693e';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -39,12 +39,12 @@ const PROVIDER_PINS = {
   'ordinary-production': {
     version: 'v17',
     canonicalPath: 'docs/policies/provider-processing-policy.v17.json',
-    sha256: 'ec7eaaf8133038eca15ce5be7af4bfb6276410bffa940c436ca20ac188693325',
+    sha256: 'e5dba26a71704016b9af9864c56aa508aa2bcebe75225a8e4e7af1c1fa67236b',
   },
   'developer-live': {
     version: 'v16',
     canonicalPath: 'docs/policies/provider-processing-policy.v16.json',
-    sha256: '7de2f513c2e5b53cd93d2aea5709caaebc7c16cd0ebcb421688e3ba4eeef7280',
+    sha256: 'c6c3b51c346d4ab4011f03835f8650c503dd87dfa02617bde4b3a0707cd8701d',
   },
 } as const;
 /**
@@ -381,8 +381,8 @@ function verifyPlannedBound(rule: Record<string, unknown>, assuranceAnchors: boo
 /** The outbound categories a research rule adds (Provider Processing v16 and v17): the model's own query and a cited public page. */
 const WEB_TOOL_CATEGORIES = ['web-search-query', 'public-source-fetch'] as const satisfies readonly OutboundDataCategoryId[];
 /** The review categories that research the web (事实核查, 学术道德与引用), admitted kinds of the review rule since v16;
- * 出版政策与风险 stays outside every rule until its web declaration (#744). */
-const WEB_REVIEW_KINDS = ['editorial-review/factual-review', 'editorial-review/academic-integrity'] as const;
+ * `factual-review` is the factual category's executor id. 出版政策与风险 stays outside every rule until its web declaration (#744). */
+const WEB_REVIEW_KINDS = ['editorial-review/factual-review', 'editorial-review/academic-integrity', 'factual-review'] as const;
 
 /** Whether `actual` is exactly `expected`, recursively: the same keys at every level, the same primitives, lists in the same order. */
 function sameValue(actual: unknown, expected: unknown): boolean {
@@ -631,10 +631,10 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
   'developer-live-public-samplebook-editorial-dialogue': {
     modelRole: 'Fast Interaction Role',
     taskKinds: ['editorial-dialogue'],
-    outboundDataCategories: ['editor-selected-manuscript-excerpt', ...WEB_TOOL_CATEGORIES],
+    outboundDataCategories: ['editor-selected-manuscript-excerpt'],
     crossUnitSynthesisAllowed: false,
     clarification: false,
-    platformTools: true,
+    platformTools: false,
     verify: (rule) => {
       const origin = rule['authorityOrigin'];
       requirePolicy(isRecord(origin) && origin['foregroundEditorSelectionAndQuestionRequired'] === true &&
@@ -659,7 +659,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
       requirePolicy(limit['endsAttemptAsProviderAccountLimit'] === true);
     },
   },
-  // The review categories, cross-deliverable consistency included and, since v16, the three that research the web (事实核查,
+  // The review categories, cross-deliverable consistency included and, since v16, the two that research the web (事实核查,
   // 学术道德与引用; 出版政策与风险 stays out until #744): planned Runs like the baseline, without a cross-unit reduction, over frozen Material References
   // and the Book's editorial deliverables, never Series Knowledge. The rule id keeps its v11 name (the policy's rule ids are stable
   // across versions) though the rule is no longer reference-free.
@@ -736,8 +736,8 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
 
 /**
  * Provider Processing v16 (and v14, v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one
- * this launch can read and each bound exactly to the one Go route. All eight rules of v16 must be present, the four that may research
- * (review, writing, evaluation, dialogue) each with the platform tools block the search backend registry implies. The baseline analysis rule must be among them; its three
+ * this launch can read and each bound exactly to the one Go route. All eight rules of v16 must be present, the three that may research
+ * (review, writing, evaluation) each with the platform tools block the search backend registry implies. The baseline analysis rule must be among them; its three
  * declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling default of ADR 0070, and the house-people
  * redaction rule of ADR 0079 §4.4 are read as v9 read them. Every other rule is read from its own entry of
  * `DEVELOPER_LIVE_RULES`; a rule id outside it, a repeated id, or any field that does not match is a policy the launch
@@ -1102,13 +1102,13 @@ const FOREGROUND_BLOCKS = {
 /**
  * The eight ordinary-production rules of Provider Processing v17, by rule id: the same kinds as developer-live v16, each
  * `eligible-only`, bound to the editor's own configured role binding rather than to one fixed route, and each read whole. Review,
- * writing, evaluation and dialogue may research through the backend the editor configures with their own key.
+ * writing and evaluation may research through the backend the editor configures with their own key.
  */
 const ORDINARY_PRODUCTION_RULES: Readonly<Record<string, OrdinaryProductionRuleReading>> = {
   'ordinary-production-baseline-analysis': productionReading('Main Editorial Role', ['baseline-manuscript-analysis'], ['public-or-synthetic'],
     { ...RUN_BLOCKS, source: productionSource(false, false), transmissions: PRODUCTION_BASELINE_TRANSMISSIONS }),
-  'ordinary-production-editorial-dialogue': researchReading(productionReading('Fast Interaction Role', ['editorial-dialogue'], ['editor-selected-manuscript-excerpt'],
-    { ...FOREGROUND_BLOCKS, authorityOrigin: PRODUCTION_DIALOGUE_ORIGIN, source: productionSource(false, false, 'editorSelectedPassageOnly'), transmissions: PRODUCTION_DIALOGUE_TRANSMISSIONS, output: null })),
+  'ordinary-production-editorial-dialogue': productionReading('Fast Interaction Role', ['editorial-dialogue'], ['editor-selected-manuscript-excerpt'],
+    { ...FOREGROUND_BLOCKS, authorityOrigin: PRODUCTION_DIALOGUE_ORIGIN, source: productionSource(false, false, 'editorSelectedPassageOnly'), transmissions: PRODUCTION_DIALOGUE_TRANSMISSIONS, output: null }),
   'ordinary-production-review': researchReading(productionReading('Main Editorial Role',
     ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency'],
     ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt'],
@@ -1185,7 +1185,7 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
 
 /**
  * Provider Processing v17 (ordinary-production): default deny with eight eligible-only rules this launch can read, each bound to
- * a user-configured role binding, the four that may research each with the platform tools block the search backend registry implies. Everything is read whole and fails closed: a missing term, an unknown term, a rule id outside
+ * a user-configured role binding, the three that may research each with the platform tools block the search backend registry implies. Everything is read whole and fails closed: a missing term, an unknown term, a rule id outside
  * `ORDINARY_PRODUCTION_RULES`, a repeated id, or any value that differs from the reading is a policy the launch cannot read.
  * The routing values themselves (route, endpoint, model, credential slot) are never source constants here: they are read from
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.

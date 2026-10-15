@@ -193,8 +193,6 @@
         },
         "allowedOutboundDataCategories": [
           "editor-selected-manuscript-excerpt",
-          "web-search-query",
-          "public-source-fetch",
           "unpublished-metadata",
           "unpublished-excerpts",
           "unpublished-full-content"
@@ -225,62 +223,7 @@
           "continueAndRegenerateAreNewAttempts": true,
           "automaticResendInsideStoppedSessionAllowed": false,
           "identicalRequestReplaysFromProviderResultCache": false,
-          "webSearchToolAllowed": true
-        },
-        "platformTools": {
-          "websearch": {
-            "selection": "user-configured",
-            "backends": [
-              {
-                "id": "search-tinyfish",
-                "host": "api.search.tinyfish.ai",
-                "endpoint": "https://api.search.tinyfish.ai/",
-                "credentialSlot": "search-tinyfish",
-                "anonymous": false
-              },
-              {
-                "id": "search-deepseek",
-                "host": "api.deepseek.com",
-                "endpoint": "https://api.deepseek.com/anthropic/v1/messages",
-                "credentialSlot": "search-deepseek",
-                "anonymous": false
-              },
-              {
-                "id": "search-brave",
-                "host": "api.search.brave.com",
-                "endpoint": "https://api.search.brave.com/res/v1/web/search",
-                "credentialSlot": "search-brave",
-                "anonymous": false
-              },
-              {
-                "id": "search-parallel",
-                "host": "api.parallel.ai",
-                "endpoint": "https://api.parallel.ai/v1/search",
-                "credentialSlot": "search-parallel",
-                "anonymous": false
-              },
-              {
-                "id": "search-bochaai",
-                "host": "api.bochaai.com",
-                "endpoint": "https://api.bochaai.com/v1/web-search",
-                "credentialSlot": "search-bochaai",
-                "anonymous": false
-              }
-            ],
-            "selectionRequiresCredential": true,
-            "userConfiguredBackendAuthorizesTransmission": false
-          },
-          "webfetch": {
-            "maxBytes": 5242880,
-            "timeoutSeconds": 30,
-            "boundedByCitations": true
-          },
-          "breaker": {
-            "roundTrips": 128,
-            "end": "联网核查未完成"
-          },
-          "oneQueryPerRunUnit": true,
-          "toolResultCategory": "public-or-synthetic"
+          "webSearchToolAllowed": false
         },
         "clarification": {
           "modelQuestionAllowed": false
@@ -490,7 +433,8 @@
           "editorial-review/literary-expression",
           "editorial-review/cross-deliverable-consistency",
           "editorial-review/factual-review",
-          "editorial-review/academic-integrity"
+          "editorial-review/academic-integrity",
+          "factual-review"
         ]
       },
       {

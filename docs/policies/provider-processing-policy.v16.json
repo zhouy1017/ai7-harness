@@ -189,9 +189,7 @@
           "editorSelectedPassageOnly": true
         },
         "allowedOutboundDataCategories": [
-          "editor-selected-manuscript-excerpt",
-          "web-search-query",
-          "public-source-fetch"
+          "editor-selected-manuscript-excerpt"
         ],
         "redaction": {
           "housePeopleNamesAndRolesStripped": true,
@@ -219,65 +217,7 @@
           "automaticResendInsideStoppedSessionAllowed": false,
           "identicalRequestReplaysFromProviderResultCache": true,
           "repeatedTestItemIdentifierAllowed": false,
-          "webSearchToolAllowed": true
-        },
-        "platformTools": {
-          "websearch": {
-            "selection": "user-configured",
-            "backends": [
-              {
-                "id": "search-tinyfish",
-                "host": "api.search.tinyfish.ai",
-                "endpoint": "https://api.search.tinyfish.ai/",
-                "credentialSlot": "search-tinyfish",
-                "anonymous": false,
-                "developmentCredentialReference": "59d3a3a4-d852-4b15-bbea-f1eefe4e63dd"
-              },
-              {
-                "id": "search-deepseek",
-                "host": "api.deepseek.com",
-                "endpoint": "https://api.deepseek.com/anthropic/v1/messages",
-                "credentialSlot": "search-deepseek",
-                "anonymous": false,
-                "developmentCredentialReference": "5d835534-e000-4b72-91c8-1dd986a6fcc7"
-              },
-              {
-                "id": "search-brave",
-                "host": "api.search.brave.com",
-                "endpoint": "https://api.search.brave.com/res/v1/web/search",
-                "credentialSlot": "search-brave",
-                "anonymous": false,
-                "developmentCredentialReference": "3f0f367d-f343-4123-b86d-31d0bfac556e"
-              },
-              {
-                "id": "search-parallel",
-                "host": "api.parallel.ai",
-                "endpoint": "https://api.parallel.ai/v1/search",
-                "credentialSlot": "search-parallel",
-                "anonymous": false,
-                "developmentCredentialReference": "983793e7-f281-4767-b5e6-9342a2d00202"
-              },
-              {
-                "id": "search-bochaai",
-                "host": "api.bochaai.com",
-                "endpoint": "https://api.bochaai.com/v1/web-search",
-                "credentialSlot": "search-bochaai",
-                "anonymous": false,
-                "developmentCredentialReference": "6e655b12-b3b0-430e-811c-911b5d0f2ccd"
-              }
-            ]
-          },
-          "webfetch": {
-            "maxBytes": 5242880,
-            "timeoutSeconds": 30,
-            "boundedByCitations": true
-          },
-          "breaker": {
-            "roundTrips": 128,
-            "end": "联网核查未完成"
-          },
-          "oneQueryPerRunUnit": true,
-          "toolResultCategory": "public-or-synthetic"
+          "webSearchToolAllowed": false
         },
         "clarification": {
           "modelQuestionAllowed": false
@@ -491,7 +431,8 @@
           "editorial-review/literary-expression",
           "editorial-review/cross-deliverable-consistency",
           "editorial-review/factual-review",
-          "editorial-review/academic-integrity"
+          "editorial-review/academic-integrity",
+          "factual-review"
         ]
       },
       {

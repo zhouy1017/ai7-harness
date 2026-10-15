@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "AI7 Provider Processing Policy v16",
-  "description": "Validates the exact developer-live authority contract: v14 plus AI7's platform tools on the rules that may research (review including 事实核查 and 学术道德与引用, writing, the three evaluation contracts and editorial dialogue): websearch through the backend the user selects among the five shipped backends, AI7 webfetch bounded by citations, a 128-round-trip breaker and one query per Run unit; baseline analysis, 润色, conflict regeneration and enrolled background analysis stay without web; 出版政策与风险 stays outside every rule; no Series Knowledge, no other task kinds.",
+  "description": "Validates the exact developer-live authority contract: v14 plus AI7's platform tools on the rules that may research (review including 事实核查 and 学术道德与引用, writing, the three evaluation contracts): websearch through the backend the user selects among the five shipped backends, AI7 webfetch bounded by citations, a 128-round-trip breaker and one query per Run unit; baseline analysis, editorial dialogue, 润色, conflict regeneration and enrolled background analysis stay without web; 出版政策与风险 stays outside every rule; no Series Knowledge, no other task kinds.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -436,7 +436,6 @@
         "redaction",
         "providerBinding",
         "transmissions",
-        "platformTools",
         "clarification",
         "authorizationPreconditions",
         "providerAccountLimit",
@@ -489,9 +488,7 @@
         },
         "allowedOutboundDataCategories": {
           "const": [
-            "editor-selected-manuscript-excerpt",
-            "web-search-query",
-            "public-source-fetch"
+            "editor-selected-manuscript-excerpt"
           ]
         },
         "redaction": {
@@ -525,69 +522,8 @@
             "automaticResendInsideStoppedSessionAllowed": false,
             "identicalRequestReplaysFromProviderResultCache": true,
             "repeatedTestItemIdentifierAllowed": false,
-            "webSearchToolAllowed": true
+            "webSearchToolAllowed": false
           }
-        },
-        "platformTools": {
-          "const": {
-            "websearch": {
-              "selection": "user-configured",
-              "backends": [
-                {
-                  "id": "search-tinyfish",
-                  "host": "api.search.tinyfish.ai",
-                  "endpoint": "https://api.search.tinyfish.ai/",
-                  "credentialSlot": "search-tinyfish",
-                  "anonymous": false,
-                  "developmentCredentialReference": "59d3a3a4-d852-4b15-bbea-f1eefe4e63dd"
-                },
-                {
-                  "id": "search-deepseek",
-                  "host": "api.deepseek.com",
-                  "endpoint": "https://api.deepseek.com/anthropic/v1/messages",
-                  "credentialSlot": "search-deepseek",
-                  "anonymous": false,
-                  "developmentCredentialReference": "5d835534-e000-4b72-91c8-1dd986a6fcc7"
-                },
-                {
-                  "id": "search-brave",
-                  "host": "api.search.brave.com",
-                  "endpoint": "https://api.search.brave.com/res/v1/web/search",
-                  "credentialSlot": "search-brave",
-                  "anonymous": false,
-                  "developmentCredentialReference": "3f0f367d-f343-4123-b86d-31d0bfac556e"
-                },
-                {
-                  "id": "search-parallel",
-                  "host": "api.parallel.ai",
-                  "endpoint": "https://api.parallel.ai/v1/search",
-                  "credentialSlot": "search-parallel",
-                  "anonymous": false,
-                  "developmentCredentialReference": "983793e7-f281-4767-b5e6-9342a2d00202"
-                },
-                {
-                  "id": "search-bochaai",
-                  "host": "api.bochaai.com",
-                  "endpoint": "https://api.bochaai.com/v1/web-search",
-                  "credentialSlot": "search-bochaai",
-                  "anonymous": false,
-                  "developmentCredentialReference": "6e655b12-b3b0-430e-811c-911b5d0f2ccd"
-                }
-              ]
-            },
-            "webfetch": {
-              "maxBytes": 5242880,
-              "timeoutSeconds": 30,
-              "boundedByCitations": true
-            },
-            "breaker": {
-              "roundTrips": 128,
-              "end": "联网核查未完成"
-            },
-            "oneQueryPerRunUnit": true,
-            "toolResultCategory": "public-or-synthetic"
-          },
-          "description": "AI7's platform tools for this rule: websearch through the one backend the user selects among the five shipped backends (default the first, the recorded top rank), each named by id, host, endpoint, development broker slot and the development Credential Reference its provider document fixes; webfetch at most 5,242,880 bytes and 30 seconds per page, only for addresses the model cites; a breaker that ends a unit after 128 consecutive tool round trips with 联网核查未完成; one search query per Run unit; tool results are public-or-synthetic. Only the model's own query reaches the search host."
         },
         "clarification": {
           "const": {
@@ -872,7 +808,8 @@
             "editorial-review/literary-expression",
             "editorial-review/cross-deliverable-consistency",
             "editorial-review/factual-review",
-            "editorial-review/academic-integrity"
+            "editorial-review/academic-integrity",
+            "factual-review"
           ]
         }
       }

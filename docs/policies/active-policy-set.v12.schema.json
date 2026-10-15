@@ -90,7 +90,7 @@
                     "policyType": "provider-processing",
                     "version": "v17",
                     "canonicalPath": "docs/policies/provider-processing-policy.v17.json",
-                    "sha256": "ec7eaaf8133038eca15ce5be7af4bfb6276410bffa940c436ca20ac188693325"
+                    "sha256": "e5dba26a71704016b9af9864c56aa508aa2bcebe75225a8e4e7af1c1fa67236b"
                   }
                 },
                 "developer-live": {
@@ -99,7 +99,7 @@
                     "policyType": "provider-processing",
                     "version": "v16",
                     "canonicalPath": "docs/policies/provider-processing-policy.v16.json",
-                    "sha256": "7de2f513c2e5b53cd93d2aea5709caaebc7c16cd0ebcb421688e3ba4eeef7280"
+                    "sha256": "c6c3b51c346d4ab4011f03835f8650c503dd87dfa02617bde4b3a0707cd8701d"
                   }
                 }
               }

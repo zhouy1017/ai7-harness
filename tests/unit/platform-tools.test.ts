@@ -78,10 +78,10 @@ describe('readPlatformToolsRule over the generalized v16 and v17 block', () => {
   const RANKED = ['search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai'];
   const research = (rules: unknown[]) => rules.filter((rule) => (rule as { transmissions: { webSearchToolAllowed: boolean } }).transmissions.webSearchToolAllowed);
 
-  it('reads the four research rules of each document, with the backends in ranking order, and nothing from the other four', async () => {
+  it('reads the three research rules of each document, with the backends in ranking order, and nothing from the other five', async () => {
     for (const [version, production] of [['v16', false], ['v17', true]] as const) {
       const rules = await rulesOf(version);
-      expect(research(rules)).toHaveLength(4);
+      expect(research(rules)).toHaveLength(3);
       for (const rule of rules) {
         const reading = readPlatformToolsRule(rule);
         if (!research([rule]).length) {

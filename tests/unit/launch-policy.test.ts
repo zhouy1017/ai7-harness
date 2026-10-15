@@ -17,7 +17,8 @@ import {
   type ConfiguredProviderBinding,
 } from '../../src/service/launch-policy.js';
 import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
-import { LAUNCH_SELECTABLE_SCOPES, parseTrustedLaunchForm } from '../../src/shared/protocol.js';
+import { FACTUAL_REVIEW_KIND, LAUNCH_SELECTABLE_SCOPES, parseTrustedLaunchForm } from '../../src/shared/protocol.js';
+import { liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
 import type { AdmittedPlatformTools, AdmittedProviderRule, LaunchPolicyProjection, TrustedOperationalScope } from '../../src/shared/protocol.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -39,8 +40,8 @@ const CARRIED_PATHS = [
 const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
-  'ordinary-production': ['v17', 'docs/policies/provider-processing-policy.v17.json', 'ec7eaaf8133038eca15ce5be7af4bfb6276410bffa940c436ca20ac188693325'],
-  'developer-live': ['v16', 'docs/policies/provider-processing-policy.v16.json', '7de2f513c2e5b53cd93d2aea5709caaebc7c16cd0ebcb421688e3ba4eeef7280'],
+  'ordinary-production': ['v17', 'docs/policies/provider-processing-policy.v17.json', 'e5dba26a71704016b9af9864c56aa508aa2bcebe75225a8e4e7af1c1fa67236b'],
+  'developer-live': ['v16', 'docs/policies/provider-processing-policy.v16.json', 'c6c3b51c346d4ab4011f03835f8650c503dd87dfa02617bde4b3a0707cd8701d'],
 } as const;
 /** Every immutable predecessor asset keeps its exact bytes: v6, v13 and v15 (the old ordinary-production), v11, v12 and v14 (the old developer-live), and sets v9 to v11. */
 const RETAINED_PREDECESSOR_DIGESTS = {
@@ -56,7 +57,7 @@ const RETAINED_PREDECESSOR_DIGESTS = {
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v12 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = 'f177551d15b55b0009617d0d8f22fe8806d5635f0bdb5064fa31f6e449839dcd';
+const ACTIVE_SET_SHA256 = 'e841b438da109d866d990cc788ffd7c45edcb38a5121d8b18c41a0345e75693e';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -85,8 +86,8 @@ function platformToolsProjection(production: boolean): AdmittedPlatformTools {
 const NO_WEB = { webSearchToolAllowed: false, platformTools: null } as const;
 const WEB = { webSearchToolAllowed: true, platformTools: platformToolsProjection(false) } as const;
 const WEB_CATEGORIES = ['web-search-query', 'public-source-fetch'] as const;
-const WEB_REVIEW_KINDS = ['editorial-review/factual-review', 'editorial-review/academic-integrity'];
-/** The three rules v16 carries from v14 unchanged (baseline analysis, 润色, conflict regeneration), as the projection states them. */
+const WEB_REVIEW_KINDS = ['editorial-review/factual-review', 'editorial-review/academic-integrity', 'factual-review'];
+/** The four rules v16 carries from v14 unchanged (baseline analysis, dialogue, 润色, conflict regeneration), as the projection states them. */
 const V16_UNCHANGED_RULES: Record<string, AdmittedProviderRule> = {
   baseline: {
     ruleId: 'developer-live-public-samplebook-analysis',
@@ -99,6 +100,21 @@ const V16_UNCHANGED_RULES: Record<string, AdmittedProviderRule> = {
     editorialDeliverablesAllowed: false,
     clarificationQuestionAllowed: true,
     clarificationTimeoutHours: 24,
+    backgroundOrigin: false,
+    matchingActiveDefaultExecutionRuleAllowed: false,
+    ...NO_WEB,
+  },
+  dialogue: {
+    ruleId: 'developer-live-public-samplebook-editorial-dialogue',
+    taskKinds: ['editorial-dialogue'],
+    modelRole: 'Fast Interaction Role',
+    ...GO_BINDING,
+    outboundDataCategories: ['editor-selected-manuscript-excerpt'],
+    crossUnitSynthesisAllowed: false,
+    materialReferencesAllowed: false,
+    editorialDeliverablesAllowed: false,
+    clarificationQuestionAllowed: false,
+    clarificationTimeoutHours: null,
     backgroundOrigin: false,
     matchingActiveDefaultExecutionRuleAllowed: false,
     ...NO_WEB,
@@ -135,25 +151,10 @@ const V16_UNCHANGED_RULES: Record<string, AdmittedProviderRule> = {
   },
 };
 /**
- * The four rules that may research under v16 (Issue #473, slice 6d): dialogue, review (with 事实核查 and 学术道德与引用 as
+ * The three rules that may research under v16 (Issue #473, slice 6d): review (with 事实核查 and 学术道德与引用 as
  * kinds), writing and evaluation, each with the two web categories and the platform tools; otherwise as v14 projected them.
  */
 const V16_CHANGED_RULES: Record<string, AdmittedProviderRule> = {
-  dialogue: {
-    ruleId: 'developer-live-public-samplebook-editorial-dialogue',
-    taskKinds: ['editorial-dialogue'],
-    modelRole: 'Fast Interaction Role',
-    ...GO_BINDING,
-    outboundDataCategories: ['editor-selected-manuscript-excerpt', ...WEB_CATEGORIES],
-    crossUnitSynthesisAllowed: false,
-    materialReferencesAllowed: false,
-    editorialDeliverablesAllowed: false,
-    clarificationQuestionAllowed: false,
-    clarificationTimeoutHours: null,
-    backgroundOrigin: false,
-    matchingActiveDefaultExecutionRuleAllowed: false,
-    ...WEB,
-  },
   review: {
     ruleId: 'developer-live-public-samplebook-reference-free-review',
     taskKinds: ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency', ...WEB_REVIEW_KINDS],
@@ -219,7 +220,7 @@ const V16_BACKGROUND_RULE: AdmittedProviderRule = {
 };
 const V16_ADMITTED_RULES: AdmittedProviderRule[] = [
   V16_UNCHANGED_RULES.baseline!,
-  V16_CHANGED_RULES.dialogue!,
+  V16_UNCHANGED_RULES.dialogue!,
   V16_CHANGED_RULES.review!,
   V16_CHANGED_RULES.writing!,
   V16_CHANGED_RULES.evaluation!,
@@ -267,8 +268,8 @@ function rulesOf(policy: Record<string, unknown>): Array<Record<string, unknown>
 
 const ADR_0074 = 'docs/adr/0074-admit-a-bounded-research-egress-and-a-runtime-factual-verification-policy.md';
 const WEB_CATEGORY_LABELS = { 'web-search-query': { labelZh: '模型自拟的联网检索词' }, 'public-source-fetch': { labelZh: '公开来源网页地址' } };
-const RESEARCH = [DIALOGUE, REVIEW, WRITING, EVALUATION];
-const PRODUCTION_RESEARCH_IDS = ['ordinary-production-editorial-dialogue', 'ordinary-production-review', 'ordinary-production-writing', 'ordinary-production-evaluation'];
+const RESEARCH = [REVIEW, WRITING, EVALUATION];
+const PRODUCTION_RESEARCH_IDS = ['ordinary-production-review', 'ordinary-production-writing', 'ordinary-production-evaluation'];
 const UNPUBLISHED = ['unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content'];
 
 /**
@@ -398,7 +399,7 @@ describe('active policy set v12', () => {
     }
   });
 
-  it('carries every v14 rule, role binding and category into v16 unchanged except the platform tools on the four research rules', async () => {
+  it('carries every v14 rule, role binding and category into v16 unchanged except the platform tools on the three research rules', async () => {
     const v14 = await readPolicy(V14_PATH);
     const v16 = await readPolicy();
     expect(v16.predecessorVersion).toBe('v14');
@@ -560,7 +561,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
 
   it('refuses a dialogue or review reading that is not the pinned v16 bytes', async () => {
     for (const [index, block, overrides] of [
-      [DIALOGUE, 'transmissions', { webSearchToolAllowed: false }],
+      [DIALOGUE, 'transmissions', { webSearchToolAllowed: true }],
       [DIALOGUE, 'transmissions', { automaticResendInsideStoppedSessionAllowed: true }],
       [DIALOGUE, 'transmissions', { oneBoundedPayloadPerAttempt: false }],
       [DIALOGUE, 'authorizationPreconditions', { finalProviderPayloadEgressGateRequired: false }],
@@ -898,7 +899,7 @@ function productionTamperings(policy: Record<string, unknown>): Mutation[] {
 }
 
 describe('Provider Processing v17 (ordinary-production, Issues #853, #863 and #473)', () => {
-  it('is the direct successor of v15: same scope, local production, default deny, the same eight rules, and the platform tools on the four research rules', async () => {
+  it('is the direct successor of v15: same scope, local production, default deny, the same eight rules, and the platform tools on the three research rules', async () => {
     const v17 = await readPolicy(V17_PATH);
     const v15 = await readPolicy(V15_PATH);
     expect(v17.predecessorVersion).toBe('v15');
@@ -1380,6 +1381,37 @@ describe('Provider Processing v16 and v17: enrolled background analysis and mode
 });
 
 describe('Provider Processing v16 and v17: platform tools on the research rules (Issue #473, slice 6d)', () => {
+  it.each([
+    ['developer-live', 'v14', V14_PATH, 'developer-live-public-samplebook-reference-free-review'],
+    ['ordinary-production', 'v15', V15_PATH, 'ordinary-production-review'],
+  ] as const)('resolves the factual-review executor under %s and refuses its predecessor (%s)', async (scope, version, predecessorPath, ruleId) => {
+    await placeValidCheckout();
+    const policy = await resolveSourceCheckoutLaunchPolicy(codeRoot, scope, scope === 'ordinary-production' ? GO_PRODUCTION_BINDING : null);
+    expect(policy.integrityState).toBe('verified');
+    const review = liveKindRule(policy, FACTUAL_REVIEW_KIND, ['public-or-synthetic']);
+    expect(review?.ruleId).toBe(ruleId);
+    expect(review?.webSearchToolAllowed).toBe(true);
+    expect(review?.platformTools).not.toBeNull();
+    expect(liveKindRule(policy, 'editorial-review/academic-integrity')?.ruleId).toBe(ruleId);
+    expect(liveKindRule(policy, 'editorial-review/publication-risk')).toBeNull();
+    expect(liveKindRule(policy, 'publication-risk')).toBeNull();
+
+    // Reconstruct the predecessor's kind/category projection from its immutable bytes, keeping the same binding and origins.
+    // Merely changing a version label would not exercise liveKindRule's exact kind lookup.
+    const predecessorRules = rulesOf(readPolicySync(predecessorPath));
+    const predecessor: LaunchPolicyProjection = { ...policy, providerProcessing: { ...policy.providerProcessing, version,
+      admittedRules: policy.providerProcessing.admittedRules.map((rule) => {
+        const prior = predecessorRules.find((candidate) => candidate.ruleId === rule.ruleId)!;
+        return { ...rule, taskKinds: prior.allowedTaskKinds as string[],
+          outboundDataCategories: prior.allowedOutboundDataCategories as AdmittedProviderRule['outboundDataCategories'],
+          webSearchToolAllowed: false, platformTools: null };
+      }),
+    } };
+    expect(liveKindRule(predecessor, FACTUAL_REVIEW_KIND, ['public-or-synthetic'])).toBeNull();
+    expect(liveKindRule(predecessor, 'editorial-review/factual-review')).toBeNull();
+    expect(liveKindRule(predecessor, 'editorial-review/academic-integrity')).toBeNull();
+  });
+
   const documents = [
     ['v16 (developer-live)', V16_PATH, false, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
     ['v17 (ordinary-production)', V17_PATH, true, (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)],
@@ -1414,9 +1446,9 @@ describe('Provider Processing v16 and v17: platform tools on the research rules 
     }
   });
 
-  it.each(documents)('%s projects the web switch and platform tools on exactly the four research rules', (_name, path, production, read) => {
+  it.each(documents)('%s projects the web switch and platform tools on exactly the three research rules', (_name, path, production, read) => {
     const rules = read(readPolicySync(path))!;
-    expect(rules.map((rule) => rule.webSearchToolAllowed)).toEqual([false, true, true, true, true, false, false, false]);
+    expect(rules.map((rule) => rule.webSearchToolAllowed)).toEqual([false, false, true, true, true, false, false, false]);
     for (const rule of rules) {
       expect(rule.platformTools, rule.ruleId).toEqual(rule.webSearchToolAllowed ? platformToolsProjection(production) : null);
     }
@@ -1480,12 +1512,12 @@ describe('Provider Processing v16 and v17: platform tools on the research rules 
       backendsOf(policy, WRITING).push({ ...backendsOf(policy, WRITING)[0]!, id: 'search-kimi', host: 'api.moonshot.cn', endpoint: 'https://api.moonshot.cn/v1/search', credentialSlot: 'search-kimi' });
     }, 'extra backend');
     refuse((policy) => { backendsOf(policy, EVALUATION).splice(0, 1); }, 'dropped default');
-    refuse((policy) => { const list = backendsOf(policy, DIALOGUE); [list[0], list[1]] = [list[1]!, list[0]!]; }, 'reordered');
+    refuse((policy) => { const list = backendsOf(policy, REVIEW); [list[0], list[1]] = [list[1]!, list[0]!]; }, 'reordered');
     // The switch on without the block, and the block with the switch off.
     refuse((policy) => { delete rulesOf(policy)[REVIEW]!.platformTools; }, 'switch without block');
     refuse((policy) => { (rulesOf(policy)[REVIEW]!.transmissions as Record<string, unknown>).webSearchToolAllowed = false; }, 'block without switch');
-    // Baseline analysis, 润色, conflict regeneration and the background rule never research, with or without the switch.
-    for (const index of [BASELINE, POLISH, CONFLICT, BACKGROUND]) {
+    // Dialogue, baseline analysis, 润色, conflict regeneration and the background rule never research, with or without the switch.
+    for (const index of [BASELINE, DIALOGUE, POLISH, CONFLICT, BACKGROUND]) {
       refuse((policy) => { rulesOf(policy)[index]!.platformTools = structuredClone(rulesOf(policy)[REVIEW]!.platformTools); }, `block on ${index}`);
       refuse((policy) => {
         rulesOf(policy)[index]!.platformTools = structuredClone(rulesOf(policy)[REVIEW]!.platformTools);
