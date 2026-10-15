@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
 import type { OutboundDataCategoryId } from '../../shared/protocol.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
@@ -71,6 +72,13 @@ export type EgressPolicyPin =
   | {
       readonly operationalScope: 'developer-live';
       readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
+      readonly liveTransmissionAllowed: true;
+      readonly authorizedLiveTransmissionCount: 'bounded-by-run';
+    }
+  // The editor's own model service under ordinary-production (Issue #811): the configured route, the Run's own ceiling.
+  | {
+      readonly operationalScope: 'ordinary-production';
+      readonly providerProcessingVersion: OrdinaryProductionProviderProcessingVersion;
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     };
@@ -413,8 +421,11 @@ export function evaluateEgress(
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {
     return refuse('binding-stale', '执行绑定已不是当前绑定；未发送任何内容。');
   }
+  // Under ordinary-production (Issue #811) the editor's own unpublished words leave only under the rule that names their
+  // category; every other scope reads exactly as before.
   if (binding.outboundDataCategory !== 'public-or-synthetic' && !(MANUSCRIPT_EXCERPT_CATEGORIES.has(binding.outboundDataCategory) &&
-      (binding.route === LOCAL_DETERMINISTIC_ROUTE || excerptAdmittedByRule(binding)))) {
+      (binding.route === LOCAL_DETERMINISTIC_ROUTE || excerptAdmittedByRule(binding))) &&
+      !(binding.policy.operationalScope === 'ordinary-production' && (binding.ruleOutboundCategories?.has(binding.outboundDataCategory) ?? false))) {
     return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
   }
   if (binding.route !== LOCAL_DETERMINISTIC_ROUTE && [...(binding.contractCategories ?? [])].some((category) =>
@@ -474,8 +485,10 @@ export function evaluateEgress(
   }
   // Under v9 the ceiling is a precondition of the decision itself, evaluated here from accumulated
   // usage, so no dispatch can precede it and no ceiling state can be assumed from an earlier turn.
+  // Ordinary production leaves the per-Run ceiling to the editor (Issue #811; S16a): unset is a Run without one, not a refusal.
   const ceiling = scope.ceilingState?.() ?? 'unset';
-  if (ceiling === 'unset' || (ceiling === 'not-applicable' && !excerptAdmittedByRule(binding))) {
+  if ((ceiling === 'unset' && binding.policy.operationalScope !== 'ordinary-production') ||
+      (ceiling === 'not-applicable' && !excerptAdmittedByRule(binding))) {
     return refuse('run-budget-ceiling-unset', 'Provider Processing v9 要求非 unset 的任务运行预算上限；未发送任何内容。');
   }
   if (ceiling === 'reached') {

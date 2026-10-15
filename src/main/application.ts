@@ -53,6 +53,15 @@ import {
   type J04ModelAdapterControl,
   type J08RecoveryControl,
   type ModelServiceSettingsProjection,
+  type ModelServiceConnectionProjection,
+  type ModelServiceCredentialInput,
+  type ModelServiceRouteId,
+  type ModelServiceUnsupportedProviderProjection,
+  type ModelRoleStatus,
+  type ModelRoleStatusLabel,
+  MODEL_SERVICE_ROUTE_BINDINGS,
+  MODEL_SERVICE_ROUTE_EFFECT_LABEL,
+  MODEL_SERVICE_ROUTES,
   type PickerReselectResult,
   type PickerStageResult,
   type EditorClipboardCommand,
@@ -69,10 +78,12 @@ import {
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
 import { developerProposalFileName } from '../shared/developer-proposal.js';
+import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import {
   createCanonicalExternalDataRoot,
+  createCanonicalProductionDataRoot,
   ensureCanonicalDataDirectory,
   inspectBoundedDataFootprint,
   requireSameCanonicalDataDirectory,
@@ -556,8 +567,8 @@ function registerRendererHandlers(
   getProductDataLocation: () => Promise<ProductDataLocationProjection>,
   revealProductDataLocation: () => ProductDataLocationRevealProjection,
   getModelServiceSettings: () => Promise<ModelServiceSettingsProjection>,
-  saveModelServiceCredential: (input: { connectionName: string; secret: string }) => Promise<ModelServiceSettingsProjection>,
-  removeModelServiceCredential: () => Promise<ModelServiceSettingsProjection>,
+  saveModelServiceCredential: (input: ModelServiceCredentialInput) => Promise<ModelServiceSettingsProjection>,
+  removeModelServiceCredential: (input?: { route: ModelServiceRouteId }) => Promise<ModelServiceSettingsProjection>,
   consumeLostApplyAcknowledgement: () => boolean,
   consumeInjectedSavePath: () => string | undefined,
   printExportPage: (pagePath: string, pdfPath: string) => Promise<void>,
@@ -2293,18 +2304,18 @@ function registerRendererHandlers(
   );
   ipcMain.handle(
     IPC_CHANNELS.saveModelServiceCredential,
-    (event, input: { connectionName: string; secret: string }) =>
+    (event, input: ModelServiceCredentialInput) =>
       envelope(async () => {
         requireSender(event);
         requireAuthority();
         return serializeEffect(() => saveModelServiceCredential(input));
       }),
   );
-  ipcMain.handle(IPC_CHANNELS.removeModelServiceCredential, (event) =>
+  ipcMain.handle(IPC_CHANNELS.removeModelServiceCredential, (event, input?: { route: ModelServiceRouteId }) =>
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      return serializeEffect(removeModelServiceCredential);
+      return serializeEffect(() => removeModelServiceCredential(input));
     }),
   );
   ipcMain.handle(IPC_CHANNELS.commitBookCreation, (event, input: ServiceOperationMap['commitBookCreation']['input']) =>
@@ -5362,7 +5373,10 @@ export async function runApplication(): Promise<void> {
     app.enableSandbox();
     startupLocation = reachStartup('data-root');
     const codeRoot = resolve(__dirname, '..', '..');
-    const dataRoot = await createCanonicalExternalDataRoot(launch.dataRoot, codeRoot);
+    // An ordinary-production data root is also kept apart from the developer caches (Issue #811), as the launcher kept it.
+    const dataRoot = launch.launchForm.trustedOperationalScope === 'ordinary-production'
+      ? await createCanonicalProductionDataRoot(launch.dataRoot, codeRoot)
+      : await createCanonicalExternalDataRoot(launch.dataRoot, codeRoot);
     startupLocation = reachStartup('shell-root');
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const earlyUserDataSwitch = app.commandLine.getSwitchValue('user-data-dir');
@@ -5619,41 +5633,54 @@ export async function runApplication(): Promise<void> {
     } catch {
       protectedSecretStore = undefined;
     }
-    const settingsProjection = async (): Promise<ModelServiceSettingsProjection> => {
-      let state = await service!.call('getModelServiceStoredState', {});
-      let connection = state.connection;
-      if (connection?.credentialOperationState === 'ready') {
-        let present = false;
-        if (protectedSecretStore !== undefined) {
-          try {
-            present = await protectedSecretStore.has(connection.credentialReference);
-          } catch {
-            present = false;
-          }
-        }
-        if (!present) {
-          try {
-            connection = await service!.call('setModelServiceCredentialState', {
-              credentialReference: connection.credentialReference,
-              credentialOperationState: 'needs-attention',
-            });
-            state = { ...state, connection };
-          } catch {
-            connection = { ...connection, credentialOperationState: 'needs-attention' };
-          }
+    /** A connection the store says is protected but the OS store no longer holds needs attention (S55a), whatever its route. */
+    const confirmedConnection = async (connection: ModelServiceConnectionProjection): Promise<ModelServiceConnectionProjection> => {
+      if (connection.credentialOperationState !== 'ready') return connection;
+      let present = false;
+      if (protectedSecretStore !== undefined) {
+        try {
+          present = await protectedSecretStore.has(connection.credentialReference);
+        } catch {
+          present = false;
         }
       }
-      const mainStatus = protectedSecretStore === undefined
-        ? 'unavailable' as const
+      if (present) return connection;
+      try {
+        return await service!.call('setModelServiceCredentialState', {
+          credentialReference: connection.credentialReference,
+          credentialOperationState: 'needs-attention',
+        });
+      } catch {
+        return { ...connection, credentialOperationState: 'needs-attention' };
+      }
+    };
+    const settingsProjection = async (): Promise<ModelServiceSettingsProjection> => {
+      const state = await service!.call('getModelServiceStoredState', {});
+      const connections = await Promise.all(state.connections.map(confirmedConnection));
+      const connectionOf = (route: ModelServiceRouteId): ModelServiceConnectionProjection | null =>
+        connections.find((connection) => connection.binding.providerId === route) ?? null;
+      const statusOf = (connection: ModelServiceConnectionProjection | null): ModelRoleStatus => protectedSecretStore === undefined
+        ? 'unavailable'
         : connection === null || connection.credentialOperationState === 'missing'
-          ? 'setup-required' as const
-          : connection.credentialOperationState === 'ready'
-            ? 'available' as const
-            : 'needs-attention' as const;
-      const mainStatusLabel = mainStatus === 'available' ? '可用' as const
-        : mainStatus === 'setup-required' ? '需设置' as const
-          : mainStatus === 'needs-attention' ? '需处理' as const
-            : '不可用' as const;
+          ? 'setup-required'
+          : connection.credentialOperationState === 'ready' ? 'available' : 'needs-attention';
+      const labelOf = (status: ModelRoleStatus): ModelRoleStatusLabel => status === 'available' ? '可用'
+        : status === 'setup-required' ? '需设置' : status === 'needs-attention' ? '需处理' : '不可用';
+      // The route new Tasks use (Issue #811): the editor's choice, else the default Go route once its credential is ready.
+      const selected = connections.find((connection) => connection.selected) ?? null;
+      const inUseRoute: ModelServiceRouteId | null = selected?.binding.providerId ??
+        (connectionOf('opencode-go')?.credentialOperationState === 'ready' ? 'opencode-go' : null);
+      const connection = inUseRoute === null ? null : connectionOf(inUseRoute);
+      const mainStatus = statusOf(connection);
+      const mainStatusLabel = labelOf(mainStatus);
+      const mainBinding = MODEL_SERVICE_ROUTE_BINDINGS[inUseRoute ?? 'opencode-go'];
+      const mainStatusDetail = protectedSecretStore === undefined
+        ? '当前操作系统安全凭据库不可用；未启用替代存储。'
+        : mainStatus === 'available'
+          ? '连接名称与凭据已由操作系统安全凭据库保护。'
+          : mainStatus === 'needs-attention'
+            ? '凭据状态无法确认；请重新输入或移除。'
+            : '请输入连接名称与凭据。';
       const unconfigured = (
         roleId: 'fast-interaction' | 'difficult-escalation' | 'frontier',
         roleLabel: '快速交互角色' | '疑难升级角色' | '前沿模型角色',
@@ -5668,37 +5695,59 @@ export async function runApplication(): Promise<void> {
         binding: null,
         connection: null,
       });
+      // Under ordinary-production the Fast Interaction Role takes the one route the editor chose, as the main role does.
+      const fastInteraction = state.launchPolicy.operationalScope === 'ordinary-production'
+        ? {
+            roleId: 'fast-interaction' as const,
+            roleLabel: '快速交互角色' as const,
+            purposeLabel: '快速交互与低风险候选生成',
+            status: mainStatus,
+            statusLabel: mainStatusLabel,
+            statusDetail: '与主编辑角色使用同一条模型服务路线和同一个凭据。',
+            binding: mainBinding,
+            connection,
+          }
+        : unconfigured('fast-interaction', '快速交互角色', '快速交互与低风险候选生成');
+      const supportedLabels = new Set([CONFIGURED_PROVIDER_LABELS['opencode-go'], CONFIGURED_PROVIDER_LABELS['deepseek-open-platform']]);
+      const unsupportedProviders: ModelServiceUnsupportedProviderProjection[] = [];
+      for (const route of CONFIGURED_ROUTE_IDS) {
+        const providerLabel = CONFIGURED_PROVIDER_LABELS[route];
+        if (supportedLabels.has(providerLabel) || unsupportedProviders.some((provider) => provider.providerLabel === providerLabel)) continue;
+        unsupportedProviders.push({ providerId: route, providerLabel, statusLabel: '尚未支持' });
+      }
       return {
         roles: [
-          unconfigured('fast-interaction', '快速交互角色', '快速交互与低风险候选生成'),
+          fastInteraction,
           {
             roleId: 'main-editorial',
             roleLabel: '主编辑角色',
             purposeLabel: '中文长篇写作、编辑建议与复杂指令处理',
             status: mainStatus,
             statusLabel: mainStatusLabel,
-            statusDetail: protectedSecretStore === undefined
-              ? '当前操作系统安全凭据库不可用；未启用替代存储。'
-              : mainStatus === 'available'
-                ? '连接名称与凭据已由操作系统安全凭据库保护。'
-                : mainStatus === 'needs-attention'
-                  ? '凭据状态无法确认；请重新输入或移除。'
-                  : '请输入连接名称与凭据。',
-            binding: {
-              providerId: 'deepseek-open-platform',
-              providerLabel: 'DeepSeek 开放平台（官方）',
-              modelId: 'deepseek-v4-pro',
-              modelLabel: 'DeepSeek V4 Pro High',
-              adapterRevision: 1,
-              configurationRevision: 1,
-              approvedFallbackChain: [],
-              credentialSlot: 'deepseek-api-key',
-            },
+            statusDetail: mainStatusDetail,
+            binding: mainBinding,
             connection,
           },
           unconfigured('difficult-escalation', '疑难升级角色', '疑难或高后果工作升级'),
           unconfigured('frontier', '前沿模型角色', '挑战性或明确授权的高后果工作'),
         ],
+        routeChoice: {
+          routes: MODEL_SERVICE_ROUTES.map((route) => {
+            const routeConnection = connectionOf(route);
+            const status = statusOf(routeConnection);
+            return {
+              route,
+              binding: MODEL_SERVICE_ROUTE_BINDINGS[route],
+              isDefault: route === 'opencode-go',
+              inUse: route === inUseRoute,
+              status,
+              statusLabel: labelOf(status),
+              connection: routeConnection,
+            };
+          }),
+          unsupportedProviders,
+          effectLabel: MODEL_SERVICE_ROUTE_EFFECT_LABEL,
+        },
         protectedSecretStore: {
           backend: process.platform === 'win32' ? 'windows-credential-manager' : 'macos-keychain',
           label: process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串',
@@ -5708,35 +5757,55 @@ export async function runApplication(): Promise<void> {
         authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。',
       };
     };
-    const saveModelServiceCredential = async (input: {
-      connectionName: string;
-      secret: string;
-    }): Promise<ModelServiceSettingsProjection> => {
+    const routeOf = (value: unknown): ModelServiceRouteId => {
+      if (value !== 'opencode-go' && value !== 'deepseek-open-platform') {
+        throw new ServiceCallError('MODEL_SERVICE_CREDENTIAL_INVALID', '模型服务路线无效。');
+      }
+      return value;
+    };
+    /**
+     * Save a route's connection name and credential — the DeepSeek 开放平台（官方） route when none is named, as S55a always saved
+     * it — or, given only `{ route, select: true }`, make that saved route the one new Tasks use (Issue #811). The store mints a
+     * route's Credential Reference the first time; main writes the value under it and nowhere else.
+     */
+    const saveModelServiceCredential = async (input: ModelServiceCredentialInput): Promise<ModelServiceSettingsProjection> => {
       if (protectedSecretStore === undefined) {
         throw new ServiceCallError('PROTECTED_SECRET_STORE_UNAVAILABLE', '操作系统安全凭据库当前不可用。');
       }
-      if (input === null || typeof input !== 'object' || Object.keys(input).sort().join(',') !== 'connectionName,secret' ||
-          typeof input.connectionName !== 'string' || typeof input.secret !== 'string' ||
-          !input.connectionName.isWellFormed() || input.connectionName.trim().length < 1 || input.connectionName.trim().length > 80 ||
-          !input.secret.isWellFormed() || input.secret.length < 1 || input.secret.length > 16_384) {
+      const keys = input !== null && typeof input === 'object' ? Object.keys(input).sort().join(',') : '';
+      if (keys === 'route,select') {
+        const selection = input as { route: unknown; select: unknown };
+        if (selection.select !== true) throw new ServiceCallError('MODEL_SERVICE_CREDENTIAL_INVALID', '连接名称或凭据输入无效。');
+        await service!.call('selectModelServiceRoute', { route: routeOf(selection.route) });
+        return settingsProjection();
+      }
+      const credential = input as { connectionName?: unknown; secret?: unknown; route?: unknown };
+      if ((keys !== 'connectionName,secret' && keys !== 'connectionName,route,secret') ||
+          typeof credential.connectionName !== 'string' || typeof credential.secret !== 'string' ||
+          !credential.connectionName.isWellFormed() || credential.connectionName.trim().length < 1 || credential.connectionName.trim().length > 80 ||
+          !credential.secret.isWellFormed() || credential.secret.length < 1 || credential.secret.length > 16_384) {
         throw new ServiceCallError('MODEL_SERVICE_CREDENTIAL_INVALID', '连接名称或凭据输入无效。');
       }
-      const current = (await service!.call('getModelServiceStoredState', {})).connection;
-      const credentialReference = current?.credentialReference ?? randomUUID();
-      await service!.call('saveModelServiceConnection', {
-        connectionName: input.connectionName.trim(),
-        credentialReference,
+      const route = keys === 'connectionName,secret' ? 'deepseek-open-platform' : routeOf(credential.route);
+      const connectionName = credential.connectionName.trim();
+      const current = (await service!.call('getModelServiceStoredState', {})).connections
+        .find((connection) => connection.binding.providerId === route) ?? null;
+      const pending = await service!.call('saveModelServiceConnection', {
+        route,
+        connectionName,
+        credentialReference: current?.credentialReference ?? null,
         credentialOperationState: 'needs-attention',
       });
       try {
-        await protectedSecretStore.set(credentialReference, input.secret);
+        await protectedSecretStore.set(pending.credentialReference, credential.secret);
       } catch {
         throw new ServiceCallError('PROTECTED_SECRET_WRITE_FAILED', '凭据未能写入操作系统安全凭据库。');
       }
       try {
         await service!.call('saveModelServiceConnection', {
-          connectionName: input.connectionName.trim(),
-          credentialReference,
+          route,
+          connectionName,
+          credentialReference: pending.credentialReference,
           credentialOperationState: 'ready',
         });
       } catch {
@@ -5744,11 +5813,17 @@ export async function runApplication(): Promise<void> {
       }
       return settingsProjection();
     };
-    const removeModelServiceCredential = async (): Promise<ModelServiceSettingsProjection> => {
+    /** Remove a route's credential — the DeepSeek 开放平台（官方） route's when none is named — keeping its connection 需设置. */
+    const removeModelServiceCredential = async (input?: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection> => {
       if (protectedSecretStore === undefined) {
         throw new ServiceCallError('PROTECTED_SECRET_STORE_UNAVAILABLE', '操作系统安全凭据库当前不可用。');
       }
-      const current = (await service!.call('getModelServiceStoredState', {})).connection;
+      if (input !== undefined && (input === null || typeof input !== 'object' || Object.keys(input).join(',') !== 'route')) {
+        throw new ServiceCallError('MODEL_SERVICE_CREDENTIAL_INVALID', '模型服务路线无效。');
+      }
+      const route = input === undefined ? 'deepseek-open-platform' : routeOf(input.route);
+      const current = (await service!.call('getModelServiceStoredState', {})).connections
+        .find((connection) => connection.binding.providerId === route) ?? null;
       if (current === null) return settingsProjection();
       await service!.call('setModelServiceCredentialState', {
         credentialReference: current.credentialReference,

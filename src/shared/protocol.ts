@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 129 as const;
+export const SERVICE_PROTOCOL_VERSION = 130 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1862,19 +1862,27 @@ export type ModelRoleStatus = 'available' | 'setup-required' | 'needs-attention'
 export type ModelRoleStatusLabel = '可用' | '需设置' | '需处理' | '不可用';
 export type ModelCredentialOperationState = 'ready' | 'missing' | 'needs-attention';
 
+/**
+ * The two routes an ordinary-production Model Role may be configured to (Issue #811): OpenCode Go DeepSeek V4.1 Flash, the
+ * default, and DeepSeek 开放平台（官方） V4.1 Flash, an independent choice. Every other configured provider is 尚未支持.
+ */
+export type ModelServiceRouteId = 'opencode-go' | 'deepseek-open-platform';
+/** One connection row per route; the official row keeps the identity Issue #712 gave it. */
+export type ModelServiceConnectionId = 'main-editorial-deepseek-v4-pro' | 'main-editorial-opencode-go';
+
 export interface ModelServiceBindingProjection {
-  providerId: 'deepseek-open-platform';
-  providerLabel: 'DeepSeek 开放平台（官方）';
-  modelId: 'deepseek-v4-pro';
-  modelLabel: 'DeepSeek V4 Pro High';
+  providerId: ModelServiceRouteId;
+  providerLabel: 'OpenCode Go' | 'DeepSeek 开放平台（官方）';
+  modelId: 'deepseek-v4.1-flash' | 'deepseek-flash';
+  modelLabel: 'DeepSeek V4.1 Flash';
   adapterRevision: 1;
   configurationRevision: 1;
   approvedFallbackChain: readonly [];
-  credentialSlot: 'deepseek-api-key';
+  credentialSlot: 'opencode-go' | 'deepseek-api-key';
 }
 
 export interface ModelServiceConnectionProjection {
-  connectionId: 'main-editorial-deepseek-v4-pro';
+  connectionId: ModelServiceConnectionId;
   roleId: 'main-editorial';
   connectionName: string;
   binding: ModelServiceBindingProjection;
@@ -1883,6 +1891,8 @@ export interface ModelServiceConnectionProjection {
   createdAt: string;
   updatedAt: string;
   credentialUpdatedAt: string;
+  /** Whether the editor chose this route for the Tasks they start from now on (Issue #811). */
+  selected: boolean;
 }
 
 /**
@@ -1913,8 +1923,11 @@ export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: 
 export type DeveloperLiveCeiling =
   | { readonly kind: 'tokens'; readonly maxTotalTokens: number }
   | { readonly kind: 'tokens-per-frozen-unit'; readonly tokensPerFrozenUnit: number };
-/** The execution route an analysis Run binds: the in-process deterministic adapter or the developer-live OpenCode Go route. */
-export type ExecutionRouteId = 'ai7-local-deterministic' | 'opencode-go';
+/**
+ * The execution route an analysis Run binds: the in-process deterministic adapter, the developer-live OpenCode Go route, or —
+ * under ordinary-production (Issue #811) — the editor's configured Go or DeepSeek 开放平台（官方） route.
+ */
+export type ExecutionRouteId = 'ai7-local-deterministic' | 'opencode-go' | 'deepseek-open-platform';
 /** A remote Provider route a Provider Resolution Plan may name: a route a provider document declares (ADR 0073 §2). */
 export type RemoteProviderId = ConfiguredRouteId;
 /** A logical credential slot of the Main Editorial Role: one per configured provider (ADR 0073 §4). */
@@ -1922,11 +1935,13 @@ export type CredentialSlotId = ConfiguredCredentialSlot;
 /** The Provider Processing pin a Provider Resolution Plan carries for its trusted scope. */
 export type ProviderProcessingPin =
   | { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 }
-  | { operationalScope: 'developer-live'; version: DeveloperLiveProviderProcessingVersion; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' };
+  | { operationalScope: 'developer-live'; version: DeveloperLiveProviderProcessingVersion; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' }
+  | { operationalScope: 'ordinary-production'; version: OrdinaryProductionProviderProcessingVersion; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' };
 /** The policy pin a Result Set Revision records; `liveTransmissions` is the policy's bound, never a usage count. */
 export type ResultSetPolicyPin =
   | { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 0 }
-  | { operationalScope: 'developer-live'; providerProcessingVersion: DeveloperLiveProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' };
+  | { operationalScope: 'developer-live'; providerProcessingVersion: DeveloperLiveProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' }
+  | { operationalScope: 'ordinary-production'; providerProcessingVersion: OrdinaryProductionProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' };
 
 /** The three launch-form arguments the built entry accepts beside `--data-root`; carried by argv only, never by an environment variable or setting. */
 export const TRUSTED_SCOPE_ARGUMENT = '--trusted-operational-scope';
@@ -1980,7 +1995,7 @@ export interface TrustedLaunchForm {
   readonly runBudgetCeiling: number | null;
   /** The explicit absolute Provider Result Cache root, or `null` for the scope default. */
   readonly providerCacheRoot: string | null;
-  /** The development validation a developer-live launch performs; `null` under every other scope. */
+  /** The development validation a developer-live launch performs; `null` under every other scope, ordinary production included. */
   readonly validation: DevelopmentValidationIntent | null;
 }
 
@@ -2056,7 +2071,9 @@ export function isTrustedOperationalScope(value: string): value is TrustedOperat
  * the developer-live scope yields `null`, and the caller fails closed. Absent arguments select
  * `development-ci`. A developer-live launch must name the development validation it performs
  * (Issue #808): that scope is a developer-test scope, and an unnamed purpose fails closed before
- * anything could be dispatched rather than sending outside the Provider Test Ledger.
+ * anything could be dispatched rather than sending outside the Provider Test Ledger. An
+ * `ordinary-production` launch (Issue #811) takes none of the four development arguments: its
+ * ceiling is the editor's per Run, and it has no cache, ledger or validation at all.
  */
 export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunchForm | null {
   const scope = raw.trustedOperationalScope ?? 'development-ci';
@@ -2206,9 +2223,57 @@ export interface LaunchPolicyProjection {
 }
 
 export interface ModelServiceStoredStateProjection {
+  /** The DeepSeek 开放平台（官方） connection, as Issue #712 has always read it; `connections` holds every route's. */
   connection: ModelServiceConnectionProjection | null;
+  /** Every route's connection (Issue #811), Go first; at most one is `selected`. */
+  connections: readonly ModelServiceConnectionProjection[];
   launchPolicy: LaunchPolicyProjection;
 }
+
+/** One route the Main Editorial Role may be configured to, as 设置 › 模型服务 offers it (Issue #811). */
+export interface ModelServiceRouteOptionProjection {
+  route: ModelServiceRouteId;
+  binding: ModelServiceBindingProjection;
+  /** The Go route: the binding new Tasks use when the editor has chosen none and its credential is there. */
+  isDefault: boolean;
+  /** Whether new Tasks use this route: the editor's choice, else the default once its credential is ready. */
+  inUse: boolean;
+  status: ModelRoleStatus;
+  statusLabel: ModelRoleStatusLabel;
+  connection: ModelServiceConnectionProjection | null;
+}
+
+/** A configured provider no Model Role can bind yet: named, never selectable. */
+export interface ModelServiceUnsupportedProviderProjection {
+  providerId: string;
+  providerLabel: string;
+  statusLabel: '尚未支持';
+}
+
+/** The routes in the order 设置 › 模型服务 lists them: the default first (Issue #811). */
+export const MODEL_SERVICE_ROUTES: ReadonlyArray<ModelServiceRouteId> = ['opencode-go', 'deepseek-open-platform'];
+
+/** Each route's exact binding (Issue #811): one model each, no fallback chain. */
+export const MODEL_SERVICE_ROUTE_BINDINGS: Readonly<Record<ModelServiceRouteId, ModelServiceBindingProjection>> = {
+  'opencode-go': {
+    providerId: 'opencode-go', providerLabel: 'OpenCode Go', modelId: 'deepseek-v4.1-flash', modelLabel: 'DeepSeek V4.1 Flash',
+    adapterRevision: 1, configurationRevision: 1, approvedFallbackChain: [], credentialSlot: 'opencode-go',
+  },
+  'deepseek-open-platform': {
+    providerId: 'deepseek-open-platform', providerLabel: 'DeepSeek 开放平台（官方）', modelId: 'deepseek-flash', modelLabel: 'DeepSeek V4.1 Flash',
+    adapterRevision: 1, configurationRevision: 1, approvedFallbackChain: [], credentialSlot: 'deepseek-api-key',
+  },
+};
+
+/**
+ * Why a model-calling action refuses under ordinary-production while no route is configured (Issue #811): it names both routes
+ * and where to set one, and says nothing was sent.
+ */
+export const MODEL_SERVICE_SETUP_REQUIRED_REASON =
+  '模型服务需设置：请先在 设置 › 模型服务 为 OpenCode Go（默认）或 DeepSeek 开放平台（官方）保存连接名称与凭据；这次没有发送任何内容。' as const;
+
+/** What 设置 › 模型服务 says about choosing the route (Issue #811). */
+export const MODEL_SERVICE_ROUTE_EFFECT_LABEL = '切换路线只影响之后开始的任务；已在进行的任务保持原有绑定。没有自动备用路线。' as const;
 
 export interface ModelRoleCardProjection {
   roleId: ModelRoleId;
@@ -2223,6 +2288,12 @@ export interface ModelRoleCardProjection {
 
 export interface ModelServiceSettingsProjection {
   roles: readonly ModelRoleCardProjection[];
+  /** The two routes and the providers not yet supported (Issue #811). */
+  routeChoice: {
+    routes: readonly ModelServiceRouteOptionProjection[];
+    unsupportedProviders: readonly ModelServiceUnsupportedProviderProjection[];
+    effectLabel: typeof MODEL_SERVICE_ROUTE_EFFECT_LABEL;
+  };
   protectedSecretStore: {
     backend: 'windows-credential-manager' | 'macos-keychain';
     label: 'Windows 凭据管理器' | 'macOS 钥匙串';
@@ -2231,6 +2302,12 @@ export interface ModelServiceSettingsProjection {
   launchPolicy: LaunchPolicyProjection;
   authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。';
 }
+
+/** What the renderer sends to save or choose a route (Issue #811); the value of `secret` never comes back. */
+export type ModelServiceCredentialInput =
+  | { connectionName: string; secret: string }
+  | { route: ModelServiceRouteId; connectionName: string; secret: string }
+  | { route: ModelServiceRouteId; select: true };
 
 export const J03_TASK_GOAL = '分析当前书稿的结构与叙事连贯性，列出供编辑复核的重点。' as const;
 
@@ -3300,7 +3377,7 @@ export interface MaterialPlanInputsProjection {
   selectedRange: BaselineAnalysisSelectedRange | null;
   predecessorRevision: { revisionId: string; ordinal: number; digest: string } | null;
   runBudgetCeiling: RunBudgetCeilingState;
-  outboundDataCategory: 'public-or-synthetic';
+  outboundDataCategory: 'public-or-synthetic' | 'unpublished-excerpts';
   expectedOutcome: string;
 }
 
@@ -3694,7 +3771,7 @@ export interface BaselineAnalysisProjection {
     capabilities: readonly [];
     remoteBinding: {
       providerId: RemoteProviderId;
-      modelId: 'deepseek-v4-pro' | 'deepseek-v4-flash' | 'deepseek-v4.1-flash';
+      modelId: 'deepseek-v4-pro' | 'deepseek-v4-flash' | 'deepseek-v4.1-flash' | 'deepseek-flash';
       adapterRevision: 1;
       configurationRevision: 1;
       approvedFallbackChain: readonly [];
@@ -3707,8 +3784,11 @@ export interface BaselineAnalysisProjection {
       | { kind: 'ai7-local-deterministic'; model: 'ai7-deterministic-fixture'; fixtureIdentity: string; fixtureSha256: string; fixtureLineage: ReadonlyArray<{ identity: string; sha256: string }> }
       /** The developer-live route replays no fixture: its identity is the endpoint it transmits to. */
       | { kind: 'opencode-go'; model: 'deepseek-v4-flash' | 'deepseek-v4.1-flash'; endpoint: string }
+      /** The editor's DeepSeek 开放平台（官方） route under ordinary-production (Issue #811). */
+      | { kind: 'deepseek-open-platform'; model: 'deepseek-flash'; endpoint: string }
       | { kind: 'none'; reason: 'j04-model-adapter-control-absent' };
-    outboundDataCategory: 'public-or-synthetic';
+    /** `unpublished-excerpts` under ordinary-production (Issue #811): the editor's own manuscript, never called public. */
+    outboundDataCategory: 'public-or-synthetic' | 'unpublished-excerpts';
     runBudgetCeiling: RunBudgetCeilingState;
   };
   executionPlan: null | {
@@ -3723,7 +3803,7 @@ export interface BaselineAnalysisProjection {
   planEnvelope: null | {
     digest: string;
     dispatchAllowed: boolean;
-    providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route' | 'remote-eligible-developer-live';
+    providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route' | 'remote-eligible-developer-live' | 'remote-eligible-ordinary-production';
     summary: string;
     promptContractDigest: string;
     behaviorCompositionDigest: string;
@@ -11967,13 +12047,23 @@ export interface ServiceOperationMap {
     input: Record<string, never>;
     output: ModelServiceStoredStateProjection;
   };
+  /**
+   * Save one route's connection (Issue #811): `credentialReference` is `null` for a route that has none yet, and the store
+   * mints a fresh one; an existing connection keeps its own. The first connection saved becomes the route in use.
+   */
   saveModelServiceConnection: {
     input: {
+      route: ModelServiceRouteId;
       connectionName: string;
-      credentialReference: string;
+      credentialReference: string | null;
       credentialOperationState: 'ready' | 'needs-attention';
     };
     output: ModelServiceConnectionProjection;
+  };
+  /** Choose the route new Tasks use (Issue #811); Runs under way keep the binding their plan froze. */
+  selectModelServiceRoute: {
+    input: { route: ModelServiceRouteId };
+    output: ModelServiceStoredStateProjection;
   };
   setModelServiceCredentialState: {
     input: {
@@ -12389,6 +12479,11 @@ export interface RendererApi {
   getProductDataLocation(): Promise<ProductDataLocationProjection>;
   revealProductDataLocation(): Promise<ProductDataLocationRevealProjection>;
   getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;
-  saveModelServiceCredential(input: { connectionName: string; secret: string }): Promise<ModelServiceSettingsProjection>;
-  removeModelServiceCredential(): Promise<ModelServiceSettingsProjection>;
+  /**
+   * Save a route's connection name and credential — the DeepSeek 开放平台（官方） route when `route` is absent, as Issue #712 has
+   * always saved it — or, given only `{ route, select: true }`, make that saved route the one new Tasks use (Issue #811).
+   */
+  saveModelServiceCredential(input: ModelServiceCredentialInput): Promise<ModelServiceSettingsProjection>;
+  /** Remove a route's credential; the DeepSeek 开放平台（官方） route's when no route is named. */
+  removeModelServiceCredential(input?: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection>;
 }

@@ -806,7 +806,7 @@ export function baselineAnalysisPlan(input: {
       ]),
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
-        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+        : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
       { key: 'provider-binding', label: '模型提供方绑定', value: `${remote.providerId} · ${remote.modelId} · adapter r${remote.adapterRevision} · config r${remote.configurationRevision} · 凭据 ${remote.credentialReadiness}` },
       { key: 'credential-reference', label: '凭据引用', value: remote.credentialReference },
       { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
@@ -1025,7 +1025,7 @@ export function initialEvaluationPlan(input: {
       { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
-        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+        : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
       { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
       { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
       { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },
@@ -1185,7 +1185,7 @@ export function readersReportPlan(input: {
       { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
-        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+        : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
       { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
       { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
       { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },
@@ -1472,7 +1472,7 @@ export function writingPlan(input: {
       { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
-        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+        : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
       { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
       { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
       { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },
@@ -1633,7 +1633,7 @@ export function evaluationRewritePlan(input: {
       { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
-        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+        : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
       { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
       { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
       { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },

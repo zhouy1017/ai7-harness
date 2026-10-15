@@ -114,7 +114,9 @@ import {
   type UnreadWalkCut,
 } from './unread-changes.js';
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
-import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION } from '../launch-policy.js';
+import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION } from '../launch-policy.js';
+import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
+import { MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
 import {
   deriveReusePlan,
@@ -645,6 +647,12 @@ export interface ExecutionPlanFacts {
   readonly sourceDigest: string;
   /** The bound deterministic fixture; `null` under developer-live, whose route replays no fixture. */
   readonly route: BaselineAnalysisRouteFacts | null;
+  /**
+   * The remote binding the plan froze under ordinary-production (Issue #811): the route, model, endpoint and credential slot
+   * the editor had configured when the plan froze, which the Run keeps whatever route is configured later. `null` under every
+   * other scope, whose route is the launch's own.
+   */
+  readonly productionBinding: ProductionPlanBinding | null;
   readonly artifactPin: { nativeCarrierSha256: string; sidecarRevision: 2; sidecarSha256: string };
   readonly promptContractDigest: string;
   readonly behaviorCompositionDigest: string;
@@ -656,6 +664,14 @@ export interface ExecutionPlanFacts {
   readonly update: ExecutionUpdateFacts | null;
   /** What the bound plan leaves out at the editor's word (Issue #419): the Run honours each. */
   readonly editorEdits: PlanEdits;
+}
+
+/** One frozen ordinary-production binding: one of the two allowed routes, exactly (Issue #811). */
+export interface ProductionPlanBinding {
+  readonly route: 'opencode-go' | 'deepseek-open-platform';
+  readonly model: 'deepseek-v4.1-flash' | 'deepseek-flash';
+  readonly endpoint: string;
+  readonly credentialSlot: 'opencode-go' | 'deepseek-api-key';
 }
 
 export interface ExecutionBindingRecord {
@@ -682,7 +698,8 @@ export interface ExecutionBindingRecord {
   /** The deterministic fixture pin; `null` on the live route, which replays no fixture. */
   readonly adapterPin: { fixtureIdentity: string; fixtureSha256: string } | null;
   readonly credentialSlot: { modelRole: 'Main Editorial Role'; slot: CredentialSlotId; credentialReference: string };
-  readonly outboundDataCategory: 'public-or-synthetic';
+  /** `unpublished-excerpts` under ordinary-production (Issue #811): the editor's own words, never called public. */
+  readonly outboundDataCategory: 'public-or-synthetic' | 'unpublished-excerpts';
   readonly policyPin: ResultSetPolicyPin;
   readonly runBudgetCeiling: RunBudgetCeilingState;
   readonly dispatchAttribution: 'Dispatch';
@@ -830,15 +847,42 @@ export function activeRunReason(state: BaselineAnalysisRunState | null, kind: st
 export interface LaunchBinding {
   /** Verified runtime policy for review admission; never persisted as a new record or IPC member. */
   readonly policy?: LaunchPolicyProjection;
-  readonly operationalScope: 'development-ci' | 'developer-live';
-  readonly live: {
-    readonly route: 'opencode-go';
-    readonly model: 'deepseek-v4.1-flash';
-    readonly endpoint: string;
-    readonly credentialSlot: 'opencode-go';
-    readonly credentialReference: string;
-    readonly runBudgetCeiling: DeveloperLiveCeiling;
-  } | null;
+  readonly operationalScope: 'development-ci' | 'developer-live' | 'ordinary-production';
+  /**
+   * Under `ordinary-production` (Issue #811) the editor's configured binding — `null` while none is configured, when every
+   * model-calling action says 模型服务需设置 — read when each plan freezes, so a route switch reaches the next Task only.
+   */
+  readonly live: DeveloperLiveLaunchBinding | OrdinaryProductionLaunchBinding | null;
+}
+
+/** The developer-live binding: the one Go route, its fixed development Credential Reference, and the launch's ceiling. */
+export interface DeveloperLiveLaunchBinding {
+  readonly scope?: undefined;
+  readonly route: 'opencode-go';
+  readonly model: 'deepseek-v4.1-flash';
+  readonly endpoint: string;
+  readonly credentialSlot: 'opencode-go';
+  readonly credentialReference: string;
+  readonly runBudgetCeiling: DeveloperLiveCeiling;
+}
+
+/**
+ * The editor's configured binding under ordinary-production (Issue #811): one of the two allowed routes, the Credential
+ * Reference its connection holds, and no launch ceiling — the Run's ceiling is the editor's own, set in the plan (S16a).
+ */
+export interface OrdinaryProductionLaunchBinding extends ProductionPlanBinding {
+  readonly scope: 'ordinary-production';
+  readonly credentialReference: string;
+  readonly runBudgetCeiling: 'unset';
+}
+
+/** The reading of an ordinary-production launch with no configured route: a stand-in for the binding in its sentences. */
+export const MODEL_SERVICE_SETUP_REQUIRED = 'ordinary-production-setup-required' as const;
+type LiveReading = LaunchBinding['live'] | typeof MODEL_SERVICE_SETUP_REQUIRED;
+
+/** Whether the launch, not the plan, sets the Run Budget Ceiling: developer-live only (ADR 0070). */
+function launchSetsCeilingOf(live: LaunchBinding['live']): boolean {
+  return live !== null && live.scope !== 'ordinary-production';
 }
 
 const DEVELOPMENT_CI_LAUNCH: LaunchBinding = { operationalScope: 'development-ci', live: null };
@@ -887,24 +931,32 @@ function ceilingReading(ceiling: DeveloperLiveCeiling, unitCount: number | null)
  * without standing up the Run each surface would otherwise need. `unitCount` is the frozen Coverage
  * Manifest count when one exists, so the per-frozen-unit default can state its computed total.
  */
-export function namedNonEffects(live: LaunchBinding['live'], unitCount: number | null = null): ReadonlyArray<string> {
+export function namedNonEffects(live: LiveReading, unitCount: number | null = null): ReadonlyArray<string> {
   return [
     '不修改稿件，不创建修订版或事实判定',
     '不创建学习资格、策略激活、Enrollment、Apply 或 Effect',
     '只读取当前图书的任务输入修订版，不读取其他图书',
     live === null
       ? 'development-ci · Provider Processing v1：0 次实时传输，远程绑定被拒绝'
-      : `developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION}：实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}），远程绑定 ${live.route} · ${live.model} 已获准`,
+      : live === MODEL_SERVICE_SETUP_REQUIRED
+        ? `ordinary-production · Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION}：模型服务需设置，尚无可用路线，0 次实时传输`
+        : live.scope === 'ordinary-production'
+          ? `ordinary-production · Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION}：经你配置的模型服务 ${live.route} · ${live.model} 实时传输，每个单元实际调用；任务运行预算上限由计划设定`
+          : `developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION}：实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}），远程绑定 ${live.route} · ${live.model} 已获准`,
     '凭据值不进入任务账本、协议帧、日志、诊断或 Session 内容',
   ];
 }
 
 /** Why a Run that cannot dispatch was blocked; only the first reason states the launch's own facts. */
-export function blockedReasons(live: LaunchBinding['live'], unitCount: number | null = null): ReadonlyArray<string> {
+export function blockedReasons(live: LiveReading, unitCount: number | null = null): ReadonlyArray<string> {
   return [
     live === null
       ? '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输；远程 DeepSeek 绑定被拒绝。'
-      : `当前可信启动范围为 developer-live，Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 允许的实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}）；远程绑定 ${live.route} · ${live.model} 已获准。`,
+      : live === MODEL_SERVICE_SETUP_REQUIRED
+        ? MODEL_SERVICE_SETUP_REQUIRED_REASON
+        : live.scope === 'ordinary-production'
+          ? `当前可信启动范围为 ordinary-production，Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION} 允许经你配置的模型服务 ${live.route} · ${live.model} 实时传输。`
+          : `当前可信启动范围为 developer-live，Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 允许的实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}）；远程绑定 ${live.route} · ${live.model} 已获准。`,
     '未提供 J-04 专用的本地确定性模型适配器控制，因此没有可执行的本地路由。',
     '运行授权已记录；派发前阻止，未创建 Session、未构造 Provider payload、未访问网络。',
   ];
@@ -915,7 +967,11 @@ export function blockedReasons(live: LaunchBinding['live'], unitCount: number | 
  * under. `firstTaskLabel` is the label of the kind's own first Task, which the sentence compares an
  * update to; it defaults to the baseline kind's, so every existing reading keeps its exact text.
  */
-export function providerConsequence(live: LaunchBinding['live'], unitCount: number | null = null, firstTaskLabel = '首次基线分析'): string {
+export function providerConsequence(live: LiveReading, unitCount: number | null = null, firstTaskLabel = '首次基线分析'): string {
+  if (live === MODEL_SERVICE_SETUP_REQUIRED) return MODEL_SERVICE_SETUP_REQUIRED_REASON;
+  if (live !== null && live.scope === 'ordinary-production') {
+    return `与${firstTaskLabel}相同：经你配置的模型服务 ${live.route} · ${live.model} 在 ordinary-production · Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION} 下执行；外发数据类别 unpublished-excerpts；任务运行预算上限由计划设定，未设置则不设上限；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
+  }
   return live === null
     ? `与${firstTaskLabel}相同：远程 DeepSeek 绑定被 development-ci · Provider Processing v1 拒绝（0 次实时传输），只有 J-04 控制绑定的 AI7 本地确定性模型适配器可执行；外发数据类别 public-or-synthetic；未设置任务预算上限；只有重算单元形成模型请求并计入用量，复用单元不形成任何模型负载。`
     : `与${firstTaskLabel}相同：远程绑定 ${live.route} · ${live.model} 在 developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 下可执行，实时传输受运行边界约束；外发数据类别 public-or-synthetic；任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
@@ -1000,16 +1056,26 @@ export class BaselineAnalysisStore {
    * silently downgraded to the provider-free plan.
    */
   bindLaunch(launch: LaunchBinding): void {
-    requireAnalysis((launch.operationalScope === 'developer-live') === (launch.live !== null),
-      'ANALYSIS_LAUNCH_BINDING_INVALID', '可信区间与开发者实时绑定不一致。');
-    const ceiling = launch.live?.runBudgetCeiling ?? null;
-    requireAnalysis(launch.live === null ||
-      ((ceiling!.kind === 'tokens'
-        ? Number.isSafeInteger(ceiling!.maxTotalTokens) && ceiling!.maxTotalTokens > 0
-        : Number.isSafeInteger(ceiling!.tokensPerFrozenUnit) && ceiling!.tokensPerFrozenUnit > 0) &&
-        UUID_PATTERN.test(launch.live.credentialReference)),
+    // Under ordinary-production (Issue #811) the binding may be absent — no route configured yet — and is the editor's, read
+    // again whenever a plan freezes; under every other scope it is the launch's, present exactly under developer-live.
+    const live = launch.live;
+    requireAnalysis(launch.operationalScope === 'ordinary-production'
+      ? live === null || live.scope === 'ordinary-production'
+      : (launch.operationalScope === 'developer-live') === (live !== null) && (live === null || live.scope !== 'ordinary-production'),
+    'ANALYSIS_LAUNCH_BINDING_INVALID', '可信区间与开发者实时绑定不一致。');
+    const ceiling = live === null || live.scope === 'ordinary-production' ? null : live.runBudgetCeiling;
+    requireAnalysis(live === null ||
+      ((ceiling === null || (ceiling.kind === 'tokens'
+        ? Number.isSafeInteger(ceiling.maxTotalTokens) && ceiling.maxTotalTokens > 0
+        : Number.isSafeInteger(ceiling.tokensPerFrozenUnit) && ceiling.tokensPerFrozenUnit > 0)) &&
+        UUID_PATTERN.test(live.credentialReference)),
     'ANALYSIS_LAUNCH_BINDING_INVALID', '开发者实时绑定缺少必需的运行预算上限或凭据引用。');
     this.#launch = launch;
+  }
+
+  /** The launch's binding as its sentences read it: under ordinary-production without a route, 模型服务需设置. */
+  #liveReading(): LiveReading {
+    return this.#launch.operationalScope === 'ordinary-production' && this.#launch.live === null ? MODEL_SERVICE_SETUP_REQUIRED : this.#launch.live;
   }
 
   // ---- inspection -------------------------------------------------------------------------------
@@ -1234,7 +1300,7 @@ export class BaselineAnalysisStore {
         canAuthorize: authorization === undefined && (update === null || update.predecessorCurrent) && planRevision === null && planDerives,
         canReconfirmPlan,
       },
-      namedNonEffects: namedNonEffects(this.#launch.live, manifest.units.length),
+      namedNonEffects: namedNonEffects(this.#liveReading(), manifest.units.length),
     });
   }
 
@@ -1554,7 +1620,7 @@ export class BaselineAnalysisStore {
       history: null,
       inspectedRevision: null,
       actions: { canPrepare: true, canAuthorize: false, canReconfirmPlan: false },
-      namedNonEffects: namedNonEffects(this.#launch.live),
+      namedNonEffects: namedNonEffects(this.#liveReading()),
     };
   }
 
@@ -1672,7 +1738,8 @@ export class BaselineAnalysisStore {
       `SELECT provider_id, model_id, adapter_revision, configuration_revision, credential_reference
        FROM model_service_connections WHERE connection_id = 'main-editorial-deepseek-v4-pro'`,
     ).get() as SqlRow | undefined;
-    requireAnalysis(connection !== undefined, 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的凭据引用元数据。');
+    // A live binding names its own route and reference; ordinary production's may be the Go row alone (Issue #811).
+    requireAnalysis(connection !== undefined || this.#launch.live !== null, 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的凭据引用元数据。');
     // Drift is a comparison of like with like: the re-derivation must name the binding this launch
     // binds, exactly as the freeze did. Under developer-live that is the live route, its development
     // Credential Reference, and the launch form's ceiling — not the production connection row, whose
@@ -1690,11 +1757,11 @@ export class BaselineAnalysisStore {
     return {
       providerBinding: live === null
         ? {
-            providerId: asString(connection.provider_id),
-            modelId: asString(connection.model_id),
-            adapterRevision: asNumber(connection.adapter_revision),
-            configurationRevision: asNumber(connection.configuration_revision),
-            credentialReference: asString(connection.credential_reference),
+            providerId: asString(connection!.provider_id),
+            modelId: asString(connection!.model_id),
+            adapterRevision: asNumber(connection!.adapter_revision),
+            configurationRevision: asNumber(connection!.configuration_revision),
+            credentialReference: asString(connection!.credential_reference),
           }
         : {
             providerId: live.route,
@@ -1712,8 +1779,8 @@ export class BaselineAnalysisStore {
       },
       selectedRange: this.#definition.mode(mode).rangeBound ? selectedRange : null,
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
-      runBudgetCeiling: live === null ? editorCeiling : resolveDeveloperLiveCeiling(live.runBudgetCeiling, unitCount),
-      outboundDataCategory: 'public-or-synthetic',
+      runBudgetCeiling: live === null || live.scope === 'ordinary-production' ? editorCeiling : resolveDeveloperLiveCeiling(live.runBudgetCeiling, unitCount),
+      outboundDataCategory: live?.scope === 'ordinary-production' ? 'unpublished-excerpts' : 'public-or-synthetic',
       expectedOutcome: this.#definition.expectedOutcome,
     };
   }
@@ -2060,7 +2127,7 @@ export class BaselineAnalysisStore {
       'ANALYSIS_PLAN_EDIT_STALE', '计划已经变了；请重新查看计划后再修改。');
     const next = canonicalPlanEdits(input);
     requireAnalysis(next !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '这项修改不在这份计划可以改的范围内。');
-    requireAnalysis(this.#launch.live === null || next.runBudgetCeiling === undefined, 'ANALYSIS_PLAN_EDIT_INVALID', PLAN_CEILING_LAUNCH_REASON);
+    requireAnalysis(!launchSetsCeilingOf(this.#launch.live) || next.runBudgetCeiling === undefined, 'ANALYSIS_PLAN_EDIT_INVALID', PLAN_CEILING_LAUNCH_REASON);
     const current = this.#planVersionFacts(intent.taskIntentId).at(-1);
     requireAnalysis(current !== undefined && current.ordinal === existing.planVersion.ordinal, 'ANALYSIS_RECORD_INVALID', '任务计划缺少计划版本。');
     const prior = this.#planEditsOf(intent.taskIntentId, current.ordinal);
@@ -2084,7 +2151,7 @@ export class BaselineAnalysisStore {
     const priorProvider = this.#planRecords(intent.taskIntentId, intent.mode, current.ordinal)['provider-resolution-plan'] as
       { remoteBinding: { credentialReadiness: ModelCredentialOperationState } };
     // The ceiling is a material input: the version this edit yields proposes the editor's (Issue #51, S16a).
-    const proposed: MaterialPlanInputsProjection = { ...stored, runBudgetCeiling: this.#launch.live === null ? planEditCeiling(next) : stored.runBudgetCeiling };
+    const proposed: MaterialPlanInputsProjection = { ...stored, runBudgetCeiling: !launchSetsCeilingOf(this.#launch.live) ? planEditCeiling(next) : stored.runBudgetCeiling };
     const ceilingMoved = canonicalJson(stored.runBudgetCeiling) !== canonicalJson(proposed.runBudgetCeiling);
     const instant = new Date().toISOString();
     transact(this.#db, () => {
@@ -2323,7 +2390,7 @@ export class BaselineAnalysisStore {
       recordedAt: asString(runRecord.recorded_at),
       transitions,
       adaptations,
-      blockedReasons: current.state === 'blocked-before-dispatch' ? recordedReasons ?? blockedReasons(this.#launch.live) : null,
+      blockedReasons: current.state === 'blocked-before-dispatch' ? recordedReasons ?? blockedReasons(this.#liveReading()) : null,
       blockedBy,
       progress: live === null ? null : { ...live, lastTransitionAt: current.recordedAt },
       attempt,
@@ -3039,7 +3106,7 @@ export class BaselineAnalysisStore {
       blockedByActiveRun,
       blockedReason,
       actions,
-      providerConsequence: providerConsequence(this.#launch.live, preview.units.length, this.#definition.mode(this.#definition.initialMode).label),
+      providerConsequence: providerConsequence(this.#liveReading(), preview.units.length, this.#definition.mode(this.#definition.initialMode).label),
       successorBehavior: SUCCESSOR_BEHAVIOR,
       // Keyed by the kind's own update modes, which is the one thing the two controls shapes differ in.
     } as BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection;
@@ -3061,11 +3128,14 @@ export class BaselineAnalysisStore {
       return { done: true, workId: null, completed: 0, total: 0, projection: null };
     }
     if (input.phase === 'advance') return this.#advance(input.workId);
+    // Ordinary production without a configured route refuses before anything is prepared, naming both routes (Issue #811).
+    requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
     if (this.#launch.live !== null) {
+      const scope = this.#launch.operationalScope;
       requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || plannedRunAdmission(input.launchPolicy, this.#definition, this.#launch.live) !== null,
-        'ANALYSIS_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
+        'ANALYSIS_KIND_NOT_ADMITTED', `${scope} 当前只允许基线稿件分析；该任务种类尚未获准实时执行。`);
       requireAnalysis(input.background == null,
-        'ANALYSIS_ORIGIN_NOT_ADMITTED', 'developer-live 当前只允许直接发起的分析任务。');
+        'ANALYSIS_ORIGIN_NOT_ADMITTED', `${scope} 当前只允许直接发起的分析任务。`);
     }
     const update = this.#resolveSelectedBlocks(input.bookId, input.update);
     const mode: AnalysisTaskMode = update === null ? this.#definition.initialMode : update.mode;
@@ -3366,7 +3436,8 @@ export class BaselineAnalysisStore {
       revisionLabel: checkpoint.revisionLabel,
       revisionDigest: checkpoint.revisionDigest,
       sourceVersionId: facts.sourceVersionId,
-      sourceDigest: SAMPLE1_SOURCE_DIGEST,
+      // Exact sample1 outside ordinary production, which #binding enforced; the editor's own Book's source under it (Issue #811).
+      sourceDigest: facts.sourceDigest,
     };
     const artifactPin = {
       identity: '@ai7/editorial-workspace-profile',
@@ -3403,9 +3474,10 @@ export class BaselineAnalysisStore {
     // deterministic route, or the selected developer-live binding. Both are frozen before authorization, never chosen
     // at dispatch, so an authorized Run can never transmit somewhere its plan did not name.
     const live = this.#launch.live;
+    const production = live !== null && live.scope === 'ordinary-production' ? live : null;
     // The editor's ceiling is the plan's own outside developer-live (Issue #51, S16a); under it the launch sets the
     // ceiling, so a redo that copies a ceiling the editor once set keeps the rest of the edit and not the ceiling.
-    const edits = live === null ? input.edits : withoutCeiling(input.edits);
+    const edits = !launchSetsCeilingOf(live) ? input.edits : withoutCeiling(input.edits);
     const promptContractDigest = this.#definition.promptContractDigest;
     const composition = live === null
       ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest)
@@ -3434,7 +3506,9 @@ export class BaselineAnalysisStore {
             credentialSlot: live.credentialSlot,
             credentialReference: live.credentialReference,
             credentialReadiness: input.credentialReadiness ?? facts.credentialOperationState,
-            providerProcessing: { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+            providerProcessing: production !== null
+              ? { operationalScope: 'ordinary-production', version: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' }
+              : { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
           },
       executionRoute: live !== null
         ? { kind: live.route, model: live.model, endpoint: live.endpoint }
@@ -3447,11 +3521,13 @@ export class BaselineAnalysisStore {
               fixtureSha256: this.#route.fixtureSha256,
               fixtureLineage: this.#route.fixtureLineage,
             },
-      outboundDataCategory: 'public-or-synthetic',
-      runBudgetCeiling: live === null ? planEditCeiling(edits) : resolveDeveloperLiveCeiling(live.runBudgetCeiling, manifest.units.length),
+      outboundDataCategory: production !== null ? 'unpublished-excerpts' : 'public-or-synthetic',
+      runBudgetCeiling: live === null || live.scope === 'ordinary-production' ? planEditCeiling(edits) : resolveDeveloperLiveCeiling(live.runBudgetCeiling, manifest.units.length),
     };
     const dispatchAllowed = live !== null || this.#route !== null;
-    const stopCondition = live !== null
+    const stopCondition = production !== null
+      ? `Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION} binds the configured ${production.route} under ordinary-production; the Coverage Manifest unit count and the plan's own Run Budget Ceiling, when set, bound every transmission`
+      : live !== null
       ? `Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} binds opencode-go under developer-live; the Run Budget Ceiling and the Coverage Manifest unit count bound every transmission`
       : dispatchAllowed
         ? 'Provider Processing v1 denies the remote route; execution binds only ai7-local-deterministic'
@@ -3491,11 +3567,15 @@ export class BaselineAnalysisStore {
     };
     if (reusePlan !== null) records['reuse-plan'] = reusePlanRecord(reusePlan);
     const envelopeBase = {
-      providerStatus: live !== null
+      providerStatus: production !== null
+        ? 'remote-eligible-ordinary-production'
+        : live !== null
         ? 'remote-eligible-developer-live'
         : dispatchAllowed ? 'remote-denied-local-deterministic' : 'remote-denied-no-route',
       dispatchAllowed,
-      summary: live !== null
+      summary: production !== null
+        ? `计划已冻结；ordinary-production · Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION} 绑定你配置的 ${production.route} · ${production.model}，每个单元实际调用`
+        : live !== null
         ? `计划已冻结；developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 允许绑定 ${live.route} · ${live.model}，实时传输受运行边界约束`
         : dispatchAllowed
           ? '计划已冻结；远程绑定被 Provider Processing v1 拒绝，执行绑定至 AI7 本地确定性模型适配器'
@@ -3560,14 +3640,18 @@ export class BaselineAnalysisStore {
     origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
+    requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
     if (this.#launch.live !== null) {
+      const scope = this.#launch.operationalScope;
       const admitted = this.#definition.kind === BASELINE_ANALYSIS_KIND ? null : plannedRunAdmission(this.#launch.policy, this.#definition, this.#launch.live);
       requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || admitted !== null,
-        'ANALYSIS_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
+        'ANALYSIS_KIND_NOT_ADMITTED', `${scope} 当前只允许基线稿件分析；该任务种类尚未获准实时执行。`);
       // Every admitted kind starts by a direct authorization; writing's quick start also starts under its default execution
-      // rule (#810). Background enrollment stays refused live.
-      requireAnalysis(origin.kind === 'standard-direct' || (origin.kind === 'default-execution-rule' && admitted !== null && this.#definition.kind === WRITING_KIND),
-        'ANALYSIS_ORIGIN_NOT_ADMITTED', 'developer-live 当前只允许直接授权的基线稿件分析。');
+      // rule (#810), under developer-live only: ordinary production admits no default-rule origin yet (Issue #811, wave 4).
+      // Background enrollment stays refused live.
+      requireAnalysis(origin.kind === 'standard-direct' || (origin.kind === 'default-execution-rule' && admitted !== null &&
+          this.#definition.kind === WRITING_KIND && scope === 'developer-live'),
+        'ANALYSIS_ORIGIN_NOT_ADMITTED', `${scope} 当前只允许直接授权的基线稿件分析。`);
     }
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) &&
       (origin.kind === 'standard-direct' || (start === 'now' && UUID_PATTERN.test(origin.kind === 'default-execution-rule' ? origin.ruleVersionId : origin.enrollmentVersionId))),
@@ -3622,7 +3706,7 @@ export class BaselineAnalysisStore {
           ? { detail: '快速开始按默认执行规则记录了运行授权。', ruleVersionId: origin.ruleVersionId }
           : { detail: BACKGROUND_AUTHORIZED_DETAIL, enrollmentVersionId: origin.enrollmentVersionId }, instant);
       if (!dispatchAllowed) {
-        const reasons = blockedReasons(this.#launch.live);
+        const reasons = blockedReasons(this.#liveReading());
         this.#insertRunState(runRecordId, 2, 'blocked-before-dispatch', { detail: reasons.join(' '), reasons }, instant);
       } else if (start === 'when-online') {
         this.#insertRunState(runRecordId, 2, 'awaiting-connectivity', { detail: CONNECTIVITY_WAIT_DETAIL }, instant);
@@ -4351,7 +4435,19 @@ export class BaselineAnalysisStore {
     // The route the plan froze must still be the route this launch binds. A developer-live plan
     // cannot execute under a provider-free launch, and a deterministic plan cannot execute live.
     const live = this.#launch.live;
-    if (live !== null) {
+    let productionBinding: ProductionPlanBinding | null = null;
+    if (this.#launch.operationalScope === 'ordinary-production') {
+      // Ordinary production (Issue #811): the Run keeps the binding its plan froze — one of the two allowed routes, exactly, on
+      // a production connection's own Credential Reference — whatever route the editor has configured since.
+      const route = providerPlan.executionRoute;
+      const allowed = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => route.kind === binding.route && 'endpoint' in route &&
+        route.model === binding.model && route.endpoint === binding.endpoint && providerPlan.remoteBinding.credentialSlot === binding.credentialSlot);
+      const reference = providerPlan.remoteBinding.credentialReference;
+      requireAnalysis(allowed !== undefined && providerPlan.remoteBinding.providerProcessing.operationalScope === 'ordinary-production' &&
+        UUID_PATTERN.test(reference) && !DEVELOPMENT_CREDENTIAL_REFERENCES.has(reference.toLowerCase()),
+      'ANALYSIS_ROUTE_STALE', '冻结计划不是正式使用下可执行的模型服务路线。');
+      productionBinding = { route: allowed.route, model: allowed.model, endpoint: allowed.endpoint, credentialSlot: allowed.credentialSlot };
+    } else if (live !== null && live.scope !== 'ordinary-production') {
       requireAnalysis(providerPlan.executionRoute.kind === live.route && providerPlan.executionRoute.model === live.model &&
         providerPlan.executionRoute.endpoint === live.endpoint, 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');
       requireAnalysis(providerPlan.remoteBinding.credentialReference === live.credentialReference &&
@@ -4443,6 +4539,7 @@ export class BaselineAnalysisStore {
       sourceDigest: (plan['manuscript-pin'] as { sourceDigest: string }).sourceDigest,
       // The deterministic fixture facts; `null` on the live route, which replays no fixture.
       route: this.#route,
+      productionBinding,
       artifactPin: { nativeCarrierSha256: artifactPin.nativeCarrierSha256, sidecarRevision: 2, sidecarSha256: artifactPin.sidecarSha256 },
       promptContractDigest: asString(envelope.promptContractDigest),
       behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
@@ -4622,6 +4719,8 @@ export class BaselineAnalysisStore {
   persistRevision(input: RevisionPersistInput): { resultSetId: string; revisionId: string; ordinal: number; digest: string } {
     const { facts } = input;
     const live = this.#launch.live;
+    // Under ordinary-production the revision names the binding the Run's plan froze (Issue #811), not the one configured now.
+    const produced = facts.productionBinding;
     const createdAt = new Date().toISOString();
     return transact(this.#db, () => {
       const kind = this.#definition.kind;
@@ -4682,7 +4781,9 @@ export class BaselineAnalysisStore {
         reducerDigest: this.#definition.reducerDigest,
         // The revision pins the route that produced it: the fixture on the deterministic route, the
         // live route's own identity when the Run actually transmitted.
-        adapterPin: live === null
+        adapterPin: produced !== null
+          ? { route: produced.route, model: produced.model, fixtureIdentity: null, fixtureSha256: null }
+          : live === null
           ? { route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL, fixtureIdentity: facts.route!.fixtureIdentity, fixtureSha256: facts.route!.fixtureSha256 }
           : { route: live.route, model: live.model, fixtureIdentity: null, fixtureSha256: null },
         bindingPin: {
@@ -4692,7 +4793,9 @@ export class BaselineAnalysisStore {
           behaviorCompositionDigest: facts.behaviorCompositionDigest,
           promptContractDigest: facts.promptContractDigest,
         },
-        policyPin: live === null
+        policyPin: produced !== null
+          ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' }
+          : live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 }
           : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' },
         provenance: {
@@ -4787,10 +4890,18 @@ export class BaselineAnalysisStore {
     manuscriptId: string;
     branchId: string;
     sourceVersionId: string;
+    sourceDigest: string;
     credentialReference: string;
     credentialOperationState: ModelCredentialOperationState;
   } {
     requireAnalysis(UUID_PATTERN.test(bookId), 'ANALYSIS_BOOK_INVALID', '任务所属图书无效。');
+    // Under ordinary production (Issue #811) the Book is the editor's own manuscript, of any source, and the connection whose
+    // credential a plan names is the configured route's; under every other scope exact sample1 and the official row, as before.
+    const live = this.#launch.live;
+    const production = this.#launch.operationalScope === 'ordinary-production';
+    const connectionId = live !== null && live.scope === 'ordinary-production' && live.route === 'opencode-go'
+      ? 'main-editorial-opencode-go'
+      : 'main-editorial-deepseek-v4-pro';
     const row = this.#db.prepare(
       `SELECT m.manuscript_id, mb.branch_id, bws.base_revision_id, bws.journal_sequence, bws.working_digest,
               mr.source_version_id, sv.source_digest,
@@ -4805,12 +4916,14 @@ export class BaselineAnalysisStore {
          AND pin.native_artifact_id = '@ai7/editorial-workspace-profile'
          AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
        LEFT JOIN native_artifact_installations installation ON installation.artifact_id = pin.native_artifact_id
-       LEFT JOIN model_service_connections connection ON connection.connection_id = 'main-editorial-deepseek-v4-pro'
+       LEFT JOIN model_service_connections connection ON connection.connection_id = ?
        WHERE m.book_id = ? AND m.role = 'primary'
        ORDER BY pin.sidecar_revision DESC`,
-    ).get(...(checkpoint === undefined ? [bookId] : [checkpoint.revisionId, bookId])) as SqlRow | undefined;
-    requireAnalysis(row !== undefined && row.source_digest === SAMPLE1_SOURCE_DIGEST,
-      'ANALYSIS_LINEAGE_UNAVAILABLE', '当前图书不是精确 sample1 主稿件血缘。');
+    ).get(...(checkpoint === undefined ? [connectionId, bookId] : [checkpoint.revisionId, connectionId, bookId])) as SqlRow | undefined;
+    requireAnalysis(row !== undefined && (production
+      ? typeof row.source_digest === 'string' && DIGEST_PATTERN.test(row.source_digest)
+      : row.source_digest === SAMPLE1_SOURCE_DIGEST),
+    'ANALYSIS_LINEAGE_UNAVAILABLE', '当前图书不是精确 sample1 主稿件血缘。');
     requireAnalysis(row.native_carrier_sha256 === NATIVE_CARRIER_DIGEST && row.sidecar_revision === 2 && row.sidecar_sha256 === SIDECAR_DIGEST,
       'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案 Revision 2。');
     requireAnalysis(typeof row.credential_operation_state === 'string' && typeof row.credential_reference === 'string',
@@ -4831,6 +4944,7 @@ export class BaselineAnalysisStore {
       manuscriptId: asString(row.manuscript_id),
       branchId: asString(row.branch_id),
       sourceVersionId: asString(row.source_version_id),
+      sourceDigest: asString(row.source_digest),
       credentialReference: asString(row.credential_reference),
       credentialOperationState: state,
     };
@@ -4845,6 +4959,14 @@ export class BaselineAnalysisStore {
     requireAnalysis(policy.integrityState === 'verified' && policy.denialReason === null &&
       policy.operationalScope === this.#launch.operationalScope && policy.activePolicySetVersion === ACTIVE_SET_VERSION,
     'ANALYSIS_POLICY_UNAVAILABLE', '可信启动策略与已绑定的可信区间不一致。');
+    if (this.#launch.operationalScope === 'ordinary-production') {
+      requireAnalysis(this.#launch.live !== null, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
+      requireAnalysis(policy.providerProcessing.version === ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION && policy.providerProcessing.decision === 'eligible-only' &&
+        policy.providerProcessing.authorizedLiveTransmissionCount === 'bounded-by-run' && policy.providerProcessing.liveTransmissionAllowed === true &&
+        policy.providerProcessing.bindingState === 'configured',
+      'ANALYSIS_POLICY_UNAVAILABLE', `无法建立可信的 ordinary-production Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION} 记录。`);
+      return;
+    }
     if (this.#launch.live !== null) {
       requireAnalysis(policy.providerProcessing.version === DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION && policy.providerProcessing.decision === 'eligible-only' &&
         policy.providerProcessing.authorizedLiveTransmissionCount === 'bounded-by-run' && policy.providerProcessing.liveTransmissionAllowed === true,

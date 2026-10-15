@@ -3,9 +3,10 @@ import { sha256Hex } from '../analysis/canonical.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../analysis/execution.js';
 import { admittedFastRoleRoute, type AdmittedFastRoleRoute } from '../dialogue/dialogue-route.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
-import type { DeveloperLiveRuntime } from '../launch-policy.js';
+import { isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
 import type { LaunchPolicyProjection } from '../../shared/protocol.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
+import { MODEL_SERVICE_SETUP_REQUIRED_REASON, type DeveloperLiveProviderProcessingVersion, type OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
@@ -79,9 +80,13 @@ export const FAST_ROLE_KINDS: Readonly<Record<FastRoleKindId, FastRoleKindDefini
   },
 };
 
-/** What a developer-live launch gives the fast-role kinds: its runtime, the broker, and each kind's admitted route, if any. */
+/**
+ * What a live launch gives the fast-role kinds: its runtime, the broker, and each kind's admitted route, if any. Under
+ * ordinary-production (Issue #811) the routes and the Credential Reference are the editor's configured binding, read at each
+ * request, so a route switch reaches the next request.
+ */
 export interface FastRoleLiveRoutes {
-  readonly runtime: DeveloperLiveRuntime;
+  readonly runtime: LiveRuntime;
   readonly broker: CredentialBroker;
   readonly routes: Readonly<Record<FastRoleKindId, AdmittedFastRoleRoute | null>>;
   /** The Credential Reference of the development slot, as the provider configuration names it. */
@@ -99,10 +104,36 @@ export function fastRoleLiveRoutes(runtime: DeveloperLiveRuntime, policy: Launch
   };
 }
 
+/**
+ * The fast-role routes of an ordinary-production launch (Issue #811): each kind's route as the current policy admits it on the
+ * editor's configured binding, and that connection's own Credential Reference; a broker that never reads a development one.
+ */
+export function productionFastRoleRoutes(
+  runtime: OrdinaryProductionRuntime,
+  policy: () => LaunchPolicyProjection,
+  credentialReference: () => string | null,
+  secretResolver: SecretResolver,
+): FastRoleLiveRoutes {
+  const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => {
+    const admitted = admittedFastRoleRoute(policy(), kind.kindId, kind.category);
+    return admitted !== null && credentialReference() !== null ? admitted : null;
+  };
+  return {
+    runtime,
+    broker: new CredentialBroker(secretResolver, { developmentReferences: 'refused' }),
+    get routes() {
+      return { [EDITORIAL_POLISH_KIND]: route(FAST_ROLE_KINDS[EDITORIAL_POLISH_KIND]), [CONFLICT_REGENERATE_KIND]: route(FAST_ROLE_KINDS[CONFLICT_REGENERATE_KIND]) };
+    },
+    get credentialReference() {
+      return credentialReference() ?? '';
+    },
+  };
+}
+
 export interface FastRoleExecutionDeps {
   /** The J-04 adapter's fixture when the launch binds one; `null` binds no local route. */
   readonly fixture: ResolvedModelFixture | null;
-  /** The developer-live launch's routes; `null` under every other scope. */
+  /** The live launch's routes — developer-live's, or ordinary production's (Issue #811); `null` under development-ci. */
   readonly live: FastRoleLiveRoutes | null;
 }
 
@@ -113,8 +144,12 @@ export interface FastRoleExecutionDeps {
 export function fastRoleRouteRefusal(deps: FastRoleExecutionDeps, kindId: FastRoleKindId, sourceDigest?: string | null): string | null {
   const kind = FAST_ROLE_KINDS[kindId];
   if (deps.live !== null) {
-    if (deps.live.routes[kindId] === null) return `当前运行范围未允许${kind.label}：选定的模型处理规则没有准许它使用实时模型。`;
-    if (sourceDigest !== undefined && (sourceDigest === null || !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(sourceDigest))) {
+    const production = isOrdinaryProductionRuntime(deps.live.runtime);
+    if (deps.live.routes[kindId] === null) {
+      return production ? MODEL_SERVICE_SETUP_REQUIRED_REASON : `当前运行范围未允许${kind.label}：选定的模型处理规则没有准许它使用实时模型。`;
+    }
+    // Ordinary production sends the editor's own manuscript (Issue #811); only developer-live is held to the Public SampleBooks.
+    if (!production && sourceDigest !== undefined && (sourceDigest === null || !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(sourceDigest))) {
       return `当前运行范围未允许${kind.label}：这本书不在开发者实时可发送的公开样书范围内。`;
     }
     return null;
@@ -129,8 +164,8 @@ export interface FastRoleBindingFacts {
   readonly promptContractDigest: string;
   readonly route: string;
   readonly model: string;
-  readonly operationalScope: 'development-ci' | 'developer-live';
-  /** The selected policy's rule that admitted it, under developer-live; `null` on the local route. */
+  readonly operationalScope: 'development-ci' | 'developer-live' | 'ordinary-production';
+  /** The selected policy's rule that admitted it, under a live scope; `null` on the local route. */
   readonly policyRuleId: string | null;
   /** The fixture that answered it, on the local route; `null` under developer-live. */
   readonly fixtureSha256: string | null;
@@ -198,6 +233,8 @@ export class FastRoleExecutionOwner {
   async #run(kind: FastRoleKindDefinition, message: string, step: string): Promise<FastRoleAnswer> {
     const live = this.#deps.live;
     const route = live === null ? null : live.routes[kind.kindId]!;
+    // Read once: under ordinary-production the configured reference may change while this request is in flight (Issue #811).
+    const credentialReference = live === null ? '' : live.credentialReference;
     const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
     const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
     const { promptContractDigest, systemPrompt } = kind;
@@ -205,7 +242,7 @@ export class FastRoleExecutionOwner {
     const composition = describeComposition(executionRoute, model, promptContractDigest);
     const bindingDigest = sha256Hex(`${kind.kindId}\u0000${sessionId}\u0000${composition.digest}`);
     const slotBinding: CredentialSlotBinding | null = live === null || route === null ? null : {
-      bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference: live.credentialReference,
+      bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference,
     };
     const bindingFacts: EgressBindingFacts = {
       bindingDigest,
@@ -216,12 +253,15 @@ export class FastRoleExecutionOwner {
       outboundDataCategory: kind.category,
       policy: route === null
         ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
-        : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+        : route.operationalScope === 'ordinary-production'
+          ? { operationalScope: 'ordinary-production', providerProcessingVersion: route.providerProcessingVersion as OrdinaryProductionProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
+          : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion as DeveloperLiveProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
       // The one message this request may send.
       admittedUserMessages: new Set([message]),
       ...(route === null ? {} : { ruleOutboundCategories: route.outboundDataCategories }),
     };
-    const validation = live?.runtime.launch.validation ?? null;
+    // Ordinary production has no development validation, so no request ever reaches the developer cache or ledger (Issue #811).
+    const validation = live === null || isOrdinaryProductionRuntime(live.runtime) ? null : live.runtime.launch.validation;
     let current: string | null = null;
     let outcome: HarnessTurnOutcome | null = null;
     let failure: { code: string; message: string } | null = null;
@@ -229,7 +269,7 @@ export class FastRoleExecutionOwner {
     let ledgerRefusal: { code: string; message: string } | null = null;
     try {
       let cache: ProviderResultCache | null = null;
-      if (live !== null && validation !== null) {
+      if (live !== null && validation !== null && !isOrdinaryProductionRuntime(live.runtime)) {
         cache = new ProviderResultCache(live.runtime.launch.providerCacheRoot);
         await cache.open();
       }
@@ -292,7 +332,9 @@ export class FastRoleExecutionOwner {
       try {
         // The credential is checked for presence only; its value is released to the final adapter alone, inside the send.
         if (live !== null && slotBinding !== null && await live.broker.checkReadiness(slotBinding) !== 'present') {
-          throw new FastRoleError('FAST_ROLE_CREDENTIAL_ABSENT', '受保护凭据库中没有所用模型服务的开发凭据；未发送任何内容。');
+          throw new FastRoleError('FAST_ROLE_CREDENTIAL_ABSENT', isOrdinaryProductionRuntime(live.runtime)
+            ? '受保护凭据库中没有你为所用模型服务保存的凭据；请在 设置 › 模型服务 重新输入。未发送任何内容。'
+            : '受保护凭据库中没有所用模型服务的开发凭据；未发送任何内容。');
         }
         harness.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
         current = bindingDigest;
@@ -323,7 +365,7 @@ export class FastRoleExecutionOwner {
             promptContractDigest,
             route: executionRoute,
             model,
-            operationalScope: route === null ? 'development-ci' : 'developer-live',
+            operationalScope: route === null ? 'development-ci' : route.operationalScope,
             policyRuleId: route?.ruleId ?? null,
             fixtureSha256: route === null ? this.#deps.fixture!.sha256 : null,
           },
