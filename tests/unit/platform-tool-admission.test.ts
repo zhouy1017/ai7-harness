@@ -33,6 +33,7 @@ describe('platform tool registration admission', () => {
   it('bootstraps only the exact named developer-live item and refuses once the capability is declared', () => {
     const profile = { ...OPENCODE_GO_V41_FLASH_PROFILE, capabilities: { ...OPENCODE_GO_V41_FLASH_PROFILE.capabilities, toolCalling: 'none' as const } };
     const item = { family: 'policy-selection', case: 'wave6-tool-evidence-bootstrap', delta: null };
+    expect(() => platformToolModelProfile(OPENCODE_GO_V41_FLASH_PROFILE, 'developer-live', item)).toThrow(/不重复/u);
     expect(() => platformToolModelProfile(profile, 'ordinary-production', item)).toThrow(/证据/u);
     expect(() => platformToolModelProfile(profile, 'developer-live', { ...item, case: 'another-case' })).toThrow(/证据/u);
     const admitted = platformToolModelProfile(profile, 'developer-live', item);
