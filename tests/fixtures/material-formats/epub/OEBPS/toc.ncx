@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="zh-CN">
+  <head><meta name="dtb:uid" content="urn:uuid:00000000-0000-4000-8000-000000000766"/><meta name="dtb:depth" content="3"/></head>
+  <docTitle><text>合成样书：潮声与灯塔</text></docTitle>
+  <navMap>
+    <navPoint id="np1" playOrder="1"><navLabel><text>前言</text></navLabel><content src="text/front.xhtml"/></navPoint>
+    <navPoint id="np2" playOrder="2"><navLabel><text>第一卷</text></navLabel><content src="text/chapter01.xhtml"/>
+      <navPoint id="np3" playOrder="3"><navLabel><text>第一章</text></navLabel><content src="text/chapter01.xhtml#c1"/>
+        <navPoint id="np4" playOrder="4"><navLabel><text>一、起风</text></navLabel><content src="text/chapter01.xhtml#c1s1"/></navPoint>
+      </navPoint>
+    </navPoint>
+  </navMap>
+</ncx>
