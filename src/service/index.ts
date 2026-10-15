@@ -1968,13 +1968,18 @@ async function run(): Promise<void> {
     preflightTimer = setInterval(() => {
       if (!openStore.replacementFrozen()) void connectivity.preflight().catch(() => undefined);
       if (!openStore.replacementFrozen()) {
-        for (const run of openStore.modelClarificationRuns()) {
-          run.ledger.expireModelClarifications(run.runRecordId);
-          const kept = new Set(run.ledger.unitCheckpoints(run.runRecordId).map((entry) => entry.unit.unitOrdinal));
-          if (run.ledger.clarificationsOf(run.runRecordId).some((entry) => entry.origin === 'model' && entry.answer !== null && !kept.has(entry.unitOrdinal))) {
-            try { owner.continueAnswered(run.runRecordId, run.ledger); } catch { /* A busy or unavailable binding is checked again next tick. */ }
+        // A timer callback that throws would end the service: whatever one tick cannot read, it reads again on the next.
+        try {
+          for (const run of openStore.modelClarificationRuns()) {
+            try {
+              run.ledger.expireModelClarifications(run.runRecordId);
+              const kept = new Set(run.ledger.unitCheckpoints(run.runRecordId).map((entry) => entry.unit.unitOrdinal));
+              if (run.ledger.clarificationsOf(run.runRecordId).some((entry) => entry.origin === 'model' && entry.answer !== null && !kept.has(entry.unitOrdinal))) {
+                owner.continueAnswered(run.runRecordId, run.ledger);
+              }
+            } catch { /* A busy or unavailable binding, or a record that does not read, is checked again next tick. */ }
           }
-        }
+        } catch { /* The store itself could not be read this tick. */ }
       }
     }, RECONNECT_PREFLIGHT_INTERVAL_MS);
     preflightTimer.unref();

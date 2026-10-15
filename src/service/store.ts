@@ -5803,8 +5803,16 @@ export class EditorialStore {
         (SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = q.run_record_id)
       WHERE q.model_question_json IS NOT NULL AND
         (SELECT state FROM analysis_run_states s WHERE s.run_record_id = q.run_record_id ORDER BY sequence DESC LIMIT 1) = 'awaiting-clarification'`).all() as SqlRow[];
-    return rows.map((row) => ({ bookId: asString(row.book_id), taskIntentId: asString(row.task_intent_id), runRecordId: asString(row.run_record_id),
-      ledger: this.clarificationLedger(asString(row.book_id), asString(row.task_intent_id)) }));
+    // A Run whose ledger no longer resolves is left to its own surface; the others still time out and continue.
+    return rows.flatMap((row) => {
+      try {
+        return [{ bookId: asString(row.book_id), taskIntentId: asString(row.task_intent_id), runRecordId: asString(row.run_record_id),
+          ledger: this.clarificationLedger(asString(row.book_id), asString(row.task_intent_id)) }];
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+        return [];
+      }
+    });
   }
 
   clarificationPlanTarget(bookId: string, taskIntentId: string): InspectTaskPlanInput {
@@ -6181,11 +6189,17 @@ export class EditorialStore {
       const taskIntentId = asString(row.task_intent_id);
       if (seen.has(taskIntentId)) continue;
       seen.add(taskIntentId);
-      const target = this.clarificationPlanTarget(asString(row.book_id), taskIntentId);
-      if (target.kind === 'fixed-task' || target.kind === 'baseline-analysis') continue;
-      readings.push({ kind: target.kind, bookId: asString(row.book_id), bookTitle: asString(row.title), taskIntentId,
-        ...(target.kind === 'review-run' ? { reviewOrdinal: this.#reviewRuns.planFacts(asString(row.book_id), target.ref!).ordinal } : {}),
-        ref: target.ref!, runRecordId: asString(row.run_record_id), state: 'clarification', stateAt: asString(row.raised_at) });
+      // As above: a Task whose records no longer read is said on its own surface, never by taking 待我处理 down with it.
+      try {
+        const target = this.clarificationPlanTarget(asString(row.book_id), taskIntentId);
+        if (target.kind === 'fixed-task' || target.kind === 'baseline-analysis') continue;
+        const reviewOrdinal = target.kind === 'review-run' ? this.#reviewCall(() => this.#reviewRuns.planFacts(asString(row.book_id), target.ref!)).ordinal : null;
+        readings.push({ kind: target.kind, bookId: asString(row.book_id), bookTitle: asString(row.title), taskIntentId,
+          ...(reviewOrdinal === null ? {} : { reviewOrdinal }),
+          ref: target.ref!, runRecordId: asString(row.run_record_id), state: 'clarification', stateAt: asString(row.raised_at) });
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+      }
     }
     return readings;
   }
