@@ -5,12 +5,14 @@ import { unzipSync, zipSync, type Zippable } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { extractMaterialFormatText, type MaterialTextFormat } from '../../src/service/material-formats.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
+import { SYNTHETIC_RTF } from '../fixtures/material-formats/sample-rtf.js';
 
 // Unit suite (L1) for Issue #766, item 3: the four readers on the synthetic file set under `tests/fixtures/material-formats/`
 // — one EPUB, one ODT and one RTF written the way real software writes them (nested navigation, styles at scale, images and
 // fonts the package names but does not hold). The files are the suite's own invented words, no manuscript and no outside file:
 // real public-domain files are not admitted yet (the Owner's decision, #766), so this suite is the synthetic stand-in for them
-// and does not show that a real book reads the same way.
+// and does not show that a real book reads the same way. The EPUB and the ODT are source trees zipped here at the fixed
+// archive time, and the RTF is source text (`sample-rtf.ts`): `.gitignore` refuses document-format files everywhere.
 
 const ROOT = fileURLToPath(new URL('../fixtures/material-formats/', import.meta.url));
 
@@ -145,7 +147,7 @@ describe('the synthetic ODT', () => {
 });
 
 describe('the synthetic RTF', () => {
-  const sample = readFileSync(join(ROOT, 'sample.rtf'));
+  const sample = Buffer.from(SYNTHETIC_RTF, 'latin1');
 
   it('names a picture field whose image is not in the file, and carries a stylesheet, a list table and tables of its own', () => {
     const text = sample.toString('latin1');
