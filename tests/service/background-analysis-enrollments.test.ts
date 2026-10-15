@@ -820,10 +820,15 @@ describe('后台分析登记 over the real store on exact sample1', () => {
     const T = new Date(2026, 8, 25, 10, 0, 0);
     const store = await openWithRoute();
     let bookId = '';
+    let pausedBookId = '';
     try {
       recordMissingCredentialConnection(store, 'L2 主编辑连接');
       bookId = (await importedBook(store, 'L2 sample1 替换数据')).bookId;
       enroll(store, bookId, 'backfill');
+      // A second Book's Enrollment the editor paused (Issue #864): paused is still in force, so it too comes up 待你确认.
+      pausedBookId = (await importedBook(store, 'L2 sample1 替换前暂停')).bookId;
+      const pausedId = enroll(store, pausedBookId, 'backfill').enrollment!.enrollmentId;
+      expect(store.holdBackgroundAnalysisEnrollment(pausedBookId, pausedId, 'pause', runtime()).state).toBe('paused');
       const destination = join(roots.inputRoot, 'AI7 数据库.ai7db');
       const preparation = await store.prepareDatabaseExport(destination, true);
       expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
@@ -842,6 +847,11 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       expect([read.state, read.stateLabel, read.next, read.offer.canEnroll, read.revoke.canRevoke])
         .toEqual(['suspended', '待你确认', { kind: 'stopped', reason: BACKGROUND_SUSPENDED }, true, true]);
       expect(read.history.map((entry) => entry.state)).toEqual(['suspended', 'active']);
+      const paused = replaced.inspectBackgroundAnalysisEnrollment(pausedBookId, runtime());
+      expect([paused.state, paused.next, paused.hold]).toEqual(['suspended', { kind: 'stopped', reason: BACKGROUND_SUSPENDED }, { canPause: false, canResume: false }]);
+      expect(paused.history.map((entry) => entry.state)).toEqual(['suspended', 'paused', 'active']);
+      expect((await refusal(() => replaced.holdBackgroundAnalysisEnrollment(pausedBookId, paused.enrollment!.enrollmentId, 'resume', runtime()))))
+        .toBe('BACKGROUND_ANALYSIS_ENROLLMENT_NOT_ACTIVE');
       // Confirming it is a new decision of the editor's: the next version.
       const confirmed = replaced.enrollBackgroundAnalysis(bookId, read.offer.disclosureDigest!, 'prospective', { kind: 'book', seriesId: null }, 1_000_000, runtime());
       expect([confirmed.state, confirmed.enrollment!.ordinal]).toEqual(['active', 2]);

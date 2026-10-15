@@ -34,10 +34,13 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 //
 // 后台分析登记 (Issue #95, plan slice S39; ADR 0048; V2-UX-ANALYSIS-016 to 021) follows: on 乙's ②A, `登记后台分析…` opens its
 // disclosure first — scope, analysis, when it starts, what it binds and never does — with no starting point chosen; Escape
-// closes it. Enrolled `只分析登记之后的改动`, it starts nothing over 乙's current analysis. The editor then edits 乙's
+// closes it. Since Issue #864 the disclosure offers the Book alone or every Book of the house, the Book chosen, and holds `登记`
+// until a tokens ceiling is typed too, saying what each Run is held to. Enrolled `只分析登记之后的改动` with a ceiling, the
+// block names the scope and the ceiling, and it starts nothing over 乙's current analysis. The editor then edits 乙's
 // manuscript and keeps the caret there: once the text has stood still, AI7 starts 同步到当前稿件 by itself — an exact Task
-// whose Run Authorization's origin is the enrollment version — while the screen, the Book and the focus stay the editor's.
-// `撤销登记…` says what revoking keeps; revoked, a further edit starts nothing, and the Run the Enrollment started, its
+// whose Run Authorization's origin is the enrollment version, its plan holding the Run to the ceiling and its Run Report naming
+// the Enrollment — while the screen, the Book and the focus stay the editor's. `暂停` reads 已暂停 and offers `续行`, which puts
+// it back in force (Issue #864). `撤销登记…` says what revoking keeps; revoked, a further edit starts nothing, and the Run the Enrollment started, its
 // authorization and its revision stay exactly as they were.
 //
 // The runner reads the service's projection through `window.ai7.inspectGlobalAttention()` only to cross-check
@@ -71,6 +74,11 @@ const QUEUED_NOTE = '运行名额已满：正在运行的任务结束后，这�
 // there by `tests/unit/background-analysis.test.ts`.
 const BACKGROUND_CURRENT_LINE = '现在：分析结果与当前稿件一致，没有要做的。';
 const BACKGROUND_REVOKED_LINE = '现在：已撤销：不会再开始新的后台分析。';
+/** Issue #864: the ceiling 登记 requires in this Journey, its words before and after, and 暂停's line. */
+const BACKGROUND_CEILING_TOKENS = 300000;
+const BACKGROUND_CEILING_REQUIRED = '登记时由你设定（必填）；书系或全部图书按书平分';
+const BACKGROUND_CEILING_FIRST = '请先填写预算上限（tokens）。';
+const BACKGROUND_PAUSED_LINE = '现在：已暂停：续行之前不会开始新的后台分析；已经开始的运行照常进行。';
 const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
 /**
  * The quiet period this Journey's launch sets for 后台分析登记 (`--j09-background-quiet-ms`, development-ci and J-09 only; #713
@@ -540,6 +548,7 @@ const READ_BACKGROUND = `(() => {
     started: root.dataset.backgroundStarted ?? null,
     pill: text('.background-analysis-state'),
     enrollment: text('.background-analysis-enrollment'),
+    ceiling: text('.background-analysis-ceiling'),
     nextLine: text('.background-analysis-next'),
     startedLines: Array.from(root.querySelectorAll('.background-analysis-started > li')).map((item) => item.textContent),
     history: Array.from(root.querySelectorAll('.background-analysis-history li')).map((item) => item.textContent),
@@ -1430,10 +1439,13 @@ async function main() {
     requireJourney(noneService?.bookId === bookB && noneService.state === 'none' && noneService.enrollment === null && noneService.startedRunCount === 0, 'background-none-record');
     await clickSelector(renderer, '[data-background-action="enroll-open"]', 'background-open');
     await waitFor(renderer, `document.activeElement===document.querySelector('.background-analysis-disclosure h4')`, 'background-disclosure-focused', 10_000);
-    const disclosure = await renderer.evaluate(`(() => { const root=document.querySelector('.background-analysis-disclosure'); return { rows: Array.from(root.querySelectorAll('dt')).map((term)=>term.textContent), scope: root.querySelector('dd')?.textContent ?? null, notGranted: root.querySelectorAll('.background-analysis-not-granted li').length, radios: Array.from(root.querySelectorAll('input[type="radio"]')).map((radio)=>[radio.dataset.startingPoint, radio.checked]), confirm: root.querySelector('[data-background-action="enroll-confirm"]')?.disabled ?? null }; })()`);
+    const disclosure = await renderer.evaluate(`(() => { const root=document.querySelector('.background-analysis-disclosure'); const terms=Array.from(root.querySelectorAll('dt')); return { rows: terms.map((term)=>term.textContent), scope: root.querySelector('dd')?.textContent ?? null, budget: terms.find((term)=>term.textContent==='预算上限')?.nextElementSibling?.textContent ?? null, notGranted: root.querySelectorAll('.background-analysis-not-granted li').length, radios: Array.from(root.querySelectorAll('input[data-starting-point]')).map((radio)=>[radio.dataset.startingPoint, radio.checked]), scopes: Array.from(root.querySelectorAll('input[data-scope-kind]')).map((radio)=>[radio.dataset.scopeKind, radio.checked]), scopesShown: root.querySelector('.background-analysis-scopes')?.hidden===false, ceiling: root.querySelector('input[data-background-ceiling]')?.value ?? null, confirm: root.querySelector('[data-background-action="enroll-confirm"]')?.disabled ?? null }; })()`);
+    // Synchronized delta (Issue #864): the house's three Books make two scopes, the Book chosen; the ceiling is empty and required.
     requireJourney(JSON.stringify(disclosure.rows) === JSON.stringify(['范围', '分析', '何时开始', '模型服务', '工序', '预算上限', '发送内容类别', '会得到']) &&
-      disclosure.scope === `《${SECOND.title}》这一本书` && disclosure.notGranted === 4 &&
-      JSON.stringify(disclosure.radios) === JSON.stringify([['prospective', false], ['backfill', false]]) && disclosure.confirm === true,
+      disclosure.scope === `《${SECOND.title}》这一本书` && disclosure.budget === BACKGROUND_CEILING_REQUIRED && disclosure.notGranted === 4 &&
+      JSON.stringify(disclosure.radios) === JSON.stringify([['prospective', false], ['backfill', false]]) &&
+      JSON.stringify(disclosure.scopes) === JSON.stringify([['book', true], ['all-books', false]]) && disclosure.scopesShown === true &&
+      disclosure.ceiling === '' && disclosure.confirm === true,
     'background-disclosure-read', disclosure);
 
     at('j14-background-keyboard');
@@ -1447,15 +1459,21 @@ async function main() {
     // `只分析登记之后的改动`: the Enrollment is recorded, and over 乙's current analysis it has nothing to do.
     await clickSelector(renderer, '[data-background-action="enroll-open"]', 'background-reopen');
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.background-analysis-disclosure input[data-starting-point="prospective"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'background-choose-prospective');
-    await waitFor(renderer, `document.querySelector('[data-background-action="enroll-confirm"]')?.disabled===false`, 'background-confirm-enabled', 10_000);
+    // A starting point alone is not enough (Issue #864): `登记` waits for the ceiling, and says so.
+    await assertRenderer(renderer, `document.querySelector('[data-background-action="enroll-confirm"]')?.disabled===true && document.querySelector('.background-analysis-choose')?.hidden===false && document.querySelector('.background-analysis-choose')?.textContent===${JSON.stringify(BACKGROUND_CEILING_FIRST)}`, 'background-ceiling-required');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('.background-analysis-disclosure input[data-background-ceiling]'); if(!(input instanceof HTMLInputElement))return false; input.focus(); return document.activeElement===input; })()`, 'background-ceiling-focus');
+    await renderer.send('Input.insertText', { text: String(BACKGROUND_CEILING_TOKENS) });
+    await waitFor(renderer, `document.querySelector('[data-background-action="enroll-confirm"]')?.disabled===false && document.querySelector('.background-analysis-share')?.textContent===${JSON.stringify(`每次后台分析最多用 ${BACKGROUND_CEILING_TOKENS} tokens，达到就停下。`)}`, 'background-confirm-enabled', 10_000);
     await clickSelector(renderer, '[data-background-action="enroll-confirm"]', 'background-confirm');
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='active' && document.activeElement===document.querySelector('[data-background-action="revoke-open"]')`, 'background-active', 30_000);
     const enrolled = await renderer.evaluate(`window.ai7.inspectBackgroundAnalysisEnrollment()`);
     const activeBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(enrolled?.state === 'active' && enrolled.enrollment?.ordinal === 1 && enrolled.enrollment.startingPoint === 'prospective' &&
       UUID_PATTERN.test(enrolled.enrollment.enrollmentVersionId ?? '') && enrolled.next?.kind === 'none' &&
+      enrolled.enrollment.ceilingTokens === BACKGROUND_CEILING_TOKENS && enrolled.enrollment.shareTokens === BACKGROUND_CEILING_TOKENS && enrolled.enrollment.scope?.kind === 'book' &&
       activeBlock.pill === '已登记' && (activeBlock.enrollment ?? '').startsWith('后台分析登记 · 第 1 版 · 只分析登记之后的改动 · 本机编辑登记于 ') &&
-      activeBlock.nextLine === BACKGROUND_CURRENT_LINE && JSON.stringify(activeBlock.actions) === JSON.stringify([['revoke-open', '撤销登记…', 'enabled']]),
+      activeBlock.ceiling === `范围：《${SECOND.title}》这一本书 · 预算上限 ${BACKGROUND_CEILING_TOKENS} tokens` &&
+      activeBlock.nextLine === BACKGROUND_CURRENT_LINE && JSON.stringify(activeBlock.actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['revoke-open', '撤销登记…', 'enabled']]),
     'background-enrolled-record', { enrolled: enrolled?.state, next: enrolled?.next, block: activeBlock });
     const beforeBackground = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(beforeBackground?.bookId === bookB && beforeBackground.resultSetRevision?.ordinal === 2, 'background-before-record');
@@ -1499,12 +1517,38 @@ async function main() {
       backgroundRun.authorization.enrollmentVersionId === enrolled.enrollment.enrollmentVersionId &&
       backgroundRun.run?.transitions?.[0]?.state === 'authorized' && backgroundRun.run.transitions[0].detail === BACKGROUND_AUTHORIZED_DETAIL &&
       ['completed', 'completed-with-gaps'].includes(backgroundRun.run.state) && backgroundRun.resultSetRevision?.ordinal === 3 &&
-      backgroundRun.resultSetRevision.freshness?.state === 'current',
+      backgroundRun.resultSetRevision.freshness?.state === 'current' &&
+      // Issue #864: the plan held the Run to the Enrollment's ceiling, and its Run Report names the Enrollment.
+      backgroundRun.planVersion?.materialInputs?.runBudgetCeiling?.maxTotalTokens === BACKGROUND_CEILING_TOKENS &&
+      backgroundRun.taskOutcome?.report?.background?.[0] === '由后台分析登记开始 · 按第 1 版登记',
     'background-run-exact', { mode: backgroundRun?.taskIntent?.mode, origin: backgroundRun?.authorization?.origin, run: backgroundRun?.run?.state, ordinal: backgroundRun?.resultSetRevision?.ordinal });
     await waitFor(renderer, `(${READ_BACKGROUND})?.started==='1'`, 'background-started-listed', 30_000);
     const startedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(startedBlock.startedLines.length === 1 && (startedBlock.startedLines[0] ?? '').startsWith('同步到当前稿件 · 按第 1 版登记 · 授权于 ') &&
       startedBlock.nextLine === BACKGROUND_CURRENT_LINE, 'background-started-read', startedBlock);
+    await assertRenderer(renderer, `document.querySelector('.analysis-run-report-background li')?.textContent==='由后台分析登记开始 · 按第 1 版登记'`, 'background-run-report-lines');
+
+    at('background-enrollment-paused');
+    // `暂停` (Issue #864) holds what the Enrollment would start: the block reads 已暂停, `续行` takes the focus, the Run it started stays.
+    await clickSelector(renderer, '[data-background-action="pause"]', 'background-pause');
+    await waitFor(renderer, `(${READ_BACKGROUND})?.state==='paused' && document.activeElement===document.querySelector('[data-background-action="resume"]')`, 'background-paused', 30_000);
+    const pausedBlock = await renderer.evaluate(READ_BACKGROUND);
+    requireJourney(pausedBlock.pill === '已暂停' && pausedBlock.nextLine === BACKGROUND_PAUSED_LINE && pausedBlock.history.length === 2 && pausedBlock.startedLines.length === 1 &&
+      JSON.stringify(pausedBlock.actions) === JSON.stringify([['resume', '续行', 'enabled'], ['revoke-open', '撤销登记…', 'enabled']]),
+    'background-paused-read', pausedBlock);
+    const pausedService = await renderer.evaluate(`window.ai7.inspectBackgroundAnalysisEnrollment()`);
+    requireJourney(pausedService?.state === 'paused' && pausedService.enrollment?.ordinal === 1 && pausedService.hold?.canResume === true &&
+      pausedService.next?.kind === 'stopped', 'background-paused-record');
+
+    at('background-enrollment-resumed');
+    // `续行` puts the same version back in force; over 乙's current analysis it again has nothing to do.
+    await clickSelector(renderer, '[data-background-action="resume"]', 'background-resume');
+    await waitFor(renderer, `(${READ_BACKGROUND})?.state==='active' && document.activeElement===document.querySelector('[data-background-action="pause"]')`, 'background-resumed', 30_000);
+    const resumedBlock = await renderer.evaluate(READ_BACKGROUND);
+    requireJourney(resumedBlock.pill === '已登记' && resumedBlock.nextLine === BACKGROUND_CURRENT_LINE && resumedBlock.history.length === 3 &&
+      JSON.stringify(resumedBlock.actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['revoke-open', '撤销登记…', 'enabled']]),
+    'background-resumed-read', resumedBlock);
+    requireJourney((await renderer.evaluate(`window.ai7.inspectBackgroundAnalysisEnrollment()`))?.enrollment?.ordinal === 1, 'background-resumed-record');
 
     at('background-revoke');
     // `撤销登记…` says what revoking keeps, then records it: the block reads 已撤销 with both states in its history.
@@ -1515,7 +1559,7 @@ async function main() {
     await clickSelector(renderer, '[data-background-action="revoke-confirm"]', 'background-revoke-confirm');
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='revoked'`, 'background-revoked', 30_000);
     const revokedBlock = await renderer.evaluate(READ_BACKGROUND);
-    requireJourney(revokedBlock.pill === '已撤销' && revokedBlock.nextLine === BACKGROUND_REVOKED_LINE && revokedBlock.history.length === 2 &&
+    requireJourney(revokedBlock.pill === '已撤销' && revokedBlock.nextLine === BACKGROUND_REVOKED_LINE && revokedBlock.history.length === 4 &&
       revokedBlock.startedLines.length === 1 && JSON.stringify(revokedBlock.actions) === JSON.stringify([['enroll-open', '登记后台分析…', 'enabled']]),
     'background-revoked-read', revokedBlock);
     const keptRecord = JSON.stringify({ task: backgroundRun.taskIntent, authorization: backgroundRun.authorization, run: backgroundRun.run.state, revision: backgroundRun.resultSetRevision.revisionId });

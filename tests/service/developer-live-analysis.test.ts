@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
+import { BackgroundAnalysisDispatcher } from '../../src/service/background-analysis.js';
 import { describeComposition } from '../../src/service/harness/primary-agent-harness.js';
 import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_POLICY_BINDING, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import type { DevelopmentValidationIntent } from '../../src/shared/protocol.js';
@@ -1296,5 +1297,119 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(refusalCode(() => store.createBaselineAnalysisPreparationWork(commit.bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy)))
       .toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
     await store.close();
+  });
+});
+
+/**
+ * The developer-live projection as Provider Processing v14 will read (Issue #863, mirrored by #864 until it merges): the baseline
+ * rule's binding and categories again under the enrolled-background rule, the one rule that admits a 后台分析登记's Run.
+ */
+function withBackgroundRule(policy: LaunchPolicyProjection): LaunchPolicyProjection {
+  const baseline = policy.providerProcessing.admittedRules.find((rule) => rule.ruleId === DEVELOPER_LIVE_POLICY_BINDING.ruleId)!;
+  expect(baseline).toBeDefined();
+  return {
+    ...policy,
+    providerProcessing: {
+      ...policy.providerProcessing,
+      admittedRules: [...policy.providerProcessing.admittedRules, { ...baseline, ruleId: 'enrolled-background-manuscript-analysis-processing', backgroundOrigin: true }],
+    },
+  };
+}
+
+/** The facts the dispatcher hands the store, a clock well past any quiet period. */
+const BACKGROUND_RUNTIME = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
+
+/** Exact sample1 enrolled for background analysis in a store bound to `policy`, with the stub answers its Run will want. */
+async function enrolledLive(policy: LaunchPolicyProjection, ceilingTokens: number): Promise<{ store: EditorialStore; bookId: string; answers: ChainAnswers }> {
+  const store = await openLiveStore(roots.dataRoot);
+  store.baselineAnalysisLedger.bindLaunch({ ...liveBinding(CEILING), policy });
+  recordMissingCredentialConnection(store, 'developer-live 主编辑角色连接');
+  // A second copy, prepared by the editor and never started, only to read the answers a plan of exact sample1 wants.
+  const reference = await importSample1Book(store, roots.codeRoot, 'developer-live 后台参照');
+  await pinEditorialWorkspaceProfileRevision2(store, reference.bookId);
+  let progress = store.createBaselineAnalysisPreparationWork(reference.bookId, BASELINE_ANALYSIS_TASK_GOAL, null, policy);
+  while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+  const answers = await unitAnswers(progress.projection!);
+  const imported = await importSample1Book(store, roots.codeRoot, 'developer-live 后台分析');
+  await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
+  const shown = store.inspectBackgroundAnalysisEnrollment(imported.bookId, BACKGROUND_RUNTIME);
+  expect([shown.offer.canEnroll, shown.offer.reason]).toEqual([true, null]);
+  store.enrollBackgroundAnalysis(imported.bookId, shown.offer.disclosureDigest!, 'backfill', { kind: 'book', seriesId: null }, ceilingTokens, BACKGROUND_RUNTIME);
+  return { store, bookId: imported.bookId, answers };
+}
+
+describe('后台分析登记 under developer-live with a stub transport (Issue #864)', { timeout: 60_000 }, () => {
+  it('holds two places under a live launch, the editor\'s Runs taking one, and refuses any other capacity', async () => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const { units: responses, named } = await unitAnswers(prepared);
+    const held = heldTransport({ calls, responses, named });
+    const execution = owner(store, held.transport);
+    try {
+      expect(execution.capacity).toBe(2);
+      expect(() => new BaselineAnalysisExecutionOwner({
+        ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null, capacity: 1, secretResolver: { resolve: async () => null },
+        developerLive: { launch: { runBudgetCeiling: CEILING, providerCacheRoot: cacheRoot, validation: VALIDATION }, nativeFetch: held.transport },
+      })).toThrowError(/运行名额设置无效/u);
+      const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      execution.admitAndDispatch(authorized.dispatchRunRecordId!);
+      await held.arrived(0);
+      // One of the editor's Runs in flight: no place for another of theirs, the background place still free.
+      expect([execution.busy, execution.full]).toEqual([true, false]);
+      for (let index = 0; index < FULL_CHAIN_TURNS + 2; index += 1) held.release(index);
+      await execution.whenIdle();
+      expect([execution.busy, execution.full]).toEqual([false, false]);
+    } finally {
+      await execution.dispose();
+    }
+  });
+
+  it('starts an enrolled background Run only under the enrolled-background rule, held to the lower of its share and the launch ceiling', async () => {
+    const v14 = withBackgroundRule(launchPolicy);
+    const { store, bookId, answers } = await enrolledLive(v14, 900_000);
+    const calls: StubCall[] = [];
+    const execution = owner(store, stubTransport({ calls, responses: answers.units, named: answers.named }), CEILING, v14);
+    const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: v14, quietMs: 30_000, now: () => BACKGROUND_RUNTIME.now });
+    try {
+      dispatcher.nudge();
+      await dispatcher.settled();
+      await execution.whenIdle();
+      const after = store.inspectBaselineAnalysis(bookId, (runRecordId) => execution.progressFor(runRecordId));
+      expect([after.taskIntent!.mode, after.authorization!.origin]).toEqual(['first-baseline', 'background-analysis-enrollment']);
+      // The share is 900,000 tokens; the launch holds every Run to 500,000, and the lower one is frozen.
+      expect(after.planVersion!.materialInputs.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 500_000 });
+      expect(['completed', 'completed-with-gaps']).toContain(after.run!.state);
+      expect(calls.length).toBeGreaterThan(0);
+      expect(after.taskOutcome!.report!.background!.slice(0, 2)).toEqual(['由后台分析登记开始 · 按第 1 版登记', '范围：《developer-live 后台分析》这一本书；登记上限 900000 tokens']);
+      expect(after.taskOutcome!.report!.background![2]).toMatch(/这次运行的上限 500000 tokens$/u);
+    } finally {
+      await dispatcher.dispose();
+      await execution.dispose();
+    }
+  });
+
+  it('refuses a background Run at admission under a policy with no enrolled-background rule, sending nothing', async () => {
+    const v14 = withBackgroundRule(launchPolicy);
+    const { store, bookId } = await enrolledLive(v14, 400_000);
+    // The start is recorded under v14 and left for its place; the owner then runs under v12, which has no such rule.
+    const dispatcher = new BackgroundAnalysisDispatcher({
+      store, launchPolicy: v14, quietMs: 30_000, now: () => BACKGROUND_RUNTIME.now,
+      execution: { full: false, routeExecutable: true, capacity: 2, admitOrQueue: () => 'queued' },
+    });
+    dispatcher.nudge();
+    await dispatcher.settled();
+    await dispatcher.dispose();
+    const waiting = store.inspectBaselineAnalysis(bookId, () => null);
+    expect([waiting.authorization!.origin, waiting.run!.state, waiting.planVersion!.materialInputs.runBudgetCeiling])
+      .toEqual(['background-analysis-enrollment', 'authorized', { kind: 'tokens', maxTotalTokens: 400_000 }]);
+    const calls: StubCall[] = [];
+    const execution = owner(store, stubTransport({ calls, responses: new Map() }));
+    try {
+      expect(refusalCode(() => execution.admitOrQueue(waiting.run!.runRecordId, undefined, 'background'))).toBe('EXECUTION_ORIGIN_NOT_ADMITTED');
+      expect(store.inspectBaselineAnalysis(bookId, () => null).run!.state).toBe('blocked-before-dispatch');
+      expect(calls).toHaveLength(0);
+    } finally {
+      await execution.dispose();
+    }
   });
 });

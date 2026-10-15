@@ -78,7 +78,8 @@ const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSu
 // Synchronized delta with Issue #95 (S39): 后台分析登记's three members — its read, 登记 and 撤销登记. They read, record or revoke
 // the editor's standing decision for the route's Book; 登记 also asks the service's dispatcher to look at once, and every Run
 // it may start is its own exact Task, plan and Run Authorization. J-09 proves them; here the Book has none and no Run of it.
-const ENROLLMENT_MEMBERS = ['inspectBackgroundAnalysisEnrollment', 'enrollBackgroundAnalysis', 'revokeBackgroundAnalysisEnrollment'];
+// Synchronized delta with Issue #864: its fourth, `暂停` / `续行` of an Enrollment in force, which holds or releases what it would start.
+const ENROLLMENT_MEMBERS = ['inspectBackgroundAnalysisEnrollment', 'enrollBackgroundAnalysis', 'revokeBackgroundAnalysisEnrollment', 'holdBackgroundAnalysisEnrollment'];
 const EXPORT_MEMBERS = [
   'reviewManuscriptExport', 'chooseManuscriptExportDestination', 'approveManuscriptExport', 'revealManuscriptExport',
   'reviewBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'approveBookDeliveryPackageExport', 'cancelBookDeliveryPackageExport',
