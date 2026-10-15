@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { BASELINE_ANALYSIS_KIND, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
 import { liveKindAdmission, liveKindContractCategories, liveKindRule, type LiveKindRule } from './live-kind-admission.js';
+import { liveMaterialContract } from '../task-material-references.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { describeComposition, prepareExecution, type HarnessExecutionSpan, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
@@ -76,7 +77,7 @@ import {
 } from './reducers.js';
 import { CARRIED_GAP_REASON, OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
 import { SERIES_SCOPE_STOP_SUMMARY } from '../series-exclusions.js';
-import { materialInterruptionMessage, type MaterialGuardRefusal } from '../task-material-references.js';
+import { materialInterruptionMessage as referenceInterruptionMessage, type MaterialGuardRefusal } from '../task-material-references.js';
 import {
   RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
   buildRunReportReflectionMessage,
@@ -126,6 +127,11 @@ import {
  * authorized and not yet admitted — 等待运行名额 — and is admitted in its turn as a place frees.
  */
 export { ExecutionAdmissionError };
+
+/** Deliverable guards supply their own stop reason; existing material and Series guard semantics stay with their owners. */
+function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
+  return refusal.code === 'REVIEW_DELIVERABLE_CHANGED' ? refusal.message : referenceInterruptionMessage(refusal);
+}
 
 /**
  * How many Runs the governor executes at once (Issue #49, S14; ADR 0021): two under development-ci. Under
@@ -1307,6 +1313,7 @@ export class BaselineAnalysisExecutionOwner {
       }
       currentBindingDigest = bindingDigest;
       bindingDigestForSlot = bindingDigest;
+      const frozenMaterial = liveMaterialContract(definition);
       bindingFacts = {
         bindingDigest,
         route,
@@ -1318,7 +1325,11 @@ export class BaselineAnalysisExecutionOwner {
         // sends an evaluation's editor-authored record or house exemplars only where the rule names them.
         ...(admitted === null ? {} : {
           ruleOutboundCategories: new Set(admitted.outboundDataCategories),
-          contractCategories: new Set(liveKindContractCategories(definition.kind)),
+          contractCategories: new Set(liveKindContractCategories(definition.kind, definition)),
+          ...(frozenMaterial === null ? {} : {
+            materialExcerpts: frozenMaterial.materials,
+            frozenMaterialDigests: new Set(frozenMaterial.sources.map((source) => source.sha256)),
+          }),
         }),
         // Under ordinary production the baseline's own rule names the categories its unit messages carry.
         ...(production !== null && admitted === null && productionRule !== null ? { ruleOutboundCategories: new Set(productionRule.outboundDataCategories) } : {}),

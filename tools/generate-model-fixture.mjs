@@ -345,6 +345,7 @@ async function loadSample1Owners() {
         "export { reviewCategoryKindDefinition } from './src/service/review/review-category-kind.ts';",
         "export { reviewCategoryContract, reviewCategoryContractDigest } from './src/service/review/review-category-contract.ts';",
         "export { reviewCategoryContractInput } from './src/service/review/category-configuration.ts';",
+        "export { reviewDeliverables } from './src/service/production-documents.ts';",
         "export { initialEvaluationKindDefinition } from './src/service/evaluation/initial-evaluation-kind.ts';",
         "export { readersReportKindDefinition } from './src/service/evaluation/readers-report-kind.ts';",
         "export { evaluationRewriteKindDefinition } from './src/service/evaluation/evaluation-rewrite-kind.ts';",
@@ -353,6 +354,10 @@ async function loadSample1Owners() {
         "export { writingKindDefinition } from './src/service/writing/writing-kind.ts';",
         "export { writingContract, writingContractDigest } from './src/service/writing/writing-contract.ts';",
         "export { WritingTasks } from './src/service/writing-tasks.ts';",
+        "export { writingMaterialParagraph, writingMaterialDigest } from './src/service/writing-tasks.ts';",
+        "export { taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords } from './src/service/task-material-references.ts';",
+        "export { MaterialIndexLedger } from './src/service/material-index.ts';",
+        "export { LibraryMaterialLedger } from './src/service/library-materials.ts';",
         "export { buildRunReportReflectionMessage } from './src/service/analysis/run-report-contract.ts';",
         "export { runReportAccountingOf } from './src/service/analysis/run-report.ts';",
         "export { EDITORIAL_POLISH_PROMPT_CONTRACT, parseEditorialPolishMessage } from './src/service/fast-role/polish-contract.ts';",
@@ -441,23 +446,52 @@ export async function verifySample1Capture(request, selection, parsed) {
       ? undefined : database.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ?').get(request.sample1Task)?.kind;
     const evaluation = typeof kind === 'string' && Object.hasOwn(EVALUATION_TASK_TABLES, kind)
       ? { table: EVALUATION_TASK_TABLES[kind], subject: EVALUATION_UNIT_SUBJECTS[kind] } : null;
+    // A material-bearing capture additionally proves every whole indexed paragraph came from exact sample1.
+    // Read the index through its owner and current eligibility, never a copied payload or unverified SQL text.
+    const sampleBlocks = [];
+    await owners.parseDocx(source, 'sample1.docx', (block) => sampleBlocks.push({ ...block, graphemes: block.graphemeLength }),
+      { digest: SAMPLE1_SOURCE_SHA256, bytes: 29_550 });
+    const library = new owners.LibraryMaterialLedger(database, dirname(dirname(request.sample1Store)));
+    const materialIndex = new owners.MaterialIndexLedger(database);
+    const materialReadings = (given) => {
+      const sources = owners.taskMaterialSources(given);
+      const boundary = { bookId: manifest.manuscript.bookId, references: sources };
+      return sources.map((pin) => {
+        const paragraphs = [];
+        for (let from = 1; from !== null;) {
+          const page = materialIndex.readForTask(boundary, pin.materialId, pin.title, from, (id, book) => library.available(id, book));
+          paragraphs.push(...page.segments.map((segment) => owners.writingMaterialParagraph(segment.text)).filter((text) => text.length > 0));
+          from = page.next;
+        }
+        if (!paragraphs.every((paragraph) => sampleBlocks.some((block) => owners.writingMaterialParagraph(block.text).includes(paragraph)))) fail();
+        return owners.taskMaterialWords(pin, paragraphs);
+      });
+    };
+    const wrapMaterials = (base) => {
+      const row = database.prepare("SELECT canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 1 AND component = 'execution-plan'").get(request.sample1Task);
+      const pins = row === undefined ? undefined : checked(row).materialReferences;
+      return pins === undefined ? base : owners.taskMaterialKindDefinition(base, { bookId: manifest.manuscript.bookId, references: pins }, materialReadings(pins));
+    };
     let writingTask;
     if (contract === undefined && kind === 'writing') {
       // #810: a writing contract is the exact input its Task froze, its 范例 rebuilt from their pinned delivered revisions — never
-      // today's metadata or words. A plan listing 资料库 material, or a Task carrying house people, proves nothing.
+      // today's metadata or words. Material words must also prove their exact sample1 source and frozen index pins.
       const snapshot = checked(database.prepare('SELECT canonical_json, sha256 FROM writing_tasks WHERE task_intent_id = ? AND prompt_contract_sha256 = ?')
         .get(request.sample1Task, selection.taskPromptContractDigest));
-      if (snapshot.taskIntentId !== request.sample1Task || snapshot.materialSources !== undefined || snapshot.input.materials !== undefined) fail();
-      writingTask = new owners.WritingTasks(database).task(request.sample1Task, selection.taskPromptContractDigest);
-      if (writingTask === null || !writingTask.exemplarsReadable || writingTask.materials.length !== 0 ||
+      if (snapshot.taskIntentId !== request.sample1Task) fail();
+      const readings = snapshot.materialSources === undefined ? [] : materialReadings(snapshot.materialSources);
+      writingTask = new owners.WritingTasks(database, (_book, pin) => {
+        const reading = readings.find((item) => item.source.materialId === pin.materialId && item.source.indexDigest === pin.indexDigest);
+        return reading === undefined ? { refusal: { code: 'MATERIAL_INDEX_MOVED', message: '' } } : { paragraphs: reading.paragraphs };
+      }).task(request.sample1Task, selection.taskPromptContractDigest);
+      if (writingTask === null || !writingTask.exemplarsReadable || writingTask.materials.some((item) => item.refusal !== null) ||
           writingTask.bookId !== manifest.manuscript.bookId || writingTask.input.book.editors.length !== 0) fail();
       const prompt = owners.writingContract(writingTask.input, writingTask.copyRules);
       contract = { prompt, digest: owners.writingContractDigest(prompt) };
-      definition = owners.writingKindDefinition(writingTask.input, writingTask.copyRules);
+      definition = owners.writingKindDefinition(writingTask.input, writingTask.copyRules, readings.length === 0 ? undefined : readings.map((reading) => reading.source));
     } else if (contract === undefined && evaluation !== null) {
       // #429: an evaluation contract is the exact input its Task froze — the house profile it was prepared under, or the 定稿
-      // record or saved entry with its exemplars — never today's profile or record. A plan listing 资料库 material proves nothing.
-      if (plan('execution-plan').materialReferences !== undefined) fail();
+      // record or saved entry with its exemplars — never today's profile or record.
       const rows = database.prepare(`SELECT canonical_json, sha256, prompt_contract_sha256 FROM ${evaluation.table} WHERE task_intent_id = ?`).all(request.sample1Task);
       if (rows.length !== 1) fail();
       const snapshot = checked(rows[0]);
@@ -474,6 +508,7 @@ export async function verifySample1Capture(request, selection, parsed) {
         definition = kind === 'readers-report' ? owners.readersReportKindDefinition(snapshot.input) : owners.evaluationRewriteKindDefinition(snapshot.input);
       }
       if (definition.kind !== kind || definition.promptContractDigest !== rows[0].prompt_contract_sha256) fail();
+      definition = wrapMaterials(definition);
       contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
     } else if (contract === undefined) {
       // #809: a review contract is the exact category configuration the Review Run froze, never
@@ -482,24 +517,40 @@ export async function verifySample1Capture(request, selection, parsed) {
       if (rows.length !== 1) fail();
       const snapshot = checked(rows[0]);
       const categories = snapshot.categories.filter((category) => category.task?.taskIntentId === request.sample1Task);
-      if (snapshot.materialReferences !== undefined || categories.length !== 1) fail();
+      if (categories.length !== 1) fail();
+      if (snapshot.materialReferences !== undefined && (snapshot.materialReferences.bookId !== manifest.manuscript.bookId ||
+          canonicalJson(snapshot.materialReferences.references) !== canonicalJson(plan('execution-plan').materialReferences))) fail();
       const category = categories[0];
       if (category.executor !== 'review-category-contract' || category.entry.searchEngine ||
           category.entry.seriesKnowledge !== undefined || category.task.planEnvelopeDigest !== sha256Hex(canonicalJson(envelope))) fail();
       const input = owners.reviewCategoryContractInput(category.entry);
+      if (input.deliverables !== undefined) {
+        // #813: prove each read-only participant from S66's records and the admitted sample1 source, not caller text.
+        const current = owners.reviewDeliverables(database, manifest.manuscript.bookId);
+        if (category.entry.categoryId !== 'cross-deliverable-consistency' || current.unavailableReason !== null ||
+            canonicalJson(current.participants) !== canonicalJson(input.deliverables) ||
+            input.deliverables.some((document) => document.sourceDigest !== SAMPLE1_SOURCE_SHA256)) fail();
+        // A manuscript-only content key would also answer a Run comparing different deliverable words. Keep only the exact
+        // request key, which pins every participant; fresh-import regression replays this response through controlled transport.
+        parsed.contentDigest = null;
+        parsed.exactParticipantsOnly = true;
+        parsed.participantContentDigest = sha256Hex(canonicalJson(input.deliverables.map(({ typeId, title, paragraphs }) => ({
+          typeId, title, paragraphs: paragraphs.map(({ position, text, truncated }) => ({ position, text, truncated })),
+        }))));
+      }
       const prompt = owners.reviewCategoryContract(input);
       contract = { prompt, digest: owners.reviewCategoryContractDigest(prompt) };
       definition = owners.reviewCategoryKindDefinition(input);
       if (category.task.kind !== definition.kind) fail();
+      definition = wrapMaterials(definition);
+      contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
     } else definition = owners.baselineAnalysisKindDefinition(contract.selection);
     if (contract.digest !== selection.taskPromptContractDigest || parsed.carriedMessageCount !== 1 ||
         parsed.systemMessages.length !== 1 || parsed.systemMessages[0] !== contract.prompt.systemPrompt) fail();
     if (pin.sourceDigest !== SAMPLE1_SOURCE_SHA256 || pin.revisionDigest !== manifest.manuscript.revisionDigest ||
       pin.revisionId !== manifest.manuscript.revisionId || envelope.promptContractDigest !== contract.digest) fail();
     step = 'extract';
-    const blocks = [];
-    await owners.parseDocx(source, 'sample1.docx', (block) => blocks.push({ ...block, graphemes: block.graphemeLength }),
-      { digest: SAMPLE1_SOURCE_SHA256, bytes: 29_550 });
+    const blocks = sampleBlocks;
     const ids = manifest.units.flatMap((unit) => unit.blockIds);
     if (ids.length !== blocks.length) fail();
     const frozenBlocks = blocks.map((block, index) => ({ ...block, blockId: ids[index] }));
@@ -1272,6 +1323,10 @@ export async function generateModelFixture(request, now = new Date()) {
   const selection = resolveLedgerSelection(await readLedgerLines(request.cacheRoot), request.selector);
   const entry = await readSelectedEntry(request.cacheRoot, selection);
   const parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest);
+  if (parsed.subject === 'review-unit' && parsed.unitMessage.split('\n', 1)[0].includes(' · 类别 cross-deliverable-consistency · ')) {
+    parsed.contentDigest = null;
+    parsed.exactParticipantsOnly = true;
+  }
   requireStageContract(selection, parsed);
   parsed.sample1Verified = await verifySample1Capture(request, selection, parsed);
   refuse(JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
@@ -1294,7 +1349,9 @@ export async function generateModelFixture(request, now = new Date()) {
   'FIXTURE_GEN/identity-unmapped', '响应含有未经映射或不唯一的占位符。');
   return assembleFixture({
     identity: request.identity,
-    description: request.description,
+    description: parsed.exactParticipantsOnly
+      ? `${request.description} Exact request key only: a manuscript-only content key could replay against different deliverable text; fresh-import regression uses controlled recorded-response transport with the same sample1-derived document words. Participant excerpt digest: ${parsed.participantContentDigest ?? 'unproved'}.`
+      : request.description,
     itemId: selection.itemId,
     model: selection.model,
     generatedOn: now.toISOString().slice(0, 10),

@@ -330,7 +330,8 @@ import {
   WRITING_MODE_GOALS,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
-import { EVALUATION_PAYLOAD_CATEGORIES, liveKindRule } from './analysis/live-kind-admission.js';
+import { EVALUATION_PAYLOAD_CATEGORIES, liveKindRule, liveMaterialRule } from './analysis/live-kind-admission.js';
+import { reviewCategoryKindId } from '../shared/protocol.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
 import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
 import { evaluationRewriteKindDefinition } from './evaluation/evaluation-rewrite-kind.js';
@@ -5242,7 +5243,10 @@ export class EditorialStore {
   }
 
   #taskMaterialOffers(bookId: string, surface: '审阅' | '评估' = '审阅'): NonNullable<ReviewWorkspaceProjection['materials']> {
-    const live = this.#baselineAnalysis.launch.live !== null;
+    const launch = this.#baselineAnalysis.launch;
+    const kinds = surface === '评估' ? [INITIAL_EVALUATION_KIND, READERS_REPORT_KIND]
+      : BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.filter((entry) => entry.executor === 'review-category-contract').map((entry) => reviewCategoryKindId(entry.categoryId));
+    const live = launch.live !== null && !kinds.some((kind) => liveMaterialRule(launch.policy, kind) !== null);
     const indexed = this.#libraryCall(() => this.#libraryMaterials.referable(bookId)).flatMap((item) => {
       try {
         const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
@@ -5291,7 +5295,7 @@ export class EditorialStore {
     requireStore(Array.isArray(materialIds) && materialIds.length <= MAX_WRITING_MATERIALS && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) && new Set(materialIds).size === materialIds.length,
       'TASK_MATERIALS_INVALID', '请选择不重复的资料库资料，最多 4 份。');
     if (materialIds.length > 0) {
-      requireStore(this.#baselineAnalysis.launch.live === null, 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
+      requireStore(this.#baselineAnalysis.launch.live === null || this.#reviewCall(() => this.#reviewRuns.materialReferencesLiveAllowed(bookId, categoryIds)), 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
       requireStore(this.#reviewCall(() => this.#reviewRuns.materialReferencesAllowed(bookId, categoryIds)),
         'REVIEW_MATERIAL_CATEGORY_REQUIRED', REVIEW_MATERIAL_CATEGORY_REQUIRED);
     }
@@ -5491,7 +5495,7 @@ export class EditorialStore {
           }),
         },
       }));
-      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(latest.ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(latest.ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null && liveMaterialRule(this.#baselineAnalysis.launch.policy, READERS_REPORT_KIND) === null), this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     if (input.kind === 'evaluation-rewrite') {
       // 按我的评分重写评语 (Issue #429, S81b2): the rewrite kind's latest Task, on the ledger of the contract its plan froze.
@@ -5540,7 +5544,7 @@ export class EditorialStore {
       // The profile the Task froze (Issue #427), never the house's current one, beside the references its plan froze (#428).
       const profile = this.#initialProfileForTask(projection.taskIntent.taskIntentId);
       const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
-      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null && liveMaterialRule(this.#baselineAnalysis.launch.policy, INITIAL_EVALUATION_KIND) === null), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
@@ -6009,11 +6013,11 @@ export class EditorialStore {
   #requireLedgerKindScope(kind: LedgerTaskKind, bookId: string, taskIntentId: string): void {
     switch (kind) {
       case 'initial-evaluation':
-        this.#requireEvaluationMaterialScope(this.#evaluationMaterialPlan(taskIntentId) !== null);
+        this.#requireEvaluationMaterialScope(this.#evaluationMaterialPlan(taskIntentId) !== null, INITIAL_EVALUATION_KIND);
         this.#requireInitialEvaluationScope();
         return;
       case 'readers-report':
-        this.#requireEvaluationMaterialScope(this.#evaluationMaterialPlan(taskIntentId) !== null);
+        this.#requireEvaluationMaterialScope(this.#evaluationMaterialPlan(taskIntentId) !== null, READERS_REPORT_KIND);
         this.#requireReadersReportScope();
         return;
       case 'evaluation-rewrite':
@@ -8883,7 +8887,7 @@ export class EditorialStore {
    * goal is the kind's own fixed text. The preparation is a cooperative job; its plan opens in the Task Drawer.
    */
   createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = []): AnalysisPreparationResult<InitialEvaluationProjection> {
-    this.#requireEvaluationMaterialScope(materialIds.length > 0);
+    this.#requireEvaluationMaterialScope(materialIds.length > 0, INITIAL_EVALUATION_KIND);
     this.#requireInitialEvaluationScope();
     const current = this.inspectInitialEvaluation(bookId);
     // One reading of the house profile gives both the contract the Task is prepared under and the snapshot it keeps (Issue #427).
@@ -8937,11 +8941,11 @@ export class EditorialStore {
   }
 
   /**
-   * A plan that lists 资料库 materials stays provider-free (Issue #429, wave 2): no rule of the selected policy names frozen
-   * material, so under a live scope it is refused before it is prepared or started.
+   * Material-bearing evaluation requires the same kind's selected rule to admit frozen material.
    */
-  #requireEvaluationMaterialScope(hasReferences: boolean): void {
-    if (hasReferences && this.#baselineAnalysis.launch.live !== null) throw new StoreError('TASK_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
+  #requireEvaluationMaterialScope(hasReferences: boolean, kind: string): void {
+    const launch = this.#baselineAnalysis.launch;
+    if (hasReferences && launch.live !== null && liveMaterialRule(launch.policy, kind) === null) throw new StoreError('TASK_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
   }
 
   #requireEvaluationMaterialReadings(ledger: BaselineAnalysisStore, bookId: string): void {
@@ -9207,7 +9211,7 @@ export class EditorialStore {
    * 定稿, or once the template has its draft document. Its plan opens in the Task Drawer.
    */
   createReadersReportPreparationWork(bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = []): AnalysisPreparationResult<ReadersReportProjection> {
-    this.#requireEvaluationMaterialScope(materialIds.length > 0);
+    this.#requireEvaluationMaterialScope(materialIds.length > 0, READERS_REPORT_KIND);
     this.#requireReadersReportScope();
     requireStore(UUID_PATTERN.test(bookId) && READERS_REPORT_TEMPLATES.includes(template), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
     const basis = this.#evaluationCall(() => this.#evaluations.latestFinalized(bookId));
@@ -9454,9 +9458,10 @@ export class EditorialStore {
    * The writing ledger of one frozen contract — a house type, the editor's words and one reference set — made when first asked
    * for and kept while it prepares, as 审稿意见's is. It takes the launch the baseline ledger was bound to.
    */
-  #writingLedger(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES): BaselineAnalysisStore {
-    const definition = this.#analysisCall(() => writingKindDefinition(input, rules));
-    return this.#writingLedgers.obtain(definition.promptContractDigest, () => {
+  #writingLedger(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES, sources?: ReadonlyArray<TaskMaterialSource>): BaselineAnalysisStore {
+    const definition = this.#analysisCall(() => writingKindDefinition(input, rules, sources));
+    const key = sources === undefined ? definition.promptContractDigest : `${definition.promptContractDigest}:${canonicalJson(sources)}`;
+    return this.#writingLedgers.obtain(key, () => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
       return ledger;
@@ -9471,7 +9476,7 @@ export class EditorialStore {
   #writingLedgerOf(task: StoredWritingTask): BaselineAnalysisStore {
     // A Task recorded under `/1` is run and judged under `/1` (#704 P2-2).
     const material = task.materials.find((entry) => entry.refusal !== null)?.refusal ?? null;
-    if (task.exemplarsReadable && material === null) return this.#writingLedger(task.input, task.copyRules);
+    if (task.exemplarsReadable && material === null) return this.#writingLedger(task.input, task.copyRules, task.materials.length === 0 ? undefined : task.materials.map((entry) => entry.source));
     // …and one whose 资料库 item no longer reads at its pinned build refuses as one whose 范例 is gone does (Issue #428).
     const moved = task.exemplarsReadable && material !== null ? material : { code: 'WRITING_EXEMPLAR_MOVED', message: WRITING_EXEMPLAR_MOVED };
     const definition = this.#analysisCall(() => writingRecordedKindDefinition(task.input, task.promptContractSha256, task.copyRules, moved));
@@ -9539,11 +9544,12 @@ export class EditorialStore {
   }
 
   /**
-   * Reference-bearing live writing awaits wave 3's successor policy; retain its precise refusal before kind admission.
+   * Preserve the precise predecessor refusal unless the writing rule explicitly admits frozen material.
    */
   #requireWritingMaterialScope(listsMaterials: boolean): void {
     this.#assertAvailable();
-    if (listsMaterials && this.#baselineAnalysis.launch.live !== null) throw new StoreError('WRITING_UNAVAILABLE', WRITING_MATERIAL_LIVE_UNAVAILABLE);
+    const launch = this.#baselineAnalysis.launch;
+    if (listsMaterials && launch.live !== null && liveMaterialRule(launch.policy, WRITING_KIND) === null) throw new StoreError('WRITING_UNAVAILABLE', WRITING_MATERIAL_LIVE_UNAVAILABLE);
   }
 
   /**
@@ -9613,10 +9619,11 @@ export class EditorialStore {
   /**
    * 新建文档 · 写作任务's 资料库 row (Issue #428): every item this Book's Tasks may list under 允许参考 whose index extracted text,
    * the latest arrival first and at most {@link MAX_WRITING_MATERIAL_OFFERS} of them, each with whether it may be ticked — an
-   * item longer than one may be is shown, disabled, with why — and under a live scope none, with why.
+   * item longer than one may be is shown, disabled, with why. Live offers require the selected writing rule's material terms.
    */
   #writingMaterialOffer(bookId: string): WritingTaskProjection['references']['materials'] {
-    const live = this.#baselineAnalysis.launch.live !== null;
+    const launch = this.#baselineAnalysis.launch;
+    const live = launch.live !== null && liveMaterialRule(launch.policy, WRITING_KIND) === null;
     const indexed: Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number }> = [];
     try {
       for (const entry of this.#libraryCall(() => this.#libraryMaterials.referable(bookId))) {
@@ -9815,7 +9822,7 @@ export class EditorialStore {
     };
     // `/2` for every Task prepared by the product; the suites may prepare one under `/1`, as software before #698 did (#707).
     const copyRules = this.#control.writingCopyRules ?? WRITING_COPY_RULES;
-    const ledger = this.#writingLedger(input, copyRules);
+    const ledger = this.#writingLedger(input, copyRules, materials.length === 0 ? undefined : materials.map((material) => material.source));
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again';
     // The pins are no words of the contract (Issue #428): a prepared Task that froze other builds of the items — one whose build is
     // gone, say — is never revised in place to these, since its row would keep its own; 改计划重做 makes a Task of its own.
@@ -16462,6 +16469,8 @@ export class EditorialStore {
   /** Verify the consuming ledger's frozen material boundary; no material paragraphs are paged or composed here. */
   materialGuard(runRecordId: string, ledger: BaselineAnalysisStore): MaterialGuardRefusal | null {
     this.#assertAvailable();
+    const deliverable = this.#reviewRuns.deliverableGuard(runRecordId, ledger.launch.live !== null);
+    if (deliverable !== null) return deliverable;
     const intent = this.#authority.prepare('SELECT t.task_intent_id, t.book_id FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     requireStore(intent !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
     const boundary = ledger.definition.kind === 'writing'
