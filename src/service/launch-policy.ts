@@ -743,7 +743,7 @@ const PRODUCTION_SUGGESTION_TRANSMISSIONS = {
 } as const;
 const PRODUCTION_SUGGESTION_OUTPUT = { suggestionsOnly: true, appliesManuscriptChange: false } as const;
 const PRODUCTION_ADMITTED_INPUTS = 'user-owned-manuscripts-and-house-knowledge';
-/** The identifiers Provider Processing v6 introduced for the editor's own unpublished material; the Egress Gate does not take them as binding categories. */
+/** The identifiers Provider Processing v6 introduced for the editor's own unpublished material. */
 const PRODUCTION_UNPUBLISHED_CLASSES = ['unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content'] as const;
 
 /** Whether `actual` is exactly `expected`: the same keys and, key by key, the same primitive or equal string list. */
@@ -775,7 +775,7 @@ interface OrdinaryProductionRuleReading {
   readonly taskKinds: readonly string[];
   /** Every category the rule names, as the policy writes them. */
   readonly policyCategories: readonly string[];
-  /** The categories the Egress Gate recognises, which the projection carries (the policy's unpublished classes are not among them). */
+  /** All policy categories, including the unpublished classes, carried to the production Egress Gate. */
   readonly outboundDataCategories: readonly OutboundDataCategoryId[];
   readonly crossUnitSynthesisAllowed: boolean;
   readonly blocks: {
@@ -795,7 +795,8 @@ function productionReading(
   blocks: OrdinaryProductionRuleReading['blocks'],
   crossUnitSynthesisAllowed = false,
 ): OrdinaryProductionRuleReading {
-  return { modelRole, taskKinds, policyCategories: [...gateCategories, ...PRODUCTION_UNPUBLISHED_CLASSES], outboundDataCategories: gateCategories, crossUnitSynthesisAllowed, blocks };
+  const policyCategories = [...gateCategories, ...PRODUCTION_UNPUBLISHED_CLASSES];
+  return { modelRole, taskKinds, policyCategories, outboundDataCategories: policyCategories, crossUnitSynthesisAllowed, blocks };
 }
 
 const RUN_BLOCKS = { authorityOrigin: PRODUCTION_RUN_ORIGIN, authorizationPreconditions: PRODUCTION_RUN_PRECONDITIONS, providerAccountLimit: PRODUCTION_RUN_ACCOUNT_LIMIT, output: null } as const;

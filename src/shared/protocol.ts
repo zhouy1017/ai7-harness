@@ -2092,7 +2092,7 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
  * Processing v11 for writing, evaluation and conflict regeneration (frozen inputs and manuscript excerpts); the last two,
  * `frozen-material-reference-excerpt` and `editorial-deliverable-excerpt`, arrive with v12 for Material-Reference-bearing
  * review, writing and evaluation and for cross-deliverable consistency. A declaration only: the gate's logic is the consuming
- * slices' to change.
+ * slices' to change. Ordinary production v13 also carries the three unpublished classes from its policy rules.
  */
 export type OutboundDataCategoryId =
   | 'public-or-synthetic'
@@ -2102,7 +2102,10 @@ export type OutboundDataCategoryId =
   | 'book-metadata-and-synopsis'
   | 'manuscript-conflict-region-excerpt'
   | 'frozen-material-reference-excerpt'
-  | 'editorial-deliverable-excerpt';
+  | 'editorial-deliverable-excerpt'
+  | 'unpublished-metadata'
+  | 'unpublished-excerpts'
+  | 'unpublished-full-content';
 
 /**
  * One allow rule of the selected Provider Processing policy, as the launch verified it from the pinned bytes: the task kinds it
