@@ -70,6 +70,7 @@ import {
   type TaskPlanKind,
 } from '../shared/protocol.js';
 import { SERIES_EXCLUSION_ACTIONS, SERIES_EXCLUSION_TARGET_KINDS, type SeriesExclusionAction, type SeriesExclusionTargetKind } from '../shared/protocol.js';
+import { BACKGROUND_ANALYSIS_CEILING_MAX } from '../shared/protocol.js';
 import { CONFLICT_RESOLUTIONS, type ConflictResolution } from '../shared/conflict-units.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1319,9 +1320,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'enrollBackgroundAnalysis': {
-      const input = requireInput(value.input, ['bookId', 'disclosureDigest', 'startingPoint'], tentativeId);
+      // The scope it covers and the tokens ceiling, which 登记 requires (Issue #864).
+      const input = requireInput(value.input, ['bookId', 'disclosureDigest', 'startingPoint', 'scope', 'ceilingTokens'], tentativeId);
+      const scope = requireInput(input.scope, ['kind', 'seriesId'], tentativeId);
       if (!validUuid(input.bookId) || !isBoundedString(input.disclosureDigest, 64) || !HEX_DIGEST_PATTERN.test(input.disclosureDigest) ||
-          (input.startingPoint !== 'prospective' && input.startingPoint !== 'backfill')) {
+          (input.startingPoint !== 'prospective' && input.startingPoint !== 'backfill') ||
+          !(scope.kind === 'series' ? validUuid(scope.seriesId) : (scope.kind === 'book' || scope.kind === 'all-books') && scope.seriesId === null) ||
+          typeof input.ceilingTokens !== 'number' || !Number.isSafeInteger(input.ceilingTokens) || input.ceilingTokens < 1 ||
+          input.ceilingTokens > BACKGROUND_ANALYSIS_CEILING_MAX) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -1329,6 +1335,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'revokeBackgroundAnalysisEnrollment': {
       const input = requireInput(value.input, ['bookId', 'enrollmentId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.enrollmentId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // `暂停` / `续行` (Issue #864): the Enrollment and which of the two.
+    case 'holdBackgroundAnalysisEnrollment': {
+      const input = requireInput(value.input, ['bookId', 'enrollmentId', 'hold'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.enrollmentId) || (input.hold !== 'pause' && input.hold !== 'resume')) throw new ProtocolError(tentativeId);
       break;
     }
     // 联网后开始任务 for every other kind with a plan (Issue #760, S74c): the kind, its Task — a Task Intent or a Review Run —

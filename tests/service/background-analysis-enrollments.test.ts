@@ -13,9 +13,9 @@ import {
   BACKGROUND_ATTEMPTED,
   BACKGROUND_CHECKPOINT_PREEMPTED,
   BACKGROUND_CURRENT,
-  BACKGROUND_DEVELOPER_LIVE,
+  BACKGROUND_NO_RULE,
   BACKGROUND_EDITOR_TASK,
-  BACKGROUND_ENROLL_DEVELOPER_LIVE,
+  BACKGROUND_ENROLL_NO_RULE,
   BACKGROUND_ENROLL_NO_ROUTE,
   BACKGROUND_ENROLL_NO_SHARE,
   BACKGROUND_NOT_ENROLLED,
@@ -202,7 +202,7 @@ function edit(store: EditorialStore, book: Imported, text: string): void {
 function enroll(store: EditorialStore, bookId: string, startingPoint: 'prospective' | 'backfill') {
   const shown = store.inspectBackgroundAnalysisEnrollment(bookId, runtime());
   expect(shown.offer.canEnroll).toBe(true);
-  return store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, startingPoint, runtime());
+  return store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, startingPoint, { kind: 'book', seriesId: null }, 1_000_000, runtime());
 }
 
 const LIVE: LaunchBinding = {
@@ -238,21 +238,22 @@ describe('后台分析登记 over the real store on exact sample1', () => {
         .toMatchObject({ canEnroll: false, reason: BACKGROUND_ENROLL_NO_ROUTE, disclosureDigest: null });
       expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime({ capacity: 1 })).offer)
         .toMatchObject({ canEnroll: false, reason: BACKGROUND_ENROLL_NO_SHARE, disclosureDigest: null });
-      expect(await refusal(() => store.enrollBackgroundAnalysis(book.bookId, shown.offer.disclosureDigest!, 'prospective', runtime({ routeExecutable: false }))))
+      expect(await refusal(() => store.enrollBackgroundAnalysis(book.bookId, shown.offer.disclosureDigest!, 'prospective', { kind: 'book', seriesId: null }, 1_000_000, runtime({ routeExecutable: false }))))
         .toBe('BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE');
 
       // A confirmation of a disclosure other than the one on show is refused, and records nothing.
-      expect(await refusal(() => store.enrollBackgroundAnalysis(book.bookId, 'f'.repeat(64), 'prospective', runtime()))).toBe('BACKGROUND_ANALYSIS_ENROLLMENT_STALE');
-      const enrolled = store.enrollBackgroundAnalysis(book.bookId, shown.offer.disclosureDigest!, 'prospective', runtime());
+      expect(await refusal(() => store.enrollBackgroundAnalysis(book.bookId, 'f'.repeat(64), 'prospective', { kind: 'book', seriesId: null }, 1_000_000, runtime()))).toBe('BACKGROUND_ANALYSIS_ENROLLMENT_STALE');
+      const enrolled = store.enrollBackgroundAnalysis(book.bookId, shown.offer.disclosureDigest!, 'prospective', { kind: 'book', seriesId: null }, 1_000_000, runtime());
       expect([enrolled.state, enrolled.stateLabel, enrolled.enrollment?.ordinal, enrolled.enrollment?.name, enrolled.enrollment?.startingPoint])
         .toEqual(['active', '已登记', 1, '后台分析登记 · 第 1 版', 'prospective']);
-      expect(enrolled.enrollment!.binds).toEqual(shown.offer.binds);
+      // What it binds is what the disclosure listed, the budget now the ceiling the editor set (Issue #864).
+      expect(enrolled.enrollment!.binds).toEqual(shown.offer.binds.map((row) => (row.label === '预算上限' ? { label: row.label, value: '任务运行预算上限：1,000,000 tokens' } : row)));
       expect([enrolled.history.map((entry) => [entry.state, entry.ordinal]), enrolled.historyCount]).toEqual([[['active', 1]], 1]);
       expect([enrolled.offer.canEnroll, enrolled.revoke.canRevoke]).toEqual([false, true]);
       // The same confirmation twice answers as once; another one while it is in force is refused.
-      expect(store.enrollBackgroundAnalysis(book.bookId, shown.offer.disclosureDigest!, 'prospective', runtime()).enrollment!.enrollmentVersionId)
+      expect(store.enrollBackgroundAnalysis(book.bookId, shown.offer.disclosureDigest!, 'prospective', { kind: 'book', seriesId: null }, 1_000_000, runtime()).enrollment!.enrollmentVersionId)
         .toBe(enrolled.enrollment!.enrollmentVersionId);
-      expect(await refusal(() => store.enrollBackgroundAnalysis(book.bookId, shown.offer.disclosureDigest!, 'backfill', runtime())))
+      expect(await refusal(() => store.enrollBackgroundAnalysis(book.bookId, shown.offer.disclosureDigest!, 'backfill', { kind: 'book', seriesId: null }, 1_000_000, runtime())))
         .toBe('BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE');
       // Prospective, over a current analysis: nothing to do.
       expect(enrolled.next).toEqual({ kind: 'none', reason: BACKGROUND_CURRENT });
@@ -400,7 +401,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       enroll(store, two.bookId, 'backfill');
       // The first Book's background Run is started and left waiting for its place, as one admitted and not yet finished holds it.
       const dispatcher = dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS }, {
-        execution: { busy: false, routeExecutable: true, capacity: 2, admitOrQueue: () => 'queued' },
+        execution: { full: false, routeExecutable: true, capacity: 2, admitOrQueue: () => 'queued' },
       });
       dispatcher.nudge();
       await dispatcher.settled();
@@ -425,12 +426,12 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       enroll(store, book.bookId, 'prospective');
       edit(store, book, '〔改动〕');
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime({ routeExecutable: false })).decision).toEqual({ kind: 'stopped', reason: BACKGROUND_NO_ROUTE });
-      // Developer-live: neither an Enrollment nor a start (Provider Processing v10: backgroundAnalysisEnrollmentAllowed false).
+      // Developer-live under a policy with no enrolled-background rule (Provider Processing v12; Issue #864): neither an Enrollment nor a start.
       store.baselineAnalysisLedger.bindLaunch(LIVE);
       const live = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime());
-      expect(live.next).toEqual({ kind: 'stopped', reason: BACKGROUND_DEVELOPER_LIVE });
+      expect(live.next).toEqual({ kind: 'stopped', reason: BACKGROUND_NO_RULE });
       expect(store.startEnrolledBaselineAnalysis(book.bookId, randomUUID(), 'a'.repeat(64), live.enrollment!.enrollmentVersionId, 'sync-current', runtime()))
-        .toEqual({ dispatchRunRecordId: null, reason: BACKGROUND_DEVELOPER_LIVE });
+        .toEqual({ dispatchRunRecordId: null, reason: BACKGROUND_NO_RULE });
       store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
 
       // A plan the editor prepared and has not started is theirs: the Enrollment waits, and never starts it.
@@ -450,7 +451,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       edit(store, book, '〔再改动〕');
       const dispatcher = dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS }, {
         // A governor whose places are free for the decision, but which leaves the start waiting for one.
-        execution: { busy: false, routeExecutable: true, capacity: 2, admitOrQueue: () => 'queued' },
+        execution: { full: false, routeExecutable: true, capacity: 2, admitOrQueue: () => 'queued' },
       });
       dispatcher.nudge();
       await dispatcher.settled();
@@ -842,7 +843,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
         .toEqual(['suspended', '待你确认', { kind: 'stopped', reason: BACKGROUND_SUSPENDED }, true, true]);
       expect(read.history.map((entry) => entry.state)).toEqual(['suspended', 'active']);
       // Confirming it is a new decision of the editor's: the next version.
-      const confirmed = replaced.enrollBackgroundAnalysis(bookId, read.offer.disclosureDigest!, 'prospective', runtime());
+      const confirmed = replaced.enrollBackgroundAnalysis(bookId, read.offer.disclosureDigest!, 'prospective', { kind: 'book', seriesId: null }, 1_000_000, runtime());
       expect([confirmed.state, confirmed.enrollment!.ordinal]).toEqual(['active', 2]);
       replaced.markCleanShutdown();
     } finally {
@@ -850,7 +851,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
     }
   }, 300_000);
 
-  it('refuses to enroll under developer-live, keeps its ledger append-only, and stays the house\'s when Books merge', async () => {
+  it('refuses to enroll under a developer-live policy with no background rule, keeps its ledger append-only, and stays the house\'s when Books merge', async () => {
     const store = await openWithRoute();
     const owner = ownerOf(store);
     try {
@@ -860,8 +861,8 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       const other = await importedBook(store, 'L2 sample1 开发者实时登记');
       store.baselineAnalysisLedger.bindLaunch(LIVE);
       const shown = store.inspectBackgroundAnalysisEnrollment(other.bookId, runtime());
-      expect([shown.offer.canEnroll, shown.offer.reason, shown.offer.disclosureDigest]).toEqual([false, BACKGROUND_ENROLL_DEVELOPER_LIVE, null]);
-      expect(await refusal(() => store.enrollBackgroundAnalysis(other.bookId, 'a'.repeat(64), 'backfill', runtime()))).toBe('BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE');
+      expect([shown.offer.canEnroll, shown.offer.reason, shown.offer.disclosureDigest]).toEqual([false, BACKGROUND_ENROLL_NO_RULE, null]);
+      expect(await refusal(() => store.enrollBackgroundAnalysis(other.bookId, 'a'.repeat(64), 'backfill', { kind: 'book', seriesId: null }, 1_000_000, runtime()))).toBe('BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE');
       store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
       store.markCleanShutdown();
     } finally {
@@ -882,7 +883,8 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       const [active] = ledger.active();
       expect(active).toBeDefined();
       const input = { bookId: active!.bookId, startingPoint: active!.version.startingPoint, binding: active!.version.binding,
-        enrolledAt: active!.version.enrolledAt, disclosureDigest: active!.version.disclosureDigest };
+        enrolledAt: active!.version.enrolledAt, disclosureDigest: active!.version.disclosureDigest,
+        ceiling: active!.version.ceiling!, share: active!.version.share!, scope: active!.version.scope };
       expect(ledger.enroll(input).version.enrollmentVersionId).toBe(active!.version.enrollmentVersionId);
       expect(() => ledger.enroll({ ...input, disclosureDigest: 'b'.repeat(64) })).toThrow(/已经登记了后台分析/u);
       expect(() => ledger.enroll({ ...input, startingPoint: 'prospective' })).toThrow(/已经登记了后台分析/u);
@@ -1074,7 +1076,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       const secondVersion = enroll(store, second.bookId, 'backfill').enrollment!.enrollmentVersionId;
       let filled = false;
       const dispatcher = dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS }, {
-        execution: { busy: false, routeExecutable: true, capacity: 2, admitOrQueue: () => 'queued' },
+        execution: { full: false, routeExecutable: true, capacity: 2, admitOrQueue: () => 'queued' },
         yieldStep: async () => {
           if (filled) return;
           filled = true;

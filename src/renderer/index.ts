@@ -94,7 +94,7 @@ import { LEARNING_AUDIT_HEADING, LEARNING_AUDIT_STATUS } from './learning-audit-
 import { mountEvaluationCalibration } from './evaluation-calibration.js';
 import { mountBookSeries, mountSeries, mountSeriesList } from './series.js';
 import { mountBackgroundAnalysis } from './background-analysis.js';
-import { BACKGROUND_PREPARED_PLAN_NOTE } from './background-analysis-labels.js';
+import { BACKGROUND_PREPARED_PLAN_NOTE, BACKGROUND_REPORT_HEADING } from './background-analysis-labels.js';
 import {
   DATA_VERSION_DATA,
   DATA_VERSION_HEADING,
@@ -3308,6 +3308,8 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
     element('h5', undefined, '失败'), failures,
     element('h5', undefined, '运行中的调整'), adaptations,
     element('h5', undefined, '如果重做'), redone,
+    // A Run a 后台分析登记 started names the Enrollment, its share and how it ended against its ceiling (Issue #864).
+    ...(report.background === undefined ? [] : [element('h5', undefined, BACKGROUND_REPORT_HEADING), backgroundReportList(report.background)]),
     technicalDetails(
       'analysis-facts',
       element('dt', undefined, '运行报告'), element('dd', 'technical-identity', `${report.schema} · 摘要 ${report.reportDigest} · 账目摘要 ${report.accountingDigest}`),
@@ -3321,6 +3323,13 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
     ),
   );
   return disclosure;
+}
+
+/** The Run Report's lines for a Run a 后台分析登记 started (Issue #864): counts and words only. */
+function backgroundReportList(lines: ReadonlyArray<string>): HTMLElement {
+  const list = element('ul', 'analysis-list analysis-run-report-background');
+  for (const line of lines) list.append(element('li', undefined, line));
+  return list;
 }
 
 /** The report where a Run has one, and the exact reason in the reader's language where it has none. */

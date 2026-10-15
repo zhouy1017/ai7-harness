@@ -80,11 +80,12 @@ function harness(decisions: Readonly<Record<string, BackgroundAnalysisDecision>>
     },
   } as unknown as BackgroundAnalysisDispatcherDependencies['store'];
   const execution = {
-    busy: options.busy ?? false,
+    full: options.busy ?? false,
     routeExecutable: true,
     capacity: 2,
-    admitOrQueue: (runRecordId: string) => {
-      calls.admitted.push(runRecordId);
+    admitOrQueue: (runRecordId: string, _ledger?: unknown, origin?: string) => {
+      // The dispatcher's start always asks for the background place (Issue #864).
+      calls.admitted.push(origin === 'background' ? runRecordId : `${runRecordId}:${origin ?? 'foreground'}`);
       return 'admitted' as const;
     },
   };
@@ -112,7 +113,7 @@ describe('the 后台分析登记 dispatcher', () => {
     expect(calls.admitted).toEqual(['run-a', 'run-c']);
   });
 
-  it('reads a busy governor as no free place, and an editor with no jobs as idle', () => {
+  it('reads a governor with every place taken as no free place, and an editor with no jobs as idle', () => {
     const { store, execution } = harness({}, { busy: true });
     expect(new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY }).runtime())
       .toMatchObject({ placeFree: false, editorWorkBusy: false });

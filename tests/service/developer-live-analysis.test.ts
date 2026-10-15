@@ -419,7 +419,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(store.inspectBaselineAnalysis(bookId).authorization).toBeNull();
     expect(refusalCode(() => store.baselineAnalysisLedger.prepare({ phase: 'start', bookId,
       goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, launchPolicy,
-      background: { enrollmentVersionId: randomUUID() },
+      background: { enrollmentVersionId: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1_000 } },
     }))).toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
   });
   it('freezes the selected plan and transmits the full declared chain through the gate', async () => {

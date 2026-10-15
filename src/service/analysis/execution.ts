@@ -134,11 +134,15 @@ function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
 }
 
 /**
- * How many Runs the governor executes at once (Issue #49, S14; ADR 0021): two under development-ci. Under
- * developer-live the human-attended scope and its live-once Provider testing (ADR 0065, ADR 0067) keep one Run in
- * flight, so a launch there holds one.
+ * How many Runs the governor executes at once (Issue #49, S14; ADR 0021): two. Under development-ci either place takes any
+ * Run. Under a live launch — developer-live and ordinary production — one place is the editor's and the other a 后台分析登记's
+ * (Issue #864, the Commander's governor correction): the editor's Runs still execute one at a time, as the human-attended scope
+ * and its live-once Provider testing (ADR 0065, ADR 0067) have always held them, and the second place takes only a Run an
+ * Enrollment started (`backgroundAnalysisShare`: capacity − 1).
  */
 export const EXECUTION_RUN_CAPACITY = 2;
+/** The places the editor's Runs may hold under a live launch: one, the other being background analysis's (Issue #864). */
+const LIVE_FOREGROUND_PLACES = 1;
 /** A bounded waiting set; excess starts are recorded as refused before dispatch, never silently dropped. */
 export const EXECUTION_WAITING_CAPACITY = 64;
 export { remapReusedResult } from './reused-result.js';
@@ -148,7 +152,7 @@ export interface ExecutionOwnerDependencies {
   readonly waitingCapacity?: number;
   /** The baseline kind's ledger: the one a dispatch that names no ledger runs against. */
   readonly ledger: BaselineAnalysisStore;
-  /** How many Runs execute at once; `EXECUTION_RUN_CAPACITY` under development-ci and one under developer-live when absent. */
+  /** How many Runs execute at once; `EXECUTION_RUN_CAPACITY` when absent, and exactly that under a live launch (Issue #864). */
   readonly capacity?: number;
   readonly launchPolicy: LaunchPolicyProjection;
   readonly fixture: ResolvedModelFixture | null;
@@ -464,6 +468,8 @@ export class BaselineAnalysisExecutionOwner {
   readonly #waitingCapacity: number;
   /** The Runs executing now, by Run Record (Issue #49, S14): never more than `#capacity`. */
   readonly #active = new Map<string, ActiveRun>();
+  /** Of those, the Runs a 后台分析登记 started (Issue #864): under a live launch the editor's Runs never take their place. */
+  readonly #backgroundActive = new Set<string>();
   /**
    * The Runs authorized and waiting on the governor (Issue #49, S14; CONC-007), in the order they were started: each is
    * admitted, in its turn, as a place frees. Their ledger records them `authorized` until then, so a service that
@@ -493,8 +499,8 @@ export class BaselineAnalysisExecutionOwner {
     this.#deps = deps;
     // Under ordinary production the broker never reads a development Credential Reference (Issue #811).
     this.#broker = new CredentialBroker(deps.secretResolver, { developmentReferences: production !== null ? 'refused' : 'admitted' });
-    const capacity = deps.capacity ?? (live !== null ? 1 : EXECUTION_RUN_CAPACITY);
-    if (!Number.isSafeInteger(capacity) || capacity < 1 || (live !== null && capacity !== 1)) {
+    const capacity = deps.capacity ?? EXECUTION_RUN_CAPACITY;
+    if (!Number.isSafeInteger(capacity) || capacity < 1 || (live !== null && capacity !== EXECUTION_RUN_CAPACITY)) {
       throw new ExecutionAdmissionError('EXECUTION_CAPACITY_INVALID', '运行名额设置无效。');
     }
     this.#capacity = capacity;
@@ -532,10 +538,16 @@ export class BaselineAnalysisExecutionOwner {
   }
 
   /**
-   * Whether the governor has no place now (Issue #49, S14): as many Runs execute as it holds. A start then waits in
-   * its queue (`admitOrQueue`); a quick start, a Review Run's approval and a 续行 wait for a place with their reasons.
+   * Whether the governor has no place for a Run the editor starts now (Issue #49, S14): as many Runs execute as it holds, or —
+   * under a live launch — the editor's one place is taken (Issue #864). A start then waits in its queue (`admitOrQueue`); a quick
+   * start, a Review Run's approval and a 续行 wait for a place with their reasons.
    */
   get busy(): boolean {
+    return this.full || (this.#live() !== null && this.#active.size - this.#backgroundActive.size >= LIVE_FOREGROUND_PLACES);
+  }
+
+  /** Whether every place is taken (Issue #864): a Run a 后台分析登记 starts needs a free place, within its share. */
+  get full(): boolean {
     return this.#active.size >= this.#capacity;
   }
 
@@ -559,12 +571,17 @@ export class BaselineAnalysisExecutionOwner {
    * A start the editor just authorized (Issue #49, S14; CONC-007): admitted at once while the governor has a place and
    * no Run waits before it, else queued — `authorized` in its ledger, read as 等待运行名额 — and admitted in its turn.
    */
-  admitOrQueue(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'admitted' | 'queued' {
+  admitOrQueue(
+    runRecordId: string,
+    ledger: BaselineAnalysisStore = this.#deps.ledger,
+    /** The 后台分析登记 dispatcher's start takes the background place (Issue #864); its plan's origin is checked again at admission. */
+    origin: 'foreground' | 'background' = 'foreground',
+  ): 'admitted' | 'queued' {
     // AI7 is closing: the start stays `authorized`; restart recovery requires a fresh explicit start.
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active.has(runRecordId)) return 'admitted';
     if (this.#queued.some((entry) => entry.runRecordId === runRecordId)) return 'queued';
-    if (!this.busy && this.#queued.length === 0) {
+    if (origin === 'background' ? !this.full : !this.busy && this.#queued.length === 0) {
       this.#admitInTurn(runRecordId, ledger);
       return 'admitted';
     }
@@ -621,7 +638,9 @@ export class BaselineAnalysisExecutionOwner {
    */
   #requireStartable(runRecordId: string, ledger: BaselineAnalysisStore): void {
     const live = this.#requireLaunchOf(ledger);
-    this.#requireTransmittable(ledger.loadExecutionPlan(runRecordId), live);
+    const facts = ledger.loadExecutionPlan(runRecordId);
+    this.#requireTransmittable(facts, live);
+    this.#requireOrigin(facts, live, ledger, this.#policy());
     if (ledger.currentRunState(runRecordId) !== 'authorized') {
       throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有刚记录授权的运行可以进入调度。');
     }
@@ -653,6 +672,23 @@ export class BaselineAnalysisExecutionOwner {
     // Ordinary production sends the editor's own manuscript (Issue #811); only developer-live is held to the Public SampleBooks.
     if (live !== null && !isOrdinaryProductionRuntime(live) && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) {
       throw new ExecutionAdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在 developer-live 可传输的 Public SampleBook 集合内；未发起任何传输。');
+    }
+  }
+
+  /**
+   * A Run a 后台分析登记 started (Issue #864) is admitted live only as the foreground kinds are admitted under their own rules:
+   * the baseline kind, under the selected policy's one enrolled-background rule (Provider Processing v14 developer-live, v15
+   * ordinary production), on that rule's exact route, model and credential slot. v12 and v13 have no such rule, so under them
+   * it is refused before anything is sent; development-ci's local route admits it as it admits every Run.
+   */
+  #requireOrigin(facts: ExecutionPlanFacts, live: LiveRuntime | null, ledger: BaselineAnalysisStore, policy: LaunchPolicyProjection): void {
+    if (facts.origin !== 'background-analysis-enrollment' || live === null) return;
+    const production = isOrdinaryProductionRuntime(live);
+    const rule = ledger.definition.kind !== BASELINE_ANALYSIS_KIND ? null
+      : liveKindRule(policy, BASELINE_ANALYSIS_KIND, [production ? 'unpublished-excerpts' : 'public-or-synthetic'], 'background');
+    const { route, model, credentialSlot } = routeFactsOf(facts, live);
+    if (rule === null || rule.route !== route || rule.model !== model || rule.credentialSlot !== credentialSlot) {
+      throw new ExecutionAdmissionError('EXECUTION_ORIGIN_NOT_ADMITTED', '当前策略没有准许后台分析登记开始的运行发送内容；什么都没有发送。');
     }
   }
 
@@ -708,10 +744,14 @@ export class BaselineAnalysisExecutionOwner {
   ): void {
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active.has(runRecordId)) throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '这个运行已经在执行。');
-    if (this.busy) throw new ExecutionAdmissionError('EXECUTION_BUSY', `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
+    if (this.full) throw new ExecutionAdmissionError('EXECUTION_BUSY', `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
     const live = this.#requireLaunchOf(ledger);
     const facts = ledger.loadExecutionPlan(runRecordId);
+    // The background place takes only a Run a 后台分析登记 started; the editor's take their own (Issue #864).
+    const background = facts.origin === 'background-analysis-enrollment';
+    if (!background && this.busy) throw new ExecutionAdmissionError('EXECUTION_BUSY', `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
     this.#requireTransmittable(facts, live);
+    this.#requireOrigin(facts, live, ledger, this.#policy());
     const state = ledger.currentRunState(runRecordId);
     const resuming = options.resume === true;
     // A Run waiting for the editor's answer (Issue #422, S76d) goes on as a continuation too, once the answer is there.
@@ -785,10 +825,14 @@ export class BaselineAnalysisExecutionOwner {
       done: Promise.resolve(),
     };
     this.#active.set(runRecordId, active);
+    if (background) this.#backgroundActive.add(runRecordId);
     active.done = this.#execute(active, facts, continuation).catch((error: unknown) => {
       this.#recordFailure(ledger, facts, error);
     }).finally(() => {
-      if (this.#active.get(runRecordId) === active) this.#active.delete(runRecordId);
+      if (this.#active.get(runRecordId) === active) {
+        this.#active.delete(runRecordId);
+        this.#backgroundActive.delete(runRecordId);
+      }
       this.#drain();
     });
   }
@@ -1138,7 +1182,10 @@ export class BaselineAnalysisExecutionOwner {
     const liveModelProfile: ProviderModelProfile = production === null ? OPENCODE_GO_V41_FLASH_PROFILE : productionModelProfile(route, model);
     // Under ordinary production the rule that admits the kind names the editor's unpublished words (Issue #811): the
     // baseline's own rule included, read for its categories as any other kind's is.
-    const productionRule = production === null ? null : admitted ?? liveKindRule(policy, BASELINE_ANALYSIS_KIND, ['unpublished-excerpts']);
+    // A Run a 后台分析登记 started is read under the enrolled-background rule, checked again here against the policy it executes under (Issue #864).
+    this.#requireOrigin(facts, live, ledger, policy);
+    const productionRule = production === null ? null : admitted ?? liveKindRule(policy, BASELINE_ANALYSIS_KIND, ['unpublished-excerpts'],
+      facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
     // The test item purpose is the Task mode, so a first baseline and each update mode number their
     // live calls separately and a repeated purpose can never collide with an unrelated test. A Task
     // without a plan is the kind's own whole first mode — `first-baseline` for the baseline kind.
