@@ -134,7 +134,7 @@ function renderExportFidelityRow(row: ExportFidelityRowProjection): HTMLElement 
  * export (Issue #416, S67b) draws each file's under a disclosure of its own, with the note said once for all of them.
  */
 export function renderExportFidelity(
-  reviewed: Pick<ManuscriptExportReviewProjection, 'fidelity' | 'degraded' | 'restoration' | 'restorationLine'>,
+  reviewed: Pick<ManuscriptExportReviewProjection, 'fidelity' | 'degraded' | 'restoration' | 'restorationLine' | 'retentionSummary'>,
   parts: { heading: boolean; degradedNote: boolean } = { heading: true, degradedNote: true },
 ): HTMLElement {
   const section = el('section', 'export-fidelity');
@@ -142,6 +142,7 @@ export function renderExportFidelity(
   section.dataset['exportRestoration'] = reviewed.restoration;
   if (parts.heading) section.append(el('h5', undefined, EXPORT_FIDELITY_HEADING));
   section.append(el('p', 'export-restoration-line', reviewed.restorationLine));
+  if (reviewed.retentionSummary !== null) section.append(el('p', 'export-retention-summary', reviewed.retentionSummary));
   const list = el('ol', 'export-fidelity-list');
   for (const row of exportShownRows(reviewed.fidelity)) list.append(renderExportFidelityRow(row));
   section.append(list);
@@ -470,6 +471,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
       el('p', 'export-outcome-detail', receipt.detail),
       el('p', 'export-receipt-meta', exportReceiptMeta(receipt, receipt.recordedAt === null ? null : localInstantLabel(receipt.recordedAt))),
     );
+    if (receipt.retentionSummary !== null) result.append(el('p', 'export-retention-summary', receipt.retentionSummary));
     const row = el('div', 'button-row');
     if (receipt.revealAvailable) row.append(actionButton('reveal', 'secondary', () => void reveal()));
     row.append(actionButton('close', 'quiet', () => close(false)));

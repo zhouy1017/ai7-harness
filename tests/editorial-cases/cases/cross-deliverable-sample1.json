@@ -1,0 +1,22 @@
+{
+  "schema": "ai7.editorial-case/1",
+  "id": "cross-deliverable-sample1",
+  "kind": "cross-deliverable",
+  "title": "跨交付物一致性 · sample1 与定稿新闻稿",
+  "manuscript": { "source": "sample1" },
+  "bookTitle": "sample1 跨交付物一致性",
+  "input": { "categories": ["cross-deliverable-consistency"], "scope": { "paragraph": 8 }, "deliverable": "sample1-news-release-nine" },
+  "fixture": "sample1-recorded-v41-review-cross-deliverable-consistency",
+  "measuredPass": null,
+  "replay": { "route": "developer-live", "modelQuestions": false },
+  "expectedConcerns": [
+    { "id": "x-age-mismatch", "category": "cross-deliverable-consistency", "paragraph": 8, "words": "六十五岁生日", "corrections": [], "concern": "新闻稿写“九十五岁”，书稿为“六十五岁”" }
+  ],
+  "falsePositiveChecks": [
+    { "id": "x-son-in-law-name", "paragraph": 8, "words": "女婿郑雄", "reason": "两处一致的人名不应被指为不一致" }
+  ],
+  "observations": {
+    "acceptance": "在所选段落指出与定稿新闻稿不一致的年龄，并标明两处出处。",
+    "rework": "漏报不一致，或指到所选范围之外。"
+  }
+}

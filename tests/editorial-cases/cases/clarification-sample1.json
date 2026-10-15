@@ -1,0 +1,22 @@
+{
+  "schema": "ai7.editorial-case/1",
+  "id": "clarification-sample1",
+  "kind": "clarification",
+  "title": "模型提问 · sample1 基线分析（指令明确与焦点含糊）",
+  "manuscript": { "source": "sample1" },
+  "bookTitle": "记录回放",
+  "input": { "fixtures": { "normal": "sample1-model-clarification-live-baseline", "ambiguous": "sample1-model-clarification-live-ambiguous" } },
+  "fixture": "sample1-model-clarification-live-ambiguous",
+  "measuredPass": null,
+  "replay": { "route": "deterministic" },
+  "expectedConcerns": [
+    { "id": "c-asks-when-ambiguous", "run": "ambiguous", "units": [1, 2, 3, 4, 5, 6, 7, 8], "concern": "焦点含糊（人物或事件由编辑决定）时，每个单元先问一次" }
+  ],
+  "falsePositiveChecks": [
+    { "id": "c-no-question-when-clear", "run": "normal", "reason": "指令明确时不应提问打断编辑" }
+  ],
+  "observations": {
+    "acceptance": "只在确有歧义时提问，问题可用选项回答，回答后单元完成。",
+    "rework": "指令明确时仍提问，或回答后单元没有完成。"
+  }
+}

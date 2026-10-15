@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { canonicalJson, DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { providerCacheKey, providerEvidenceGeneration } from './provider-result-cache.js';
+import { clarificationPromptContractDigest } from './clarification-contract.js';
 
 /**
  * Hand-written synthetic deterministic model fixtures (`tests/fixtures/model/<identity>.json`): one
@@ -332,7 +333,10 @@ export function parseModelFixture(value: unknown): ModelFixture {
       const stageSubject = ['reduction', 'sampling', 'reflection'].includes(capture.subject);
       // A legacy line recorded one contract for every call, so only a namespaced capture can say which contract a stage ran under.
       requireFixture(stageSubject ? capture.evidenceScope === 'namespaced'
-        : capture.taskPromptContractDigest === null || capture.taskPromptContractDigest === capture.promptContractDigest, '夹具条目的任务与阶段契约不一致。');
+        : capture.taskPromptContractDigest === null || capture.taskPromptContractDigest === capture.promptContractDigest ||
+          // A book-level synthesis asked inside a Task wrapped with the v14 model-question instruction runs under its base contract (#812).
+          (capture.subject === 'task-synthesis' && capture.taskPromptContractDigest === clarificationPromptContractDigest(capture.promptContractDigest)),
+      '夹具条目的任务与阶段契约不一致。');
       requireFixture(unitSubject ? (entry.unitOrdinal as number) > 0 : entry.unitOrdinal === 0, '夹具条目的捕获契约序号不一致。');
       requireFixture(capture.subject === 'dialogue' ? response.kind !== 'unit-result' : response.kind !== 'answer-chunks', '夹具条目的捕获响应契约不一致。');
       const serializedResponse = JSON.stringify(response);

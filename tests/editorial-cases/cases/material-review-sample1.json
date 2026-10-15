@@ -1,0 +1,136 @@
+{
+  "schema": "ai7.editorial-case/1",
+  "id": "material-review-sample1",
+  "kind": "material-review",
+  "title": "错别字与规范用语（参考资料库）· sample1 全书",
+  "manuscript": {
+    "source": "sample1"
+  },
+  "bookTitle": "sample1 · 资料参考验证",
+  "input": {
+    "categories": [
+      "typos-and-usage"
+    ],
+    "scope": "whole",
+    "material": "sample1-derived-library-item"
+  },
+  "fixture": "sample1-recorded-v41-material-review",
+  "measuredPass": null,
+  "replay": {
+    "route": "developer-live",
+    "modelQuestions": false
+  },
+  "expectedConcerns": [
+    {
+      "id": "m-missing-de",
+      "category": "typos-and-usage",
+      "paragraph": 10,
+      "words": "比较特别卜算",
+      "corrections": [
+        "比较特别的卜算"
+      ],
+      "concern": "“特别”与“卜算”之间脱漏结构助词“的”"
+    },
+    {
+      "id": "m-circle-1990",
+      "category": "typos-and-usage",
+      "paragraph": 15,
+      "words": "一九九○年代",
+      "corrections": [
+        "一九九〇年代"
+      ],
+      "concern": "年份中的零误用符号“○”，应为汉字“〇”",
+      "keywords": [
+        "〇",
+        "圆圈",
+        "零"
+      ]
+    },
+    {
+      "id": "m-circle-1980",
+      "category": "typos-and-usage",
+      "paragraph": 21,
+      "words": "一九八○年代",
+      "corrections": [
+        "一九八〇年代"
+      ],
+      "concern": "年份中的零误用符号“○”，应为汉字“〇”",
+      "keywords": [
+        "〇",
+        "圆圈",
+        "零"
+      ]
+    },
+    {
+      "id": "m-stray-shang",
+      "category": "typos-and-usage",
+      "paragraph": 56,
+      "words": "马跃之上第一次",
+      "corrections": [
+        "马跃之第一次"
+      ],
+      "concern": "“上”字衍文"
+    },
+    {
+      "id": "m-missing-object",
+      "category": "typos-and-usage",
+      "paragraph": 64,
+      "words": "与好好聊聊天",
+      "corrections": [
+        "与曾本之好好聊聊天",
+        "与他好好聊聊天"
+      ],
+      "concern": "介词“与”后缺少宾语"
+    },
+    {
+      "id": "m-missing-lai",
+      "category": "typos-and-usage",
+      "paragraph": 73,
+      "words": "连接起才够用",
+      "corrections": [
+        "连接起来才够用"
+      ],
+      "concern": "“连接起”后脱漏“来”"
+    },
+    {
+      "id": "m-missing-ta",
+      "category": "typos-and-usage",
+      "paragraph": 79,
+      "words": "只是让去开门",
+      "corrections": [
+        "只是让他去开门"
+      ],
+      "concern": "兼语句“让”后缺少兼语"
+    }
+  ],
+  "falsePositiveChecks": [
+    {
+      "id": "m-oracle-inscription",
+      "paragraph": 48,
+      "words": "拯之承启",
+      "reason": "甲骨文书信的原文"
+    },
+    {
+      "id": "m-seal-name",
+      "paragraph": 49,
+      "words": "郝嘉",
+      "reason": "印章上的人名"
+    },
+    {
+      "id": "m-wordplay",
+      "paragraph": 56,
+      "words": "知之者之之也，不知者之之乎",
+      "reason": "有意的文字游戏"
+    },
+    {
+      "id": "m-custom-term",
+      "paragraph": 10,
+      "words": "称之为七十小寿",
+      "reason": "小说设定的地方习俗用语"
+    }
+  ],
+  "observations": {
+    "acceptance": "参考资料不改变错别字审阅的定位与修改质量；资料原文不被当作书稿引用。；数字问题必须指出零字符本身，改成阿拉伯数字不算识别到该问题。",
+    "rework": "参考资料引入新的误报，或审阅结果的定位变差。"
+  }
+}

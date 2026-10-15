@@ -1,0 +1,4 @@
+@font-face { font-family: "Synthetic Serif"; src: url("../fonts/SyntheticSerif-Regular.otf"); }
+body { font-family: "Synthetic Serif", serif; line-height: 1.5; }
+p.first { text-indent: 0; }
+.cover-image img { max-width: 100%; }
