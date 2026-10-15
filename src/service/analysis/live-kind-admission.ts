@@ -55,15 +55,14 @@ export function liveKindRule(
       policy.providerProcessing.authorizedLiveTransmissionCount !== 'bounded-by-run') return null;
   const rules = (policy.providerProcessing.admittedRules ?? []).filter((rule) => rule.taskKinds.includes(kind));
   const rule = rules.length === 1 ? rules[0]! : null;
-  const categories: readonly string[] = rule?.outboundDataCategories ?? [];
-  return rule !== null && requiredCategories.every((category) => categories.includes(category)) ? rule : null;
+  return rule !== null && requiredCategories.every((category) => rule.outboundDataCategories.includes(category)) ? rule : null;
 }
 
 /** Material eligibility is a term of the kind's one selected rule, never a second rule. */
 export function liveMaterialRule(policy: LaunchPolicyProjection | undefined, kind: string): AdmittedProviderRule | null {
   const rule = liveKindRule(policy, kind, ['frozen-material-reference-excerpt']);
   // The successor policy owner projects this flag; absent in predecessor projections means denied.
-  return rule !== null && 'materialReferencesAllowed' in rule && rule.materialReferencesAllowed === true ? rule : null;
+  return rule !== null && rule.materialReferencesAllowed === true ? rule : null;
 }
 
 /**

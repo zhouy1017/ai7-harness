@@ -57,6 +57,8 @@ function dialogueRule(overrides: Record<string, unknown> = {}): Record<string, u
     credentialSlot: OPENCODE_GO_ROUTE_PROFILE.credentialSlot,
     outboundDataCategories: ['editor-selected-manuscript-excerpt'],
     crossUnitSynthesisAllowed: false,
+    materialReferencesAllowed: false,
+    editorialDeliverablesAllowed: false,
     ...overrides,
   };
 }
@@ -71,6 +73,8 @@ const BASELINE_RULE = {
   credentialSlot: OPENCODE_GO_ROUTE_PROFILE.credentialSlot,
   outboundDataCategories: ['public-or-synthetic'],
   crossUnitSynthesisAllowed: false,
+  materialReferencesAllowed: false,
+  editorialDeliverablesAllowed: false,
 };
 
 function withRules(policy: LaunchPolicyProjection, rules: ReadonlyArray<unknown>): LaunchPolicyProjection {
