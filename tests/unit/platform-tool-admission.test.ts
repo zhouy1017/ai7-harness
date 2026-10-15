@@ -7,17 +7,15 @@ import { reviewCategoryEntry } from '../../src/service/review/category-configura
 import { liveReviewRule } from '../../src/service/review/live-review-admission.js';
 import { platformToolModelProfile } from '../../src/service/provider/platform-tool-session.js';
 import { OPENCODE_GO_V41_FLASH_PROFILE } from '../../src/service/provider/model-profile.js';
-import { searchToolsRuleStub } from '../support/policy-rules.js';
-import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
 describe('platform tool registration admission', () => {
   it('requires a declaring research rule and the exact factual research contract', async () => {
-    const old = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live');
-    const template = old.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes('editorial-review/academic-integrity')) ?? old.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes('editorial-review/style-and-format'))!;
-    const researchRule = { ...template, ...searchToolsRuleStub(), taskKinds: ['factual-review', 'editorial-review/factual-review', 'editorial-review/academic-integrity'] };
-    const policy: LaunchPolicyProjection = { ...old, providerProcessing: { ...old.providerProcessing, admittedRules: [researchRule] } };
+    const policy = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live');
+    expect(policy.providerProcessing.version).toBe('v16');
+    const researchRule = policy.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes('factual-review'))!;
+    const template = researchRule;
     const base = factualReviewKindDefinition();
     const research = withFactualResearch(base);
     const binding = { route: template.route, model: template.model, endpoint: template.endpoint, credentialSlot: template.credentialSlot };

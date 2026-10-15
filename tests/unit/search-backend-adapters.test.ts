@@ -6,7 +6,7 @@ import { platformToolsFromProjection, authorizeSearchCall, sendSearchCall, probe
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import { EgressTicketBook, evaluateSearchServiceCall, type EgressBindingFacts } from '../../src/service/provider/egress-gate.js';
 import { toolArgumentsDigest } from '../../src/service/provider/platform-tools.js';
-import { searchToolsRuleStub } from '../support/policy-rules.js';
+import { searchToolsRule } from '../support/search-tools-policy.js';
 
 function bodyOf(id: string, hits: Array<{ title: string; url: string }>): string {
   if (id === 'search-bochaai') return JSON.stringify({ data: { webPages: { value: hits.map((hit) => ({ name: hit.title, url: hit.url })) } } });
@@ -19,8 +19,8 @@ function facts(id = 'search-tinyfish'): EgressBindingFacts {
   const declared = searchBackend(id).declaration;
   return { bindingDigest: 'a'.repeat(64), route: 'opencode-go', model: 'deepseek-v4.1-flash', systemPrompt: '',
     outboundDataCategory: 'public-or-synthetic', admittedUserMessages: new Set(),
-    policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v14', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
-    platformTools: platformToolsFromProjection(searchToolsRuleStub()),
+    policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v16', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+    platformTools: platformToolsFromProjection(searchToolsRule()),
     searchBackend: { backendId: id, host: declared.host!, endpoint: declared.endpoint!, credentialSlot: declared.credentialSlot, credentialReference: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
   };
 }
@@ -47,10 +47,13 @@ describe('the shipped keyed search adapters', () => {
   it('refuses unknown and unshipped ids and a transplanted backend host', () => {
     expect(() => searchBackend('search-kimi')).toThrow(/NOT_SHIPPED/);
     expect(() => searchBackendConfigurationDigest('search-kimi')).toThrow(/NOT_SHIPPED/);
-    const bad = searchToolsRuleStub();
-    bad.platformTools.websearch.backends[0]!.host = 'other.example.org';
+    const good = searchToolsRule();
+    const block = good.platformTools!;
+    const bad = { ...good, platformTools: { ...block, websearch: { ...block.websearch,
+      backends: block.websearch.backends.map((backend, index) => ({ ...backend, host: index === 0 ? 'other.example.org' : backend.host })),
+    } } };
     expect(platformToolsFromProjection(bad)).toBeNull();
-    expect(platformToolsFromProjection({ ...searchToolsRuleStub(), webSearchToolAllowed: false })).toBeNull();
+    expect(platformToolsFromProjection({ ...searchToolsRule(), webSearchToolAllowed: false })).toBeNull();
   });
 
   it('releases a credential only for the redeemed search ticket and selected slot, and sends once', async () => {

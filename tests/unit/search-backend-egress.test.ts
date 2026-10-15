@@ -5,7 +5,7 @@ import { PlatformToolSession } from '../../src/service/provider/platform-tool-se
 import { platformToolsFromProjection } from '../../src/service/provider/search-service.js';
 import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
 import { armHostAllowanceSet, armPerTicketHostAdmission, admitTicketHost, hostAllowanceSet, allowanceAdmitsConnection, installNodeNetworkDenial } from '../../src/shared/network-denial.js';
-import { searchToolsRuleStub } from '../support/policy-rules.js';
+import { searchToolsRule } from '../support/search-tools-policy.js';
 
 const frozen = SEARCH_BACKENDS.find((entry) => entry.id === 'search-tinyfish')!;
 armHostAllowanceSet([{ host: 'opencode.ai', port: 443 }, { host: frozen.host!, port: 443 }]);
@@ -13,8 +13,8 @@ armPerTicketHostAdmission();
 installNodeNetworkDenial();
 const binding: EgressBindingFacts = { bindingDigest: 'a'.repeat(64), route: 'opencode-go', model: 'deepseek-v4.1-flash', systemPrompt: '',
   admittedUserMessages: new Set(), outboundDataCategory: 'public-or-synthetic',
-  policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v14', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
-  platformTools: platformToolsFromProjection(searchToolsRuleStub()),
+  policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v16', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+  platformTools: platformToolsFromProjection(searchToolsRule()),
   searchBackend: { backendId: frozen.id, host: frozen.host!, endpoint: frozen.endpoint!, credentialSlot: frozen.credentialSlot, credentialReference: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
 };
 const scope = { currentBindingDigest: () => 'a'.repeat(64), acceptedOutputDigests: new Set<string>(), ceilingState: () => 'within' as const };

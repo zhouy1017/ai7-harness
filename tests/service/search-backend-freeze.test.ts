@@ -5,8 +5,6 @@ import { resolveSourceCheckoutLaunchPolicy, DEVELOPER_LIVE_POLICY_BINDING, ORDIN
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
-import { searchToolsRuleStub } from '../support/policy-rules.js';
-import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 
 describe('a review Run freezes its search backend', () => {
   it('refuses a production Run without its selected backend key, naming the backend and 设置', async () => {
@@ -15,9 +13,8 @@ describe('a review Run freezes its search backend', () => {
     try {
       const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: randomUUID() };
       store.saveModelServiceConnection('合成 Go 连接', configured.credentialReference, 'ready', 'opencode-go');
-      const original = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
-      const template = original.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes('editorial-review/style-and-format'))!;
-      const policy = { ...original, providerProcessing: { ...original.providerProcessing, admittedRules: [{ ...template, ...searchToolsRuleStub(), taskKinds: ['factual-review', 'editorial-review/factual-review'] }] } };
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
+      expect(policy.providerProcessing.version).toBe('v17');
       const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...configured, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
       store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
       const book = await importSample1Book(store, roots.codeRoot, '生产检索密钥回归');
@@ -33,10 +30,8 @@ describe('a review Run freezes its search backend', () => {
     const roots = await createServiceTestRoots();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const original = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
-      const template = original.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes('editorial-review/style-and-format'))!;
-      const rule = { ...template, ...searchToolsRuleStub(), taskKinds: ['factual-review', 'editorial-review/factual-review', 'editorial-review/academic-integrity'] };
-      const policy: LaunchPolicyProjection = { ...original, providerProcessing: { ...original.providerProcessing, admittedRules: [rule] } };
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+      expect(policy.providerProcessing.version).toBe('v16');
       const launch = { operationalScope: 'developer-live' as const, policy, live: {
         ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
         runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 500_000 },
