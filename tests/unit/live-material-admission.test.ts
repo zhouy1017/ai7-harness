@@ -87,6 +87,20 @@ describe('material-bearing live kind admission (#809)', () => {
       audience: '读者', channel: '纸面', requirements: null, synopsis: null, evaluation: null, exemplars: [], materials: [material] }, 2, [{ ...source, sha256: 'f'.repeat(64) }])).toThrowError();
   });
 
+  it('keeps the deliverable term of the one review rule when 跨交付物一致性 carries material', () => {
+    const entry = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((candidate) => candidate.categoryId === 'cross-deliverable-consistency')!;
+    const cross = wrap(reviewCategoryKindDefinition(reviewCategoryContractInput({ ...entry, executor: 'review-category-contract', unavailableReason: null,
+      guidelineDocuments: [{ documentId: 'synthetic/cross-deliverable', title: '合成比对规则', issuer: '合成', version: '1',
+        clauses: [{ clauseId: 'cross-deliverable-consistency/1', text: '比较稿件与合成交付物片段。' }] }],
+      deliverables: { leftOut: [], unavailableReason: null, participants: [{ documentId: 'synthetic-document', typeId: 'promotion-article', typeLabel: '宣传文章',
+        title: '合成交付物', versionLabel: '定稿', revisionId: 'synthetic-revision', revisionDigest: 'b'.repeat(64), sourceDigest: 'c'.repeat(64),
+        laterSaves: 0, omittedParagraphs: 0, paragraphs: [{ ref: 'D1-P1', position: 1, text: '合成交付物段落。', truncated: false }] }] } })));
+    expect(liveKindAdmission(selected, cross, binding)).not.toBeNull();
+    expect(liveKindAdmission(withRuleFor(selected, cross.kind, { editorialDeliverablesAllowed: false }), cross, binding)).toBeNull();
+    expect(liveKindAdmission(withRuleFor(selected, cross.kind, { materialReferencesAllowed: false }), cross, binding)).toBeNull();
+    expect(liveKindContractCategories(cross.kind, cross)).toEqual(['editorial-deliverable-excerpt', 'frozen-material-reference-excerpt']);
+  });
+
   it('does not turn the material-free score rewrite into a material wrapper through a direct caller', () => {
     expect(liveKindAdmission(admitting('evaluation-rewrite'), wrap({ ...initial, kind: 'evaluation-rewrite' }), binding)).toBeNull();
   });
