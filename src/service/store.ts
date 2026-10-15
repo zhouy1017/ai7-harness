@@ -4374,6 +4374,13 @@ const WAITING_TASK_MOVED_LABELS: Readonly<Record<string, string>> = {
   MATERIAL_INDEX_RECORD_INVALID: '参考资料',
 };
 const WAITING_TASK_MOVED_FALLBACK = '计划依据的内容';
+/**
+ * Records merged from another house keep their own profile by value (KB-002), so they match none of this house's 评估方案
+ * versions. 知识库 › 评估方案 counts them under this labelled bucket (Issue #798, P3-6) instead of dropping them from every
+ * version's use count. The renderer holds the same id literal to label the card.
+ */
+export const EVALUATION_PROFILE_UNKNOWN_ID = 'unknown/merged-profile';
+export const EVALUATION_PROFILE_UNKNOWN_TITLE = '未知版本';
 
 export class EditorialStore {
   readonly #dataRoot: string;
@@ -8714,11 +8721,27 @@ export class EditorialStore {
     return this.#evaluationCall(() => {
       requireStore(before === null || (Number.isSafeInteger(before) && before > 0), 'EVALUATION_PROFILE_PAGE_INVALID', '评估方案版本页码无效。');
       const page = this.#evaluationProfiles.page(before);
-      return { activeSha256: this.#evaluationProfiles.current().sha256, nextBefore: page.nextBefore,
-        profiles: page.profiles.map((profile) => {
-          const use = this.#authority.prepare('SELECT count(*) AS records, count(DISTINCT book_id) AS books FROM evaluation_records WHERE profile_sha256 = ?').get(profile.sha256)!;
-          return { ...profile, records: Number(use.records), books: Number(use.books) };
-        }) };
+      const profiles = page.profiles.map((profile) => {
+        const use = this.#authority.prepare('SELECT count(*) AS records, count(DISTINCT book_id) AS books FROM evaluation_records WHERE profile_sha256 = ?').get(profile.sha256)!;
+        return { ...profile, records: Number(use.records), books: Number(use.books) };
+      });
+      // The first page names the records that came from another house (Issue #798, P3-6). The known set is every house
+      // version, not just this page's, so a record from an earlier page's version is never mistaken for an unknown one.
+      if (before === null) {
+        const unknown = this.#authority.prepare(
+          `SELECT count(*) AS records, count(DISTINCT book_id) AS books FROM evaluation_records
+           WHERE profile_sha256 <> ?
+             AND profile_sha256 NOT IN (SELECT json_extract(canonical_json, '$.profile.sha256') FROM evaluation_profile_versions
+                                        WHERE json_extract(canonical_json, '$.profile.sha256') IS NOT NULL)`,
+        ).get(evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE))!;
+        if (Number(unknown.records) > 0) profiles.push({
+          profileId: EVALUATION_PROFILE_UNKNOWN_ID, title: EVALUATION_PROFILE_UNKNOWN_TITLE, version: '—', issuer: '',
+          total: 100, items: [], readiness: [], bands: BUILTIN_EVALUATION_PROFILE.bands, risks: BUILTIN_EVALUATION_PROFILE.risks,
+          conclusions: BUILTIN_EVALUATION_PROFILE.conclusions, sha256: '',
+          records: Number(unknown.records), books: Number(unknown.books),
+        });
+      }
+      return { activeSha256: this.#evaluationProfiles.current().sha256, nextBefore: page.nextBefore, profiles };
     });
   }
 
@@ -8904,8 +8927,8 @@ export class EditorialStore {
       launchPolicy,
       ...(canonicalJson(this.initialEvaluationLedgerForBook(bookId).definition.materialReferences?.sources ?? []) === canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? {} : { newTask: true }),
     }));
-    const intent = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = 'evaluation' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(bookId);
-    if (intent !== undefined) this.#evaluationCall(() => this.#transaction(this.#authority, () => this.#evaluationProfiles.snapshotTask(asString(intent.task_intent_id), this.#initialBaseDigest(ledger), profile)));
+    // The snapshot pins the Task the preparation returned, inside `#snapshotInitialPreparation`, never a separate
+    // "latest evaluation Task" query (Issue #798, P3-2): that query could pin an unrelated earlier row.
     this.#snapshotInitialPreparation(result, profile, ledger);
     return { ...result, projection: result.projection as InitialEvaluationProjection | null };
   }
@@ -16009,7 +16032,7 @@ export class EditorialStore {
     // and past ten of them the house offset as the 定稿 evaluations give it now (EVAL-011a), recomputed at every read.
     const house = this.#evaluations.calibration();
     const { adjustments, unreadable: unreadableBooks } = house;
-    const profileItems = this.#evaluations.profile().items;
+    const profileItems = this.#evaluations.calibrationScale().items;
     const where = 'EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id)';
     const rows = (after === null
       ? this.#authority.prepare(`SELECT b.book_id, b.title FROM books b WHERE ${where} ORDER BY b.title, b.book_id LIMIT ?`).all(MAX_EVALUATION_CALIBRATION_BOOKS + 1)

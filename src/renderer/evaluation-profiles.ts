@@ -1,5 +1,8 @@
 import type { EvaluationProfileProjection, EvaluationProfilesProjection, RendererApi, SaveEvaluationProfileInput } from '../shared/protocol.js';
-import { evaluationBandLine, evaluationItemLegend, evaluationProfilePill, evaluationProfileUse } from './evaluation-labels.js';
+import {
+  EVALUATION_PROFILE_UNKNOWN_ID, EVALUATION_PROFILE_UNKNOWN_LABEL, EVALUATION_PROFILE_UNKNOWN_NOTE,
+  evaluationBandLine, evaluationItemLegend, evaluationProfilePill, evaluationProfileUse,
+} from './evaluation-labels.js';
 
 export const PROFILE_PROSPECTIVE = '新版本只用于之后准备的初评和新建的评估，已有记录保留当时的方案。';
 export const PROFILE_CALIBRATION = '改名或修改说明保留该项的校准依据；移除的项不再用于新评估，新增的项等待自己的调分依据。项数变化时，原有项的校准偏移按新的满分折算。';
@@ -40,9 +43,18 @@ export function renderEvaluationProfiles(root: HTMLElement, projection: Evaluati
     card.dataset['profileRecords'] = String(profile.records);
     card.dataset['profileVersion'] = profile.version;
     const current = profile.sha256 === active;
+    // Records merged from another house have no profile of ours: their card names the 未知版本 bucket and nothing else
+    // (Issue #798, P3-6), rather than showing empty 评分项、档位、风险项 and 结论 sections.
+    const unknown = profile.profileId === EVALUATION_PROFILE_UNKNOWN_ID;
     const heading = el('div', 'guideline-heading');
-    heading.append(el('h3', undefined, profile.title), el('span', 'status-pill evaluation-profile-pill', evaluationProfilePill(profile)));
+    heading.append(el('h3', undefined, unknown ? EVALUATION_PROFILE_UNKNOWN_LABEL : profile.title));
+    if (!unknown) heading.append(el('span', 'status-pill evaluation-profile-pill', evaluationProfilePill(profile)));
     if (current) heading.append(el('span', 'status-pill', '当前使用'));
+    if (unknown) {
+      card.append(heading, el('p', 'field-note evaluation-profile-use', evaluationProfileUse(profile)), el('p', 'field-note', EVALUATION_PROFILE_UNKNOWN_NOTE));
+      root.append(card);
+      continue;
+    }
     const items = el('ul', 'evaluation-profile-items');
     for (const item of profile.items) {
       const li = el('li', undefined, evaluationItemLegend(item));

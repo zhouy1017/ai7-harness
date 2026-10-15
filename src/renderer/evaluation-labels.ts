@@ -219,6 +219,14 @@ export function evaluationProfilePill(profile: Pick<EvaluationProfileProjection,
   return `第 ${profile.version} 版 · ${profile.issuer}`;
 }
 
+/**
+ * Records merged from another house keep their own profile by value, so they match none of this house's versions; 知识库 ›
+ * 评估方案 counts them under this labelled bucket (Issue #798, P3-6). The service holds the same id literal.
+ */
+export const EVALUATION_PROFILE_UNKNOWN_ID = 'unknown/merged-profile';
+export const EVALUATION_PROFILE_UNKNOWN_LABEL = '未知版本';
+export const EVALUATION_PROFILE_UNKNOWN_NOTE = '这些评估记录来自其他本社合并，按其当时的方案版本保留，不计入本社任何评估方案版本。';
+
 /** A band as the profile states it: its floor on the 100-point total, applied to an item by its 满分, and its anchor. */
 export function evaluationBandLine(band: EvaluationProfileProjection['bands'][number]): string {
   return band.floor === 0 ? `${band.label} · 其余：${band.anchor}` : `${band.label} · ${band.floor} 分及以上（单项按满分折算）：${band.anchor}`;
