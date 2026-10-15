@@ -167,7 +167,7 @@ describe('start-built launch arguments', () => {
       ['--data-root', 'relative'],
       ['--data-root', dataRoot, '--data-root', dataRoot],
       ['--data-root', dataRoot, '--trusted-operational-scope', 'fixture-recording'],
-      ['--data-root', dataRoot, '--trusted-operational-scope', 'ordinary-production'],
+      ['--data-root', dataRoot, '--trusted-operational-scope', 'ordinary-production', '--run-budget-ceiling', '1000'],
       ['--data-root', dataRoot, '--run-budget-ceiling', '1000'],
       ['--data-root', dataRoot, '--trusted-operational-scope', 'developer-live'],
       ['--data-root', dataRoot, '--trusted-operational-scope', 'developer-live', '--validation-case', 'Baseline'],

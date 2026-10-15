@@ -15670,18 +15670,21 @@ export class EditorialStore {
       'MODEL_SERVICE_CONNECTION_INVALID',
       '连接名称必须为 1 至 80 个有效字符。',
     );
-    requireStore(credentialReferenceInput === null || UUID_PATTERN.test(credentialReferenceInput),
-      'MODEL_SERVICE_CONNECTION_INVALID', '凭据引用无效。');
+    // A connection's reference is never one a provider document fixes for development (Issue #811).
+    requireStore(credentialReferenceInput === null ||
+      (UUID_PATTERN.test(credentialReferenceInput) && !DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReferenceInput.toLowerCase())),
+    'MODEL_SERVICE_CONNECTION_INVALID', '凭据引用无效。');
     const current = this.getModelServiceRouteConnection(route);
     requireStore(
-      current === null ? credentialReferenceInput === null : current.credentialReference === credentialReferenceInput,
+      current === null || current.credentialReference === credentialReferenceInput,
       'MODEL_SERVICE_CONNECTION_CONFLICT',
       '已存连接的凭据引用不可替换。',
     );
     const now = new Date().toISOString();
     this.#transaction(this.#authority, () => {
       if (current === null) {
-        let credentialReference = randomUUID();
+        // Minted here when the caller names none — as main always does — so the reference belongs to this data root alone.
+        let credentialReference = credentialReferenceInput ?? randomUUID();
         while (DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReference)) credentialReference = randomUUID();
         const anySelected = this.#authority.prepare('SELECT 1 FROM model_service_connections WHERE selected = 1').get() !== undefined;
         this.#authority.prepare(

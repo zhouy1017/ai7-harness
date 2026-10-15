@@ -1758,7 +1758,9 @@ export class BaselineAnalysisStore {
       providerBinding: live === null
         ? {
             providerId: asString(connection!.provider_id),
-            modelId: asString(connection!.model_id),
+            // The denied production binding a development-ci plan freezes names the model Issue #712 named; since revision 72
+            // the connection row names its route's current model instead, which no development-ci plan calls (Issue #811).
+            modelId: 'deepseek-v4-pro',
             adapterRevision: asNumber(connection!.adapter_revision),
             configurationRevision: asNumber(connection!.configuration_revision),
             credentialReference: asString(connection!.credential_reference),

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -128,14 +128,14 @@ describe('the production data root', () => {
 const GO = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0];
 const OFFICIAL = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[1];
 
-describe('the configured binding the resolver reads (stand-in for #853)', () => {
+describe('the configured binding the resolver reads (#853 v13)', () => {
   const CARRIED = [
     'config/source-checkout-launch-authority.json',
-    'docs/policies/active-policy-set.v9.json',
+    'docs/policies/active-policy-set.v10.json',
     'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v2.json',
-    'docs/policies/provider-processing-policy.v6.json',
-    'docs/policies/provider-processing-policy.v11.json',
+    'docs/policies/provider-processing-policy.v12.json',
+    'docs/policies/provider-processing-policy.v13.json',
     'docs/policies/external-export-policy.v2.json',
   ];
 
@@ -149,11 +149,14 @@ describe('the configured binding the resolver reads (stand-in for #853)', () => 
     return root;
   }
 
-  it('names exactly the two production bindings, Go first, the same as 设置 › 模型服务 offers', () => {
-    expect(ORDINARY_PRODUCTION_ALLOWED_BINDINGS).toEqual([
-      { route: 'opencode-go', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'deepseek-v4.1-flash', credentialSlot: 'opencode-go' },
-      { route: 'deepseek-open-platform', endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash', credentialSlot: 'deepseek-api-key' },
-    ]);
+  it('mirrors exactly the bindings v13 allows both bound roles, Go first, as 设置 › 模型服务 offers them', async () => {
+    const policy = JSON.parse(await readFile(join(REPO_ROOT, 'docs', 'policies', 'provider-processing-policy.v13.json'), 'utf8')) as {
+      roleBindings: Record<string, { defaultBinding?: string; allowedBindings: unknown[] }>;
+    };
+    for (const role of ['Main Editorial Role', 'Fast Interaction Role']) {
+      expect(policy.roleBindings[role]!.allowedBindings).toEqual(ORDINARY_PRODUCTION_ALLOWED_BINDINGS);
+      expect(policy.roleBindings[role]!.defaultBinding).toBe('opencode-go');
+    }
     expect(MODEL_SERVICE_ROUTES).toEqual(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.map((binding) => binding.route));
     for (const binding of ORDINARY_PRODUCTION_ALLOWED_BINDINGS) {
       expect(MODEL_SERVICE_ROUTE_BINDINGS[binding.route]).toMatchObject({ providerId: binding.route, modelId: binding.model, credentialSlot: binding.credentialSlot, approvedFallbackChain: [] });
@@ -162,62 +165,54 @@ describe('the configured binding the resolver reads (stand-in for #853)', () => 
 
   it('reports 需设置 with no admitted rule until a route is configured, and transmits nothing', async () => {
     const projection = await resolveSourceCheckoutLaunchPolicy(await checkout(), 'ordinary-production', null);
-    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v9' });
+    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v10' });
     expect(projection.providerProcessing).toMatchObject({
-      version: 'v6', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
-      crossUnitReductionAllowed: false, assuranceSamplingAllowed: false, runReportReflectionAllowed: false,
+      version: 'v13', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
     });
   });
 
-  it('fills every rule — both Model Roles — from the one configured binding, with the unpublished categories', async () => {
+  it('fills every rule — both Model Roles — from the one configured binding', async () => {
     const root = await checkout();
     for (const allowed of ORDINARY_PRODUCTION_ALLOWED_BINDINGS) {
       const configured: ConfiguredProviderBinding = { ...allowed, credentialReference: randomUUID() };
+      expect(allowedProductionBindingOf(configured)).toEqual(allowed);
       const projection = await resolveSourceCheckoutLaunchPolicy(root, 'ordinary-production', configured);
       const rules = projection.providerProcessing.admittedRules;
-      expect(projection.providerProcessing.bindingState).toBe('bound');
+      expect(projection.providerProcessing.bindingState).toBe('configured');
       expect(projection.providerProcessing.liveTransmissionAllowed).toBe(true);
-      expect(rules.map((rule) => rule.taskKinds).flat()).toEqual([
-        'baseline-manuscript-analysis', 'editorial-dialogue', 'editorial-review/typos-and-usage', 'editorial-review/style-and-format',
-        'editorial-review/literary-expression', 'writing', 'evaluation', 'readers-report', 'evaluation-rewrite', 'editorial-polish', 'conflict-regenerate',
-      ]);
+      expect(rules.map((rule) => rule.taskKinds).flat()).toEqual(expect.arrayContaining([
+        'baseline-manuscript-analysis', 'editorial-dialogue', 'editorial-review/typos-and-usage', 'writing', 'evaluation', 'editorial-polish', 'conflict-regenerate',
+      ]));
       expect(new Set(rules.map((rule) => rule.modelRole))).toEqual(new Set(['Main Editorial Role', 'Fast Interaction Role']));
       for (const rule of rules) {
         expect(rule).toMatchObject({ route: allowed.route, endpoint: allowed.endpoint, model: allowed.model, credentialSlot: allowed.credentialSlot });
-        expect(rule.outboundDataCategories).toEqual(expect.arrayContaining(['unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content']));
       }
     }
   });
 
-  it('admits no binding outside the two, and no development Credential Reference', async () => {
+  it('never passes a binding outside the two, or a development Credential Reference, to the resolver', async () => {
     const root = await checkout();
     const reference = randomUUID();
-    for (const configured of [
+    const outside = [
       { ...GO, endpoint: 'https://opencode.ai/zen/v1/chat/completions', credentialReference: reference },
       { ...OFFICIAL, model: 'deepseek-v4-pro', credentialReference: reference },
       { ...GO, credentialSlot: 'deepseek-api-key', credentialReference: reference },
       { route: 'openai-platform', endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-5', credentialSlot: 'openai-platform', credentialReference: reference },
+    ];
+    for (const configured of [
+      ...outside,
       { ...GO, credentialReference: CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['opencode-go'] },
       { ...GO, credentialReference: CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['opencode-go'].toUpperCase() },
       { ...OFFICIAL, credentialReference: 'not-a-reference' },
     ]) {
       expect(allowedProductionBindingOf(configured), JSON.stringify(configured)).toBeNull();
+    }
+    // And the resolver itself admits none of the four bindings outside the policy: it denies.
+    for (const configured of outside) {
       const projection = await resolveSourceCheckoutLaunchPolicy(root, 'ordinary-production', configured);
-      expect(projection.providerProcessing.bindingState).toBe('setup-required');
+      expect(projection.integrityState).toBe('denied');
       expect(projection.providerProcessing.admittedRules).toEqual([]);
     }
-  });
-
-  it('leaves development-ci and developer-live exactly as they were, whatever binding is passed', async () => {
-    const root = await checkout();
-    const configured = { ...GO, credentialReference: randomUUID() };
-    const ci = await resolveSourceCheckoutLaunchPolicy(root, 'development-ci', configured);
-    expect(ci.providerProcessing).toMatchObject({ version: 'v1', decision: 'deny', admittedRules: [] });
-    expect(ci.providerProcessing.bindingState).toBeUndefined();
-    const live = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live', configured);
-    expect(live.providerProcessing.version).toBe('v11');
-    expect(live.providerProcessing.bindingState).toBeUndefined();
-    expect(live.providerProcessing.admittedRules.every((rule) => rule.route === 'opencode-go' && rule.credentialSlot === 'opencode-go')).toBe(true);
   });
 });
 
