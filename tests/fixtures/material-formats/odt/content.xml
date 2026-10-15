@@ -1,0 +1,420 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.3">
+  <office:scripts/>
+  <office:font-face-decls>
+    <style:font-face style:name="Synthetic Serif" svg:font-family="'Synthetic Serif'" style:font-family-generic="roman"/>
+  </office:font-face-decls>
+  <office:automatic-styles>
+    <style:style style:name="P1" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.1cm"/></style:style>
+    <style:style style:name="P2" style:family="paragraph" style:parent-style-name="Heading_20_1"><style:paragraph-properties fo:margin-top="0.2cm"/></style:style>
+    <style:style style:name="P3" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.3cm"/></style:style>
+    <style:style style:name="P4" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.4cm"/></style:style>
+    <style:style style:name="P5" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.5cm"/></style:style>
+    <style:style style:name="P6" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.6cm"/></style:style>
+    <style:style style:name="P7" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.7cm"/></style:style>
+    <style:style style:name="P8" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.8cm"/></style:style>
+    <style:style style:name="P9" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.9cm"/></style:style>
+    <style:style style:name="P10" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.0cm"/></style:style>
+    <style:style style:name="P11" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.1cm"/></style:style>
+    <style:style style:name="P12" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.2cm"/></style:style>
+    <style:style style:name="P13" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.3cm"/></style:style>
+    <style:style style:name="P14" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.4cm"/></style:style>
+    <style:style style:name="P15" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.5cm"/></style:style>
+    <style:style style:name="P16" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.6cm"/></style:style>
+    <style:style style:name="P17" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.7cm"/></style:style>
+    <style:style style:name="P18" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.8cm"/></style:style>
+    <style:style style:name="P19" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.9cm"/></style:style>
+    <style:style style:name="P20" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.0cm"/></style:style>
+    <style:style style:name="P21" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.1cm"/></style:style>
+    <style:style style:name="P22" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.2cm"/></style:style>
+    <style:style style:name="P23" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.3cm"/></style:style>
+    <style:style style:name="P24" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.4cm"/></style:style>
+    <style:style style:name="P25" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.5cm"/></style:style>
+    <style:style style:name="P26" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.6cm"/></style:style>
+    <style:style style:name="P27" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.7cm"/></style:style>
+    <style:style style:name="P28" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.8cm"/></style:style>
+    <style:style style:name="P29" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.9cm"/></style:style>
+    <style:style style:name="P30" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.0cm"/></style:style>
+    <style:style style:name="P31" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.1cm"/></style:style>
+    <style:style style:name="P32" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.2cm"/></style:style>
+    <style:style style:name="P33" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.3cm"/></style:style>
+    <style:style style:name="P34" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.4cm"/></style:style>
+    <style:style style:name="P35" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.5cm"/></style:style>
+    <style:style style:name="P36" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.6cm"/></style:style>
+    <style:style style:name="P37" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.7cm"/></style:style>
+    <style:style style:name="P38" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.8cm"/></style:style>
+    <style:style style:name="P39" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.9cm"/></style:style>
+    <style:style style:name="P40" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.0cm"/></style:style>
+    <style:style style:name="P41" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.1cm"/></style:style>
+    <style:style style:name="P42" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.2cm"/></style:style>
+    <style:style style:name="P43" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.3cm"/></style:style>
+    <style:style style:name="P44" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.4cm"/></style:style>
+    <style:style style:name="P45" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.5cm"/></style:style>
+    <style:style style:name="P46" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.6cm"/></style:style>
+    <style:style style:name="P47" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.7cm"/></style:style>
+    <style:style style:name="P48" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.8cm"/></style:style>
+    <style:style style:name="P49" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.9cm"/></style:style>
+    <style:style style:name="P50" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.0cm"/></style:style>
+    <style:style style:name="P51" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.1cm"/></style:style>
+    <style:style style:name="P52" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.2cm"/></style:style>
+    <style:style style:name="P53" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.3cm"/></style:style>
+    <style:style style:name="P54" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.4cm"/></style:style>
+    <style:style style:name="P55" style:family="paragraph" style:parent-style-name="Hidden_20_Draft"/>
+    <style:style style:name="P56" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.6cm"/></style:style>
+    <style:style style:name="P57" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.7cm"/></style:style>
+    <style:style style:name="P58" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.8cm"/></style:style>
+    <style:style style:name="P59" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.9cm"/></style:style>
+    <style:style style:name="P60" style:family="paragraph" style:parent-style-name="Text_20_body"><style:paragraph-properties fo:margin-top="0.0cm"/></style:style>
+    <style:style style:name="T1" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T2" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T3" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T4" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T5" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T6" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T7" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T8" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T9" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T10" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T11" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T12" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T13" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T14" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T15" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T16" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T17" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T18" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T19" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T20" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T21" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T22" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T23" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T24" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T25" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T26" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T27" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T28" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T29" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T30" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T31" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T32" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T33" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T34" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T35" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T36" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T37" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T38" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T39" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T40" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T41" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T42" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T43" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T44" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T45" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T46" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T47" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T48" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T49" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T50" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T51" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T52" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T53" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T54" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T55" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T56" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T57" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T58" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T59" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T60" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T61" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T62" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T63" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T64" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T65" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T66" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T67" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T68" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T69" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T70" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T71" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T72" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T73" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T74" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T75" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T76" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T77" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T78" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T79" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T80" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T81" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T82" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T83" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T84" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T85" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T86" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T87" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T88" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T89" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T90" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T91" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T92" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T93" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T94" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T95" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T96" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T97" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T98" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T99" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T100" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T101" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T102" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T103" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T104" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T105" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T106" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T107" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T108" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T109" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T110" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T111" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T112" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T113" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T114" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T115" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T116" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T117" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T118" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T119" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T120" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T121" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T122" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T123" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T124" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T125" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T126" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T127" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T128" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T129" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T130" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T131" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T132" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T133" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T134" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T135" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T136" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T137" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T138" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T139" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T140" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T141" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T142" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T143" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T144" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T145" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T146" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T147" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T148" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T149" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T150" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T151" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T152" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T153" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T154" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T155" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T156" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T157" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T158" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T159" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T160" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T161" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T162" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T163" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T164" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T165" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T166" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T167" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T168" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T169" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T170" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T171" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T172" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T173" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T174" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T175" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T176" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T177" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T178" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T179" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T180" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T181" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T182" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T183" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T184" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T185" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T186" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T187" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T188" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T189" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T190" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T191" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T192" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T193" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T194" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T195" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T196" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T197" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T198" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T199" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T200" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T201" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T202" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T203" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T204" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T205" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T206" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T207" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T208" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T209" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T210" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T211" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T212" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T213" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T214" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T215" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T216" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T217" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T218" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T219" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T220" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T221" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T222" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T223" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T224" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T225" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T226" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T227" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T228" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T229" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T230" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T231" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T232" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T233" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T234" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T235" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T236" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T237" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T238" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T239" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T240" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T241" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T242" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T243" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T244" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T245" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T246" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T247" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T248" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T249" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T250" style:family="text"><style:text-properties text:display="none"/></style:style>
+    <style:style style:name="T251" style:family="text" style:parent-style-name="Hidden_20_Mark"/>
+    <style:style style:name="T252" style:family="text" style:parent-style-name="Hidden_20_Child"/>
+    <style:style style:name="T253" style:family="text" style:parent-style-name="Strong_20_Emphasis"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T254" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T255" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T256" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T257" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T258" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T259" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T260" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T261" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T262" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T263" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T264" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T265" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T266" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T267" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T268" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T269" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T270" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T271" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T272" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T273" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T274" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T275" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T276" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T277" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T278" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T279" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T280" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T281" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T282" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T283" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T284" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T285" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T286" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T287" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T288" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T289" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T290" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T291" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T292" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T293" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T294" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T295" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T296" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T297" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T298" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T299" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="T300" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+    <style:style style:name="Sect1" style:family="section"><style:section-properties text:dont-balance-text-columns="false"/></style:style>
+    <style:style style:name="fr1" style:family="graphic"><style:graphic-properties style:wrap="none"/></style:style>
+    <style:style style:name="Table1" style:family="table"><style:table-properties style:width="16cm"/></style:style>
+    <style:style style:name="Table1.A1" style:family="table-cell"><style:table-cell-properties fo:padding="0.1cm"/></style:style>
+    <text:list-style style:name="L1"><text:list-level-style-bullet text:level="1" text:bullet-char="•"/></text:list-style>
+  </office:automatic-styles>
+  <office:body>
+    <office:text text:use-soft-page-breaks="true">
+      <text:sequence-decls>
+        <text:sequence-decl text:display-outline-level="0" text:name="Illustration"/>
+        <text:sequence-decl text:display-outline-level="0" text:name="Table"/>
+      </text:sequence-decls>
+      <text:p text:style-name="P1">合成样稿：港口与钟楼</text:p>
+      <text:table-of-content text:style-name="Sect1" text:protected="true" text:name="目录1">
+        <text:table-of-content-source text:outline-level="2">
+          <text:index-title-template text:style-name="Contents_20_Heading">目录</text:index-title-template>
+        </text:table-of-content-source>
+        <text:index-body>
+          <text:index-title text:style-name="Sect1" text:name="目录1_Head">
+            <text:p text:style-name="Contents_20_Heading">目录</text:p>
+          </text:index-title>
+          <text:p text:style-name="Contents_20_1"><text:a xlink:type="simple" xlink:href="#__RefHeading___1" text:style-name="Index_20_Link">第一节　清晨<text:tab/>1</text:a></text:p>
+          <text:p text:style-name="Contents_20_2"><text:a xlink:type="simple" xlink:href="#__RefHeading___2" text:style-name="Index_20_Link">一、钟声<text:tab/>2</text:a></text:p>
+        </text:index-body>
+      </text:table-of-content>
+      <text:h text:style-name="P2" text:outline-level="1"><text:bookmark-start text:name="__RefHeading___1"/>第一节　清晨<text:bookmark-end text:name="__RefHeading___1"/></text:h>
+      <text:p text:style-name="P3">港口的钟楼在<text:span text:style-name="T1">清晨</text:span>敲了七下<text:soft-page-break/>，雾还没有散。</text:p>
+      <text:p text:style-name="P3">她<text:s text:c="2"/>走过码头，<text:span text:style-name="T250">这句话已被隐藏。</text:span><text:span text:style-name="T251">这句话经由父样式隐藏。</text:span><text:span text:style-name="T252">这句话经由两级父样式隐藏。</text:span><text:span text:style-name="T253">这句话没有被隐藏。</text:span>看见<text:a xlink:type="simple" xlink:href="https://example.invalid/harbour" text:style-name="Internet_20_link">一条合成链接</text:a>。</text:p>
+      <text:p text:style-name="P55">整段隐藏的草稿，不应读到。</text:p>
+      <text:h text:style-name="P2" text:outline-level="2"><text:bookmark-start text:name="__RefHeading___2"/>一、钟声<text:bookmark-end text:name="__RefHeading___2"/></text:h>
+      <text:p text:style-name="P3">钟声先到<text:line-break/>然后才是回响<text:note text:id="ftn1" text:note-class="footnote"><text:note-citation>1</text:note-citation><text:note-body><text:p text:style-name="Footnote">脚注的字不读。</text:p></text:note-body></text:note>。</text:p>
+      <text:p text:style-name="P3"><draw:frame draw:style-name="fr1" draw:name="图1" text:anchor-type="as-char" svg:width="8cm" svg:height="5cm"><draw:image xlink:href="Pictures/image1.png" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/><svg:title>钟楼</svg:title><svg:desc>图片文件不在包内</svg:desc></draw:frame>图片之后的字照常读。</text:p>
+      <text:list text:style-name="L1">
+        <text:list-item><text:p text:style-name="P4">备好缆绳</text:p></text:list-item>
+        <text:list-item><text:p text:style-name="P4">检查船舱</text:p>
+          <text:list><text:list-item><text:p text:style-name="P4">先看舱底</text:p></text:list-item></text:list>
+        </text:list-item>
+      </text:list>
+      <table:table table:name="Table1" table:style-name="Table1">
+        <table:table-column table:number-columns-repeated="2"/>
+        <table:table-row>
+          <table:table-cell table:style-name="Table1.A1" office:value-type="string"><text:p text:style-name="P4">时辰</text:p></table:table-cell>
+          <table:table-cell table:style-name="Table1.A1" office:value-type="string"><text:p text:style-name="P4">水位</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:table-cell table:style-name="Table1.A1" office:value-type="string"><text:p text:style-name="P4">正午</text:p></table:table-cell>
+          <table:table-cell table:style-name="Table1.A1" office:value-type="string"><text:p text:style-name="P4">高</text:p></table:table-cell>
+        </table:table-row>
+      </table:table>
+      <text:p text:style-name="P3">末尾的段落。<office:annotation office:name="__Annotation__1"><dc:creator>合成批注者</dc:creator><text:p>批注的字不读。</text:p></office:annotation></text:p>
+    </office:text>
+  </office:body>
+</office:document-content>

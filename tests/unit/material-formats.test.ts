@@ -605,6 +605,41 @@ describe('what Issue #766 found', () => {
     expect(executions).toBeLessThan(blocks * 16);
   });
 
+  it('does the same counted work per block at 120 open spans as at 2, a block start being O(1) in the open-element depth (#766, item 1)', () => {
+    const operations = (spans: number, blocks: number): { lookups: number; executions: number } => {
+      const bytes = strToU8(`<ul>${'<span>'.repeat(spans)}${'<li></li>'.repeat(blocks)}字</ul>`);
+      const originalHas = Set.prototype.has;
+      const originalExec = RegExp.prototype.exec;
+      let lookups = 0;
+      let executions = 0;
+      const hasSpy = vi.spyOn(Set.prototype, 'has').mockImplementation(function (this: Set<unknown>, value: unknown): boolean {
+        lookups += 1;
+        return originalHas.call(this, value);
+      });
+      const execSpy = vi.spyOn(RegExp.prototype, 'exec').mockImplementation(function (this: RegExp, value: string): RegExpExecArray | null {
+        executions += 1;
+        return originalExec.call(this, value);
+      });
+      try {
+        expect(read(bytes, 'HTML').paragraphs).toEqual([[undefined, ['字']]]);
+      } finally {
+        hasSpy.mockRestore();
+        execSpy.mockRestore();
+      }
+      return { lookups, executions };
+    };
+    const blocks = 10_000;
+    const deep = operations(120, blocks);
+    const shallow = operations(2, blocks);
+    // The 118 extra spans are each opened and closed once (about 9 set lookups and 2 pattern executions apiece, a constant
+    // that does not grow with the items): the work for the items themselves is the same at either depth, and the whole
+    // stays linear in them (counts, never wall time). A walk of the open elements per block would add about 118 per block.
+    expect(deep.lookups - shallow.lookups).toBeLessThan(118 * 16);
+    expect(deep.executions - shallow.executions).toBeLessThan(118 * 4);
+    expect(deep.lookups).toBeLessThan(blocks * 32);
+    expect(deep.executions).toBeLessThan(blocks * 16);
+  });
+
   it('replaces a same-named common style with a content.xml automatic style at the 10,000-style cap, so shown text is not dropped (#766, item 2)', () => {
     const style = 'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ' +
       'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"';
@@ -636,5 +671,31 @@ describe('what Issue #766 found', () => {
       'content.xml': strToU8(ODT_CONTENT('<text:p>字</text:p>').replace('<office:document-content', '<!ENTITY x "y"><office:document-content')),
     });
     expect(refusal(withEntity, 'ODT')).toBe('external-entity');
+  });
+
+  it('has the pre-check and saxes each refuse a DTD or an entity declaration on its own (#766, item 4)', () => {
+    const part = (declaration: string): Uint8Array => archive({
+      mimetype: [strToU8('application/vnd.oasis.opendocument.text'), { level: 0 }],
+      'content.xml': strToU8(ODT_CONTENT('<text:p>字</text:p>').replace('<office:document-content', `${declaration}<office:document-content`)),
+    });
+    const dtd = part('<!DOCTYPE d [<!ENTITY x SYSTEM "file:///etc/passwd">]>');
+    const entity = part('<!ENTITY x "y">');
+    // With the pre-check, both are refused before the parser is handed the part, and named as an entity.
+    expect(refusal(dtd, 'ODT')).toBe('external-entity');
+    expect(refusal(entity, 'ODT')).toBe('external-entity');
+    // With the pre-check disabled, the real parser path still refuses both: a DOCTYPE through `readXml`'s own handler (named
+    // as an entity too), a bare entity declaration as the syntax error it is.
+    const original = RegExp.prototype.test;
+    const preCheck = vi.spyOn(RegExp.prototype, 'test').mockImplementation(function (this: RegExp, value: string): boolean {
+      return this.source === '<!DOCTYPE|<!ENTITY' ? false : original.call(this, value);
+    });
+    try {
+      expect(refusal(dtd, 'ODT')).toBe('external-entity');
+      expect(refusal(entity, 'ODT')).toBe('unreadable');
+      // The switch is the pre-check's own pattern and nothing else: an ordinary part still reads with it off.
+      expect(read(odt('<text:p>字</text:p>'), 'ODT').paragraphs).toEqual([[undefined, ['字']]]);
+    } finally {
+      preCheck.mockRestore();
+    }
   });
 });
