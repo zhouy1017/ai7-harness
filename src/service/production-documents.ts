@@ -18,7 +18,7 @@ import {
   type ProductionDocumentVersionProjection,
   type SourceFormat,
 } from '../shared/protocol.js';
-import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
+import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex, isRecord } from './analysis/canonical.js';
 import type { PackageDeliveryReading, PackageDocumentReading } from './book-delivery-packages.js';
 import { ProductionDocumentOriginError, productionDocumentOriginMarks } from './production-document-origins.js';
 import { WRITING_DRAFT_PARSER_IDENTITY } from './writing-tasks.js';
@@ -117,7 +117,8 @@ export const REVIEW_DELIVERABLE_CHANGED = '跨交付物一致性所依据的交�
 export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeliverableReading {
   const participants: ReviewDeliverableParticipant[] = [];
   const leftOut: Array<{ documentId: string; title: string; reason: string }> = [];
-  const rows = db.prepare('SELECT * FROM production_documents WHERE book_id = ? ORDER BY type_id, document_id').all(bookId) as SqlRow[];
+  const rows = db.prepare('SELECT * FROM production_documents WHERE book_id = ? ORDER BY type_id, document_id LIMIT 17').all(bookId) as SqlRow[];
+  if (rows.length > 16) return { participants, leftOut, unavailableReason: '交付物数量超出本次比对边界。' };
   let corrupt: string | null = null;
   for (const row of rows) {
     const documentId = text(row.document_id);
@@ -134,14 +135,20 @@ export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeli
       const identity = db.prepare("SELECT manuscript_id FROM manuscripts WHERE manuscript_id = ? AND book_id = ? AND role = 'production-document'").get(documentId, bookId);
       requireDocument(identity !== undefined, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档的图书身份无效。');
       const decision = db.prepare('SELECT decision FROM production_document_type_decisions WHERE book_id = ? AND type_id = ? ORDER BY sequence DESC LIMIT 1').get(bookId, typeId) as SqlRow | undefined;
-      const versions = db.prepare('SELECT * FROM production_document_versions WHERE document_id = ? ORDER BY version DESC').all(documentId) as SqlRow[];
-      requireDocument(versions.length > 0, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档没有版本。');
+      const latest = db.prepare('SELECT * FROM production_document_versions WHERE document_id = ? ORDER BY version DESC LIMIT 1').get(documentId) as SqlRow | undefined;
+      requireDocument(latest !== undefined, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档没有版本。');
       const phase = db.prepare("SELECT * FROM production_document_phase_transitions WHERE document_id = ? AND phase_id = 'finalization' ORDER BY ordinal DESC LIMIT 1").get(documentId) as SqlRow | undefined;
-      if (phase !== undefined) requireDocument(sha256Hex(text(phase.canonical_json)) === text(phase.sha256), 'PRODUCTION_DOCUMENT_RECORD_INVALID', '工作流程记录与其摘要不一致。');
-      const delivery = versions.find((version) => version.origin === 'delivery');
+      if (phase !== undefined) {
+        requireDocument(sha256Hex(text(phase.canonical_json)) === text(phase.sha256), 'PRODUCTION_DOCUMENT_RECORD_INVALID', '工作流程记录与其摘要不一致。');
+        let body: unknown;
+        try { body = JSON.parse(text(phase.canonical_json)) as unknown; } catch { /* Refuse the unreadable record below. */ }
+        requireDocument(isRecord(body) && body.documentId === documentId && body.phaseId === 'finalization' && body.toState === phase.to_state &&
+          body.recordedAt === phase.recorded_at && body.ordinal === phase.ordinal, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '工作流程记录与其阶段状态不一致。');
+      }
+      const delivery = db.prepare("SELECT * FROM production_document_versions WHERE document_id = ? AND origin = 'delivery' ORDER BY version DESC LIMIT 1").get(documentId) as SqlRow | undefined;
       const completed = phase?.to_state === 'completed';
-      const chosen = delivery ?? (completed ? versions.find((version) => version.origin === 'saved' && text(version.recorded_at) <= text(phase!.recorded_at)) : undefined);
-      const latest = versions[0]!;
+      const chosen = delivery ?? (completed ? db.prepare("SELECT * FROM production_document_versions WHERE document_id = ? AND origin = 'saved' AND recorded_at <= ? ORDER BY version DESC LIMIT 1")
+        .get(documentId, text(phase!.recorded_at)) as SqlRow | undefined : undefined);
       const titleRow = db.prepare("SELECT text FROM manuscript_block_versions WHERE revision_id = ? AND kind = 'title' ORDER BY position LIMIT 1").get(text(chosen?.revision_id ?? latest.revision_id)) as SqlRow | undefined;
       title = titleRow === undefined ? typeLabel : sliceGraphemes(text(titleRow.text), 0, 80);
       if (decision?.decision === 'not-for-this-book') {
@@ -159,8 +166,7 @@ export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeli
         WHERE mr.revision_id = ? AND mr.manuscript_id = ?`).get(bookId, revisionId, documentId) as SqlRow | undefined;
       requireDocument(revision !== undefined && revision.revision_digest === chosen.revision_digest, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档版本与其修订版不一致。');
       const blocks = db.prepare(`SELECT v.* FROM manuscript_block_versions v JOIN manuscript_blocks b ON b.block_id = v.block_id
-        AND b.manuscript_id = ? WHERE v.revision_id = ? ORDER BY v.position`).all(documentId, revisionId) as SqlRow[];
-      requireDocument(blocks.length > 0, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档版本没有可读取的段落。');
+        AND b.manuscript_id = ? WHERE v.revision_id = ? ORDER BY v.position`).iterate(documentId, revisionId) as IterableIterator<SqlRow>;
       // Bound each document to 10,000 graphemes and 64 paragraphs. Every retained paragraph states whether it was cut.
       let remaining = 10_000;
       let readableParagraphs = 0;
@@ -177,9 +183,11 @@ export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeli
         paragraphs.push({ ref: `deliverable/${typeId}/${position}`, position, text: kept, truncated: kept !== words });
         remaining -= graphemeCount(kept);
       }
+      requireDocument(paragraphs.length > 0, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档版本没有可读取的段落。');
+      const later = db.prepare("SELECT count(*) total FROM production_document_versions WHERE document_id = ? AND origin = 'saved' AND version > ?").get(documentId, integer(chosen.version)) as SqlRow;
       participants.push({ documentId, typeId, typeLabel, title, versionLabel: productionDocumentVersionLabel(integer(chosen.version)),
         revisionId, revisionDigest: text(chosen.revision_digest), sourceDigest: text(revision.source_digest), paragraphs,
-        laterSaves: versions.filter((version) => version.origin === 'saved' && integer(version.version) > integer(chosen.version)).length,
+        laterSaves: integer(later.total),
         omittedParagraphs: readableParagraphs - paragraphs.length });
     } catch (error) {
       if (!(error instanceof ProductionDocumentError)) throw error;
