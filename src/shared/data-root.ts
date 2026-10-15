@@ -66,6 +66,28 @@ export async function createCanonicalExternalDataRoot(dataRootInput: string, cod
   return dataRoot;
 }
 
+/**
+ * The developer Provider Result Cache siblings of a checkout (ADR 0067, Issue #808): the directory the developer-live launch
+ * defaults to, and the name the #811 brief gives it. Development captures live there and nowhere an ordinary user's data does.
+ */
+export const DEVELOPMENT_CACHE_SIBLING_DIRECTORIES = ['ai7-harness-provider-cache', 'ai7-provider-cache'] as const;
+
+/**
+ * An ordinary-production Agent Data Root (Issue #811): outside the checkout exactly as every data root is — so never under its
+ * `.cache` either — and besides that neither equal to, inside, nor containing a developer cache sibling of the checkout, so
+ * the production instance can never reach a development capture through its own data.
+ */
+export async function createCanonicalProductionDataRoot(dataRootInput: string, codeRootInput: string): Promise<string> {
+  requireBoundary(isAbsolute(dataRootInput) && isAbsolute(codeRootInput));
+  const codeRoot = await realpath(codeRootInput);
+  const caches = await Promise.all(DEVELOPMENT_CACHE_SIBLING_DIRECTORIES.map((name) => canonicalProspectivePath(resolve(codeRoot, '..', name))));
+  const apart = (candidate: string): boolean => caches.every((cache) => !isInside(cache, candidate) && !isInside(candidate, cache));
+  requireBoundary(apart(await canonicalProspectivePath(dataRootInput)));
+  const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
+  requireBoundary(apart(dataRoot));
+  return dataRoot;
+}
+
 /** Create or validate one exact directory chain beneath an already canonical Agent Data Root. */
 export async function ensureCanonicalDataDirectory(dataRootInput: string, ...segments: string[]): Promise<string> {
   const dataRoot = await canonicalDataRoot(dataRootInput);

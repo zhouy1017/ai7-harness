@@ -117,7 +117,7 @@ describe('the denied Task kind reads its statements from the bound launch', () =
     expect(() => planProviderProcessingPin({ ...forged, operationalScope: null })).toThrowError(TaskAuthorizationError);
   });
 
-  it('admits no ordinary-production plan yet: the scope is launch-selectable but this Task kind carries no pin for it (Issue #853)', () => {
+  it('pins an ordinary-production plan to Provider Processing v13, bounded by the Run (Issue #811)', () => {
     const production: LaunchPolicyProjection = {
       ...launch('development-ci'),
       operationalScope: 'ordinary-production',
@@ -131,6 +131,11 @@ describe('the denied Task kind reads its statements from the bound launch', () =
         label: '本机生产：实时传输受运行边界约束',
       },
     };
-    expect(() => planProviderProcessingPin(production)).toThrowError(TaskAuthorizationError);
+    const pin = planProviderProcessingPin(production);
+    expect(pin).toEqual({ operationalScope: 'ordinary-production', version: 'v13', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' });
+    expect(planStopCondition(pin)).toBe('Provider Processing v13 admits dispatch bounded by the Run');
+    // A launch whose stated version disagrees with its scope is still refused rather than pinned.
+    expect(() => planProviderProcessingPin({ ...production, providerProcessing: { ...production.providerProcessing, version: 'v12' } }))
+      .toThrowError(TaskAuthorizationError);
   });
 });

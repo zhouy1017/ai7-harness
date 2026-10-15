@@ -9,7 +9,8 @@ export const EVALUATION_UNVERIFIED_DISCLOSURE = '【未联网核查】' as const
 
 /** Whether a Result Set Revision was produced under the live route, by its recorded operational scope. */
 export function producedUnverified(operationalScope: unknown): boolean {
-  return operationalScope === 'developer-live';
+  // Ordinary production's routes have no web verification either (Issue #811).
+  return operationalScope === 'developer-live' || operationalScope === 'ordinary-production';
 }
 
 /** A basis note as shown: the disclosure first when the result it belongs to was produced unverified. */

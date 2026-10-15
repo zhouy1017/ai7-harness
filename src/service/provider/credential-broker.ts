@@ -1,4 +1,4 @@
-import { CREDENTIAL_REFERENCE_PATTERN } from '../../shared/protected-secret-identity.js';
+import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
 import { CONFIGURED_CREDENTIAL_SLOTS } from '../../shared/provider-configuration.generated.js';
 import { DIGEST_PATTERN } from '../analysis/canonical.js';
 import type { CredentialSlot, TransmitTicket } from './egress-gate.js';
@@ -38,6 +38,9 @@ export class CredentialBrokerError extends Error {
  */
 const CREDENTIAL_SLOTS: ReadonlySet<CredentialSlot> = new Set<CredentialSlot>(CONFIGURED_CREDENTIAL_SLOTS);
 
+/** Whether a broker may read a development reference: yes under the development scopes, never under ordinary production. */
+export type DevelopmentReferenceAdmission = 'admitted' | 'refused';
+
 function requireBinding(binding: CredentialSlotBinding): void {
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || (binding.modelRole !== 'Main Editorial Role' && binding.modelRole !== 'Fast Interaction Role') ||
       !CREDENTIAL_SLOTS.has(binding.slot) || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference)) {
@@ -47,10 +50,19 @@ function requireBinding(binding: CredentialSlotBinding): void {
 
 export class CredentialBroker {
   readonly #resolver: SecretResolver;
+  readonly #developmentReferences: DevelopmentReferenceAdmission;
   #releases = 0;
 
-  constructor(resolver: SecretResolver) {
+  constructor(resolver: SecretResolver, options: { developmentReferences?: DevelopmentReferenceAdmission } = {}) {
     this.#resolver = resolver;
+    this.#developmentReferences = options.developmentReferences ?? 'admitted';
+  }
+
+  /** Refuse a development reference before the store is touched, when this broker serves ordinary production. */
+  #requireAdmittedReference(credentialReference: string): void {
+    if (this.#developmentReferences === 'refused' && DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReference.toLowerCase())) {
+      throw new CredentialBrokerError('CREDENTIAL_DEVELOPMENT_REFERENCE_REFUSED', '正式使用不读取开发凭据引用；未读取任何凭据。');
+    }
   }
 
   /** How many times a value has been released to a transmit step; zero for every v1 Run. */
@@ -61,6 +73,7 @@ export class CredentialBroker {
   /** Readiness only: the value is resolved and discarded inside this call and never returned. */
   async checkReadiness(binding: CredentialSlotBinding): Promise<CredentialReadiness> {
     requireBinding(binding);
+    this.#requireAdmittedReference(binding.credentialReference);
     const value = await this.#resolver.resolve(binding.credentialReference);
     return typeof value === 'string' && value.length > 0 ? 'present' : 'missing';
   }
@@ -74,6 +87,7 @@ export class CredentialBroker {
     if (!CREDENTIAL_SLOTS.has(slot) || !CREDENTIAL_REFERENCE_PATTERN.test(credentialReference)) {
       throw new CredentialBrokerError('CREDENTIAL_BINDING_INVALID', '凭据槽位绑定无效。');
     }
+    this.#requireAdmittedReference(credentialReference);
     const value = await this.#resolver.resolve(credentialReference);
     return typeof value === 'string' && value.length > 0 ? 'present' : 'missing';
   }
@@ -85,6 +99,7 @@ export class CredentialBroker {
    */
   async releaseTo<T>(binding: CredentialSlotBinding, ticket: TransmitTicket | null, consume: (value: string) => Promise<T>): Promise<T> {
     requireBinding(binding);
+    this.#requireAdmittedReference(binding.credentialReference);
     if (ticket === null || ticket.decision !== 'transmit-remote' || ticket.bindingDigest !== binding.bindingDigest) {
       throw new CredentialBrokerError('CREDENTIAL_RELEASE_REFUSED', '没有本次绑定的 transmit-remote 决定；凭据未释放。');
     }

@@ -393,6 +393,7 @@ export function reviewReplacementLine(replacement: string): string {
 }
 
 export function reviewClauseLine(clause: { documentTitle: string; clauseId: string; text: string }): string {
+  if (clause.clauseId.startsWith('deliverable/')) return `比对来源（只读）：${clause.documentTitle}：${clause.text}`;
   return `依据：条款 ${clause.clauseId} · ${clause.documentTitle}：${clause.text}`;
 }
 
