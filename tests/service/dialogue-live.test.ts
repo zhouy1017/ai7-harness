@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -725,7 +726,7 @@ describe('revision 71', () => {
       rows = database.prepare('SELECT rowid, attempt_id, canonical_json, sha256 FROM dialogue_execution_bindings ORDER BY rowid').all();
       database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_update!);
       database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_delete!);
-      database.exec(`PRAGMA user_version = ${version}`);
+      execPre74Fixture(database, `PRAGMA user_version = ${version}`);
       database.exec('COMMIT');
       if (version === 60) {
         for (const schema of [EVALUATION_REWRITE_SCHEMA_SQL, CAPTURED_PROCEDURE_SCHEMA_SQL, READERS_REPORT_SCHEMA_SQL]) {
@@ -795,7 +796,7 @@ describe('revision 72 (Issue #811)', () => {
       database.exec(MODEL_SERVICE_CONNECTION_REVISION_11_SQL);
       database.prepare(`INSERT INTO model_service_connections VALUES ('main-editorial-deepseek-v4-pro', 'main-editorial', '旧连接', 'deepseek-open-platform',
         'deepseek-v4-pro', 1, 1, '[]', 'deepseek-api-key', ?, 'ready', ?, ?, ?)`).run(officialReference, stamp, stamp, stamp);
-      database.exec('PRAGMA user_version = 71');
+      execPre74Fixture(database, 'PRAGMA user_version = 71');
       database.exec('COMMIT');
     } finally {
       database.close();
@@ -831,7 +832,7 @@ describe('revision 72 (Issue #811)', () => {
     database = new DatabaseSync(path);
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(LATEST_SCHEMA_VERSION).toBe(73);
+      expect(LATEST_SCHEMA_VERSION).toBe(74);
       // Revision 8 accepts nullable selection: two NULL rows coexist, but a second 1 or any other integer is refused.
       expect(database.prepare('SELECT selected FROM model_service_connections ORDER BY connection_id').all()).toEqual([{ selected: 1 }, { selected: null }]);
       expect(() => database.exec("UPDATE model_service_connections SET selected = 1 WHERE provider_id = 'opencode-go'")).toThrow();

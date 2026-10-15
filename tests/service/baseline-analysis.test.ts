@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -215,7 +216,7 @@ function downgradeToRevision16(databasePath: string): void {
     database.exec('BEGIN IMMEDIATE');
     downgradePlanRecordsToRevision16(database);
     dropEntryPositionRelation(database);
-    database.exec(`PRAGMA user_version = ${SUCCESSIVE_TASK_SCHEMA_VERSION}`);
+    execPre74Fixture(database, `PRAGMA user_version = ${SUCCESSIVE_TASK_SCHEMA_VERSION}`);
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');
   } finally {
@@ -285,7 +286,7 @@ function downgradeToRevision19(databasePath: string): void {
     downgradeRelation(database, 'analysis_result_sets', ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_sets, RESULT_SET_COLUMNS);
     downgradeRelation(database, 'analysis_task_intents', ANALYSIS_LEDGER_REVISION_19_SQL.analysis_task_intents, REVISION_19_INTENT_COLUMNS);
     dropEntryPositionRelation(database);
-    database.exec(`PRAGMA user_version = ${TEXT_CONVERSION_SCHEMA_VERSION}`);
+    execPre74Fixture(database, `PRAGMA user_version = ${TEXT_CONVERSION_SCHEMA_VERSION}`);
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');
   } finally {
@@ -315,7 +316,7 @@ function downgradeToRevision15(databasePath: string): void {
     database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_update']!);
     database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_delete']!);
     dropEntryPositionRelation(database);
-    database.exec(`PRAGMA user_version = ${J04_BASELINE_ANALYSIS_SCHEMA_VERSION}`);
+    execPre74Fixture(database, `PRAGMA user_version = ${J04_BASELINE_ANALYSIS_SCHEMA_VERSION}`);
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');
   } finally {
@@ -1654,7 +1655,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       for (const name of Object.keys(ANALYSIS_LEDGER_TRIGGER_SQL)) database.exec(`DROP TRIGGER ${name}`);
       for (const name of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${name}`);
       dropEntryPositionRelation(database);
-      database.exec('PRAGMA user_version = 14');
+      execPre74Fixture(database, 'PRAGMA user_version = 14');
     } finally {
       database.close();
     }

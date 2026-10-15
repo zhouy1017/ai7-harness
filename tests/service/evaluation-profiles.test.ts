@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -30,7 +31,7 @@ describe('知识库 › 评估方案, prospective snapshots over the real store'
     const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
       if (state === 'absent') db.exec('DROP TABLE initial_evaluation_tasks; DROP TABLE evaluation_profile_versions');
-      db.exec('PRAGMA user_version = 69');
+      execPre74Fixture(db, 'PRAGMA user_version = 69');
     } finally { db.close(); }
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -43,7 +44,7 @@ describe('知识库 › 评估方案, prospective snapshots over the real store'
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     store.close();
     const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try { db.exec('DROP TABLE initial_evaluation_tasks; PRAGMA user_version = 69'); } finally { db.close(); }
+    try { execPre74Fixture(db, 'DROP TABLE initial_evaluation_tasks; PRAGMA user_version = 69'); } finally { db.close(); }
     await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow('不兼容');
   });
 

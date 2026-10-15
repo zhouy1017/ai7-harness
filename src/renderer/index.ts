@@ -3302,6 +3302,8 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
     : `这次运行共记录 ${report.findingCounts.reduce((total, entry) => total + entry.count, 0)} 条发现，分 ${report.findingCounts.length} 类。`;
   const usageRows = (Object.keys(report.usagePerStage) as Array<keyof typeof report.usagePerStage>).flatMap((stage) => {
     const usage = report.usagePerStage[stage];
+    if (stage === 'platform-tools') return [element('dt', undefined, '用量 · 联网检索'), element('dd', undefined,
+      `${Object.entries(usage.searchCalls ?? {}).map(([id, calls]) => `${id}：${calls} 次检索`).join(' · ') || '0 次检索'} · 网页取回 ${usage.fetchCount ?? 0} 次 / ${usage.fetchBytes ?? 0} 字节 · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}`)];
     return [element('dt', undefined, `用量 · ${stage}`), element('dd', 'technical-identity', `${usage.requests} 次模型请求 · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}`)];
   });
   disclosure.append(
@@ -5518,6 +5520,64 @@ function renderModelRouteOption(option: ModelServiceRouteOptionProjection): HTML
   return section;
 }
 
+function renderSearchBackendSettings(projection: ModelServiceSettingsProjection): HTMLElement {
+  const section = element('section', 'review-section');
+  section.setAttribute('aria-label', '联网检索');
+  section.dataset['searchBackends'] = 'true';
+  section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', '新任务使用所选后端；已开始的运行继续使用计划里冻结的后端。'));
+  for (const backend of projection.searchBackends.backends) {
+    const card = element('article', 'model-role-card');
+    card.dataset['searchBackend'] = backend.backendId;
+    card.dataset['selected'] = String(backend.backendId === projection.searchBackends.selectedBackendId);
+    card.append(element('h4', undefined, `${backend.rank}. ${backend.name}${backend.backendId === projection.searchBackends.selectedBackendId ? ' · 已选择' : ''}`),
+      element('p', 'field-note', `${backend.reachable ? '可达' : '不可达'} · 延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · ${backend.keyRequired ? '需要密钥' : '无需密钥'}`),
+      element('p', 'field-note', `中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`));
+    if (backend.note !== null) card.append(element('p', 'field-note', backend.note));
+    const actions = element('div', 'button-row');
+    const choose = button('选择后端', 'quiet', () => void (async () => {
+      try { renderModelServiceSettingsProjection(await window.ai7.selectSearchBackend({ backendId: backend.backendId })); setStatus('联网检索后端已保存'); }
+      catch (error) { setStatus(rendererErrorMessage(error, '无法保存联网检索后端。'), 'error'); }
+    })());
+    choose.disabled = backend.backendId === projection.searchBackends.selectedBackendId;
+    const output = element('div');
+    output.dataset['searchProbe'] = backend.backendId;
+    const probe = button('测试检索', 'quiet', () => void (async () => {
+      probe.disabled = true;
+      try {
+        const result = await window.ai7.probeSearchBackend({ backendId: backend.backendId });
+        output.replaceChildren(element('p', undefined, `${result.reachable ? '可达' : '不可达'} · 延迟 ${result.latencyMs} ms · 结果数 ${result.resultCount}${result.failure === null ? '' : ` · ${result.failure}`}`));
+        const list = element('ul');
+        for (const hit of result.results.slice(0, 3)) {
+          const item = element('li');
+          const link = element('a', undefined, hit.title);
+          link.href = hit.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          item.append(link, element('span', 'field-note', ` ${hit.url}`)); list.append(item);
+        }
+        output.append(list);
+      } catch (error) { output.replaceChildren(element('p', 'attention-note', rendererErrorMessage(error, '测试检索未完成。'))); }
+      finally { probe.disabled = false; }
+    })());
+    actions.append(choose, probe);
+    if (projection.launchPolicy.operationalScope === 'ordinary-production') {
+      const secret = element('input'); secret.type = 'password'; secret.autocomplete = 'off';
+      secret.setAttribute('aria-label', `${backend.name} 密钥`);
+      const save = button('保存密钥', 'quiet', () => void (async () => {
+        const value = secret.value; secret.value = '';
+        try { renderModelServiceSettingsProjection(await window.ai7.saveSearchBackendCredential({ backendId: backend.backendId, secret: value })); }
+        catch (error) { setStatus(rendererErrorMessage(error, '无法保存联网检索密钥。'), 'error'); }
+      })());
+      const remove = button('移除密钥', 'quiet', () => void (async () => {
+        try { renderModelServiceSettingsProjection(await window.ai7.removeSearchBackendCredential({ backendId: backend.backendId })); }
+        catch (error) { setStatus(rendererErrorMessage(error, '无法移除联网检索密钥。'), 'error'); }
+      })());
+      card.append(element('p', 'field-note', backend.connection.credentialOperationState === 'ready' ? '密钥已保存' : '密钥需设置'), secret);
+      actions.append(save, remove);
+    }
+    card.append(actions, output); section.append(card);
+  }
+  return section;
+}
+
 function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
   const content = panel();
   content.classList.add('model-service-settings');
@@ -5605,7 +5665,7 @@ function renderModelServiceSettingsProjection(projection: ModelServiceSettingsPr
   );
   const actions = element('div', 'button-row');
   actions.append(button('返回', 'quiet', () => void initializeStartup()));
-  content.append(roles, unsupported, renderModelServiceProxyBlock(projection), policy, protectedStore, actions);
+  content.append(roles, renderSearchBackendSettings(projection), unsupported, renderModelServiceProxyBlock(projection), policy, protectedStore, actions);
   replaceScreen('model-service', content);
 }
 

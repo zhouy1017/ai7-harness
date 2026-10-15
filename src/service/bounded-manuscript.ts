@@ -73,7 +73,7 @@ import {
   ANALYSIS_LEDGER_REVISION_30_SQL,
   ANALYSIS_LEDGER_REVISION_65_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
-  ANALYSIS_LEDGER_SCHEMA_SQL,
+  ANALYSIS_LEDGER_SCHEMA_SQL, WEB_TOOLS_PLAN_RECORDS_SQL, SEARCH_BACKEND_CONNECTIONS_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
@@ -130,7 +130,7 @@ import {
   EVALUATION_PROFILE_SCHEMA_VERSION,
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
-  MODEL_CLARIFICATION_SCHEMA_VERSION,
+  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
@@ -287,7 +287,7 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
     ANALYSIS_LEDGER_REVISION_19_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_15_SQL.analysis_task_intents,
   ],
-  analysis_plan_records: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_16_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records],
+  analysis_plan_records: [WEB_TOOLS_PLAN_RECORDS_SQL, ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_16_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records],
   analysis_result_sets: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_sets,
     ANALYSIS_LEDGER_REVISION_64_SQL.analysis_result_sets,
@@ -2711,6 +2711,7 @@ function requireManuscriptReimportTargetSchema(
     db,
     {
       ...FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL,
+      ...(Number(db.prepare('PRAGMA user_version').get()?.user_version) >= SEARCH_BACKEND_SCHEMA_VERSION || db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'search_backend_connections'").get() !== undefined ? { search_backend_connections: SEARCH_BACKEND_CONNECTIONS_SQL } : {}),
       // Revision 72 (Issue #811) widens the model-service connections for the two production routes: a store below it may
       // still hold revision 11's text.
       ...(includeModelServiceTable
@@ -5837,7 +5838,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5888,7 +5889,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(

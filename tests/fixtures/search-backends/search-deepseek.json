@@ -1,0 +1,19 @@
+{
+  "source": "Issue #883 reviewed evaluation capture; titles and URLs only",
+  "backendId": "search-deepseek",
+  "queryId": "zh-01",
+  "hits": [
+    {
+      "title": "中华人民共和国宪法修正案 - 当前位置：首页",
+      "url": "http://www.npc.gov.cn/npc//c2/c30834/201905/t20190521_280825.html#1"
+    },
+    {
+      "title": "中华人民共和国宪法修正案",
+      "url": "http://www.npc.gov.cn/c2/c30834/201905/t20190521_280825.html#1"
+    },
+    {
+      "title": "新華社受權播發憲法修正案",
+      "url": "http://big5.www.gov.cn/gate/big5/www.gov.cn/xinwen/2018-03/11/content_5273218.htm"
+    }
+  ]
+}

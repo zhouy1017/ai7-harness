@@ -1,5 +1,8 @@
+import { searchBackend } from './search-backends/index.js';
+import type { CredentialBroker } from './credential-broker.js';
+import type { TicketHostAdmission } from './public-source-fetch.js';
 import { isRecord } from '../analysis/canonical.js';
-import { redeemEgressTicket, type EgressTicketBook, type SearchServiceTicket } from './egress-gate.js';
+import { EgressTicketBook, evaluateSearchServiceCall, redeemEgressTicket, type SearchServiceTicket } from './egress-gate.js';
 import { toolArgumentsDigest, type PlatformToolArguments, type PlatformToolsRule } from './platform-tools.js';
 import { PlatformToolHttpError, deadlineSignal, readBoundedBody, type PlatformToolFetch } from './platform-tool-http.js';
 import { anonymousSearchInterface } from './search-backends.js';
@@ -117,9 +120,9 @@ export interface SearchCallOutcome {
 }
 
 /** One search call whose ticket was redeemed: the only thing `sendSearchCall` sends. */
-export interface AuthorizedSearchCall {
-  readonly request: { url: string; headers: Record<string, string>; body: string };
-}
+export type AuthorizedSearchCall =
+  | { readonly request: { url: string; headers: Record<string, string>; body: string }; readonly ticket?: undefined }
+  | { readonly ticket: SearchServiceTicket; readonly query: string; readonly request?: undefined };
 
 const authorizedSearchCalls = new WeakSet<AuthorizedSearchCall>();
 
@@ -142,7 +145,15 @@ export function authorizeSearchCall(input: {
   if (ticket.argumentsDigest !== toolArgumentsDigest(input.arguments)) throw ticketRefused();
   const rule = redeemEgressTicket(input.book, ticket);
   if (rule === null) throw ticketRefused();
-  const request = searchServiceRequest(rule, input.arguments.query);
+  if (ticket.backend !== undefined) {
+    const adapter = searchBackend(ticket.backend.backendId);
+    if (adapter.declaration.host !== ticket.host || adapter.declaration.endpoint !== ticket.backend.endpoint) throw ticketRefused();
+    const authorized = Object.freeze({ ticket, query: input.arguments.query });
+    authorizedSearchCalls.add(authorized);
+    return authorized;
+  }
+  if (!('service' in rule.websearch)) throw ticketRefused();
+  const request = searchServiceRequest(rule as PlatformToolsRule, input.arguments.query);
   // The gate issues into a book only under the book's own rule, so this holds by construction; it is kept as the forwarder's
   // own statement that a ticket sends to exactly its host.
   if (new URL(request.url).hostname !== ticket.host) throw ticketRefused();
@@ -163,8 +174,33 @@ export async function forwardSearchCall(input: {
 }
 
 /** Send one authorized search call, exactly once; an object `authorizeSearchCall` did not return sends nothing. */
-export async function sendSearchCall(authorized: AuthorizedSearchCall, fetch: PlatformToolFetch, signal?: AbortSignal): Promise<SearchCallOutcome> {
+export async function sendSearchCall(authorized: AuthorizedSearchCall, fetch: PlatformToolFetch, signal?: AbortSignal,
+  credentialed?: { readonly broker: CredentialBroker; readonly admitHost: TicketHostAdmission; readonly modelRole: 'Main Editorial Role' | 'Fast Interaction Role' },
+): Promise<SearchCallOutcome> {
   if (!authorizedSearchCalls.delete(authorized)) throw ticketRefused();
+  if (authorized.ticket !== undefined) {
+    const { ticket, query } = authorized;
+    const backend = ticket.backend!;
+    if (credentialed === undefined) throw new SearchServiceError('SEARCH_SERVICE_CREDENTIAL_REQUIRED', '联网检索需要本后端的受保护凭据。');
+    return credentialed.broker.releaseTo({ bindingDigest: ticket.bindingDigest, modelRole: credentialed.modelRole,
+      slot: backend.credentialSlot, credentialReference: backend.credentialReference }, ticket, async (credential) => {
+      const adapter = searchBackend(backend.backendId);
+      const request = adapter.request(query, { credential, count: 10 });
+      if (new URL(request.url).hostname !== ticket.host) throw ticketRefused();
+      const deadline = deadlineSignal(SEARCH_SERVICE_TIMEOUT_MS, signal);
+      let release: (() => void) | undefined;
+      try {
+        release = credentialed.admitHost({ host: ticket.host, port: 443, ticketId: ticket.ticketId });
+        const response = await fetch(request.url, { method: request.method, headers: { ...request.headers },
+          ...(request.body === null ? {} : { body: request.body }), signal: deadline.signal, redirect: 'manual' });
+        const contentType = response.headers.get('content-type');
+        const bytes = await readBoundedBody(response, SEARCH_RESPONSE_MAX_BYTES);
+        const results = adapter.readResults(response.status, contentType, new TextDecoder().decode(bytes));
+        const text = results === null ? null : capCharacters(JSON.stringify(results), SEARCH_RESULT_MAX_CHARACTERS);
+        return { url: adapter.declaration.endpoint!, status: response.status, contentType, bytes, text };
+      } finally { deadline.dispose(); release?.(); }
+    });
+  }
   const { request } = authorized;
   const input = { fetch, signal };
   const deadline = deadlineSignal(SEARCH_SERVICE_TIMEOUT_MS, input.signal);
@@ -180,4 +216,53 @@ export async function sendSearchCall(authorized: AuthorizedSearchCall, fetch: Pl
   } finally {
     deadline.dispose();
   }
+}
+
+/** The settings path's only query; it contains no Book or manuscript input. */
+export const SEARCH_BACKEND_PROBE_QUERY = 'UNESCO World Book and Copyright Day April 23';
+
+export async function probeSearchBackend(input: {
+  readonly binding: import('./egress-gate.js').EgressBindingFacts;
+  readonly broker: CredentialBroker;
+  readonly fetch: PlatformToolFetch;
+  readonly admitHost: TicketHostAdmission;
+}): Promise<import('../../shared/protocol.js').SearchBackendProbeProjection> {
+  const backendId = input.binding.searchBackend!.backendId;
+  const started = Date.now();
+  try {
+    const scope = { currentBindingDigest: () => input.binding.bindingDigest, acceptedOutputDigests: new Set<string>(), ceilingState: () => 'within' as const };
+    const book = EgressTicketBook.open(input.binding, scope);
+    const args = { tool: 'websearch' as const, query: SEARCH_BACKEND_PROBE_QUERY };
+    const decision = evaluateSearchServiceCall({ arguments: args }, input.binding, scope, book);
+    if (decision.decision !== 'call-search-service') throw new SearchServiceError('SEARCH_PROBE_NOT_ADMITTED', decision.detail);
+    const authorized = authorizeSearchCall({ ticket: decision.ticket, book, arguments: args });
+    const outcome = await sendSearchCall(authorized, input.fetch, undefined, { broker: input.broker, admitHost: input.admitHost, modelRole: 'Main Editorial Role' });
+    const hits = searchBackend(backendId).readResults(outcome.status, outcome.contentType, new TextDecoder().decode(outcome.bytes));
+    return { backendId, reachable: outcome.status === 200 && hits !== null, latencyMs: Date.now() - started, resultCount: hits?.length ?? 0,
+      results: (hits ?? []).slice(0, 3).map((hit) => ({ title: capCharacters(hit.title.replace(/[\r\n]/gu, ' '), 120), url: hit.url.length <= 2048 ? hit.url : '' })).filter((hit) => hit.url !== ''),
+      failure: outcome.status === 200 && hits !== null ? null : `HTTP ${outcome.status}` };
+  } catch (error) {
+    return { backendId, reachable: false, latencyMs: Date.now() - started, resultCount: 0, results: [],
+      failure: error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'SEARCH_PROBE_FAILED' };
+  }
+}
+
+/** Consume a launch-verified projection; the registry supplies the endpoint only after id, host and slot match. */
+export function platformToolsFromProjection(rule: unknown): import('./egress-gate.js').RuntimePlatformToolsRule | null {
+  if (!isRecord(rule) || rule['webSearchToolAllowed'] !== true || !isRecord(rule['platformTools'])) return null;
+  const block = rule['platformTools'];
+  const search = block['websearch']; const page = block['webfetch']; const breaker = block['breaker'];
+  if (!isRecord(search) || search['selection'] !== 'user-configured' || !Array.isArray(search['backends']) ||
+      !isRecord(page) || page['maxBytes'] !== 5_242_880 || page['timeoutSeconds'] !== 30 || page['boundedByCitations'] !== true ||
+      !isRecord(breaker) || breaker['roundTrips'] !== 128 || breaker['end'] !== '联网核查未完成') return null;
+  for (const entry of search['backends'] as unknown[]) {
+    if (!isRecord(entry) || typeof entry['id'] !== 'string') return null;
+    try {
+      const declared = searchBackend(entry['id']).declaration;
+      if (entry['host'] !== declared.host || entry['credentialSlot'] !== declared.credentialSlot) return null;
+    } catch { return null; }
+  }
+  if (search['backends'].length !== 5 || new Set(search['backends'].map((entry: { id: string }) => entry.id)).size !== 5) return null;
+  return { websearch: { selection: 'user-configured', backends: search['backends'] as Array<{ id: string; host: string; credentialSlot: string }> },
+    webfetch: { maxBytes: 5_242_880, timeoutSeconds: 30, boundedByCitations: true } };
 }

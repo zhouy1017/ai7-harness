@@ -231,6 +231,7 @@ export function applyAssuranceSample(reduction: AnalysisReductionResult, sample:
 }
 
 export interface AnalysisKindDefinition {
+  readonly platformToolBase?: AnalysisKindDefinition;
   /** The exact result contract beneath the optional provider clarification instruction /2. */
   readonly clarificationBase?: AnalysisKindDefinition;
   /** Optional exact Material Index pins, frozen into this Task’s execution plan (Issue #428). */
@@ -723,3 +724,20 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
 
 /** The baseline unit result type, re-exported so the execution owner can remap a reused unit by lineage. */
 export type { BaselineUnitResult };
+
+/** The factual executor's admitted research contract; its findings retain the existing unresolved evidence states until #425. */
+export function withFactualResearch(definition: AnalysisKindDefinition): AnalysisKindDefinition {
+  const base = definition.platformToolBase ?? definition;
+  if (base.kind !== FACTUAL_REVIEW_KIND) throw new Error('FACTUAL_RESEARCH_KIND_INVALID');
+  const systemPrompt = base.systemPrompt.replace('不调用任何工具、不引用外部资料。', '可以使用本次计划声明的 websearch 与 webfetch。') + '\n' + [
+    '联网核查：在本分析单元内，先针对一条最需要核实的真实世界背景事实调用 websearch，再输出原契约要求的 JSON。',
+    '查询用你自己概括的公开事实主题，不发送稿件原文、引文、标题、作者或文件名。每一条查询只执行一次，不为获得更好的答案重试。',
+    '只在必要时用 webfetch 读取检索结果中的 https 来源。basis 可以用简短来源名称与 URL 说明检索所见；不要把模型知识当作证据。',
+    '如果单元只包含虚构设定，可检索一条与其时代或制度有关的公共背景事实，但不得把虚构设定当作事实错误。',
+    '保持原有 assertions JSON 结构与定位规则；外部证据的留存和支持判断由后续来源流程完成，你不作事实定论。',
+  ].join('\n');
+  const promptContractDigest = sha256Hex(canonicalJson({ basePromptContractDigest: base.promptContractDigest, systemPrompt, platformTools: 'websearch-webfetch/1' }));
+  return { ...base, platformToolBase: base, systemPrompt, promptContractDigest,
+    requestDigest: (unitOrdinal, unitDigest) => factualReviewRequestDigest(promptContractDigest, unitOrdinal, unitDigest),
+  };
+}

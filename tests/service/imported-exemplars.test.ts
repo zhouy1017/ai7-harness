@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { writeFile, readFile, readdir, rm } from 'node:fs/promises';
@@ -73,7 +74,7 @@ describe('earlier published Books in 范例', () => {
     const database = db();
     try {
       for (const table of Object.keys(IMPORTED_EXEMPLAR_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      database.exec('PRAGMA user_version = 68');
+      execPre74Fixture(database, 'PRAGMA user_version = 68');
     } finally { database.close(); }
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(store.getBookOverview(existing).book).toMatchObject({ title: '升级前的测试项目' });

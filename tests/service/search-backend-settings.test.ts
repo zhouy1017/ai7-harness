@@ -1,0 +1,53 @@
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { describe, expect, it } from 'vitest';
+import { EditorialStore } from '../../src/service/store.js';
+import { ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL } from '../../src/service/task-authorization.js';
+import { createServiceTestRoots } from '../support/temp-data-root.js';
+
+describe('the persisted search settings and schema 74', () => {
+  it('keeps selection and opaque per-backend credential references across restart', async () => {
+    const roots = await createServiceTestRoots();
+    let store: EditorialStore | undefined;
+    try {
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      const settings = store.getSearchBackendSettings();
+      expect(settings.selectedBackendId).toBe('search-tinyfish');
+      expect(settings.backends.map((entry) => entry.backendId)).toEqual(['search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai']);
+      const first = store.saveSearchBackendCredential('search-brave', null, 'needs-attention');
+      const saved = store.saveSearchBackendCredential('search-brave', first.credentialReference, 'ready');
+      expect(saved.credentialReference).toMatch(/^[0-9a-f-]{36}$/u);
+      store.selectSearchBackend('search-brave');
+      expect(() => store!.selectSearchBackend('search-kimi')).toThrow(/未提供/u);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getSearchBackendSettings().selectedBackendId).toBe('search-brave');
+      expect(store.getSearchBackendConnections().find((row) => row.backendId === 'search-brave')).toEqual(saved.selected ? saved : { ...saved, selected: true, selectedAt: store.getSearchBackendConnections().find((row) => row.backendId === 'search-brave')!.selectedAt });
+      const removed = store.saveSearchBackendCredential('search-brave', null, 'missing');
+      expect(removed.credentialReference).toBe(first.credentialReference);
+      expect(removed.credentialOperationState).toBe('missing');
+    } finally { store?.close(); await roots.dispose(); }
+  });
+
+  it('migrates exact revision 73 once and refuses a malformed terminal CHECK', async () => {
+    const roots = await createServiceTestRoots();
+    let store: EditorialStore | undefined;
+    try {
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); store.close(); store = undefined;
+      const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+      const db = new DatabaseSync(path);
+      db.exec('DROP TABLE search_backend_connections; DROP TABLE analysis_plan_records;');
+      db.exec(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records);
+      db.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_update']!);
+      db.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_delete']!);
+      db.exec('PRAGMA user_version = 73'); db.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getSearchBackendConnections()).toHaveLength(5); store.close(); store = undefined;
+      const terminal = new DatabaseSync(path);
+      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(74);
+      expect(String(terminal.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_plan_records'").get()!.sql)).toContain('web-tools-backend');
+      expect(() => terminal.prepare("INSERT INTO search_backend_connections VALUES ('search-kimi', NULL, 'missing', NULL, 'now')").run()).toThrow();
+      terminal.exec('DROP TABLE search_backend_connections'); terminal.close();
+      await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
+    } finally { store?.close(); await roots.dispose(); }
+  });
+});

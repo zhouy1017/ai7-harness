@@ -94,6 +94,7 @@ export function runReportReflectionNotRun(reason: string): RunReportReflectionOu
  * which is exactly why a hand-written fixture can pin its digest across imports and across replays.
  */
 export interface RunReportAccounting {
+  readonly platformTools?: RunReportUsage;
   readonly classification: RunReportClassification;
   readonly stages: ReadonlyArray<{ readonly stage: RunReportStageId; readonly state: RunReportStageProjection['state'] }>;
   readonly units: RunReportUnitAccountingProjection;
@@ -115,6 +116,8 @@ const MODEL_CLARIFICATION_REPORT_WORDS = {
 
 /** Everything the report is built from, apart from what the reflection turn itself produces. */
 export interface RunReportFacts {
+  readonly platformTools?: RunReportUsage;
+  readonly webToolsBackend?: import('../../shared/protocol.js').FrozenWebToolsBackend;
   readonly modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'timed-out' | 'unanswered' }>;
   readonly runRecordId: string;
   readonly taskIntentId: string;
@@ -264,8 +267,9 @@ function assembleRunReport(
         line: `第 ${entry.unitOrdinal} 个阅读范围的模型问题：${MODEL_CLARIFICATION_REPORT_WORDS[entry.outcome]}。`,
       })),
     }),
+    ...(facts.webToolsBackend === undefined ? {} : { webToolsBackend: facts.webToolsBackend }),
     failures: failureRows(facts),
-    usagePerStage: { ...facts.usage, 'run-report-reflection': reflection.usage },
+    usagePerStage: { ...facts.usage, 'run-report-reflection': reflection.usage, 'platform-tools': facts.platformTools ?? RUN_REPORT_NO_USAGE },
     findingCounts: facts.findingCounts,
     assurance: assuranceOf(facts.sample),
     ifRedone: reflection.ifRedone,
@@ -281,6 +285,7 @@ function assembleRunReport(
 export function runReportAccountingOf(report: RunReportRecord): RunReportAccounting {
   const { seed: _seed, ...assurance } = report.assurance;
   return {
+    ...(report.usagePerStage['platform-tools']?.requests > 0 ? { platformTools: report.usagePerStage['platform-tools'] } : {}),
     classification: report.classification,
     stages: report.stages.map((stage) => ({ stage: stage.stage, state: stage.state })),
     units: report.units,
@@ -339,7 +344,7 @@ export function runReportUsageReconciles(report: RunReportRecord, revisionUsage:
     requests: total.requests + report.usagePerStage[stage].requests,
     inputTokens: total.inputTokens + report.usagePerStage[stage].inputTokens,
     outputTokens: total.outputTokens + report.usagePerStage[stage].outputTokens,
-  }), RUN_REPORT_NO_USAGE);
+  }), report.usagePerStage['platform-tools'] ?? RUN_REPORT_NO_USAGE);
   return summed.requests === revisionUsage.requests &&
     summed.inputTokens === revisionUsage.inputTokens &&
     summed.outputTokens === revisionUsage.outputTokens;

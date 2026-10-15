@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { OUTCOME_RESOLUTION_SCHEMA_SQL, initializeOutcomeResolutionSchema } from '../../src/service/analysis/outcome-resolutions.js';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -398,7 +399,7 @@ function plant(version: number): void {
       if (entry.revision <= version) break;
       entry.undo(database);
     }
-    database.exec(`PRAGMA user_version = ${version}`);
+    execPre74Fixture(database, `PRAGMA user_version = ${version}`);
   });
 }
 

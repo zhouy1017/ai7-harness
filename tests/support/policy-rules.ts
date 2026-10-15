@@ -1,3 +1,4 @@
+import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
 import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../src/shared/protocol.js';
 
 // Variants of the selected developer-live projection for refusal paths: one kind's rule changed, repeated or removed. The
@@ -25,4 +26,15 @@ export function withoutRuleFor(policy: LaunchPolicyProjection, kind: string): La
 /** The projection with the rule naming `kind` listed twice: an ambiguous admission. */
 export function withRepeatedRuleFor(policy: LaunchPolicyProjection, kind: string): LaunchPolicyProjection {
   return withRules(policy, [...policy.providerProcessing.admittedRules, ruleFor(policy, kind)]);
+}
+
+/** The 6d projection while 6b builds in parallel; never a policy-byte amendment or live authority. */
+export function searchToolsRuleStub() {
+  return { webSearchToolAllowed: true, platformTools: {
+    websearch: { selection: 'user-configured' as const, selectionRequiresCredential: false,
+      backends: SEARCH_BACKENDS.filter((entry) => entry.shipped).map((entry) => ({ id: entry.id, host: entry.host!, credentialSlot: entry.credentialSlot })),
+    },
+    webfetch: { maxBytes: 5_242_880, timeoutSeconds: 30, boundedByCitations: true as const },
+    breaker: { roundTrips: 128, end: '联网核查未完成' }, oneQueryPerRunUnit: true as const, toolResultCategory: 'public-or-synthetic' as const,
+  } };
 }

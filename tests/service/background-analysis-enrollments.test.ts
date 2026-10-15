@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -1189,7 +1190,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       for (const table of [...Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse(), ...Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()]) database.exec(`DROP TABLE ${table}`);
       database.exec('PRAGMA foreign_keys = ON');
       downgradeAnalysisRunAuthorizationsToRevision65(database);
-      database.exec(`PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
+      execPre74Fixture(database, `PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
       expect(analysisRunAuthorizationsShape(database)).toBe('revision-65');
       return database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all();
     });

@@ -1,3 +1,8 @@
+import { PlatformToolSession, platformToolModelProfile } from '../provider/platform-tool-session.js';
+import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
+import { platformToolsFromProjection } from '../provider/search-service.js';
+import { searchBackend } from '../provider/search-backends/index.js';
+import { admitTicketHost } from '../../shared/network-denial.js';
 import { randomUUID } from 'node:crypto';
 import { backgroundAnalysisShare, backgroundShareFullReason } from '../background-analysis-enrollments.js';
 import { BASELINE_ANALYSIS_KIND, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
@@ -873,7 +878,7 @@ export class BaselineAnalysisExecutionOwner {
     // describe it, never the one the plan froze: a harness a later release pins differently is seen here, before a
     // summary promises what the Run kept, and not first when the execution refuses it.
     const { route, model } = routeFactsOf(facts, live);
-    const composition = describeComposition(route, model, ledger.definition.promptContractDigest);
+    const composition = describeComposition(route, model, ledger.definition.promptContractDigest, { platformTools: facts.webToolsBackend !== undefined });
     const rebuilt = executionBindingRecordOf({
       facts, definition: ledger.definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
       harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: composition.digest,
@@ -1228,7 +1233,7 @@ export class BaselineAnalysisExecutionOwner {
     const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live);
     // The live route's profiles: the Go route's under developer-live, the frozen route's under ordinary production.
     const routeProfile: ProviderRouteProfile = production === null ? OPENCODE_GO_ROUTE_PROFILE : productionRouteProfile(route);
-    const liveModelProfile: ProviderModelProfile = production === null ? OPENCODE_GO_V41_FLASH_PROFILE : productionModelProfile(route, model);
+    let liveModelProfile: ProviderModelProfile = production === null ? OPENCODE_GO_V41_FLASH_PROFILE : productionModelProfile(route, model);
     // Under ordinary production the rule that admits the kind names the editor's unpublished words (Issue #811): the
     // baseline's own rule included, read for its categories as any other kind's is.
     // A Run a 后台分析登记 started is read under the enrolled-background rule, checked again here against the policy it executes under (Issue #864).
@@ -1248,6 +1253,8 @@ export class BaselineAnalysisExecutionOwner {
       if (active.validationStep.startsWith('sampling-')) return definition.assurance!.promptContractDigest;
       return promptContractDigest;
     };
+    const bootstrap = production === null && validation?.family === 'policy-selection' && validation.case === 'wave6-tool-evidence-bootstrap';
+    if (facts.webToolsBackend !== undefined) liveModelProfile = platformToolModelProfile(liveModelProfile, production === null ? 'developer-live' : 'ordinary-production', validation);
     let cache: ProviderResultCache | null = null;
     if (live !== null && production === null && validation !== null) {
       cache = new ProviderResultCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
@@ -1289,9 +1296,12 @@ export class BaselineAnalysisExecutionOwner {
     // Usage accumulated so far, in the shape the ceiling evaluator reads. Every attempt counts, so the
     // ceiling sees exactly what the Run has spent at the instant the gate asks, before each dispatch.
     const accumulated: UsageFacts[] = [];
+    const pendingLoopUsage: UsageFacts[] = [];
+    const seenLoopResults = new Set<object>();
+    let platformSession: PlatformToolSession | null = null;
     const ceilingState = (): EgressCeilingState => {
       if (runBudgetCeiling.kind === 'unset') return 'unset';
-      return evaluateRunBudgetCeiling(accumulated, runBudgetCeiling).state === 'reached' ? 'reached' : 'within';
+      return evaluateRunBudgetCeiling([...accumulated, ...pendingLoopUsage], runBudgetCeiling).state === 'reached' ? 'reached' : 'within';
     };
     // The single-use ticket the gate issued for the step in flight; the adapter takes it or refuses.
     let pendingTicket: TransmitTicket | null = null;
@@ -1304,6 +1314,11 @@ export class BaselineAnalysisExecutionOwner {
     // transport. Nothing but the count crosses this closure.
     active.transmissions = () => liveAdapter.instance?.transmissions ?? 0;
     const harness = await prepareExecution({
+      ...(facts.webToolsBackend === undefined ? {} : { platformTools: {
+        execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
+        admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
+        acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
+      } }),
       sessionId: harnessSessionId,
       route,
       model,
@@ -1353,7 +1368,11 @@ export class BaselineAnalysisExecutionOwner {
       },
       gate: (payload) => {
         if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
-        const decision = evaluateEgress(payload, bindingFacts, { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
+        const last = liveAdapter.instance?.lastCanonicalResult;
+        if (platformSession !== null && last !== null && last !== undefined && last.kind === 'tool-calls' && last.usage !== null && !seenLoopResults.has(last)) {
+          pendingLoopUsage.push(last.usage); seenLoopResults.add(last);
+        }
+        const decision = evaluateEgress(payload, bindingFacts, platformSession?.egressScope ?? { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
         admittedPayloadDigest = decision.decision === 'refuse' ? null : decision.payloadDigest;
         return decision;
       },
@@ -1437,6 +1456,23 @@ export class BaselineAnalysisExecutionOwner {
             : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages,
       };
+      if (facts.webToolsBackend !== undefined && live !== null) {
+        const selectedRule = liveKindRule(policy, definition.kind);
+        const tools = platformToolsFromProjection(selectedRule);
+        if (tools === null) throw new ExecutionAdmissionError('PLATFORM_TOOLS_NOT_NAMED', '本任务的规则未声明联网工具。');
+        const backend = searchBackend(facts.webToolsBackend.backendId);
+        if (backend.declaration.host !== facts.webToolsBackend.host || facts.searchCredentialReference === undefined) throw new ExecutionAdmissionError('PLATFORM_TOOL_BACKEND_DRIFT', '冻结的联网检索配置无效。');
+        bindingFacts = { ...bindingFacts, platformTools: tools, searchBackend: { backendId: facts.webToolsBackend.backendId,
+          host: facts.webToolsBackend.host, endpoint: backend.declaration.endpoint!, credentialSlot: backend.declaration.credentialSlot, credentialReference: facts.searchCredentialReference } };
+        const snapshots = cache === null ? null : new ResearchSnapshotCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
+        if (snapshots !== null) await snapshots.open();
+        const ready = await this.#broker.checkPlanReadiness(backend.declaration.credentialSlot, facts.searchCredentialReference);
+        if (ready !== 'present') throw new ExecutionAdmissionError('SEARCH_CREDENTIAL_MISSING', `${backend.declaration.displayName} 缺少密钥；请在 设置 › 模型服务 › 联网检索 配置。`);
+        platformSession = new PlatformToolSession({ binding: bindingFacts, scope: { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState },
+          fetch: live.nativeFetch, admitHost: admitTicketHost, broker: this.#broker, cache, snapshots, purpose: testItemPurpose, evidenceSearchRoundTripOnly: bootstrap,
+          onUsage: (usage) => accumulated.push(usage),
+        });
+      }
       harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
       // 取消任务 before the Run kept any unit (CTRL-008): nothing of it is left to gather, so it ends here without
       // provider work and without a revision. A stopped Run that kept units — or whose units asked the editor, their first
@@ -1653,7 +1689,11 @@ export class BaselineAnalysisExecutionOwner {
         const message = answerMessage ?? unitMessages.get(unit.ordinal)!;
         admittedUserMessages.add(message);
         const unitMessageDigest = sha256Hex(message);
+        platformSession?.startUnit();
         const turn = await harness.submitUnit(message);
+        if (platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
+        pendingLoopUsage.length = 0;
+        seenLoopResults.clear();
         // Read before anything else can start a turn: the adapter clears this at the start of every
         // stream, so it is this attempt's result or nothing.
         const canonical = liveAdapter.instance?.lastCanonicalResult ?? null;
@@ -1772,7 +1812,8 @@ export class BaselineAnalysisExecutionOwner {
           gap('contract-invalid', '技术回合完成但没有模型输出。');
         } else if (turn.terminal === 'failed') {
           const failure = turn.signals.find((signal) => signal.kind === 'failed');
-          const reason = failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。';
+          const breakerEnd = platformSession?.unitEnd(turn);
+          const reason = breakerEnd !== undefined && breakerEnd !== null ? breakerEnd.disclosure : failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。';
           // 模型服务账户限额 (Issue #51, S16b; MODEL-018): a Run that keeps its progress stops here with the unit unsettled —
           // no gap, no retry, no fallback, no second model — and 续行 reads it again once the limit clears.
           if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit' && active.resumableOnInterrupt &&
@@ -2319,7 +2360,11 @@ export class BaselineAnalysisExecutionOwner {
           active.progress.currentUnitStartedAt = new Date().toISOString();
           active.progress.attemptState = 'dispatched';
           active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
-          const turn = await harness.submitUnit(message);
+          platformSession?.startUnit();
+        const turn = await harness.submitUnit(message);
+        if (platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
+        pendingLoopUsage.length = 0;
+        seenLoopResults.clear();
           // Every later turn of the Run keeps the Run's own category again.
           if (production !== null && step !== null && bindingFacts !== null) bindingFacts = { ...bindingFacts, outboundDataCategory: 'unpublished-excerpts' };
           if (this.#deps.stageHold) await this.#deps.stageHold('cross-unit-reduction');
@@ -2439,6 +2484,11 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
       unitRecords.sort((left, right) => left.unitOrdinal - right.unitOrdinal);
+      if (platformSession !== null) {
+        usage.requests += platformSession.usage.requests;
+        usage.inputTokens += platformSession.usage.inputTokens;
+        usage.outputTokens += platformSession.usage.outputTokens;
+      }
       const revision = ledger.persistRevision({
         facts,
         attemptId,
@@ -2490,6 +2540,7 @@ export class BaselineAnalysisExecutionOwner {
         recordedAt: new Date().toISOString(),
         spans: clock.spans(),
         usage: stageUsage,
+        ...(platformSession === null ? {} : { platformTools: platformSession.usage, webToolsBackend: facts.webToolsBackend }),
         unitRows: runReportUnitRows(unitRecords, unitObservations),
         submitted: submittedUnits.length,
         // Exactly the three fields decision 4 names; the adaptation's own digests, codes, and

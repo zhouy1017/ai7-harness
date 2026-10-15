@@ -1,3 +1,9 @@
+import { taskDeclaresPlatformTools } from './live-kind-admission.js';
+import { withFactualResearch } from './kind-definition.js';
+import { platformToolsFromProjection } from '../provider/search-service.js';
+import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
+import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
+import type { FrozenWebToolsBackend } from '../../shared/protocol.js';
 import { randomUUID } from 'node:crypto';
 import { liveKindAdmission, liveKindRule } from './live-kind-admission.js';
 import { withModelClarification } from '../provider/clarification-contract.js';
@@ -650,6 +656,8 @@ export interface PlanAdaptationInput {
 
 /** Everything the execution owner needs from the frozen plan before the first model call. */
 export interface ExecutionPlanFacts {
+  readonly webToolsBackend?: FrozenWebToolsBackend;
+  readonly searchCredentialReference?: string;
   readonly bookId: string;
   readonly taskIntentId: string;
   readonly runRecordId: string;
@@ -1104,6 +1112,10 @@ export class BaselineAnalysisStore {
   #refreshClarificationDefinition(): void {
     const launch = this.#launch;
     const rule = liveKindRule(launch.policy, this.#definition.kind);
+    const base = this.#definition.clarificationBase ?? this.#definition;
+    if (base.kind === 'factual-review') {
+      this.#definition = platformToolsFromProjection(rule) === null ? base.platformToolBase ?? base : withFactualResearch(base);
+    }
     // The one origin-qualified admitted rule owns eligibility; missing terms deny.
     if (this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ||
         rule?.clarificationQuestionAllowed === true) {
@@ -3549,10 +3561,26 @@ export class BaselineAnalysisStore {
     // ceiling, so a redo that copies a ceiling the editor once set keeps the rest of the edit and not the ceiling.
     const edits = !launchSetsCeilingOf(live) ? input.edits : withoutCeiling(input.edits);
     const promptContractDigest = this.#definition.promptContractDigest;
+    const admittedToolRule = this.#definition.kind === BASELINE_ANALYSIS_KIND || intent.preparedByEnrollmentVersionId !== null ? null
+      : liveKindRule(this.#launch.policy, this.#definition.kind);
+    const toolsProjection: unknown = admittedToolRule !== null && 'platformTools' in admittedToolRule ? admittedToolRule.platformTools : null;
+    const toolsDeclared = live !== null && taskDeclaresPlatformTools(this.#definition.kind) && platformToolsFromProjection(admittedToolRule) !== null;
+    let webToolsBackend: FrozenWebToolsBackend | undefined;
+    let searchCredentialReference: string | undefined;
+    if (toolsDeclared) {
+      const row = this.#db.prepare('SELECT * FROM search_backend_connections WHERE selected = 1').get() as SqlRow | undefined;
+      requireAnalysis(row !== undefined, 'SEARCH_BACKEND_NOT_SHIPPED', '请在 设置 › 模型服务 › 联网检索 选择后端。');
+      const adapter = searchBackend(asString(row.backend_id));
+      if (production !== null) requireAnalysis(row.credential_operation_state === 'ready' && typeof row.credential_reference === 'string',
+        'SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
+      webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at) };
+      searchCredentialReference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot] : asString(row.credential_reference);
+    }
     const composition = live === null
       ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest)
-      : describeComposition(live.route, live.model, promptContractDigest);
+      : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined });
     const providerPlan = {
+      ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }),
       role: 'Main Editorial Role',
       capabilities: [],
       remoteBinding: live === null
@@ -3639,6 +3667,7 @@ export class BaselineAnalysisStore {
         materialReferenceBasePromptContractDigest: this.#definition.materialReferences.basePromptContractDigest,
       }),
     };
+    if (webToolsBackend !== undefined) records['web-tools-backend'] = canonicalRecord(webToolsBackend);
     if (reusePlan !== null) records['reuse-plan'] = reusePlanRecord(reusePlan);
     const envelopeBase = {
       providerStatus: production !== null
@@ -3654,6 +3683,7 @@ export class BaselineAnalysisStore {
         : dispatchAllowed
           ? '计划已冻结；远程绑定被 Provider Processing v1 拒绝，执行绑定至 AI7 本地确定性模型适配器'
           : '计划已冻结；远程绑定被 Provider Processing v1 拒绝，且没有可执行的本地路由',
+      ...(webToolsBackend === undefined ? {} : { webToolsBackendDigest: records['web-tools-backend']!.digest }),
       taskIntentId,
       checkpointDigest: input.checkpointDigest,
       manuscriptPinDigest: records['manuscript-pin']!.digest,
@@ -4624,6 +4654,7 @@ export class BaselineAnalysisStore {
       manifestDigest: manifest.digest,
       planEnvelopeDigest: asString(run.plan_envelope_sha256),
       runSourceScopeDigest: asString(digests['run-source-scope']),
+      ...(providerPlan.webToolsBackend === undefined ? {} : { webToolsBackend: providerPlan.webToolsBackend, searchCredentialReference: providerPlan.searchCredentialReference! }),
       providerResolutionPlanDigest: asString(digests['provider-resolution-plan']),
       credentialReference: providerPlan.remoteBinding.credentialReference,
       sourceDigest: (plan['manuscript-pin'] as { sourceDigest: string }).sourceDigest,

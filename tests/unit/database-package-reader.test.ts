@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,7 +35,7 @@ async function writtenPackage(): Promise<string> {
   writeFileSync(join(dataRoot, 'objects', 'sha256', 'one.docx'), 'a stored manuscript object');
   const database = new DatabaseSync(':memory:');
   try {
-    database.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT; INSERT INTO books VALUES (\'b\'); PRAGMA user_version = 1;');
+    execPre74Fixture(database, 'CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT; INSERT INTO books VALUES (\'b\'); PRAGMA user_version = 1;');
     const path = join(root, 'written.ai7db');
     await writeDatabasePackage(database, dataRoot, path, () => ({
       dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 1, createdAt: '2026-09-25T02:00:00.000Z', origin: 'database-export',
