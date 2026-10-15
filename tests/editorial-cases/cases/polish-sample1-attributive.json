@@ -8,6 +8,7 @@
   "input": { "selection": { "paragraph": 72, "start": "在修养同样深厚的曾本之听来", "end": "戳着他的心窝。" } },
   "fixture": "sample1-recorded-v41-editorial-polish",
   "measuredPass": "polish",
+  "replay": { "route": "deterministic" },
   "expectedConcerns": [
     { "id": "s1-polish-stacked-adverbials", "category": "polish", "paragraph": 72, "words": "有诗意很优雅地", "corrections": ["诗意而优雅地", "既有诗意又很优雅地", "诗意、优雅地"], "concern": "状语“有诗意很优雅地”堆叠生硬" }
   ],

@@ -8,6 +8,7 @@
   "input": { "categories": ["style-and-format"], "scope": "whole" },
   "fixture": "sample1-recorded-v41-editorial-review",
   "measuredPass": "review",
+  "replay": { "route": "developer-live", "modelQuestions": true },
   "expectedConcerns": [
     { "id": "s1-chapter-one-heading", "category": "style-and-format", "paragraph": 4, "words": "壹", "corrections": [], "concern": "章序号“壹”作为正文段落排出，未按标题格式处理" },
     { "id": "s1-chapter-two-heading", "category": "style-and-format", "paragraph": 51, "words": "贰", "corrections": [], "concern": "章序号“贰”作为正文段落排出，未按标题格式处理" },

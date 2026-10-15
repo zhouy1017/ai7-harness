@@ -8,6 +8,7 @@
   "input": { "categories": ["typos-and-usage"], "scope": "whole" },
   "fixture": "synthetic-editorial-review-authored",
   "measuredPass": null,
+  "replay": { "route": "deterministic" },
   "expectedConcerns": [
     { "id": "lh-de-di", "defect": "lh-de-di" },
     { "id": "lh-du-du", "defect": "lh-du-du" },

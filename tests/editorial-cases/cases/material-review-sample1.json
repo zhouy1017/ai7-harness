@@ -8,6 +8,7 @@
   "input": { "categories": ["typos-and-usage"], "scope": "whole", "material": "sample1-derived-library-item" },
   "fixture": "sample1-recorded-v41-material-review",
   "measuredPass": null,
+  "replay": { "route": "developer-live", "modelQuestions": false },
   "expectedConcerns": [
     { "id": "m-missing-de", "category": "typos-and-usage", "paragraph": 10, "words": "比较特别卜算", "corrections": ["比较特别的卜算"], "concern": "“特别”与“卜算”之间脱漏结构助词“的”" },
     { "id": "m-circle-1990", "category": "typos-and-usage", "paragraph": 15, "words": "一九九○年代", "corrections": ["一九九〇年代"], "concern": "年份中的零误用符号“○”，应为汉字“〇”" },
@@ -22,7 +23,7 @@
     { "id": "m-oracle-inscription", "paragraph": 48, "words": "拯之承启", "reason": "甲骨文书信的原文" },
     { "id": "m-seal-name", "paragraph": 49, "words": "郝嘉", "reason": "印章上的人名" },
     { "id": "m-wordplay", "paragraph": 56, "words": "知之者之之也，不知者之之乎", "reason": "有意的文字游戏" },
-    { "id": "m-custom-term", "paragraph": 10, "words": "七十小寿", "reason": "小说设定的地方习俗用语" }
+    { "id": "m-custom-term", "paragraph": 10, "words": "称之为七十小寿", "reason": "小说设定的地方习俗用语" }
   ],
   "observations": {
     "acceptance": "参考资料不改变错别字审阅的定位与修改质量；资料原文不被当作书稿引用。",

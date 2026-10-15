@@ -8,6 +8,7 @@
   "input": { "fixtures": { "normal": "sample1-model-clarification-live-baseline", "ambiguous": "sample1-model-clarification-live-ambiguous" } },
   "fixture": "sample1-model-clarification-live-ambiguous",
   "measuredPass": null,
+  "replay": { "route": "deterministic" },
   "expectedConcerns": [
     { "id": "c-asks-when-ambiguous", "run": "ambiguous", "units": [1, 2, 3, 4, 5, 6, 7, 8], "concern": "焦点含糊（人物或事件由编辑决定）时，每个单元先问一次" }
   ],

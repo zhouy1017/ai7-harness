@@ -13,6 +13,7 @@
   },
   "fixture": "sample1-recorded-v41-editorial-writing-draft",
   "measuredPass": "writing-draft",
+  "replay": { "route": "developer-live", "modelQuestions": true },
   "expectedConcerns": [
     { "id": "w-book-title", "section": "draft", "keywords": ["蟠虺"], "concern": "文中出现书名" },
     { "id": "w-oracle-letter", "section": "draft", "keywords": ["甲骨文"], "concern": "突出甲骨文来信的悬念" },

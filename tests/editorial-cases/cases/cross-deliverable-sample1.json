@@ -8,6 +8,7 @@
   "input": { "categories": ["cross-deliverable-consistency"], "scope": { "paragraph": 8 }, "deliverable": "sample1-news-release-nine" },
   "fixture": "sample1-recorded-v41-review-cross-deliverable-consistency",
   "measuredPass": null,
+  "replay": { "route": "developer-live", "modelQuestions": false },
   "expectedConcerns": [
     { "id": "x-age-mismatch", "category": "cross-deliverable-consistency", "paragraph": 8, "words": "六十五岁生日", "corrections": [], "concern": "新闻稿写“九十五岁”，书稿为“六十五岁”" }
   ],

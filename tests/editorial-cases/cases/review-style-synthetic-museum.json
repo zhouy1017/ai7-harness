@@ -8,6 +8,7 @@
   "input": { "categories": ["style-and-format"], "scope": "whole" },
   "fixture": "synthetic-editorial-review-authored",
   "measuredPass": null,
+  "replay": { "route": "deterministic" },
   "expectedConcerns": [
     { "id": "mu-half-width-comma", "defect": "mu-half-width-comma" },
     { "id": "mu-numeral-style", "defect": "mu-numeral-style" },
