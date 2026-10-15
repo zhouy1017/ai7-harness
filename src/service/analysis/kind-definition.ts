@@ -25,6 +25,7 @@ import {
   type CoverageManifestUnitProjection,
   type FactualReviewExcludedProjection,
   type FactualReviewFindingProjection,
+  type TrustedOperationalScope,
 } from '../../shared/protocol.js';
 import { FixtureReplayResearchCapability, type ResearchCapability } from '../capabilities/research.js';
 import {
@@ -400,7 +401,7 @@ const RETAINED_V1_RECORDED_MODEL = 'deepseek-v4.1-flash';
  * current contract. Nothing here relaxes the adapter's own guard: a /1 Run is answered only because it asks /1's questions.
  */
 export function baselinePromptContractForLaunch(launch: {
-  readonly operationalScope: 'development-ci' | 'developer-live';
+  readonly operationalScope: TrustedOperationalScope;
   readonly journey: string | undefined;
   readonly fixture: Pick<ResolvedModelFixture, 'identity' | 'lineage' | 'entries'> | null;
 }): BaselinePromptContractSelection {

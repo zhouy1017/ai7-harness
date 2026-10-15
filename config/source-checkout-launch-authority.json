@@ -5,11 +5,12 @@
   "trustedOperationalScope": "development-ci",
   "launchSelectableScopes": [
     "development-ci",
-    "developer-live"
+    "developer-live",
+    "ordinary-production"
   ],
   "activePolicySet": {
-    "version": "v9",
-    "canonicalPath": "docs/policies/active-policy-set.v9.json",
-    "sha256": "b13013bbd0b9b1cb0fdd7b88d0d349d9c010d3043e867c547a81f37ed3d5cb0b"
+    "version": "v10",
+    "canonicalPath": "docs/policies/active-policy-set.v10.json",
+    "sha256": "e1bb81956a46fc9dad3f761943d94f1b68802549ed6838fde7efa7e711584487"
   }
 }

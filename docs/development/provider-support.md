@@ -393,7 +393,7 @@ Open:
 | OpenCode session header | sent — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08 |
 | Per-turn output cap | none |
 
-The developer-live route of Provider Processing v11 (ADR 0065, ADR 0067), selected by active-policy-set v9. On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run or dialogue attempt. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.
+The developer-live route of Provider Processing v12 (ADR 0065, ADR 0067), selected by active-policy-set v10; also one of the two routes the editor may choose under ordinary-production v13. On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run or dialogue attempt. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.
 
 | Model id | Display name | Context | Tool calling | Web search tool |
 | --- | --- | --- | --- | --- |
@@ -423,7 +423,7 @@ Inert: 9 of 11 (no declared answer channel). Established:
 - `deepseek-v4.1-flash` · `streaming: chat-completions-sse` — `live-test-item` `S17c/editorial-dialogue/1`, `S17c/editorial-dialogue/3`, observed 2026-10-14
 - `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp` · `requestShape: openai-chat-completions` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08
 - `deepseek-v4-flash`: Historical V4 profile, retained with its original evidence; no current product binding selects it. It sends no DeepSeek-specific parameter. Its toolCalling stays none: the Owner's own session observed a client tool call through this gateway (ADR 0080 §5.3), which is not yet a recorded live-test item.
-- `deepseek-v4.1-flash`: The developer-live product binding of Provider Processing v11 for baseline analysis, editorial dialogue, reference-free non-web review, writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility. Request shape is a declared vendor wire contract; answer and reasoning channels have their own named V4.1 product observations. Sends no unverified format, reasoning-control or tool parameters. Old V4 items establish none of this model's capabilities.
+- `deepseek-v4.1-flash`: The developer-live product binding of Provider Processing v12 for baseline analysis, editorial dialogue, non-web review (cross-deliverable consistency included), writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility. Request shape is a declared vendor wire contract; answer and reasoning channels have their own named V4.1 product observations. Sends no unverified format, reasoning-control or tool parameters. Old V4 items establish none of this model's capabilities.
 - `deepseek-v4-pro`: The same model id as the production route's, behind a different route: a different profile, and no capability carries across.
 
 ### `opencode-go-messages`
