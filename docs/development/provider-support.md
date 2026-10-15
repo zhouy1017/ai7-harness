@@ -184,7 +184,7 @@ Inert: 0 of 2 (no declared answer channel). Established:
 - `deepseek-flash` · `answerChannel: message-content-string` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15
 - `deepseek-flash` · `reasoningChannel: message-reasoning-content` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15
 - `deepseek-v4-pro`: The production model. Its request side is exactly what adapter revision 1 has always sent; its response side has never been observed, so every other read-side capability is absent. By the vendor's notice, from 12:00 Beijing time on 2026-09-14 requests for this id are routed to V4.1 Flash (ADR 0080 §3); the id is not moved here (ADR 0080 §5.3).
-- `deepseek-flash`: The vendor's current id for V4.1 Flash, named by Provider Processing v13's ordinary-production binding for the DeepSeek 开放平台（官方） route (Issue #811). Answer and reasoning channels are the vendor's documented response contract; it sends no unverified format, reasoning-control or tool parameters.
+- `deepseek-flash`: The vendor's current id for V4.1 Flash, named by Provider Processing v13's ordinary-production binding for the DeepSeek 开放平台（官方） route (Issue #811). Answer and reasoning channels are the vendor's documented response contract, which the #811 ordinary-production observation of 2026-10-15 (one baseline Task, recorded on the Issue, no ledger line by design) agreed with; it sends no unverified format, reasoning-control or tool parameters.
 
 Readings:
 
