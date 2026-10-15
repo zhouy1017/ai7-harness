@@ -69,13 +69,16 @@ export interface RunCaseRequest {
   readonly testCase: EditorialCase;
 }
 
-/** The developer-live projection a replay binds: the v14 model-question wrapper off for a capture made before it existed. */
+/** Historical captures keep their declared contract: no platform tools, and no v14 question wrapper unless recorded. */
 function replayPolicy(policy: LaunchPolicyProjection, testCase: EditorialCase): LaunchPolicyProjection {
-  if (testCase.replay.route !== 'developer-live' || testCase.replay.modelQuestions) return policy;
+  if (testCase.replay.route !== 'developer-live') return policy;
   const kinds = testCase.kind === 'initial-evaluation' ? ['evaluation'] : testCase.kind === 'readers-report' ? ['evaluation', 'readers-report']
     : testCase.kind === 'writing-draft' ? ['writing']
       : (testCase.input.categories as ReadonlyArray<string> | undefined)?.map((category) => `editorial-review/${category}`) ?? [];
-  return kinds.reduce((current, kind) => withRuleFor(current, kind, { clarificationQuestionAllowed: false, clarificationTimeoutHours: null }), policy);
+  return kinds.reduce((current, kind) => withRuleFor(current, kind, {
+    webSearchToolAllowed: false, platformTools: null,
+    ...(testCase.replay.modelQuestions ? {} : { clarificationQuestionAllowed: false, clarificationTimeoutHours: null }),
+  }), policy);
 }
 
 async function replayLedgerContracts(inputRoot: string): Promise<Set<string>> {

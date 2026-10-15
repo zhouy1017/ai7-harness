@@ -28,6 +28,7 @@ export function liveReviewRule(
 ): ReviewProviderRule | null {
   if (entry.seriesKnowledge !== undefined || entry.categoryId === 'publication-risk') return null;
   if (entry.searchEngine) {
+    if (!['factual-review', 'academic-integrity'].includes(entry.categoryId)) return null;
     const rule = liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic']);
     return (entry.executor === 'review-category-contract' || entry.executor === 'factual-review-kind') && platformToolsFromProjection(rule) !== null ? rule : null;
   }
