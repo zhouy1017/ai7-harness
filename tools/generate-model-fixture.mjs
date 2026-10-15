@@ -494,6 +494,10 @@ export async function verifySample1Capture(request, selection, parsed) {
         if (category.entry.categoryId !== 'cross-deliverable-consistency' || current.unavailableReason !== null ||
             canonicalJson(current.participants) !== canonicalJson(input.deliverables) ||
             input.deliverables.some((document) => document.sourceDigest !== SAMPLE1_SOURCE_SHA256)) fail();
+        // A manuscript-only content key would also answer a Run comparing different deliverable words. Keep only the exact
+        // request key, which pins every participant; fresh-import regression replays this response through controlled transport.
+        parsed.contentDigest = null;
+        parsed.exactParticipantsOnly = true;
       }
       const prompt = owners.reviewCategoryContract(input);
       contract = { prompt, digest: owners.reviewCategoryContractDigest(prompt) };
@@ -1280,6 +1284,10 @@ export async function generateModelFixture(request, now = new Date()) {
   const selection = resolveLedgerSelection(await readLedgerLines(request.cacheRoot), request.selector);
   const entry = await readSelectedEntry(request.cacheRoot, selection);
   const parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest);
+  if (parsed.subject === 'review-unit' && parsed.unitMessage.split('\n', 1)[0].includes(' · 类别 cross-deliverable-consistency · ')) {
+    parsed.contentDigest = null;
+    parsed.exactParticipantsOnly = true;
+  }
   requireStageContract(selection, parsed);
   parsed.sample1Verified = await verifySample1Capture(request, selection, parsed);
   refuse(JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
@@ -1302,7 +1310,9 @@ export async function generateModelFixture(request, now = new Date()) {
   'FIXTURE_GEN/identity-unmapped', '响应含有未经映射或不唯一的占位符。');
   return assembleFixture({
     identity: request.identity,
-    description: request.description,
+    description: parsed.exactParticipantsOnly
+      ? `${request.description} Exact request key only: a manuscript-only content key could replay against different deliverable text; fresh-import regression uses controlled recorded-response transport with the same sample1-derived document words.`
+      : request.description,
     itemId: selection.itemId,
     model: selection.model,
     generatedOn: now.toISOString().slice(0, 10),

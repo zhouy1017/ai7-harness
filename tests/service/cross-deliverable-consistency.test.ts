@@ -265,6 +265,8 @@ describe('cross-deliverable participants and revision lineage', () => {
         identity: 'sample1-cross-deliverable-source-proof', description: 'Provider-free source-proof regression for finalized document comparison.',
         sample1Store: join(roots.dataRoot, 'store', 'ai7.sqlite'), sample1Task: snapshot.categories[0].task.taskIntentId }));
       expect(generated.provenance).toBe('recorded');
+      expect(generated.entries[0]!.contentDigest).toBeNull();
+      expect(generated.description.includes('Exact request key only')).toBe(true);
       subjects.push(generated.entries[0]!.capture!.subject);
     }
     expect(subjects).toContain('review-unit');
