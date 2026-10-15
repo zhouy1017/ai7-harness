@@ -267,6 +267,12 @@ describe('exact sample1 fixture exemption source proof', () => {
       const { manifest, byId, digest } = await freeze(kind, definition, frozen);
       const unit = capture(definition.systemPrompt, definition.buildUnitMessage(manifest.units[0]!, manifest.units.length, byId), digest);
       expect(await tool.verifySample1Capture(request, { ...selection, taskPromptContractDigest: digest }, unit)).toBe(true);
+      // Only the base or its re-derived /2 wrapper reads back: the validation-only variant names no frozen input of this kind.
+      const variant = withAmbiguousClarificationValidation(base);
+      const refused = await freeze(kind, variant, frozen);
+      const variantUnit = capture(variant.systemPrompt, variant.buildUnitMessage(refused.manifest.units[0]!, refused.manifest.units.length, refused.byId), refused.digest);
+      await expect(tool.verifySample1Capture(request, { ...selection, taskPromptContractDigest: refused.digest }, variantUnit))
+        .rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
     });
 
     it('proves an evaluation synthesis capture from the closed units the revision kept', async () => {

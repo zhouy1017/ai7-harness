@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { sep } from 'node:path';
 import { clarificationGraphemes, parseModelClarification } from '../../src/service/analysis/clarifications.js';
 import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
-import { withModelClarification, withAmbiguousClarificationValidation, CLARIFICATION_INSTRUCTION } from '../../src/service/provider/clarification-contract.js';
+import {
+  withModelClarification, withAmbiguousClarificationValidation, CLARIFICATION_INSTRUCTION, clarificationPlanBaseDigest, clarificationPromptContractDigest,
+} from '../../src/service/provider/clarification-contract.js';
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
 
 describe('model clarification contract alternative', () => {
@@ -33,6 +36,24 @@ describe('model clarification contract alternative', () => {
     // A wrapped non-baseline contract never bypasses the single admitted-rule check.
     expect(liveKindAdmission(undefined, wrapped, { route: 'none', endpoint: '', model: '', credentialSlot: '' })).toBeNull();
   });
+  it('unwraps a frozen plan only to its base digest or the re-derived /2 wrapper, never the validation variant', () => {
+    const base = baselineAnalysisKindDefinition();
+    const wrapped = withModelClarification(base);
+    const variant = withAmbiguousClarificationValidation(base);
+    // The writing, 审稿意见 and rewrite readers accept exactly this re-derivation beside the base digest.
+    expect(clarificationPromptContractDigest(base.promptContractDigest)).toBe(wrapped.promptContractDigest);
+    expect(clarificationPromptContractDigest(base.promptContractDigest)).not.toBe(variant.promptContractDigest);
+    // The review material consumer: an unwrapped plan keeps its envelope digest; a wrapped one yields its proven base.
+    expect(clarificationPlanBaseDigest({}, { promptContractDigest: base.promptContractDigest })).toBe(base.promptContractDigest);
+    expect(clarificationPlanBaseDigest({ clarificationBasePromptContractDigest: base.promptContractDigest }, { promptContractDigest: wrapped.promptContractDigest }))
+      .toBe(base.promptContractDigest);
+    for (const [execution, envelope] of [
+      [{ clarificationBasePromptContractDigest: base.promptContractDigest }, { promptContractDigest: variant.promptContractDigest }],
+      [{ clarificationBasePromptContractDigest: 'f'.repeat(64) }, { promptContractDigest: wrapped.promptContractDigest }],
+      [{ clarificationBasePromptContractDigest: 7 }, { promptContractDigest: wrapped.promptContractDigest }],
+      [{}, { promptContractDigest: 'not-a-digest' }],
+    ] as const) expect(clarificationPlanBaseDigest(execution, envelope)).toBeNull();
+  });
   it('keeps the declared ambiguous retry separate from every product launch selection', () => {
     const base = baselineAnalysisKindDefinition();
     const normal = withModelClarification(base);
@@ -40,8 +61,15 @@ describe('model clarification contract alternative', () => {
     expect(variant.promptContractDigest).not.toBe(normal.promptContractDigest);
     expect(variant.systemPrompt).toContain('本次分析的阅读重点尚未决定：人物或事件');
     expect(normal.systemPrompt).not.toContain('本次分析的阅读重点尚未决定：人物或事件');
-    for (const path of ['src/service/analysis/baseline-analysis-store.ts', 'src/service/index.ts', 'src/main/application.ts', 'tools/start-built.mjs']) {
-      expect(readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')).not.toContain('withAmbiguousClarificationValidation');
+    // No product source names the variant but its owner; the fixture generator and the replay test are its only other readers.
+    const product = readdirSync(new URL('../../src/', import.meta.url), { recursive: true, encoding: 'utf8' })
+      .map((path) => path.split(sep).join('/'))
+      .filter((path) => /\.(ts|mts|mjs)$/u.test(path) && path !== 'service/provider/clarification-contract.ts');
+    expect(product.length).toBeGreaterThan(100);
+    for (const path of [...product.map((file) => `src/${file}`), 'tools/start-built.mjs']) {
+      const text = readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
+      expect(text, path).not.toContain('withAmbiguousClarificationValidation');
+      expect(text, path).not.toContain('AMBIGUOUS_CLARIFICATION_VALIDATION_INSTRUCTION');
     }
   });
 });
