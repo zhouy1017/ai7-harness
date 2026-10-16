@@ -1,3 +1,4 @@
+import { HOUSE_REVIEW_PREFERENCE_CATEGORY } from './launch-policy.js';
 import { HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
 import { inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
 import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
@@ -4770,7 +4771,7 @@ export class EditorialStore {
         if (use === null) return null;
         // The kind's one foreground rule must name the category; the live admission asks the same again before any dispatch.
         const rules = policy.providerProcessing.admittedRules.filter((rule) => rule.backgroundOrigin !== true && rule.taskKinds.includes(kind));
-        return rules.length === 1 && rules[0]!.outboundDataCategories.includes('house-review-preference-excerpt') ? use : 'closed';
+        return rules.length === 1 && rules[0]!.outboundDataCategories.includes(HOUSE_REVIEW_PREFERENCE_CATEGORY) ? use : 'closed';
       },
       materialReadings: (boundary) => this.#taskMaterialReadings(boundary),
       materialOffers: (bookId) => this.#taskMaterialOffers(bookId),

@@ -20,7 +20,7 @@ import { ProviderResultCache, isModelCallLine } from '../../src/service/provider
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import type { LaunchPolicyProjection, ReviewCategoryResultSetRevisionProjection, ReviewRunProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
+import { withoutHouseReviewPreference } from '../support/policy-rules.js';
 import { HOUSE_PREFERENCE_CLOSED } from '../../src/service/task-plan.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 
@@ -342,9 +342,8 @@ describe('reference-free review on the Go execution path', () => {
       expect(settled.categories.map((category) => category.state)).toEqual(['settled']);
       return settled;
     };
-    // The review rule as it stands, closed to the category whichever policy version is selected.
-    const closedPolicy: LaunchPolicyProjection = { ...policy, providerProcessing: { ...policy.providerProcessing,
-      admittedRules: policy.providerProcessing.admittedRules!.map((rule) => ({ ...rule, outboundDataCategories: rule.outboundDataCategories.filter((category) => category !== 'house-review-preference-excerpt') })) } };
+    // The selected review rule with the category taken out: v18's reading.
+    const closedPolicy = withoutHouseReviewPreference(policy);
     const launch = store.baselineAnalysisLedger.launch;
     store.baselineAnalysisLedger.bindLaunch({ ...launch, policy: closedPolicy });
     const first = await runUnder(closedPolicy);
@@ -368,11 +367,12 @@ describe('reference-free review on the Go execution path', () => {
     expect(closedPlan.scope.send).not.toContain('本社审阅偏好');
     expect(requests.some((request) => request.system.includes('本社审阅偏好') || request.last.includes('本社审阅偏好'))).toBe(false);
 
-    // A rule naming it: every unit request of the category carries the framed block, and the egress gate admitted it.
-    const admittedPolicy = withHouseReviewPreferenceFor(policy, kind);
-    store.baselineAnalysisLedger.bindLaunch({ ...launch, policy: admittedPolicy });
+    // The selected v20 review rule names it: every unit request of the category carries the framed block, and the egress gate
+    // admitted it.
+    expect(policy.providerProcessing.admittedRules!.find((rule) => rule.taskKinds.includes(kind))!.outboundDataCategories).toContain('house-review-preference-excerpt');
+    store.baselineAnalysisLedger.bindLaunch(launch);
     requests = [];
-    const admitted = await runUnder(admittedPolicy);
+    const admitted = await runUnder(policy);
     const plan = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: admitted.reviewRunId });
     expect(plan.scope.reference).toContain(`错别字与规范用语：参考本社审阅偏好 v${version.ordinal}（来源：1 条已判定反馈）`);
     expect(plan.scope.send).toContain(`本社审阅偏好 v${version.ordinal}的摘录`);

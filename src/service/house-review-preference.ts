@@ -7,6 +7,7 @@ import { graphemesOf } from '../shared/mark-anchor.js';
 import type { HouseReviewPreferenceVersion, HouseReviewPreferenceUse, LearningEligibilityChoice, LearningMaterialState, TrustedOperationalScope } from '../shared/protocol.js';
 import { LearningEligibilityError, type LearningAttribution, type LearningMaterialCandidate } from './learning-eligibility.js';
 import { NO_EDIT_QUALITY, editQualityOfDecisions, type DecisionEditQuality } from './edit-quality-signals.js';
+import { HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES, HOUSE_REVIEW_PREFERENCE_MAX_LINES } from './launch-policy.js';
 
 /** The house owns versions; Book-owned Runs carry their selected version by value during database merges. */
 export const HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL = {
@@ -55,10 +56,6 @@ export function initializeHouseReviewPreferenceSchema(db: DatabaseSync, version:
     throw error;
   }
 }
-
-/** The most lines, and the most graphemes in total, one record (and so one request's block) carries: Provider Processing v20/v21. */
-export const HOUSE_REVIEW_PREFERENCE_MAX_LINES = 12;
-export const HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES = 200;
 
 export interface HousePreferenceSource {
   readonly bookId: string;
@@ -151,6 +148,7 @@ export function preferenceLines(sources: readonly HousePreferenceSource[], names
     const key = source.eligibility === 'house' ? `0/${source.categoryId}` : `1/${source.bookId}/${source.categoryId}`;
     groups.set(key, [...(groups.get(key) ?? []), source]);
   }
+  // Provider Processing v20/v21 bound one request's block; a record never holds more than one block may carry.
   let remaining = HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES;
   const lines: HouseReviewPreferenceVersion['lines'][number][] = [];
   for (const [, group] of [...groups].sort(([a], [b]) => a.localeCompare(b, 'en'))) {

@@ -13,7 +13,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { liveReviewKindAdmitted } from '../../src/service/review/live-review-admission.js';
-import { withRepeatedRuleFor, withRuleFor, withoutRuleFor } from '../support/policy-rules.js';
+import { withRepeatedRuleFor, withRuleFor, withoutHouseReviewPreference, withoutRuleFor } from '../support/policy-rules.js';
 
 // #429: the generic admission every live non-baseline kind passes, over the real selected Provider Processing v11 projection
 // and in-memory variants of it; no transport, credential or manuscript.
@@ -150,9 +150,11 @@ describe('house preference live admission (#911)', () => {
     const base = reviewCategoryKindDefinition(reviewCategoryContractInput(entry));
     const preference = { versionId: '10000000-0000-4000-8000-000000000001', ordinal: 1, sourceCount: 1, materialSetDigest: 'a'.repeat(64), lines: ['用语：保留原有写法。'] };
     const wrapped = houseReviewPreferenceKindDefinition(base, preference, true);
-    const admitted = withHouseReviewPreferenceFor(policy, base.kind);
-    expect(liveKindAdmission(policy, wrapped, binding)).toBeNull();
+    // Provider Processing v20's own review rule names the category (#910); the same rule without it is closed.
+    const admitted = policy;
+    expect(liveKindAdmission(withoutHouseReviewPreference(policy), wrapped, binding)).toBeNull();
     expect(liveKindAdmission(admitted, wrapped, binding)).not.toBeNull();
+    expect(liveKindAdmission(withHouseReviewPreferenceFor(policy, base.kind), wrapped, binding)).not.toBeNull();
     expect(liveKindAdmission(admitted, { ...wrapped }, binding)).toBeNull();
     expect(liveKindAdmission(admitted, { ...wrapped, systemPrompt: wrapped.systemPrompt + '伪造' }, binding)).toBeNull();
     expect(liveKindAdmission(withRepeatedRuleFor(admitted, base.kind), wrapped, binding)).toBeNull();

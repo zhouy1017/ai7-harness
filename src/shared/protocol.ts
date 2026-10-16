@@ -2317,7 +2317,6 @@ export type OutboundDataCategoryId =
   | 'editor-selected-manuscript-excerpt'
   | 'editor-authored-evaluation-text'
   | 'house-exemplar-excerpt'
-  | 'house-review-preference-excerpt'
   | 'book-metadata-and-synopsis'
   | 'manuscript-conflict-region-excerpt'
   | 'frozen-material-reference-excerpt'

@@ -38,7 +38,16 @@ export function withRepeatedRuleFor(policy: LaunchPolicyProjection, kind: string
   return withRules(policy, [...policy.providerProcessing.admittedRules, ruleFor(policy, kind)]);
 }
 
-/** #911 opt-in under an in-memory rule, while #910's immutable policy successor lands separately. */
+/** The projection with no rule naming `house-review-preference-excerpt`: a rule closed to the 本社审阅偏好 block (#911). */
+export function withoutHouseReviewPreference(policy: LaunchPolicyProjection): LaunchPolicyProjection {
+  return withRules(policy, policy.providerProcessing.admittedRules.map((rule) => ({ ...rule,
+    outboundDataCategories: rule.outboundDataCategories.filter((category) => category !== 'house-review-preference-excerpt') })));
+}
+
+/**
+ * A rule naming `house-review-preference-excerpt` for `kind` (#911): development-ci's v1 admits no rule, so fixture-route tests of the
+ * consumer read this in-memory one; under developer-live, Provider Processing v20's review rule names the category itself.
+ */
 export function withHouseReviewPreferenceFor(policy: LaunchPolicyProjection, kind: string): LaunchPolicyProjection {
   const previous = ruleFor(policy, kind);
   const category = 'house-review-preference-excerpt' as const;
