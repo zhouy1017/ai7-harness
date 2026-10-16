@@ -1492,7 +1492,7 @@ export interface OrdinaryProductionPolicyReading {
     readonly reading: OrdinaryProductionRuleReading;
     readonly allowedRoutes: readonly string[];
     readonly platformTools: AdmittedPlatformTools | null;
-    /** The rule's verified local tools (v19): retrieval allowed on every rule but enrolled background analysis and material translation. */
+    /** The rule's verified local tools: retrieval allowed on every rule but enrolled background analysis, material translation and custom analysis. */
     readonly localTools: AdmittedLocalTools;
   }>;
 }
