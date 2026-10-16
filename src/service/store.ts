@@ -3,7 +3,7 @@ import { initializeProposalReviewSchema } from './editorial-marks.js';
 import { SEARCH_BACKENDS, defaultSearchBackend } from './provider/search-backends.js';
 import { RetrievalIndex, RetrievalError, type RetrievalMaterialVectorQuery, type RetrievalSource } from './retrieval/index.js';
 import { materialRetrievalSources } from './retrieval/source-readers.js';
-import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
+import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, taskMaterialSettled, TASK_MATERIAL_OFFER_DAMAGED, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
 import { allowedProductionBindingOf, type ConfiguredProviderBinding } from './launch-policy.js';
@@ -4486,9 +4486,9 @@ const WAITING_TASK_MOVED_LABELS: Readonly<Record<string, string>> = {
   EVALUATION_REWRITE_STALE: '这一版的评分',
   EVALUATION_REWRITE_UNAVAILABLE: '这一版的评分',
   WRITING_EXEMPLAR_MOVED: '范例',
-  MATERIAL_INDEX_MOVED: '参考资料',
-  MATERIAL_REFERENCE_UNAVAILABLE: '参考资料',
-  MATERIAL_INDEX_RECORD_INVALID: '参考资料',
+  MATERIAL_INDEX_MOVED: '参考资料的索引版本（已不在本机）',
+  MATERIAL_REFERENCE_UNAVAILABLE: '参考资料的允许参考（已撤回）',
+  MATERIAL_INDEX_RECORD_INVALID: '参考资料的索引记录（已损坏）',
 };
 const WAITING_TASK_MOVED_FALLBACK = '计划依据的内容';
 /**
@@ -5398,26 +5398,35 @@ export class EditorialStore {
     return references;
   }
 
+  /**
+   * The 资料库 items a Book's Tasks may list whose index is complete, the latest arrival first. An item whose index record is
+   * damaged is not dropped and does not fail the page (#795): it is listed with `damaged` and no known size, and offered as
+   * not selectable, with its reason (Issue #759); a frozen reference row names the damage again where a plan lists it.
+   */
+  #indexedMaterialOffers(bookId: string): Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number; damaged: boolean }> {
+    return this.#libraryCall(() => this.#libraryMaterials.referable(bookId)).flatMap((item): Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number; damaged: boolean }> => {
+      try {
+        const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
+        return build === null || build.state !== 'complete' ? [] : [{ ...item, characters: build.metadata.characters, damaged: false }];
+      } catch (error) {
+        if (error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID') return [{ ...item, characters: 0, damaged: true }];
+        throw error;
+      }
+    });
+  }
+
   #taskMaterialOffers(bookId: string, surface: '审阅' | '评估' = '审阅'): NonNullable<ReviewWorkspaceProjection['materials']> {
     const launch = this.#baselineAnalysis.launch;
     const kinds = surface === '评估' ? [INITIAL_EVALUATION_KIND, READERS_REPORT_KIND]
       : BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.filter((entry) => entry.executor === 'review-category-contract').map((entry) => reviewCategoryKindId(entry.categoryId));
     const live = launch.live !== null && !kinds.some((kind) => liveMaterialRule(launch.policy, kind) !== null);
-    const indexed = this.#libraryCall(() => this.#libraryMaterials.referable(bookId)).flatMap((item) => {
-      try {
-        const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
-        return build === null || build.state !== 'complete' ? [] : [{ ...item, characters: build.metadata.characters }];
-      } catch (error) {
-        // A damaged build cannot be offered again; 评估's frozen reference row carries its named refusal (#795).
-        if (surface === '评估' && error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID') return [];
-        throw error;
-      }
-    });
+    const indexed = this.#indexedMaterialOffers(bookId);
     return {
       statement: live ? TASK_MATERIAL_LIVE_UNAVAILABLE : indexed.length === 0 ? TASK_MATERIALS_NONE : TASK_MATERIALS_STATEMENT,
       items: indexed.slice(0, MAX_WRITING_MATERIAL_OFFERS).map((item) => {
-        const reason = live ? TASK_MATERIAL_LIVE_UNAVAILABLE : item.characters > MAX_WRITING_MATERIAL_GRAPHEMES ? writingMaterialOverBound(item.characters) : null;
-        return { ...item, selectable: reason === null, reason };
+        const reason = live ? TASK_MATERIAL_LIVE_UNAVAILABLE : item.damaged ? TASK_MATERIAL_OFFER_DAMAGED
+          : item.characters > MAX_WRITING_MATERIAL_GRAPHEMES ? writingMaterialOverBound(item.characters) : null;
+        return { materialId: item.materialId, title: item.title, scope: item.scope, characters: item.characters, selectable: reason === null, reason };
       }),
       more: Math.max(0, indexed.length - MAX_WRITING_MATERIAL_OFFERS),
     };
@@ -10098,7 +10107,7 @@ export class EditorialStore {
       const frozen = task === null ? null : this.#evaluationMaterialPlan(task.taskIntentId);
       if (frozen === null) return { lines: [], blocked: false };
       const readings = this.#taskMaterialReadings(frozen.boundary, '评估')
-        .map((reading) => task!.state === 'prepared' ? reading : { source: reading.source, refusal: null });
+        .map((reading) => task!.state === 'prepared' ? reading : taskMaterialSettled(reading));
       return { lines: readings.map(taskMaterialReferenceLine), blocked: readings.some((reading) => reading.refusal !== null) };
     };
     const initial = frozenOf(page.initial.task);
@@ -10112,7 +10121,7 @@ export class EditorialStore {
     const references = ledger.definition.materialReferences?.sources;
     if (references === undefined) return [];
     const readings = this.#taskMaterialReadings({ bookId, references }, '评估');
-    return authorized ? readings.map((reading) => ({ source: reading.source, paragraphs: reading.paragraphs ?? [], refusal: null })) : readings;
+    return authorized ? readings.map(taskMaterialSettled) : readings;
   }
 
   #evaluationMaterialPlan(taskIntentId: string): { boundary: TaskMaterialBoundary; baseDigest: string; promptDigest: string } | null {
@@ -10980,13 +10989,9 @@ export class EditorialStore {
   #writingMaterialOffer(bookId: string): WritingTaskProjection['references']['materials'] {
     const launch = this.#baselineAnalysis.launch;
     const live = launch.live !== null && liveMaterialRule(launch.policy, WRITING_KIND) === null;
-    const indexed: Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number }> = [];
+    let indexed: Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number; damaged: boolean }>;
     try {
-      for (const entry of this.#libraryCall(() => this.#libraryMaterials.referable(bookId))) {
-        const build = this.#materialIndexCall(() => this.#materialIndex.current(entry.materialId));
-        if (build === null || build.state !== 'complete') continue;
-        indexed.push({ ...entry, characters: build.metadata.characters });
-      }
+      indexed = this.#indexedMaterialOffers(bookId);
     } catch (error) {
       if (!(error instanceof StoreError)) throw error;
       return { statement: `资料库暂不可用：${error.message}`, items: [], more: 0 };
@@ -10995,7 +11000,8 @@ export class EditorialStore {
     return {
       statement: live ? WRITING_MATERIAL_LIVE_UNAVAILABLE : indexed.length === 0 ? WRITING_MATERIALS_NONE : WRITING_MATERIALS_STATEMENT,
       items: shown.map((item) => {
-        const reason = live ? WRITING_MATERIAL_LIVE_UNAVAILABLE : item.characters > MAX_WRITING_MATERIAL_GRAPHEMES ? writingMaterialOverBound(item.characters) : null;
+        const reason = live ? WRITING_MATERIAL_LIVE_UNAVAILABLE : item.damaged ? TASK_MATERIAL_OFFER_DAMAGED
+          : item.characters > MAX_WRITING_MATERIAL_GRAPHEMES ? writingMaterialOverBound(item.characters) : null;
         return { materialId: item.materialId, title: item.title, characters: item.characters, scope: item.scope, selectable: reason === null, reason };
       }),
       more: indexed.length - shown.length,

@@ -1,4 +1,4 @@
-import { taskMaterialSelection, taskMaterialSelectionReason, similarMaterialsField } from './task-material-selection.js';
+import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSizeText, similarMaterialsField } from './task-material-selection.js';
 import {
   MAX_BATCH_APPLY_SUGGESTIONS,
   REVIEW_FINDING_SEVERITIES,
@@ -2353,7 +2353,7 @@ export function reviewMaterialsField(
     const reason = el('small', 'field-note');
     reason.id = uid('material-reason');
     input.setAttribute('aria-describedby', reason.id);
-    label.append(input, el('span', undefined, `《${item.title}》 · ${item.scope === 'book' ? '这本书' : '社级'} · 已提取 ${item.characters.toLocaleString('en-US')} 字`), reason);
+    label.append(input, el('span', undefined, `《${item.title}》 · ${item.scope === 'book' ? '这本书' : '社级'} · ${taskMaterialSizeText(item)}`), reason);
     field.append(label);
     return { item, input, reason };
   });

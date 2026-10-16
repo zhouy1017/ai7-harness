@@ -16,7 +16,7 @@ export const WRITING_REFERENCE_HEADING = 'AI7 会参考';
 export const WRITING_REFERENCE_TERMS = ['梗概与人物', '评估结论与营销要点', '范例', '资料库', '图书信息'] as const;
 /** One 资料库 item as its box reads: its title, its size as its card states it, and whose it is. */
 export function writingMaterialLabel(item: Pick<WritingTaskMaterialProjection, 'title' | 'characters' | 'scope'>): string {
-  return `《${item.title}》 · 已提取 ${item.characters.toLocaleString('en-US')} 字 · ${item.scope === 'book' ? '本书资料' : '社级资料'}`;
+  return `《${item.title}》 · ${item.characters > 0 ? `已提取 ${item.characters.toLocaleString('en-US')} 字` : '字数未知'} · ${item.scope === 'book' ? '本书资料' : '社级资料'}`;
 }
 /** Why a further item cannot be ticked once four are (the service's own bound, MAX_WRITING_MATERIALS). */
 export const WRITING_MATERIALS_AT_LIMIT = '写作任务最多参考 4 份资料库资料；请少选几份。';

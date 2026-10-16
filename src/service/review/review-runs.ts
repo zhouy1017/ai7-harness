@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { clarificationPlanBaseDigest } from '../provider/clarification-contract.js';
-import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading, type MaterialGuardRefusal } from '../task-material-references.js';
+import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSettled, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading, type MaterialGuardRefusal } from '../task-material-references.js';
 import { liveMaterialRule } from '../analysis/live-kind-admission.js';
 import { reviewDeliverables, REVIEW_DELIVERABLE_CHANGED } from '../production-documents.js';
 import { liveReviewRule, liveReviewUnavailableReason } from './live-review-admission.js';
@@ -781,7 +781,7 @@ interface RunView {
  * approval — why that approval would now be refused, in the words the refusal itself uses (D8).
  */
 export interface ReviewRunPlanFacts {
-  readonly materials?: ReadonlyArray<Pick<TaskMaterialReading, 'source' | 'refusal'>>;
+  readonly materials?: ReadonlyArray<Pick<TaskMaterialReading, 'source' | 'refusal'> & { readonly settledNote?: string }>;
   /** The Run lists 资料库 items and the launch now bound is developer-live, which sends none of them: the plan is refused. */
   readonly materialsRefusedLive?: boolean;
   readonly reviewRunId: string;
@@ -1552,7 +1552,7 @@ export class ReviewRunStore {
     const firstTask = snapshot.categories.find((category) => category.task !== null);
     return {
       ...(this.#materialsRefusedLive(snapshot) ? { materialsRefusedLive: true } : {}),
-      ...(snapshot.materialReferences === undefined ? {} : { materials: this.#materialReadings(snapshot).map((reading) => view.authorization === null ? reading : { ...reading, refusal: null }) }),
+      ...(snapshot.materialReferences === undefined ? {} : { materials: this.#materialReadings(snapshot).map((reading) => view.authorization === null ? reading : taskMaterialSettled(reading)) }),
       reviewRunId: snapshot.reviewRunId,
       ordinal: snapshot.ordinal,
       label: `第 ${snapshot.ordinal} 次`,

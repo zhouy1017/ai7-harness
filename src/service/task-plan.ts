@@ -1,6 +1,6 @@
 import { researchDecisionLine } from '../shared/research-status.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
-import { taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
+import { materialSettledReason, taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
 
 import type {
   AnalysisReusePlanCounts,
@@ -998,7 +998,7 @@ export function evaluationMaterialPlan(plan: TaskPlanProjection, materials: Read
     : '资料库资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。';
   return {
     ...plan,
-    state: refusal === null ? plan.state : { key: 'changed', label: '参考资料已不可用' },
+    state: refusal === null ? plan.state : { key: 'changed', label: refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE' ? '参考资料已撤回允许参考' : refusal.code === 'MATERIAL_INDEX_RECORD_INVALID' ? '参考资料的索引记录已损坏' : '参考资料已不在本机' },
     scope: { ...plan.scope, reference: [...plan.scope.reference, ...materials.map(taskMaterialReferenceLine), background], send: sending },
     notDo: { ...plan.notDo, editorial: plan.notDo.editorial.map((line) => line === '不读这本书以外的内容' ? '不读允许参考以外的资料' : line) },
     technical: [...plan.technical, { key: 'material-references', label: '资料库参考版本',
@@ -1367,8 +1367,12 @@ function writingMaterialGone(projection: WritingProjection, materials: ReadonlyA
 }
 
 /** The plan's line for one 资料库 item under 允许参考 (Issue #428; TASK-032): the product record, its size, the pinned build. */
-export function writingMaterialReferenceLine(material: WritingPlanMaterial): string {
+export function writingMaterialReferenceLine(material: WritingPlanMaterial, started = false): string {
   const line = `资料库资料《${material.source.title}》：已提取 ${groupedCount(material.source.characters)} 字，按计划冻结的索引版本读取（只参照，不照抄）`;
+  // A Task already started read the item as its plan pinned: it is not "unable to start", its draft stays readable (Issue #759).
+  if (started && material.refusal !== null) {
+    return `${line}——${materialSettledReason(material.refusal.code) ?? '这份资料现已不可用'}；已有的草稿仍可查看，再次起草需用「新建文档…」重新准备`;
+  }
   return material.refusal === null ? line : `${line}——${material.refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE'
     ? '这份资料现在不能列进这本书任务的「允许参考」' : material.refusal.code === 'MATERIAL_INDEX_RECORD_INVALID'
       ? '这份资料的索引记录已损坏' : '计划冻结的索引版本已不在本机'}，这次起草不能再开始`;
@@ -1402,7 +1406,7 @@ export const WRITING_NO_RULE = '这份写作计划现在不能设为快速开始
  * What a writing Task references, in the plan's words (DELIV-007): each part of its frozen reference set as it is there, or
  * that the Book has none — read from the contract input, never from anything the Task did not freeze.
  */
-export function writingReferenceLines(input: WritingContractInput, exemplarsHere = true, materials: ReadonlyArray<WritingPlanMaterial> = []): string[] {
+export function writingReferenceLines(input: WritingContractInput, exemplarsHere = true, materials: ReadonlyArray<WritingPlanMaterial> = [], started = false): string[] {
   const named = (list: ReadonlyArray<string>, none: string): string => (list.length === 0 ? none : list.join('、'));
   const synopsis = input.synopsis;
   const evaluation = input.evaluation;
@@ -1418,7 +1422,7 @@ export function writingReferenceLines(input: WritingContractInput, exemplarsHere
     // A 范例 the Task referenced and this data no longer holds is said so where it is named (#688 re-review).
     exemplarsHere ? writingExemplarLine(input.type.label, input.exemplars) : `${writingExemplarLine(input.type.label, input.exemplars)}${WRITING_EXEMPLAR_GONE_SUFFIX}`,
     // The 资料库 items the editor listed under 允许参考, one line each, after the 范例 (Issue #428); a plan that lists none has none.
-    ...materials.map(writingMaterialReferenceLine),
+    ...materials.map((material) => writingMaterialReferenceLine(material, started)),
     `图书信息：《${input.book.title}》 · 作者：${named(input.book.authors, '未填写')} · 责编：${named(input.book.editors, '未填写')} · 书系：${named(input.book.series, '不在任何书系中')}`,
     `你写的受众「${input.audience}」、渠道「${input.channel}」${input.requirements === null ? '' : `与其他要求「${input.requirements}」`}`,
   ];
@@ -1495,7 +1499,7 @@ export function writingPlan(input: {
     },
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
-      reference: writingReferenceLines(task, exemplarsHere, materials),
+      reference: writingReferenceLines(task, exemplarsHere, materials, projection.authorization !== null),
       send: live
         ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明`
         : '不发送任何内容',

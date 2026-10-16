@@ -303,6 +303,9 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     // A started Task read its reference as it was: 评估 never says it can no longer start.
     expect(frozenRows(kind).blocked).toBe(false);
     expect(frozenRows(kind).lines.join(' ')).not.toContain('不能再开始');
+    // …but it says the build is gone, that the result stays readable and what a further run needs (Issue #759).
+    expect(frozenRows(kind).lines).toEqual([expect.stringContaining('计划冻结的索引版本现已不在本机；已有的结果仍可查看，再次运行需重新准备计划')]);
+    expect(plan(kind, prepared.taskIntent!.taskIntentId).scope.reference.join(' ')).toContain('已有的结果仍可查看，再次运行需重新准备计划');
     expect(plan(kind, prepared.taskIntent!.taskIntentId).start.readiness).toBe('started');
   });
   it('blocks missing or no-longer-admitted references, and a fresh preparation can remove references', async () => {
@@ -355,14 +358,17 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(page.records).toEqual(before.records);
     expect(page.record).toEqual(before.record);
     expect(page.materials!.items.some((item) => item.materialId === healthy && item.selectable)).toBe(true);
-    if (record === 'build') expect(page.materials!.items.some((item) => item.materialId === id)).toBe(false);
+    // A damaged build is no longer dropped from the offers (Issue #759): it is listed, not selectable, with its reason and no size.
+    if (record === 'build') {
+      expect(page.materials!.items.find((item) => item.materialId === id)).toMatchObject({ selectable: false, reason: '索引记录已损坏 · 不可选', characters: 0 });
+    }
     await close(); await open();
     expect(store.inspectEvaluation(bookId, null).records).toEqual(before.records);
     expect(frozenRows(kind).blocked).toBe(true);
     expect(frozenRows(kind).lines).toEqual([expect.stringContaining('资料《合成背景资料》的索引记录已损坏')]);
     expect(frozenRows(kind).lines.join(' ')).toContain('可以在「评估」重新准备计划');
     const blockedPlan = plan(kind, prepared.taskIntent!.taskIntentId);
-    expect(blockedPlan.state.label).toBe('参考资料已不可用');
+    expect(blockedPlan.state.label).toBe('参考资料的索引记录已损坏');
     expect(blockedPlan.start.readiness).toBe('changed');
     expect(blockedPlan.scope.send).toContain('也只在本机读取');
     expect(blockedPlan.drift?.reasons.join(' ')).toContain('的索引记录已损坏');

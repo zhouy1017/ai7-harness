@@ -244,8 +244,33 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       expect(store.inspectWriting(bookId)!.authorization).not.toBeNull();
       expect(store.inspectWritingTask(bookId).task!.refusal).toBeNull();
       expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: prepared.taskIntent!.taskIntentId }).state.label).not.toBe(WRITING_MATERIAL_UNAVAILABLE_LABEL);
+      // The started Task’s plan says the item is withdrawn now, not that the Task cannot start (Issue #759).
+      const started = store.inspectTaskPlan({ bookId, kind: 'writing', ref: prepared.taskIntent!.taskIntentId }).scope.reference.join(' ');
+      expect(started).toContain('这份资料现已撤回允许参考；已有的草稿仍可查看，再次起草需用「新建文档…」重新准备');
+      expect(started).not.toContain('不能再开始');
       expect(() => owner.admitAndDispatch(accepted.dispatchRunRecordId!, accepted.ledger)).toThrowError(expect.objectContaining({ code: 'MATERIAL_REFERENCE_UNAVAILABLE' }));
       expect(accepted.ledger.currentRunState(accepted.dispatchRunRecordId!)).toBe('blocked-before-dispatch');
+    });
+  }, 300_000);
+
+  it('offers a damaged index as a named, unselectable choice and keeps the other items offered (Issue #759)', async () => {
+    const { fixture } = await memoryFixture();
+    await withSession(fixture, async ({ store }) => {
+      const bookId = await sample1Book(store, WRITING_BOOK_TITLE);
+      const damaged = await put(store, '参考资料甲.txt', LISTED_TEXT, '参考资料甲');
+      const healthy = await put(store, '参考资料乙.txt', '另一份可读取的合成资料。', '参考资料乙');
+      decide(store, damaged.materialId, { scope: 'book', bookId }, 'book');
+      decide(store, healthy.materialId, { scope: 'book', bookId }, 'book');
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      withDatabase((database) => {
+        for (const name of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) database.exec(`DROP TRIGGER ${name}`);
+        database.prepare("UPDATE material_index_builds SET canonical_json = '{}' WHERE material_id = ?").run(damaged.materialId);
+        for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) database.exec(sql);
+      }, false);
+      const offer = store.inspectWritingTask(bookId).references.materials;
+      expect(offer.items.find((item) => item.materialId === damaged.materialId)).toMatchObject({ selectable: false, reason: '索引记录已损坏 · 不可选', characters: 0 });
+      expect(offer.items.find((item) => item.materialId === healthy.materialId)).toMatchObject({ selectable: true, reason: null });
     });
   }, 300_000);
 

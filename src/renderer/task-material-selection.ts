@@ -13,6 +13,54 @@ export function taskMaterialSelection(items: ReadonlyArray<WritingTaskMaterialPr
   return result;
 }
 
+interface SelectionMemory {
+  /** The names last offered, so a choice that has since left the offers can still be named. */
+  readonly titles: Map<string, string>;
+  /** Choices taken out of the selection and not yet acknowledged, by identity, each with its words. */
+  readonly removals: Map<string, string>;
+}
+const selectionMemories = new WeakMap<object, SelectionMemory>();
+
+function selectionMemory(owner: object): SelectionMemory {
+  let memory = selectionMemories.get(owner);
+  if (memory === undefined) { memory = { titles: new Map(), removals: new Map() }; selectionMemories.set(owner, memory); }
+  return memory;
+}
+
+/**
+ * Bring a selection up to the offers now (Issue #759): keep the still-offered choices in offer order — the same order whichever
+ * was ticked first — and for each choice taken out say which and why: no longer offered, not selectable (the offer's own reason),
+ * or beyond the whole-item bounds. `owner` is the surface's state; the words stay until `acknowledgeTaskMaterialRemovals`.
+ * Returns the kept identities and every removal not yet acknowledged.
+ */
+export function reconcileTaskMaterialSelection(owner: object, items: ReadonlyArray<WritingTaskMaterialProjection>, selected: ReadonlySet<string>): { kept: string[]; removals: string[] } {
+  const memory = selectionMemory(owner);
+  const kept = taskMaterialSelection(items, selected);
+  const keptIds = new Set(kept);
+  for (const id of selected) {
+    if (keptIds.has(id)) continue;
+    const item = items.find((entry) => entry.materialId === id);
+    const name = item?.title ?? memory.titles.get(id);
+    const label = name === undefined ? '已选的一份资料' : `《${name}》`;
+    memory.removals.set(id, item === undefined ? `${label}已不在可参考的清单中，已从所选中去掉。`
+      : !item.selectable ? `${label}已从所选中去掉：${item.reason ?? '现在不能选'}`
+        : `${label}已从所选中去掉：最多参考 4 份资料，合计不超过 6,000 字。`);
+  }
+  for (const id of keptIds) memory.removals.delete(id);
+  for (const item of items) memory.titles.set(item.materialId, item.title);
+  return { kept, removals: [...memory.removals.values()] };
+}
+
+/** The editor has seen the removals (they changed the ticks themselves): stop repeating them. */
+export function acknowledgeTaskMaterialRemovals(owner: object): void {
+  selectionMemories.get(owner)?.removals.clear();
+}
+
+/** What an offered item states of its size: the extracted characters, or none known when its damaged index record gives none. */
+export function taskMaterialSizeText(item: Pick<WritingTaskMaterialProjection, 'characters'>): string {
+  return item.characters > 0 ? `已提取 ${item.characters.toLocaleString('en-US')} 字` : '字数未知';
+}
+
 /** Name only current bounded choices; plans never display extracted reference text. */
 export function taskMaterialSendLine(items: ReadonlyArray<WritingTaskMaterialProjection>, selected: ReadonlySet<string>): string | null {
   const ids = new Set(taskMaterialSelection(items, selected));

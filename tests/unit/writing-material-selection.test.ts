@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import { createSourceFile, forEachChild, isFunctionDeclaration, ModuleKind, ScriptTarget, transpileModule, type Node } from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { acknowledgeTaskMaterialRemovals, reconcileTaskMaterialSelection } from '../../src/renderer/task-material-selection.js';
 import { WRITING_MATERIALS_AT_LIMIT, writingMaterialLabel, writingMaterialsMore, writingMaterialsOverTotalNote } from '../../src/renderer/writing-task-labels.js';
 import { WRITING_MATERIALS_TOO_MANY, writingMaterialsOverTotal } from '../../src/service/writing-tasks.js';
 import { MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES, type WritingTaskProjection } from '../../src/shared/protocol.js';
@@ -47,6 +48,7 @@ function harness(items: Item[]) {
   const context = createContext({
     api: {},
     busy: false, CSS: { escape: (value: string) => value }, writingMaterialLabel, writingMaterialsMore, WRITING_MATERIALS_AT_LIMIT, writingMaterialsOverTotalNote,
+    reconcileTaskMaterialSelection, acknowledgeTaskMaterialRemovals,
     el: (tag: string, className?: string, text?: string) => new Element(tag, className, text),
     uid: () => `control-${++identities}`,
     paint: () => { paints += 1; draw(); },
@@ -70,6 +72,7 @@ function harness(items: Item[]) {
       return root.all().find((node) => node.id === described)?.text;
     },
     paints: () => paints,
+    removals: (): string[] => root.all().filter((node) => node.className.includes('writing-material-removed')).map((node) => node.text),
   };
 }
 
@@ -93,6 +96,23 @@ describe('writing material controls', () => {
     expect(view.box('c').checked).toBe(false);
     expect(view.box('c').disabled).toBe(true);
     expect(view.reason('c')).toBe('稍后决定');
+  });
+
+  it('says which ticked item left the selection and why, until the editor ticks again (Issue #759)', () => {
+    const view = harness([item('a'), item('b'), item('c')]);
+    view.tick('a');
+    view.tick('c');
+    view.refresh([item('a'), { ...item('c', 0), selectable: false, reason: '索引记录已损坏 · 不可选' }]);
+    expect(view.state.materialIds).toEqual(['a']);
+    expect(view.removals()).toEqual(['《c》已从所选中去掉：索引记录已损坏 · 不可选']);
+    expect(view.box('c').checked).toBe(false);
+    view.refresh([item('a')]);
+    expect(view.removals()).toEqual(['《c》已从所选中去掉：索引记录已损坏 · 不可选']);
+    view.tick('a', false);
+    expect(view.removals()).toEqual([]);
+    view.tick('a');
+    view.refresh([]);
+    expect(view.removals()).toEqual(['《a》已不在可参考的清单中，已从所选中去掉。']);
   });
 
   it('disables a fifth tick with the service wording and enables it again after unticking', () => {
