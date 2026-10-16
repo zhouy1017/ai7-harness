@@ -880,9 +880,9 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-proposal-action="batch-confirm"]')`, 'proposal-frozen-scope');
     await assertRenderer(renderer, `document.querySelector('.proposal-controls').textContent.includes('批量草稿范围（已冻结）') && document.querySelector('.proposal-controls').textContent.includes('1 项纳入')`, 'proposal-scope-visible');
     await click(renderer, '确认保存批量草稿', 'proposal-confirm-draft');
-    await waitFor(renderer, `document.querySelector('[data-proposal-action="draft-undo"]') && document.querySelector('.proposal-navigator').textContent.includes('暂不决定')`, 'proposal-draft-saved');
+    await waitFor(renderer, `document.querySelector('[data-proposal-action="draft-undo"]') && document.querySelector('.proposal-navigator').textContent.includes('暂不决定') && document.querySelector('.proposal-workspace').getAttribute('aria-busy') === 'false'`, 'proposal-draft-saved');
     await click(renderer, '撤销上次草稿处理', 'proposal-draft-undo');
-    await waitFor(renderer, `!document.querySelector('[data-proposal-action="draft-undo"]')`, 'proposal-undo-saved');
+    await waitFor(renderer, `!document.querySelector('[data-proposal-action="draft-undo"]') && document.querySelector('.proposal-workspace').getAttribute('aria-busy') === 'false'`, 'proposal-undo-saved');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-proposal-action="draft-deferred"]').click(); return true; })()`, 'proposal-save-deferred');
     await waitFor(renderer, `document.querySelector('.proposal-navigator').textContent.includes('暂不决定') && document.querySelector('.proposal-workspace').getAttribute('aria-busy') === 'false'`, 'proposal-deferred-saved');
 
