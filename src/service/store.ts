@@ -19849,20 +19849,33 @@ export class EditorialStore {
     });
   }
 
-  /** One range the composer pinned now: the exact words selected in the Book's primary manuscript, verified as a mark's are. */
+  /**
+   * One range the composer pinned now: the exact words selected in the Book's primary manuscript, as its working text holds them at
+   * that paragraph and those graphemes now. The pin names the branch's revision and journal position as they stand — a window the
+   * editor has open may still name the revision a Task Input checkpoint has since moved past (the text being the same), which is no
+   * reason to refuse words that are exactly there. Words that are not there are refused.
+   */
   #pinDraftRange(bookId: string, span: DialogueSelectionInput): StoredDraftRange {
-    requireDraft(typeof span === 'object' && span !== null && typeof span.manuscriptId === 'string' && UUID_PATTERN.test(span.manuscriptId),
-      'TASK_INTENT_DRAFT_RANGE_INVALID', '所选文字无效。');
-    const manuscript = this.#authority.prepare('SELECT book_id, role FROM manuscripts WHERE manuscript_id = ?').get(span.manuscriptId) as SqlRow | undefined;
-    requireDraft(manuscript !== undefined && manuscript.book_id === bookId && manuscript.role === 'primary', 'TASK_INTENT_DRAFT_RANGE_INVALID', '所选文字不在这本书的稿件中。');
-    const verified = this.#markCall(() => this.#editorialMarks.verifySpan(span));
-    requireDraft(verified.bookId === bookId && verified.text.length > 0 && span.toGrapheme - span.fromGrapheme <= MAX_DIALOGUE_SELECTION_GRAPHEMES,
+    requireDraft(typeof span === 'object' && span !== null && typeof span.manuscriptId === 'string' && UUID_PATTERN.test(span.manuscriptId) &&
+      typeof span.branchId === 'string' && UUID_PATTERN.test(span.branchId) && typeof span.blockId === 'string' && /^blk_[0-9a-f]{24}$/u.test(span.blockId) &&
+      Number.isSafeInteger(span.fromGrapheme) && Number.isSafeInteger(span.toGrapheme) && span.fromGrapheme >= 0 && span.toGrapheme > span.fromGrapheme &&
+      typeof span.selectedText === 'string' && span.selectedText.length > 0,
+    'TASK_INTENT_DRAFT_RANGE_INVALID', '所选文字无效。');
+    requireDraft(span.toGrapheme - span.fromGrapheme <= MAX_DIALOGUE_SELECTION_GRAPHEMES,
       'TASK_INTENT_DRAFT_RANGE_INVALID', `所选文字最多 ${MAX_DIALOGUE_SELECTION_GRAPHEMES} 个字。`);
+    const manuscript = this.#authority.prepare(
+      `SELECT m.book_id, m.role FROM manuscripts m JOIN manuscript_branches b ON b.manuscript_id = m.manuscript_id
+       WHERE m.manuscript_id = ? AND b.branch_id = ?`,
+    ).get(span.manuscriptId, span.branchId) as SqlRow | undefined;
+    requireDraft(manuscript !== undefined && manuscript.book_id === bookId && manuscript.role === 'primary', 'TASK_INTENT_DRAFT_RANGE_INVALID', '所选文字不在这本书的稿件中。');
+    const block = this.#authority.prepare('SELECT text, digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(span.branchId, span.blockId) as SqlRow | undefined;
+    const text = block === undefined ? null : graphemesOf(asString(block.text)).slice(span.fromGrapheme, span.toGrapheme).join('');
+    requireDraft(block !== undefined && text === span.selectedText, 'TASK_INTENT_DRAFT_RANGE_MOVED', '所选文字已经改动或不在当前稿件中；请重新选择。');
     const state = this.#draftBranchState(span.branchId);
     return {
-      rangeId: randomUUID(), manuscriptId: span.manuscriptId, branchId: span.branchId, blockId: span.blockId, blockDigest: span.baseBlockDigest,
-      fromGrapheme: span.fromGrapheme, toGrapheme: span.toGrapheme, revisionId: verified.revisionId, revisionLabel: verified.revisionLabel,
-      journalSequence: verified.journalSequence, pendingSave: state.pendingSave, text: verified.text,
+      rangeId: randomUUID(), manuscriptId: span.manuscriptId, branchId: span.branchId, blockId: span.blockId, blockDigest: asString(block.digest),
+      fromGrapheme: span.fromGrapheme, toGrapheme: span.toGrapheme, revisionId: state.revisionId, revisionLabel: state.revisionLabel,
+      journalSequence: state.journalSequence, pendingSave: state.pendingSave, text: span.selectedText,
     };
   }
 

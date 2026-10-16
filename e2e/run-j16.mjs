@@ -1616,7 +1616,7 @@ async function main() {
     // plan or Run (TASK-004) — that waits in 等你处理 and in 待我处理 as its own card.
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'composer-drawer-closed');
     await assertRenderer(renderer, MARK_HELPERS, 'composer-helpers');
-    const composerBlocks = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).filter((node) => { const head = (node.textContent ?? '').slice(0, 8); return head.length === 8 && Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(head)).length === head.length; }).slice(0, 2).map((node) => node.dataset.blockId)`);
+    const composerBlocks = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).filter((node) => { const head = (node.textContent ?? '').slice(0, 8); return node.dataset.blockId !== ${JSON.stringify(taskBlock)} && node.querySelector('.editorial-mark') === null && head.length === 8 && Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(head)).length === head.length; }).slice(0, 2).map((node) => node.dataset.blockId)`);
     requireJourney(Array.isArray(composerBlocks) && composerBlocks.length === 2 && composerBlocks.every((id) => /^blk_[0-9a-f]{24}$/.test(id)), 'composer-blocks', composerBlocks);
     const composerWords = await Promise.all(composerBlocks.map((id) => renderer.evaluate(`(window.__j16.block(${JSON.stringify(id)})?.textContent ?? '').slice(0, 6)`)));
     const draftsBefore = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: null }).then((read) => read.drafts.length)`);

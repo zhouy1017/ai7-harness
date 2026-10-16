@@ -216,6 +216,14 @@ describe('Task Intent Drafts over the real store on exact sample1', () => {
       const pending = store.saveTaskIntentDraft({ bookId: book.bookId, draftId: null, expectedOrdinal: null, origin: 'composer-selection', goal: GOAL,
         target: { kind: 'ranges', ranges: [{ kind: 'new', span: spanOf(store, book) }] }, outcomeClass: 'analysis' });
       expect(pending.version.ranges.map((range) => [range.state, range.stateLabel])).toEqual([['pending-save', '待保存修订版']]);
+      // A window still naming an older revision or journal position (a Task Input checkpoint moved the branch meanwhile) pins the
+      // same words at the branch's state now; words that are not there are refused.
+      const stale = { ...spanOf(store, book, 1), baseRevisionId: randomUUID(), expectedJournalSequence: 0 };
+      const pinned = store.saveTaskIntentDraft({ bookId: book.bookId, draftId: null, expectedOrdinal: null, origin: 'composer-selection', goal: GOAL,
+        target: { kind: 'ranges', ranges: [{ kind: 'new', span: stale }] }, outcomeClass: null });
+      expect(pinned.version.ranges.map((entry) => [entry.blockId, entry.text, entry.state])).toEqual([[stale.blockId, stale.selectedText, 'pending-save']]);
+      expect(refusal(() => store.saveTaskIntentDraft({ bookId: book.bookId, draftId: null, expectedOrdinal: null, origin: 'composer-selection', goal: GOAL,
+        target: { kind: 'ranges', ranges: [{ kind: 'new', span: { ...stale, selectedText: `${stale.selectedText}多` } }] }, outcomeClass: null }))).toBe('TASK_INTENT_DRAFT_RANGE_MOVED');
       // The words it pinned change: 任务范围需要重新选择, and 准备计划 is refused until it is reselected (TASK-043).
       editBlock(store, book, span.blockId, '〔挪动〕');
       const moved = store.inspectTaskIntentDrafts({ bookId: book.bookId, draftId: pending.draftId }).drafts[0]!;
