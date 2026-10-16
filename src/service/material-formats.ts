@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { posix } from 'node:path';
 import { Unzip, UnzipInflate, UnzipPassThrough } from 'fflate';
 import { SaxesParser, type SaxesTagNS } from 'saxes';
@@ -20,6 +21,10 @@ import type { ConvertedParagraph } from './text-manuscript.js';
  * anything of it is read (nothing is ever fetched or expanded), and an EPUB carrying DRM or encryption, or an ODT saved with
  * a password, is refused with that reason. Scripts, styles, notes, comments, headers and footers, and hidden text are not
  * read: an index holds the body text a reader sees.
+ *
+ * A PDF (Issue #892) is read by `extractPdfText` at the end of this module through `pdfjs-dist`'s text layer — the one new
+ * dependency, admitted by exact pin, run in this process without a worker file or a canvas — into the same paragraphs, each
+ * with the page it stands on. A PDF without a text layer to speak of needs recognition, which is not provided.
  */
 
 /** Each reader's identity, recorded in a build's `converter` beside the DOCX parser it is read through. */
@@ -37,7 +42,7 @@ export function isMaterialTextFormat(format: string): format is MaterialTextForm
 }
 
 /** Why a file was not read, in the Material Index's own reasons. */
-export type MaterialFormatRefusalReason = 'over-bound' | 'unreadable' | 'empty' | 'encrypted' | 'external-entity';
+export type MaterialFormatRefusalReason = 'over-bound' | 'unreadable' | 'empty' | 'encrypted' | 'external-entity' | 'needs-recognition';
 
 export class MaterialFormatRefusal extends Error {
   constructor(readonly reason: MaterialFormatRefusalReason, detail: string) {
@@ -1453,3 +1458,220 @@ function readRtf(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
   return { title: title.length > 0 ? title : null, paragraphs: sink.paragraphs };
 }
 
+
+// ---- PDF (Issue #892) -----------------------------------------------------------------------------------------------
+
+/**
+ * The PDF reader's identity: the paragraphs below, read from the text layer `pdfjs-dist` gives (Issue #892; ADR 0070 §3, the
+ * Commander's admission of the exact pin). Its Node build runs in this process with no worker file and no canvas: nothing is
+ * rendered, no font is drawn, no script is run and nothing is fetched — the character maps and standard font metrics are read
+ * from the package on this machine.
+ */
+export const PDF_TEXT_CONVERTER_IDENTITY = 'ai7-pdf-text/1+pdfjs-dist@6.4.299';
+/** The pages one PDF may hold: above it the file is refused as over the bound, never cut. */
+export const MAX_MATERIAL_PDF_PAGES = 2_000;
+/**
+ * Fewer letters than this per page, on average, is no text layer a reader could use: a scan, or a scan with a stray page
+ * number. Such a file needs recognition (需要识别), which this build does not provide.
+ */
+export const MIN_PDF_LETTERS_PER_PAGE = 8;
+
+/** The text of a PDF: its paragraphs, and for each the page it stands on and its place on that page (1-based). */
+export interface MaterialPdfText extends MaterialFormatText {
+  readonly pageCount: number;
+  readonly pages: ReadonlyArray<{ readonly page: number; readonly paragraph: number }>;
+}
+
+/** The parts of `pdfjs-dist` the reader uses. */
+type PdfJs = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+
+const PDFJS_MODULE = 'pdfjs-dist/legacy/build/pdf.mjs';
+const PDFJS_WORKER_MODULE = 'pdfjs-dist/legacy/build/pdf.worker.mjs';
+let pdfjsLoading: Promise<PdfJs> | null = null;
+
+/**
+ * `pdfjs-dist`, loaded once and only when a PDF is read. Its worker module is loaded into this process first and handed over
+ * as `globalThis.pdfjsWorker`, so the library never starts a worker or loads a file of its own. The module prints a notice
+ * about the canvas it does not need while it loads; that notice is not let through.
+ */
+function loadPdfJs(): Promise<PdfJs> {
+  if (pdfjsLoading === null) {
+    const loading = (async () => {
+      const warn = console.warn;
+      console.warn = () => {};
+      try {
+        (globalThis as { pdfjsWorker?: unknown }).pdfjsWorker = await import(PDFJS_WORKER_MODULE);
+        return await import(PDFJS_MODULE) as PdfJs;
+      } finally {
+        console.warn = warn;
+      }
+    })();
+    pdfjsLoading = loading;
+    loading.catch(() => { if (pdfjsLoading === loading) pdfjsLoading = null; });
+  }
+  return pdfjsLoading;
+}
+
+/** Where the package keeps its character maps, standard font metrics and image decoders on this machine, as directory paths. */
+function pdfjsDataDirectories(): { cMapUrl: string; standardFontDataUrl: string; wasmUrl: string } {
+  const root = posix.dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json').replaceAll('\\', '/'));
+  return { cMapUrl: `${root}/cmaps/`, standardFontDataUrl: `${root}/standard_fonts/`, wasmUrl: `${root}/wasm/` };
+}
+
+/** One positioned run of text, as the text layer gives it. */
+interface PdfTextRun {
+  readonly str: string;
+  readonly hasEOL: boolean;
+  readonly transform: readonly number[];
+  readonly height: number;
+}
+
+interface PdfLine {
+  text: string;
+  y: number;
+  height: number;
+}
+
+const PDF_HAN = /\p{Script=Han}/u;
+const PDF_LETTER = /\p{L}/u;
+const PDF_LOWER = /\p{Ll}/u;
+
+/** Two wrapped lines of one paragraph joined: no space beside Han text, a hyphen at a Latin line's end taken away. */
+function joinPdfLines(left: string, right: string): string {
+  if (left.length === 0) return right;
+  const last = left.at(-1)!;
+  const first = right.charAt(0);
+  if (PDF_HAN.test(last) || PDF_HAN.test(first)) return left + right;
+  if (last === '-' && left.length > 1 && PDF_LOWER.test(left.at(-2)!) && PDF_LOWER.test(first)) return left.slice(0, -1) + right;
+  return `${left} ${right}`;
+}
+
+/**
+ * One page's lines from its text runs: a run that ends its line, or a run set lower or higher than the line it would join,
+ * ends the line. A line's height is its tallest run.
+ */
+function pdfLines(runs: ReadonlyArray<PdfTextRun>): PdfLine[] {
+  const lines: PdfLine[] = [];
+  let current: PdfLine | null = null;
+  for (const run of runs) {
+    const y = run.transform[5] ?? 0;
+    const height = Math.abs(run.height) > 0 ? Math.abs(run.height) : Math.abs(run.transform[3] ?? 0);
+    if (current !== null && run.str.length > 0 && Math.abs(y - current.y) > Math.max(current.height, height) / 2) {
+      lines.push(current);
+      current = null;
+    }
+    if (run.str.length > 0) {
+      if (current === null) current = { text: '', y, height };
+      current.text += run.str;
+      current.height = Math.max(current.height, height);
+    }
+    if (run.hasEOL) {
+      lines.push(current ?? { text: '', y, height });
+      current = null;
+    }
+  }
+  if (current !== null) lines.push(current);
+  return lines;
+}
+
+function errorName(error: unknown): unknown {
+  return (error as { name?: unknown } | null)?.name;
+}
+
+/**
+ * The text of one PDF as paragraphs with their pages (Issue #892). A paragraph ends at an empty line, at a gap above a line
+ * wider than half again its height, where the next line stands higher than the last (a new column), and always at the
+ * page's end: no paragraph spans two pages, so each is cited by its page. Refused, naming why: encrypted, a structure that
+ * cannot be read, more pages than the bound, the text and paragraph bounds every reader keeps, or no text layer to speak of
+ * (`needs-recognition`). A stop asked meanwhile ends it between two pages.
+ */
+export async function extractPdfText(
+  bytes: Uint8Array,
+  signal?: AbortSignal,
+  bounds: MaterialFormatBounds = MATERIAL_FORMAT_BOUNDS,
+  maxPages: number = MAX_MATERIAL_PDF_PAGES,
+): Promise<MaterialPdfText> {
+  const pdfjs = await loadPdfJs();
+  const task = pdfjs.getDocument({
+    // A copy: the library takes the buffer it is given.
+    data: new Uint8Array(bytes),
+    ...pdfjsDataDirectories(),
+    cMapPacked: true,
+    isOffscreenCanvasSupported: false,
+    isImageDecoderSupported: false,
+    disableFontFace: true,
+    useSystemFonts: false,
+    useWorkerFetch: false,
+    enableXfa: false,
+    disableAutoFetch: true,
+    disableStream: true,
+    verbosity: pdfjs.VerbosityLevel.ERRORS,
+  });
+  const sink = new ParagraphSink(bounds);
+  const pages: Array<{ page: number; paragraph: number }> = [];
+  let letters = 0;
+  try {
+    let document: Awaited<typeof task.promise>;
+    try {
+      document = await task.promise;
+    } catch (error) {
+      if (errorName(error) === 'PasswordException') refuse('encrypted', 'password');
+      refuse('unreadable', errorName(error) === 'InvalidPDFException' ? 'structure' : 'open');
+    }
+    const pageCount = document.numPages;
+    requireFormat(Number.isSafeInteger(pageCount) && pageCount >= 1, 'unreadable', 'no pages');
+    requireFormat(pageCount <= maxPages, 'over-bound', 'too many pages');
+    let title: string | null = null;
+    try {
+      const info = (await document.getMetadata()).info as { Title?: unknown } | null;
+      if (typeof info?.Title === 'string') title = info.Title;
+    } catch {
+      title = null;
+    }
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+      if (signal?.aborted === true) throw new DOMException('PDF reading stopped.', 'AbortError');
+      const page = await document.getPage(pageNumber);
+      const content = await page.getTextContent({ includeMarkedContent: false, disableNormalization: false });
+      page.cleanup();
+      let onPage = 0;
+      let previous: PdfLine | null = null;
+      let paragraph = '';
+      const end = (): void => {
+        if (paragraph.length > 0) {
+          const before = sink.paragraphs.length;
+          sink.text(paragraph);
+          sink.flush();
+          if (sink.paragraphs.length > before) {
+            onPage += 1;
+            pages.push({ page: pageNumber, paragraph: onPage });
+          }
+        }
+        paragraph = '';
+      };
+      const runs = content.items.filter((item): item is typeof item & PdfTextRun => 'str' in item);
+      for (const line of pdfLines(runs)) {
+        const text = line.text.replace(/\s+/gu, ' ').trim();
+        for (const character of text) if (PDF_LETTER.test(character)) letters += 1;
+        if (text.length === 0) {
+          end();
+          previous = null;
+          continue;
+        }
+        if (previous !== null) {
+          const gap = previous.y - line.y;
+          if (gap < 0 || gap > Math.max(previous.height, line.height) * 1.5) end();
+        }
+        paragraph = joinPdfLines(paragraph, text);
+        previous = line;
+      }
+      end();
+    }
+    requireFormat(letters >= MIN_PDF_LETTERS_PER_PAGE * pageCount && sink.paragraphs.length > 0, 'needs-recognition', 'no text layer');
+    return { title: normalizedTitle(title), paragraphs: sink.paragraphs, pageCount, pages };
+  } catch (error) {
+    if (error instanceof MaterialFormatRefusal || (error instanceof DOMException && error.name === 'AbortError')) throw error;
+    refuse('unreadable', 'read');
+  } finally {
+    await task.destroy();
+  }
+}

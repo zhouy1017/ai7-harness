@@ -100,6 +100,9 @@ importers:
       fflate:
         specifier: 0.8.3
         version: 0.8.3
+      pdfjs-dist:
+        specifier: 6.4.299
+        version: 6.4.299
       prosemirror-commands:
         specifier: 1.7.2
         version: 1.7.2
@@ -834,6 +837,10 @@ packages:
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==, tarball: https://registry.npmjs.org/pathe/-/pathe-2.0.3.tgz}
 
+  pdfjs-dist@6.4.299:
+    resolution: {integrity: sha512-AVl138zALtfaAPvADulE0PZThbYzCBS79nL4pOSL/6Sm/4AH5A21BD9VHt97OlCuzJuCpmeZtAtkinisF4Vb1g==, tarball: https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.4.299.tgz}
+    engines: {node: '>=22.13.0 || >=24'}
+
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==, tarball: https://registry.npmjs.org/pend/-/pend-1.2.0.tgz}
 
@@ -1029,6 +1036,9 @@ packages:
 
   yauzl@2.10.0:
     resolution: {integrity: sha512-p4a9I6X6nu6IhoGmBqAcbJy1mlC4j27vEPZX9F4L4/vZT3Lyq1VkFHw/V/PUcB9Buo+DG3iHkT0x3Qya58zc3g==, tarball: https://registry.npmjs.org/yauzl/-/yauzl-2.10.0.tgz}
+
+ignoredOptionalDependencies:
+  - '@napi-rs/canvas'
 
 snapshots:
 
@@ -1526,6 +1536,8 @@ snapshots:
   orderedmap@2.1.1: {}
 
   pathe@2.0.3: {}
+
+  pdfjs-dist@6.4.299: {}
 
   pend@1.2.0: {}
 

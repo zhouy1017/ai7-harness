@@ -3681,6 +3681,37 @@ function registerRendererHandlers(
       return service.call('inspectLibraryMaterialSegments', { materialId: input.materialId, from: input.from });
     }),
   );
+  // 构建相似索引 (Issue #892): the item's vectors made on this machine, on request.
+  ipcMain.handle(IPC_CHANNELS.buildMaterialVectors, (event, input: ServiceOperationMap['buildMaterialVectors']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('buildMaterialVectors', { materialId: input.materialId });
+      });
+    }),
+  );
+  // 相似段落检索 (Issue #892): an item's paragraphs nearest the editor's text; read-only.
+  ipcMain.handle(IPC_CHANNELS.queryMaterialVectors, (event, input: ServiceOperationMap['queryMaterialVectors']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('queryMaterialVectors', { materialId: input.materialId, text: input.text, k: input.k });
+    }),
+  );
+  // 生成来源译文 (Issue #892): asked for under the selected policy's rule; refused when none names it.
+  ipcMain.handle(IPC_CHANNELS.requestMaterialTranslation, (event, input: ServiceOperationMap['requestMaterialTranslation']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('requestMaterialTranslation', { materialId: input.materialId });
+      });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.previewLibraryMaterial, (event) =>
     envelope(async () => {
       const owned = requireSender(event);

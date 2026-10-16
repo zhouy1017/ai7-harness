@@ -612,6 +612,8 @@ describe('the ledger across slices and kinds', () => {
     expect(cache.nextItemId('smoke')).toBe('S40/smoke/2');
     expect(cache.nextItemId('factual-review', 'S87')).toBe('S87/factual-review/2');
     expect(cache.nextItemId('factual-review')).toBe('S40/factual-review/1');
+    // 生成来源译文's items name their own slice (Issue #892).
+    expect(cache.nextItemId('material-translation', 'S80')).toBe('S80/material-translation/1');
     expect(() => cache.claimItem('S87/factual-review/1')).toThrowError(/Provider Test Ledger/u);
     expect(() => cache.claimItem('S41/smoke/1')).toThrowError(/<slice>/u);
     expect(() => cache.nextItemId('smoke', 'S41' as never)).toThrowError(/切片/u);

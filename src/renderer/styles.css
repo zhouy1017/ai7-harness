@@ -869,6 +869,15 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .material-segment-list { display: grid; gap: .35rem; margin: 0; padding-left: 2.2rem; overflow-wrap: anywhere; }
 .material-segment-title, .material-segment-heading { font-weight: 700; }
 .material-anchor { display: inline-block; margin-right: .2rem; padding: 0 .25rem; border: 1px solid #c9d6d2; border-radius: 4px; font-size: .75rem; color: #2c463b; }
+/* 相似段落检索 and 来源译文 (Issue #892): made on request; a translation sits under its paragraph, labelled, never in its place. */
+.material-index-layer-actions { display: grid; gap: .3rem; min-width: 0; }
+.material-translation-note, .material-vector-note { margin: 0; color: #5c6358; }
+.material-vector-search { display: grid; gap: .35rem; min-width: 0; }
+.material-vector-search input { flex: 1 1 14rem; min-width: 0; box-sizing: border-box; font: inherit; }
+.material-vector-results-heading { margin: 0; font-weight: 700; }
+.material-vector-list { display: grid; gap: .3rem; margin: 0; padding-left: 1.6rem; overflow-wrap: anywhere; }
+.material-translation { margin: .25rem 0 0; padding-left: .6rem; border-left: 3px solid #c9d6d2; color: #2c463b; overflow-wrap: anywhere; }
+.material-translation-label { display: inline-block; margin-right: .35rem; font-size: .75rem; font-weight: 700; }
 /* On a surface that raises a Task, the plan is one line and 查看计划 (S72 D4). */
 .task-plan-summary { margin-top: 1rem; }
 .task-plan-summary h4 { margin: 0; }

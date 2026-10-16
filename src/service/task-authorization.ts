@@ -458,7 +458,13 @@ export const SEARCH_BACKEND_CONNECTIONS_SQL = `CREATE TABLE search_backend_conne
 export const SEARCH_BACKEND_SCHEMA_VERSION = 74;
 /** Revision 75 (Issue #425, S70): the retained external evidence of research Runs — four append-only relations, nothing existing moved. */
 export const RESEARCH_EVIDENCE_SCHEMA_VERSION = 75;
-export const LATEST_SCHEMA_VERSION = RESEARCH_EVIDENCE_SCHEMA_VERSION;
+/**
+ * Revision 76 (Issue #892): the Material Index's similarity vectors and 来源译文 — two additive, append-only relations owned by
+ * `material-index.ts` and created before this version is stamped. No existing row changes, and nothing of revision 67's two
+ * relations moves. No task-authorization or analysis relation changes. This is the terminal version.
+ */
+export const MATERIAL_INDEX_LAYER_SCHEMA_VERSION = 76;
+export const LATEST_SCHEMA_VERSION = MATERIAL_INDEX_LAYER_SCHEMA_VERSION;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -2247,10 +2253,13 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === READERS_REPORT_SCHEMA_VERSION || version === CAPTURED_PROCEDURE_SCHEMA_VERSION || version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION || version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION || version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
-      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION,
+      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION ||
+      version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === RESEARCH_EVIDENCE_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // Revision 76 (Issue #892) moves no task-authorization or analysis relation, so a revision-75 store carries the terminal ledger.
+  if (version === RESEARCH_EVIDENCE_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
   // Revision 75 (Issue #425) moves no task-authorization or analysis relation, so a revision-74 store carries the terminal ledger.
   if (version === SEARCH_BACKEND_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
   if (version === MODEL_CLARIFICATION_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }

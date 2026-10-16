@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import {
+  MATERIAL_INDEXER_FIRST,
   MATERIAL_INDEXER_IDENTITY,
   MATERIAL_INDEXER_PREDECESSOR,
   MATERIAL_INDEX_PREPARE_SLICE,
@@ -16,7 +17,9 @@ import {
   prepareMaterialIndexInSlices,
   splitSentences,
   type MaterialExtraction,
+  type MaterialLayerActivity,
 } from '../../src/service/material-index.js';
+import { STUB_EMBEDDING_DIMENSIONS, STUB_EMBEDDING_IDENTITY } from '../../src/service/knowledge/embedding-stub.js';
 import { LIBRARY_MATERIAL_SCHEMA_SQL, initializeLibraryMaterialSchema } from '../../src/service/library-materials.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 
@@ -25,6 +28,15 @@ import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 // text here is the suite's own synthetic words.
 
 const sentences = (text: string): string[] => splitSentences(text).map(([start, end]) => text.slice(start, end));
+
+/** The store's facts beside the ledger when nothing is being made and 来源译文 is not admitted (Issue #892). */
+const ACTIVITY: MaterialLayerActivity = {
+  embedding: { identity: STUB_EMBEDDING_IDENTITY, dimensions: STUB_EMBEDDING_DIMENSIONS, readiness: { state: 'ready' } },
+  vectorsBuilding: false,
+  translating: false,
+  translationRequest: { available: false, reason: '当前策略未开放来源译文' },
+  translationFailure: null,
+};
 
 describe('the sentence anchors of a paragraph', () => {
   it('ends a sentence after its end marks and the closing quotes or brackets that follow, trimming white space', () => {
@@ -160,17 +172,26 @@ describe('the ledger over a minimal store', () => {
     expect(ledger.unindexed()).toEqual([MATERIAL]);
     ledger.record({ materialId: MATERIAL, sha256: SHA, format: 'DOCX' }, complete, '2026-10-09T01:00:00.000Z');
     expect(ledger.unindexed()).toEqual([]);
-    const projection = ledger.projection({ materialId: MATERIAL, sha256: SHA, format: 'DOCX' }, 'queued');
+    const projection = ledger.projection({ materialId: MATERIAL, sha256: SHA, format: 'DOCX' }, 'queued', ACTIVITY);
     expect(projection).toMatchObject({
       state: 'complete', reason: null, builtAt: '2026-10-09T01:00:00.000Z',
-      metadata: { documentTitle: '自带标题', language: 'zh', paragraphs: 2, headings: 1, sentences: 3, characters: 10 },
+      metadata: { documentTitle: '自带标题', language: 'zh', paragraphs: 2, headings: 1, sentences: 3, characters: 10, pages: null },
+      // Chinese text needs no 来源译文; its vectors wait until the editor asks (Issue #892).
+      translation: null,
+      vectors: { state: 'not-built', embedding: STUB_EMBEDDING_IDENTITY, dimensions: STUB_EMBEDDING_DIMENSIONS, built: 0, total: 2, builtAt: null, expectedDigest: null },
+      layers: { translation: 'not-needed', vectors: 'not-built', recognition: 'not-needed' },
     });
+    // Its build record names no page count: a format without pages records exactly what it did before (Issue #892).
+    const built = db.prepare('SELECT canonical_json FROM material_index_builds').get() as { canonical_json: string };
+    expect(Object.keys((JSON.parse(built.canonical_json) as { metadata: Record<string, unknown> }).metadata)).toEqual(['characters', 'documentTitle', 'headings', 'language', 'paragraphs', 'sentences']);
     expect(() => ledger.record({ materialId: MATERIAL, sha256: SHA, format: 'DOCX' }, complete)).toThrowError(MaterialIndexError);
     // A record of an item that moved is refused.
     const other = store();
     expect(() => new MaterialIndexLedger(other).record({ materialId: MATERIAL, sha256: 'c'.repeat(64), format: 'DOCX' }, complete)).toThrowError(MaterialIndexError);
     const page = ledger.page(MATERIAL, '资料', 1);
-    expect(page.segments.map((segment) => [segment.ordinal, segment.kind, segment.sentences])).toEqual([[1, 'title', [[0, 2]]], [2, 'paragraph', [[0, 4], [4, 8]]]]);
+    expect(page.segments.map((segment) => [segment.ordinal, segment.kind, segment.sentences, segment.page, segment.translation])).toEqual([
+      [1, 'title', [[0, 2]], null, null], [2, 'paragraph', [[0, 4], [4, 8]], null, null],
+    ]);
     expect(page.next).toBeNull();
     expect(page.previous).toBeNull();
   });
@@ -251,26 +272,56 @@ describe('the ledger over a minimal store', () => {
 
   it('names one indexer for every format, and keeps the converter each build read through in its record (#729)', () => {
     // Naming the DOC and text converters here would move every item's current build, DOCX ones included: the identity
-    // stays, and a converter's change moves `ai7-material-index/N` instead.
-    expect(MATERIAL_INDEXER_IDENTITY).toBe('ai7-material-index/2+ai7-docx-fflate-saxes/3');
-    expect(MATERIAL_INDEXER_PREDECESSOR).toBe('ai7-material-index/1+ai7-docx-fflate-saxes/3');
+    // stays, and a converter's change moves `ai7-material-index/N` instead. PDF moved it once more (Issue #892).
+    expect(MATERIAL_INDEXER_IDENTITY).toBe('ai7-material-index/3+ai7-docx-fflate-saxes/3');
+    expect(MATERIAL_INDEXER_PREDECESSOR).toBe('ai7-material-index/2+ai7-docx-fflate-saxes/3');
+    expect(MATERIAL_INDEXER_FIRST).toBe('ai7-material-index/1+ai7-docx-fflate-saxes/3');
     const db = store();
     new MaterialIndexLedger(db).record({ materialId: MATERIAL, sha256: SHA, format: 'TXT' }, { ...complete, converter: 'ai7-text-to-docx/1+ai7-docx-fflate-saxes/3' });
     const row = db.prepare('SELECT canonical_json FROM material_index_builds').get() as { canonical_json: string };
     expect(JSON.parse(row.canonical_json)).toMatchObject({ indexer: MATERIAL_INDEXER_IDENTITY, converter: 'ai7-text-to-docx/1+ai7-docx-fflate-saxes/3' });
   });
 
-  /** A build rewritten as the predecessor indexer made it, under its own digest; the trigger is lifted for that alone. */
-  function asPredecessor(db: DatabaseSync, materialId: string): string {
+  /** A build rewritten as an earlier indexer made it, under its own digest; the trigger is lifted for that alone. */
+  function asPredecessor(db: DatabaseSync, materialId: string, indexer: string = MATERIAL_INDEXER_FIRST): string {
     const row = db.prepare('SELECT index_id, canonical_json FROM material_index_builds WHERE material_id = ?').get(materialId) as { index_id: string; canonical_json: string };
-    const earlier = canonicalRecord({ ...(JSON.parse(row.canonical_json) as Record<string, unknown>), indexer: MATERIAL_INDEXER_PREDECESSOR });
+    const earlier = canonicalRecord({ ...(JSON.parse(row.canonical_json) as Record<string, unknown>), indexer });
     db.exec('DROP TRIGGER IF EXISTS material_index_builds_no_update');
     db.prepare('UPDATE material_index_builds SET indexer = ?, canonical_json = ?, sha256 = ? WHERE index_id = ?')
-      .run(MATERIAL_INDEXER_PREDECESSOR, earlier.json, earlier.digest, row.index_id);
+      .run(indexer, earlier.json, earlier.digest, row.index_id);
     return earlier.digest;
   }
 
-  it('lets the predecessor\'s builds stand, but builds again an item it refused as a format it could not read (#428)', () => {
+  it('lets the predecessor\'s builds stand, but builds again a PDF it could not read (Issue #892)', () => {
+    const db = store();
+    const PAGE = '33333333-3333-4333-8333-333333333333';
+    const SCAN = '44444444-4444-4444-8444-444444444444';
+    for (const [id, sha] of [[PAGE, 'd'.repeat(64)], [SCAN, 'e'.repeat(64)]] as const) {
+      db.prepare('INSERT INTO library_materials(material_id, object_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?)')
+        .run(id, sha, '2026-10-09T00:00:01.000Z', '{}', sha);
+    }
+    const ledger = new MaterialIndexLedger(db);
+    ledger.record({ materialId: MATERIAL, sha256: SHA, format: 'TXT' }, complete, '2026-10-09T01:00:00.000Z');
+    ledger.record({ materialId: PAGE, sha256: 'd'.repeat(64), format: 'HTML' }, complete, '2026-10-09T01:00:01.000Z');
+    ledger.record({ materialId: SCAN, sha256: 'e'.repeat(64), format: 'PDF' }, { state: 'unsupported', reason: 'needs-local-dependency', converter: null }, '2026-10-09T01:00:02.000Z');
+    const text = asPredecessor(db, MATERIAL, MATERIAL_INDEXER_PREDECESSOR);
+    const page = asPredecessor(db, PAGE, MATERIAL_INDEXER_PREDECESSOR);
+    asPredecessor(db, SCAN, MATERIAL_INDEXER_PREDECESSOR);
+    // The text and the page stand as they were built: not built again, their digests unmoved, a plan's pin still current.
+    expect(ledger.current(MATERIAL)?.sha256).toBe(text);
+    expect(ledger.current(PAGE)?.sha256).toBe(page);
+    expect(ledger.referencePin(MATERIAL, BOOK, () => true).indexDigest).toBe(text);
+    // The PDF the predecessor could not read waits for this indexer, and leaves 最近完成 until it is built.
+    expect(ledger.current(SCAN)).toBeNull();
+    expect(ledger.unindexed()).toEqual([SCAN]);
+    expect(ledger.completions('2000-01-01T00:00:00.000Z', 5).map((entry) => entry.materialId)).toEqual([PAGE, MATERIAL]);
+    ledger.record({ materialId: SCAN, sha256: 'e'.repeat(64), format: 'PDF' }, complete, '2026-10-10T00:00:00.000Z');
+    expect(ledger.current(SCAN)).toMatchObject({ state: 'complete' });
+    expect(ledger.unindexed()).toEqual([]);
+    expect((db.prepare('SELECT count(*) count FROM material_index_builds WHERE material_id = ?').get(SCAN) as { count: number }).count).toBe(2);
+  });
+
+  it('lets the first indexer\'s builds stand, but builds again an item it refused as a format it could not read (#428)', () => {
     const db = store();
     const PAGE = '33333333-3333-4333-8333-333333333333';
     const SCAN = '44444444-4444-4444-8444-444444444444';
@@ -284,19 +335,19 @@ describe('the ledger over a minimal store', () => {
     ledger.record({ materialId: SCAN, sha256: 'e'.repeat(64), format: 'PDF' }, { state: 'unsupported', reason: 'needs-local-dependency', converter: null }, '2026-10-09T01:00:02.000Z');
     const text = asPredecessor(db, MATERIAL);
     asPredecessor(db, PAGE);
-    const scan = asPredecessor(db, SCAN);
-    // The text and the PDF stand as they were built: not built again, their digests unmoved, a plan's pin still current.
+    asPredecessor(db, SCAN);
+    // The text stands as it was built: not built again, its digest unmoved, a plan's pin still current.
     expect(ledger.current(MATERIAL)?.sha256).toBe(text);
-    expect(ledger.current(SCAN)?.sha256).toBe(scan);
     expect(ledger.referencePin(MATERIAL, BOOK, () => true).indexDigest).toBe(text);
-    // The web page the predecessor could not read waits for this indexer, and leaves 最近完成 until it is built.
+    // The web page and the PDF the first indexer could not read wait for this one, and leave 最近完成 until they are built.
     expect(ledger.current(PAGE)).toBeNull();
-    expect(ledger.unindexed()).toEqual([PAGE]);
-    expect(ledger.completions('2000-01-01T00:00:00.000Z', 5).map((entry) => entry.materialId)).toEqual([SCAN, MATERIAL]);
+    expect(ledger.current(SCAN)).toBeNull();
+    expect(ledger.unindexed()).toEqual([PAGE, SCAN]);
+    expect(ledger.completions('2000-01-01T00:00:00.000Z', 5).map((entry) => entry.materialId)).toEqual([MATERIAL]);
     ledger.record({ materialId: PAGE, sha256: 'd'.repeat(64), format: 'HTML' }, complete, '2026-10-10T00:00:00.000Z');
     expect(ledger.current(PAGE)).toMatchObject({ state: 'complete' });
-    expect(ledger.unindexed()).toEqual([]);
-    expect(ledger.completions('2000-01-01T00:00:00.000Z', 5).map((entry) => entry.materialId)).toEqual([PAGE, SCAN, MATERIAL]);
+    expect(ledger.unindexed()).toEqual([SCAN]);
+    expect(ledger.completions('2000-01-01T00:00:00.000Z', 5).map((entry) => entry.materialId)).toEqual([PAGE, MATERIAL]);
     // Both of the page's builds are kept: nothing is rewritten.
     expect((db.prepare('SELECT count(*) count FROM material_index_builds WHERE material_id = ?').get(PAGE) as { count: number }).count).toBe(2);
     // A build an indexer before the predecessor made never stands.
@@ -314,7 +365,7 @@ describe('the ledger over a minimal store', () => {
     const db = store();
     const ledger = new MaterialIndexLedger(db);
     ledger.record({ materialId: MATERIAL, sha256: SHA, format: 'PDF' }, { state: 'unsupported', reason: 'needs-local-dependency', converter: null });
-    expect(ledger.projection({ materialId: MATERIAL, sha256: SHA, format: 'PDF' }, 'indexing')).toMatchObject({
+    expect(ledger.projection({ materialId: MATERIAL, sha256: SHA, format: 'PDF' }, 'indexing', ACTIVITY)).toMatchObject({
       state: 'unsupported', reason: 'needs-local-dependency', metadata: { language: null, paragraphs: 0 },
       layers: { text: 'deferred', recognition: 'deferred', segments: 'deferred', translation: 'deferred', vectors: 'deferred' },
     });

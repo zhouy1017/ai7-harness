@@ -11,6 +11,7 @@ AI7 is proprietary software. The following components remain under their own lic
 | `@standard-schema/spec` | 1.1.0 | MIT; Copyright (c) 2024 Colin McDonnell |
 | `@napi-rs/keyring` and its exact optional `@napi-rs/keyring-*` native carriers | 1.3.0 | MIT; Copyright (c) 2020 N-API for Rust |
 | `fflate` | 0.8.3 | MIT; Copyright (c) 2026 Arjun Barrett |
+| `pdfjs-dist` | 6.4.299 | Apache License 2.0; Copyright 2024 Mozilla Foundation; PDF.js text extraction only, optional `@napi-rs/canvas` excluded |
 | `prosemirror-commands`, `prosemirror-history`, `prosemirror-keymap`, `prosemirror-model`, `prosemirror-state`, `prosemirror-transform`, `prosemirror-view` | exact versions in `pnpm-lock.yaml` | MIT; Copyright (C) 2015-2017 by Marijn Haverbeke `<marijn@haverbeke.berlin>` and others |
 | `orderedmap`, `w3c-keyname` | 2.1.1, 2.2.8 | MIT; Copyright (C) 2016 by Marijn Haverbeke `<marijn@haverbeke.berlin>` and others |
 | `rope-sequence` | 1.3.4 | MIT; Copyright (C) 2016 by Marijn Haverbeke `<marijn@haverbeke.berlin>` |
@@ -155,7 +156,7 @@ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH RE
 
 ## Apache License 2.0 route
 
-The complete Apache License 2.0 text is available at <https://www.apache.org/licenses/LICENSE-2.0> and in the installed `playwright-core@1.62.1`, `typescript@6.0.3`, `detect-libc@2.1.2`, and `expect-type@1.4.0` license files. Playwright's installed `NOTICE` and `ThirdPartyNotices.txt` and TypeScript's installed `ThirdPartyNoticeText.txt` retain their exact development-tool notices. Electron's complete bundled third-party license text, including Chromium notices, is carried verbatim in `dist/notices/ELECTRON_LICENSES.chromium.html`.
+The complete Apache License 2.0 text is available at <https://www.apache.org/licenses/LICENSE-2.0> and in the installed `pdfjs-dist@6.4.299`, `playwright-core@1.62.1`, `typescript@6.0.3`, `detect-libc@2.1.2`, and `expect-type@1.4.0` license files. Playwright's installed `NOTICE` and `ThirdPartyNotices.txt` and TypeScript's installed `ThirdPartyNoticeText.txt` retain their exact development-tool notices. Electron's complete bundled third-party license text, including Chromium notices, is carried verbatim in `dist/notices/ELECTRON_LICENSES.chromium.html`.
 
 ## Mozilla Public License 2.0 route
 

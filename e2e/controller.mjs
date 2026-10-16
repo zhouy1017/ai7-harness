@@ -658,10 +658,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-library-decide',
     // 资料索引 (Issue #428, S80a).
     'knowledge-library-index',
+    // 相似段落检索 built on request (Issue #892).
+    'knowledge-library-index-vectors',
     'j14-library-reflow-forced-colors',
     'knowledge-library-bounded-readers',
     'knowledge-library-index-translation',
-    // 资料索引 of HTML, EPUB, ODT and RTF (Issue #428).
+    // 资料索引 of HTML, EPUB, ODT and RTF (Issue #428), and a PDF's text layer with page anchors (Issue #892).
     'knowledge-library-index-formats',
     'knowledge-earlier-exemplar-import',
     'zero-activity',
