@@ -14,6 +14,15 @@ describe('the persisted search settings and schema 74', () => {
       const settings = store.getSearchBackendSettings();
       expect(settings.selectedBackendId).toBe('search-tinyfish');
       expect(settings.backends.map((entry) => entry.backendId)).toEqual(['search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai']);
+      // Plain price lines; the one price whose vendor source was not retained (#884) carries that caveat, the others none.
+      const byId = new Map(settings.backends.map((entry) => [entry.backendId, entry]));
+      expect(byId.get('search-tinyfish')!.price).toBe('免费');
+      expect(byId.get('search-deepseek')!.price).toMatch(/^按 token 计费，实测约 USD 0\.\d{4} \/ 次$/u);
+      expect(byId.get('search-brave')!.price).toBe('USD 5 / 1000 次');
+      expect(byId.get('search-bochaai')!.price).toBe('CNY 0.036 / 次');
+      expect(settings.backends.filter((entry) => entry.note?.includes('单价来源未经核实')).map((entry) => entry.backendId)).toEqual(['search-bochaai']);
+      expect(byId.get('search-tinyfish')!.note).toContain('30 次/分钟');
+      expect(byId.get('search-brave')!.note).toContain('间歇性');
       const first = store.saveSearchBackendCredential('search-brave', null, 'needs-attention');
       const saved = store.saveSearchBackendCredential('search-brave', first.credentialReference, 'ready');
       expect(saved.credentialReference).toMatch(/^[0-9a-f-]{36}$/u);

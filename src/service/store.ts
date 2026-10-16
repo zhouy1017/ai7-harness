@@ -3361,14 +3361,7 @@ const MODEL_SERVICE_ROUTE_ROWS: Readonly<Record<ModelServiceRouteId, {
 const MODEL_SERVICE_ROW_COLUMNS = 'connection_id, role_id, connection_name, provider_id, model_id, adapter_revision, configuration_revision, ' +
   'approved_fallback_chain, credential_slot, credential_reference, credential_operation_state, created_at, updated_at, credential_updated_at';
 
-/**
- * Revision 11 → 72 for `model_service_connections` (Issue #811): the relation is rebuilt from its current text and its one
- * official row copied byte for byte, rowid included — except that it now names the official route's current model id,
- * `deepseek-flash`, and is the route in use, as the only one configured. Its Credential Reference and state are kept, so the
- * protected credential behind it still answers. Nothing references this relation, so foreign keys stay as they are.
- */
-
-
+/** Revision 74 (Issue #473): one connection row per shipped search backend, the registry's top rank selected; an existing table is checked, never rebuilt. */
 function initializeSearchBackendSchema(db: DatabaseSync): void {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'search_backend_connections'").get() as SqlRow | undefined;
   const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
@@ -3388,6 +3381,12 @@ function initializeSearchBackendSchema(db: DatabaseSync): void {
   } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
+/**
+ * Revision 11 → 72 for `model_service_connections` (Issue #811): the relation is rebuilt from its current text and its one
+ * official row copied byte for byte, rowid included — except that it now names the official route's current model id,
+ * `deepseek-flash`, and is the route in use, as the only one configured. Its Credential Reference and state are kept, so the
+ * protected credential behind it still answers. Nothing references this relation, so foreign keys stay as they are.
+ */
 function initializeModelServiceRoutesSchema(db: DatabaseSync): void {
   const folded = (value: string): string => value.trim().replace(/\s+/gu, ' ');
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'model_service_connections'").get() as SqlRow | undefined;
@@ -16210,11 +16209,17 @@ export class EditorialStore {
       backends: SEARCH_BACKENDS.filter((entry) => entry.shipped).map((entry) => ({
         backendId: entry.id, name: entry.displayName, rank: entry.rank!, host: entry.host!,
         reachable: entry.profile?.verdict === 'measured', p50Ms: entry.profile?.latencyMs.p50 ?? null,
-        price: entry.price.amount === null ? entry.price.basis : `${entry.price.currency} ${entry.price.amount} / ${entry.price.per} 次`,
+        // A plain price line: a token-billed backend shows its measured cost per call, never the vendor's English basis.
+        price: entry.price.amount === null
+          ? entry.profile?.costPerCallUsd === null || entry.profile?.costPerCallUsd === undefined ? '按 token 计费' : `按 token 计费，实测约 USD ${entry.profile.costPerCallUsd.toFixed(4)} / 次`
+          : entry.price.amount === 0 ? '免费' : `${entry.price.currency} ${entry.price.amount} / ${entry.price.per === 1 ? '' : `${entry.price.per} `}次`,
         keyRequired: entry.keyRequired,
         chineseHitRate: entry.profile === null || entry.profile.totals.chinese === 0 ? 0 : entry.profile.hits.chinese / entry.profile.totals.chinese,
         internationalHitRate: entry.profile === null || entry.profile.totals.international === 0 ? 0 : entry.profile.hits.international / entry.profile.totals.international,
-        note: entry.id === 'search-tinyfish' ? '提供方限速：30 次/分钟、500 次/小时；另一页面标示每日 12,000 次。' : entry.id === 'search-brave' ? '测量时出现间歇性连接失败。' : entry.profile?.note ?? null,
+        note: [entry.id === 'search-tinyfish' ? '提供方限速：30 次/分钟、500 次/小时；另一页面标示每日 12,000 次。' : entry.id === 'search-brave' ? '测量时出现间歇性连接失败。' : entry.profile?.note ?? null,
+          // #884: a price whose vendor source was not retained is shown only with that caveat.
+          entry.priceSource.verified ? null : '单价来源未经核实：这是评估时记录的历史标价，以服务商当前价格页为准。',
+        ].filter((line): line is string => line !== null).join(' ') || null,
         connection: connections.find((row) => row.backendId === entry.id)!,
       })),
     };
