@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
+import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
 import { DialogueExecutionOwner, dialogueLiveRoute, dialogueRouteRefusal, productionDialogueRoute, type DialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import {
   DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL,
@@ -251,6 +251,8 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       const request = JSON.parse(init.body) as { stream: boolean; tools: Array<{ function: { name: string } }>; messages: Array<{ role: string; content: string }> };
       expect(request.stream).toBe(true);
       expect(request.tools.map((tool) => tool.function.name)).toEqual(['exact_fetch', 'retrieve']);
+      // The selected v18 dialogue rule admits the local tools, so the digest-pinned /2 contract is the system message.
+      expect(request.messages[0]).toEqual({ role: 'system', content: DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt });
       const turn = calls.length;
       if (turn === 2) {
         const result = JSON.parse(request.messages.at(-1)!.content) as Array<{ candidateId: string }>;
@@ -276,7 +278,7 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     }) as unknown as typeof fetch;
     const dialogues = new DialogueExecutionOwner({ records: store, fixture: null,
       sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
-      live: liveRoute(nativeFetch, { policy: withLocalRetrievalFor(livePolicy, 'editorial-dialogue') }),
+      live: liveRoute(nativeFetch),
       retrievalSources: (id) => store.dialogueRetrievalSources(id) });
     try {
       dialogues.requireReady(store.dialogueSourceDigest(book.bookId, selection));
@@ -505,7 +507,9 @@ describe('就这段提问… on the live route (provider-free)', () => {
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '实时提问');
     const selection = selectionOf(store, book);
-    const dialogues = liveOwner(store, liveRoute(stubTransport(calls, () => ANSWER)));
+    // #893: the predecessor /1 contract on a live route whose rule admits no local tools stays byte-identical; selected v18
+    // admits them, so this case states a rule without targeted retrieval (the /2 case below uses the selected rule).
+    const dialogues = liveOwner(store, liveRoute(stubTransport(calls, () => ANSWER), { policy: withLocalRetrievalFor(livePolicy, 'editorial-dialogue', false) }));
     try {
       const { dialogueId, projection } = await ask(store, dialogues, book.bookId, selection);
       expect(projection.attempts[0]!.state).toBe('completed');

@@ -1,5 +1,6 @@
 import type { ProviderModelProfile } from './model-profile.js';
 import { RetrievalError, type RetrievalIndex } from '../retrieval/index.js';
+import { LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_ROUND_TRIP_BREAKER } from './local-tools.js';
 import type { DevelopmentValidationIntent } from '../../shared/protocol.js';
 import type { CredentialBroker } from './credential-broker.js';
 import type { PlatformToolCallItem, PlatformToolCallResult } from './live-transmission.js';
@@ -116,7 +117,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     if (rule !== null && (deps.fetch === undefined || deps.admitHost === undefined)) throw new Error('PLATFORM_TOOL_TRANSPORT_REQUIRED');
     this.#binding = deps.binding;
     this.#retrieval = deps.retrieval ?? null;
-    this.#localBreaker = new PlatformToolBreaker(deps.binding.localTools?.breaker.roundTrips ?? 128);
+    this.#localBreaker = new PlatformToolBreaker(deps.binding.localTools?.breaker.roundTrips ?? LOCAL_TOOL_ROUND_TRIP_BREAKER);
     this.#oneQueryPerUnit = rule !== null && 'backends' in rule.websearch;
     this.#base = deps.scope;
     this.#fetch = deps.fetch ?? (() => { throw new Error('LOCAL_TOOL_HAS_NO_TRANSPORT'); });
@@ -443,7 +444,7 @@ const BREAKER_UNIT_END: PlatformToolUnitEnd = Object.freeze({
   retry: 'never',
   settles: 'unit-only',
 });
-const LOCAL_BREAKER_UNIT_END: PlatformToolUnitEnd = Object.freeze({ reason: 'circuit-breaker-tripped', disclosure: '检索未完成', retry: 'never', settles: 'unit-only' });
+const LOCAL_BREAKER_UNIT_END: PlatformToolUnitEnd = Object.freeze({ reason: 'circuit-breaker-tripped', disclosure: LOCAL_TOOL_BREAKER_END, retry: 'never', settles: 'unit-only' });
 
 function refusal(text: string): { readonly text: string; readonly sourceUrl: null } {
   return { text, sourceUrl: null };

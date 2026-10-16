@@ -1,5 +1,5 @@
 import { SEARCH_BACKENDS } from './search-backends.js';
-import type { LocalToolsRule } from '../retrieval/local-rule.js';
+import type { LocalToolsRule } from './local-tools.js';
 import { randomUUID } from 'node:crypto';
 import type { OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
