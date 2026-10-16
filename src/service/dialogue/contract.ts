@@ -38,6 +38,20 @@ export const DIALOGUE_PROMPT_CONTRACT = {
 
 export const DIALOGUE_PROMPT_CONTRACT_DIGEST = sha256Hex(canonicalJson(DIALOGUE_PROMPT_CONTRACT));
 
+/** The admitted retrieval successor; predecessor recordings retain their exact no-tool contract. */
+export const DIALOGUE_RETRIEVAL_PROMPT_CONTRACT = {
+  ...DIALOGUE_PROMPT_CONTRACT,
+  schema: 'ai7.dialogue-prompt-contract/2',
+  contractVersion: 'ai7.editorial-dialogue/2',
+  systemPrompt: [
+    '你是出版社编辑的写作顾问。编辑在稿件中选了一段文字，并提出一个问题。',
+    '根据所选文字、问题与本次已授权固定来源作答；找到书中哪里的问题先 retrieve，再 exact_fetch。检索预览不是原文。',
+    '引用检索到的文字前必须精确取文；只引用 exact_fetch 返回的原文，并附上 [retrieval:候选 candidateId] 锚点。未经精确取文的引用不被接受。',
+    '用简洁的一行中文回答，不编造情节或事实；回答只供编辑参考，不修改稿件，也不自动成为修改建议。',
+  ].join('\n'),
+} as const;
+export const DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST = sha256Hex(canonicalJson(DIALOGUE_RETRIEVAL_PROMPT_CONTRACT));
+
 const HEADER_PATTERN = /^AI7 编辑对话 · (提问|接着回答) · 问题摘要 ([0-9a-f]{64})$/u;
 
 export function dialogueQuestionDigest(question: string): string {
@@ -46,7 +60,8 @@ export function dialogueQuestionDigest(question: string): string {
 
 /** The request key the deterministic fixture answers by: the frozen contract, how the turn asks, and the question. */
 export function dialogueRequestDigest(contractDigest: string, kind: DialogueTurnKind, questionDigest: string): string {
-  return sha256Hex(`${DIALOGUE_CONTRACT_VERSION}\u0000${contractDigest}\u0000${kind}\u0000${questionDigest}`);
+  const version = contractDigest === DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST ? DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.contractVersion : DIALOGUE_CONTRACT_VERSION;
+  return sha256Hex(`${version}\u0000${contractDigest}\u0000${kind}\u0000${questionDigest}`);
 }
 
 export interface DialogueMessageInput {

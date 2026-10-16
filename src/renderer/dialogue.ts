@@ -105,7 +105,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
   }
 
   function fragmentNode(text: string, breakAfter: boolean): HTMLElement {
-    const node = el('span', `dialogue-fragment${breakAfter ? ' dialogue-fragment-break' : ''}`, text);
+    const node = el('span', `dialogue-fragment${breakAfter ? ' dialogue-fragment-break' : ''}`, text.replace(/\[retrieval:[0-9a-f]{64}\]/gu, '〔稿件引用〕'));
     node.dataset['dialogueFragment'] = '';
     return node;
   }
@@ -153,6 +153,15 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     const questionHeading = el('h3', 'section-label', DIALOGUE_QUESTION_HEADING);
     const question = el('p', 'dialogue-question', next.question ?? DIALOGUE_QUESTION_MISSING);
     context.replaceChildren(selectionHeading, quote, jump, questionHeading, question);
+    if (next.retrievalWarning !== null && next.retrievalWarning !== undefined) context.append(el('p', 'field-note', next.retrievalWarning));
+    for (const candidate of next.anchors ?? []) {
+      if (candidate.anchor.blockId === undefined) continue;
+      const anchor = el('button', 'quiet dialogue-retrieval-anchor', '跳到引用段落');
+      anchor.type = 'button';
+      anchor.dataset['dialogueRetrievalAnchor'] = candidate.candidateId;
+      anchor.addEventListener('click', () => options.jump({ manuscriptId: next.manuscriptId, blockId: candidate.anchor.blockId! }));
+      context.append(anchor);
+    }
     const sections = next.attempts.map((attempt, index) => attemptSection(attempt, index === next.attempts.length - 1));
     attemptsHost.replaceChildren(...sections.map((entry) => entry.section));
     const last = sections.at(-1);

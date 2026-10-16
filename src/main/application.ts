@@ -3681,6 +3681,14 @@ function registerRendererHandlers(
       return service.call('inspectLibraryMaterialSegments', { materialId: input.materialId, from: input.from });
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.searchReferableMaterials, (event, input: ServiceOperationMap['searchReferableMaterials']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('searchReferableMaterials', { bookId: input.bookId, query: input.query, k: input.k });
+    }),
+  );
   // 构建相似索引 (Issue #892): the item's vectors made on this machine, on request.
   ipcMain.handle(IPC_CHANNELS.buildMaterialVectors, (event, input: ServiceOperationMap['buildMaterialVectors']['input']) =>
     envelope(async () => {

@@ -1,3 +1,4 @@
+import { notExactFetched } from '../retrieval/result-validator.js';
 import {
   FACTUAL_ASSERTION_CATEGORIES,
   FACTUAL_ASSERTION_CLASSES,
@@ -60,6 +61,7 @@ export interface FactualReduction {
 }
 
 export const EXCLUSION_REASON_LABELS = {
+  'not-exact-fetched': '未经精确取文',
   'quote-not-found': '引文未在其所声明的内容块中找到；该断言不获得来源范围。',
   'quote-ambiguous': '引文在其所声明的内容块中出现多于一次，锚点不唯一；该断言不获得来源范围。',
 } as const;
@@ -156,8 +158,8 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
   const questions: ResearchOutcome[] = [];
   for (const entry of located) {
     const { assertion } = entry;
-    if (entry.location.state !== 'verified') {
-      const reason = entry.location.state === 'ambiguous' ? 'quote-ambiguous' as const : 'quote-not-found' as const;
+    if (notExactFetched(assertion) || entry.location.state !== 'verified') {
+      const reason = notExactFetched(assertion) ? 'not-exact-fetched' as const : entry.location.state === 'ambiguous' ? 'quote-ambiguous' as const : 'quote-not-found' as const;
       excluded.push({
         findingId: findingId({ kind: 'excluded', unitOrdinal: entry.unitOrdinal, assertionOrdinal: entry.assertionOrdinal, quote: normalizedQuotation(assertion.quote) }),
         unitOrdinal: entry.unitOrdinal,

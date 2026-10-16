@@ -1,3 +1,4 @@
+import { notExactFetched } from '../retrieval/result-validator.js';
 import {
   REVIEW_CATEGORY_ASSURANCE_STATEMENT,
   REVIEW_FINDING_SEVERITIES,
@@ -46,6 +47,7 @@ export interface ReviewCategoryReduction {
 }
 
 export const REVIEW_EXCLUSION_REASON_LABELS = {
+  'not-exact-fetched': '未经精确取文',
   'quote-not-found': '引文未在其所声明的内容块中找到；该发现不获得来源范围，也不形成标记。',
   'quote-ambiguous': '引文在其所声明的内容块中出现多于一次，锚点不唯一；该发现不获得来源范围，也不形成标记。',
   'replacement-identical': '替换文字与其定位到的原文完全相同，没有提出任何修改；该发现不形成修改建议。',
@@ -147,6 +149,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
         reasonLabel: REVIEW_EXCLUSION_REASON_LABELS[reason],
       });
     };
+    if (notExactFetched(finding)) { exclude('not-exact-fetched'); continue; }
     if (entry.location.state !== 'verified') {
       exclude(entry.location.state === 'ambiguous' ? 'quote-ambiguous' : 'quote-not-found');
       continue;

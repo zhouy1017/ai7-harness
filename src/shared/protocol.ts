@@ -2,7 +2,18 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 140 as const;
+export const SERVICE_PROTOCOL_VERSION = 141 as const;
+
+/** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
+export interface LocalRetrievalCandidateProjection {
+  readonly candidateId: string;
+  readonly sourceKind: 'manuscript' | 'material' | 'retained-source';
+  readonly sourceId: string;
+  readonly revisionOrIndexDigest: string;
+  readonly anchor: { readonly blockId?: string; readonly segmentOrdinal?: number; readonly start: number; readonly end: number };
+  readonly score: number;
+  readonly preview: string;
+}
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -142,6 +153,7 @@ export const IPC_CHANNELS = {
   buildMaterialVectors: 'ai7:j15:build-material-vectors',
   queryMaterialVectors: 'ai7:j15:query-material-vectors',
   requestMaterialTranslation: 'ai7:j15:request-material-translation',
+  searchReferableMaterials: 'ai7:search-referable-materials',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -2778,6 +2790,9 @@ export const RUN_REPORT_USAGE_STAGES = ['units', 'cross-unit-reduction', 'assura
 export type RunReportUsageStageId = (typeof RUN_REPORT_USAGE_STAGES)[number];
 
 export interface RunReportUsageProjection {
+  retrievalCalls?: number;
+  exactFetchCalls?: number;
+  refusedRetrievalCalls?: number;
   searchCalls?: Readonly<Record<string, number>>;
   refusedSearchCalls?: number;
   fetchCount?: number;
@@ -4205,7 +4220,7 @@ export interface FactualReviewFindingProjection {
 }
 
 /** Why an assertion never became a finding: its quotation could not be anchored in the block it named. */
-export type FactualExclusionReason = 'quote-not-found' | 'quote-ambiguous';
+export type FactualExclusionReason = 'quote-not-found' | 'quote-ambiguous' | 'not-exact-fetched';
 
 /**
  * The excluded appendix (ADR 0066): an assertion the model listed whose quotation Reference Integrity
@@ -4551,7 +4566,7 @@ export interface ReviewCategoryFindingProjection {
  * not in the block it named, or is there more than once — and the third is a 修改建议 whose replacement
  * is exactly the text already there, which proposes nothing.
  */
-export type ReviewFindingExclusionReason = 'quote-not-found' | 'quote-ambiguous' | 'replacement-identical';
+export type ReviewFindingExclusionReason = 'quote-not-found' | 'quote-ambiguous' | 'replacement-identical' | 'not-exact-fetched';
 
 /** The excluded appendix: what the model listed that the service could not anchor; never a mark. */
 export interface ReviewCategoryExcludedProjection {
@@ -11197,6 +11212,8 @@ export interface DialogueAttemptProjection {
  * a Proposal (DIALOG-016).
  */
 export interface DialogueProjection {
+  readonly anchors?: ReadonlyArray<LocalRetrievalCandidateProjection>;
+  readonly retrievalWarning?: '未经精确取文' | null;
   readonly dialogueId: string;
   readonly bookId: string;
   readonly manuscriptId: string;
@@ -12113,6 +12130,10 @@ export interface ServiceOperationMap {
     input: { materialId: string };
     output: LibraryMaterialProjection;
   };
+  searchReferableMaterials: {
+    input: { bookId: string; query: string; k: number };
+    output: { candidates: ReadonlyArray<LocalRetrievalCandidateProjection> };
+  };
   /** 放入资料…: the absolute path main's picker returned, read as it would arrive; nothing is kept. */
   previewLibraryMaterial: {
     input: { path: string };
@@ -12790,6 +12811,7 @@ export interface RendererApi {
   queryMaterialVectors(input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection>;
   /** 生成来源译文: refused unless the selected policy's rule names it. */
   requestMaterialTranslation(input: ServiceOperationMap['requestMaterialTranslation']['input']): Promise<LibraryMaterialProjection>;
+  searchReferableMaterials(input: ServiceOperationMap['searchReferableMaterials']['input']): Promise<ServiceOperationMap['searchReferableMaterials']['output']>;
   /** 放入资料…: the native picker, then the file as it would arrive; `null` when the picker was cancelled. */
   previewLibraryMaterial(): Promise<LibraryMaterialPreviewProjection | null>;
   addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection>;

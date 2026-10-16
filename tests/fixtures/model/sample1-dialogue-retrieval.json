@@ -1,0 +1,23 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-dialogue-retrieval",
+  "description": "Authored provider-free J-16 retrieval stimulus layered over sample1-dialogue. The registered local retrieve and exact_fetch tools read the selected authorized revision; no manuscript text or recorded response is stored here.",
+  "provenance": "authored",
+  "basedOn": "sample1-dialogue",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "7b00c9a51c87489421084e0a3b5bcccb090359bb5620c52d5d79398731b29e73",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.local-retrieval-stimulus/1\",\"query\":\"selected-words\",\"localTools\":{\"targetedRetrieval\":{\"allowed\":true,\"source\":\"authorized-pinned-sources-only\",\"callsPerUnit\":5,\"candidatesPerCall\":8,\"exactFetchRequiredBeforeCitation\":true,\"scope\":\"no-egress\"},\"breaker\":{\"roundTrips\":128,\"end\":\"检索未完成\"}}}",
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 5
+        }
+      }
+    }
+  ]
+}

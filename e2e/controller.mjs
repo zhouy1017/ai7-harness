@@ -1343,6 +1343,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'restart-keeps-tasks',
     'dialogue-history-recovered',
     'dialogue-convert',
+    'dialogue-retrieval-anchors',
     // 就这段发起任务… (Issue #423, S77b).
     'selection-task-menu',
     'selection-task-composer',

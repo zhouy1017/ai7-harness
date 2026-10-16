@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { markRetrievalResult } from '../../src/service/retrieval/result-validator.js';
 import { deriveCoverageManifest, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
 import {
   FACTUAL_REVIEW_UNIT_RESULT_SCHEMA,
@@ -81,6 +82,14 @@ function reduce(outcomes: ReadonlyArray<FactualUnitOutcome>) {
 }
 
 describe('the factual review reduction', () => {
+  it('excludes an anchored assertion without Exact Fetch with its explicit reason (#893)', () => {
+    const outcome = closed([assertion()]);
+    if (outcome.state !== 'closed') throw new Error('synthetic outcome');
+    markRetrievalResult(outcome.result, [{ collection: 'assertions', ordinal: 0 }]);
+    const result = reduce([outcome]);
+    expect(result.findings.length).toBe(0);
+    expect(result.excluded.map((item) => [item.reason, item.reasonLabel])).toEqual([['not-exact-fetched', '未经精确取文']]);
+  });
   it('records a located assertion as a finding whose range slices the block back to its quotation', () => {
     const reduction = reduce([closed([assertion()])]);
     expect(reduction.findings).toHaveLength(1);

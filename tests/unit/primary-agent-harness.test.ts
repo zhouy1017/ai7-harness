@@ -36,6 +36,16 @@ function bindingFacts(bindingDigest: string): EgressBindingFacts {
 }
 
 describe('PrimaryAgentHarness', () => {
+  it('pins the exact local subset and the combined four-tool composition (#893)', () => {
+    const local = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST, { localTools: true });
+    const both = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST, { platformTools: true, localTools: true });
+    expect(local.tools.registeredTools).toBe(2);
+    expect(local.localTools?.names).toEqual(['exact_fetch', 'retrieve']);
+    expect(local).not.toHaveProperty('platformTools');
+    expect(local.digest).toBe('85a2d753073c658ef6f44fea3d7895391565c4f7fe0b68af722247e6b6cdbbcd');
+    expect(both.tools.registeredTools).toBe(4);
+    expect(both.digest).toBe('2fb2e380b426c9c341b7bd29c8fe0d061a4337383e9ece825604fd5329221bba');
+  });
   it('pins the research declaration in tool compositions and preserves non-web compositions (#744)', () => {
     const plain = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST);
     const web = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST, { platformTools: true });

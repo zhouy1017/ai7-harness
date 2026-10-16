@@ -151,6 +151,7 @@ import { assuranceSampleNotRun } from './reducers.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
 import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST } from './assurance-sampling-contract.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
+import { kindLocalTools } from './live-kind-admission.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
 import { PLAN_MOVED_LABEL, type WaitingRunBlockCause } from '../reconnect-preflight.js';
@@ -3588,7 +3589,8 @@ export class BaselineAnalysisStore {
     }
     const composition = live === null
       ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest)
-      : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined, researchDeclaration });
+      : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined, researchDeclaration,
+        localTools: intent.preparedByEnrollmentVersionId === null && kindLocalTools(this.#launch.policy, this.#definition.kind) !== null });
     const providerPlan = {
       ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }),
       role: 'Main Editorial Role',

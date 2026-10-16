@@ -1,4 +1,8 @@
 import type { DialogueAnswerState, DialogueAttemptProjection, DialogueProjection } from '../../shared/protocol.js';
+import { isRecord } from '../analysis/canonical.js';
+import type { RetrievalCandidate } from '../retrieval/index.js';
+import { dialogueRetrievalCitations } from '../retrieval/result-validator.js';
+import { toolResultOf, type AssembledMessage } from '../provider/payload.js';
 import { harnessSessionLogBytes, readHarnessSessionLog, type StoredHarnessLog } from '../harness/session-log.js';
 import { parseDialogueMessage, type DialogueMessageInput } from './contract.js';
 import type { StoredDialogueAttempt, StoredDialogueTask } from './dialogue-ledger.js';
@@ -13,6 +17,7 @@ import { fragmentsText, splitFragments, type DialogueFragment, type FragmentRead
 
 /** What one attempt's turn holds in the Harness Session Ledger, read through its span. */
 export interface AttemptTurn {
+  readonly exactFetched?: ReadonlyMap<string, RetrievalCandidate>;
   /** The message the turn sent, read back by the dialogue contract; `null` when the turn's message is not there. */
   readonly message: DialogueMessageInput | null;
   /** Every text delta the model streamed in the turn, in order. */
@@ -31,8 +36,22 @@ export function attemptTurn(log: StoredHarnessLog, startSeq: number, endSeq: num
   const last = endSeq ?? log.events.length - 1;
   let message: DialogueMessageInput | null = null;
   let streamed = '';
+  const exactCalls = new Set<string>();
+  const exactFetched = new Map<string, RetrievalCandidate>();
   for (const event of log.events.slice(startSeq, last + 1)) {
     const data = event.data as Record<string, unknown> | null;
+    if (event.type === 'tool/call' && data?.name === 'exact_fetch' && typeof data.callId === 'string') exactCalls.add(data.callId);
+    if (event.type === 'tool/result' && isRecord(data?.message)) {
+      const result = toolResultOf(data.message as unknown as AssembledMessage);
+      if (result !== null && exactCalls.has(result.callId) && !result.isError) {
+        try {
+          const value: unknown = JSON.parse(result.text);
+          if (isRecord(value) && isRecord(value.candidate) && typeof value.text === 'string' && typeof value.candidate.candidateId === 'string') {
+            exactFetched.set(value.candidate.candidateId, value.candidate as unknown as RetrievalCandidate);
+          }
+        } catch { /* Refusals are plain text, and never certify a citation. */ }
+      }
+    }
     if (event.type === 'user/message' && message === null && data !== null) {
       const text = textOf(data.content);
       if (text !== null) message = parseDialogueMessage(text);
@@ -41,7 +60,7 @@ export function attemptTurn(log: StoredHarnessLog, startSeq: number, endSeq: num
       if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') streamed += chunk.text;
     }
   }
-  return { message, streamed };
+  return { message, streamed, ...(exactFetched.size === 0 ? {} : { exactFetched }) };
 }
 
 /** An attempt's turn, or why there is none: its log is not here, or it is here and does not read. */
@@ -98,6 +117,7 @@ export function fragmentReading(state: DialogueAnswerState): FragmentReading {
 }
 
 export interface ResolvedAttempt {
+  readonly exactFetched?: ReadonlyMap<string, RetrievalCandidate>;
   readonly queued?: boolean;
   readonly attempt: StoredDialogueAttempt;
   readonly state: DialogueAnswerState;
@@ -112,6 +132,7 @@ export interface ResolvedAttempt {
  */
 /** What the answer in flight holds in memory: the message its turn sent, and every delta streamed so far. */
 export interface LiveAnswer {
+  readonly exactFetched?: ReadonlyMap<string, RetrievalCandidate>;
   readonly queued?: boolean;
   readonly message: DialogueMessageInput;
   readonly streamed: string;
@@ -138,7 +159,8 @@ export function resolveAttempts(
     const own = streamed === null ? [] : splitFragments(streamed, fragmentReading(state));
     const prior = attempt.kind === 'continue' ? resolved.at(-1) : undefined;
     const carried = prior === undefined ? [] : prior.fragments;
-    resolved.push({ attempt, state, fragments: [...carried, ...own], source, ...(streaming?.queued === true ? { queued: true } : {}) });
+    resolved.push({ attempt, state, fragments: [...carried, ...own], source, exactFetched: streaming?.exactFetched ?? turn?.exactFetched ?? new Map(),
+      ...(streaming?.queued === true ? { queued: true } : {}) });
   }
   return { attempts: resolved, first };
 }
@@ -177,6 +199,7 @@ export function dialogueProjection(
     };
   });
   const latestState = latest?.state ?? null;
+  const citations = dialogueRetrievalCitations(latest === undefined ? '' : fragmentsText(latest.fragments), latest?.exactFetched ?? new Map());
   const known = resolved.first !== null;
   return {
     dialogueId: task.dialogueId,
@@ -188,13 +211,15 @@ export function dialogueProjection(
     range: { blockId: task.blockId, fromGrapheme: task.fromGrapheme, toGrapheme: task.toGrapheme },
     askedAt: task.askedAt,
     attempts,
+    anchors: citations.anchors.filter((candidate) => candidate.sourceKind === 'manuscript' && candidate.sourceId === task.manuscriptId && candidate.anchor.blockId !== undefined),
+    retrievalWarning: citations.unverified ? '未经精确取文' : null,
     actions: {
       stop: latestState === 'answering',
       // 继续回答 goes on from complete fragments the answer kept; 重新回答 asks again (DIALOG-014). Both need the question.
       continue: known && latest !== undefined && (latestState === 'stopped' || latestState === 'interrupted') && latest.fragments.length > 0,
       regenerate: known && latestState !== null && latestState !== 'answering',
       // An Incomplete Dialogue Answer is no completed answer and is never converted (DIALOG-013).
-      convert: latestState === 'completed' && latest !== undefined && latest.fragments.length > 0,
+      convert: latestState === 'completed' && latest !== undefined && latest.fragments.length > 0 && !citations.unverified,
     },
   };
 }

@@ -1,4 +1,5 @@
 import { SEARCH_BACKENDS } from './search-backends.js';
+import type { LocalToolsRule } from '../retrieval/local-rule.js';
 import { randomUUID } from 'node:crypto';
 import type { OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
@@ -9,6 +10,7 @@ import { DIGEST_PATTERN, canonicalJson, sha256Hex, isRecord } from '../analysis/
 import { assistantToolCalls, messageText, toolResultOf, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
 import {
   PLATFORM_TOOL_NAMES,
+  ruleNamedToolSchemas,
   canonicalPublicUrl,
   toolArgumentsDigest,
   toolSetEqualsPlatformSchemas,
@@ -166,6 +168,7 @@ export interface EgressBindingFacts {
    * and then every tool, tool call, tool result, search call, and fetch is refused exactly as before.
    */
   readonly platformTools?: PlatformToolsRule | null;
+  readonly localTools?: LocalToolsRule | null;
 }
 
 /**
@@ -200,6 +203,7 @@ export interface EgressAttemptScope {
   readonly admittedToolResults?: ReadonlyMap<string, AdmittedToolResult>;
   /** The unit's circuit breaker (ADR 0080 §7.4); intact when absent. */
   breakerState?: () => 'intact' | 'tripped';
+  localBreakerState?: () => 'intact' | 'tripped';
   /** Whether a canonical URL is one the model cited or the search returned in this attempt (ADR 0079 §4.3). */
   citationAdmits?: (url: string) => boolean;
 }
@@ -412,14 +416,14 @@ function evaluateToolMessage(
   message: AssembledModelPayload['messages'][number],
   index: number,
   binding: EgressBindingFacts,
-  rule: PlatformToolsRule,
+  rule: PlatformToolsRule | null,
   scope: EgressAttemptScope,
   calls: { readonly open: Map<string, PlatformToolName>; readonly seen: Set<string> },
 ): EgressDecision | null {
   const toolCalls = assistantToolCalls(message);
   if (toolCalls !== null) {
     if (message.source.kind !== 'model' || message.source.provider !== binding.route || message.source.model !== binding.model ||
-        !toolCalls.calls.every((call) => (PLATFORM_TOOL_NAMES as ReadonlyArray<string>).includes(call.name)) ||
+        !toolCalls.calls.every((call) => ruleNamedToolSchemas(rule !== null, binding.localTools?.targetedRetrieval.allowed === true).some((schema) => schema.name === call.name)) ||
         !(scope.acceptedToolCallDigests?.has(assistantToolCallDigest(message.content)) ?? false)) {
       return refuse('payload-out-of-scope', `第 ${index + 1} 条模型工具调用不是本次尝试已接受的输出；未发送任何内容。`);
     }
@@ -450,8 +454,10 @@ export function toolResultKey(callId: string, tool: PlatformToolName): string {
 }
 
 /** Whether a tool result's URL is one its tool may have read: the rule's search host, or a cited public page. */
-function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformToolsRule, scope: EgressAttemptScope, binding: EgressBindingFacts): boolean {
+function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformToolsRule | null, scope: EgressAttemptScope, binding: EgressBindingFacts): boolean {
+  if (admitted.tool === 'retrieve' || admitted.tool === 'exact_fetch') return binding.localTools?.targetedRetrieval.allowed === true && admitted.sourceUrl === null;
   if (admitted.sourceUrl === null) return true;
+  if (rule === null) return false;
   if (admitted.tool === 'websearch') {
     try {
       const url = new URL(admitted.sourceUrl);
@@ -510,7 +516,8 @@ export function evaluateEgress(
   // ADR 0080 §7.2: a payload may expose tools only when its tool set equals exactly the platform tools the binding's rule
   // names. A rule that names none — Provider Processing v9's — matches no tool set, so every tool is refused as before.
   const rule = platformToolsOf(binding);
-  if (payload.tools !== undefined && payload.tools.length > 0 && !(rule !== null && toolSetEqualsPlatformSchemas(payload.tools))) {
+  const schemas = ruleNamedToolSchemas(rule !== null, binding.localTools?.targetedRetrieval.allowed === true);
+  if (payload.tools !== undefined && payload.tools.length > 0 && !toolSetEqualsPlatformSchemas(payload.tools, schemas)) {
     return refuse('tools-present', '组合运行时向模型暴露了规则未命名的工具；未发送任何内容。');
   }
   if ((payload.system ?? '') !== binding.systemPrompt) {
@@ -522,7 +529,7 @@ export function evaluateEgress(
     // The tool branch is reached only under a rule naming the platform tools and only for a message that is a tool call
     // or a tool result; every other message — and both kinds under every other rule — takes the unchanged branches below,
     // where a non-text block is still a refusal.
-    if (rule !== null && (assistantToolCalls(message) !== null || (message.role === 'user' && message.source.kind === 'tool'))) {
+    if (schemas.length > 0 && (assistantToolCalls(message) !== null || (message.role === 'user' && message.source.kind === 'tool'))) {
       const refused = evaluateToolMessage(message, index, binding, rule, scope, calls);
       if (refused !== null) return refused;
       continue;
@@ -550,6 +557,9 @@ export function evaluateEgress(
   // again with the refusal in hand, so a looping model stops transmitting rather than running into the Run's ceiling.
   if (rule !== null && last.source.kind === 'tool' && (scope.breakerState?.() ?? 'intact') === 'tripped') {
     return refuse('circuit-breaker-tripped', '联网核查未完成：本单元的工具往返已达到熔断上限，本单元到此结束；未发送任何内容。');
+  }
+  if (binding.localTools?.targetedRetrieval.allowed === true && last.source.kind === 'tool' && scope.localBreakerState?.() === 'tripped') {
+    return refuse('circuit-breaker-tripped', '检索未完成：本单元的工具往返已达到熔断上限，本单元到此结束；未发送任何内容。');
   }
   const digest = payloadDigest(payload);
   if (binding.route === LOCAL_DETERMINISTIC_ROUTE) return { decision: 'transmit-local', payloadDigest: digest };

@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { liveKindAdmission, liveKindRule, modelAdmitsPlatformTools } from '../../src/service/analysis/live-kind-admission.js';
+import { liveKindAdmission, liveKindRule, modelAdmitsPlatformTools, kindLocalTools } from '../../src/service/analysis/live-kind-admission.js';
+import { withLocalRetrievalFor } from '../support/policy-rules.js';
+import { admittedFastRoleRoute } from '../../src/service/dialogue/dialogue-route.js';
 import { factualReviewKindDefinition, withFactualResearch } from '../../src/service/analysis/kind-definition.js';
 import { reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import { liveReviewRule } from '../../src/service/review/live-review-admission.js';
@@ -12,6 +14,24 @@ import { OPENCODE_GO_V41_FLASH_PROFILE } from '../../src/service/provider/model-
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
 describe('platform tool registration admission', () => {
+  it('admits local retrieval by rule for every foreground model kind, preserving baseline/background exclusions', async () => {
+    const policy = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live');
+    for (const rule of policy.providerProcessing.admittedRules.filter((entry) => !entry.backgroundOrigin)) {
+      for (const kind of rule.taskKinds) {
+        expect(kindLocalTools(policy, kind)).toBeNull();
+        const projected = withLocalRetrievalFor(policy, kind);
+        expect(kindLocalTools(projected, kind) !== null).toBe(kind !== 'baseline-manuscript-analysis');
+        expect(kindLocalTools(projected, kind, 'background')).toBeNull();
+        expect(kindLocalTools(withLocalRetrievalFor(policy, kind, false), kind)).toBeNull();
+      }
+    }
+    for (const kind of ['editorial-dialogue', 'editorial-polish', 'proposal-conflict-regenerate']) {
+      const rule = policy.providerProcessing.admittedRules.find((entry) => entry.taskKinds.includes(kind));
+      if (rule === undefined) continue;
+      const category = rule.outboundDataCategories[0]!;
+      expect(admittedFastRoleRoute(withLocalRetrievalFor(policy, kind), kind, category)?.localTools?.targetedRetrieval.allowed).toBe(true);
+    }
+  });
   it('requires a declaring research rule and the exact factual research contract', async () => {
     const policy = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live');
     expect(policy.providerProcessing.version).toBe('v18');
