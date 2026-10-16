@@ -1,4 +1,5 @@
 import type {
+  EvidenceAssuranceLevel,
   BaselineAnalysisGoal,
   BaselineAnalysisUpdateRequest,
   BookTaskItemProjection,
@@ -139,6 +140,9 @@ import {
   taskPlanSavedLine,
   type TaskBarAction,
   type TaskDrawerMode,
+  TASK_PLAN_ASSURANCE_HEADING,
+  TASK_PLAN_ASSURANCE_NOTE,
+  taskPlanAssuranceEdited,
 } from './task-drawer-labels.js';
 
 /**
@@ -341,6 +345,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * the other edits; and the one ceiling form that is open, with what is typed in it, kept across repaints.
    */
   const budgetBuffers = new Map<string, RunBudgetCeilingState>();
+  /** The 证据保证级别 the editor chose and has not yet made the plan (Issue #901), by Task. */
+  const assuranceBuffers = new Map<string, EvidenceAssuranceLevel>();
   let budgetForm: { key: string; draft: string; error: string | null } | null = null;
   /**
    * 澄清卡 (Issue #422, S76d; INPUT-004): the choice and the note the editor has on each open question, kept outside every
@@ -908,7 +914,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         [TASK_PLAN_SCOPE_TERMS[2], next.scope.send],
         [TASK_PLAN_SCOPE_TERMS[3], next.scope.notRead],
       ])),
-      planSection(2, steps, ...stepsNote),
+      planSection(2, steps, ...stepsNote, ...assuranceBlock(next)),
       planSection(3, listOf(participation, 'task-plan-list task-plan-participation')),
       planSection(4, facts([
         [TASK_PLAN_SERVICE_TERMS[0], next.service.role],
@@ -1228,6 +1234,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           if (plan === null || working) return;
           editBuffers.delete(editKey(plan));
           budgetBuffers.delete(editKey(plan));
+          assuranceBuffers.delete(editKey(plan));
           budgetForm = null;
           focusBar = true;
           paint(plan, true);
@@ -1266,6 +1273,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (next.start.readiness === 'started') {
       editBuffers.delete(key);
       budgetBuffers.delete(key);
+      assuranceBuffers.delete(key);
       if (budgetForm?.key === key) budgetForm = null;
       return 0;
     }
@@ -1281,6 +1289,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       }
       if (buffer.size === 0) editBuffers.delete(key);
       count += buffer.size;
+    }
+    // The level is one change (Issue #901), gone once the version shown holds it.
+    const level = assuranceBuffers.get(key);
+    if (level !== undefined) {
+      if (next.edit.assurance === undefined || level === next.edit.assurance.level) assuranceBuffers.delete(key);
+      else count += 1;
     }
     // The ceiling is one change (Issue #51, S16a), gone once the version shown holds it. Like the other edits it waits
     // through a key-content change for the version 重新确认计划 writes.
@@ -1458,6 +1472,51 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   }
 
   /**
+   * 证据保证级别 (Issue #901; EASSURE-001, EASSURE-008): the three levels of a 事实核查 Task as one radio group, each with its
+   * consequence; a level below the policy minimum disabled with the requirement said beside it. A choice waits, like the other
+   * edits, for 更新计划; nothing is shown for any other kind.
+   */
+  function assuranceBlock(next: TaskPlanProjection): HTMLElement[] {
+    const assurance = next.edit.assurance;
+    if (assurance === undefined) return [];
+    const key = editKey(next);
+    const shown = assuranceBuffers.get(key) ?? assurance.level;
+    const block = el('fieldset', 'task-plan-assurance');
+    block.dataset['taskPlanAssurance'] = shown;
+    block.append(el('legend', undefined, TASK_PLAN_ASSURANCE_HEADING), el('p', 'field-note', TASK_PLAN_ASSURANCE_NOTE));
+    const name = uid('assurance');
+    for (const option of assurance.options) {
+      const label = el('label', 'task-plan-assurance-option');
+      const input = el('input');
+      input.type = 'radio';
+      input.name = name;
+      input.value = option.level;
+      input.checked = option.level === shown;
+      input.disabled = !next.edit.editable || !assurance.settable || option.disabled || working || interrupted;
+      input.dataset['taskPlanEdit'] = `assurance:${option.level}`;
+      input.addEventListener('change', () => {
+        if (plan === null || editKey(plan) !== key || working || interrupted) return;
+        if (option.level === assurance.level) assuranceBuffers.delete(key);
+        else assuranceBuffers.set(key, option.level);
+        paint(plan, true);
+        body.querySelector<HTMLElement>(`[data-task-plan-edit="assurance:${option.level}"]`)?.focus();
+      });
+      const text = el('span', 'task-plan-assurance-text');
+      text.append(el('strong', undefined, option.label), el('span', 'field-note', option.consequence));
+      if (option.requirement !== null) text.append(el('span', 'field-note task-plan-assurance-requirement', option.requirement));
+      label.append(input, text);
+      block.append(label);
+    }
+    const pending = assuranceBuffers.get(key);
+    if (pending !== undefined) {
+      const chosen = assurance.options.find((option) => option.level === pending);
+      block.append(el('p', 'task-plan-assurance-edited', `${TASK_PLAN_EDIT_TAG} · ${taskPlanAssuranceEdited(chosen?.label ?? pending)}`));
+    }
+    if (!assurance.settable && assurance.reason !== null) block.append(el('p', 'field-note', assurance.reason));
+    return [block];
+  }
+
+  /**
    * The ceiling's form: one labelled field for a whole count of tokens, what the ceiling does, and why a value was not
    * taken. Enter sets it (never mid-composition), Escape closes the form and not the drawer; what is typed survives a repaint.
    */
@@ -1553,6 +1612,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       .map((entry) => entry.id);
     // 设置上限… (Issue #51, S16a): the edit is the whole plan as the editor left it, so a ceiling set before is sent again.
     const ceiling = shownCeiling(current);
+    // 证据保证级别 (Issue #901): a 事实核查 Task's plan sends the level it shows, as the whole plan the editor left.
+    const level = current.edit.assurance === undefined ? undefined : assuranceBuffers.get(editKey(current)) ?? current.edit.assurance.level;
     options.setStatus('正在更新计划…', 'busy');
     try {
       const edits = {
@@ -1561,12 +1622,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         disallowedAdaptations,
         ...(askFirstAdaptations.length === 0 ? {} : { askFirstAdaptations }),
         ...(ceiling === 'unset' ? {} : { runBudgetCeiling: ceiling }),
+        ...(level === undefined ? {} : { evidenceAssuranceLevel: level }),
       };
       const updated = current.kind === 'baseline-analysis'
         ? await api.editBaselineAnalysisPlan({ ...edits, taskIntentId: current.ref })
         : await api.editTaskPlan({ ...edits, kind: current.kind, ref: current.ref });
       editBuffers.delete(editKey(current));
       budgetBuffers.delete(editKey(current));
+      assuranceBuffers.delete(editKey(current));
       if (budgetForm?.key === editKey(current)) budgetForm = null;
       const ordinal = typeof updated.planVersion === 'number' ? updated.planVersion : updated.planVersion?.ordinal;
       options.setStatus(`计划已更新为第 ${ordinal ?? '?'} 版。`, 'success');

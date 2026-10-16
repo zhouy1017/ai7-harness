@@ -904,6 +904,36 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     return list;
   };
 
+  /**
+   * A Correction Proposal's factual lineage (Issue #901; CORR-012, EASSURE-012): the result version it came from with its three
+   * states apart, the level, the sources checked and only candidates, the policy version — and 证据核查未完成 with what is
+   * missing, kept on the card through decision, Apply and reversal. Nothing for any other mark.
+   */
+  const factualLineage = (card: EditorialMarkCardProjection): HTMLElement[] => {
+    const lineage = card.factualCorrection;
+    if (lineage === undefined) return [];
+    const block = el('div', 'editorial-mark-factual');
+    block.dataset['markFactualResult'] = lineage.resultId;
+    block.dataset['markFactualVersion'] = String(lineage.resultVersion);
+    if (lineage.assuranceLabel !== null) {
+      const label = el('p', 'editorial-mark-factual-incomplete', lineage.assuranceLabel);
+      label.dataset['markAssurance'] = 'incomplete';
+      block.append(label);
+      if (lineage.missingChecks.length > 0) block.append(el('p', 'muted', `尚缺：${lineage.missingChecks.join('、')}`));
+    }
+    const facts = el('dl', 'editorial-mark-factual-facts');
+    for (const [term, value] of [
+      ['事实核查结果', `第 ${lineage.resultVersion} 版 · ${lineage.levelLabel}`],
+      ['引文完整性', lineage.states.referenceIntegrity === 'verified' ? '引文已在原文中定位' : '引文未能定位'],
+      ['断言支持', lineage.states.claimSupport],
+      ['事实核查', lineage.states.factualVerification],
+      ['来源', `已核对 ${lineage.checkedSources} 个 · 候选 ${lineage.candidateSources} 个`],
+      ['核查政策', `${lineage.policyPin.document} · ${lineage.policyPin.sha256.slice(0, 12)}`],
+    ] as ReadonlyArray<readonly [string, string]>) facts.append(el('dt', undefined, term), el('dd', undefined, value));
+    block.append(facts, el('p', 'muted', '核查结果是证据评估，不是事实定论；这条修改建议仍由你决定是否应用。'));
+    return [block];
+  };
+
   function showCard(card: EditorialMarkCardProjection, form?: (cancel: () => void) => FormConfig): void {
     closeMenu();
     floating?.remove();
@@ -990,7 +1020,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
               : '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。'
             : '稿件本身仍是原文。')),
         region('rationale', '修改理由', el('p', undefined, suggestion.rationale.length > 0 ? suggestion.rationale : '没有填写修改理由。')),
-        region('basis', '依据与核查', basisList(card)),
+        region('basis', '依据与核查', basisList(card), ...factualLineage(card)),
       );
       const yours = region('disposition', '你的处理');
       const pendingReceipt = recoveryCards.get(card.markId);

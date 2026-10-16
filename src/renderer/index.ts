@@ -2492,6 +2492,8 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     openProposalWorkspace: (input) => renderProposalWorkspace(input, bookId, bookTitle),
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
     planChanged: () => taskDrawer.refresh('review-run'),
+    // 在来源与证据中查看 (Issue #901): the Evidence Workspace's deep link into the Book's retained sources.
+    openSource: (evidenceId) => renderBookSources(bookId, bookTitle, evidenceId),
   });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(REVIEW_DESTINATION_ACTIONS[0], 'primary', async () => {
@@ -2673,7 +2675,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
  * ② 资料与记录 › 来源与证据 (Issue #425, S70; IA-012, SRC-013): the Book's retained external sources, with the way back to the
  * manuscript and to 工作概览 that every destination of the Book keeps. Read-only but for 保存为来源材料.
  */
-function renderBookSources(bookId: string, bookTitle: string): void {
+function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: string): void {
   const content = panel();
   content.classList.add('book-sources');
   content.dataset['bookId'] = bookId;
@@ -2684,7 +2686,8 @@ function renderBookSources(bookId: string, bookTitle: string): void {
     element('p', 'field-note', SOURCES_LEDE),
     host,
   );
-  const surface = mountResearchEvidence({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
+  const surface = mountResearchEvidence({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage,
+    ...(focusEvidenceId === undefined ? {} : { focusEvidenceId }) });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
     openManuscript.disabled = true;
@@ -2712,7 +2715,17 @@ function renderBookSources(bookId: string, bookTitle: string): void {
   setStatus(SOURCES_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
-      if (content.isConnected) setStatus(SOURCES_STATUS.opened);
+      if (!content.isConnected) return;
+      setStatus(SOURCES_STATUS.opened);
+      // The source view has followed its existing cursor pages to the retained source named by this deep link.
+      if (focusEvidenceId !== undefined) {
+        const card = content.querySelector<HTMLElement>(`[data-evidence-id="${CSS.escape(focusEvidenceId)}"]`);
+        if (card !== null) {
+          card.tabIndex = -1;
+          card.scrollIntoView({ block: 'center' });
+          card.focus();
+        }
+      }
     },
     (error: unknown) => {
       if (content.isConnected) setStatus(rendererErrorMessage(error, SOURCES_STATUS.unavailable), 'error');
@@ -3367,6 +3380,7 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
   disclosure.dataset['runReportClassification'] = report.classification;
   disclosure.append(element('summary', undefined, `查看运行报告 · ${RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
   disclosure.append(element('p', 'research-status', researchStatusLine(report)));
+  if (report.factualAssurance?.disclosure != null) disclosure.append(element('p', 'fact-lens-disclosure', report.factualAssurance.disclosure));
   const stages = element('ul', 'analysis-list analysis-run-report-stages');
   for (const stage of report.stages) {
     const item = element('li', undefined, `${RUN_REPORT_STAGE_LABELS[stage.stage]}：${RUN_REPORT_STAGE_STATE_LABELS[stage.state]}${stage.wallMs === null ? '' : ` · 用时 ${durationLabel(stage.wallMs)}`}`);

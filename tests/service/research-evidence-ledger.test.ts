@@ -6,7 +6,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
 import { LATEST_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { RetainedEvidence, RetainedUnit } from '../../src/service/analysis/factual-review-evidence.js';
-import { dropMaterialIndexLayerRelations, dropResearchEvidenceRelations } from '../support/pre74-schema.js';
+import { dropFactualVerificationRelations, FACTUAL_VERIFICATION_SCHEMA_NAMES, dropMaterialIndexLayerRelations, dropResearchEvidenceRelations, restoreProposalReviewPredecessor, pre77SchemaRows } from '../support/pre74-schema.js';
 import { MATERIAL_INDEX_LAYER_SCHEMA_SQL, MATERIAL_INDEX_LAYER_TRIGGER_SQL } from '../../src/service/material-index.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book } from '../support/sample1-baseline.js';
@@ -74,8 +74,9 @@ describe('the research evidence ledger, schema 75', () => {
     let store: EditorialStore | undefined;
     try {
       expect(RESEARCH_EVIDENCE_SCHEMA_VERSION).toBe(75);
-      // Revision 76 (Issue #892) follows it; a revision-74 store is migrated through both.
-      expect(LATEST_SCHEMA_VERSION).toBe(77);
+      // Revisions 76 (#892), 77 (#902), and 78 (#901) follow it; the exact revision-74 store traverses each.
+      // Synchronized delta with Issue #901: revision 78 (factual verification) is the terminal version.
+      expect(LATEST_SCHEMA_VERSION).toBe(RESEARCH_EVIDENCE_SCHEMA_VERSION + 3);
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       await importSample1Book(store, roots.codeRoot, '迁移回归');
       store.close(); store = undefined;
@@ -83,15 +84,17 @@ describe('the research evidence ledger, schema 75', () => {
       const terminal = schemaRows(path);
       // The predecessor is planted as revision 74 left it: none of revision 75's relations or triggers, nor revision 76's.
       const plant = new DatabaseSync(path);
+      dropFactualVerificationRelations(plant);
+      restoreProposalReviewPredecessor(plant);
       dropMaterialIndexLayerRelations(plant);
       dropResearchEvidenceRelations(plant);
       plant.exec(`PRAGMA user_version = ${SEARCH_BACKEND_SCHEMA_VERSION}`);
       plant.close();
       const predecessor = schemaRows(path);
-      const added = [...Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL), ...Object.keys(RESEARCH_EVIDENCE_TRIGGER_SQL),
+      const added = [...FACTUAL_VERIFICATION_SCHEMA_NAMES, ...Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL), ...Object.keys(RESEARCH_EVIDENCE_TRIGGER_SQL),
         ...Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL), ...Object.keys(MATERIAL_INDEX_LAYER_TRIGGER_SQL)];
       expect(predecessor.filter((row) => added.includes(row.name))).toEqual([]);
-      expect(predecessor).toEqual(terminal.filter((row) => !added.includes(row.name)));
+      expect(predecessor).toEqual(pre77SchemaRows(terminal.filter((row) => !added.includes(row.name))));
 
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       store.close(); store = undefined;

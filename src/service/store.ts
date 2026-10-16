@@ -656,6 +656,43 @@ import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
 import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
 import { RESEARCH_EVIDENCE_INCOMPLETE, RESEARCH_EVIDENCE_READ_ONLY, ResearchEvidenceError, ResearchEvidenceLedger, initializeResearchEvidenceSchema } from './research-evidence.js';
+import {
+  FactualVerificationError,
+  FactualVerificationLedger,
+  initializeFactualVerificationSchema,
+  type ManuscriptReader,
+  type MaterializedFactualFinding,
+} from './factual-verification.js';
+import { FACTUAL_VERIFICATION_POLICY_VERSION, sliceGraphemes } from './analysis/factual-review-contract.js';
+import { factualFindingId } from './analysis/factual-review-reducers.js';
+import type { FactualCorrectionEntry, FactualEvidenceRelation, FactualUnitAssertionV2 } from './analysis/factual-review-contract-v2.js';
+import { planEditAssuranceLevel, planEditsOf } from './analysis/plan-edits.js';
+import { assuranceSelector } from './task-plan.js';
+import {
+  CORRECTION_ASSURANCE_INCOMPLETE_LABEL,
+  FACTUAL_VERIFICATION_OUTCOMES,
+  type CorrectionProposalDraftProjection,
+  type CorrectionProposalSavedProjection,
+  type EvidenceAssuranceLevel,
+  type EvidenceWorkspaceProjection,
+  type FactualReviewResultSetRevisionProjection,
+  type FactualRunAssuranceProjection,
+  type FactualVerificationLensProjection,
+  type InspectEvidenceWorkspaceInput,
+  type InspectFactualVerificationInput,
+  type PlanEditsProjection,
+  type PrepareCorrectionProposalInput,
+  type RecordVerificationReviewDecisionInput,
+  type SaveCorrectionProposalInput,
+  type VerificationReviewDecisionRecordedProjection,
+  SUPPLEMENTARY_CHECK_DEFERRED,
+} from '../shared/protocol.js';
+
+/** The Fact-check Lens's words (Issue #901). */
+const FACTUAL_LENS_EMPTY = '这本书还没有事实核查结果：在 审阅 中选择 事实核查 并开始任务后，这里列出每条断言的核查结果。' as const;
+const FACTUAL_LENS_STATEMENT = '核查结果是证据评估：引文完整性、断言支持与事实核查三项分开显示，不是事实定论，也不构成审阅决定。' as const;
+/** The source a Correction Proposal's 修改建议 names (Issue #901; CORR-012). */
+const CORRECTION_MARK_SOURCE_LABEL = '事实核查 · 更正提案' as const;
 import { MAX_LIBRARY_MATERIAL_TITLE_GRAPHEMES, type ResearchEvidenceBookProjection, type ResearchEvidenceCaptureState } from '../shared/protocol.js';
 import { LIBRARY_OBJECT_DIRECTORY, LibraryMaterialError, LibraryMaterialLedger, initializeLibraryMaterialSchema, libraryMaterialTitle, type LibraryMaterialOriginal } from './library-materials.js';
 import {
@@ -1028,7 +1065,7 @@ import {
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   MODEL_CLARIFICATION_SCHEMA_VERSION,
-  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION,
+  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -2319,7 +2356,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || (currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION)),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2383,7 +2420,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || (currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION))
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2761,7 +2798,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || (version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION)),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2814,7 +2851,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || (version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION))) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2959,7 +2996,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || (version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION)),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3011,7 +3048,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || (version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION))) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3508,7 +3545,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || (version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION)),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3560,7 +3597,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || (version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION))) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4534,6 +4571,7 @@ export class EditorialStore {
   readonly #materialIndex: MaterialIndexLedger;
   /** 来源与证据 (Issue #425, S70; SRC-013): the external sources research Runs retained, and the units' research outcomes. */
   readonly #researchEvidence: ResearchEvidenceLedger;
+  readonly #factualVerification: FactualVerificationLedger;
   /** The items waiting for their index, in arrival order, and the one being built now. */
   readonly #indexQueue: string[] = [];
   #indexing: string | null = null;
@@ -4648,6 +4686,7 @@ export class EditorialStore {
     this.#reviewGuidelines = new ReviewGuidelineLedger(authority);
     this.#materialIndex = new MaterialIndexLedger(authority);
     this.#researchEvidence = new ResearchEvidenceLedger(authority);
+    this.#factualVerification = new FactualVerificationLedger(authority);
     this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot, (material) =>
       this.#materialIndex.projection({ materialId: material.materialId, sha256: material.sha256, format: material.source.format },
         this.#indexing === material.materialId ? 'indexing' : 'queued', this.#layerActivity(material.materialId, material.source.sha256)));
@@ -4992,6 +5031,8 @@ export class EditorialStore {
       // Revision 76 (Issue #892): the Material Index's similarity vectors and 来源译文.
       initializeMaterialIndexLayerSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeProposalReviewSchema(authority);
+      // Revision 78 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
+      initializeFactualVerificationSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -5515,7 +5556,11 @@ export class EditorialStore {
       refuseDispatch: (reviewRunId, categoryId, runRecordId, code, message) =>
         this.#reviewCall(() => runs.refuseDispatch(reviewRunId, categoryId, runRecordId, code, message)),
       settle: (reviewRunId, categoryId) => this.#reviewCall(() => runs.settle(reviewRunId, categoryId)),
-      write: (reviewRunId, categoryId) => this.#reviewCall(() => runs.write(reviewRunId, categoryId)),
+      write: (reviewRunId, categoryId) => {
+        this.#reviewCall(() => runs.write(reviewRunId, categoryId));
+        // The settled 事实核查 category's Versioned Verification Results (Issue #901), once its findings are on the manuscript.
+        if (categoryId === 'factual-review') this.materializeFactualVerification(reviewRunId);
+      },
       fail: (reviewRunId, categoryId, code, message) => this.#reviewCall(() => runs.fail(reviewRunId, categoryId, code, message)),
       waitingForPlace: (reviewRunId, categoryId) => runs.waitingForPlace(reviewRunId, categoryId),
       paused: (reviewRunId) => this.#reviewCall(() => runs.paused(reviewRunId)),
@@ -5581,6 +5626,16 @@ export class EditorialStore {
           if (active === undefined && projection.run?.state !== 'cancelled') plan = { ...plan, state: originalState, runControl: null };
           plan = { ...plan, edit: { ...plan.edit, planEnvelopeDigest: plan.edit.editable
             ? canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest : null } };
+        }
+      }
+      // The Evidence Assurance Level selector (Issue #901; EASSURE-001): only a Review Run with a 事实核查 Task shows it, at the
+      // level that Task's version freezes; the policy minimum hook disables the options below it (EASSURE-008).
+      const factualTask = tasks.find((task) => task.categoryId === 'factual-review');
+      if (factualTask !== undefined) {
+        const factual = this.#analysisCall(() => factualTask.ledger.inspect(input.bookId)) as unknown as BaselineAnalysisProjection;
+        if (factual.taskIntent?.taskIntentId === factualTask.taskIntentId && factual.planVersion !== null) {
+          plan = { ...plan, edit: { ...plan.edit, assurance: assuranceSelector(planEditAssuranceLevel(factual.planVersion.edits), plan.edit,
+            FACTUAL_VERIFICATION_POLICY_VERSION.minimumLevel) } };
         }
       }
       plan = { ...plan, defaultRule: this.#reviewDefaultRule(input.bookId, plan.ref) };
@@ -5943,9 +5998,25 @@ export class EditorialStore {
       const tasks = this.#reviewCall(() => this.#reviewRuns.controlTasks(input.bookId, input.ref));
       const digest = canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest;
       requireStore(digest === input.planEnvelopeDigest && tasks.length > 0, 'ANALYSIS_PLAN_EDIT_STALE', '计划已经变了；请重新查看计划后再修改。');
+      // The Evidence Assurance Level is the 事实核查 Task's alone (Issue #901): only that category's Task is handed it, and a
+      // Review Run without one refuses it. An edit of the level alone leaves every other category's plan as it is.
+      const { evidenceAssuranceLevel, ...shared } = input;
+      requireStore(evidenceAssuranceLevel === undefined || tasks.some((task) => task.categoryId === 'factual-review'),
+        'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
       this.#transaction(this.#authority, () => {
-        for (const task of tasks) this.#analysisCall(() => task.ledger.editPlan(input.bookId,
-          { ...input, taskIntentId: task.taskIntentId, planEnvelopeDigest: task.planEnvelopeDigest }));
+        let changed = 0;
+        for (const task of tasks) {
+          const factual = task.categoryId === 'factual-review';
+          try {
+            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...shared, ...(factual && evidenceAssuranceLevel !== undefined ? { evidenceAssuranceLevel } : {}),
+              taskIntentId: task.taskIntentId, planEnvelopeDigest: task.planEnvelopeDigest }));
+            changed += 1;
+          } catch (error) {
+            if (evidenceAssuranceLevel !== undefined && error instanceof StoreError && error.code === 'ANALYSIS_PLAN_EDIT_UNCHANGED') continue;
+            throw error;
+          }
+        }
+        requireStore(changed > 0, 'ANALYSIS_PLAN_EDIT_UNCHANGED', '计划没有改动。');
       });
       return this.inspectTaskPlan(input, progress);
     }
@@ -6074,6 +6145,7 @@ export class EditorialStore {
       JOIN json_each(rr.canonical_json, '$.categories') c JOIN analysis_run_records r
       ON r.task_intent_id = json_extract(c.value, '$.task.taskIntentId') WHERE r.run_record_id = ?`).all(runRecordId) as SqlRow[]) {
       this.#reviewCall(() => this.#reviewRuns.finishCancelled(asString(row.book_id), asString(row.review_run_id)));
+      this.materializeFactualVerification(asString(row.review_run_id));
     }
   }
 
@@ -9225,6 +9297,296 @@ export class EditorialStore {
    */
   recordResearchEvidence(input: Parameters<ResearchEvidenceLedger['record']>[0]): string[] {
     return this.#evidenceCall(() => this.#transaction(this.#authority, () => this.#researchEvidence.record(input)));
+  }
+
+  // ---- Factual verification (Issue #901; FACT, EVID, EASSURE, FREV, CORR) ---------------------------------------------------
+
+  #verificationCall<T>(operation: () => T): T {
+    return this.#libraryCall(() => {
+      try {
+        return operation();
+      } catch (error) {
+        if (error instanceof FactualVerificationError) throw new StoreError(error.code, error.message);
+        throw error;
+      }
+    });
+  }
+
+  /** The edits one frozen plan version of a Task names, read from its execution plan. */
+  #frozenPlanEdits(taskIntentId: string, ordinal: number): PlanEditsProjection {
+    const row = this.#authority.prepare(
+      "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = ? AND component = 'execution-plan'",
+    ).get(taskIntentId, ordinal) as SqlRow | undefined;
+    return row === undefined ? planEditsOf({}) : planEditsOf(JSON.parse(asString(row.canonical_json)) as unknown);
+  }
+
+  /**
+   * The level a 事实核查 Run executes under, recorded once as it starts (EASSURE-002, D9): the level its plan froze, lowered to
+   * 快速整理 with its disclosure only when this device reads offline then. The execution owner calls it; nothing else lowers it.
+   */
+  recordFactualRunAssurance(input: { bookId: string; runRecordId: string; taskIntentId: string; offline: boolean }): FactualRunAssuranceProjection {
+    return this.#verificationCall(() => {
+      const facts = this.#analysisCall(() => this.#factualReview.loadExecutionPlan(input.runRecordId));
+      const plannedLevel = planEditAssuranceLevel(this.#frozenPlanEdits(facts.taskIntentId, facts.planVersionOrdinal));
+      const contractLevel = this.#factualReview.definitionForDigest(facts.promptContractDigest).evidenceAssuranceLevel ?? null;
+      return this.#transaction(this.#authority, () => this.#factualVerification.recordRunAssurance({ ...input, plannedLevel, contractLevel }));
+    });
+  }
+
+  /** The current working text of a Review Run's branch and its pinned revision's blocks, as the verification ledger reads them. */
+  #manuscriptReader(branchId: string, manuscriptId: string): ManuscriptReader {
+    const working = this.#authority.prepare('SELECT text FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+    return {
+      rangeUntouched: (runRecordId, blockId, fromGrapheme, toGrapheme) => {
+        const facts = this.#factualReview.loadExecutionPlan(runRecordId);
+        let from = fromGrapheme;
+        let to = toGrapheme;
+        const edits = this.#authority.prepare(`SELECT from_grapheme, to_grapheme, insert_text FROM edit_journal_entries
+          WHERE branch_id = ? AND block_id = ? AND sequence > ? ORDER BY sequence`)
+          .all(branchId, blockId, facts.checkpoint.journalSequence) as SqlRow[];
+        for (const edit of edits) {
+          const start = asNumber(edit.from_grapheme);
+          const end = asNumber(edit.to_grapheme);
+          if (start < to && end > from || start === end && start > from && start < to) return false;
+          if (end <= from) {
+            const delta = graphemeLength(asString(edit.insert_text)) - (end - start);
+            from += delta;
+            to += delta;
+          }
+        }
+        return true;
+      },
+      sourceCurrent: (runRecordId, pin) => {
+        try {
+          const source = this.retrievalSourcesForRun(runRecordId, this.#factualReview).find((entry) =>
+            entry.sourceKind === pin.sourceKind && entry.sourceId === pin.sourceId && entry.digest === pin.digest);
+          return source !== undefined && source.read().digest === pin.digest;
+        } catch { return false; }
+      },
+      currentBlockText: (blockId) => {
+        const row = working.get(branchId, blockId) as SqlRow | undefined;
+        return row === undefined ? null : asString(row.text);
+      },
+      revisionBlocks: (manuscriptRevisionId) => {
+        let heading: string | null = null;
+        return this.#factualReview.readRevisionBlocks(manuscriptId, manuscriptRevisionId).map((block) => {
+          if (block.kind === 'heading') heading = block.text;
+          return { blockId: block.blockId, text: block.text, heading };
+        });
+      },
+    };
+  }
+
+  #reviewRunBranch(bookId: string, reviewRunId: string): { branchId: string; manuscriptId: string } {
+    const row = this.#authority.prepare('SELECT branch_id, manuscript_id FROM review_runs WHERE review_run_id = ? AND book_id = ?').get(reviewRunId, bookId) as SqlRow | undefined;
+    requireStore(row !== undefined, 'FACTUAL_VERIFICATION_NOT_FOUND', '这次审阅不属于这本书。');
+    return { branchId: asString(row.branch_id), manuscriptId: asString(row.manuscript_id) };
+  }
+
+  #bookManuscript(bookId: string): { branchId: string; manuscriptId: string } | null {
+    const row = this.#authority.prepare(`SELECT rr.branch_id, rr.manuscript_id FROM review_runs rr WHERE rr.book_id = ? ORDER BY rr.ordinal DESC LIMIT 1`).get(bookId) as SqlRow | undefined;
+    return row === undefined ? null : { branchId: asString(row.branch_id), manuscriptId: asString(row.manuscript_id) };
+  }
+
+  /**
+   * The Versioned Verification Results of one Review Run's settled 事实核查 category (FREV-001), recorded once it has put its
+   * findings on the manuscript: each finding with the relations and Correction Variants the Run's model stated for its
+   * assertions, which the ledger checks against what the Run captured. Repeating it records nothing more.
+   */
+  #materializeFactualVerification(reviewRunId: string): void {
+    const event = this.#authority.prepare(`SELECT result_set_revision_id FROM review_run_category_events WHERE review_run_id = ? AND category_id = 'factual-review'
+      AND result_set_revision_id IS NOT NULL ORDER BY sequence DESC LIMIT 1`).get(reviewRunId) as SqlRow | undefined;
+    if (event === undefined) return;
+    const revisionId = asString(event.result_set_revision_id);
+    const run = this.#authority.prepare('SELECT book_id, branch_id, manuscript_id FROM review_runs WHERE review_run_id = ?').get(reviewRunId) as SqlRow;
+    const bookId = asString(run.book_id);
+    const revisionRow = this.#authority.prepare('SELECT task_intent_id, run_record_id, manuscript_revision_id FROM analysis_result_set_revisions WHERE revision_id = ?')
+      .get(revisionId) as SqlRow | undefined;
+    if (revisionRow === undefined) return;
+    const runRecordId = asString(revisionRow.run_record_id);
+    if (this.#authority.prepare('SELECT 1 FROM factual_verification_results WHERE run_record_id = ? LIMIT 1').get(runRecordId) !== undefined) return;
+    const inspected = this.#analysisCall(() => this.#factualReview.inspect(bookId, undefined, revisionId)).inspectedRevision;
+    if (inspected === null) return;
+    const revision = inspected.revision as FactualReviewResultSetRevisionProjection;
+    const manuscriptRevisionId = asString(revisionRow.manuscript_revision_id);
+    const taskIntentId = asString(revisionRow.task_intent_id);
+    const blocks = this.#factualReview.readRevisionBlocks(revision.manuscriptPin.manuscriptId, manuscriptRevisionId);
+    const blockText = new Map(blocks.map((block) => [block.blockId, block.text] as const));
+    let heading: string | null = null;
+    const headings = new Map<string, string | null>();
+    for (const block of blocks) {
+      if (block.kind === 'heading') heading = block.text;
+      headings.set(block.blockId, heading);
+    }
+    // The relations and variants of every assertion, by the finding identity its block and quotation mint.
+    const manifestRow = this.#authority.prepare(`SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'coverage-manifest'
+      ORDER BY plan_version DESC LIMIT 1`).get(taskIntentId) as SqlRow | undefined;
+    const manifest = manifestRow === undefined ? null : JSON.parse(asString(manifestRow.canonical_json)) as CoverageManifestProjection;
+    const stated = new Map<string, { relations: FactualEvidenceRelation[]; corrections: Array<{ text: string; rationale: string }> }>();
+    let relationsStated = false;
+    for (const row of this.#authority.prepare("SELECT unit_ordinal, canonical_json FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed'").all(revisionId) as SqlRow[]) {
+      const record = JSON.parse(asString(row.canonical_json)) as { assertions?: ReadonlyArray<FactualUnitAssertionV2 | { blockOrdinal: number; quote: string }>; corrections?: ReadonlyArray<FactualCorrectionEntry> };
+      if (!Object.hasOwn(record, 'corrections')) continue;
+      relationsStated = true;
+      const unit = manifest?.units.find((entry) => entry.ordinal === asNumber(row.unit_ordinal));
+      if (unit === undefined) continue;
+      const messageBlockIds = [...unit.overlapBlockIds, ...unit.blockIds];
+      (record.assertions ?? []).forEach((assertion, index) => {
+        const blockId = messageBlockIds[assertion.blockOrdinal - 1];
+        if (blockId === undefined) return;
+        const id = factualFindingId(blockId, assertion.quote);
+        const entry = stated.get(id) ?? { relations: [], corrections: [] };
+        entry.relations.push(...('evidenceRelations' in assertion ? assertion.evidenceRelations : []));
+        const correction = (record.corrections ?? []).find((candidate) => candidate.assertionRef === index + 1);
+        if (correction !== undefined && entry.corrections.length === 0) entry.corrections.push(...correction.variants.slice(0, 3));
+        stated.set(id, entry);
+      });
+    }
+    const assurance = this.#factualVerification.runAssurance(runRecordId);
+    const facts = this.#analysisCall(() => this.#factualReview.loadExecutionPlan(runRecordId));
+    const contractLevel = this.#factualReview.definitionForDigest(facts.promptContractDigest).evidenceAssuranceLevel ?? null;
+    const findingsById = new Map(revision.findings.map((finding) => [finding.findingId, finding] as const));
+    const findings: MaterializedFactualFinding[] = [];
+    for (const row of this.#authority.prepare("SELECT finding_id, kind_ref, mark_id FROM review_findings WHERE review_run_id = ? AND category_id = 'factual-review' ORDER BY ordinal")
+      .all(reviewRunId) as SqlRow[]) {
+      const finding = findingsById.get(asString(row.kind_ref));
+      const text = finding === undefined ? undefined : blockText.get(finding.sourceRange.blockId);
+      if (finding === undefined || text === undefined) continue;
+      const entry = stated.get(finding.findingId);
+      findings.push({
+        assertionClass: finding.assertionClass,
+        reviewFindingId: asString(row.finding_id), findingId: finding.findingId, blockId: finding.sourceRange.blockId,
+        fromGrapheme: finding.sourceRange.fromGrapheme, toGrapheme: finding.sourceRange.toGrapheme, quote: finding.quote,
+        pinnedText: sliceGraphemes(text, finding.sourceRange.fromGrapheme, finding.sourceRange.toGrapheme), question: finding.question,
+        category: finding.category, severity: finding.severity, heading: headings.get(finding.sourceRange.blockId) ?? null,
+        markId: row.mark_id === null ? null : asString(row.mark_id),
+        unitOrdinals: [finding.unitOrdinal, ...finding.mergedFrom.map((merged) => merged.unitOrdinal)],
+        relations: relationsStated ? entry?.relations ?? [] : null, corrections: entry?.corrections ?? [],
+      });
+    }
+    this.#transaction(this.#authority, () => this.#factualVerification.materialize({
+      bookId, reviewRunId, runRecordId, taskIntentId, revisionId, manuscriptRevisionId, contractLevel,
+      plannedLevel: assurance?.plannedLevel ?? planEditAssuranceLevel(this.#frozenPlanEdits(facts.taskIntentId, facts.planVersionOrdinal)), findings,
+    }));
+  }
+
+  /** Record the results of a Review Run's 事实核查 category if it has formed them and they are not yet recorded. */
+  materializeFactualVerification(reviewRunId: string): void {
+    this.#verificationCall(() => this.#materializeFactualVerification(reviewRunId));
+  }
+
+  /** The Fact-check Lens (FACT-004, FACT-005, FACT-007): one bounded page over the existing cursor paging; a read. */
+  inspectFactualVerification(input: InspectFactualVerificationInput): FactualVerificationLensProjection {
+    return this.#verificationCall(() => {
+      requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.bookId) !== undefined, 'BOOK_NOT_FOUND', '所选图书不存在。');
+      const binding = input.reviewRunId === null ? this.#bookManuscript(input.bookId) : this.#reviewRunBranch(input.bookId, input.reviewRunId);
+      const policyPin = { ...FACTUAL_VERIFICATION_POLICY_VERSION };
+      if (binding === null) {
+        return { bookId: input.bookId, reviewRunId: null, results: [], nextCursor: null, total: 0, counts: FACTUAL_VERIFICATION_OUTCOMES.map((outcome) => ({ outcome, count: 0 })),
+          chapters: [], run: null, policyPin, statement: FACTUAL_LENS_EMPTY };
+      }
+      const reader = this.#manuscriptReader(binding.branchId, binding.manuscriptId);
+      const chapterRows = this.#authority.prepare("SELECT block_id, text, position FROM working_blocks WHERE branch_id = ? AND kind = 'heading' ORDER BY position").all(binding.branchId) as SqlRow[];
+      const chapters = chapterRows.map((row) => ({ blockId: asString(row.block_id), heading: asString(row.text), position: asNumber(row.position) }));
+      const positionOf = this.#authority.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+      const chapterOf = (blockId: string): string | null => {
+        const row = positionOf.get(binding.branchId, blockId) as SqlRow | undefined;
+        if (row === undefined) return null;
+        const position = asNumber(row.position);
+        return chapters.filter((chapter) => chapter.position <= position).at(-1)?.blockId ?? null;
+      };
+      const page = this.#factualVerification.lens({ bookId: input.bookId, reviewRunId: input.reviewRunId, after: input.after, chapterOf, filters: {
+        chapterBlockId: input.chapterBlockId, outcome: input.outcome, severity: input.severity, sourceCondition: input.sourceCondition, actionNeed: input.actionNeed,
+      } }, reader);
+      const runRecordId = page.results[0]?.runRecordId ?? null;
+      return {
+        bookId: input.bookId, reviewRunId: input.reviewRunId, results: page.results, nextCursor: page.nextCursor, total: page.total, counts: page.counts,
+        chapters: chapters.map(({ blockId, heading }) => ({ blockId, heading })),
+        run: runRecordId === null ? null : this.#factualVerification.runAssurance(runRecordId), policyPin,
+        statement: page.total === 0 ? FACTUAL_LENS_EMPTY : FACTUAL_LENS_STATEMENT,
+      };
+    });
+  }
+
+  #resultBinding(bookId: string, resultId: string): { reader: ManuscriptReader } {
+    requireStore(typeof resultId === 'string' && UUID_PATTERN.test(resultId), 'FACTUAL_VERIFICATION_INVALID', '核查结果标识无效。');
+    const row = this.#authority.prepare('SELECT review_run_id FROM factual_verification_results WHERE result_id = ? AND book_id = ?').get(resultId, bookId) as SqlRow | undefined;
+    requireStore(row !== undefined, 'FACTUAL_VERIFICATION_NOT_FOUND', '这条核查结果不属于这本书。');
+    const binding = this.#reviewRunBranch(bookId, asString(row.review_run_id));
+    return { reader: this.#manuscriptReader(binding.branchId, binding.manuscriptId) };
+  }
+
+  /** The Evidence Workspace of one result (EVID-001 to EVID-013): a read; it creates no mutation of any kind (EVID-012). */
+  inspectEvidenceWorkspace(input: InspectEvidenceWorkspaceInput): EvidenceWorkspaceProjection {
+    return this.#verificationCall(() => {
+      const { reader } = this.#resultBinding(input.bookId, input.resultId);
+      return this.#factualVerification.workspace(input.bookId, input.resultId, input.sourcesAfter, reader);
+    });
+  }
+
+  /**
+   * 记录核查审阅决定 (FREV-006): one immutable Review Decision bound to the result version the editor read. 要求补充证据 names the
+   * range and level of the supplementary check it asks for; no Task is prepared until the factual update modes land (#905).
+   */
+  recordVerificationReviewDecision(input: RecordVerificationReviewDecisionInput): VerificationReviewDecisionRecordedProjection {
+    return this.#verificationCall(() => {
+      const { reader } = this.#resultBinding(input.bookId, input.resultId);
+      const recorded = this.#transaction(this.#authority, () => this.#factualVerification.recordDecision(input, reader));
+      const workspace = this.#factualVerification.workspace(input.bookId, input.resultId, null, reader);
+      // 要求补充证据 (FREV-008): recorded with its range and level; a Book holds one 事实核查 Run until #905, so no Task is prepared.
+      return { workspace, supplementary: recorded.requestedLevel === null ? null
+        : { blockId: workspace.result.blockId, level: recorded.requestedLevel, statement: SUPPLEMENTARY_CHECK_DEFERRED } };
+    });
+  }
+
+  /** 准备更正提案 (CORR-001): the draft offer; a read. */
+  prepareCorrectionProposal(input: PrepareCorrectionProposalInput): CorrectionProposalDraftProjection {
+    return this.#verificationCall(() => {
+      const { reader } = this.#resultBinding(input.bookId, input.resultId);
+      return this.#factualVerification.draft(input.bookId, input.resultId, reader);
+    });
+  }
+
+  /**
+   * 保存为更正提案 (CORR-011, CORR-012): one ordinary 修改建议 per included range, made by the same producer every AI7 mark is
+   * made by (the precedent is 转为修改建议 of a dialogue), and the factual lineage of each beside it in one transaction. No
+   * Proposal Decision, Apply or manuscript change is made; the marks then go the ordinary decision → Apply → receipt way.
+   */
+  saveCorrectionProposal(input: SaveCorrectionProposalInput): CorrectionProposalSavedProjection {
+    return this.#verificationCall(() => {
+      const { reader } = this.#resultBinding(input.bookId, input.resultId);
+      const prepared = this.#factualVerification.prepareSave(input, reader);
+      const result = prepared.draft.result;
+      const run = this.#reviewRunBranch(input.bookId, result.reviewRunId);
+      const proposalId = randomUUID();
+      const label = prepared.draft.assuranceIncomplete ? `${CORRECTION_ASSURANCE_INCOMPLETE_LABEL} · ` : '';
+      const markIds = this.#markCall(() => this.#editorialMarks.createProducedMany(prepared.ranges.map((range) => ({
+        manuscriptId: run.manuscriptId,
+        branchId: run.branchId,
+        blockId: range.blockId,
+        fromGrapheme: range.fromGrapheme,
+        toGrapheme: range.toGrapheme,
+        pinnedText: range.text,
+        kind: 'change-suggestion' as const,
+        body: '',
+        proposedText: prepared.text,
+        rationale: prepared.rationale,
+        atomicGroupId: null,
+        source: { kind: 'ai7' as const, origin: 'task' as const, label: CORRECTION_MARK_SOURCE_LABEL, taskId: result.taskIntentId },
+        basis: [{ label: `${label}事实核查 · 核查结果第 ${result.version} 版 · ${result.states.factualVerification}`, blockId: result.blockId,
+          fromGrapheme: result.fromGrapheme, toGrapheme: result.toGrapheme, quote: result.quote }],
+      })), (created) => {
+        requireStore(created.every((markId) => markId !== null), 'CORRECTION_TARGET_CHANGED', '所选位置的文字已经改动；不会改到别处，请重新准备更正提案。');
+        const ids = created as string[];
+        this.#factualVerification.recordProposal({ bookId: input.bookId, proposalId, draft: prepared.draft, markIds: ids, ranges: prepared.ranges,
+          text: prepared.text, rationale: prepared.rationale, variant: prepared.variant });
+        return ids;
+      }));
+      return {
+        proposalId, markIds, assuranceIncomplete: prepared.draft.assuranceIncomplete, label: prepared.draft.label,
+        completionLabel: '已保存为更正提案：它是普通的修改建议，不会自动应用，是否接受由你决定。',
+      };
+    });
   }
 
   /**
@@ -16526,7 +16888,10 @@ export class EditorialStore {
   }
 
   getEditorialMarkCard(manuscriptId: string, branchId: string, markId: string): EditorialMarkCardProjection {
-    return this.#markCall(() => this.#editorialMarks.card(manuscriptId, branchId, markId));
+    const card = this.#markCall(() => this.#editorialMarks.card(manuscriptId, branchId, markId));
+    // A Correction Proposal's 修改建议 carries its factual lineage into 依据与核查 (Issue #901; CORR-012, EASSURE-012).
+    const lineage = this.#verificationCall(() => this.#factualVerification.lineageOfMark(card.markId));
+    return lineage === null ? card : { ...card, factualCorrection: lineage };
   }
 
   updateEditorialMark(input: UpdateEditorialMarkInput): EditorialMarkCommandProjection {

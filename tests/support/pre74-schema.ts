@@ -2,17 +2,30 @@ import type { DatabaseSync } from 'node:sqlite';
 import { ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, WEB_TOOLS_PLAN_RECORDS_SQL } from '../../src/service/task-authorization.js';
 import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
 import { MATERIAL_INDEX_LAYER_SCHEMA_SQL, MATERIAL_INDEX_LAYER_TRIGGER_SQL } from '../../src/service/material-index.js';
+import { FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from '../../src/service/factual-verification-schema.js';
+
 import { EDITORIAL_MARK_SCHEMA_SQL, PROPOSAL_ITEM_DECISIONS_PRE77_SQL, PROPOSAL_REVIEW_SCHEMA_SQL, PROPOSAL_REVIEW_TRIGGER_SQL } from '../../src/service/editorial-marks.js';
 
+export const FACTUAL_VERIFICATION_SCHEMA_NAMES = [...Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL), ...Object.keys(FACTUAL_VERIFICATION_TRIGGER_SQL)];
+/** Revision 78's four relations, added empty after a planted predecessor is reopened. */
+export const FACTUAL_VERIFICATION_RELATIONS = Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL);
 export const RESEARCH_EVIDENCE_RELATIONS = Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL);
 /** Revision 76's two relations (Issue #892), which a planted predecessor gains empty beside its revision-67 ones. */
 export const MATERIAL_INDEX_LAYER_RELATIONS = Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL);
 /** Revision 77's five relations (Issue #902), which a planted predecessor gains empty. */
 export const PROPOSAL_REVIEW_RELATIONS = Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL);
 
+/** The exact schema before 8b: its added objects are absent and its predecessor CHECK still stands. */
+export function pre77SchemaRows<T extends { name: string; sql: unknown }>(rows: readonly T[]): Array<T | { name: string; sql: unknown }> {
+  const added = new Set([...Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL), ...Object.keys(PROPOSAL_REVIEW_TRIGGER_SQL)]);
+  return rows.filter((row) => !added.has(row.name)).map((row) => row.name === 'proposal_item_decisions'
+    ? { ...row, sql: PROPOSAL_ITEM_DECISIONS_PRE77_SQL } : row);
+}
+
 /** Plant an actual predecessor, including revision 74's newly widened component CHECK and house settings. */
 export function execPre74Fixture(db: DatabaseSync, sql: string): void {
   const version = /PRAGMA user_version\s*=\s*(\d+)/iu.exec(sql)?.[1];
+  if (version !== undefined && Number(version) < 78) dropFactualVerificationRelations(db);
   if (version !== undefined && Number(version) < 77) restoreProposalReviewPredecessor(db);
   if (version !== undefined && Number(version) < 76) dropMaterialIndexLayerRelations(db);
   if (version !== undefined && Number(version) < 75) dropResearchEvidenceRelations(db);
@@ -33,7 +46,8 @@ export function execPre74Fixture(db: DatabaseSync, sql: string): void {
 /**
  * Revision 74 widens one CHECK; revision 75 adds its four empty ledgers and their immutable triggers; revision 76 (Issue #892)
  * adds the Material Index's two layer ledgers and their triggers beside a store's revision-67 relations, when it has them;
- * revision 77 (Issue #902) adds its five relations and their triggers and widens `proposal_item_decisions`' CHECK.
+ * revision 77 (Issue #902) adds its five relations and their triggers and widens `proposal_item_decisions`' CHECK;
+ * revision 78 (Issue #901) adds its four factual verification relations and immutable triggers.
  */
 export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]): Array<{ name: string; sql: unknown }> {
   const materialIndex = rows.some((row) => row.name === 'material_index_builds');
@@ -43,7 +57,14 @@ export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]
     ...Object.entries({ ...PROPOSAL_REVIEW_SCHEMA_SQL, ...PROPOSAL_REVIEW_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...Object.entries({ ...RESEARCH_EVIDENCE_SCHEMA_SQL, ...RESEARCH_EVIDENCE_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...(materialIndex ? Object.entries({ ...MATERIAL_INDEX_LAYER_SCHEMA_SQL, ...MATERIAL_INDEX_LAYER_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })) : []),
+    ...Object.entries({ ...FACTUAL_VERIFICATION_SCHEMA_SQL, ...FACTUAL_VERIFICATION_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
   ].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+}
+
+/** Remove this slice's append-only schema when planting a predecessor. */
+export function dropFactualVerificationRelations(db: DatabaseSync): void {
+  for (const trigger of Object.keys(FACTUAL_VERIFICATION_TRIGGER_SQL)) db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
+  for (const table of Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE IF EXISTS ${table}`);
 }
 
 /**

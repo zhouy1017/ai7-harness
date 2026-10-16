@@ -1712,6 +1712,53 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .research-evidence-translation figure { margin: 0; display: grid; gap: 4px; min-width: 0; }
 .research-evidence-translation figcaption { font-weight: 600; }
 .research-evidence-units ul { margin: 0; padding-left: 1.25rem; }
+/* 事实核查 · 核查结果 and the Evidence Workspace (Issue #901): three states apart, discrete-state source cards, 2–4 pinned. */
+.fact-lens { display: grid; gap: 8px; margin-top: .7rem; padding: .7rem .8rem; border: 1px solid #ded9cd; border-radius: 9px; background: #fbfaf6; }
+.fact-lens-rows { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.fact-lens-row { display: grid; gap: 6px; padding: .6rem .7rem; border: 1px solid #e4dfd3; border-radius: 8px; background: #fffefb; min-width: 0; }
+.fact-lens-states, .evidence-states { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.fact-lens-state, .evidence-state { display: grid; gap: 2px; min-width: 0; }
+.fact-lens-anchor, .evidence-anchor-stale, .fact-lens-disclosure { font-weight: 700; }
+.evidence-term { font-size: .82rem; font-weight: 700; opacity: .8; }
+.evidence-pill-neutral { background: #eceae4; }
+.evidence-pill-positive { background: #dcefe0; }
+.evidence-pill-warning { background: #f7ead0; }
+.evidence-pill-danger { background: #f6dcd8; }
+.evidence-workspace { display: grid; gap: 10px; margin-top: 6px; padding: .7rem .8rem; border-left: 3px solid #8a8370; background: #fdfcf8; min-width: 0; }
+.evidence-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 10px; }
+.evidence-wording, .evidence-statement { display: grid; gap: 4px; min-width: 0; }
+.evidence-quote, .evidence-excerpt { margin: 0; padding-left: 10px; border-left: 3px solid currentColor; overflow-wrap: anywhere; }
+.evidence-sources { display: grid; gap: 8px; }
+.evidence-card { display: grid; gap: 6px; padding: .55rem .65rem; border: 1px solid #e0dbcf; border-radius: 8px; min-width: 0; }
+.evidence-card[data-check-state="candidate"] { border-style: dashed; background: #faf9f5; }
+.evidence-card-url { overflow-wrap: anywhere; }
+.evidence-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0; }
+.evidence-facts dt { font-weight: 700; }
+.evidence-facts dd { margin: 0; overflow-wrap: anywhere; }
+.evidence-pin { display: inline-flex; gap: 6px; align-items: center; }
+.evidence-matrix { display: grid; gap: 6px; overflow-x: auto; }
+.evidence-matrix-table { border-collapse: collapse; min-width: 100%; }
+.evidence-matrix-table th, .evidence-matrix-table td { padding: 4px 8px; border: 1px solid #e0dbcf; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.evidence-conflict { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.evidence-conflict-point { grid-column: 1 / -1; margin: 0; font-weight: 600; }
+.evidence-summary ul, .evidence-limitations ul, .evidence-history ol { margin: 0; padding-left: 1.25rem; }
+.evidence-decision, .evidence-correction { display: grid; gap: 8px; padding-top: 6px; border-top: 1px solid #e4dfd3; }
+.evidence-decision-choices, .correction-variants, .correction-ranges { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; }
+.evidence-choice, .correction-variant, .correction-range { display: flex; gap: 8px; align-items: flex-start; }
+.correction-variant-body { display: grid; gap: 2px; min-width: 0; }
+.evidence-decision-reasons { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.evidence-field { display: grid; gap: 4px; width: 100%; }
+.evidence-field textarea { resize: vertical; }
+.evidence-decision-drift, .correction-assurance-label, .editorial-mark-factual-incomplete { font-weight: 700; }
+.editorial-mark-factual { display: grid; gap: 4px; margin-top: 6px; }
+.editorial-mark-factual-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0; }
+.editorial-mark-factual-facts dd { margin: 0; overflow-wrap: anywhere; }
+.task-plan-assurance { display: grid; gap: 6px; margin: 8px 0 0; padding: 8px 10px; border: 1px solid #e0dbcf; border-radius: 8px; }
+.task-plan-assurance-option { display: flex; gap: 8px; align-items: flex-start; }
+.task-plan-assurance-text { display: grid; gap: 2px; min-width: 0; }
+@media (max-width: 640px) {
+  .fact-lens-states, .evidence-states, .evidence-conflict { grid-template-columns: minmax(0, 1fr); }
+}
 
 /* Issue #902: bounded Proposal navigator and exact active-range comparison. */
 .proposal-layout { display: grid; grid-template-columns: minmax(240px, 32%) minmax(0, 1fr); gap: 24px; }

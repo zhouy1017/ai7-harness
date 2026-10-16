@@ -26,6 +26,7 @@ import {
   type FactualReviewExcludedProjection,
   type FactualReviewFindingProjection,
   type TrustedOperationalScope,
+  type EvidenceAssuranceLevel,
 } from '../../shared/protocol.js';
 import { FixtureReplayResearchCapability, type ResearchCapability } from '../capabilities/research.js';
 import {
@@ -75,6 +76,14 @@ import {
   type FactualReviewUnitResult,
 } from './factual-review-contract.js';
 import { reduceFactualReview, type FactualUnitOutcome } from './factual-review-reducers.js';
+import {
+  FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA,
+  factualReviewPromptContractV2,
+  factualReviewUnitRecordV2,
+  factualReviewUnitResultOfRecordV2,
+  parseFactualReviewUnitResultV2,
+  type FactualReviewUnitResultV2,
+} from './factual-review-contract-v2.js';
 import { carryPositionalResult, remapReusedResult } from './reused-result.js';
 import {
   PRE_ASSURANCE_SAMPLE,
@@ -238,6 +247,11 @@ export interface ResearchDeclaration {
 
 export interface AnalysisKindDefinition {
   readonly researchDeclaration?: ResearchDeclaration;
+  /**
+   * The Evidence Assurance Level a factual-review definition executes (Issue #901). Absent on every other kind, and on the two
+   * factual definitions that predate the levels — v1 alone and v1 under the research wrap — which an earlier plan names.
+   */
+  readonly evidenceAssuranceLevel?: EvidenceAssuranceLevel;
   readonly platformToolBase?: AnalysisKindDefinition;
   /** The exact result contract beneath the optional provider clarification instruction /2. */
   readonly clarificationBase?: AnalysisKindDefinition;
@@ -747,4 +761,59 @@ export function withFactualResearch(definition: AnalysisKindDefinition): Analysi
   return { ...base, platformToolBase: base, systemPrompt, promptContractDigest,
     requestDigest: (unitOrdinal, unitDigest) => factualReviewRequestDigest(promptContractDigest, unitOrdinal, unitDigest),
   };
+}
+
+// ---- Evidence Assurance Levels (Issue #901) ------------------------------------------------------------------------------
+
+const FACTUAL_VERIFICATION_EXECUTION_STEPS = ['派生覆盖清单', '逐单元执行事实核查契约 v2 并按计划声明的工具查找证据', '按内容块文本确定性校验每条引文',
+  '归约为事实核查发现', '形成结果集修订版'] as const;
+
+/**
+ * The factual kind at one Evidence Assurance Level (Issue #901; ui-ux-v2 ADR 0004). 快速整理 is v1 itself, byte for byte and
+ * with no research wrap: no platform or local tool is declared and no research instruction is sent. 标准核查 and 严格核查 are
+ * Factual Review Contract v2 at that level — the same unit message, kind, contract version, modes, reducer and assurance
+ * sampling, with the v2 system section, unit result and records. Whether a Run is handed the tools a v2 plan may declare is
+ * still the selected rule's and the model's to say.
+ */
+export function factualReviewLevelDefinition(level: EvidenceAssuranceLevel, research: ResearchCapability = new FixtureReplayResearchCapability()): AnalysisKindDefinition {
+  const base = factualReviewKindDefinition(research);
+  if (level === 'quick') return { ...base, evidenceAssuranceLevel: 'quick', researchDeclaration: { webSearch: false, searchEngine: null } };
+  const contract = factualReviewPromptContractV2(level);
+  const promptContractDigest = sha256Hex(canonicalJson(contract));
+  const schemaDigest = sha256Hex(canonicalJson({
+    contractVersion: FACTUAL_REVIEW_CONTRACT_VERSION,
+    unitResultSchema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA,
+    promptContractDigest,
+  }));
+  return {
+    ...base,
+    evidenceAssuranceLevel: level,
+    systemPrompt: contract.systemPrompt,
+    promptContractDigest,
+    unitResultSchema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA,
+    schemaDigest,
+    executionSteps: FACTUAL_VERIFICATION_EXECUTION_STEPS,
+    updateExecutionSteps: FACTUAL_VERIFICATION_EXECUTION_STEPS,
+    requestDigest: (unitOrdinal, unitDigest) => factualReviewRequestDigest(promptContractDigest, unitOrdinal, unitDigest),
+    parseUnitResult: (text, unit) =>
+      parseFactualReviewUnitResultV2(text, { unitOrdinal: unit.ordinal, blockCount: factualReviewMessageBlockIds(unit).length }),
+    unitRecord: (result) => factualReviewUnitRecordV2(result as FactualReviewUnitResultV2),
+    unitResultOfRecord: (record, unitOrdinal) => factualReviewUnitResultOfRecordV2(record, unitOrdinal),
+    remapReusedResult: (result, predecessorUnit, newUnit) => carryPositionalResult(result as FactualReviewUnitResultV2, predecessorUnit, newUnit),
+  };
+}
+
+/**
+ * Every factual definition a frozen plan may name, by its prompt-contract digest: 标准核查 and 严格核查, and the two that
+ * predate the levels — v1 alone (also 快速整理's bytes) and v1 under the research wrap (#744) — so that a plan executes, and
+ * replays, under exactly the contract it froze.
+ */
+export function factualReviewDefinitionsByDigest(research: ResearchCapability = new FixtureReplayResearchCapability()): ReadonlyMap<string, AnalysisKindDefinition> {
+  const base = factualReviewKindDefinition(research);
+  return new Map([
+    factualReviewLevelDefinition('standard', research),
+    factualReviewLevelDefinition('strict', research),
+    withFactualResearch(base),
+    base,
+  ].map((definition) => [definition.promptContractDigest, definition] as const));
 }

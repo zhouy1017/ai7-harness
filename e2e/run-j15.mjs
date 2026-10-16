@@ -459,9 +459,14 @@ async function constructPredecessorV12(dataRoot, bookId) {
   try {
     // Every post-v12 table. A table left off is not caught here: the open accepts a predecessor that kept a later layer's
     // tables (`includeMaterialIndexTables ||= committed(…)` in bounded-manuscript.ts), so that mutant survives by design.
+    // Synchronized delta with Issue #901: revision 77's four factual verification relations lead the list.
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE correction_proposals;
+      DROP TABLE factual_review_decisions;
+      DROP TABLE factual_verification_results;
+      DROP TABLE factual_run_assurance;
       DROP TABLE manuscript_outcome_recovery;
       DROP TABLE proposal_review_positions;
       DROP TABLE proposal_decisions;

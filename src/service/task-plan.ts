@@ -30,6 +30,7 @@ import type {
   TaskPlanStepProjection,
 } from '../shared/protocol.js';
 import { MODEL_SERVICE_ROUTES, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, READERS_REPORT_TEMPLATE_LABELS, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
+import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, EVIDENCE_ASSURANCE_LEVEL_LABELS, type EvidenceAssuranceLevel } from '../shared/protocol.js';
 import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
 import type { ClarificationFacts } from './analysis/clarifications.js';
 import { namedNonEffects } from './analysis/baseline-analysis-store.js';
@@ -280,7 +281,37 @@ export const DRIFT_FIELD_LABELS: Readonly<Record<string, string>> = {
   // The editor's own edits (Issue #419): a step left out, an adaptation withdrawn.
   'steps.assurance-sampling': `步骤 · ${PLAN_EDIT_STEP_LABELS['assurance-sampling']}`,
   'adaptations.safe-retry': '可以自己调整 · 安全地再试一次',
+  // A factual-review Task's Evidence Assurance Level (Issue #901).
+  evidenceAssuranceLevel: '证据保证级别',
 };
+
+/** Why a level below the Factual Verification Policy minimum is not offered (EASSURE-008); the requirement, never policy code. */
+export function assuranceLevelPolicyRequirement(minimum: EvidenceAssuranceLevel): string {
+  return `事实核查政策要求至少采用${EVIDENCE_ASSURANCE_LEVEL_LABELS[minimum]}，不能选更低的级别。`;
+}
+
+/**
+ * The Evidence Assurance Level selector of a factual-review Task (Issue #901; EASSURE-001, EASSURE-008): the level the version
+ * shown freezes, each option with its one-line consequence, and an option below the policy minimum disabled with the concrete
+ * requirement. It names no model, provider or quality ladder (EASSURE-013).
+ */
+export function assuranceSelector(
+  level: EvidenceAssuranceLevel,
+  edit: Pick<TaskPlanProjection['edit'], 'editable' | 'reason'>,
+  minimum: EvidenceAssuranceLevel | null,
+): NonNullable<TaskPlanProjection['edit']['assurance']> {
+  const order: Readonly<Record<EvidenceAssuranceLevel, number>> = { quick: 0, standard: 1, strict: 2 };
+  return {
+    level,
+    settable: edit.editable,
+    reason: edit.reason,
+    options: EVIDENCE_ASSURANCE_LEVELS.map((option) => {
+      const below = minimum !== null && order[option] < order[minimum];
+      return { level: option, label: EVIDENCE_ASSURANCE_LEVEL_LABELS[option], consequence: EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES[option],
+        disabled: below, requirement: below ? assuranceLevelPolicyRequirement(minimum!) : null };
+    }),
+  };
+}
 
 function countsReading(counts: AnalysisReusePlanCounts): string {
   return `重新分析 ${counts.recomputed} 个，沿用 ${counts.reused} 个`;

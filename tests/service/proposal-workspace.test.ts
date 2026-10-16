@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { dropFactualVerificationRelations } from '../support/pre74-schema.js';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -327,6 +328,7 @@ describe('Proposal decision workspace', () => {
       store.markCleanShutdown(); store.close();
       const db = new DatabaseSync(path); db.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE');
       // Restore the exact predecessor tables before claiming its version.
+      dropFactualVerificationRelations(db); // Synchronized delta: revision 78's relations cannot stand in a pre-77 fixture.
       for (const table of Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE ${table}`);
       const columns = db.prepare("SELECT name FROM pragma_table_info('proposal_item_decisions') ORDER BY cid").all().map((row) => String(row.name)).join(', ');
       db.exec('CREATE TEMP TABLE saved_decisions AS SELECT rowid AS old_rowid, * FROM proposal_item_decisions; DROP TABLE proposal_item_decisions');

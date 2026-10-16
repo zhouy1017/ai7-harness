@@ -5,7 +5,7 @@ import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy
 import { liveKindAdmission, liveKindRule, modelAdmitsPlatformTools, kindLocalTools } from '../../src/service/analysis/live-kind-admission.js';
 import { localRetrievalRule, withLocalRetrievalFor } from '../support/policy-rules.js';
 import { admittedFastRoleRoute } from '../../src/service/dialogue/dialogue-route.js';
-import { factualReviewKindDefinition, withFactualResearch } from '../../src/service/analysis/kind-definition.js';
+import { factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from '../../src/service/analysis/kind-definition.js';
 import { reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import { liveReviewRule } from '../../src/service/review/live-review-admission.js';
 import { platformToolModelProfile } from '../../src/service/provider/platform-tool-session.js';
@@ -50,7 +50,12 @@ describe('platform tool registration admission', () => {
     const research = withFactualResearch(base);
     const binding = { route: template.route, model: template.model, endpoint: template.endpoint, credentialSlot: template.credentialSlot };
     expect(liveKindRule(policy, 'factual-review')).toBe(researchRule);
+    // Synchronized delta with Issue #901: v1's bytes are admitted only as the 快速整理 level a plan chose, with no tool declared;
+    // the levels' own v2 contracts are admitted beside the research wrap, and v1 alone or any other digest is still refused.
     expect(liveKindAdmission(policy, base, binding)).toBeNull();
+    expect(liveKindAdmission(policy, factualReviewLevelDefinition('quick'), binding)?.ruleId).toBe(template.ruleId);
+    expect(liveKindAdmission(policy, factualReviewLevelDefinition('standard'), binding)?.ruleId).toBe(template.ruleId);
+    expect(liveKindAdmission(policy, factualReviewLevelDefinition('strict'), binding)?.ruleId).toBe(template.ruleId);
     expect(liveKindAdmission(policy, research, binding)?.ruleId).toBe(template.ruleId);
     const refused = { ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: [{ ...researchRule, webSearchToolAllowed: false }] } };
     expect(liveKindAdmission(refused, research, binding)).toBeNull();

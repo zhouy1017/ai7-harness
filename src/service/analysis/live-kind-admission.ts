@@ -11,7 +11,7 @@ import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } fr
 import { reviewCategoryKindDefinition } from '../review/review-category-kind.js';
 import { liveMaterialContract } from '../task-material-references.js';
 import { withModelClarification } from '../provider/clarification-contract.js';
-import { factualReviewKindDefinition, withFactualResearch, type AnalysisKindDefinition, type ResearchDeclaration } from './kind-definition.js';
+import { factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch, type AnalysisKindDefinition, type ResearchDeclaration } from './kind-definition.js';
 
 /** The rule facts a live step reads from the one selected rule that admitted its kind. */
 export interface LiveKindRule {
@@ -37,6 +37,8 @@ export interface LiveKindDefinition {
   readonly livePromptContractDigest?: () => string;
   readonly materialReferences?: unknown;
   readonly systemPrompt?: string;
+  /** A factual-review definition's Evidence Assurance Level (Issue #901). */
+  readonly evidenceAssuranceLevel?: string;
 }
 
 /** What the kind's own owner says its live contract must be. */
@@ -139,7 +141,14 @@ function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[]
  * kind has no row and is not admitted.
  */
 function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectation | null {
-  if (definition.kind === FACTUAL_REVIEW_KIND) return { promptContractDigest: withFactualResearch(factualReviewKindDefinition()).promptContractDigest, payloadCategories: ['public-or-synthetic'] };
+  if (definition.kind === FACTUAL_REVIEW_KIND) {
+    // The research contract (#744) and each Evidence Assurance Level's own (Issue #901): 快速整理 is v1 with no tool declared.
+    const admitted = [withFactualResearch(factualReviewKindDefinition()), factualReviewLevelDefinition('standard'), factualReviewLevelDefinition('strict')]
+      .map((entry) => entry.promptContractDigest);
+    // v1's bytes are admitted only as the 快速整理 level a plan chose, never as v1 on a launch whose rule hands it no tool.
+    const quick = definition.evidenceAssuranceLevel === 'quick' && definition.promptContractDigest === factualReviewLevelDefinition('quick').promptContractDigest;
+    return { promptContractDigest: admitted.includes(definition.promptContractDigest) || quick ? definition.promptContractDigest : null, payloadCategories: ['public-or-synthetic'] };
+  }
   if (definition.kind === reviewCategoryKindId('cross-deliverable-consistency')) return {
     promptContractDigest: definition.livePromptContractDigest?.() ?? null,
     payloadCategories: plannedPayloadCategories(definition.kind)!,

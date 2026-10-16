@@ -765,6 +765,17 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectResearchEvidence(request.input) };
     case 'saveEvidenceAsMaterial':
       return { id: request.id, ok: true, op: request.op, result: await store.saveEvidenceAsMaterial(request.input) };
+    // Factual verification (Issue #901): the Fact-check Lens, the Evidence Workspace, the review decision and Correction Proposals.
+    case 'inspectFactualVerification':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectFactualVerification(request.input) };
+    case 'inspectEvidenceWorkspace':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvidenceWorkspace(request.input) };
+    case 'recordVerificationReviewDecision':
+      return { id: request.id, ok: true, op: request.op, result: store.recordVerificationReviewDecision(request.input) };
+    case 'prepareCorrectionProposal':
+      return { id: request.id, ok: true, op: request.op, result: store.prepareCorrectionProposal(request.input) };
+    case 'saveCorrectionProposal':
+      return { id: request.id, ok: true, op: request.op, result: store.saveCorrectionProposal(request.input) };
     case 'decideLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
     case 'inspectLearningMaterials':
@@ -1962,6 +1973,11 @@ async function run(): Promise<void> {
       retrievalIndex: (runRecordId, ledger) => guardedStore.retrievalIndexForRun(runRecordId, ledger),
       // External Evidence Retention (Issue #425, S70): each research unit's retained sources, kept as the unit settles.
       researchEvidence: (input) => { guardedStore.recordResearchEvidence(input); },
+      // The level a 事实核查 Run executes under, decided once as it starts (Issue #901; EASSURE-002, D9).
+      factualRunStart: (input) => {
+        guardedStore.recordFactualRunAssurance({ ...input,
+          offline: (connectivityPath === undefined ? hostConnectivity() : controlledConnectivity(connectivityPath)) === 'offline' });
+      },
     });
     // Startup reconciliation (Issue #422, S76b; CONT-014): a baseline Run this service's predecessor left under way has
     // nothing running it now. It settles 已暂停 or 任务已中断 · 可续行 before any request is read; one left cancelling is

@@ -1,4 +1,4 @@
-import type { CoverageManifestUnitProjection } from '../../shared/protocol.js';
+import type { CoverageManifestUnitProjection, FactualVerificationPolicyPinProjection } from '../../shared/protocol.js';
 import {
   FACTUAL_ASSERTION_CATEGORIES,
   FACTUAL_ASSERTION_CLASSES,
@@ -39,6 +39,18 @@ export const FACTUAL_REVIEW_UNIT_RESULT_SCHEMA = 'ai7.factual-review.unit-result
 export const FACTUAL_REVIEW_PROMPT_CONTRACT_SCHEMA = 'ai7.factual-review.prompt-contract/1' as const;
 export const FACTUAL_REVIEW_RESULT_SET_REVISION_SCHEMA = 'ai7.factual-review.result-set-revision/1' as const;
 export const FACTUAL_REVIEW_SUCCESSOR_REVISION_SCHEMA = 'ai7.factual-review.result-set-revision/2' as const;
+
+/**
+ * The Factual Verification Policy Document version every Versioned Verification Result binds (Issue #901; V2-UX-FACT-002):
+ * the accepted document by its path and the SHA-256 of its exact bytes, which its unit suite holds equal to the file. It names
+ * no minimum Evidence Assurance Level, so `minimumLevel` is `null`; the selector's hook reads it (V2-UX-EASSURE-008). No
+ * Provider Processing byte is involved.
+ */
+export const FACTUAL_VERIFICATION_POLICY_VERSION = {
+  document: 'docs/policies/factual-verification-policy.md',
+  sha256: '165b887bd63b4852c1f7181b4af48d84429dcf0193cd66efdc6a43a0f124c946',
+  minimumLevel: null,
+} as const satisfies FactualVerificationPolicyPinProjection;
 
 export {
   FACTUAL_REVIEW_CONTRACT_VERSION,
