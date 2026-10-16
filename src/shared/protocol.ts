@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 143 as const;
+export const SERVICE_PROTOCOL_VERSION = 144 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -239,6 +239,12 @@ export const IPC_CHANNELS = {
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
   getManuscriptApplyOutcome: 'ai7:j05:get-manuscript-apply-outcome',
+  inspectProposalWorkspace: 'ai7:j05:inspect-proposal-workspace',
+  saveProposalDecisionDraft: 'ai7:j05:save-proposal-decision-draft',
+  batchProposalDecisionDraft: 'ai7:j05:batch-proposal-decision-draft',
+  recordProposalDecision: 'ai7:j05:record-proposal-decision',
+  inspectApplyReceipt: 'ai7:j05:inspect-apply-receipt',
+  prepareReverseApply: 'ai7:j05:prepare-reverse-apply',
   inspectProposalConflict: 'ai7:j06:inspect-proposal-conflict',
   saveProposalConflictDraft: 'ai7:j06:save-proposal-conflict-draft',
   resolveProposalConflict: 'ai7:j06:resolve-proposal-conflict',
@@ -1328,7 +1334,7 @@ export type EditorialMarkKind = 'change-suggestion' | 'annotation' | 'editor-not
 export type PersonalHighlightColor = 1 | 2 | 3;
 /** `applied`: a Change Suggestion whose replacement an AI7 Apply wrote; the mark now stands on the applied text. */
 export type EditorialMarkStatus = 'open' | 'resolved' | 'applied';
-export type ProposalItemDisposition = 'accepted' | 'rejected' | 'accepted-with-edit';
+export type ProposalItemDisposition = 'accepted' | 'rejected' | 'accepted-with-edit' | 'deferred';
 /** A Proposal Change Item's kind (V2-UX-PROP-014): `insert` since schema revision 28 (Issue #411). */
 export type ProposalChangeType = 'replace' | 'delete' | 'insert';
 
@@ -1615,6 +1621,159 @@ export interface ManuscriptApplyCommandProjection extends EditorialMarkCommandPr
 export interface ManuscriptApplyOutcomeProjection {
   state: 'committed' | 'not-committed';
   application: ManuscriptApplyProjection | null;
+}
+
+/** Issue #902: settled legacy outcomes retain their exact wire shape. */
+export interface ApplyReceiptProjection {
+  state: 'applied' | 'not-applied' | 'confirming' | 'unresolved';
+  application: ManuscriptApplyProjection | null;
+  clientEffectId: string;
+  manuscriptId: string;
+  branchId: string;
+  bookId: string;
+  actor: 'editor';
+  approvedAt: string | null;
+  replayPolicy: 'idempotency-keyed';
+  safeRetry: boolean;
+  reason: string;
+  decisionIds: ReadonlyArray<string>;
+}
+
+/** Rev 2 compatibility: transient recovery states can never masquerade as settled evidence. */
+export function applyReceiptState(outcome: ManuscriptApplyOutcomeProjection): 'applied' | 'not-applied' {
+  return outcome.state === 'committed' ? 'applied' : 'not-applied';
+}
+export function legacyApplyOutcome(receipt: Pick<ApplyReceiptProjection, 'state' | 'application'>): ManuscriptApplyOutcomeProjection | null {
+  if (receipt.state === 'confirming' || receipt.state === 'unresolved') return null;
+  return { state: receipt.state === 'applied' ? 'committed' : 'not-committed', application: receipt.application };
+}
+
+export type ProposalDraftDisposition = 'accepted' | 'rejected' | 'deferred';
+export interface ProposalWorkspaceInput {
+  /** Bounded metadata page; scope digests always bind the full result. */
+  offset?: number;
+  manuscriptId: string;
+  branchId: string;
+  /** Exact Review Run or producing Task; null is the editor's branch-local proposals. */
+  resultId: string | null;
+  returnPosition?: ProposalReviewReturnPosition | null;
+}
+export interface ProposalReviewReturnPosition {
+  blockId: string | null;
+  activeMarkId: string | null;
+  comparison: 'inline' | 'side-by-side';
+  review: 'all' | 'unreviewed' | 'reviewed' | 'stale' | 'conflicting';
+  chapterBlockId: string | null;
+  changeType: ProposalChangeType | null;
+  expanded: boolean;
+}
+export interface ProposalNavigatorItem {
+  markId: string;
+  itemId: string;
+  blockId: string;
+  position: number;
+  fromGrapheme: number;
+  toGrapheme: number;
+  chapterBlockId: string | null;
+  chapter: string;
+  changeType: ProposalChangeType;
+  baseRevisionId: string;
+  stale: boolean;
+  /** `drifted` is a classified Three-way Proposal Conflict (原文已变, ADR 0085); `detached` is not yet classified. */
+  anchorState: 'exact' | 'drifted' | 'detached';
+  conflict: boolean;
+  loaded: boolean;
+  otherVersion: boolean;
+  atomicGroupId: string | null;
+  atomicReason: string | null;
+  draft: ProposalDraftDisposition | null;
+  draftOrdinal: number;
+  decisionId: string | null;
+  disposition: ProposalItemDisposition | null;
+  appliedRevisionId: string | null;
+}
+export interface ProposalDecisionProjection {
+  decisionId: string;
+  supersedes: string | null;
+  baseRevisionIds: ReadonlyArray<string>;
+  currentRevisionId: string;
+  journalSequence: number;
+  actor: 'editor';
+  recordedAt: string;
+  items: ReadonlyArray<{ markId: string; itemId: string; disposition: ProposalDraftDisposition; decisionId: string }>;
+  unresolved: ReadonlyArray<string>;
+}
+export interface ProposalWorkspaceProjection {
+  totalItems: number;
+  nextOffset: number | null;
+  bookId: string;
+  manuscriptId: string;
+  branchId: string;
+  resultId: string | null;
+  revisionId: string;
+  journalSequence: number;
+  items: ReadonlyArray<ProposalNavigatorItem>;
+  offerWorkspace: boolean;
+  truncated: boolean;
+  scopeDigest: string;
+  decision: ProposalDecisionProjection | null;
+  returnPosition: ProposalReviewReturnPosition | null;
+}
+export interface SaveProposalDecisionDraftInput extends ProposalWorkspaceInput {
+  markIds: ReadonlyArray<string>;
+  disposition: ProposalDraftDisposition | null;
+  atomicGroupId: string | null;
+  expectedScopeDigest: string;
+}
+export interface BatchProposalDecisionDraftInput extends ProposalWorkspaceInput {
+  scope: 'selection' | 'chapter' | 'change-type' | 'filter';
+  markIds: ReadonlyArray<string>;
+  chapterBlockId: string | null;
+  changeType: ProposalChangeType | null;
+  review: ProposalReviewReturnPosition['review'];
+  disposition: ProposalDraftDisposition;
+  /** null previews the exact frozen scope and every exclusion, without recording anything. */
+  confirmDigest: string | null;
+}
+export interface ProposalDraftBatchProjection {
+  nextOffset: number | null;
+  scopeDigest: string;
+  included: ReadonlyArray<string>;
+  excluded: ReadonlyArray<{ markId: string; reason: 'conflict' | 'unclassified-stale' | 'unloaded' | 'other-version' | 'atomic-group' | 'applied' }>;
+  saved: boolean;
+  workspace: ProposalWorkspaceProjection;
+}
+export interface RecordProposalDecisionInput extends ProposalWorkspaceInput {
+  expectedScopeDigest: string;
+  clientDecisionId: string;
+}
+export interface InspectApplyReceiptInput {
+  manuscriptId: string;
+  branchId: string;
+  clientEffectId: string;
+  /**
+   * `settled` reads; `confirming` and `unresolved` are what a surface that lost its acknowledgement, or its recovery
+   * read too, reports; `recheck` is the editor's explicit re-check of a 结果待确认 against the authoritative records.
+   * None of them dispatches.
+   */
+  recovery: 'settled' | 'confirming' | 'unresolved' | 'recheck';
+}
+export interface PrepareReverseApplyInput {
+  manuscriptId: string;
+  branchId: string;
+  markId: string;
+}
+export interface ReverseApplyPreparationProjection {
+  ranges: ReadonlyArray<{ markId: string; position: number; fromGrapheme: number; toGrapheme: number }>;
+  originalEffectId: string;
+  bookId: string;
+  branchId: string;
+  revisionId: string;
+  journalSequence: number;
+  markId: string;
+  blockId: string;
+  ready: boolean;
+  reason: string;
 }
 
 /**
@@ -11271,6 +11430,7 @@ export const GLOBAL_ATTENTION_GROUP_LIMIT = 50;
  * - a completion of the last days: a baseline Task Outcome or a Review Run that reached the manuscript.
  */
 export type GlobalAttentionStateKey =
+  | 'apply-outcome-unresolved'
   | 'import-outcome-uncertain'
   | 'import-cleanup-pending'
   | 'recovery-pending'
@@ -11344,6 +11504,7 @@ export type GlobalAttentionStateKey =
  * words the product already uses there. An item whose record offers none of them is not listed at all.
  */
 export type GlobalAttentionNextStep =
+  | 'view-apply-receipt'
   | 'view-run'
   | 'view-review'
   | 'reconfirm-plan'
@@ -11381,7 +11542,7 @@ export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
   'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue', 'view-material-index',
-  'view-unconfirmed',
+  'view-unconfirmed', 'view-apply-receipt',
 ];
 
 /**
@@ -11389,6 +11550,7 @@ export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
  * Opening grants nothing; every decision is still made at the record.
  */
 export type GlobalAttentionTarget =
+  | { kind: 'apply-receipt'; bookId: string; manuscriptId: string; branchId: string; clientEffectId: string }
   | { kind: 'import-recovery'; draftId: string }
   | { kind: 'manuscript-recovery'; attentionId: string }
   | { kind: 'manuscript-conflict'; bookId: string; manuscriptId: string; branchId: string; markId: string }
@@ -11412,6 +11574,7 @@ export type GlobalAttentionTarget =
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
+  | { kind: 'apply-receipt' }
   | { kind: 'import'; sourceDisplayName: string; relationship: 'first-manuscript' | 'source-only' | 'reimport' | null }
   | { kind: 'recovery'; branchName: string }
   | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
@@ -12884,6 +13047,16 @@ export interface ServiceOperationMap {
     output: ManuscriptApplyOutcomeProjection;
   };
   /**
+   * The dedicated Proposal review workspace (Issue #902): metadata pages, durable decision drafts, frozen batch drafts
+   * and 记录提案决定 write no manuscript text; the four-state receipt and the reverse preparation dispatch nothing.
+   */
+  inspectProposalWorkspace: { input: ProposalWorkspaceInput; output: ProposalWorkspaceProjection };
+  saveProposalDecisionDraft: { input: SaveProposalDecisionDraftInput; output: ProposalWorkspaceProjection };
+  batchProposalDecisionDraft: { input: BatchProposalDecisionDraftInput; output: ProposalDraftBatchProjection };
+  recordProposalDecision: { input: RecordProposalDecisionInput; output: ProposalWorkspaceProjection };
+  inspectApplyReceipt: { input: InspectApplyReceiptInput; output: ApplyReceiptProjection };
+  prepareReverseApply: { input: PrepareReverseApplyInput; output: ReverseApplyPreparationProjection };
+  /**
    * 稿件冲突 of one 修改建议 (Issue #57, plan slice S22; ADR 0085). The read compares the three texts; the
    * Resolution Draft is saved on exactly the basis the editor saw; the conflict is left by 保留当前稿件,
    * 暂不处理 or 保存为新提案版本. None of them writes the manuscript.
@@ -13387,6 +13560,12 @@ export interface RendererApi {
   quitApplication(): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
   cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
+  inspectProposalWorkspace(input: ProposalWorkspaceInput): Promise<ProposalWorkspaceProjection>;
+  saveProposalDecisionDraft(input: SaveProposalDecisionDraftInput): Promise<ProposalWorkspaceProjection>;
+  batchProposalDecisionDraft(input: BatchProposalDecisionDraftInput): Promise<ProposalDraftBatchProjection>;
+  recordProposalDecision(input: RecordProposalDecisionInput): Promise<ProposalWorkspaceProjection>;
+  inspectApplyReceipt(input: InspectApplyReceiptInput): Promise<ApplyReceiptProjection>;
+  prepareReverseApply(input: PrepareReverseApplyInput): Promise<ReverseApplyPreparationProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;
   reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;

@@ -77,7 +77,7 @@ function requireVerification(condition: unknown, code: string, message: string):
 type SqlRow = Record<string, SQLOutputValue>;
 const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
 /** The revision this module's relations first stand in. */
-export const FACTUAL_VERIFICATION_REVISION = 77;
+export const FACTUAL_VERIFICATION_REVISION = 78;
 export const FACTUAL_VERIFICATION_PRODUCER = 'AI7 事实核查';
 const RESULT_SCHEMA = 'ai7.factual-verification-result/1';
 const DECISION_SCHEMA = 'ai7.factual-review-decision/1';
@@ -85,7 +85,7 @@ const PROPOSAL_SCHEMA = 'ai7.correction-proposal/1';
 const RUN_ASSURANCE_SCHEMA = 'ai7.factual-run-assurance/1';
 const GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
 
-/** Revision 77's relations, created once on a store below it; a store that has them is checked against their exact text. */
+/** Revision 78's relations, created once on a store below it; a store that has them is checked against their exact text. */
 export function initializeFactualVerificationSchema(db: DatabaseSync, version: number): void {
   const present = Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL).filter((table) =>
     db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) !== undefined);
@@ -107,7 +107,7 @@ export function initializeFactualVerificationSchema(db: DatabaseSync, version: n
   }
 }
 
-/** Every relation and trigger of revision 77 exactly as written, and nothing of it missing. */
+/** Every relation and trigger of revision 78 exactly as written, and nothing of it missing. */
 export function validateFactualVerificationSchema(db: DatabaseSync): void {
   for (const [name, sql] of [...Object.entries(FACTUAL_VERIFICATION_SCHEMA_SQL), ...Object.entries(FACTUAL_VERIFICATION_TRIGGER_SQL)]) {
     const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name = ?').get(name) as SqlRow | undefined;

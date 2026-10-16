@@ -467,6 +467,11 @@ async function constructPredecessorV12(dataRoot, bookId) {
       DROP TABLE factual_review_decisions;
       DROP TABLE factual_verification_results;
       DROP TABLE factual_run_assurance;
+      DROP TABLE manuscript_outcome_recovery;
+      DROP TABLE proposal_review_positions;
+      DROP TABLE proposal_decisions;
+      DROP TABLE proposal_decision_drafts;
+      DROP TABLE proposal_atomic_groups;
       DROP TABLE material_index_translations;
       DROP TABLE material_index_vectors;
       DROP TABLE analysis_outcome_resolutions;

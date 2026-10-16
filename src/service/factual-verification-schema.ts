@@ -1,5 +1,5 @@
 /**
- * Schema revision 77's relations (Issue #901; V2-UX-FREV-001, FREV-006, CORR-011, EASSURE-002): the DDL, triggers and foreign
+ * Schema revision 78's relations (Issue #901; V2-UX-FREV-001, FREV-006, CORR-011, EASSURE-002): the DDL, triggers and foreign
  * keys of factual verification, kept apart from its ledger and free of imports so that every schema owner that validates the
  * whole store can read them at load. `factual-verification.ts` owns the rows. All four relations are append-only: a later
  * result is a new version, a later decision is a new row, and nothing is ever rewritten.

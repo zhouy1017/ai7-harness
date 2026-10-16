@@ -4,13 +4,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from '../../src/service/factual-verification-schema.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
-import { FACTUAL_VERIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { FACTUAL_VERIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book } from '../support/sample1-baseline.js';
 
-// Issue #901: schema revision 77 adds four append-only relations — factual_run_assurance, factual_verification_results,
-// factual_review_decisions, correction_proposals — and moves nothing else. A revision-76 store gains them once; a store stamped
-// 77 without them is refused.
+// Issue #901: schema revision 78 adds four append-only relations — factual_run_assurance, factual_verification_results,
+// factual_review_decisions, correction_proposals — and moves nothing else. A revision-77 store gains them once; a store stamped
+// 78 without them is refused.
 let roots: ServiceTestRoots | undefined;
 
 afterEach(async () => {
@@ -23,11 +23,11 @@ function dropFactualVerificationRelations(db: DatabaseSync): void {
   for (const table of Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE IF EXISTS ${table}`);
 }
 
-describe('revision 77', () => {
-  it('migrates an exact revision-76 store by adding its four relations, moving nothing else, and refuses a 77 without them', async () => {
-    expect(FACTUAL_VERIFICATION_SCHEMA_VERSION).toBe(77);
+describe('revision 78', () => {
+  it('migrates an exact revision-77 store by adding its four relations, moving nothing else, and refuses a 78 without them', async () => {
+    expect(FACTUAL_VERIFICATION_SCHEMA_VERSION).toBe(78);
     expect(LATEST_SCHEMA_VERSION).toBe(FACTUAL_VERIFICATION_SCHEMA_VERSION);
-    expect(MATERIAL_INDEX_LAYER_SCHEMA_VERSION).toBe(76);
+    expect(PROPOSAL_REVIEW_SCHEMA_VERSION).toBe(77);
     roots = await createServiceTestRoots('ai7-factual-verification-schema-');
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const schemaRows = (): Array<{ name: string; sql: string }> => {
@@ -48,7 +48,7 @@ describe('revision 77', () => {
     const plant = new DatabaseSync(path);
     const books = plant.prepare('SELECT * FROM books ORDER BY book_id').all();
     dropFactualVerificationRelations(plant);
-    plant.exec(`PRAGMA user_version = ${MATERIAL_INDEX_LAYER_SCHEMA_VERSION}`);
+    plant.exec(`PRAGMA user_version = ${PROPOSAL_REVIEW_SCHEMA_VERSION}`);
     plant.close();
     expect(schemaRows()).toEqual(terminal.filter((row) => !names.includes(row.name)));
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -57,7 +57,7 @@ describe('revision 77', () => {
     expect(schemaRows()).toEqual(terminal);
     const migrated = new DatabaseSync(path);
     expect(migrated.prepare('SELECT * FROM books ORDER BY book_id').all()).toEqual(books);
-    expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(77);
+    expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(78);
     for (const table of Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL)) {
       expect((migrated.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n).toBe(0);
       // A Book's factual verification travels with it in a merge.

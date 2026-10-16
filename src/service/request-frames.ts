@@ -1941,6 +1941,50 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectProposalWorkspace':
+    case 'saveProposalDecisionDraft':
+    case 'batchProposalDecisionDraft':
+    case 'recordProposalDecision': {
+      const common = ['manuscriptId', 'branchId', 'resultId', ...((value.input !== null && typeof value.input === 'object' && !Array.isArray(value.input) && 'offset' in value.input) ? ['offset'] : [])];
+      const extras = value.op === 'saveProposalDecisionDraft' ? ['markIds', 'disposition', 'atomicGroupId', 'expectedScopeDigest']
+        : value.op === 'batchProposalDecisionDraft' ? ['scope', 'markIds', 'chapterBlockId', 'changeType', 'review', 'disposition', 'confirmDigest']
+          : value.op === 'recordProposalDecision' ? ['expectedScopeDigest', 'clientDecisionId'] : [];
+      const input = requireInput(value.input, [...common, ...extras, ...((value.input !== null && typeof value.input === 'object' && !Array.isArray(value.input)) && 'returnPosition' in value.input ? ['returnPosition'] : [])], tentativeId);
+      const uuid = (v: unknown): boolean => typeof v === 'string' && UUID_PATTERN.test(v);
+      const nullableUuid = (v: unknown): boolean => v === null || uuid(v);
+      const digest = (v: unknown): boolean => typeof v === 'string' && /^[a-f0-9]{64}$/u.test(v);
+      const disposition = (v: unknown): boolean => v === 'accepted' || v === 'rejected' || v === 'deferred';
+      const review = (v: unknown): boolean => v === 'all' || v === 'unreviewed' || v === 'reviewed' || v === 'stale' || v === 'conflicting';
+      const changeType = (v: unknown): boolean => v === null || v === 'replace' || v === 'insert' || v === 'delete';
+      if ((input.offset !== undefined && (!Number.isSafeInteger(input.offset) || Number(input.offset) < 0 || Number(input.offset) > 10000)) || !uuid(input.manuscriptId) || !uuid(input.branchId) || !nullableUuid(input.resultId)) throw new ProtocolError(tentativeId);
+      if (input.returnPosition !== undefined && input.returnPosition !== null) {
+        const pos = requireInput(input.returnPosition, ['blockId', 'activeMarkId', 'comparison', 'review', 'chapterBlockId', 'changeType', 'expanded'], tentativeId);
+        if (!(pos.blockId === null || (typeof pos.blockId === 'string' && MARK_BLOCK_PATTERN.test(pos.blockId))) || !nullableUuid(pos.activeMarkId) ||
+          !(pos.comparison === 'inline' || pos.comparison === 'side-by-side') || !review(pos.review) ||
+          !(pos.chapterBlockId === null || (typeof pos.chapterBlockId === 'string' && MARK_BLOCK_PATTERN.test(pos.chapterBlockId))) || !changeType(pos.changeType) || typeof pos.expanded !== 'boolean') throw new ProtocolError(tentativeId);
+      }
+      if (value.op === 'saveProposalDecisionDraft' || value.op === 'batchProposalDecisionDraft') {
+        if (!Array.isArray(input.markIds) || input.markIds.length > 10000 || !input.markIds.every(uuid) || new Set(input.markIds).size !== input.markIds.length ||
+          !(disposition(input.disposition) || (value.op === 'saveProposalDecisionDraft' && input.disposition === null))) throw new ProtocolError(tentativeId);
+      }
+      if (value.op === 'saveProposalDecisionDraft' && (!nullableUuid(input.atomicGroupId) || !digest(input.expectedScopeDigest))) throw new ProtocolError(tentativeId);
+      if (value.op === 'recordProposalDecision' && (!uuid(input.clientDecisionId) || !digest(input.expectedScopeDigest))) throw new ProtocolError(tentativeId);
+      if (value.op === 'batchProposalDecisionDraft' &&
+        (!(input.scope === 'selection' || input.scope === 'chapter' || input.scope === 'change-type' || input.scope === 'filter') || !review(input.review) || !changeType(input.changeType) ||
+          !(input.chapterBlockId === null || (typeof input.chapterBlockId === 'string' && MARK_BLOCK_PATTERN.test(input.chapterBlockId))) || !(input.confirmDigest === null || digest(input.confirmDigest)))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectApplyReceipt': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'clientEffectId', 'recovery'], tentativeId);
+      if (![input.manuscriptId, input.branchId, input.clientEffectId].every((v) => typeof v === 'string' && UUID_PATTERN.test(v)) ||
+        !(input.recovery === 'settled' || input.recovery === 'confirming' || input.recovery === 'unresolved' || input.recovery === 'recheck')) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'prepareReverseApply': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'markId'], tentativeId);
+      if (![input.manuscriptId, input.branchId, input.markId].every((v) => typeof v === 'string' && UUID_PATTERN.test(v))) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'getManuscriptApplyOutcome': {
       const input = requireInput(value.input, ['manuscriptId', 'branchId', 'clientEffectId'], tentativeId);
       if (

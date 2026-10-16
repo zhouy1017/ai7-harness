@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { proposalReviewPosition } from './editorial-workspace-profile.js';
 import {
   coverSpanEdit,
   followGraphemeEdit,
@@ -31,6 +32,14 @@ import {
   type RecordProposalDecisionFeedbackInput,
   type RecordProposalDecisionReasonInput,
   type UpdateEditorialMarkInput,
+  type ProposalWorkspaceInput,
+  type ProposalWorkspaceProjection,
+  type ProposalNavigatorItem,
+  type ProposalDecisionProjection,
+  type SaveProposalDecisionDraftInput,
+  type BatchProposalDecisionDraftInput,
+  type ProposalDraftBatchProjection,
+  type RecordProposalDecisionInput,
 } from '../shared/protocol.js';
 import {
   ANCHOR_CONFLICT_STATE_SQL,
@@ -139,7 +148,7 @@ export const EDITORIAL_MARK_SCHEMA_SQL = {
   client_decision_id TEXT NOT NULL UNIQUE,
   item_id TEXT NOT NULL REFERENCES proposal_change_items(item_id),
   ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
-  disposition TEXT NOT NULL CHECK(disposition IN ('accepted', 'accepted-with-edit', 'rejected', 'withdrawn')),
+  disposition TEXT NOT NULL CHECK(disposition IN ('accepted', 'accepted-with-edit', 'rejected', 'withdrawn', 'deferred')),
   edited_text TEXT,
   supersedes_decision_id TEXT REFERENCES proposal_item_decisions(decision_id),
   decided_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
@@ -869,6 +878,8 @@ export interface ProducedEditorialMarkInput {
   proposedText: string | null;
   rationale: string | null;
   atomicGroupId: string | null;
+  /** Required for an atomic group: names the inconsistency partial acceptance would cause. */
+  atomicReason?: string | null;
   source: { kind: 'ai7'; origin: 'task' | 'review-category' | 'analysis'; label: string; taskId: string | null }
     | { kind: 'imported-author'; label: string };
   basis: ReadonlyArray<EditorialMarkBasisProjection>;
@@ -877,6 +888,109 @@ export interface ProducedEditorialMarkInput {
    * imported 批注 may say so.
    */
   status?: 'open' | 'resolved';
+}
+
+export const PROPOSAL_ITEM_DECISIONS_PRE77_SQL = EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions.replace(
+  "'withdrawn', 'deferred'", "'withdrawn'",
+);
+
+export const PROPOSAL_REVIEW_SCHEMA_SQL = {
+  proposal_atomic_groups: `CREATE TABLE proposal_atomic_groups (
+    group_id TEXT PRIMARY KEY,
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    reason TEXT NOT NULL CHECK(length(reason) BETWEEN 1 AND 2000),
+    created_at TEXT NOT NULL
+  ) STRICT`,
+  proposal_decision_drafts: `CREATE TABLE proposal_decision_drafts (
+    draft_id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL REFERENCES proposal_change_items(item_id),
+    ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+    disposition TEXT CHECK(disposition IN ('accepted', 'rejected', 'deferred')),
+    actor TEXT NOT NULL CHECK(actor = 'editor'),
+    updated_at TEXT NOT NULL,
+    UNIQUE(item_id, ordinal)
+  ) STRICT`,
+  proposal_decisions: `CREATE TABLE proposal_decisions (
+    decision_id TEXT PRIMARY KEY,
+    client_decision_id TEXT NOT NULL UNIQUE,
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    result_id TEXT,
+    current_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
+    canonical_json TEXT NOT NULL,
+    supersedes TEXT REFERENCES proposal_decisions(decision_id),
+    actor TEXT NOT NULL CHECK(actor = 'editor'),
+    recorded_at TEXT NOT NULL
+  ) STRICT`,
+  // Append-only (#902 rev 6): the latest ordinal is the current Return Position; an unchanged one is not appended.
+  proposal_review_positions: `CREATE TABLE proposal_review_positions (
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    result_key TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+    position_json TEXT NOT NULL CHECK(length(position_json) BETWEEN 2 AND 4000),
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY(branch_id, result_key, ordinal)
+  ) STRICT`,
+  // Append-only (#902 rev 6): the latest ordinal is an Effect identity's recovery state; a re-check appends the
+  // settled `applied` / `not-applied` it proved, so an unresolved episode stays on record.
+  manuscript_outcome_recovery: `CREATE TABLE manuscript_outcome_recovery (
+    client_effect_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    state TEXT NOT NULL CHECK(state IN ('confirming', 'unresolved', 'applied', 'not-applied')),
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY(client_effect_id, ordinal)
+  ) STRICT`,
+} as const;
+export const PROPOSAL_REVIEW_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  proposal_atomic_groups: ['branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE'],
+  proposal_decision_drafts: ['item_id>proposal_change_items.item_id:NO ACTION/NO ACTION/NONE'],
+  proposal_decisions: ['branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE', 'current_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE', 'supersedes>proposal_decisions.decision_id:NO ACTION/NO ACTION/NONE'],
+  proposal_review_positions: ['branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE'],
+  manuscript_outcome_recovery: ['branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE', 'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE'],
+};
+export const PROPOSAL_REVIEW_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL).flatMap((table) =>
+    ['update', 'delete'].map((action) => [`${table}_no_${action}`, `CREATE TRIGGER ${table}_no_${action}
+      BEFORE ${action.toUpperCase()} ON ${table} BEGIN SELECT RAISE(ABORT, 'PROPOSAL_RECORD_IMMUTABLE'); END`])),
+);
+
+/** Byte-preserving CHECK widening. Restore keys, triggers, indexes and rowids in one transaction. */
+export function initializeProposalReviewSchema(db: DatabaseSync): void {
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 77) {
+    requireMark(Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL).every((name) => db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(name) !== undefined), 'SCHEMA_MIGRATION_FAILED', '提案审阅记录缺失。');
+  }
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'proposal_decisions'").get()) return;
+  const shape = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'proposal_item_decisions'").get() as SqlRow;
+  const widen = foldedSql(text(shape.sql)) === foldedSql(PROPOSAL_ITEM_DECISIONS_PRE77_SQL);
+  requireMark(widen || foldedSql(text(shape.sql)) === foldedSql(EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions),
+    'SCHEMA_MIGRATION_FAILED', '提案决定表结构不兼容。');
+  const restore = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
+  if (widen) db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    transact(db, () => {
+      if (widen) {
+        requireMark(Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 0, 'SCHEMA_MIGRATION_FAILED', '引用校验尚未停用。');
+        const attached = (db.prepare("SELECT sql FROM sqlite_schema WHERE tbl_name = 'proposal_item_decisions' AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name").all() as SqlRow[]).map((row) => text(row.sql));
+        const columns = (db.prepare("SELECT name FROM pragma_table_info('proposal_item_decisions') ORDER BY cid").all() as SqlRow[]).map((row) => text(row.name)).join(', ');
+        const before = db.prepare('SELECT rowid, * FROM proposal_item_decisions ORDER BY rowid').all();
+        db.exec('CREATE TEMP TABLE migrate_proposal_item_decisions AS SELECT rowid AS migrate_rowid, * FROM proposal_item_decisions');
+        db.exec('DROP TABLE proposal_item_decisions');
+        db.exec(EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions);
+        db.exec(`INSERT INTO proposal_item_decisions(rowid, ${columns}) SELECT migrate_rowid, ${columns} FROM temp.migrate_proposal_item_decisions ORDER BY migrate_rowid`);
+        db.exec('DROP TABLE temp.migrate_proposal_item_decisions');
+        for (const sql of attached) db.exec(sql);
+        requireMark(JSON.stringify(before) === JSON.stringify(db.prepare('SELECT rowid, * FROM proposal_item_decisions ORDER BY rowid').all()),
+          'SCHEMA_MIGRATION_FAILED', '提案决定迁移未保留原始记录。');
+      }
+      for (const sql of Object.values(PROPOSAL_REVIEW_SCHEMA_SQL)) db.exec(sql);
+      for (const sql of Object.values(PROPOSAL_REVIEW_TRIGGER_SQL)) db.exec(sql);
+      requireMark(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+    });
+  } finally {
+    if (widen && restore) db.exec('PRAGMA foreign_keys = ON');
+  }
 }
 
 export class EditorialMarkStore {
@@ -952,6 +1066,162 @@ export class EditorialMarkStore {
   }
 
   /**
+   * The dedicated Proposal review workspace (Issue #902): one exact scope over a Run result, or the branch's own
+   * suggestions, read in bounded metadata pages whose scope digest always binds the whole result.
+   */
+  #pageWorkspace(workspace: ProposalWorkspaceProjection, offset = 0): ProposalWorkspaceProjection {
+    const items = workspace.items.slice(offset, offset + 50);
+    const ids = new Set(items.map((item) => item.markId));
+    return { ...workspace, items, nextOffset: offset + 50 < workspace.items.length ? offset + 50 : null,
+      decision: workspace.decision === null ? null : { ...workspace.decision,
+        baseRevisionIds: workspace.decision.baseRevisionIds.filter((id) => items.some((item) => item.baseRevisionId === id)),
+        items: workspace.decision.items.filter((item) => ids.has(item.markId)), unresolved: workspace.decision.unresolved.filter((id) => ids.has(id)) } };
+  }
+
+  inspectProposalWorkspace(input: ProposalWorkspaceInput): ProposalWorkspaceProjection { return this.#pageWorkspace(this.#proposalWorkspace(input), input.offset); }
+  saveProposalDecisionDraft(input: SaveProposalDecisionDraftInput): ProposalWorkspaceProjection { return this.#pageWorkspace(this.#saveProposalDecisionDraft(input), input.offset); }
+  recordProposalDecision(input: RecordProposalDecisionInput): ProposalWorkspaceProjection { return this.#pageWorkspace(this.#recordProposalDecision(input), input.offset); }
+  batchProposalDecisionDraft(input: BatchProposalDecisionDraftInput): ProposalDraftBatchProjection {
+    const full = this.#batchProposalDecisionDraft(input); const offset = input.offset ?? 0;
+    const candidates = [...full.included.map((markId) => ({ markId, reason: null })), ...full.excluded].slice(offset, offset + 50);
+    return { ...full, included: candidates.filter((item) => item.reason === null).map((item) => item.markId),
+      excluded: candidates.filter((item): item is ProposalDraftBatchProjection['excluded'][number] => item.reason !== null),
+      nextOffset: offset + 50 < full.included.length + full.excluded.length ? offset + 50 : null, workspace: this.#pageWorkspace(full.workspace) };
+  }
+
+  #proposalWorkspace(input: ProposalWorkspaceInput): ProposalWorkspaceProjection {
+    requireMark(UUID_PATTERN.test(input.manuscriptId) && UUID_PATTERN.test(input.branchId) &&
+      (input.resultId === null || UUID_PATTERN.test(input.resultId)), 'MARK_INVALID', '提案范围无效。');
+    const state = this.#branchState(input.manuscriptId, input.branchId);
+    const rows = this.#db.prepare(`SELECT m.mark_id, m.block_id, m.from_grapheme, m.to_grapheme,
+      m.pinned_revision_id, m.pinned_journal_sequence, m.anchor_state, m.status, i.item_id, i.change_type, i.atomic_group_id,
+      w.position, g.reason atomic_reason,
+      (SELECT h.block_id FROM working_blocks h WHERE h.branch_id = m.branch_id AND h.kind = 'heading' AND h.position <= w.position ORDER BY h.position DESC LIMIT 1) chapter_id,
+      (SELECT h.text FROM working_blocks h WHERE h.branch_id = m.branch_id AND h.kind = 'heading' AND h.position <= w.position ORDER BY h.position DESC LIMIT 1) chapter,
+      (SELECT d.disposition FROM proposal_decision_drafts d WHERE d.item_id = i.item_id ORDER BY d.ordinal DESC LIMIT 1) draft,
+      (SELECT MAX(d.ordinal) FROM proposal_decision_drafts d WHERE d.item_id = i.item_id) draft_ordinal,
+      (SELECT d.disposition FROM proposal_item_decisions d WHERE d.item_id = i.item_id ORDER BY d.ordinal DESC LIMIT 1) disposition,
+      (SELECT d.decision_id FROM proposal_item_decisions d WHERE d.item_id = i.item_id ORDER BY d.ordinal DESC LIMIT 1) item_decision_id,
+      (SELECT r.resulting_revision_id FROM manuscript_effect_targets t JOIN manuscript_effect_receipts r ON r.effect_id = t.effect_id WHERE t.item_id = i.item_id ORDER BY r.resulting_journal_sequence DESC LIMIT 1) applied_revision
+      FROM editorial_marks m JOIN proposal_change_items i ON i.mark_id = m.mark_id
+      LEFT JOIN working_blocks w ON w.branch_id = m.branch_id AND w.block_id = m.block_id
+      LEFT JOIN proposal_atomic_groups g ON g.group_id = i.atomic_group_id
+      WHERE m.manuscript_id = ? AND m.branch_id = ? AND m.status IN ('open', 'resolved', 'applied')
+      AND (? IS NULL OR m.source_task_id = ? OR EXISTS(SELECT 1 FROM review_findings f WHERE f.mark_id = m.mark_id AND f.review_run_id = ?))
+      ORDER BY COALESCE(w.position, 2147483647), m.from_grapheme, m.mark_id LIMIT 10001`)
+      .all(input.manuscriptId, input.branchId, input.resultId, input.resultId, input.resultId) as SqlRow[];
+    const items: ProposalNavigatorItem[] = rows.slice(0, 10000).map((row) => ({
+      markId: text(row.mark_id), itemId: text(row.item_id), blockId: text(row.block_id),
+      position: row.position === null ? 0 : integer(row.position), fromGrapheme: integer(row.from_grapheme), toGrapheme: integer(row.to_grapheme),
+      chapterBlockId: nullableText(row.chapter_id), chapter: nullableText(row.chapter)?.slice(0, 120) ?? '未分章',
+      changeType: text(row.change_type) as ProposalNavigatorItem['changeType'], baseRevisionId: text(row.pinned_revision_id),
+      stale: row.pinned_revision_id !== state.revisionId || Number(row.pinned_journal_sequence) !== state.journalSequence,
+      anchorState: text(row.anchor_state) as ProposalNavigatorItem['anchorState'], conflict: row.anchor_state !== 'exact',
+      loaded: row.position !== null, otherVersion: false,
+      atomicGroupId: nullableText(row.atomic_group_id), atomicReason: nullableText(row.atomic_reason),
+      draft: nullableText(row.draft) as ProposalNavigatorItem['draft'], draftOrdinal: Number(row.draft_ordinal ?? 0),
+      decisionId: nullableText(row.item_decision_id), disposition: row.disposition === 'withdrawn' ? null : nullableText(row.disposition) as ProposalNavigatorItem['disposition'],
+      appliedRevisionId: row.status === 'applied' ? nullableText(row.applied_revision) : null,
+    }));
+    const recorded = this.#db.prepare('SELECT canonical_json FROM proposal_decisions WHERE branch_id = ? AND result_id IS ? ORDER BY rowid DESC LIMIT 1').get(input.branchId, input.resultId);
+    const decision = recorded ? JSON.parse(String(recorded.canonical_json)) as ProposalDecisionProjection : null;
+    return { totalItems: items.length, nextOffset: null, bookId: state.bookId, manuscriptId: input.manuscriptId, branchId: input.branchId, resultId: input.resultId,
+      revisionId: state.revisionId, journalSequence: state.journalSequence, items, truncated: rows.length > 10000,
+      offerWorkspace: items.length > 20, decision,
+      scopeDigest: sha256(JSON.stringify({ revisionId: state.revisionId, journalSequence: state.journalSequence, items, decisionId: decision?.decisionId ?? null })),
+      returnPosition: proposalReviewPosition(this.#db, input.branchId, input.resultId, input.returnPosition) };
+  }
+
+  #saveProposalDecisionDraft(input: SaveProposalDecisionDraftInput): ProposalWorkspaceProjection {
+    return transact(this.#db, () => {
+      const workspace = this.#proposalWorkspace(input);
+      requireMark(workspace.scopeDigest === input.expectedScopeDigest && !workspace.truncated, 'PROPOSAL_SCOPE_MOVED', '范围已变，请重新检查。');
+      requireMark(input.markIds.length > 0 && new Set(input.markIds).size === input.markIds.length, 'MARK_INVALID', '请选择精确修改项。');
+      const selected = workspace.items.filter((item) => input.markIds.includes(item.markId));
+      requireMark(selected.length === input.markIds.length, 'PROPOSAL_SCOPE_MOVED', '范围中有未加载或其他版本的修改项。');
+      if (input.atomicGroupId !== null) {
+        const members = workspace.items.filter((item) => item.atomicGroupId === input.atomicGroupId);
+        const allMembers = Number(this.#db.prepare('SELECT count(*) total FROM proposal_change_items WHERE atomic_group_id = ?').get(input.atomicGroupId)?.total);
+        requireMark(members.length > 1 && members.length === allMembers && members.length === selected.length && selected.every((item) => item.atomicGroupId === input.atomicGroupId),
+          'PROPOSAL_ATOMIC_SCOPE', '原子组只能对全部精确成员记录一个处理；拆分需要新的提案版本。');
+      } else requireMark(selected.every((item) => item.atomicGroupId === null), 'PROPOSAL_ATOMIC_SCOPE', '原子组不能按普通批量处理。');
+      requireMark(selected.every((item) => item.appliedRevisionId === null && item.loaded && !item.otherVersion), 'PROPOSAL_SCOPE_MOVED', '范围中有已应用、未加载或其他版本的项。');
+      requireMark(input.disposition === null || input.disposition === 'accepted' || input.disposition === 'rejected' || input.disposition === 'deferred', 'MARK_INVALID', '草稿处理无效。');
+      if (input.disposition === 'accepted') requireMark(selected.every((item) => !item.conflict), 'PROPOSAL_CONFLICT', '冲突项不能拟采纳。');
+      const now = new Date().toISOString();
+      for (const item of selected) this.#db.prepare("INSERT INTO proposal_decision_drafts(draft_id, item_id, ordinal, disposition, actor, updated_at) VALUES (?, ?, ?, ?, 'editor', ?)")
+        .run(randomUUID(), item.itemId, item.draftOrdinal + 1, input.disposition, now);
+      return this.#proposalWorkspace(input);
+    });
+  }
+
+  #batchProposalDecisionDraft(input: BatchProposalDecisionDraftInput): ProposalDraftBatchProjection {
+    return transact(this.#db, () => {
+      const workspace = this.#proposalWorkspace(input);
+      const scope = workspace.items.filter((item) => input.scope === 'selection' ? input.markIds.includes(item.markId)
+        : input.scope === 'chapter' ? item.chapterBlockId === input.chapterBlockId
+          : input.scope === 'change-type' ? item.changeType === input.changeType
+            : (input.review === 'all' || (input.review === 'unreviewed' ? item.draft === null && item.disposition === null
+              : input.review === 'reviewed' ? item.draft !== null || item.disposition !== null
+                : input.review === 'stale' ? item.stale : item.conflict)) &&
+              (input.chapterBlockId === null || item.chapterBlockId === input.chapterBlockId) && (input.changeType === null || item.changeType === input.changeType));
+      const excluded: Array<ProposalDraftBatchProjection['excluded'][number]> = [];
+      const included: string[] = [];
+      // A drifted anchor is a classified Three-way Proposal Conflict (原文已变, ADR 0085) whatever its base pin says;
+      // only a detached one is a stale base not yet classified (V2-UX-PDEC-005).
+      for (const item of scope) {
+        const reason = item.atomicGroupId !== null ? 'atomic-group' : item.otherVersion ? 'other-version' : !item.loaded ? 'unloaded'
+          : item.anchorState === 'detached' ? 'unclassified-stale' : item.conflict ? 'conflict' : item.appliedRevisionId !== null ? 'applied' : null;
+        if (reason === null) included.push(item.markId); else excluded.push({ markId: item.markId, reason });
+      }
+      for (const markId of input.markIds) if (input.scope === 'selection' && !scope.some((item) => item.markId === markId)) {
+        const old = this.#db.prepare("SELECT 1 FROM editorial_marks WHERE mark_id = ? AND manuscript_id = ? AND branch_id = ? AND status = 'converted'").get(markId, input.manuscriptId, input.branchId);
+        excluded.push({ markId, reason: old === undefined ? 'unloaded' : 'other-version' });
+      }
+      const scopeDigest = sha256(JSON.stringify({ digest: workspace.scopeDigest, scope: input.scope, included, excluded, disposition: input.disposition }));
+      if (input.confirmDigest !== null) {
+        requireMark(input.confirmDigest === scopeDigest && !workspace.truncated, 'PROPOSAL_SCOPE_MOVED', '批量范围已变，请重新检查全部排除项。');
+        if (included.length > 0) this.#saveProposalDecisionDraft({ ...input, expectedScopeDigest: workspace.scopeDigest, markIds: included, atomicGroupId: null });
+      }
+      return { nextOffset: null, scopeDigest, included, excluded, saved: input.confirmDigest !== null, workspace: input.confirmDigest === null ? workspace : this.#proposalWorkspace(input) };
+    });
+  }
+
+  #recordProposalDecision(input: RecordProposalDecisionInput): ProposalWorkspaceProjection {
+    requireMark(UUID_PATTERN.test(input.clientDecisionId), 'MARK_INVALID', '决定标识无效。');
+    return transact(this.#db, () => {
+      const prior = this.#db.prepare('SELECT branch_id, result_id FROM proposal_decisions WHERE client_decision_id = ?').get(input.clientDecisionId);
+      if (prior) {
+        requireMark(prior.branch_id === input.branchId && prior.result_id === input.resultId, 'IDEMPOTENCY_CONFLICT', '决定标识已用于其他范围。');
+        return this.#proposalWorkspace(input);
+      }
+      const workspace = this.#proposalWorkspace(input);
+      requireMark(workspace.scopeDigest === input.expectedScopeDigest && !workspace.truncated, 'PROPOSAL_SCOPE_MOVED', '决定范围已变，请重新检查。');
+      const chosen = workspace.items.filter((item) => item.draft !== null && item.appliedRevisionId === null);
+      requireMark(chosen.length > 0, 'PROPOSAL_EMPTY', '请先选择拟采纳、拟拒绝或暂不决定。');
+      requireMark(chosen.every((item) => item.draft !== 'accepted' || (!item.conflict && item.loaded && !item.otherVersion)), 'PROPOSAL_CONFLICT', '不能记录冲突项的采纳决定。');
+      for (const item of chosen) if (item.atomicGroupId !== null) {
+        const members = workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId);
+        requireMark(members.length > 1 && members.every((entry) => entry.draft === item.draft && entry.appliedRevisionId === null) &&
+          members.length === Number(this.#db.prepare('SELECT count(*) total FROM proposal_change_items WHERE atomic_group_id = ?').get(item.atomicGroupId)?.total),
+          'PROPOSAL_ATOMIC_SCOPE', '原子组必须对全部精确成员记录一个决定。');
+      }
+      const now = new Date().toISOString();
+      const decision: ProposalDecisionProjection = {
+        decisionId: randomUUID(), supersedes: workspace.decision?.decisionId ?? null,
+        baseRevisionIds: [...new Set(workspace.items.map((item) => item.baseRevisionId))],
+        currentRevisionId: workspace.revisionId, journalSequence: workspace.journalSequence, actor: 'editor', recordedAt: now,
+        items: chosen.map((item) => ({ markId: item.markId, itemId: item.itemId, disposition: item.draft!,
+          decisionId: this.recordDecisionForApply(input, item.itemId, item.blockId, item.draft!, null, null, now) })),
+        unresolved: workspace.items.filter((item) => item.draft === null || item.draft === 'deferred' || item.conflict).map((item) => item.markId),
+      };
+      this.#db.prepare("INSERT INTO proposal_decisions(decision_id, client_decision_id, branch_id, result_id, current_revision_id, journal_sequence, canonical_json, supersedes, actor, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'editor', ?)")
+        .run(decision.decisionId, input.clientDecisionId, input.branchId, input.resultId, workspace.revisionId, workspace.journalSequence, JSON.stringify(decision), decision.supersedes, now);
+      return this.#proposalWorkspace(input);
+    });
+  }
+
+  /**
    * A mark made by AI7 or carried in from an imported file. The range is verified against the working
    * state exactly as an editor's is; nothing reaches the manuscript surface unanchored.
    */
@@ -1024,6 +1294,15 @@ export class EditorialMarkStore {
       pinnedText: pinned, kind: input.kind, highlightColor: null, body: content.body, source,
       basis: input.basis, convertedFrom: null, anchorState: 'exact', now, status,
     });
+    if (input.atomicGroupId !== null) {
+      requireMark(input.kind === 'change-suggestion' && UUID_PATTERN.test(input.atomicGroupId) && typeof input.atomicReason === 'string' && input.atomicReason.trim().length > 0 && input.atomicReason.length <= 2000,
+        'PROPOSAL_ATOMIC_SCOPE', '原子组需要明确说明部分采纳会造成的不一致。');
+      const group = this.#db.prepare('SELECT branch_id, reason FROM proposal_atomic_groups WHERE group_id = ?').get(input.atomicGroupId);
+      requireMark(group === undefined || (group.branch_id === input.branchId && group.reason === input.atomicReason), 'PROPOSAL_ATOMIC_SCOPE', '原子组身份或依赖说明不一致。');
+      requireMark(this.#db.prepare('SELECT 1 FROM proposal_change_items i JOIN proposal_decision_drafts d ON d.item_id = i.item_id WHERE i.atomic_group_id = ? LIMIT 1').get(input.atomicGroupId) === undefined,
+        'PROPOSAL_ATOMIC_SCOPE', '开始处理后不能扩展原子组；请创建新提案版本。');
+      if (group === undefined) this.#db.prepare('INSERT INTO proposal_atomic_groups(group_id, branch_id, reason, created_at) VALUES (?, ?, ?, ?)').run(input.atomicGroupId, input.branchId, input.atomicReason, now);
+    }
     if (input.kind === 'change-suggestion') this.#insertItem(markId, pinned, content.proposedText!, content.rationale, input.atomicGroupId, now);
     return markId;
   }
@@ -1142,8 +1421,9 @@ export class EditorialMarkStore {
       const mark = this.#liveMark(input);
       requireMark(mark.kind === 'change-suggestion', 'MARK_ACTION_INVALID', '只有修改建议可以这样处理。');
       requireMark(mark.status !== 'applied', 'MARK_DECISION_INVALID', '这条修改建议已经应用；要改回去，请准备撤销本次应用。');
-      const item = this.#db.prepare('SELECT item_id, current_text FROM proposal_change_items WHERE mark_id = ?').get(input.markId) as SqlRow | undefined;
+      const item = this.#db.prepare('SELECT item_id, current_text, atomic_group_id FROM proposal_change_items WHERE mark_id = ?').get(input.markId) as SqlRow | undefined;
       requireMark(item !== undefined, 'MARK_STORE_INVALID', '修改建议缺少提案修改项。');
+      requireMark(item.atomic_group_id === null, 'PROPOSAL_ATOMIC_SCOPE', '原子组只能记录一个整体处理。');
       const itemId = text(item.item_id);
       const current = this.#db.prepare(
         'SELECT decision_id, ordinal, disposition FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1',
@@ -1390,7 +1670,7 @@ export class EditorialMarkStore {
     binding: { manuscriptId: string; branchId: string },
     itemId: string,
     blockId: string,
-    disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn',
+    disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn' | 'rejected' | 'deferred',
     editedText: string | null,
     reason: string | null,
     now: string,

@@ -21,7 +21,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { LATEST_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { LibraryMaterialKind, LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { malformedPdf, sampleTextPdf, syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
-import { dropFactualVerificationRelations, FACTUAL_VERIFICATION_SCHEMA_NAMES, dropMaterialIndexLayerRelations } from '../support/pre74-schema.js';
+import { dropFactualVerificationRelations, FACTUAL_VERIFICATION_SCHEMA_NAMES, dropMaterialIndexLayerRelations, restoreProposalReviewPredecessor, pre77SchemaRows } from '../support/pre74-schema.js';
 import { withoutRuleFor } from '../support/policy-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -497,8 +497,8 @@ describe('来源译文 over the real store', () => {
 describe('revision 76', () => {
   it('migrates an exact revision-75 store by adding its two relations, moving nothing else, and refuses a 76 without them', async () => {
     expect(MATERIAL_INDEX_LAYER_SCHEMA_VERSION).toBe(76);
-    // Synchronized delta with Issue #901: revision 77 (factual verification) is the terminal version.
-    expect(LATEST_SCHEMA_VERSION).toBe(MATERIAL_INDEX_LAYER_SCHEMA_VERSION + 1);
+    // Synchronized delta with Issue #901: revision 78 (factual verification) is the terminal version.
+    expect(LATEST_SCHEMA_VERSION).toBe(MATERIAL_INDEX_LAYER_SCHEMA_VERSION + 2);
     const schemaRows = (): Array<{ name: string; sql: string }> => {
       const database = new DatabaseSync(storePath(), { readOnly: true });
       try {
@@ -518,11 +518,12 @@ describe('revision 76', () => {
     const earlierLayers = ['material_index_builds', 'material_index_segments'].map((table) =>
       plant.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
     dropFactualVerificationRelations(plant);
+    restoreProposalReviewPredecessor(plant);
     dropMaterialIndexLayerRelations(plant);
     plant.exec(`PRAGMA user_version = ${RESEARCH_EVIDENCE_SCHEMA_VERSION}`);
     plant.close();
     const names = [...FACTUAL_VERIFICATION_SCHEMA_NAMES, ...Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL), ...Object.keys(MATERIAL_INDEX_LAYER_TRIGGER_SQL)];
-    expect(schemaRows()).toEqual(terminal.filter((row) => !names.includes(row.name)));
+    expect(schemaRows()).toEqual(pre77SchemaRows(terminal.filter((row) => !names.includes(row.name))));
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       // The build made before the revision stands; its vectors are built on it.
@@ -535,7 +536,7 @@ describe('revision 76', () => {
     const migrated = new DatabaseSync(storePath());
     expect(['material_index_builds', 'material_index_segments'].map((table) =>
       migrated.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(earlierLayers);
-    expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(77);
+    expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(78);
     dropMaterialIndexLayerRelations(migrated);
     migrated.close();
     await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();

@@ -1263,6 +1263,18 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.reverseAppliedChangeSuggestion(request.input) };
     case 'getManuscriptRail':
       return { id: request.id, ok: true, op: request.op, result: store.getManuscriptRail(request.input.manuscriptId, request.input.branchId) };
+    case 'inspectProposalWorkspace':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectProposalWorkspace(request.input) };
+    case 'saveProposalDecisionDraft':
+      return { id: request.id, ok: true, op: request.op, result: store.saveProposalDecisionDraft(request.input) };
+    case 'batchProposalDecisionDraft':
+      return { id: request.id, ok: true, op: request.op, result: store.batchProposalDecisionDraft(request.input) };
+    case 'recordProposalDecision':
+      return { id: request.id, ok: true, op: request.op, result: store.recordProposalDecision(request.input) };
+    case 'inspectApplyReceipt':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectApplyReceipt(request.input) };
+    case 'prepareReverseApply':
+      return { id: request.id, ok: true, op: request.op, result: store.prepareReverseApply(request.input) };
     case 'getManuscriptApplyOutcome':
       return {
         id: request.id,

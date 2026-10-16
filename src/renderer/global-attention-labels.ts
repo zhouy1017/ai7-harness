@@ -103,6 +103,7 @@ export function globalAttentionTruncatedLine(group: GlobalAttentionGroupKey, sho
 
 /** Each item's exact state or named decision, in the words its own record already uses. */
 export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionStateKey, string>> = {
+  'apply-outcome-unresolved': '应用结果待确认',
   'import-outcome-uncertain': '导入提交结果待确认',
   'import-cleanup-pending': '放弃清理尚未完成',
   'recovery-pending': '恢复待确认状态',
@@ -178,6 +179,7 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
 
 /** The state pill's tone and shape: words and a shape, never colour alone. */
 export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateKey, ReviewPill>> = {
+  'apply-outcome-unresolved': { tone: 'blocked', shape: 'square' },
   'import-outcome-uncertain': { tone: 'attention', shape: 'triangle' },
   'import-cleanup-pending': { tone: 'blocked', shape: 'square' },
   'recovery-pending': { tone: 'attention', shape: 'triangle' },
@@ -239,6 +241,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
  * suggestion card's 解决冲突….
  */
 export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionNextStep, string>> = {
+  'view-apply-receipt': '查看应用凭据',
   'view-run': TASK_BAR_RUN_LINKS['baseline-analysis'],
   'view-review': TASK_BAR_RUN_LINKS['review-run'],
   'reconfirm-plan': TASK_BAR_RECONFIRM,
@@ -323,6 +326,7 @@ export const GLOBAL_ATTENTION_TASK_KIND_LABELS = {
 /** The Active Work Object, in its record's own terms. */
 export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjection): string {
   switch (object.kind) {
+    case 'apply-receipt': return '稿件应用 · 结果待确认';
     case 'import':
       return object.relationship === null
         ? `导入 · ${object.sourceDisplayName}`
@@ -368,6 +372,7 @@ function quoted(labels: ReadonlyArray<string>): string {
 export function globalAttentionReason(item: GlobalAttentionItemProjection): string {
   const { facts } = item;
   switch (item.state) {
+    case 'apply-outcome-unresolved': return '本地权威记录尚不能证明本次应用结果；禁止自动重试、重做或重复应用。';
     case 'import-outcome-uncertain':
       return '本地证据目前无法证明这次原子提交已经完成或确定未提交；已阻止重试、放弃和清理。';
     case 'import-cleanup-pending':

@@ -1,3 +1,4 @@
+import { mountProposalWorkspace } from './proposal-workspace.js';
 import { renderEvaluationProfiles } from './evaluation-profiles.js';
 import { researchPlanLine, researchStatusLine, researchUnavailableLine } from '../shared/research-status.js';
 import { exemplarImportButton, exemplarEligibility } from './imported-exemplars.js';
@@ -728,6 +729,8 @@ let manuscriptRail: PositionRail | undefined;
 let reviewWorkspace: ReviewWorkspaceSurface | undefined;
 /** ⑥ 交付物 while it is on screen: nothing still in flight paints once the screen is replaced. */
 let deliverablesSurface: DeliverablesSurface | undefined;
+/** The dedicated Proposal review workspace while it is on screen (Issue #902): it stops painting once replaced. */
+let proposalWorkspaceSurface: ReturnType<typeof mountProposalWorkspace> | undefined;
 /** 稿件冲突 while it is on screen: a draft save still in flight never paints once the screen is replaced. */
 let proposalConflictSurface: ProposalConflictSurface | undefined;
 /** 待我处理 while it is on screen: it stops painting once the screen is replaced. */
@@ -909,6 +912,8 @@ function replaceScreen(state: string, content: HTMLElement): void {
   reviewWorkspace = undefined;
   deliverablesSurface?.destroy();
   deliverablesSurface = undefined;
+  proposalWorkspaceSurface?.destroy();
+  proposalWorkspaceSurface = undefined;
   proposalConflictSurface?.destroy();
   proposalConflictSurface = undefined;
   globalAttentionSurface?.destroy();
@@ -993,6 +998,27 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
 /** One record, opened in this window — 待我处理's items and the 任务 panel's cards (Issue #423, S77a) alike. */
 async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysisRevisionId?: string): Promise<void> {
   switch (target.kind) {
+    case 'apply-receipt':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
+        const receipt = await window.ai7.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'settled' });
+        const labels = { applied: '已应用', 'not-applied': '未应用', confirming: '正在确认应用结果', unresolved: '结果待确认' } as const;
+        const content = panel(); const heading = element('h2', undefined, labels[receipt.state]); const reason = element('p', undefined, receipt.reason);
+        heading.dataset['applyReceiptState'] = receipt.state; content.append(heading, reason);
+        const details = element('details'); const full = element('pre', undefined, JSON.stringify(receipt, null, 2)); details.append(element('summary', undefined, '查看完整凭据'), full); content.append(details);
+        // EREC-005: the editor's re-check reads the authoritative records by the same Effect identity; it dispatches nothing.
+        if (receipt.state === 'unresolved') {
+          const recheck = button('重新核对应用结果', 'primary', async () => {
+            const next = await window.ai7.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'recheck' });
+            heading.textContent = labels[next.state]; heading.dataset['applyReceiptState'] = next.state; reason.textContent = next.reason; full.textContent = JSON.stringify(next, null, 2);
+            if (next.state !== 'unresolved') recheck.remove();
+          });
+          content.append(recheck);
+        }
+        content.append(button('在稿件中查看', 'secondary', async () => { const opened = await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }); await openEditorWindow(opened, route.bookTitle); }), button('返回提案', 'secondary', () => renderProposalWorkspace({ manuscriptId: target.manuscriptId, branchId: target.branchId, resultId: null }, target.bookId, route.bookTitle)));
+        replaceScreen('apply-receipt', content);
+      });
+      return;
     case 'manuscript-recovery':
       await returnToRecoveryComparison(target.attentionId);
       return;
@@ -2463,6 +2489,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
       if (screen.firstElementChild !== origin) return;
       await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined);
     },
+    openProposalWorkspace: (input) => renderProposalWorkspace(input, bookId, bookTitle),
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
     planChanged: () => taskDrawer.refresh('review-run'),
     // 在来源与证据中查看 (Issue #901): the Evidence Workspace's deep link into the Book's retained sources.
@@ -2504,6 +2531,26 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
  * `deliverables.ts`; this only routes to it and gives it the workbench's persistent way out, appended last
  * so the sticky region stays on screen for the whole page (V2-UX-LAYER-005).
  */
+/**
+ * The dedicated Proposal review workspace (Issue #902, V2-UX-PROP-002): offered, never entered by itself. It takes the
+ * manuscript view's place; 返回稿件 opens the manuscript at the active change with its card.
+ */
+async function renderProposalWorkspace(input: { manuscriptId: string; branchId: string; resultId: string | null }, bookId: string, bookTitle: string): Promise<void> {
+  const origin = screen.firstElementChild;
+  try { await window.ai7.getManuscriptWindow({ manuscriptId: input.manuscriptId, branchId: input.branchId, cursor: null }); }
+  catch (error) { setStatus(rendererErrorMessage(error, '无法打开提案审阅工作区。'), 'error'); return; }
+  if (screen.firstElementChild !== origin) return;
+  const content = panel(); content.dataset['bookId'] = bookId; content.classList.add('proposal-workspace');
+  const surface = mountProposalWorkspace({ root: content, api: window.ai7, input, bookTitle, setStatus,
+    returnToManuscript: async (blockId, markId) => {
+      const binding = { manuscriptId: input.manuscriptId, branchId: input.branchId };
+      const opened = blockId === null ? await window.ai7.getManuscriptWindow({ ...binding, cursor: null }) : await window.ai7.getManuscriptWindowAt({ ...binding, target: { kind: 'block', blockId } });
+      await openEditorWindow(opened, bookTitle, undefined, undefined, markId ?? undefined);
+    }, openConflict: (markId) => renderProposalConflict({ ...input, bookId, markId }, bookTitle),
+  });
+  replaceScreen('proposal-workspace', content); proposalWorkspaceSurface = surface; leaveGuard = () => surface.settle(); surface.start();
+}
+
 /**
  * 稿件冲突 of one 修改建议 as a Dedicated Work Workspace (Issue #57; ED-003, IA › Proposal conflict workspace).
  * It takes the manuscript view's place; the surface is `proposal-conflict.ts`, and this only routes to it
@@ -9169,6 +9216,10 @@ function renderEditorWindow(
     },
     openReviewFinding: (target) => void leaveForReview({ reviewRunId: target.reviewRunId, findingId: target.findingId }),
     openConflict: (markId) => void leaveForConflict(markId),
+    openProposalWorkspace: () => void (async () => {
+      try { if (!(await settleLocalEdit())) return; await rememberEntryPosition(); renderProposalWorkspace({ manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId, resultId: null }, initialWindow.bookId, bookTitle); }
+      catch (error) { setStatus(rendererErrorMessage(error, '无法打开提案审阅工作区。'), 'error'); }
+    })(),
     // 书系知识 (Issue #63, S28b): a member Book's manuscript offers its selected words to each Series it is in; a Production
     // Document offers nothing of 书系.
     ...(isDocument ? {} : {
