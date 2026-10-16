@@ -295,6 +295,64 @@ describe('就这段提问… over the real store and harness', () => {
     }
   });
 
+  // 转为任务意图草稿 (Issue #52, S17b; Issue #423, slice 7a; DIALOG-013, 016): only a completed answer, the latest, while its selected
+  // words still stand — a draft carrying the answer's words with the dialogue, the attempt and the selection's digest as provenance.
+  it('makes a Task Intent Draft of a completed answer with its provenance, and refuses an incomplete, stale or drifted one', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const stepped = steppedHold();
+    const dialogues = owner(store, stepped.hold);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '转为任务意图草稿');
+      const selection = selectionOf(store, book);
+      const turn = store.askAboutSelection(book.bookId, { selection, question: QUESTION });
+      stepped.allow(2);
+      dialogues.begin(turn);
+      await waitFor(() => stepped.waiting(), (at) => at === 2, 'held');
+      const promote = (attemptId: string) => store.promoteAnswerToTaskIntentDraft({ bookId: book.bookId, dialogueId: turn.dialogueId, attemptId });
+      // Answering, then stopped: an Incomplete Dialogue Answer is never promoted (DIALOG-013).
+      expect(refusal(() => promote(turn.attemptId))).toBe('DIALOGUE_INCOMPLETE');
+      await dialogues.stop(turn.attemptId);
+      expect(refusal(() => promote(turn.attemptId))).toBe('DIALOGUE_INCOMPLETE');
+      stepped.allow(99);
+      const again = store.nextDialogueAttempt(book.bookId, { dialogueId: turn.dialogueId, attemptId: turn.attemptId }, 'regenerate');
+      dialogues.begin(again);
+      await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)), (value) => value.attempts[1]?.state === 'completed', 'answered');
+      // Only the latest attempt is the answer the editor sees.
+      expect(refusal(() => promote(turn.attemptId))).toBe('DIALOGUE_STALE');
+      const workingBefore = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest;
+      const draft = promote(again.attemptId);
+      expect(draft).toMatchObject({
+        bookId: book.bookId, origin: 'dialogue-answer', promotion: null,
+        version: {
+          ordinal: 1, goal: QUESTION, target: 'ranges', outcomeClass: null, procedurePin: null,
+          answer: {
+            dialogueId: turn.dialogueId, attemptId: again.attemptId, attemptOrdinal: 2,
+            selectionSha256: sha256Hex(selection.selectedText), text: `${FIRST_SENTENCE}${SECOND_SENTENCE}${TAIL}`, rows: [], truncated: false,
+          },
+        },
+      });
+      expect(draft.version.ranges).toEqual([expect.objectContaining({ blockId: selection.blockId, fromGrapheme: 2, toGrapheme: 22, text: selection.selectedText, state: 'exact' })]);
+      // The same answer opens the draft it made; nothing in the manuscript or the dialogue moved.
+      expect(promote(again.attemptId).draftId).toBe(draft.draftId);
+      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest).toBe(workingBefore);
+      expect(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null).attempts[1]!.convertedMarkIds).toEqual([]);
+      // The selected words changed since the question: refused.
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = window.blocks.find((candidate) => candidate.blockId === selection.blockId)!;
+      store.flushJournalEdit({
+        clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId, blockId: block.blockId,
+        windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
+        fromGrapheme: 0, toGrapheme: 0, insertText: '〔改动〕',
+      });
+      expect(refusal(() => promote(again.attemptId))).toBe('DIALOGUE_SELECTION_MOVED');
+      // The draft it made stays, its range now 任务范围需要重新选择.
+      expect(store.inspectTaskIntentDrafts({ bookId: book.bookId, draftId: draft.draftId }).drafts[0]!.version.ranges[0]!.state).toBe('reselect');
+    } finally {
+      await dialogues.dispose();
+      store.close();
+    }
+  });
+
   it('goes on from what a stopped answer kept, as a new attempt carrying it', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const stepped = steppedHold();

@@ -19869,13 +19869,13 @@ export class EditorialStore {
   /** Where a branch stands: its revision, its journal, and whether the journal holds edits no revision holds yet (TASK-039). */
   #draftBranchState(branchId: string): { revisionId: string; revisionLabel: string; journalSequence: number; lastCheckpointSequence: number; pendingSave: boolean } {
     const row = this.#authority.prepare(
-      `SELECT s.base_revision_id, s.journal_sequence, s.last_checkpoint_sequence, r.label
+      `SELECT s.base_revision_id, s.journal_sequence, s.last_checkpoint_sequence, r.revision_label
        FROM branch_working_state s JOIN manuscript_revisions r ON r.revision_id = s.base_revision_id WHERE s.branch_id = ?`,
     ).get(branchId) as SqlRow | undefined;
     requireDraft(row !== undefined, 'TASK_INTENT_DRAFT_RANGE_INVALID', '稿件工作状态不存在。');
     const journalSequence = asNumber(row.journal_sequence);
     const lastCheckpointSequence = asNumber(row.last_checkpoint_sequence);
-    return { revisionId: asString(row.base_revision_id), revisionLabel: asString(row.label), journalSequence, lastCheckpointSequence, pendingSave: journalSequence > lastCheckpointSequence };
+    return { revisionId: asString(row.base_revision_id), revisionLabel: asString(row.revision_label), journalSequence, lastCheckpointSequence, pendingSave: journalSequence > lastCheckpointSequence };
   }
 
   /**
