@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
-import { HouseReviewPreferenceLedger, HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL, preferenceLines, type HousePreferenceSource } from '../../src/service/house-review-preference.js';
+import { HouseReviewPreferenceLedger, withdrawalOf, HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL, preferenceLines, type HousePreferenceSource } from '../../src/service/house-review-preference.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
 import { LEARNING_ELIGIBILITY_SCHEMA_SQL } from '../../src/service/learning-eligibility.js';
@@ -141,4 +141,28 @@ describe('house review preference ledger', () => {
     dropHouseReviewPreferenceRelations(db); db.close();
     await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
   }, 120_000);
+
+  it('composes no block from a version whose material was withdrawn after its admission, and a re-inclusion restores none of it (#912)', () => {
+    const { db, ledger } = ledgerOf();
+    try {
+      const material = source();
+      const bookId = material.bookId;
+      const decide = (decisionId: string, ordinal: number, choice: string, supersedes: string | null, recordedAt: string) =>
+        db.prepare('INSERT INTO learning_eligibility_decisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(decisionId, bookId, 'review-disposition:x', material.materialDigest,
+          ordinal, choice, supersedes, recordedAt, '{}', String(ordinal).repeat(64));
+      decide(material.eligibilityDecisionId, 1, 'house', null, '2026-10-17T00:00:00.000Z');
+      ledger.rebuild('ordinary-production', [material]);
+      expect(ledger.use('ordinary-production', bookId, material.categoryId)).not.toBeNull();
+      expect(withdrawalOf(db, material.eligibilityDecisionId)).toEqual({ materialKey: 'review-disposition:x', withdrawnAt: null });
+      const excluded = randomUUID();
+      decide(excluded, 2, 'excluded', material.eligibilityDecisionId, '2026-10-17T01:00:00.000Z');
+      // The version still holds it (no rebuild in this scope yet): it reads as none, never as a block.
+      expect(ledger.use('ordinary-production', bookId, material.categoryId)).toBeNull();
+      decide(randomUUID(), 3, 'house', excluded, '2026-10-17T02:00:00.000Z');
+      expect(withdrawalOf(db, material.eligibilityDecisionId)).toEqual({ materialKey: 'review-disposition:x', withdrawnAt: '2026-10-17T01:00:00.000Z' });
+      expect(ledger.use('ordinary-production', bookId, material.categoryId)).toBeNull();
+      expect(withdrawalOf(db, randomUUID())).toEqual({ materialKey: null, withdrawnAt: null });
+    } finally { db.close(); }
+  });
 });
+

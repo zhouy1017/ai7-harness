@@ -554,4 +554,23 @@ describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () =>
     expect(lineage.signals.map((signal) => [signal.ordinal, signal.current])).toEqual([[1, false], [3, true]]);
     expect(lineage.tasks.map((task) => [task.reviewRunId, task.versionOrdinal, task.use])).toEqual([[fresh.reviewRunId, 3, 'completed']]);
   }, 180_000);
+
+  it('records a batch only over materials of one class and scope as read, naming a drifted member and leaving it standing (LAUD-010, LAUD-011)', async () => {
+    const { book, materials } = await ignored('L2 sample1 batch', ['typos-and-usage', 'style-and-format']);
+    for (const material of materials) admit(book.bookId, material);
+    const [typos, style] = [materials.find((entry) => entry.originLabel.includes('错别字'))!, materials.find((entry) => !entry.originLabel.includes('错别字'))!];
+    const read = (material: { materialKey: string }) => audited(book.bookId, material.materialKey);
+    // The 体例 member was read before its decision: it drifted, and is named rather than coerced into the batch.
+    const items = [{ materialKey: typos.materialKey, materialDigest: read(typos).digest, expectedDecisions: 1 },
+      { materialKey: style.materialKey, materialDigest: read(style).digest, expectedDecisions: 0 }];
+    const preview = store.previewLearningRemediation({ bookId: book.bookId, items });
+    expect([preview.scope, preview.kind, preview.included.map((entry) => entry.materialKey), preview.leftOut.map((entry) => [entry.materialKey, entry.reason])])
+      .toEqual(['house', 'review-disposition', [typos.materialKey], [[style.materialKey, 'changed']]]);
+    expect(preview.groups).toMatchObject({ future: 1, currentVersion: 2, linesAffected: 1 });
+    const outcome = store.recordLearningRemediation({ bookId: book.bookId, items, previewDigest: preview.previewDigest });
+    expect([outcome.recorded.map((entry) => entry.materialKey), outcome.leftOut.map((entry) => entry.reason)]).toEqual([[typos.materialKey], ['changed']]);
+    expect([read(typos).standing, read(style).standing]).toEqual(['excluded', 'house']);
+    expect(store.inspectHouseReviewPreference().current!.lines.map((line) => line.categoryId)).toEqual(['style-and-format']);
+  }, 180_000);
 });
+
