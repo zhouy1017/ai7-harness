@@ -19683,10 +19683,10 @@ export class EditorialStore {
       if (input.draftId !== null) {
         const draft = this.#drafts.draft(input.draftId);
         requireDraft(draft !== null && draft.bookId === input.bookId, 'TASK_INTENT_DRAFT_NOT_FOUND', '这份任务意图草稿不在这本书里。');
-        return { bookId: input.bookId, drafts: [this.#draftProjection(draft, bookTitle, true)] };
+        return { bookId: input.bookId, bookTitle, manuscript: this.#draftManuscript(input.bookId), drafts: [this.#draftProjection(draft, bookTitle, true)] };
       }
       const drafts = [...this.#drafts.unpromoted(input.bookId, GLOBAL_ATTENTION_READ_LIMIT), ...this.#drafts.promoted(input.bookId, 10)];
-      return { bookId: input.bookId, drafts: drafts.map((draft) => this.#draftProjection(draft, bookTitle, false)) };
+      return { bookId: input.bookId, bookTitle, manuscript: this.#draftManuscript(input.bookId), drafts: drafts.map((draft) => this.#draftProjection(draft, bookTitle, false)) };
     });
   }
 
@@ -19864,6 +19864,15 @@ export class EditorialStore {
       fromGrapheme: span.fromGrapheme, toGrapheme: span.toGrapheme, revisionId: verified.revisionId, revisionLabel: verified.revisionLabel,
       journalSequence: verified.journalSequence, pendingSave: state.pendingSave, text: verified.text,
     };
+  }
+
+  /** The Book's primary manuscript as it stands now, for the composer's context line (TASK-002); `null` before it has one. */
+  #draftManuscript(bookId: string): TaskIntentDraftsProjection['manuscript'] {
+    const row = this.#authority.prepare("SELECT b.branch_id FROM manuscripts m JOIN manuscript_branches b ON b.manuscript_id = m.manuscript_id WHERE m.book_id = ? AND m.role = 'primary' ORDER BY b.rowid LIMIT 1")
+      .get(bookId) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const state = this.#draftBranchState(asString(row.branch_id));
+    return { revisionLabel: state.revisionLabel, journalSequence: state.journalSequence, pendingSave: state.pendingSave };
   }
 
   /** Where a branch stands: its revision, its journal, and whether the journal holds edits no revision holds yet (TASK-039). */

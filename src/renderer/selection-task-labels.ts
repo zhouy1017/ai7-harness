@@ -200,3 +200,6 @@ export function selectionTaskChoices(
   }
   return { choices, refusal: choices.length > 0 ? null : selectionTaskNoneLine(reasons) };
 }
+
+/** 再选一段加入 in the Context-bound Task Composer (Issue #423, slice 7a; TASK-046): it takes the words selected now, or says so. */
+export const SELECTION_TASK_PICK_RANGE = '先在稿件里选中要加入的文字，再按「再选一段加入」。';

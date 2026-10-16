@@ -134,3 +134,19 @@ export const DIALOGUE_CARD_REASONS = {
 export function dialogueResultTaskLine(dialogue: Pick<DialogueProjection, 'question'>): string {
   return dialogueQuestionLine(dialogue.question);
 }
+
+/** 转为任务意图草稿 on a completed dialogue answer (Issue #52, S17b; DIALOG-016). */
+export const DIALOGUE_PROMOTE_LABEL = '转为任务意图草稿';
+export const DIALOGUE_PROMOTE_INCOMPLETE = '内容不完整的回答不能转为任务意图草稿。';
+export const DIALOGUE_PROMOTE_STATUS = {
+  promoting: '正在转为任务意图草稿…',
+  promoted: '已转为任务意图草稿：它带着这次回答和所选文字，不会发送，也不会开始任务。',
+  failed: '无法转为任务意图草稿。',
+} as const;
+/**
+ * The Live Reasoning Summary (UI ADR 0014; DIALOG-005, 009): while the foreground answer has not begun, what the dialogue is doing
+ * in words — from what the answer already shows, never model reasoning — and gone once the formal answer begins. It is never kept.
+ */
+export function dialogueReasoningLine(anchors: number): string {
+  return anchors > 0 ? `正在比对检索到的 ${anchors} 个段落…` : '正在检索与所选文字相关的段落…';
+}

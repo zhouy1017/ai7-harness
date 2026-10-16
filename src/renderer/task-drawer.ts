@@ -17,10 +17,10 @@ import type {
 } from '../shared/protocol.js';
 import { isStartWhenOnlineTaskKind } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
-import { mountTaskPanel } from './task-panel.js';
+import { mountTaskComposer, mountTaskPanel, type ComposerRange, type TaskComposerSeed } from './task-panel.js';
 import { mountDialogue } from './dialogue.js';
 import { DIALOGUE_TITLE } from './dialogue-labels.js';
-import { TASK_PANEL_TITLE } from './task-panel-labels.js';
+import { TASK_COMPOSER_TITLES, TASK_PANEL_TITLE } from './task-panel-labels.js';
 import {
   parseBudgetCeiling,
   TASK_PLAN_BUDGET_APPLY,
@@ -90,6 +90,7 @@ import {
   TASK_PLAN_DRIFT_HEADING,
   TASK_PLAN_EDIT,
   TASK_PLAN_EDIT_REASON,
+  taskPlanDraftSentence,
   TASK_PLAN_EDIT_ADAPTATION_WITHDRAWN,
   TASK_PLAN_EDIT_ADAPTATION_ASK_FIRST,
   taskPlanEditAskFirst,
@@ -187,8 +188,14 @@ export interface TaskDrawerSurface {
    * fragment while it is shown. `← 任务` goes back to the panel, which is the dialogue in the background.
    */
   openDialogue(bookId: string, dialogueId: string, returnFocus: () => HTMLElement | null): void;
-  /** What the drawer shows now: one Task's plan, a Book's 任务 panel, a dialogue, or nothing. */
-  view(): { readonly kind: 'plan' | 'panel' | 'dialogue'; readonly bookId: string } | null;
+  /**
+   * The Context-bound Task Composer in the same slot (Issue #423, slice 7a; TASK-001 to 009): a new one on what `seed` carries, or
+   * one draft of the Book. `← 任务` goes back to the panel; 收起 to wherever it was opened from.
+   */
+  openComposer(seed: TaskComposerSeed, returnFocus: () => HTMLElement | null): void;
+  openDraft(bookId: string, draftId: string, returnFocus: () => HTMLElement | null): void;
+  /** What the drawer shows now: one Task's plan, a Book's 任务 panel, a dialogue, the composer, or nothing. */
+  view(): { readonly kind: 'plan' | 'panel' | 'dialogue' | 'composer'; readonly bookId: string } | null;
   /** Read the plan on show again when it is one of `kind`'s: the surface that raised it just recorded something. */
   refresh(kind: TaskPlanKind): void;
   close(restoreFocus: boolean): void;
@@ -232,6 +239,10 @@ type DrawerApi = Pick<
   | 'continueDialogueAnswer'
   | 'regenerateDialogueAnswer'
   | 'convertDialogueToChangeSuggestion'
+  | 'inspectTaskIntentDrafts'
+  | 'saveTaskIntentDraft'
+  | 'promoteTaskIntentDraft'
+  | 'promoteAnswerToTaskIntentDraft'
 >;
 
 export interface MountTaskDrawerOptions {
@@ -273,6 +284,16 @@ export interface MountTaskDrawerOptions {
   dialogueJump(bookId: string, target: { readonly manuscriptId: string; readonly blockId: string }): void;
   /** 转为修改建议 made a 修改建议: the manuscript's marks read again. */
   dialogueConverted(dialogue: DialogueProjection, markId: string): void;
+  /** 发起全书任务… (Issue #423, slice 7a): what a whole-Book composer of the Book carries — its title and the manuscript as it stands. */
+  wholeBookSeed(bookId: string): Promise<TaskComposerSeed>;
+  /** 再选一段加入 (TASK-046): the words selected in the Book's manuscript on screen now, or why there are none. */
+  pickRange(bookId: string): Promise<ComposerRange | string>;
+  /** 按现成工序准备…: the house's 工序 on the one paragraph, in the composer beside it that prepares at once. */
+  openProcedures(bookId: string, range: ComposerRange): void;
+  /** The manuscript's own edits are written before a Task Input revision is saved (TASK-039): `false` leaves the draft as it is. */
+  settle(): Promise<boolean>;
+  /** 返回继续 (TASK-006): the Book an unfinished draft was left on, opened again; `resume` brings the draft back beside it. */
+  resumeDraft(bookId: string, resume: () => void): void;
 }
 
 /** How often the drawer reads a running Task's plan again, so the bar follows the Run to its end. */
@@ -389,8 +410,15 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   /** Said beside the bar's actions once the plan the drawer was opened on is painted (`open`'s `note`). */
   let pendingNote: string | null = null;
   let pollTimer: number | undefined;
-  /** What the slot shows (Issue #423, S77a): one Task's plan, the Book's 任务 panel, or one dialogue (Issue #52, S17a). */
-  let view: 'plan' | 'panel' | 'dialogue' = 'plan';
+  /**
+   * What the slot shows (Issue #423, S77a): one Task's plan, the Book's 任务 panel, one dialogue (Issue #52, S17a), or the
+   * Context-bound Task Composer (Issue #423, slice 7a).
+   */
+  let view: 'plan' | 'panel' | 'dialogue' | 'composer' = 'plan';
+  /** Where 收起 takes the composer: back to the plan or the panel it was opened from, or closed. */
+  let composerReturn: (() => void) | null = null;
+  /** An unfinished draft — or unsaved words — left beside another Book (TASK-006): collapsed, never following the new Book. */
+  let parked: null | { readonly bookId: string; readonly bookTitle: string; readonly draftId: string | null } = null;
   let panelBookId: string | null = null;
   /** The plan was opened from a card's 取消任务: its Cancellation Impact Summary opens once the plan is painted. */
   let cancelOnOpen = false;
@@ -473,12 +501,77 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       surface.open({ bookId: book, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
     },
     onRecorded: (book) => options.onRecorded('baseline-analysis', book),
+    // 发起全书任务… (Issue #423, slice 7a): the composer on the whole Book, in the same slot; 收起 comes back here.
+    openComposer: () => {
+      const book = panelBookId;
+      if (book === null) return;
+      void options.wholeBookSeed(book).then((seed) => {
+        if (root.hidden || view !== 'panel' || panelBookId !== book) return;
+        surface.openComposer(seed, returnFocus);
+        composerReturn = () => surface.openPanel(book, returnFocus);
+      }, (error: unknown) => options.setStatus(options.errorMessage(error, '无法打开任务撰写。'), 'error'));
+    },
+    openDraft: (draftId) => {
+      const book = panelBookId;
+      if (book === null) return;
+      surface.openDraft(book, draftId, returnFocus);
+      composerReturn = () => surface.openPanel(book, returnFocus);
+    },
+    parked: () => parked,
+    resumeParked: () => resumeParked(),
   });
+
+  const composer = mountTaskComposer({
+    api,
+    setStatus: options.setStatus,
+    errorMessage: options.errorMessage,
+    awaitServiceJob: options.awaitServiceJob,
+    pickRange: (book) => options.pickRange(book),
+    // The house's 工序 prepare at once in the composer beside the paragraph: this one, transient, is done.
+    openProcedures: (book, range) => {
+      composerReturn = null;
+      surface.close(false);
+      options.openProcedures(book, range);
+    },
+    settle: () => options.settle(),
+    openPlan: (book, kind, ref) => surface.open({ bookId: book, kind, ref }, returnFocus),
+    openNew: (seed) => {
+      const back = composerReturn;
+      surface.openComposer(seed, returnFocus);
+      composerReturn = back;
+    },
+    close: () => {
+      const back = composerReturn;
+      composerReturn = null;
+      if (back !== null && !interrupted) back();
+      else surface.close(true);
+    },
+    onChanged: () => undefined,
+  });
+
+  /** 返回继续 (TASK-006): the Book the draft was left on, then the draft beside it, as it was. */
+  function resumeParked(): void {
+    const left = parked;
+    if (left === null) return;
+    options.resumeDraft(left.bookId, () => {
+      parked = null;
+      const held = composer.held();
+      if (left.draftId !== null) surface.openDraft(left.bookId, left.draftId, returnFocus);
+      else if (held !== null && held.bookId === left.bookId) showComposer(left.bookId);
+      composerReturn = null;
+    });
+  }
 
   const dialogueSurface = mountDialogue({
     api,
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
+    // 转为任务意图草稿 (Issue #52, S17b): the new draft in the composer, in the same slot; 收起 comes back to the dialogue.
+    onPromoted: (draft) => {
+      const dialogueId = dialogueSurface.current();
+      surface.openDraft(draft.bookId, draft.draftId, returnFocus);
+      composerReturn = dialogueId === null ? null : () => surface.openDialogue(draft.bookId, dialogueId, returnFocus);
+    },
     jump: (target) => {
       if (panelBookId !== null) options.dialogueJump(panelBookId, target);
     },
@@ -490,7 +583,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   function showView(): void {
     root.dataset['taskDrawerView'] = view;
     back.hidden = view === 'panel';
-    title.textContent = view === 'panel' ? TASK_PANEL_TITLE : view === 'dialogue' ? DIALOGUE_TITLE : TASK_DRAWER_TITLE;
+    title.textContent = view === 'panel' ? TASK_PANEL_TITLE : view === 'dialogue' ? DIALOGUE_TITLE : view === 'composer' ? TASK_COMPOSER_TITLES.draft : TASK_DRAWER_TITLE;
     modes.hidden = view !== 'plan';
     foot.hidden = view !== 'plan';
     // Leaving a dialogue is backgrounding it (DIALOG-010): nothing is read or shown, and its answer runs on unchanged.
@@ -791,7 +884,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   function goalBlock(next: TaskPlanProjection): HTMLElement {
     const section = el('section', 'task-plan-goal');
     const sentence = el('div', 'task-plan-sentence');
-    sentence.append(el('p', 'task-plan-sentence-text', next.goal.sentence), unavailable(TASK_PLAN_EDIT, 'edit', TASK_PLAN_EDIT_REASON));
+    const draft = next.goal.draft;
+    if (draft === undefined) {
+      sentence.append(el('p', 'task-plan-sentence-text', next.goal.sentence), unavailable(TASK_PLAN_EDIT, 'edit', TASK_PLAN_EDIT_REASON));
+    } else {
+      // A Task prepared from a Task Intent Draft (Issue #423, slice 7a): the editor's own sentence, and 修改 back to the composer.
+      const asked = el('p', 'task-plan-sentence-text task-plan-draft-sentence', taskPlanDraftSentence(draft.sentence));
+      asked.dataset['taskPlanDraft'] = draft.draftId;
+      const edit = control(TASK_PLAN_EDIT, 'quiet', 'edit');
+      edit.addEventListener('click', () => {
+        const back = plan === null ? null : { bookId: plan.bookId, kind: plan.kind, ref: plan.ref };
+        surface.openDraft(next.bookId, draft.draftId, returnFocus);
+        composerReturn = back === null ? null : () => surface.open(back, returnFocus);
+      });
+      sentence.append(asked, edit, el('p', 'field-note task-plan-sentence-procedure', next.goal.sentence));
+    }
     const chips = el('ul', 'task-plan-chips');
     for (const chip of taskPlanChips(next.goal.chips)) {
       const item = el('li', `task-plan-chip task-plan-chip-${chip.key}`, chip.text);
@@ -2307,7 +2414,57 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
 
   // ---- the surface --------------------------------------------------------------------------------------
 
+  /** The composer of `bookId` in the slot, as it is held. */
+  function showComposer(bookId: string): void {
+    ticket += 1;
+    clearPoll();
+    panel.stop();
+    view = 'composer';
+    panelBookId = bookId;
+    request = null;
+    plan = null;
+    painted = '';
+    refusal = null;
+    pendingNote = null;
+    cancelOnOpen = false;
+    root.hidden = false;
+    root.dataset['taskDrawer'] = 'open';
+    shell.dataset['taskDrawer'] = 'open';
+    showView();
+    questions.replaceChildren();
+    questionsPainted = '';
+    bar.hidden = true;
+    bar.replaceChildren();
+    body.replaceChildren(composer.element);
+    options.onOpen();
+    if (interrupted) disableAll();
+  }
+
+  /** Leaving the composer for another Book or screen (TASK-006): what it holds stays with its Book, collapsed, never followed. */
+  function parkComposer(): void {
+    const held = composer.held();
+    composer.stop();
+    if (held !== null && !held.promoted && (held.draftId !== null || held.unsaved)) {
+      parked = { bookId: held.bookId, bookTitle: held.bookTitle, draftId: held.draftId };
+    }
+  }
+
   const surface: TaskDrawerSurface = {
+    openComposer(seed, finder) {
+      returnFocus = finder;
+      composerReturn = null;
+      if (parked?.bookId === seed.bookId) parked = null;
+      showComposer(seed.bookId);
+      composer.openNew(seed);
+    },
+    openDraft(bookId, draftId, finder) {
+      returnFocus = finder;
+      composerReturn = null;
+      if (parked?.bookId === bookId) parked = null;
+      showComposer(bookId);
+      composer.openDraft(bookId, draftId);
+      title.focus();
+    },
     open(next, finder, note, how) {
       ticket += 1;
       panel.stop();
@@ -2399,12 +2556,13 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     },
     view() {
       if (root.hidden) return null;
+      if (view === 'composer') return panelBookId === null ? null : { kind: 'composer', bookId: panelBookId };
       if (view === 'dialogue') return panelBookId === null ? null : { kind: 'dialogue', bookId: panelBookId };
       if (view === 'panel') return panelBookId === null ? null : { kind: 'panel', bookId: panelBookId };
       return request === null ? null : { kind: 'plan', bookId: request.bookId };
     },
     refresh(kind) {
-      if (root.hidden || interrupted || view === 'dialogue') return;
+      if (root.hidden || interrupted || view === 'dialogue' || view === 'composer') return;
       if (view === 'panel') {
         panel.refresh();
         return;
@@ -2437,6 +2595,15 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     },
     followScreen(state, bookId) {
       if (root.hidden) return;
+      // The composer stays beside its own Book (TASK-006): anything else collapses it, the draft left with its Book.
+      if (view === 'composer') {
+        if (bookId === null || bookId !== panelBookId || !TASK_DRAWER_SCREENS.includes(state)) {
+          parkComposer();
+          composerReturn = null;
+          surface.close(false);
+        }
+        return;
+      }
       if (view === 'dialogue') {
         if (bookId === null || bookId !== panelBookId || !TASK_DRAWER_SCREENS.includes(state)) surface.close(false);
         return;
@@ -2462,6 +2629,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       clearPoll();
       panel.stop();
       dialogueSurface.stop();
+      composer.stop();
       disableAll();
     },
   };

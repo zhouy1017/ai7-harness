@@ -12104,6 +12104,12 @@ export interface TaskIntentDraftProjection {
 
 export interface TaskIntentDraftsProjection {
   readonly bookId: string;
+  readonly bookTitle: string;
+  /**
+   * The Book's manuscript as it stands now (TASK-002): its revision, its journal position, and whether the journal holds edits
+   * no revision holds yet — words pinned now are `待保存修订版` until a revision holds them. `null` before it has one.
+   */
+  readonly manuscript: null | { readonly revisionLabel: string; readonly journalSequence: number; readonly pendingSave: boolean };
   /** The Book's drafts not yet promoted, newest first, then up to ten promoted ones. */
   readonly drafts: ReadonlyArray<TaskIntentDraftProjection>;
 }
