@@ -267,9 +267,15 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   // chain and its original, unless this data already holds it (`libraryRefusal`).
   library_materials: 'owned',
   library_material_decisions: 'owned',
+  // 来源与证据 (Issue #425, S70): the sources its research Runs retained, each unit's research outcome, and the 资料库 items
+  // 保存为来源材料 made of them come with the Book; a captured text is kept once by its digest, taken when this data lacks it.
+  research_evidence: 'owned',
+  research_evidence_units: 'owned',
+  research_evidence_materials: 'owned',
   // House rows a Book's records reference: taken when this store lacks them. The 方案 is the one every AI7 carries, fixed to
   // its bytes: a Book that enabled it brings it, whole, to data that has not installed it.
   content_objects: 'shared',
+  research_evidence_contents: 'shared',
   workflow_profiles: 'shared',
   service_lifetimes: 'shared',
   native_artifact_installations: 'shared',

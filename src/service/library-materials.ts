@@ -20,6 +20,7 @@ import {
   type LibraryMaterialKind,
   type LibraryMaterialPreviewProjection,
   type LibraryMaterialProjection,
+  type LibraryMaterialProvenance,
   type LibraryMaterialsProjection,
   type LibraryMaterialSourceProjection,
   type MaterialIndexProjection,
@@ -260,6 +261,18 @@ interface StoredMaterial {
   readonly objectKey: string;
   readonly recordedAt: string;
   readonly sha256: string;
+  /** Where an item 保存为来源材料 made came from (Issue #425, S70); absent for every file the editor put in. */
+  readonly provenance?: LibraryMaterialProvenance;
+}
+
+/** An external-evidence provenance exactly as 保存为来源材料 writes it (Issue #425, S70). */
+function isProvenance(value: unknown): value is LibraryMaterialProvenance {
+  const digest = (entry: unknown): boolean => entry === null || (typeof entry === 'string' && DIGEST_PATTERN.test(entry));
+  return isRecord(value) && Object.keys(value).sort().join(',') === 'bookId,capturedAt,contentSha256,evidenceId,kind,pageSha256,runRecordId,snapshotDigest,url' &&
+    value.kind === 'research-evidence' && typeof value.evidenceId === 'string' && UUID_PATTERN.test(value.evidenceId) &&
+    typeof value.bookId === 'string' && typeof value.runRecordId === 'string' && UUID_PATTERN.test(value.runRecordId) &&
+    typeof value.url === 'string' && value.url.startsWith('https://') && typeof value.capturedAt === 'string' &&
+    typeof value.contentSha256 === 'string' && DIGEST_PATTERN.test(value.contentSha256) && digest(value.pageSha256) && digest(value.snapshotDigest);
 }
 
 /** Read the immutable original's row binding without following any recorded source path. */
@@ -278,10 +291,12 @@ export function readLibraryMaterialRecord(row: SqlRow): StoredMaterial {
     Number.isSafeInteger(record.source.bytes) && Number(record.source.bytes) > 0 &&
     record.objectKey === posix.join('sha256', objectDigest.slice(0, 2), `${objectDigest}${OBJECT_EXTENSIONS[format as LibraryMaterialFormat]}`),
   'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
+  requireLibrary(record.provenance === undefined || isProvenance(record.provenance), 'LIBRARY_MATERIAL_RECORD_INVALID', '资料库的记录已损坏。');
   return {
     materialId: String(row.material_id), title: record.title, kind: record.kind as LibraryMaterialKind,
     source: record.source as unknown as LibraryMaterialSourceProjection, objectKey: record.objectKey,
     recordedAt: String(row.recorded_at), sha256: String(row.sha256),
+    ...(record.provenance === undefined ? {} : { provenance: record.provenance as unknown as LibraryMaterialProvenance }),
   };
 }
 
@@ -621,7 +636,8 @@ export class LibraryMaterialLedger {
    * 放入资料库's second half, inside the caller's transaction: the arrival record, with the title and kind the editor gave it.
    * No attribution and no eligibility come with it — both are the editor's to decide next.
    */
-  record(kept: { preview: Preview; objectKey: string }, title: string, kind: LibraryMaterialKind): string {
+  record(kept: { preview: Preview; objectKey: string }, title: string, kind: LibraryMaterialKind, provenance?: LibraryMaterialProvenance): string {
+    requireLibrary(provenance === undefined || isProvenance(provenance), 'LIBRARY_MATERIAL_PROVENANCE_INVALID', '来源材料的出处无效。');
     requireLibrary(LIBRARY_MATERIAL_KINDS.includes(kind), 'LIBRARY_MATERIAL_KIND_INVALID', '请选择这份资料是图书、论文、资料还是网页。');
     const named = libraryMaterialTitle(title);
     requireLibrary(this.#previews.get(kept.preview.previewId) === kept.preview, 'LIBRARY_MATERIAL_PREVIEW_EXPIRED', '这次放入的预览已经失效；请重新选择文件。');
@@ -638,6 +654,7 @@ export class LibraryMaterialLedger {
       objectKey: kept.objectKey,
       actor: LIBRARY_ACTOR,
       recordedAt,
+      ...(provenance === undefined ? {} : { provenance }),
     });
     this.#db.prepare('INSERT INTO library_materials(material_id, object_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?)')
       .run(materialId, kept.preview.source.sha256, recordedAt, record.json, record.digest);
@@ -799,6 +816,7 @@ export class LibraryMaterialLedger {
       reference,
       decisionCount: now.count,
       index: this.#indexOf(this.#original(material)),
+      ...(material.provenance === undefined ? {} : { provenance: material.provenance }),
       decisions: now.recent.map((entry): LibraryMaterialDecisionProjection => ({
         ordinal: entry.ordinal,
         recordedAt: entry.recordedAt,

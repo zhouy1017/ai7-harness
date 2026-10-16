@@ -281,5 +281,32 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
   };
 }
 
+/**
+ * One closed unit's findings as the reducer will record them (Issue #425, S70): every assertion of a finding class whose
+ * quotation Reference Integrity locates exactly once in the block it named, under the identity the finding reduction mints —
+ * so the evidence retained for a unit the moment it settles names the very finding the revision later carries. An assertion
+ * that does not locate is no finding and is never sourced.
+ */
+export function locatedUnitFindings(
+  unit: Pick<CoverageManifestProjection['units'][number], 'overlapBlockIds' | 'blockIds'>,
+  result: FactualReviewUnitResult,
+  blocks: ReadonlyMap<string, Pick<ManifestBlockInput, 'text'>>,
+): Array<{ findingId: string; blockId: string; quote: string; basis: string; category: FactualAssertionCategory }> {
+  const messageBlockIds = factualReviewMessageBlockIds(unit as CoverageManifestProjection['units'][number]);
+  const seen = new Set<string>();
+  const located: Array<{ findingId: string; blockId: string; quote: string; basis: string; category: FactualAssertionCategory }> = [];
+  for (const assertion of result.assertions) {
+    if (!FACTUAL_FINDING_CLASSES.includes(assertion.assertionClass)) continue;
+    const blockId = messageBlockIds[assertion.blockOrdinal - 1];
+    const block = blockId === undefined ? undefined : blocks.get(blockId);
+    if (blockId === undefined || block === undefined || locateQuotation(block.text, assertion.quote).state !== 'verified') continue;
+    const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(assertion.quote) });
+    if (seen.has(findingIdentity)) continue;
+    seen.add(findingIdentity);
+    located.push({ findingId: findingIdentity, blockId, quote: assertion.quote, basis: assertion.basis, category: assertion.category });
+  }
+  return located;
+}
+
 /** The research state a revision must carry while no egress is accepted; the suite pins it. */
 export const FACTUAL_REVIEW_RESEARCH_STATE = FACTUAL_RESEARCH_NOT_AUTHORIZED;

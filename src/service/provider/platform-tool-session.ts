@@ -77,6 +77,11 @@ export class PlatformToolSession implements PlatformToolOwner {
   readonly #admittedToolResults = new Map<string, AdmittedToolResult>();
   readonly #citations = new Set<string>();
   readonly #executedCallIds = new Set<string>();
+  /** What the unit in flight's tools brought back, kept for the External Evidence Retention Procedure (Issue #425, S70). */
+  #unitCaptures: Array<{ readonly tool: PlatformToolName; readonly snapshot: ResearchSnapshot }> = [];
+  #unitSearches = 0;
+  /** Each search answer of this attempt by its digest, so a unit that reuses one keeps the snapshot it read. */
+  readonly #searchSnapshots = new Map<string, ResearchSnapshot>();
 
   constructor(deps: {
     readonly binding: EgressBindingFacts;
@@ -155,10 +160,55 @@ export class PlatformToolSession implements PlatformToolOwner {
 
   /** Start a unit: its breaker is intact and no call is a duplicate yet. Citations persist across the attempt. */
   startUnit(): void {
+    this.#unitCaptures = [];
+    this.#unitSearches = 0;
     this.#breaker.startUnit();
     this.#unitSearchQuery = null;
     this.#unitSearchHasResult = false;
     this.#unitSearchRefused = false;
+  }
+
+  /**
+   * What the unit in flight's tools brought back (Issue #425, S70): every search answer and fetched page it read, in order, as the
+   * Research Snapshots they were answered from, and how many of its searches answered. Read when the unit settles, before
+   * `startUnit` begins the next one.
+   */
+  get unitCaptures(): { readonly searches: ReadonlyArray<ResearchSnapshot>; readonly fetches: ReadonlyArray<ResearchSnapshot>; readonly searchCalls: number } {
+    return {
+      searches: this.#unitCaptures.filter((entry) => entry.tool === 'websearch').map((entry) => entry.snapshot),
+      fetches: this.#unitCaptures.filter((entry) => entry.tool === 'webfetch').map((entry) => entry.snapshot),
+      searchCalls: this.#unitSearches,
+    };
+  }
+
+  /**
+   * One retention fetch (ADR 0079 §3; SRC-013, EGR-003): AI7 fetching a page the model cited, after the unit's turn and outside
+   * the model's tool loop, so the source is retained whole. It is the model's `webfetch` in every other respect — cited first,
+   * decided by the same gate under the attempt's current binding, a single-use ticket, the host open only for it, answered
+   * from the Research Snapshot Cache or sent once under the same test item purpose — but it is not one of the model's round
+   * trips and never enters the model's context. Bounded by the citations: the caller asks once per cited page. A refusal or a
+   * failure is returned, never retried.
+   */
+  async retain(url: string, signal?: AbortSignal): Promise<ResearchSnapshot | { readonly failed: string }> {
+    if (this.#evidenceOnly) return { failed: '此证据项不取回网页。' };
+    const canonical = canonicalPublicUrl(url);
+    if (canonical === null) return { failed: '不是规范的公开 https 地址；未取回。' };
+    this.cite(canonical);
+    const decision = evaluatePublicSourceFetch({ arguments: { tool: 'webfetch', url: canonical } }, this.#binding, this.egressScope, this.#book);
+    if (decision.decision !== 'fetch-public-source') return { failed: decision.detail };
+    try {
+      const settled = await this.#settle(
+        { kind: 'fetch', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: 'webfetch' },
+        {
+          authorize: () => authorizePublicFetch({ ticket: decision.ticket, book: this.#book }),
+          send: (authorized) => sendPublicFetch(authorized, { fetch: this.#fetch, admitHost: this.#admitHost, ...(signal === undefined ? {} : { signal }) }),
+        });
+      if (settled.replayed) this.#book.revoke(decision.ticket);
+      return settled.snapshot ?? { failed: `未能取回该来源（状态 ${settled.status}）；不重试。` };
+    } catch (error) {
+      const code = error !== null && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'PLATFORM_TOOL_FAILED';
+      return { failed: `取回失败（${code}）；不重试。` };
+    }
   }
 
   /** Record a URL the model cited; only a cited or search-returned URL may be fetched (ADR 0079 §4.3). */
@@ -258,6 +308,8 @@ export class PlatformToolSession implements PlatformToolOwner {
       if (reused !== undefined) {
         if (this.#breaker.observe(digest) === 'tripped') return refusal('联网核查未完成：本单元的工具往返已达到熔断上限。');
         this.#unitSearchHasResult = reused.sourceUrl !== null && reused.text !== '[]';
+        const kept = this.#searchSnapshots.get(digest);
+        if (kept !== undefined) { this.#unitCaptures.push({ tool: 'websearch', snapshot: kept }); this.#unitSearches += 1; }
         return reused;
       }
     }
@@ -285,6 +337,9 @@ export class PlatformToolSession implements PlatformToolOwner {
         const result = { text: settled.snapshot.text, sourceUrl: settled.snapshot.url };
         this.#unitSearchHasResult = result.text !== '[]';
         this.#runResults.set(digest, result);
+        this.#searchSnapshots.set(digest, settled.snapshot);
+        this.#unitCaptures.push({ tool: 'websearch', snapshot: settled.snapshot });
+        this.#unitSearches += 1;
         return result;
       }
       const decision = evaluatePublicSourceFetch({ arguments: args }, this.#binding, scope, this.#book);
@@ -299,6 +354,7 @@ export class PlatformToolSession implements PlatformToolOwner {
       if (settled.snapshot === null) return refusal(`未能取回该来源（状态 ${settled.status}）；请改用下一条引用。`);
       const result = { text: settled.snapshot.text, sourceUrl: settled.snapshot.url };
       this.#runResults.set(digest, result);
+      this.#unitCaptures.push({ tool: 'webfetch', snapshot: settled.snapshot });
       return result;
     } catch (error) {
       const code = error !== null && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'PLATFORM_TOOL_FAILED';

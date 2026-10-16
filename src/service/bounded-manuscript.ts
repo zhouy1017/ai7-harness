@@ -130,7 +130,7 @@ import {
   EVALUATION_PROFILE_SCHEMA_VERSION,
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
-  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION,
+  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
@@ -225,6 +225,7 @@ import { WRITING_TASK_FOREIGN_KEYS, WRITING_TASK_SCHEMA_SQL, WRITING_TASK_TRIGGE
 import { MATERIAL_INDEX_FOREIGN_KEYS, MATERIAL_INDEX_SCHEMA_SQL, MATERIAL_INDEX_TRIGGER_SQL } from './material-index.js';
 import { EVALUATION_PROFILE_SCHEMA_SQL, EVALUATION_PROFILE_TRIGGER_SQL, EVALUATION_PROFILE_FOREIGN_KEYS } from './evaluation-profiles.js';
 import { IMPORTED_EXEMPLAR_SCHEMA_SQL, IMPORTED_EXEMPLAR_TRIGGER_SQL, IMPORTED_EXEMPLAR_FOREIGN_KEYS } from './imported-exemplars.js';
+import { RESEARCH_EVIDENCE_FOREIGN_KEYS, RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from './research-evidence-schema.js';
 import { OUTCOME_RESOLUTION_FOREIGN_KEYS, OUTCOME_RESOLUTION_SCHEMA_SQL, OUTCOME_RESOLUTION_TRIGGER_SQL } from './analysis/outcome-resolutions.js';
 import {
   BACKGROUND_ANALYSIS_ENROLLMENT_FOREIGN_KEYS,
@@ -2010,6 +2011,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...MATERIAL_INDEX_FOREIGN_KEYS,
   ...OUTCOME_RESOLUTION_FOREIGN_KEYS,
   ...IMPORTED_EXEMPLAR_FOREIGN_KEYS,
+  ...RESEARCH_EVIDENCE_FOREIGN_KEYS,
   ...EVALUATION_PROFILE_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
@@ -2707,6 +2709,8 @@ function requireManuscriptReimportTargetSchema(
   includeOutcomeResolutionTables ||= committed(OUTCOME_RESOLUTION_SCHEMA_SQL);
   const includeEvaluationProfileTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= EVALUATION_PROFILE_SCHEMA_VERSION || committed(EVALUATION_PROFILE_SCHEMA_SQL);
   const includeImportedExemplarTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= IMPORTED_EXEMPLAR_SCHEMA_VERSION || committed(IMPORTED_EXEMPLAR_SCHEMA_SQL);
+  // Revision 75 (Issue #425, S70): the retained external evidence of research Runs.
+  const includeResearchEvidenceTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= RESEARCH_EVIDENCE_SCHEMA_VERSION || committed(RESEARCH_EVIDENCE_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
@@ -2862,6 +2866,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeOutcomeResolutionTables ? OUTCOME_RESOLUTION_SCHEMA_SQL : {}),
       ...(includeImportedExemplarTables ? IMPORTED_EXEMPLAR_SCHEMA_SQL : {}),
       ...(includeEvaluationProfileTables ? EVALUATION_PROFILE_SCHEMA_SQL : {}),
+      ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2920,6 +2925,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeOutcomeResolutionTables ? OUTCOME_RESOLUTION_TRIGGER_SQL : {}),
       ...(includeImportedExemplarTables ? IMPORTED_EXEMPLAR_TRIGGER_SQL : {}),
       ...(includeEvaluationProfileTables ? EVALUATION_PROFILE_TRIGGER_SQL : {}),
+      ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5838,7 +5844,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5889,7 +5895,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(

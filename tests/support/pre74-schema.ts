@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, WEB_TOOLS_PLAN_RECORDS_SQL } from '../../src/service/task-authorization.js';
+import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
 
 /** Plant an actual predecessor, including revision 74's newly widened component CHECK and house settings. */
 export function execPre74Fixture(db: DatabaseSync, sql: string): void {
@@ -21,4 +22,10 @@ export function execPre74Fixture(db: DatabaseSync, sql: string): void {
 /** All pre-existing schema rows remain exact except revision 74's explicitly widened component CHECK. */
 export function expectedSchema74<T extends { name: string; sql: unknown }>(rows: readonly T[]): T[] {
   return rows.map((row) => row.name === 'analysis_plan_records' ? { ...row, sql: WEB_TOOLS_PLAN_RECORDS_SQL } : row);
+}
+
+/** Drop revision 75's research evidence relations and triggers (Issue #425), so a planted store is the predecessor it claims. */
+export function dropResearchEvidenceRelations(db: DatabaseSync): void {
+  for (const trigger of Object.keys(RESEARCH_EVIDENCE_TRIGGER_SQL)) db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
+  for (const table of Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE IF EXISTS ${table}`);
 }

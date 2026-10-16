@@ -1,5 +1,8 @@
 import { PlatformToolSession, platformToolModelProfile } from '../provider/platform-tool-session.js';
 import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
+import { researchSnapshotDigest, retainUnitEvidence, retainedPageOf, searchHitsOf, type RetainedPage, type RetainedUnit } from './factual-review-evidence.js';
+import { locatedUnitFindings } from './factual-review-reducers.js';
+import { FACTUAL_REVIEW_KIND, type FactualReviewUnitResult } from './factual-review-contract.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
 import { admitTicketHost } from '../../shared/network-denial.js';
@@ -198,6 +201,11 @@ export interface ExecutionOwnerDependencies {
   readonly readGuard?: ((runRecordId: string) => string | null) | null;
   /** Re-check the consuming ledger's frozen materials before admission and every further model step. */
   readonly materialGuard?: ((runRecordId: string, ledger: BaselineAnalysisStore) => MaterialGuardRefusal | null) | null;
+  /**
+   * Where a research unit's retained external evidence is kept the moment the unit settles (Issue #425, S70; SRC-013): the
+   * store's research evidence ledger. Absent, nothing is retained.
+   */
+  readonly researchEvidence?: ((input: { bookId: string; runRecordId: string; unitOrdinal: number; backendId: string | null; unit: RetainedUnit }) => void) | null;
 }
 
 /**
@@ -1875,6 +1883,54 @@ export class BaselineAnalysisExecutionOwner {
         return 'settled';
       };
       /**
+       * The External Evidence Retention Procedure (Issue #425, S70; SRC-013, EGR-003): the moment a research unit of 事实核查
+       * settles, what its tools brought back is retained within the authorizing Task — each cited page the model read, else one
+       * retention fetch of it while the Run may still send, else the excerpt its search returned — aligned to the citations,
+       * with the unit's search outcome. A cancellation, a pause, AI7 stopping or a reached ceiling sends nothing more: what was
+       * already captured is kept. A failure to keep it never ends the Run; the unit simply has no retained evidence.
+       */
+      const retainUnit = async (unit: CoverageManifestUnitProjection): Promise<void> => {
+        const sink = this.#deps.researchEvidence;
+        const session = platformSession;
+        if (session === null || sink === undefined || sink === null || (definition.platformToolBase ?? definition).kind !== FACTUAL_REVIEW_KIND) return;
+        const outcome = outcomes.find((entry) => entry.unitOrdinal === unit.ordinal);
+        if (outcome === undefined) return;
+        try {
+          const captures = session.unitCaptures;
+          const pages = new Map<string, RetainedPage>();
+          for (const snapshot of captures.fetches) {
+            const page = retainedPageOf(snapshot);
+            if (page !== null) pages.set(page.url, page);
+          }
+          const lastSearch = captures.searches.at(-1);
+          const retained = await retainUnitEvidence({
+            findings: outcome.state === 'closed' ? locatedUnitFindings(unit, outcome.result as FactualReviewUnitResult, blocksById) : [],
+            sources: [...captures.searches.flatMap(searchHitsOf), ...captures.fetches.map((snapshot) => ({ url: snapshot.url, title: null, snippet: null, via: 'fetch' as const }))],
+            pages,
+            searchSnapshotDigest: lastSearch === undefined ? null : researchSnapshotDigest(lastSearch),
+            searchState: session.breakerState === 'tripped' || session.unitDisclosure === '联网核查未完成' ? 'incomplete' : captures.searchCalls > 0 ? 'completed' : 'not-searched',
+            searchCalls: captures.searchCalls,
+            fetchAllowed: !active.cancelRequested && !active.interrupted && !active.pauseRequested && liveInterruption === null && ceilingState() !== 'reached',
+            fetch: async (url) => {
+              const got = await session.retain(url);
+              return 'failed' in got ? got : retainedPageOf(got) ?? { failed: '取回的页面没有可读的正文。' };
+            },
+            // No Provider Processing policy names a translation step yet: the rule reads its scope alone, and 来源译文 refuses.
+            rule: { operationalScope: bindingFacts?.policy.operationalScope ?? 'unbound' },
+            translator: null,
+            now: () => new Date(),
+          });
+          sink({ bookId: facts.manifest.manuscript.bookId, runRecordId: facts.runRecordId, unitOrdinal: unit.ordinal, backendId: facts.webToolsBackend?.backendId ?? null, unit: retained });
+        } catch {
+          // Nothing retained for this unit; its findings read 未外部复核 exactly as they would without the research path.
+        }
+      };
+      const settleAndRetain = async (input: Parameters<typeof settleFromTurn>[0]): Promise<ReturnType<typeof settleFromTurn>> => {
+        const settled = settleFromTurn(input);
+        if (settled === 'settled') await retainUnit(input.unit);
+        return settled;
+      };
+      /**
        * The `safe-retry` Plan Adaptation: recorded before the retry is dispatched, inside the unchanged envelope and Execution
        * Binding; the retry repeats the byte-identical unit message once. The Run makes it on its own, or — moved into 先问你
        * (Issue #422, S76d) — once the editor answered 再试一次, and then the record names that answer. The record names the
@@ -1968,7 +2024,7 @@ export class BaselineAnalysisExecutionOwner {
             const startedAt = Date.now();
             const attempt = await submitAttempt(w.unit, w.attempts + 1, 'dispatched', null,
               buildClarificationAnswerMessage(unitMessages.get(w.unit.ordinal)!, entry));
-            const settled = settleFromTurn({ unit: w.unit, requestDigest: w.requestDigest, attempt, attempts: w.attempts + 1,
+            const settled = await settleAndRetain({ unit: w.unit, requestDigest: w.requestDigest, attempt, attempts: w.attempts + 1,
               usage: addUsage(w.usage, attempt.unitUsage), wallMs: w.wallMs + Date.now() - startedAt, firstFailure: null, withheld: null });
             if (settled === 'end' || settled === 'stop') return 'end';
             continue;
@@ -2022,7 +2078,7 @@ export class BaselineAnalysisExecutionOwner {
             { payloadDigest: w.firstPayloadDigest, unitMessageDigest: w.firstUnitMessageDigest }, entry.answer!.answerId);
           // AI7 stopping under the retry cut it off: the unit is not settled, and 续行 applies the answer again.
           if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) return 'stopped';
-          const settled = settleFromTurn({
+          const settled = await settleAndRetain({
             unit: w.unit, requestDigest: w.requestDigest, attempt, attempts: w.attempts + 1, usage: addUsage(w.usage, attempt.unitUsage),
             wallMs: w.wallMs + (Date.now() - startedAtMs), firstFailure: { reason: w.failure.reason, code: w.failure.code }, withheld: null,
           });
@@ -2137,7 +2193,7 @@ export class BaselineAnalysisExecutionOwner {
         }
         // A range the account limit refused before 续行 carries that attempt in its row as well.
         const prior = refused !== null && refused.unitOrdinal === unit.ordinal ? refused : null;
-        const settled = settleFromTurn({
+        const settled = await settleAndRetain({
           unit, requestDigest, attempt,
           attempts: attempts + (prior?.attempts ?? 0),
           usage: prior === null ? unitUsageTotal : addUsage(unitUsageTotal, prior.usage),

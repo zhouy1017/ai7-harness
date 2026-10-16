@@ -752,6 +752,10 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
     case 'addLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: await store.addLibraryMaterial(request.input) };
+    case 'inspectResearchEvidence':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectResearchEvidence(request.input) };
+    case 'saveEvidenceAsMaterial':
+      return { id: request.id, ok: true, op: request.op, result: await store.saveEvidenceAsMaterial(request.input) };
     case 'decideLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
     case 'inspectLearningMaterials':
@@ -1932,6 +1936,8 @@ async function run(): Promise<void> {
       // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
       readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
       materialGuard: (runRecordId, ledger) => guardedStore.materialGuard(runRecordId, ledger),
+      // External Evidence Retention (Issue #425, S70): each research unit's retained sources, kept as the unit settles.
+      researchEvidence: (input) => { guardedStore.recordResearchEvidence(input); },
     });
     // Startup reconciliation (Issue #422, S76b; CONT-014): a baseline Run this service's predecessor left under way has
     // nothing running it now. It settles 已暂停 or 任务已中断 · 可续行 before any request is read; one left cancelling is

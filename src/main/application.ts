@@ -3642,6 +3642,26 @@ function registerRendererHandlers(
       return service.call('inspectLibraryMaterial', { materialId: input.materialId });
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectResearchEvidence, (event, input: { bookId: string; after?: number | null; staleAfterDays?: number | null }) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectResearchEvidence', { bookId: input.bookId, after: input.after ?? null, staleAfterDays: input.staleAfterDays ?? null });
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.saveEvidenceAsMaterial,
+    (event, input: { bookId: string; evidenceId: string; title?: string | null }) =>
+      envelope(async () => {
+        requireSender(event);
+        requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+        return serializeEffect(async () => {
+          requireAuthority();
+          return service.call('saveEvidenceAsMaterial', { bookId: input.bookId, evidenceId: input.evidenceId, title: input.title ?? null });
+        });
+      }),
+  );
   ipcMain.handle(IPC_CHANNELS.readLibraryDecisionReason, (event, input: ServiceOperationMap['readLibraryDecisionReason']['input']) =>
     envelope(async () => {
       requireSender(event);
