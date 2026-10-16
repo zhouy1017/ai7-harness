@@ -22,6 +22,7 @@ import type { DialogueProjection, DialogueSelectionInput } from '../../src/share
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
 import { DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from '../../src/service/dialogue/contract.js';
+import { dialogueReasoningLine } from '../../src/renderer/dialogue-labels.js';
 
 // Service-integration suite (L2) for 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016) over the
 // real store, the real PrimaryAgentHarness composition and the AI7 local deterministic adapter: an answer streamed by
@@ -320,7 +321,21 @@ describe('就这段提问… over the real store and harness', () => {
       // Only the latest attempt is the answer the editor sees.
       expect(refusal(() => promote(turn.attemptId))).toBe('DIALOGUE_STALE');
       const workingBefore = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest;
+      const ledgerTruth = (): string => {
+        const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+        try {
+          const records = Object.keys(DIALOGUE_SCHEMA_SQL).map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+          const logRoot = join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY);
+          const logs = readdirSync(logRoot).filter((name) => name.endsWith('.jsonl')).sort().map((name) => readFileSync(join(logRoot, name), 'utf8'));
+          expect(logs.length).toBeGreaterThan(0);
+          return JSON.stringify({ records, logs });
+        } finally { db.close(); }
+      };
+      const historyBefore = ledgerTruth();
+      for (const line of [dialogueReasoningLine(0), dialogueReasoningLine(1)]) expect(historyBefore.includes(line)).toBe(false);
       const draft = promote(again.attemptId);
+      expect(sha256Hex(ledgerTruth())).toBe(sha256Hex(historyBefore));
+      for (const line of [dialogueReasoningLine(0), dialogueReasoningLine(1)]) expect(JSON.stringify(draft).includes(line)).toBe(false);
       expect(draft).toMatchObject({
         bookId: book.bookId, origin: 'dialogue-answer', promotion: null,
         version: {

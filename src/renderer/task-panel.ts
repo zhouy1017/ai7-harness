@@ -588,6 +588,8 @@ export interface TaskComposerSurface {
   openDraft(bookId: string, draftId: string): void;
   /** What the composer holds (TASK-006): its Book, its draft, and whether anything on it is unsaved; `null` when empty. */
   held(): null | { readonly bookId: string; readonly bookTitle: string; readonly draftId: string | null; readonly unsaved: boolean; readonly promoted: boolean };
+  /** Keep these unsaved fields on their Book while another composer is opened. */
+  park(): () => void;
   /** Nothing is read until the composer is shown again; what it holds stays. */
   stop(): void;
 }
@@ -615,9 +617,9 @@ interface ComposerState {
   channel: string;
 }
 
-/** The lowercase hex SHA-256 of the trimmed goal, for the recommendation slot's `data-goal-digest` (#423 rev 6). */
+/** The lowercase hex SHA-256 of the current goal text, for the recommendation slot's `data-goal-digest` (#423 rev 6). */
 async function goalDigest(goal: string): Promise<string> {
-  const bytes = new TextEncoder().encode(goal.trim());
+  const bytes = new TextEncoder().encode(goal);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
@@ -733,11 +735,12 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     // 要处理什么 (TASK-003, 007): the selected words, or the whole manuscript — chosen, never defaulted to wider.
     const target = el('fieldset', 'task-composer-target');
     target.append(el('legend', undefined, TASK_COMPOSER_TARGET_LEGEND));
+    const targetName = uid('target');
     for (const value of ['ranges', 'book'] as const) {
       const label = el('label', 'task-composer-choice');
       const input = el('input');
       input.type = 'radio';
-      input.name = uid('target');
+      input.name = targetName;
       input.value = value;
       input.dataset['taskComposerField'] = `target-${value}`;
       input.checked = current.target === value;
@@ -776,7 +779,6 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
         remove.addEventListener('click', () => {
           if (state === null) return;
           state.ranges = state.ranges.filter((entry) => entry.key !== range.key);
-          if (state.ranges.length === 0) state.target = 'book';
           state.dirty = true;
           render();
         });
@@ -1010,7 +1012,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       row.append(button(TASK_COMPOSER_ACTIONS.copy, 'copy', 'secondary', () => options.openNew({
         bookId: current.bookId,
         bookTitle: current.bookTitle,
-        origin: 'composer-book',
+        origin: current.target === 'ranges' ? 'composer-selection' : 'composer-book',
         manuscript: current.manuscript,
         ranges: [],
         goal: current.goal,
@@ -1026,7 +1028,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
   function syncActions(): void {
     if (state === null) return;
     const current = state;
-    const empty = current.goal.trim().length === 0;
+    const empty = current.goal.trim().length === 0 || (current.target === 'ranges' && current.ranges.length === 0);
     for (const node of element.querySelectorAll<HTMLButtonElement>('.task-composer-actions button, .task-composer-add-range, [data-task-composer-action="remove-range"]')) {
       const action = node.dataset['taskComposerAction'];
       node.disabled = working ||
@@ -1088,6 +1090,10 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       return;
     }
     const current = state;
+    if (current.target === 'ranges' && current.ranges.length === 0) {
+      problem(TASK_COMPOSER_NO_RANGES);
+      return;
+    }
     if (current.goal.trim().length === 0) {
       problem(TASK_COMPOSER_STATUS.goalEmpty);
       return;
@@ -1121,6 +1127,10 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       return;
     }
     const current = state;
+    if (current.target === 'ranges' && current.ranges.length === 0) {
+      problem(TASK_COMPOSER_NO_RANGES);
+      return;
+    }
     if (current.goal.trim().length === 0) {
       problem(TASK_COMPOSER_STATUS.goalEmpty);
       return;
@@ -1148,8 +1158,9 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
 
   /** 准备计划 (decision 1): the existing preparation of the chosen kind, as one job; its plan opens, where it is started. */
   async function promote(): Promise<void> {
-    if (state === null || working || mode() !== 'draft') return;
+    if (state === null || working || composing || mode() !== 'draft') return;
     const current = state;
+    const mine = ticket;
     if (current.dirty) {
       problem(TASK_COMPOSER_PROMOTE_SAVE_FIRST);
       return;
@@ -1183,7 +1194,8 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       const draft = read.drafts[0];
       if (draft === undefined) throw new Error(TASK_COMPOSER_STATUS.promoteFailed);
       options.onChanged(draft.bookId);
-      if (state === current) apply(draft, current.manuscript, current.pin?.title ?? null);
+      if (state !== current || mine !== ticket) return;
+      apply(draft, current.manuscript, current.pin?.title ?? null);
       if (draft.promotion === null) throw new Error(TASK_COMPOSER_STATUS.promoteFailed);
       options.setStatus(TASK_COMPOSER_STATUS.prepared, 'success');
       options.openPlan(draft.bookId, draft.promotion.taskKind, draft.promotion.planRef);
@@ -1238,7 +1250,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
         versionId: null,
         goal: seed.goal ?? '',
         outcomeClass: seed.outcomeClass ?? null,
-        target: seed.ranges.length > 0 ? 'ranges' : 'book',
+        target: seed.origin === 'composer-selection' || seed.ranges.length > 0 ? 'ranges' : 'book',
         ranges: [...seed.ranges],
         pin: null,
         manuscript: seed.manuscript,
@@ -1298,6 +1310,18 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
         draftId: state.draftId,
         unsaved: state.draftId === null ? state.goal.trim().length > 0 || state.ranges.length > 0 : state.dirty,
         promoted: state.promotion !== null,
+      };
+    },
+    park() {
+      const held = state;
+      ticket += 1;
+      return () => {
+        ticket += 1;
+        state = held;
+        working = false;
+        composing = false;
+        freshSlot();
+        render();
       };
     },
     stop() {

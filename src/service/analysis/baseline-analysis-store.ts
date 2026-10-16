@@ -445,6 +445,7 @@ interface PreparationWork {
   background: boolean;
   /** The dispatcher's Task Intent, not yet written: it is written only as the plan freezes (#713 re-review, P2-1). */
   pendingIntent: PendingIntent | null;
+  intentDraft?: { promoted(taskIntentId: string): void };
 }
 
 /** A Task Intent as `prepare` decided it, before it is written. */
@@ -461,6 +462,7 @@ interface PendingIntent {
   readonly selectedRange: BaselineAnalysisSelectedRange | null;
   /** The Task Intent Draft version 准备计划 promoted into this Task (Issue #423, slice 7a); `null` for every other Task. */
   readonly intentDraftVersionId: string | null;
+  readonly intentDraftParagraphs: number | null;
 }
 
 /** The tokens ceiling a 后台分析登记 holds each Run it starts to: the Book's share of the Enrollment's ceiling (Issue #864). */
@@ -494,6 +496,7 @@ interface IntentFacts {
   readonly backgroundRunBudgetCeiling: BackgroundRunBudgetCeiling | null;
   /** The Task Intent Draft version this Task was promoted from (Issue #423, slice 7a): its goal is that draft's sentence. */
   readonly intentDraftVersionId: string | null;
+  readonly intentDraftParagraphs: number | null;
 }
 
 /**
@@ -597,7 +600,7 @@ export type BaselineAnalysisPrepareInput =
      * bounded sentence — `goal` — and whose record names the draft version; `promoted` records the promotion in the very write
      * that makes the Task Intent, so a refused promotion leaves no Task behind. Never with a redo, a reconfirmation or a dispatcher.
      */
-    intentDraft?: { versionId: string; promoted(taskIntentId: string): void };
+    intentDraft?: { versionId: string; paragraphs?: number; promoted(taskIntentId: string): void };
   }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
@@ -2467,6 +2470,8 @@ export class BaselineAnalysisStore {
       preparedByEnrollmentVersionId: record.preparedByEnrollmentVersionId === undefined ? null : record.preparedByEnrollmentVersionId as string,
       backgroundRunBudgetCeiling: record.backgroundRunBudgetCeiling === undefined ? null : record.backgroundRunBudgetCeiling as BackgroundRunBudgetCeiling,
       intentDraftVersionId,
+      intentDraftParagraphs: isRecord(record) && Number.isSafeInteger(record.intentDraftParagraphs) && (record.intentDraftParagraphs as number) > 0
+        ? record.intentDraftParagraphs as number : null,
     };
   }
 
@@ -3338,7 +3343,16 @@ export class BaselineAnalysisStore {
       }
       return { done: true, workId: null, completed: 0, total: 0, projection: null };
     }
-    if (input.phase === 'advance') return this.#advance(input.workId);
+    if (input.phase === 'advance') {
+      try { return this.#advance(input.workId); } catch (error) {
+        const work = this.#work.get(input.workId);
+        if (work?.intentDraft !== undefined) {
+          this.#checkpointOwner.cancelManuscriptCheckpointWork(work.checkpointWorkId);
+          this.#work.delete(input.workId);
+        }
+        throw error;
+      }
+    }
     // Ordinary production without a configured route refuses before anything is prepared, naming both routes (Issue #811).
     requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
     if (this.#launch.live !== null) {
@@ -3482,9 +3496,8 @@ export class BaselineAnalysisStore {
     const reusable = sameTask && sameRange(latestIntent.selectedRange, selectedRange);
     const taskIntentId = reusable ? latestIntent.taskIntentId : randomUUID();
     const initial = this.#isInitial(mode);
-    // What the Task Intent records, written as it is made — or, for the 后台分析登记 dispatcher's, only in the transaction that
-    // freezes its plan (the Commander's ruling on #713, re-review P2-1): a background preparation that stops leaves no Task Intent
-    // at all, so it never stands as the Book's latest Task in front of the editor's.
+    // Background preparations and draft promotions write their intent only when the plan freezes. A stopped preparation leaves
+    // no orphan intent, and a failed draft promotion leaves its draft editable. Ordinary preparation retains its existing path.
     const pendingIntent: PendingIntent | null = reusable ? null : {
       taskIntentId, bookId: input.bookId, goal: input.goal, mode, redoOf,
       preparedByEnrollmentVersionId: background?.enrollmentVersionId ?? null,
@@ -3492,13 +3505,11 @@ export class BaselineAnalysisStore {
       predecessor: initial ? null : { revisionId: latest!.revisionId, digest: latest!.digest },
       selectedRange,
       intentDraftVersionId: intentDraft?.versionId ?? null,
+      intentDraftParagraphs: intentDraft?.paragraphs ?? null,
     };
-    if (pendingIntent !== null && background === null) {
-      transact(this.#db, () => {
-        this.#insertIntent(pendingIntent);
-        intentDraft?.promoted(pendingIntent.taskIntentId);
-      });
-    }
+    // A draft remains editable if saving its Task Input or plan fails. Its intent and promotion commit only with the plan.
+    const deferIntent = background !== null || intentDraft !== null;
+    if (pendingIntent !== null && !deferIntent) this.#insertIntent(pendingIntent);
     const active = Array.from(this.#work.values()).find((work) => work.taskIntentId === taskIntentId);
     if (active !== undefined) return { done: false, workId: active.workId, completed: 0, total: active.total, projection: null };
     const checkpoint = this.#checkpointOwner.createManuscriptCheckpointWork(binding.manuscriptId, binding.branchId, TASK_INPUT_CHECKPOINT_PURPOSE,
@@ -3506,15 +3517,17 @@ export class BaselineAnalysisStore {
     if (checkpoint.workId === null) {
       requireAnalysis(checkpoint.checkpoint !== null, 'ANALYSIS_CHECKPOINT_INVALID', '任务输入固定点缺失。');
       transact(this.#db, () => {
-        if (pendingIntent !== null && background !== null) this.#insertIntent(pendingIntent);
+        if (pendingIntent !== null && deferIntent) this.#insertIntent(pendingIntent);
         this.#persistPrepared(taskIntentId, checkpoint.checkpoint!, TASK_INPUT_CHECKPOINT_PURPOSE, input.launchPolicy);
+        intentDraft?.promoted(taskIntentId);
       });
       return { done: true, workId: null, completed: 1, total: 1, projection: this.inspect(input.bookId) };
     }
     const workId = randomUUID();
     this.#work.set(workId, {
       workId, taskIntentId, bookId: input.bookId, checkpointWorkId: checkpoint.workId, launchPolicy: structuredClone(input.launchPolicy),
-      total: checkpoint.total, background: background !== null, pendingIntent: background === null ? null : pendingIntent,
+      total: checkpoint.total, background: background !== null, pendingIntent: deferIntent ? pendingIntent : null,
+      ...(intentDraft === null ? {} : { intentDraft }),
     });
     return { done: false, workId, completed: 0, total: checkpoint.total, projection: null };
   }
@@ -3534,6 +3547,7 @@ export class BaselineAnalysisStore {
       ...(intent.preparedByEnrollmentVersionId === null ? {} : { preparedByEnrollmentVersionId: intent.preparedByEnrollmentVersionId }),
       ...(intent.backgroundRunBudgetCeiling === null ? {} : { backgroundRunBudgetCeiling: { ...intent.backgroundRunBudgetCeiling } }),
       ...(intent.intentDraftVersionId === null ? {} : { intentDraftVersionId: intent.intentDraftVersionId }),
+      ...(intent.intentDraftParagraphs === null ? {} : { intentDraftParagraphs: intent.intentDraftParagraphs }),
     };
     // A whole first Task's record is the base alone, as it has been since revision 15. Every Task that
     // carries a plan also states its mode, its predecessor and its range — and a range-bound first
@@ -3566,6 +3580,7 @@ export class BaselineAnalysisStore {
         // The dispatcher's Task Intent is written here, in the transaction that freezes its plan, and nowhere earlier.
         if (work.pendingIntent !== null) this.#insertIntent(work.pendingIntent);
         this.#persistPrepared(work.taskIntentId, checkpoint, purpose, work.launchPolicy);
+        work.intentDraft?.promoted(work.taskIntentId);
       },
     );
     this.#work.delete(workId);
@@ -3685,6 +3700,12 @@ export class BaselineAnalysisStore {
       taskInputRevision: { revisionId: checkpoint.revisionId, revisionDigest: checkpoint.revisionDigest },
       readableScopeKinds: ['current-book-primary-manuscript-revision'],
       sourceVersionEvidence: { sourceVersionId: facts.sourceVersionId, readable: false },
+      ...(intent.intentDraftParagraphs === null ? {} : {
+        draftRangeExpansion: {
+          paragraphs: intent.intentDraftParagraphs,
+          statement: `所选文字已扩展为所在的 ${intent.intentDraftParagraphs} 个完整段落；任务按包含这些段落的阅读范围处理。`,
+        },
+      }),
     };
     // An update Run admits only the recomputed units' messages; a reused unit never forms a model-bound
     // payload, and neither does a unit a scope plan leaves unreviewed — which the scope says in so many

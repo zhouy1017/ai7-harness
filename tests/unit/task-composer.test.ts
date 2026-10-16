@@ -130,6 +130,38 @@ const SEED_SELECTION = (ranges: ComposerRange[]): TaskComposerSeed => ({
 });
 
 describe('the Context-bound Task Composer', () => {
+  it('returns to unsaved fields on their original Book after another composer has opened', async () => {
+    const { composer, field, type } = harness();
+    composer.openNew(SEED_SELECTION([range('blk_000000000000000000000001', '所选的字')]));
+    await settle();
+    type('尚未保存的编辑要求');
+    const resume = composer.park();
+    composer.openNew({ bookId: 'b0000000-0000-4000-8000-000000000002', bookTitle: '另一本', origin: 'composer-book', manuscript: null, ranges: [] });
+    await settle();
+    resume();
+    expect(composer.held()).toMatchObject({ bookId: BOOK, unsaved: true });
+    expect(field('goal')!.value).toBe('尚未保存的编辑要求');
+    expect(field('target-ranges')!.checked).toBe(true);
+  });
+
+  it('never reopens a backgrounded composer when its promotion finishes', async () => {
+    let complete!: () => void;
+    const { composer, action, field, type, opened } = harness({ awaitServiceJob: (job) => new Promise((resolveJob) => { complete = () => resolveJob(job); }) });
+    composer.openNew({ bookId: BOOK, bookTitle: '任务撰写', origin: 'composer-book', manuscript: null, ranges: [] });
+    await settle();
+    type('准备稿件分析');
+    field('outcome-analysis')!.checked = true;
+    field('outcome-analysis')!.dispatchEvent({ type: 'change' });
+    action('prepare')!.click();
+    await settle();
+    action('promote')!.click();
+    await settle();
+    composer.stop();
+    complete();
+    await settle();
+    expect(opened).toEqual([]);
+  });
+
   it('is transient: nothing shows until it is opened, and 取消 leaves nothing behind and saves nothing', async () => {
     const { composer, root, action, closed, saved } = harness();
     expect(root.dataset['taskComposer']).toBe('closed');
@@ -235,10 +267,12 @@ describe('the Context-bound Task Composer', () => {
     action('add-range')!.click();
     await settle();
     expect(root.querySelector('.task-composer-problem')!.textContent).toBe(answer);
-    // Removing the last one leaves the whole Book, said as the target, never the words silently.
+    // Removing the last pin never grants whole-Book scope; another range or an explicit whole-Book choice is required.
     action('remove-range')!.click();
     expect(root.querySelectorAll('li.task-composer-range')).toHaveLength(0);
-    expect(field('target-book')!.checked).toBe(true);
+    expect(field('target-book')!.checked).toBe(false);
+    expect(field('target-ranges')!.checked).toBe(true);
+    expect(action('prepare')!.disabled).toBe(true);
   });
 
   it('keeps 7c\'s recommendation slot element, follows the draft in its attributes only, and keeps the 工序 its event picks', async () => {
@@ -246,6 +280,7 @@ describe('the Context-bound Task Composer', () => {
     composer.openNew(SEED_SELECTION([range('blk_000000000000000000000001', '所选的字')]));
     await settle();
     const slot = root.querySelector('[data-procedure-recommendation]')!;
+    expect(slot.children).toHaveLength(0);
     const child = miniDocument.createElement('p');
     slot.append(child);
     type('统一这段的人名');
@@ -253,6 +288,9 @@ describe('the Context-bound Task Composer', () => {
     expect(slot.dataset['scopeKind']).toBe('selection');
     expect(slot.dataset['taskKind']).toBe('');
     expect(slot.dataset['goalDigest']).toBe(createHash('sha256').update('统一这段的人名').digest('hex'));
+    type(' 统一这段的人名 ');
+    await settle();
+    expect(slot.dataset['goalDigest']).toBe(createHash('sha256').update(' 统一这段的人名 ').digest('hex'));
     const procedureId = '90000000-0000-4000-8000-000000000001';
     const versionId = '90000000-0000-4000-8000-000000000002';
     slot.dispatchEvent({ type: 'procedure-recommendation-selected', bubbles: true, detail: { procedureId, versionId, title: '人名统一', matchRationale: '按人名' } });

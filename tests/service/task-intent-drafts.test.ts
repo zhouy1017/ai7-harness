@@ -19,6 +19,7 @@ import {
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { restoreTaskIntentDraftPredecessor } from '../support/pre74-schema.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
+import { WRITING_FIXTURE_IDENTITY, WRITING_REQUEST } from '../support/writing-task.js';
 
 // Service-integration suite (L2) for Task Intent Drafts (Issue #423, wave 10 slice 7a; V2-UX-TASK-001 to 009, 042, 043): the real
 // store over exact `sample1`. A draft is created and versioned without any Task, plan, Run Record or transmission; it stays bound
@@ -124,11 +125,79 @@ function runPreparation(store: EditorialStore, bookId: string, preparation: Draf
     let progress = store.createReviewRunPreparationWork(bookId, [preparation.categoryId], preparation.scope, launchPolicy, null, [], null, preparation.intentDraft);
     while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
   } else {
-    throw new Error('writing is not prepared on the fixture route');
+    let progress = store.createWritingPreparationWork(bookId, preparation.request, launchPolicy, null, preparation.intentDraft);
+    while (!progress.done) progress = store.advanceWritingPreparationWork(progress.workId!);
   }
 }
 
 describe('Task Intent Drafts over the real store on exact sample1', () => {
+  it('promotes writing atomically into a prepared plan with its writing context and no authorization', async () => {
+    fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
+    const store = await open();
+    try {
+      const book = await importBook(store, 'L2 草稿 写作准备', true);
+      editBlock(store, book, spanOf(store, book).blockId, '〔测试编辑〕');
+      const draft = store.saveTaskIntentDraft({ bookId: book.bookId, draftId: null, expectedOrdinal: null, origin: 'composer-book',
+        goal: '重点介绍人物关系，写一篇简短宣传文章', target: { kind: 'book' }, outcomeClass: 'writing' });
+      const preparation = store.taskIntentDraftPreparation({ bookId: book.bookId, draftId: draft.draftId, versionId: draft.version.versionId,
+        choice: { kind: 'writing', typeId: WRITING_REQUEST.typeId }, writing: { audience: WRITING_REQUEST.audience, channel: WRITING_REQUEST.channel } });
+      runPreparation(store, book.bookId, preparation);
+      const prepared = store.inspectWriting(book.bookId)!;
+      expect(prepared).toMatchObject({ state: 'prepared', authorization: null, run: null });
+      expect(prepared.taskIntent!.goal).toBe(draft.version.goal);
+      const promoted = store.inspectTaskIntentDrafts({ bookId: book.bookId, draftId: draft.draftId }).drafts[0]!;
+      expect(promoted.promotion).toMatchObject({ taskKind: 'writing', taskIntentId: prepared.taskIntent!.taskIntentId });
+      expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'writing', ref: promoted.promotion!.planRef }).goal.draft)
+        .toEqual({ draftId: draft.draftId, sentence: draft.version.goal });
+      expect(refusal(() => runPreparation(store, book.bookId, preparation))).toBe('TASK_INTENT_DRAFT_PROMOTED');
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        expect(db.prepare('SELECT count(*) AS n FROM analysis_task_intents').get()).toEqual({ n: 1 });
+        expect(db.prepare('SELECT count(*) AS n FROM task_intent_draft_promotions').get()).toEqual({ n: 1 });
+      } finally { db.close(); }
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  }, 300_000);
+
+  it('keeps a cancelled or stale preparation editable and commits exactly one intent with its plan and promotion', async () => {
+    const store = await open();
+    try {
+      const book = await importBook(store, 'L2 草稿 原子准备', true);
+      editBlock(store, book, spanOf(store, book).blockId, '〔测试编辑〕');
+      const draft = store.saveTaskIntentDraft({ bookId: book.bookId, draftId: null, expectedOrdinal: null, origin: 'composer-book', goal: GOAL,
+        target: { kind: 'book' }, outcomeClass: 'analysis' });
+      const request = { bookId: book.bookId, draftId: draft.draftId, versionId: draft.version.versionId,
+        choice: { kind: 'baseline' as const, mode: 'first-baseline' as const } };
+      const preparation = store.taskIntentDraftPreparation(request);
+      expect(preparation.kind).toBe('baseline');
+      if (preparation.kind !== 'baseline') throw new Error('EXPECTED_BASELINE');
+      const start = () => store.createBaselineAnalysisPreparationWork(book.bookId, preparation.goal, preparation.update, launchPolicy, false, null, preparation.intentDraft);
+      const counts = (): unknown => {
+        const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+        try {
+          return ['analysis_task_intents', 'analysis_task_input_checkpoints', 'analysis_plan_versions', 'task_intent_draft_promotions']
+            .map((table) => db.prepare(`SELECT count(*) AS n FROM ${table}`).get()!.n);
+        } finally { db.close(); }
+      };
+      const cancelled = start();
+      expect(cancelled.done).toBe(false);
+      expect(counts()).toEqual([0, 0, 0, 0]);
+      store.cancelBaselineAnalysisPreparationWork(cancelled.workId!);
+      expect(store.inspectTaskIntentDrafts({ bookId: book.bookId, draftId: draft.draftId }).drafts[0]!.promotion).toBeNull();
+      let stale = start();
+      const edited = store.saveTaskIntentDraft({ bookId: book.bookId, draftId: draft.draftId, expectedOrdinal: 1, origin: 'composer-book', goal: `${GOAL}。`,
+        target: { kind: 'book' }, outcomeClass: 'analysis' });
+      expect(refusal(() => {
+        while (!stale.done) stale = store.advanceBaselineAnalysisPreparationWork(stale.workId!);
+      })).toBe('TASK_INTENT_DRAFT_STALE');
+      expect(counts()).toEqual([0, 0, 0, 0]);
+      runPreparation(store, book.bookId, store.taskIntentDraftPreparation({ ...request, versionId: edited.version.versionId }));
+      expect(counts()).toEqual([1, 1, 1, 1]);
+      expect(store.inspectBaselineAnalysis(book.bookId)).toMatchObject({ state: 'prepared', authorization: null, run: null });
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  }, 300_000);
+
   it('creates and versions a Book-bound draft without any Task or transmission, and never lets it follow another Book', async () => {
     const store = await open();
     try {
@@ -318,11 +387,18 @@ describe('Task Intent Drafts over the real store on exact sample1', () => {
       expect(draft.resolution?.state).toBe('choose');
       const options = draft.resolution!.state === 'choose' ? draft.resolution!.options : [];
       expect(options.every((option) => option.taskKind === 'review-run' && option.choice.kind === 'review' && option.choice.categoryId !== 'factual-review')).toBe(true);
+      const modelFree = new Set(store.inspectReviewWorkspace(book.bookId, null).categories.filter((category) => category.modelFree).map((category) => category.categoryId));
+      expect(options.every((option) => option.choice.kind !== 'review' || !modelFree.has(option.choice.categoryId))).toBe(true);
+      for (const categoryId of modelFree) expect(refusal(() => store.taskIntentDraftPreparation({
+        bookId: book.bookId, draftId: draft.draftId, versionId: draft.version.versionId, choice: { kind: 'review', categoryId },
+      }))).toBe('TASK_INTENT_DRAFT_UNSUPPORTED');
       const typos = options.find((option) => option.choice.kind === 'review' && option.choice.categoryId === 'typos-and-usage')!;
       expect(typos).toBeDefined();
       const preparation = store.taskIntentDraftPreparation({ bookId: book.bookId, draftId: draft.draftId, versionId: draft.version.versionId, choice: typos.choice });
       expect(preparation).toMatchObject({ kind: 'review', categoryId: 'typos-and-usage', scope: { kind: 'selection', fromChapterBlockId: span.blockId, toChapterBlockId: span.blockId } });
       runPreparation(store, book.bookId, preparation);
+      // A delayed second preparation must roll back its intent and plan when the draft was already promoted.
+      expect(refusal(() => runPreparation(store, book.bookId, preparation))).toBe('TASK_INTENT_DRAFT_PROMOTED');
       const workspace = store.inspectReviewWorkspace(book.bookId, null);
       const run = workspace.run!;
       expect(run.state).toBe('prepared');
@@ -331,6 +407,16 @@ describe('Task Intent Drafts over the real store on exact sample1', () => {
       expect(promoted.planRef).toBe(run.reviewRunId);
       expect(promoted.taskIntentId).not.toBeNull();
       expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }).goal.draft).toEqual({ draftId: draft.draftId, sentence: GOAL });
+      expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }).scope.process).toContain('所选文字已扩展为所在的 1 个完整段落');
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        expect(db.prepare('SELECT count(*) AS n FROM analysis_task_intents').get()).toEqual({ n: 1 });
+        const scope = db.prepare("SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'run-source-scope'").get(promoted.taskIntentId!)!;
+        expect(JSON.parse(String(scope.canonical_json)).draftRangeExpansion).toMatchObject({ paragraphs: 1 });
+        const recorded = db.prepare('SELECT canonical_json FROM review_runs WHERE review_run_id = ?').get(run.reviewRunId)!;
+        expect(JSON.parse(String(recorded.canonical_json)).scope.label).toContain('所选文字已扩展为所在的 1 个完整段落');
+      } finally { db.close(); }
+      expect(store.inspectTaskIntentDrafts({ bookId: book.bookId, draftId: draft.draftId }).drafts[0]!.version.ranges).toEqual(draft.version.ranges);
       store.markCleanShutdown();
     } finally {
       store.close();

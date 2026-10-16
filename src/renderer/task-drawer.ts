@@ -418,7 +418,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   /** Where 收起 takes the composer: back to the plan or the panel it was opened from, or closed. */
   let composerReturn: (() => void) | null = null;
   /** An unfinished draft — or unsaved words — left beside another Book (TASK-006): collapsed, never following the new Book. */
-  let parked: null | { readonly bookId: string; readonly bookTitle: string; readonly draftId: string | null } = null;
+  let parked: null | { readonly bookId: string; readonly bookTitle: string; readonly draftId: string | null; readonly resume: () => void } = null;
   let panelBookId: string | null = null;
   /** The plan was opened from a card's 取消任务: its Cancellation Impact Summary opens once the plan is painted. */
   let cancelOnOpen = false;
@@ -555,9 +555,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (left === null) return;
     options.resumeDraft(left.bookId, () => {
       parked = null;
-      const held = composer.held();
-      if (left.draftId !== null) surface.openDraft(left.bookId, left.draftId, returnFocus);
-      else if (held !== null && held.bookId === left.bookId) showComposer(left.bookId);
+      showComposer(left.bookId);
+      left.resume();
       composerReturn = null;
     });
   }
@@ -2445,7 +2444,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const held = composer.held();
     composer.stop();
     if (held !== null && !held.promoted && (held.draftId !== null || held.unsaved)) {
-      parked = { bookId: held.bookId, bookTitle: held.bookTitle, draftId: held.draftId };
+      parked = { bookId: held.bookId, bookTitle: held.bookTitle, draftId: held.draftId, resume: composer.park() };
     }
   }
 

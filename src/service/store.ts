@@ -4544,6 +4544,7 @@ const MATERIAL_LAYERS_READ_ONLY = '数据库替换正在等待：资料索引暂
 export interface DraftPromotion {
   readonly versionId: string;
   readonly goal: string;
+  readonly paragraphs?: number;
   promoted(task: { readonly taskIntentId: string | null; readonly reviewRunId: string | null }): void;
 }
 
@@ -5544,7 +5545,7 @@ export class EditorialStore {
     const references = this.#prepareTaskMaterials(bookId, materialIds);
     return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, redoOf,
       ...(references.length === 0 ? {} : { materialReferences: { bookId, references } }),
-      ...(intentDraft === null ? {} : { intentDraft: { versionId: intentDraft.versionId, goal: intentDraft.goal, promoted: intentDraft.promoted } }),
+      ...(intentDraft === null ? {} : { intentDraft }),
     }));
   }
 
@@ -5741,6 +5742,11 @@ export class EditorialStore {
       ? this.#draftCall(() => this.#drafts.promotedInto(plan.ref)) : null;
     if (promoted !== null && promoted.bookId === input.bookId) {
       plan = { ...plan, goal: { ...plan.goal, draft: { draftId: promoted.draftId, sentence: promoted.latest.goal } } };
+      if (promoted.latest.target === 'ranges') {
+        const paragraphs = new Set(promoted.latest.ranges.map((range) => range.blockId)).size;
+        plan = { ...plan, scope: { ...plan.scope,
+          process: `${plan.scope.process}；所选文字已扩展为所在的 ${paragraphs} 个完整段落；任务按包含这些段落的阅读范围处理。` } };
+      }
     }
     return { ...found, plan: { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) } };
   }
@@ -5971,7 +5977,7 @@ export class EditorialStore {
     return this.#baselineProgress(() => this.#baselineAnalysis.prepare({ phase: 'start', bookId, goal, update, reconfirm, launchPolicy, redoOf,
       ...(intentDraft === null ? {} : {
         goal: intentDraft.goal as BaselineAnalysisGoal,
-        intentDraft: { versionId: intentDraft.versionId, promoted: (taskIntentId: string) => intentDraft.promoted({ taskIntentId, reviewRunId: null }) },
+        intentDraft: { ...intentDraft, promoted: (taskIntentId: string) => intentDraft.promoted({ taskIntentId, reviewRunId: null }) },
       }),
     }));
   }
@@ -11285,6 +11291,13 @@ export class EditorialStore {
     const pins = (list: ReadonlyArray<Pick<WritingMaterialSource, 'materialId' | 'indexDigest'>>): string =>
       list.map((source) => `${source.materialId}:${source.indexDigest}`).join(',');
     const newTask = latest !== null && pins(latest.task.materials.map((material) => material.source)) !== pins(materials.map((material) => material.source));
+    const recordWritingTask = (taskIntentId: string): void => {
+      this.#writingCall(() => this.#writingTasks.recordTask({
+        taskIntentId, bookId, evaluationRecordId: evaluation?.recordId ?? null, baselineRevisionId: synopsis?.revisionId ?? null,
+        exemplarSources: exemplars.map((exemplar) => exemplar.source), materialSources: materials.map((material) => material.source),
+        contract: input, promptContractSha256: ledger.definition.promptContractDigest, copyRules,
+      }));
+    };
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
       bookId,
@@ -11295,23 +11308,18 @@ export class EditorialStore {
       launchPolicy,
       ...(newTask ? { newTask } : {}),
       ...(intentDraft === null ? {} : {
-        intentDraft: { versionId: intentDraft.versionId, promoted: (taskIntentId: string) => intentDraft.promoted({ taskIntentId, reviewRunId: null }) },
+        intentDraft: { ...intentDraft, promoted: (taskIntentId: string) => {
+          recordWritingTask(taskIntentId);
+          intentDraft.promoted({ taskIntentId, reviewRunId: null });
+        } },
       }),
     }));
     // Which type, words and reference set the Task drafts from, recorded once for it and this contract.
-    const taskIntentId = this.#writingCall(() => this.#writingTasks.latestTaskIntentId(bookId));
-    requireStore(taskIntentId !== null, 'WRITING_RECORD_INVALID', '写作任务没有准备出来。');
-    this.#writingCall(() => this.#transaction(this.#authority, () => this.#writingTasks.recordTask({
-      taskIntentId,
-      bookId,
-      evaluationRecordId: evaluation?.recordId ?? null,
-      baselineRevisionId: synopsis?.revisionId ?? null,
-      exemplarSources: exemplars.map((exemplar) => exemplar.source),
-      materialSources: materials.map((material) => material.source),
-      contract: input,
-      promptContractSha256: ledger.definition.promptContractDigest,
-      copyRules,
-    })));
+    if (intentDraft === null) {
+      const taskIntentId = this.#writingCall(() => this.#writingTasks.latestTaskIntentId(bookId));
+      requireStore(taskIntentId !== null, 'WRITING_RECORD_INVALID', '写作任务没有准备出来。');
+      this.#transaction(this.#authority, () => recordWritingTask(taskIntentId));
+    }
     if (result.workId !== null) this.#writingWork.set(result.workId, ledger);
     return { ...result, projection: result.projection as WritingProjection | null };
   }
@@ -19758,13 +19766,16 @@ export class EditorialStore {
         resolution.state === 'unsupported' ? resolution.reason : '这份草稿不能这样准备计划；请从草稿给出的选项中选择。');
       const promoted = (task: { readonly taskIntentId: string | null; readonly reviewRunId: string | null }): void => {
         try {
+          requireDraft(this.#draftRanges(draft.latest.ranges).every((range) => range.state !== 'reselect'),
+            'TASK_INTENT_DRAFT_RANGE_RESELECT', '任务范围需要重新选择：所选文字在准备期间已改动。');
           this.#drafts.promote(draft.draftId, draft.latest.versionId, { taskKind: offered.taskKind, ...task }, now);
         } catch (error) {
           if (error instanceof TaskIntentDraftError) throw new StoreError(error.code, error.message);
           throw error;
         }
       };
-      const intentDraft: DraftPromotion = { versionId: draft.latest.versionId, goal: draft.latest.goal, promoted };
+      const intentDraft: DraftPromotion = { versionId: draft.latest.versionId, goal: draft.latest.goal, promoted,
+        ...(draft.latest.target === 'ranges' ? { paragraphs: new Set(draft.latest.ranges.map((range) => range.blockId)).size } : {}) };
       const block = draft.latest.ranges[0]?.blockId ?? null;
       const choice = offered.choice;
       switch (choice.kind) {
@@ -19990,7 +20001,7 @@ export class EditorialStore {
       review: review === null ? null : {
         available: review.newReview.available,
         reason: review.newReview.unavailableReason,
-        categories: review.categories.filter((category) => category.available)
+        categories: review.categories.filter((category) => category.available && !category.modelFree)
           .map((category) => ({ categoryId: category.categoryId, label: category.label, book: category.scopes.whole.available, selection: category.scopes.selection.available })),
       },
       writing: writing === null ? null : writing.types.map((type) => ({

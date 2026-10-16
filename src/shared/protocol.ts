@@ -12092,8 +12092,8 @@ export interface TaskIntentDraftProjection {
   /** The Task the draft became with 准备计划 — a normal prepared Task that still needs 开始任务 — or `null`. */
   readonly promotion: null | {
     readonly taskKind: 'baseline-analysis' | 'review-run' | 'writing';
-    /** `null` for a Review Run of the baseline's leads alone, which has no Task Intent of its own. */
-    readonly taskIntentId: string | null;
+    /** Every draft promotion creates exactly one Task Intent; model-free baseline leads are excluded. */
+    readonly taskIntentId: string;
     /** What the Task Drawer opens: the Task Intent, or the Review Run. */
     readonly planRef: string;
     readonly promotedAt: string;

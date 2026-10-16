@@ -26,7 +26,7 @@ import { BLOCK_ID_PATTERN, DIGEST_PATTERN, UUID_PATTERN, canonicalRecord, isReco
  * - `task_intent_draft_versions`: each version, numbered — the goal, the target, the intended outcome and, in its record, the
  *   ranges as they were pinned and the dialogue answer it was made from;
  * - `task_intent_draft_promotions`: the one version of a draft that became a Task, and that Task — its Task Intent, and for a
- *   审阅 the Review Run, which alone stands for a Run of the baseline's leads. A promoted draft is final.
+ *   审阅 the Review Run. Model-free baseline leads are not a draft promotion target. A promoted draft is final.
  */
 export const TASK_INTENT_DRAFT_SCHEMA_SQL = {
   task_intent_drafts: `CREATE TABLE task_intent_drafts (
@@ -42,7 +42,7 @@ export const TASK_INTENT_DRAFT_SCHEMA_SQL = {
   draft_id TEXT NOT NULL REFERENCES task_intent_drafts(draft_id),
   ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
   goal TEXT NOT NULL CHECK(length(goal) BETWEEN 1 AND ${MAX_TASK_INTENT_GOAL_LENGTH}),
-  target_kind TEXT NOT NULL CHECK(target_kind IN ('book', 'ranges', 'deliverable')),
+  target_kind TEXT NOT NULL CHECK(target_kind IN ('book', 'ranges')),
   outcome_class TEXT CHECK(outcome_class IS NULL OR outcome_class IN ('analysis', 'review', 'factual', 'writing')),
   range_count INTEGER NOT NULL CHECK(range_count BETWEEN 0 AND ${MAX_TASK_INTENT_DRAFT_RANGES}),
   created_at TEXT NOT NULL,
@@ -55,7 +55,7 @@ export const TASK_INTENT_DRAFT_SCHEMA_SQL = {
   draft_id TEXT PRIMARY KEY REFERENCES task_intent_drafts(draft_id),
   version_id TEXT NOT NULL UNIQUE REFERENCES task_intent_draft_versions(version_id),
   task_kind TEXT NOT NULL CHECK(task_kind IN ('baseline-analysis', 'review-run', 'writing')),
-  task_intent_id TEXT UNIQUE REFERENCES analysis_task_intents(task_intent_id),
+  task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
   review_run_id TEXT UNIQUE REFERENCES review_runs(review_run_id),
   promoted_at TEXT NOT NULL,
   canonical_json TEXT NOT NULL,
@@ -165,11 +165,11 @@ export interface StoredDraft {
   readonly promotion: null | StoredPromotion;
 }
 
-/** The Task a draft became: its kind, its Task Intent — none for a Review Run of the leads alone — and its Review Run. */
+/** The Task a draft became: its kind, its mandatory Task Intent, and its optional Review Run. */
 export interface StoredPromotion {
   readonly versionId: string;
   readonly taskKind: 'baseline-analysis' | 'review-run' | 'writing';
-  readonly taskIntentId: string | null;
+  readonly taskIntentId: string;
   readonly reviewRunId: string | null;
   readonly promotedAt: string;
 }
@@ -275,12 +275,12 @@ export class TaskIntentDraftLedger {
    * The promotion of the draft's latest version into the Task Intent the existing preparation just wrote — in that write's own
    * transaction, so a draft is promoted exactly once and a refusal here leaves no Task behind.
    */
-  promote(draftId: string, versionId: string, task: Omit<StoredPromotion, 'versionId' | 'promotedAt'>, now: Date): void {
+  promote(draftId: string, versionId: string, task: Omit<StoredPromotion, 'versionId' | 'promotedAt' | 'taskIntentId'> & { taskIntentId: string | null }, now: Date): void {
     const draft = this.draft(draftId);
     requireDraft(draft !== null, 'TASK_INTENT_DRAFT_NOT_FOUND', '这份任务意图草稿不存在。');
     requireDraft(draft.promotion === null, 'TASK_INTENT_DRAFT_PROMOTED', '这份草稿已经准备成任务。');
     requireDraft(draft.latest.versionId === versionId, 'TASK_INTENT_DRAFT_STALE', '这份草稿在你准备计划之前已有新的版本；请看最新的版本。');
-    requireDraft((task.taskIntentId === null || UUID_PATTERN.test(task.taskIntentId)) && (task.reviewRunId === null || UUID_PATTERN.test(task.reviewRunId)) &&
+    requireDraft(task.taskIntentId !== null && UUID_PATTERN.test(task.taskIntentId) && (task.reviewRunId === null || UUID_PATTERN.test(task.reviewRunId)) &&
       (task.taskKind === 'review-run') === (task.reviewRunId !== null) && (task.taskKind === 'review-run' || task.taskIntentId !== null),
     'TASK_INTENT_DRAFT_INVALID', '任务标识无效。');
     const promotedAt = now.toISOString();
@@ -341,7 +341,7 @@ export class TaskIntentDraftLedger {
         draftId,
         promotedAt: text(promotionRow.promoted_at),
         reviewRunId: nullable(promotionRow.review_run_id),
-        taskIntentId: nullable(promotionRow.task_intent_id),
+        taskIntentId: text(promotionRow.task_intent_id),
         taskKind: text(promotionRow.task_kind) as StoredPromotion['taskKind'],
         versionId: text(promotionRow.version_id),
       };
