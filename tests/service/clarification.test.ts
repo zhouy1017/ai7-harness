@@ -1,3 +1,4 @@
+import { HOUSE_REVIEW_PREFERENCE_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -199,7 +200,7 @@ describe('schema revision 35 over the real store', () => {
       expect(runStatesShapeAt34(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys(), ...RESEARCH_EVIDENCE_RELATIONS, ...MATERIAL_INDEX_LAYER_RELATIONS, ...PROPOSAL_REVIEW_RELATIONS, ...FACTUAL_VERIFICATION_RELATIONS, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER].sort());
+      expect([...after.keys()]).toEqual([...before.truth.keys(), ...RESEARCH_EVIDENCE_RELATIONS, ...MATERIAL_INDEX_LAYER_RELATIONS, ...PROPOSAL_REVIEW_RELATIONS, ...FACTUAL_VERIFICATION_RELATIONS, ...HOUSE_REVIEW_PREFERENCE_RELATIONS, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER].sort());
       for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(after.get(relation)?.content).toMatch(/^0:/);
       for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
       // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
@@ -356,7 +357,7 @@ describe('Clarification Requests over the real store', () => {
       expect(settled.run!.transitions.at(-1)!.detail).toBe('资料《合成资料》在任务运行中已撤回允许参考，任务已中断；已完成的单元保留。');
       expect(settled.resultSetRevision!.units.map((unit) => unit.state)).toEqual(['closed', 'gap', 'closed', 'closed', 'gap', 'closed', 'closed', 'closed']);
       expect(settled.taskOutcome!.classification).toBe('interrupted');
-      expect(settled.taskOutcome!.safeNextAction).toBe('核对参考资料，重新准备计划并授权；已完成的单元保留。');
+      expect(settled.taskOutcome!.safeNextAction).toBe('这份资料已撤回允许参考；在资料库重新准入后重新准备计划并授权，或在新计划里去掉这份资料；已完成的单元保留。');
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

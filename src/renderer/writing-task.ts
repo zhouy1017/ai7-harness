@@ -8,7 +8,7 @@ import type {
 } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { taskPlanQuickStartFellBack } from './task-drawer-labels.js';
-import { similarMaterialsField } from './task-material-selection.js';
+import { acknowledgeTaskMaterialRemovals, reconcileTaskMaterialSelection, similarMaterialsField } from './task-material-selection.js';
 import {
   WRITING_ACTIONS,
   WRITING_CONSEQUENCE_TERMS,
@@ -334,8 +334,10 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       state.materialIds.push(id); state.problem = null; paint(null);
     }));
     node.append(el('p', 'writing-materials-statement', offer.statement));
-    // An item no longer offered is no longer ticked.
-    state.materialIds = state.materialIds.filter((id) => offer.items.some((item) => item.materialId === id && item.selectable));
+    // An item no longer offered, or no longer one that may be ticked, leaves the selection with its reason (Issue #759).
+    const reconciled = reconcileTaskMaterialSelection(state, offer.items, new Set(state.materialIds));
+    state.materialIds = reconciled.kept;
+    for (const note of reconciled.removals) node.append(el('p', 'field-note writing-material-removed', note));
     const selectedCharacters = offer.items.filter((item) => state.materialIds.includes(item.materialId))
       .reduce((total, item) => total + item.characters, 0);
     if (offer.items.length > 0) {
@@ -355,6 +357,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
           : selectedCharacters + item.characters > 6_000 ? writingMaterialsOverTotalNote(selectedCharacters + item.characters) : null);
         box.disabled = busy || !item.selectable || reasonText !== null;
         box.addEventListener('change', () => {
+          acknowledgeTaskMaterialRemovals(state);
           state.materialIds = box.checked
             ? offer.items.filter((entry) => entry.materialId === item.materialId || state.materialIds.includes(entry.materialId)).map((entry) => entry.materialId)
             : state.materialIds.filter((entry) => entry !== item.materialId);

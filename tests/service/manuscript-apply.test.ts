@@ -128,6 +128,71 @@ function typeInto(store: EditorialStore, book: Imported, blockId: string, from: 
 }
 
 describe('AI7 Apply on a Change Suggestion', () => {
+  it('counts bulk replacements on an applied range in another block and ignores replacements around a retained range', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const blocks = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null));
+      const replace = (query: string, replacement: string) => {
+        const search = store.createSearch(book.manuscriptId, book.branchId, query).searchId;
+        while (!store.advanceSearch(search).done) { /* bounded search */ }
+        const preview = store.prepareReplacement(search, replacement, []);
+        while (!store.advanceReplacementWork(preview.previewId).done) { /* prepare */ }
+        store.freezeReplacement(preview.previewId, []);
+        while (!store.advanceReplacementWork(preview.previewId).done) { /* validate */ }
+        return store.commitReplacement(preview.previewId);
+      };
+      typeInto(store, book, blocks[0]!.blockId, 0, 0, '〔批量靶〕');
+      const marked = suggest(store, book, blocks[1]!.blockId, 4, 8, '〔批量靶〕');
+      store.applyChangeSuggestion({ ...binding(store, book), markId: marked.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      expect(store.inspectEditQualitySignals(null)).toMatchObject({ surviving: 1, editVolume: 0 });
+      expect(replace('〔批量靶〕', '〔改定〕').committedCount).toBe(2);
+      const changed = store.inspectEditQualitySignals(null);
+      expect(changed.surviving).toBe(0);
+      expect(changed.editVolume).toBeGreaterThan(0);
+      store.undoManuscript(book.manuscriptId, book.branchId, store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest);
+      expect(store.inspectEditQualitySignals(null).surviving).toBe(1);
+      const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, marked.markId);
+      typeInto(store, book, blocks[1]!.blockId, card.toGrapheme, card.toGrapheme, '〔外侧靶〕');
+      typeInto(store, book, blocks[1]!.blockId, 0, 0, '〔外侧靶〕');
+      const beforeOutside = store.inspectEditQualitySignals(null);
+      expect(replace('〔外侧靶〕', '〔外侧改〕').committedCount).toBe(2);
+      const afterOutside = store.inspectEditQualitySignals(null);
+      expect(afterOutside.surviving).toBe(1);
+      expect(afterOutside.editVolume).toBe(beforeOutside.editVolume);
+      expect(afterOutside.lineageDigest).not.toBe(beforeOutside.lineageDigest);
+    } finally { store.markCleanShutdown(); store.close(); }
+  }, 120_000);
+
+  it('projects judged suggestion survival and edit effort through unrelated, reverting and reverse-apply edits', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const block = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[0]!;
+      const suggestion = suggest(store, book, block.blockId, 6, 12, '建议');
+      store.applyChangeSuggestion({ ...binding(store, book), markId: suggestion.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      const initial = store.inspectEditQualitySignals(null);
+      expect(initial).toMatchObject({ applied: 1, surviving: 1, editVolume: 0 });
+      // A plain accept is judged for survival, but without a reason it is not Learning Material.
+      expect(store.inspectLearningMaterials(null).books.flatMap((entry) => entry.materials)).toHaveLength(0);
+      typeInto(store, book, block.blockId, 0, 0, '前');
+      const unrelated = store.inspectEditQualitySignals(null);
+      expect(unrelated).toMatchObject({ applied: 1, surviving: 1, editVolume: 0 });
+      expect(unrelated.lineageDigest).not.toBe(initial.lineageDigest);
+      const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, suggestion.markId);
+      typeInto(store, book, block.blockId, card.fromGrapheme, card.toGrapheme, suggestion.pinned);
+      expect(store.inspectEditQualitySignals(null)).toMatchObject({ applied: 1, surviving: 0 });
+      expect(store.inspectEditQualitySignals(null).editVolume).toBeGreaterThan(0);
+      const next = suggest(store, book, paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[1]!.blockId, 4, 7, '甲');
+      store.applyChangeSuggestion({ ...binding(store, book), markId: next.markId, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '甲乙', reason: null });
+      expect(store.inspectEditQualitySignals(null).surviving).toBe(1);
+      const beforeReverse = store.inspectEditQualitySignals(null);
+      store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId: next.markId, clientEffectId: randomUUID() });
+      expect(store.inspectEditQualitySignals(null).surviving).toBe(0);
+      expect(store.inspectEditQualitySignals(null).lineageDigest).not.toBe(beforeReverse.lineageDigest);
+    } finally { store.markCleanShutdown(); store.close(); }
+  }, 120_000);
+
   it('writes the text with its receipt in one interaction, keeps the three records apart, and never writes twice', async () => {
     const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

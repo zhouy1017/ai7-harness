@@ -72,6 +72,7 @@ import {
   type ServiceRequest,
   type TaskPlanKind,
 } from '../shared/protocol.js';
+import { MAX_WRITING_MATERIALS } from '../shared/protocol.js';
 import { SERIES_EXCLUSION_ACTIONS, SERIES_EXCLUSION_TARGET_KINDS, type SeriesExclusionAction, type SeriesExclusionTargetKind } from '../shared/protocol.js';
 import { BACKGROUND_ANALYSIS_CEILING_MAX, FACTUAL_VERIFICATION_OUTCOMES, VERIFICATION_REVIEW_DISPOSITIONS } from '../shared/protocol.js';
 import { CONFLICT_RESOLUTIONS, type ConflictResolution } from '../shared/conflict-units.js';
@@ -973,13 +974,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 准备 AI7 初评: the route's Book; the mode is the service's to decide from the Book's 初评 so far.
     case 'prepareInitialEvaluation': {
       const input = requireInputWithOptional(value.input, ['bookId'], ['materialIds'], tentativeId);
-      if (!validUuid(input.bookId) || !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every(validUuid)))) throw new ProtocolError(tentativeId);
+      if (!validUuid(input.bookId) || !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every(validUuid)))) throw new ProtocolError(tentativeId);
       break;
     }
     // 起草审稿意见 (Issue #429, S81c): the route's Book and one of the two templates; the 定稿 version is the service's to find.
     case 'prepareReadersReport': {
       const input = requireInputWithOptional(value.input, ['bookId', 'template'], ['materialIds'], tentativeId);
-      if (!validUuid(input.bookId) || (input.template !== 'author' && input.template !== 'editorial') || !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every(validUuid)))) throw new ProtocolError(tentativeId);
+      if (!validUuid(input.bookId) || (input.template !== 'author' && input.template !== 'editorial') || !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every(validUuid)))) throw new ProtocolError(tentativeId);
       break;
     }
     // 打开草稿: one drafted result of the route's Book's 审稿意见.
@@ -1010,12 +1011,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 先看计划 of a writing Task: the route's Book, a house type by its identity, and the editor's words, each a bounded string
     // the store holds to its own bounds; the reference set is the service's to read, but for the 资料库 items the editor ticked
-    // under 允许参考 (Issue #428): optional, each an identity, at most a few more than the store takes, which refuses with words.
+    // under 允许参考 (Issue #428): optional, each an identity, at most as many as the store takes (the frame refuses a longer list outright; the store refuses repeats with words).
     case 'prepareWritingTask': {
       const input = requireInputWithOptional(value.input, ['bookId', 'typeId', 'audience', 'channel', 'requirements'], ['materialIds'], tentativeId);
       if (!validUuid(input.bookId) || !isBoundedString(input.typeId, 64) || !isBoundedString(input.audience, 1_000, true) ||
           !isBoundedString(input.channel, 1_000, true) || !(input.requirements === null || isBoundedString(input.requirements, 4_000)) ||
-          !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every(validUuid)))) {
+          !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every(validUuid)))) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -1341,6 +1342,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // 知识库 › 社级编辑记忆 (Issue #911): the house record takes no input; 质量与学习's edit signals, the house or one Book.
+    case 'inspectHouseReviewPreference':
+    case 'rebuildHouseReviewPreference': {
+      requireInput(value.input, [], tentativeId);
+      break;
+    }
+    case 'inspectEditQualitySignals': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!(input.bookId === null || validUuid(input.bookId))) throw new ProtocolError(tentativeId);
+      break;
+    }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
     case 'inspectLearningMaterials': {
       const input = requireInput(value.input, ['bookId', 'after'], tentativeId);
@@ -1517,7 +1529,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds'], tentativeId);
       if (!validUuid(input.bookId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||
           !validReviewRunScope(input.scope) ||
-          !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every(validUuid))) ||
+          !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every(validUuid))) ||
           !optionalOrNull(input, 'capturedProcedure', (pin) => isRecord(pin) && hasExactKeys(pin, ['versionId', 'documentSha256']) &&
             validUuid(pin.versionId) && isBoundedString(pin.documentSha256, 64) && HEX_DIGEST_PATTERN.test(pin.documentSha256))) {
         throw new ProtocolError(tentativeId);

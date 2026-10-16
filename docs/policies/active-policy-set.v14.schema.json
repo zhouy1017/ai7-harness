@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI7 Active Policy Set v14",
+  "description": "Exact scope mapping: unchanged v1/v2 and External Export v2; ordinary-production v21 (v19 plus the house-review-preference-excerpt outbound category on the review rule); developer-live v20 (v18 plus the same category on the review rule). Direct successor of v13.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaDialect",
+    "schemaPath",
+    "manifestType",
+    "version",
+    "predecessorVersion",
+    "predecessorCanonicalPath",
+    "digestAlgorithm",
+    "trustedOperationalScopeSelection",
+    "activePolicies"
+  ],
+  "properties": {
+    "schemaDialect": {
+      "const": "http://json-schema.org/draft-07/schema#"
+    },
+    "schemaPath": {
+      "const": "docs/policies/active-policy-set.v14.schema.json"
+    },
+    "manifestType": {
+      "const": "ai7-active-policy-set"
+    },
+    "version": {
+      "const": "v14"
+    },
+    "predecessorVersion": {
+      "const": "v13"
+    },
+    "predecessorCanonicalPath": {
+      "const": "docs/policies/active-policy-set.v13.json"
+    },
+    "digestAlgorithm": {
+      "const": "sha256"
+    },
+    "trustedOperationalScopeSelection": {
+      "const": {
+        "exactlyOneProviderProcessingScopeBoundPerLaunch": true,
+        "selectionAuthorityClass": "trusted-build-or-launch-authority",
+        "ordinaryProductSettingAllowed": false,
+        "environmentVariableSelectorAllowed": false,
+        "providerSelectorAllowed": false,
+        "artifactOrPluginSelectorAllowed": false,
+        "crossScopeFallbackAllowed": false,
+        "missingOrUnknownScopeResult": "deny-provider-processing"
+      }
+    },
+    "activePolicies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider-processing-policy",
+        "external-export-policy"
+      ],
+      "properties": {
+        "provider-processing-policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "selectionType",
+            "scopePins"
+          ],
+          "properties": {
+            "selectionType": {
+              "const": "trusted-operational-scope-map"
+            },
+            "scopePins": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "development-ci",
+                "fixture-recording",
+                "ordinary-production",
+                "developer-live"
+              ],
+              "properties": {
+                "development-ci": {
+                  "$ref": "#/definitions/providerV1Pin"
+                },
+                "fixture-recording": {
+                  "$ref": "#/definitions/providerV2Pin"
+                },
+                "ordinary-production": {
+                  "const": {
+                    "policyId": "provider-processing-policy",
+                    "policyType": "provider-processing",
+                    "version": "v21",
+                    "canonicalPath": "docs/policies/provider-processing-policy.v21.json",
+                    "sha256": "d1199f4c110d0c6598e6910c1784e5c612c18866387abdfe6e45b1c7593c6263"
+                  }
+                },
+                "developer-live": {
+                  "const": {
+                    "policyId": "provider-processing-policy",
+                    "policyType": "provider-processing",
+                    "version": "v20",
+                    "canonicalPath": "docs/policies/provider-processing-policy.v20.json",
+                    "sha256": "d9cd34ed6e945760657345ed7e7bf4eae4489e5367ac7eb2400af413cc28f757"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "external-export-policy": {
+          "$ref": "#/definitions/externalExportPin"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "providerV1Pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "policyType",
+        "version",
+        "canonicalPath",
+        "sha256"
+      ],
+      "properties": {
+        "policyId": {
+          "const": "provider-processing-policy"
+        },
+        "policyType": {
+          "const": "provider-processing"
+        },
+        "version": {
+          "const": "v1"
+        },
+        "canonicalPath": {
+          "const": "docs/policies/provider-processing-policy.v1.json"
+        },
+        "sha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      }
+    },
+    "providerV2Pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "policyType",
+        "version",
+        "canonicalPath",
+        "sha256"
+      ],
+      "properties": {
+        "policyId": {
+          "const": "provider-processing-policy"
+        },
+        "policyType": {
+          "const": "provider-processing"
+        },
+        "version": {
+          "const": "v2"
+        },
+        "canonicalPath": {
+          "const": "docs/policies/provider-processing-policy.v2.json"
+        },
+        "sha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      }
+    },
+    "externalExportPin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "policyType",
+        "version",
+        "canonicalPath",
+        "sha256"
+      ],
+      "properties": {
+        "policyId": {
+          "const": "external-export-policy"
+        },
+        "policyType": {
+          "const": "external-export"
+        },
+        "version": {
+          "const": "v2"
+        },
+        "canonicalPath": {
+          "const": "docs/policies/external-export-policy.v2.json"
+        },
+        "sha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      }
+    }
+  }
+}

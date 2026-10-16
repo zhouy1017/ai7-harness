@@ -59,7 +59,7 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
     tab: 'memory',
     label: '社级编辑记忆',
     holds: '社里沉淀下来的编辑经验，供审阅与写作参考。',
-    pending: '尚未提供：社级编辑记忆还没有接通。',
+    pending: null,
   },
   {
     tab: 'exemplars',

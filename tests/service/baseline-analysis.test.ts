@@ -682,7 +682,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(settled.taskOutcome?.classification).toBe('interrupted');
       expect(settled.taskOutcome?.safeNextAction).toBe(guard === 'series'
         ? '修改计划并重新授权，或取消任务；这次运行不能续行、重试，也不会改用别的材料。'
-        : '核对参考资料，重新准备计划并授权；已完成的单元保留。');
+        : '这份资料已撤回允许参考；在资料库重新准入后重新准备计划并授权，或在新计划里去掉这份资料；已完成的单元保留。');
       store.markCleanShutdown();
     } finally {
       await owner.dispose();

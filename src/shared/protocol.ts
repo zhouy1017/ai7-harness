@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 144 as const;
+export const SERVICE_PROTOCOL_VERSION = 146 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -188,6 +188,9 @@ export const IPC_CHANNELS = {
   recordChangeSuggestionDecision: 'ai7:j05:record-change-suggestion-decision',
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
+  inspectHouseReviewPreference: 'ai7:j11:inspect-house-review-preference',
+  rebuildHouseReviewPreference: 'ai7:j11:rebuild-house-review-preference',
+  inspectEditQualitySignals: 'ai7:j11:inspect-edit-quality-signals',
   inspectLearningMaterials: 'ai7:j11:inspect-learning-materials',
   decideLearningMaterial: 'ai7:j11:decide-learning-material',
   inspectLearningMaterial: 'ai7:j11:inspect-learning-material',
@@ -2095,18 +2098,18 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ordinary-production';
 /**
- * Historical v5, v9, v10, v11, v12, v14, v16 and the superseded web reservation v8 remain readable identities; selected v18 admits
+ * Historical v5, v9, v10, v11, v12, v14, v16, v18 and the superseded web reservation v8 remain readable identities; selected v20 admits
  * baseline analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable
  * consistency and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and
  * 润色 and conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules, and AI7's platform
  * tools (websearch through the user-selected backend, webfetch) on review, writing and evaluation, and AI7's local targeted-retrieval
  * tool on every rule but enrolled background analysis and material translation. A type member does not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19';
-/** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, and selected v13. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21';
+/** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, and selected v14. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
@@ -2318,6 +2321,7 @@ export type OutboundDataCategoryId =
   | 'manuscript-conflict-region-excerpt'
   | 'frozen-material-reference-excerpt'
   | 'editorial-deliverable-excerpt'
+  | 'house-review-preference-excerpt'
   | 'unpublished-metadata'
   | 'unpublished-excerpts'
   | 'unpublished-full-content'
@@ -6192,6 +6196,65 @@ export interface ReviewReportProjection {
   record: ReviewReportRecord;
 }
 
+/** The most Learning Materials 为什么会影响这个结果 names for one category; the rest are counted. */
+export const MAX_REVIEW_RUN_INFLUENCE_MATERIALS = 20;
+/** One category's 本社审阅偏好 version and the materials behind the lines its Run read (Issue #912). */
+export interface ReviewRunInfluenceProjection {
+  categoryId: string;
+  categoryLabel: string;
+  versionId: string;
+  ordinal: number;
+  sourceCount: number;
+  materials: ReadonlyArray<{
+    bookId: string;
+    bookTitle: string;
+    /** `null` where the decision behind it is no longer in this house's records. */
+    materialKey: string | null;
+    kind: LearningLedgerMaterialKind | null;
+    /** When its 停止今后使用 was recorded after it was admitted; `null` while it stands. */
+    withdrawnAt: string | null;
+  }>;
+  moreMaterials: number;
+}
+
+/** Local, versioned editorial preferences; attribution never enters the prompt block. */
+export interface HouseReviewPreferenceUse {
+  versionId: string;
+  ordinal: number;
+  materialSetDigest: string;
+  sourceCount: number;
+  lines: ReadonlyArray<string>;
+}
+export interface HouseReviewPreferenceVersion {
+  schema: 'ai7.house-review-preference/1';
+  versionId: string;
+  ordinal: number;
+  supersedes: string | null;
+  operationalScope: TrustedOperationalScope;
+  materialSetDigest: string;
+  recordedAt: string;
+  sourceCount: number;
+  lines: ReadonlyArray<{
+    text: string; categoryId: string; bookId: string | null;
+    sources: ReadonlyArray<{ bookId: string; bookTitle: string; materialDigest: string; decisionId: string; eligibilityDecisionId: string; qualityLineageDigest: string;
+      attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> } }>;
+  }>;
+}
+export interface HouseReviewPreferenceProjection {
+  operationalScope: TrustedOperationalScope;
+  current: HouseReviewPreferenceVersion | null;
+  history: ReadonlyArray<{ versionId: string; ordinal: number; recordedAt: string; sourceCount: number }>;
+  basis: string;
+}
+export interface EditQualitySignalsProjection {
+  bookId: string | null;
+  applied: number;
+  surviving: number;
+  editVolume: number;
+  lineageDigest: string;
+  categories: ReadonlyArray<{ categoryId: string; applied: number; surviving: number; editVolume: number; lineageDigest: string }>;
+}
+
 export interface ReviewReportRecord {
   schema: 'ai7.review.report/1';
   reviewRunId: string;
@@ -6286,7 +6349,19 @@ export interface ReviewRunProjection {
    * The Historically Affected Result Marker (Issue #64, S29b; SER-026): the result the Run formed used Series material that was
    * excluded afterwards. The Run, its findings and its reports are never rewritten; this says so beside them.
    */
-  historicalMarker: null | { label: typeof HISTORICALLY_AFFECTED_RESULT_MARKER | typeof HISTORICAL_MARKER_UNVERIFIABLE; detail: string };
+  historicalMarker: null | {
+    label: typeof HISTORICALLY_AFFECTED_RESULT_MARKER | typeof HISTORICAL_MARKER_UNVERIFIABLE | typeof LEARNING_INFLUENCE_RESULT_MARKER;
+    detail: string;
+    /** For a result that read a 本社审阅偏好 version since remediated (Issue #912; LAUD-008): the material, which opens in 学习回溯. */
+    remediation?: { bookId: string; materialKey: string; recordedAt: string };
+  };
+  /**
+   * 为什么会影响这个结果 (Issue #912; LAUD-004): each category's pinned 本社审阅偏好 version and the Learning Materials behind the
+   * lines it read; empty when no category read one.
+   */
+  influence: ReadonlyArray<ReviewRunInfluenceProjection>;
+  /** What a `scope-changed` Run stopped for: Series material excluded, or a 本社审阅偏好 version whose material was withdrawn. */
+  scopeStop: null | 'series-knowledge' | 'house-review-preference';
   /** The Captured Procedure version the Run was prepared from, pinned (Issue #65, S30; ADR 0087 §4); `null` for one chosen by hand. */
   procedure: ReviewRunProcedureProjection | null;
   /** Whether `将以上工序保存为可复用工序` is offered on this Run, and why not (ADR 0087 §2). */
@@ -8947,10 +9022,10 @@ export interface LearningAuditMaterialProjection {
   /** When the decision that stands — or, when it changed, the one it had — was made. */
   readonly decidedAt: string | null;
   /**
-   * How many Tasks used it. Nothing in AI7 reads learning material yet — no Learning Signal, Memory Candidate or memory is
-   * made of it — so it is none, and says so.
+   * How many Tasks used it (Issue #912): the Review Runs whose category sent a 本社审阅偏好 version with a line it supports. No
+   * Memory Candidate or memory is made of it yet.
    */
-  readonly downstreamTasks: 0;
+  readonly downstreamTasks: number;
 }
 
 export interface LearningAuditBookProjection {
@@ -9014,9 +9089,36 @@ export interface LearningLineageDecisionProjection {
   };
 }
 
+/** The most Tasks one Learning Lineage Explorer lists; earlier ones are counted. */
+export const MAX_LEARNING_LINEAGE_TASKS = 50;
+
+/** A 学习信号 (Issue #912): one 本社审阅偏好 version with a line the material supports. */
+export interface LearningLineageSignalProjection {
+  readonly versionId: string;
+  readonly ordinal: number;
+  readonly recordedAt: string;
+  /** Whether it is the version new Runs read now. */
+  readonly current: boolean;
+  /** How many of its lines the material supports. */
+  readonly lines: number;
+}
+
+/** A Task that used the material (Issue #912): a Review Run category that sent a version with a line it supports. */
+export interface LearningLineageTaskProjection {
+  readonly bookId: string;
+  readonly reviewRunId: string;
+  /** 《书名》第 N 次审阅 · 类别 */
+  readonly label: string;
+  readonly versionOrdinal: number;
+  readonly use: 'running' | 'completed' | 'stopped';
+  /** It completed, and the material was 停止今后使用 afterwards: its result carries the Historically Affected Result Marker. */
+  readonly marked: boolean;
+}
+
 /**
  * One material's Learning Lineage Explorer (LAUD-003 to LAUD-005): 学习材料 → 准入决定 → 学习信号 → 记忆候选 → 已启用记忆 →
- * 使用过的任务. The last four are empty because nothing in AI7 makes them yet; each count says none.
+ * 使用过的任务. 学习信号 are the 本社审阅偏好 versions it supports and 使用过的任务 the Review Runs that sent them (Issue #912); no
+ * Memory Candidate or memory is made yet, so those two count none.
  */
 export interface LearningLineageProjection {
   readonly bookId: string;
@@ -9027,7 +9129,12 @@ export interface LearningLineageProjection {
   readonly decisions: ReadonlyArray<LearningLineageDecisionProjection>;
   /** How many earlier decisions the chain holds beyond those. */
   readonly earlierDecisions: number;
-  readonly downstream: { readonly signals: 0; readonly memoryCandidates: 0; readonly activeMemories: 0; readonly tasks: 0 };
+  readonly downstream: { readonly signals: number; readonly memoryCandidates: 0; readonly activeMemories: 0; readonly tasks: number };
+  /** Its 学习信号, oldest first. */
+  readonly signals: ReadonlyArray<LearningLineageSignalProjection>;
+  /** The newest `MAX_LEARNING_LINEAGE_TASKS` Tasks that used it, oldest first. */
+  readonly tasks: ReadonlyArray<LearningLineageTaskProjection>;
+  readonly earlierTasks: number;
 }
 
 /** One material a 停止今后使用 names, at the version and decision count the editor read. */
@@ -9061,12 +9168,23 @@ export interface LearningRemediationPreviewProjection {
   readonly groups: {
     /** The included materials stop being eligible for any later learning. */
     readonly future: number;
-    /** Running Tasks that read them: none, since no Task reads learning material yet. */
-    readonly running: 0;
+    /**
+     * The current 本社审阅偏好 version's ordinal and how many of its lines the materials support (Issue #912): recording builds a
+     * new version without them. `null` and 0 when there is no version.
+     */
+    readonly currentVersion: number | null;
+    readonly linesAffected: number;
+    /** Approved Review Runs whose pinned version reads them and that have not finished: each stops before its next read. */
+    readonly running: number;
+    /** Prepared, not approved Review Runs whose pinned version reads them: their approval is refused. */
+    readonly prepared: number;
     /** Candidates or enabled memory made of them: none, since none is made yet. */
     readonly memory: 0;
-    /** Completed Tasks that used them: none; the decisions they hold stay on record. */
-    readonly completed: 0;
+    /** Completed Review Runs whose result read them: each keeps its result and gains the marker. */
+    readonly completed: number;
+    /** The first few of each, by name. */
+    readonly runningNamed: ReadonlyArray<string>;
+    readonly completedNamed: ReadonlyArray<string>;
     readonly decisionsKept: number;
   };
   readonly previewDigest: string;
@@ -9971,6 +10089,15 @@ export const MAX_SERIES_EXCLUSION_TARGETS_PAGE = 50;
 export const SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL = '书系检索范围已变化 · 需要重新确认计划' as const;
 /** The Historically Affected Result Marker (SER-026). */
 export const HISTORICALLY_AFFECTED_RESULT_MARKER = '此结果使用的材料后来被排除' as const;
+/**
+ * The state a Run stops in when a Learning Material its pinned 本社审阅偏好 version read was 停止今后使用 (Issue #912; LAUD-008):
+ * the Run is `scope-changed` — its only ways on are 重新执行（不含该影响） and 取消任务 — in these words, never the Series one.
+ */
+export const LEARNING_INFLUENCE_WITHDRAWN_LABEL = '所参考的本社审阅偏好已停止使用 · 需要重新确认计划' as const;
+/** The outcome summary the stop records, by which the Review Run tells it apart from any other interruption. */
+export const LEARNING_INFLUENCE_STOP_SUMMARY = `${LEARNING_INFLUENCE_WITHDRAWN_LABEL}：它参考的偏好版本中有学习材料已停止今后使用，运行在下一个阅读范围前停下；已读完的结果保留，已经发给模型服务的内容无法收回。` as const;
+/** The Historically Affected Result Marker for a result that read such a version (Issue #912; LAUD-008). */
+export const LEARNING_INFLUENCE_RESULT_MARKER = '此结果参考的学习材料后来停止今后使用' as const;
 /** The marker where the exclusion ledger no longer reads (Issue #64 review): history that cannot be checked says so. */
 export const HISTORICAL_MARKER_UNVERIFIABLE = '此结果使用的材料是否后来被排除：无法核对' as const;
 
@@ -12972,6 +13099,9 @@ export interface ServiceOperationMap {
   recordChangeSuggestionDecision: { input: RecordChangeSuggestionDecisionInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
+  inspectHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
+  rebuildHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
+  inspectEditQualitySignals: { input: { bookId: string | null }; output: EditQualitySignalsProjection };
   inspectLearningMaterials: { input: { bookId: string | null; after: LearningMaterialCursor | null }; output: LearningMaterialsProjection };
   /** One material as its Review Card reads it, by its Book and place. */
   inspectLearningMaterial: { input: { bookId: string; materialKey: string }; output: LearningMaterialProjection };
@@ -13505,6 +13635,9 @@ export interface RendererApi {
   recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): Promise<EditorialMarkCommandProjection>;
+  inspectHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
+  rebuildHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
+  inspectEditQualitySignals(input: { bookId: string | null }): Promise<EditQualitySignalsProjection>;
   inspectLearningMaterials(input: { bookId: string | null; after?: LearningMaterialCursor | null }): Promise<LearningMaterialsProjection>;
   inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;

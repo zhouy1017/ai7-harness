@@ -1,9 +1,13 @@
+import { HOUSE_REVIEW_PREFERENCE_CATEGORY } from './launch-policy.js';
+import { HousePreferenceInfluence, HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, withdrawalOf, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
+import { inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
+import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
 import type { ApplyReceiptProjection, BatchProposalDecisionDraftInput, InspectApplyReceiptInput, PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordProposalDecisionInput, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput } from '../shared/protocol.js';
 import { initializeProposalReviewSchema } from './editorial-marks.js';
 import { SEARCH_BACKENDS, defaultSearchBackend } from './provider/search-backends.js';
 import { RetrievalIndex, RetrievalError, type RetrievalMaterialVectorQuery, type RetrievalSource } from './retrieval/index.js';
 import { materialRetrievalSources } from './retrieval/source-readers.js';
-import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
+import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, taskMaterialSettled, TASK_MATERIAL_OFFER_DAMAGED, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
 import { allowedProductionBindingOf, type ConfiguredProviderBinding } from './launch-policy.js';
@@ -13,7 +17,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_LINEAGE_TASKS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   ControlTaskRunInput,
   EditTaskPlanInput,
@@ -756,10 +760,12 @@ import {
   learningAuditStanding,
   learningMaterialDigest,
   learningMaterialOrder,
+  LEARNING_REMEDIATION_NAMED,
   learningRemediationPreview,
   proposalDecisionCandidate,
   reviewDispositionCandidate,
   type LearningMaterialCandidate,
+  type LearningRemediationReach,
 } from './learning-eligibility.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry } from './review/category-configuration.js';
 import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from './evaluation-calibration.js';
@@ -1065,7 +1071,7 @@ import {
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   MODEL_CLARIFICATION_SCHEMA_VERSION,
-  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION,
+  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -2356,7 +2362,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2420,7 +2426,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2798,7 +2804,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2851,7 +2857,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2996,7 +3002,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3048,7 +3054,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3545,7 +3551,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3597,7 +3603,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4486,9 +4492,9 @@ const WAITING_TASK_MOVED_LABELS: Readonly<Record<string, string>> = {
   EVALUATION_REWRITE_STALE: '这一版的评分',
   EVALUATION_REWRITE_UNAVAILABLE: '这一版的评分',
   WRITING_EXEMPLAR_MOVED: '范例',
-  MATERIAL_INDEX_MOVED: '参考资料',
-  MATERIAL_REFERENCE_UNAVAILABLE: '参考资料',
-  MATERIAL_INDEX_RECORD_INVALID: '参考资料',
+  MATERIAL_INDEX_MOVED: '参考资料的索引版本（已不在本机）',
+  MATERIAL_REFERENCE_UNAVAILABLE: '参考资料的允许参考（已撤回）',
+  MATERIAL_INDEX_RECORD_INVALID: '参考资料的索引记录（已损坏）',
 };
 const WAITING_TASK_MOVED_FALLBACK = '计划依据的内容';
 /**
@@ -4761,7 +4767,14 @@ export class EditorialStore {
     this.#outcomeResolutions = new OutcomeResolutionLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
-      ledgerOf: (entry, materials, digest, bookId) => this.#reviewLedgerOf(entry, materials, digest, bookId),
+      ledgerOf: (entry, materials, digest, bookId, preference) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference),
+      housePreference: (bookId, categoryId, kind, policy) => {
+        const use = new HouseReviewPreferenceLedger(this.#authority).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId);
+        if (use === null) return null;
+        // The kind's one foreground rule must name the category; the live admission asks the same again before any dispatch.
+        const rules = policy.providerProcessing.admittedRules.filter((rule) => rule.backgroundOrigin !== true && rule.taskKinds.includes(kind));
+        return rules.length === 1 && rules[0]!.outboundDataCategories.includes(HOUSE_REVIEW_PREFERENCE_CATEGORY) ? use : 'closed';
+      },
       materialReadings: (boundary) => this.#taskMaterialReadings(boundary),
       materialOffers: (bookId) => this.#taskMaterialOffers(bookId),
       baseline: () => this.#baselineAnalysis,
@@ -5033,6 +5046,7 @@ export class EditorialStore {
       initializeProposalReviewSchema(authority);
       // Revision 78 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
       initializeFactualVerificationSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
+      initializeHouseReviewPreferenceSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -5309,7 +5323,7 @@ export class EditorialStore {
    * otherwise the category's own, built from the configuration entry the Run snapshotted — so a Run keeps
    * finding the ledger of the exact contract it prepared under.
    */
-  #reviewLedgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string): BaselineAnalysisStore {
+  #reviewLedgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string, preference?: HouseReviewPreferenceUse | null): BaselineAnalysisStore {
     if (entry.executor === 'factual-review-kind') return this.#factualReview;
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
@@ -5317,6 +5331,7 @@ export class EditorialStore {
     if (materials === undefined && latestForBook !== undefined) {
       const row = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1").get(latestForBook, base.kind) as SqlRow | undefined;
       if (row !== undefined) {
+        preference = new HouseReviewPreferenceLedger(this.#authority).pinned(asString(row.task_intent_id));
         const records = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?) AND component IN ('execution-plan', 'plan-envelope')").all(asString(row.task_intent_id), asString(row.task_intent_id)) as SqlRow[];
         const components = new Map(records.map((record) => {
           const json = asString(record.canonical_json);
@@ -5337,9 +5352,15 @@ export class EditorialStore {
         }
       }
     }
-    if (materials === undefined) return this.reviewCategoryLedger(base);
+    if (materials === undefined) return this.reviewCategoryLedger(houseReviewPreferenceKindDefinition(base, preference ?? null, true));
     const readings = this.#taskMaterialReadings(materials);
-    const definition = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, frozenPromptDigest));
+    // The frozen digest is the outermost contract's. A readable pin re-derives the material contract and wraps it again, which
+    // must give that digest; an unreadable one is the material wrapper's own blocked definition under it, and never sends.
+    const refused = readings.some((reading) => reading.refusal !== null);
+    const material = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, preference == null || refused ? frozenPromptDigest : undefined));
+    const definition = refused ? material : houseReviewPreferenceKindDefinition(material, preference ?? null, true);
+    requireStore(preference == null || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
+      'HOUSE_REVIEW_PREFERENCE_INVALID', '本社审阅偏好与任务计划不一致。');
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
     return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
@@ -5398,26 +5419,35 @@ export class EditorialStore {
     return references;
   }
 
+  /**
+   * The 资料库 items a Book's Tasks may list whose index is complete, the latest arrival first. An item whose index record is
+   * damaged is not dropped and does not fail the page (#795): it is listed with `damaged` and no known size, and offered as
+   * not selectable, with its reason (Issue #759); a frozen reference row names the damage again where a plan lists it.
+   */
+  #indexedMaterialOffers(bookId: string): Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number; damaged: boolean }> {
+    return this.#libraryCall(() => this.#libraryMaterials.referable(bookId)).flatMap((item): Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number; damaged: boolean }> => {
+      try {
+        const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
+        return build === null || build.state !== 'complete' ? [] : [{ ...item, characters: build.metadata.characters, damaged: false }];
+      } catch (error) {
+        if (error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID') return [{ ...item, characters: 0, damaged: true }];
+        throw error;
+      }
+    });
+  }
+
   #taskMaterialOffers(bookId: string, surface: '审阅' | '评估' = '审阅'): NonNullable<ReviewWorkspaceProjection['materials']> {
     const launch = this.#baselineAnalysis.launch;
     const kinds = surface === '评估' ? [INITIAL_EVALUATION_KIND, READERS_REPORT_KIND]
       : BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.filter((entry) => entry.executor === 'review-category-contract').map((entry) => reviewCategoryKindId(entry.categoryId));
     const live = launch.live !== null && !kinds.some((kind) => liveMaterialRule(launch.policy, kind) !== null);
-    const indexed = this.#libraryCall(() => this.#libraryMaterials.referable(bookId)).flatMap((item) => {
-      try {
-        const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
-        return build === null || build.state !== 'complete' ? [] : [{ ...item, characters: build.metadata.characters }];
-      } catch (error) {
-        // A damaged build cannot be offered again; 评估's frozen reference row carries its named refusal (#795).
-        if (surface === '评估' && error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID') return [];
-        throw error;
-      }
-    });
+    const indexed = this.#indexedMaterialOffers(bookId);
     return {
       statement: live ? TASK_MATERIAL_LIVE_UNAVAILABLE : indexed.length === 0 ? TASK_MATERIALS_NONE : TASK_MATERIALS_STATEMENT,
       items: indexed.slice(0, MAX_WRITING_MATERIAL_OFFERS).map((item) => {
-        const reason = live ? TASK_MATERIAL_LIVE_UNAVAILABLE : item.characters > MAX_WRITING_MATERIAL_GRAPHEMES ? writingMaterialOverBound(item.characters) : null;
-        return { ...item, selectable: reason === null, reason };
+        const reason = live ? TASK_MATERIAL_LIVE_UNAVAILABLE : item.damaged ? TASK_MATERIAL_OFFER_DAMAGED
+          : item.characters > MAX_WRITING_MATERIAL_GRAPHEMES ? writingMaterialOverBound(item.characters) : null;
+        return { materialId: item.materialId, title: item.title, scope: item.scope, characters: item.characters, selectable: reason === null, reason };
       }),
       more: Math.max(0, indexed.length - MAX_WRITING_MATERIAL_OFFERS),
     };
@@ -10098,7 +10128,7 @@ export class EditorialStore {
       const frozen = task === null ? null : this.#evaluationMaterialPlan(task.taskIntentId);
       if (frozen === null) return { lines: [], blocked: false };
       const readings = this.#taskMaterialReadings(frozen.boundary, '评估')
-        .map((reading) => task!.state === 'prepared' ? reading : { source: reading.source, refusal: null });
+        .map((reading) => task!.state === 'prepared' ? reading : taskMaterialSettled(reading));
       return { lines: readings.map(taskMaterialReferenceLine), blocked: readings.some((reading) => reading.refusal !== null) };
     };
     const initial = frozenOf(page.initial.task);
@@ -10112,7 +10142,7 @@ export class EditorialStore {
     const references = ledger.definition.materialReferences?.sources;
     if (references === undefined) return [];
     const readings = this.#taskMaterialReadings({ bookId, references }, '评估');
-    return authorized ? readings.map((reading) => ({ source: reading.source, paragraphs: reading.paragraphs ?? [], refusal: null })) : readings;
+    return authorized ? readings.map(taskMaterialSettled) : readings;
   }
 
   #evaluationMaterialPlan(taskIntentId: string): { boundary: TaskMaterialBoundary; baseDigest: string; promptDigest: string } | null {
@@ -10980,13 +11010,9 @@ export class EditorialStore {
   #writingMaterialOffer(bookId: string): WritingTaskProjection['references']['materials'] {
     const launch = this.#baselineAnalysis.launch;
     const live = launch.live !== null && liveMaterialRule(launch.policy, WRITING_KIND) === null;
-    const indexed: Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number }> = [];
+    let indexed: Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number; damaged: boolean }>;
     try {
-      for (const entry of this.#libraryCall(() => this.#libraryMaterials.referable(bookId))) {
-        const build = this.#materialIndexCall(() => this.#materialIndex.current(entry.materialId));
-        if (build === null || build.state !== 'complete') continue;
-        indexed.push({ ...entry, characters: build.metadata.characters });
-      }
+      indexed = this.#indexedMaterialOffers(bookId);
     } catch (error) {
       if (!(error instanceof StoreError)) throw error;
       return { statement: `资料库暂不可用：${error.message}`, items: [], more: 0 };
@@ -10995,7 +11021,8 @@ export class EditorialStore {
     return {
       statement: live ? WRITING_MATERIAL_LIVE_UNAVAILABLE : indexed.length === 0 ? WRITING_MATERIALS_NONE : WRITING_MATERIALS_STATEMENT,
       items: shown.map((item) => {
-        const reason = live ? WRITING_MATERIAL_LIVE_UNAVAILABLE : item.characters > MAX_WRITING_MATERIAL_GRAPHEMES ? writingMaterialOverBound(item.characters) : null;
+        const reason = live ? WRITING_MATERIAL_LIVE_UNAVAILABLE : item.damaged ? TASK_MATERIAL_OFFER_DAMAGED
+          : item.characters > MAX_WRITING_MATERIAL_GRAPHEMES ? writingMaterialOverBound(item.characters) : null;
         return { materialId: item.materialId, title: item.title, characters: item.characters, scope: item.scope, selectable: reason === null, reason };
       }),
       more: indexed.length - shown.length,
@@ -12195,10 +12222,61 @@ export class EditorialStore {
           note: input.note,
           attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
         });
+        this.#rebuildHouseReviewPreference();
       });
     });
     // The one material it decided: the page it sits on is never re-sent whole.
     return this.inspectLearningMaterial(input.bookId, input.materialKey);
+  }
+
+  inspectEditQualitySignals(bookId: string | null): EditQualitySignalsProjection {
+    return this.#learningCall(() => {
+      requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+      if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
+      return readEditQualitySignals(this.#authority, bookId);
+    });
+  }
+
+  inspectHouseReviewPreference(): HouseReviewPreferenceProjection {
+    return this.#learningCall(() => {
+      const operationalScope = this.#baselineAnalysis.launch.operationalScope;
+      const history = new HouseReviewPreferenceLedger(this.#authority).history(operationalScope);
+      return { operationalScope, current: history.at(-1) ?? null,
+        history: history.map(({ versionId, ordinal, recordedAt, sourceCount }) => ({ versionId, ordinal, recordedAt, sourceCount })), basis: LEARNING_ELIGIBILITY_BASIS };
+    });
+  }
+
+  rebuildHouseReviewPreference(): HouseReviewPreferenceProjection {
+    this.#learningCall(() => this.#transaction(this.#authority, () => this.#rebuildHouseReviewPreference()));
+    return this.inspectHouseReviewPreference();
+  }
+
+  /**
+   * The house record from every Book's review material as it stands (Issue #911): the sources are read, and filtered by
+   * eligibility and by the scope of the Result Set Revision each came from, in `house-review-preference.ts`; every person the
+   * house's Books name now is kept out of the lines besides each decision's own attribution.
+   */
+  #rebuildHouseReviewPreference(): void {
+    const scope = this.#baselineAnalysis.launch.operationalScope;
+    const sources: HousePreferenceSource[] = [];
+    const names: string[] = [];
+    for (const book of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY book_id').iterate() as IterableIterator<SqlRow>) {
+      const bookId = asString(book.book_id);
+      const people = this.#bookPeople.current(bookId);
+      names.push(...people.authors, ...people.editors, ...people.related.map((person) => person.name));
+      sources.push(...housePreferenceSources(this.#authority, scope, { bookId, title: asString(book.title) }, this.#standingMaterials(bookId),
+        (categoryId) => reviewCategoryEntry(categoryId)?.label ?? categoryId));
+    }
+    new HouseReviewPreferenceLedger(this.#authority).rebuild(scope, sources, names);
+  }
+
+  /** Each of one Book's Learning Materials where it stands, a decided one with the newest decision of its chain. */
+  *#standingMaterials(bookId: string): IterableIterator<StandingReviewMaterial> {
+    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false))) {
+      const latest = projection.state === 'decided' ? this.#learningEligibility.history(bookId, candidate.materialKey).at(-1) ?? null : null;
+      yield { candidate, state: projection.state, materialDigest: projection.digest,
+        decision: latest === null ? null : { decisionId: latest.decisionId, choice: latest.choice, attribution: latest.attribution } };
+    }
   }
 
   /**
@@ -12348,7 +12426,55 @@ export class EditorialStore {
         if (kept.length > limit) kept.pop();
       }
     }
-    return { page: kept.map(({ candidate, material }) => ({ material, orderedAt: candidate.orderedAt })), count };
+    // 使用过的任务 for the materials the page keeps (Issue #912; LAUD-001): read once for the page, never for every match.
+    const influence = kept.length === 0 ? null : new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
+    return { page: kept.map(({ candidate, material }) => ({
+      material: { ...material, downstreamTasks: this.#materialInfluence(bookId, material.materialKey, influence!).tasks.length },
+      orderedAt: candidate.orderedAt,
+    })), count };
+  }
+
+  /**
+   * What came of one material after its decisions (Issue #912; LAUD-003, LAUD-004): the 本社审阅偏好 versions of this launch's
+   * scope with a line it supports — its 学习信号 — and every Review Run category whose pinned version carried such a line, as
+   * it is now; its 使用过的任务 are those that sent anything. Only real consumption is read.
+   */
+  #materialInfluence(bookId: string, materialKey: string, influence: HousePreferenceInfluence): {
+    signals: ReturnType<HousePreferenceInfluence['signalsOf']>;
+    uses: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
+    tasks: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
+  } {
+    const decisionIds = new Set(this.#learningEligibility.history(bookId, materialKey).map((entry) => entry.decisionId));
+    const uses = influence.usesOf(decisionIds).flatMap((pin) => {
+      const withdrawn = [...pin.decisionIds].some((id) => decisionIds.has(id) && withdrawalOf(this.#authority, id).withdrawnAt !== null);
+      return this.#reviewRuns.influenceUses([pin]).map((use) => ({ ...use, versionOrdinal: pin.version.ordinal, withdrawn }));
+    });
+    return { signals: influence.signalsOf(decisionIds), uses, tasks: uses.filter((use) => use.consumed) };
+  }
+
+  /**
+   * What 停止今后使用 of the included materials reaches (Issue #912; LAUD-006, LAUD-008): the lines of the current 本社审阅偏好
+   * version they support, and the Review Run category Tasks whose pinned version reads them — approved and not finished, which
+   * stop before their next read; prepared and not approved, whose approval is refused; finished, which keep their result and
+   * gain the marker.
+   */
+  #remediationReach(bookId: string, materialKeys: ReadonlyArray<string>): ReturnType<LearningRemediationReach> & { approved: Array<{ reviewRunId: string; categoryId: string }> } {
+    const influence = new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
+    const decisionIds = new Set(materialKeys.flatMap((key) => this.#learningEligibility.history(bookId, key).map((entry) => entry.decisionId)));
+    const current = influence.versions.at(-1) ?? null;
+    const uses = this.#reviewRuns.influenceUses(influence.usesOf(decisionIds));
+    const running = uses.filter((use) => use.state === 'running' || use.state === 'approved');
+    const completed = uses.filter((use) => use.state === 'completed');
+    return {
+      currentVersion: current?.ordinal ?? null,
+      linesAffected: current?.lines.filter((line) => line.sources.some((source) => decisionIds.has(source.eligibilityDecisionId))).length ?? 0,
+      running: running.length,
+      prepared: uses.filter((use) => use.state === 'prepared').length,
+      completed: completed.length,
+      runningNamed: running.slice(0, LEARNING_REMEDIATION_NAMED).map((use) => use.label),
+      completedNamed: completed.slice(0, LEARNING_REMEDIATION_NAMED).map((use) => use.label),
+      approved: uses.filter((use) => use.state === 'approved').map(({ reviewRunId, categoryId }) => ({ reviewRunId, categoryId })),
+    };
   }
 
   /**
@@ -12386,7 +12512,21 @@ export class EditorialStore {
           },
         })),
         earlierDecisions: chain.length - shown.length,
-        downstream: { signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 },
+        ...(() => {
+          const { signals, tasks } = this.#materialInfluence(bookId, materialKey, new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope));
+          const current = this.#authority.prepare('SELECT version_id FROM house_review_preference_versions WHERE operational_scope = ? ORDER BY ordinal DESC LIMIT 1')
+            .get(this.#baselineAnalysis.launch.operationalScope) as SqlRow | undefined;
+          const listed = tasks.slice(-MAX_LEARNING_LINEAGE_TASKS);
+          return {
+            downstream: { signals: signals.length, memoryCandidates: 0 as const, activeMemories: 0 as const, tasks: tasks.length },
+            signals: signals.map(({ version, lines }) => ({ versionId: version.versionId, ordinal: version.ordinal, recordedAt: version.recordedAt,
+              current: current !== undefined && asString(current.version_id) === version.versionId, lines })),
+            tasks: listed.map((use) => ({ bookId: use.bookId, reviewRunId: use.reviewRunId, label: use.label, versionOrdinal: use.versionOrdinal,
+              use: use.state === 'completed' ? 'completed' as const : use.state === 'running' ? 'running' as const : 'stopped' as const,
+              marked: use.state === 'completed' && use.withdrawn })),
+            earlierTasks: tasks.length - listed.length,
+          };
+        })(),
       };
     });
   }
@@ -12420,6 +12560,12 @@ export class EditorialStore {
           remediationPreview: preview.previewDigest,
         });
       }
+      this.#rebuildHouseReviewPreference();
+      // An approved Review Run category whose pinned version reads them and has not begun stops now (Issue #912; LAUD-008);
+      // one reading now stops before its next range, at the execution owner's guard.
+      for (const run of this.#remediationReach(input.bookId, preview.included.map((entry) => entry.materialKey)).approved) {
+        this.#reviewRuns.stopForWithdrawnInfluence(run.reviewRunId, run.categoryId);
+      }
       return { bookId: input.bookId, recorded: preview.included, leftOut: preview.leftOut };
     }));
   }
@@ -12437,7 +12583,10 @@ export class EditorialStore {
       found.set(candidate.materialKey, candidate);
       standings.set(candidate.materialKey, { candidate, projection });
     }
-    return { preview: learningRemediationPreview({ bookId: input.bookId, title }, input.items, (key) => standings.get(key) ?? null), found };
+    return { preview: learningRemediationPreview({ bookId: input.bookId, title }, input.items, (key) => standings.get(key) ?? null, (keys) => {
+      const { approved: _approved, ...reach } = this.#remediationReach(input.bookId, keys);
+      return reach;
+    }), found };
   }
 
   #readFeedbackHistory(input: FeedbackHistoryInput, exactEntryId: string | null = null): FeedbackHistoryProjection {
@@ -17884,6 +18033,16 @@ export class EditorialStore {
       if (error instanceof ReviewRunError || error instanceof SeriesExclusionError) return '无法读取的书系检索排除记录';
       throw error;
     }
+  }
+
+  /**
+   * The current-read guard over 本社审阅偏好 (Issue #912; LAUD-008), asked by the execution owner before each reading range of a
+   * Run: the pinned version a Learning Material behind what the Run reads was 停止今后使用 from, or `null`. A record it cannot
+   * read stops the Run rather than let it read past a withdrawal it could not check.
+   */
+  learningInfluenceGuard(runRecordId: string): string | null {
+    this.#assertAvailable();
+    return this.#reviewRuns.learningReadGuard(runRecordId);
   }
 
   /** Verify the consuming ledger's frozen material boundary; no material paragraphs are paged or composed here. */

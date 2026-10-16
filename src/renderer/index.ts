@@ -1,3 +1,5 @@
+import { renderHouseReviewPreference } from './knowledge-base-memory.js';
+import { mountEditQualitySignals } from './quality-learning.js';
 import { mountProposalWorkspace } from './proposal-workspace.js';
 import { renderEvaluationProfiles } from './evaluation-profiles.js';
 import { researchPlanLine, researchStatusLine, researchUnavailableLine } from '../shared/research-status.js';
@@ -2494,6 +2496,9 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     planChanged: () => taskDrawer.refresh('review-run'),
     // 在来源与证据中查看 (Issue #901): the Evidence Workspace's deep link into the Book's retained sources.
     openSource: (evidenceId) => renderBookSources(bookId, bookTitle, evidenceId),
+    // 查看学习来源链 (Issue #912): 质量与学习 › 学习回溯 at the material a result's preference came from.
+    openLearningLineage: (materialBookId, materialKey, reviewRunId) => void renderQualityLearning('audit', null, false,
+      { bookId: materialBookId, materialKey }, () => renderBookReview(bookId, bookTitle, { reviewRunId, findingId: null })),
   });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(REVIEW_DESTINATION_ACTIONS[0], 'primary', async () => {
@@ -5033,6 +5038,13 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
   }
   const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
   // 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005): the profile each 评估 version snapshots, and its use.
+  if (tab === 'memory') {
+    try {
+      renderHouseReviewPreference(panelNode, await window.ai7.inspectHouseReviewPreference(), window.ai7);
+      if (content.isConnected) setStatus('本社审阅偏好已打开');
+    } catch (error) { setStatus(rendererErrorMessage(error, '无法读取本社审阅偏好。'), 'error'); }
+    return;
+  }
   if (tab === 'evaluation') {
     setStatus('正在读取评估方案…', 'busy');
     try {
@@ -5229,7 +5241,8 @@ function readersReportExemplars(book: ExemplarBookProjection): HTMLElement {
  * 待我处理 opens it, for that Book, with the way to every Book one step away; and 学习回溯 (Issue #62, S27a), the learning
  * audit of every material's lineage and 停止今后使用.
  */
-async function renderQualityLearning(tab: QualityLearningTab, bookId: string | null, tabFocused = false): Promise<void> {
+async function renderQualityLearning(tab: QualityLearningTab, bookId: string | null, tabFocused = false,
+  openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null): Promise<void> {
   const content = panel();
   content.classList.add('quality-learning');
   content.dataset['qualityTab'] = tab;
@@ -5270,6 +5283,7 @@ async function renderQualityLearning(tab: QualityLearningTab, bookId: string | n
     back.append(all);
   }
   back.append(button('返回', 'quiet', () => void initializeStartup()));
+  if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
   content.append(
     element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${heading}`),
     element('h2', undefined, QUALITY_LEARNING_TITLE),
@@ -5286,9 +5300,13 @@ async function renderQualityLearning(tab: QualityLearningTab, bookId: string | n
     ? mountFeedbackHistory({ root: host, api: window.ai7, open: openFeedbackTarget, setStatus, errorMessage: rendererErrorMessage })
     : tab === 'learning'
       ? mountLearningMaterials({ root: host, bookId, api: window.ai7, openSource: openLearningMaterialSource, setStatus, errorMessage: rendererErrorMessage, technicalDetails })
-      : mountLearningAudit({ root: host, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
+      : mountLearningAudit({ root: host, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, openMaterial });
   try {
     await surface.load();
+    if (tab === 'feedback') {
+      const metrics = element('div'); section.append(metrics);
+      await mountEditQualitySignals(metrics, window.ai7);
+    }
     if (content.isConnected) setStatus(status.opened);
   } catch (error) {
     setStatus(rendererErrorMessage(error, status.unavailable), 'error');

@@ -1,3 +1,8 @@
+import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
+import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
+import { HOUSE_PREFERENCE_CLOSED, HOUSE_PREFERENCE_NOT_RULE } from '../../src/service/task-plan.js';
+import { editCategoryWeight, graphemeEditVolume } from '../../src/service/edit-quality-signals.js';
+import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -10,7 +15,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { REPORT_EXPORT_FORMATS, REPORT_FORMAT_LINES } from '../../src/service/manuscript-export.js';
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { ALWAYS_ONLINE } from '../../src/service/connectivity.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { PROCEDURE_STEP_NOT_CHOSEN } from '../../src/service/captured-procedures.js';
 import { RECONCILED_INTERRUPTED_DETAIL, type BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
@@ -2008,6 +2013,139 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
         .toBe(SELECTION_GONE_REASON);
       expect(workspace(session, book).runs).toEqual([]);
       expect(store.inspectBookTasks(book.bookId, () => null).groups.every((group) => group.total === 0)).toBe(true);
+    });
+  }, 300_000);
+});
+
+
+describe('house preference review consumption (#911)', () => {
+  it('automatically rebuilds eligible review feedback, stays neutral without policy admission, and freezes one pin per category Run', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const first = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      const finding = first.findings.find((entry) => entry.markId !== null)!;
+      session.store.recordReviewFindingDisposition(book.bookId, first.reviewRunId, finding.findingId, '保留本书体例');
+      const material = session.store.inspectLearningMaterials(book.bookId).books[0]!.materials.find((entry) => entry.kind === 'review-disposition')!;
+      const decide = (choice: 'house' | 'book' | 'excluded' | 'deferred', expectedDecisions: number) => session.store.decideLearningMaterial({
+        bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions, choice, note: null,
+      });
+      decide('deferred', 0);
+      expect(session.store.inspectHouseReviewPreference().current).toBeNull();
+      decide('house', 1);
+      const version = session.store.inspectHouseReviewPreference().current!;
+      expect(version.sourceCount).toBe(1);
+      expect(version.lines[0]!.sources[0]!.eligibilityDecisionId).toBeTruthy();
+      const noPolicy = prepare(session, book, [TYPOS], WHOLE);
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: noPolicy.reviewRunId }).scope.reference).toContain('本社审阅偏好未启用：当前策略未开放');
+      const kind = reviewCategoryKindDefinition(TYPOS_AND_USAGE).kind;
+      launchPolicy = withHouseReviewPreferenceFor(launchPolicy, kind);
+      const admitted = prepare(session, book, [TYPOS], WHOLE);
+      const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: admitted.reviewRunId });
+      expect(plan.scope.reference.some((line) => line.includes('本社审阅偏好 v1'))).toBe(true);
+      expect(plan.technical.some((line) => line.value.includes(version.versionId))).toBe(true);
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        const pins = new HouseReviewPreferenceLedger(db);
+        const task = admitted.categories[0]!.taskIntentId!;
+        const pin = pins.pinned(task);
+        expect(pin?.versionId).toBe(version.versionId);
+        expect(db.prepare('SELECT count(*) AS n FROM review_run_preference_pins WHERE review_run_id = ?').get(admitted.reviewRunId)!.n).toBe(1);
+        decide('excluded', 2);
+        expect(session.store.inspectHouseReviewPreference().current!.ordinal).toBe(2);
+        expect(pins.pinned(task)?.versionId).toBe(version.versionId);
+        // Reopening the plan resolves the pinned definition, even after a newer empty house version.
+        expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: admitted.reviewRunId }).scope.reference.some((line) => line.includes('本社审阅偏好 v1'))).toBe(true);
+        // The exclusion withdrew the pinned version's only material: the one approval is refused (Issue #912; LAUD-007).
+        expect(() => session.store.authorizeReviewRun(book.bookId, admitted.reviewRunId, approvals(admitted))).toThrowError(/本社审阅偏好 v1 中有 1 条学习材料已停止今后使用/u);
+      } finally { db.close(); }
+    });
+  }, 300_000);
+
+  it('keeps a category Task\'s pinned version through the editor\'s plan revision, which the one approval then accepts (#911 review)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const first = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      const finding = first.findings.find((entry) => entry.markId !== null)!;
+      session.store.recordReviewFindingDisposition(book.bookId, first.reviewRunId, finding.findingId, '保留本书体例');
+      const material = session.store.inspectLearningMaterials(book.bookId).books[0]!.materials.find((entry) => entry.kind === 'review-disposition')!;
+      session.store.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice: 'house', note: null });
+      const version = session.store.inspectHouseReviewPreference().current!;
+      launchPolicy = withHouseReviewPreferenceFor(launchPolicy, reviewCategoryKindDefinition(TYPOS_AND_USAGE).kind);
+      const admitted = prepare(session, book, [TYPOS], WHOLE);
+      const input = { bookId: book.bookId, kind: 'review-run' as const, ref: admitted.reviewRunId };
+      let plan = session.store.inspectTaskPlan(input);
+      const used = `错别字与规范用语：参考本社审阅偏好 v${version.ordinal}（来源：1 条已判定反馈）`;
+      expect(plan.scope.reference).toContain(used);
+      expect(plan.notDo.technical).toContain(HOUSE_PREFERENCE_NOT_RULE);
+      expect(plan.scope.reference).not.toContain(HOUSE_PREFERENCE_CLOSED);
+      plan = session.store.editTaskPlan({ ...input, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, removedSteps: [], disallowedAdaptations: ['safe-retry'] });
+      expect(plan.boundary.adaptable.find((entry) => entry.id === 'safe-retry')?.removed).toBe(true);
+      expect(plan.scope.reference).toContain(used);
+      const revised = workspace(session, book, admitted.reviewRunId).run!;
+      expect(revised.categories[0]!.planEnvelopeDigest).not.toBe(admitted.categories[0]!.planEnvelopeDigest);
+      // The revision is the same Task under the same contract: it reads the same pin, so its one approval stands.
+      session.store.authorizeReviewRun(book.bookId, admitted.reviewRunId, approvals(revised));
+      const report = session.store.generateReviewReport(book.bookId, admitted.reviewRunId).run!.report!;
+      expect(report.record.categorySummaries.entries[0]!.basisStatement).toContain(`参考本社审阅偏好 v${version.ordinal}`);
+    });
+  }, 300_000);
+
+  it('reads only admitted judgments made under its own scope: an excluded decision\'s Apply and every named person stay out (#911 review)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      session.store.updateBookPeople({ bookId: book.bookId, expectedVersion: 0, authors: ['周一'], editors: ['郑三'], related: [{ roleId: 'proofreader', name: '王四' }] });
+      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, LITERARY], WHOLE));
+      const marked = run.findings.filter((entry) => entry.categoryId === TYPOS && entry.markId !== null && entry.output === 'change-suggestion');
+      // Three distinct 修改建议, each still open.
+      const [kept, excluded, rejected] = marked.filter((entry, index) => marked.findIndex((other) => other.markId === entry.markId) === index && entry.status === 'pending');
+      expect(kept && excluded && rejected).toBeTruthy();
+      // 修改后接受 is weighted by its category (文学性与表达 3): the grapheme distance from what was proposed, and no more.
+      const literary = run.findings.find((entry) => entry.categoryId === LITERARY && entry.markId !== null && entry.output === 'change-suggestion' &&
+        entry.status === 'pending' && ![kept, excluded, rejected].some((other) => other!.blockId === entry.blockId))!;
+      session.store.applyChangeSuggestion({ ...binding(session, book), markId: literary.markId!, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '〔文学改写〕', reason: null });
+      expect(editCategoryWeight(LITERARY)).toBe(3);
+      expect(session.store.inspectEditQualitySignals(book.bookId).categories.find((entry) => entry.categoryId === LITERARY))
+        .toMatchObject({ applied: 1, surviving: 1, editVolume: 3 * graphemeEditVolume(literary.replacement!, '〔文学改写〕') });
+      // 修改后接受 with a reason applies the editor's own words: each is Learning Material with an Apply target of its own.
+      session.store.applyChangeSuggestion({ ...binding(session, book), markId: kept!.markId!, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '〔编辑改写〕', reason: '周一与王四认为按规范改' });
+      session.store.applyChangeSuggestion({ ...binding(session, book), markId: excluded!.markId!, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '〔排除改写〕', reason: '排除的理由' });
+      session.store.recordChangeSuggestionDecision({ ...binding(session, book), markId: rejected!.markId!, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '郑三说不必改' });
+      // The admitted decision's own applied text is written over; the excluded one's stands.
+      const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, kept!.markId!);
+      const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: card.blockId });
+      const block = window.blocks.find((entry) => entry.blockId === card.blockId)!;
+      session.store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId, blockId: block.blockId,
+        windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
+        fromGrapheme: card.fromGrapheme, toGrapheme: card.toGrapheme, insertText: '〔再改〕' });
+      const materials = session.store.inspectLearningMaterials(book.bookId).books[0]!.materials;
+      const decide = (reason: string, choice: 'house' | 'excluded') => {
+        const material = materials.find((entry) => entry.kind === 'proposal-decision' && entry.excerpt.some((line) => line.includes(reason)))!;
+        session.store.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice, note: null });
+      };
+      decide('周一与王四认为按规范改', 'house');
+      decide('排除的理由', 'excluded');
+      decide('郑三说不必改', 'house');
+      const record = session.store.inspectHouseReviewPreference();
+      expect(record.operationalScope).toBe('development-ci');
+      const version = record.current!;
+      expect(version.sourceCount).toBe(2);
+      expect(version.lines).toHaveLength(1);
+      const text = version.lines[0]!.text;
+      // Only the admitted decisions count, and only their own Apply: the one applied is written over, so it is not kept.
+      expect(text).toContain('采纳1、未采纳1');
+      expect(text).toContain('应用后常再改，注意编辑改写偏好');
+      expect(text).toContain('认为按规范改');
+      for (const absent of ['周一', '郑三', '王四', '排除的理由']) expect(text).not.toContain(absent);
+      expect(version.lines[0]!.sources[0]!.attribution).toMatchObject({ authors: ['周一'], editors: ['郑三'] });
+      // The development-data rule, by each source's own Result Set Revision: these fixture-route judgments reach neither the
+      // developer-live record nor the production one, and the development record stands as it was.
+      const original = session.store.baselineAnalysisLedger.launch;
+      session.store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', policy: await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live'), live: {
+        route: DEVELOPER_LIVE_POLICY_BINDING.route, endpoint: DEVELOPER_LIVE_POLICY_BINDING.endpoint, model: DEVELOPER_LIVE_POLICY_BINDING.model,
+        credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
+        runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 } } });
+      expect(session.store.rebuildHouseReviewPreference()).toMatchObject({ operationalScope: 'developer-live', current: null, history: [] });
+      session.store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null), live: null });
+      expect(session.store.rebuildHouseReviewPreference()).toMatchObject({ operationalScope: 'ordinary-production', current: null, history: [] });
+      session.store.baselineAnalysisLedger.bindLaunch(original);
+      expect(session.store.rebuildHouseReviewPreference().current!.versionId).toBe(version.versionId);
     });
   }, 300_000);
 });

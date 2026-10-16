@@ -778,6 +778,12 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.saveCorrectionProposal(request.input) };
     case 'decideLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
+    case 'inspectHouseReviewPreference':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectHouseReviewPreference() };
+    case 'rebuildHouseReviewPreference':
+      return { id: request.id, ok: true, op: request.op, result: store.rebuildHouseReviewPreference() };
+    case 'inspectEditQualitySignals':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEditQualitySignals(request.input.bookId) };
     case 'inspectLearningMaterials':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterials(request.input.bookId, request.input.after) };
     case 'inspectLearningMaterial':
@@ -1969,6 +1975,8 @@ async function run(): Promise<void> {
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
       // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
       readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
+      // The current-read guard over 本社审阅偏好 (Issue #912; LAUD-008): a withdrawn material stops a Run that read it.
+      influenceGuard: (runRecordId) => guardedStore.learningInfluenceGuard(runRecordId),
       materialGuard: (runRecordId, ledger) => guardedStore.materialGuard(runRecordId, ledger),
       retrievalIndex: (runRecordId, ledger) => guardedStore.retrievalIndexForRun(runRecordId, ledger),
       // External Evidence Retention (Issue #425, S70): each research unit's retained sources, kept as the unit settles.

@@ -1375,7 +1375,7 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '', channel: '', requirements: '一千字以内' } },
       { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: [randomUUID(), randomUUID()] } },
       { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: [] } },
-      { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: Array.from({ length: 16 }, () => randomUUID()) } },
+      { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: Array.from({ length: 4 }, () => randomUUID()) } },
       { op: 'authorizeWritingTask', input: { bookId, taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(64) } },
       { op: 'createWritingDraft', input: { bookId, revisionId: recordId } },
       // 快速开始 of a writing Task (S84b): the Task just prepared, its exact plan, and the rule version.
@@ -1420,6 +1420,8 @@ describe('decodeRequest rejects malformed frames', () => {
       ['prepareWritingTask', { bookId, typeId: 'promotion-article', audience: '读者', channel: '公'.repeat(1_001), requirements: null }],
       ['prepareWritingTask', { bookId, typeId: 'promotion-article', audience: '读者', channel: '公众号', requirements: '' }],
       ['prepareWritingTask', { bookId: 'book', typeId: 'promotion-article', audience: '读者', channel: '公众号', requirements: null }],
+      // At most what the service takes (Issue #759): four are admitted, a fifth is refused at the frame.
+      ['prepareWritingTask', { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: Array.from({ length: 5 }, () => randomUUID()) }],
       ['prepareWritingTask', { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: Array.from({ length: 17 }, () => randomUUID()) }],
       ['prepareWritingTask', { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: ['not-a-uuid'] }],
       ['prepareWritingTask', { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: randomUUID() }],
@@ -1515,6 +1517,28 @@ describe('decodeRequest rejects malformed frames', () => {
       ['decideLearningMaterial', { ...decision, expectedDecisions: -1 }],
       ['decideLearningMaterial', { ...decision, note: 7 }],
       ['decideLearningMaterial', { ...decision, scope: 'house' }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
+  it('accepts 本社审阅偏好 with no input and 编辑改动质量信号 for the house or one Book (Issue #911)', () => {
+    const inputs: ReadonlyArray<AcceptedInput> = [
+      { op: 'inspectHouseReviewPreference', input: {} },
+      { op: 'rebuildHouseReviewPreference', input: {} },
+      { op: 'inspectEditQualitySignals', input: { bookId: null } },
+      { op: 'inspectEditQualitySignals', input: { bookId: randomUUID() } },
+    ];
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['inspectHouseReviewPreference', { scope: 'ordinary-production' }],
+      ['rebuildHouseReviewPreference', { bookId: null }],
+      ['inspectEditQualitySignals', {}],
+      ['inspectEditQualitySignals', { bookId: 'book' }],
+      ['inspectEditQualitySignals', { bookId: null, operationalScope: 'developer-live' }],
     ] as const) {
       expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
     }

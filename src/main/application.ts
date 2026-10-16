@@ -59,6 +59,7 @@ import {
   type ModelServiceUnsupportedProviderProjection,
   type ModelRoleStatus,
   type ModelRoleStatusLabel,
+  MAX_WRITING_MATERIALS,
   MODEL_SERVICE_ROUTE_BINDINGS,
   MODEL_SERVICE_ROUTE_EFFECT_LABEL,
   MODEL_SERVICE_ROUTES,
@@ -3424,7 +3425,7 @@ function registerRendererHandlers(
     envelope(async () => {
       const owned = requireSender(event);
       requireDesktop(input === undefined || (input !== null && typeof input === 'object' &&
-        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every((id) => typeof id === 'string' && id.length <= 64)))), 'AI7_RENDERER_BOUNDARY_INVALID');
+        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every((id) => typeof id === 'string' && id.length <= 64)))), 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
@@ -3469,7 +3470,7 @@ function registerRendererHandlers(
     envelope(async () => {
       const owned = requireSender(event);
       requireDesktop(input !== null && typeof input === 'object' && (input.template === 'author' || input.template === 'editorial') &&
-        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every((id) => typeof id === 'string' && id.length <= 64))), 'AI7_RENDERER_BOUNDARY_INVALID');
+        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every((id) => typeof id === 'string' && id.length <= 64))), 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
@@ -3604,7 +3605,7 @@ function registerRendererHandlers(
       requireDesktop(input !== null && typeof input === 'object' && typeof input.typeId === 'string' && typeof input.audience === 'string' &&
         typeof input.channel === 'string' && (input.requirements === null || typeof input.requirements === 'string') &&
         // 允许参考's ticked 资料库 items (Issue #428): identities only; the service reads, pins and bounds them.
-        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 &&
+        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS &&
           input.materialIds.every((id) => typeof id === 'string' && id.length <= 64))), 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
@@ -3881,6 +3882,24 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 知识库 › 社级编辑记忆 and 质量与学习 (Issue #911): house-wide, bound to no Book route. 更新本社审阅偏好 appends a version,
+  // so it is serialized with every other effect.
+  ipcMain.handle(IPC_CHANNELS.inspectHouseReviewPreference, (event) => envelope(async () => {
+    requireSender(event); requireAuthority();
+    return service.call('inspectHouseReviewPreference', {});
+  }));
+  ipcMain.handle(IPC_CHANNELS.rebuildHouseReviewPreference, (event) => envelope(async () => {
+    requireSender(event);
+    return serializeEffect(async () => {
+      requireAuthority();
+      return service.call('rebuildHouseReviewPreference', {});
+    });
+  }));
+  ipcMain.handle(IPC_CHANNELS.inspectEditQualitySignals, (event, input: ServiceOperationMap['inspectEditQualitySignals']['input']) => envelope(async () => {
+    requireSender(event); requireAuthority();
+    requireDesktop(input !== null && typeof input === 'object' && Object.keys(input).length === 1 && (input.bookId === null || (typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId))), 'AI7_RENDERER_BOUNDARY_INVALID');
+    return service.call('inspectEditQualitySignals', { bookId: input.bookId });
+  }));
   // 质量与学习 › 学习准入 (Issue #61, S26b): a house-wide destination like 知识库, bound to no Book route; each decision names
   // its Book and is serialized with every other effect.
   ipcMain.handle(IPC_CHANNELS.inspectLearningMaterials, (event, input: ServiceOperationMap['inspectLearningMaterials']['input']) =>
@@ -4428,6 +4447,9 @@ function registerRendererHandlers(
     (event, input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>
       envelope(async () => {
         const owned = requireSender(event);
+        requireDesktop(input !== null && typeof input === 'object' &&
+          (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS &&
+            input.materialIds.every((id) => typeof id === 'string' && id.length <= 64))), 'AI7_RENDERER_BOUNDARY_INVALID');
         return serializeEffect(async () => {
           requireAuthority();
           const route = requireCurrentBookRoute(owned);

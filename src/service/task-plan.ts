@@ -1,6 +1,7 @@
+import { housePreferenceLabel } from './house-review-preference.js';
 import { researchDecisionLine } from '../shared/research-status.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
-import { taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
+import { materialSettledReason, taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
 
 import type {
   AnalysisReusePlanCounts,
@@ -29,7 +30,7 @@ import type {
   TaskPlanStartProjection,
   TaskPlanStepProjection,
 } from '../shared/protocol.js';
-import { MODEL_SERVICE_ROUTES, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, READERS_REPORT_TEMPLATE_LABELS, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
+import { MODEL_SERVICE_ROUTES, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, READERS_REPORT_TEMPLATE_LABELS, LEARNING_INFLUENCE_WITHDRAWN_LABEL, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
 import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, EVIDENCE_ASSURANCE_LEVEL_LABELS, type EvidenceAssuranceLevel } from '../shared/protocol.js';
 import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
 import type { ClarificationFacts } from './analysis/clarifications.js';
@@ -998,7 +999,7 @@ export function evaluationMaterialPlan(plan: TaskPlanProjection, materials: Read
     : '资料库资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。';
   return {
     ...plan,
-    state: refusal === null ? plan.state : { key: 'changed', label: '参考资料已不可用' },
+    state: refusal === null ? plan.state : { key: 'changed', label: refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE' ? '参考资料已撤回允许参考' : refusal.code === 'MATERIAL_INDEX_RECORD_INVALID' ? '参考资料的索引记录已损坏' : '参考资料已不在本机' },
     scope: { ...plan.scope, reference: [...plan.scope.reference, ...materials.map(taskMaterialReferenceLine), background], send: sending },
     notDo: { ...plan.notDo, editorial: plan.notDo.editorial.map((line) => line === '不读这本书以外的内容' ? '不读允许参考以外的资料' : line) },
     technical: [...plan.technical, { key: 'material-references', label: '资料库参考版本',
@@ -1367,8 +1368,12 @@ function writingMaterialGone(projection: WritingProjection, materials: ReadonlyA
 }
 
 /** The plan's line for one 资料库 item under 允许参考 (Issue #428; TASK-032): the product record, its size, the pinned build. */
-export function writingMaterialReferenceLine(material: WritingPlanMaterial): string {
+export function writingMaterialReferenceLine(material: WritingPlanMaterial, started = false): string {
   const line = `资料库资料《${material.source.title}》：已提取 ${groupedCount(material.source.characters)} 字，按计划冻结的索引版本读取（只参照，不照抄）`;
+  // A Task already started read the item as its plan pinned: it is not "unable to start", its draft stays readable (Issue #759).
+  if (started && material.refusal !== null) {
+    return `${line}——${materialSettledReason(material.refusal.code) ?? '这份资料现已不可用'}；已有的草稿仍可查看，再次起草需用「新建文档…」重新准备`;
+  }
   return material.refusal === null ? line : `${line}——${material.refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE'
     ? '这份资料现在不能列进这本书任务的「允许参考」' : material.refusal.code === 'MATERIAL_INDEX_RECORD_INVALID'
       ? '这份资料的索引记录已损坏' : '计划冻结的索引版本已不在本机'}，这次起草不能再开始`;
@@ -1402,7 +1407,7 @@ export const WRITING_NO_RULE = '这份写作计划现在不能设为快速开始
  * What a writing Task references, in the plan's words (DELIV-007): each part of its frozen reference set as it is there, or
  * that the Book has none — read from the contract input, never from anything the Task did not freeze.
  */
-export function writingReferenceLines(input: WritingContractInput, exemplarsHere = true, materials: ReadonlyArray<WritingPlanMaterial> = []): string[] {
+export function writingReferenceLines(input: WritingContractInput, exemplarsHere = true, materials: ReadonlyArray<WritingPlanMaterial> = [], started = false): string[] {
   const named = (list: ReadonlyArray<string>, none: string): string => (list.length === 0 ? none : list.join('、'));
   const synopsis = input.synopsis;
   const evaluation = input.evaluation;
@@ -1418,7 +1423,7 @@ export function writingReferenceLines(input: WritingContractInput, exemplarsHere
     // A 范例 the Task referenced and this data no longer holds is said so where it is named (#688 re-review).
     exemplarsHere ? writingExemplarLine(input.type.label, input.exemplars) : `${writingExemplarLine(input.type.label, input.exemplars)}${WRITING_EXEMPLAR_GONE_SUFFIX}`,
     // The 资料库 items the editor listed under 允许参考, one line each, after the 范例 (Issue #428); a plan that lists none has none.
-    ...materials.map(writingMaterialReferenceLine),
+    ...materials.map((material) => writingMaterialReferenceLine(material, started)),
     `图书信息：《${input.book.title}》 · 作者：${named(input.book.authors, '未填写')} · 责编：${named(input.book.editors, '未填写')} · 书系：${named(input.book.series, '不在任何书系中')}`,
     `你写的受众「${input.audience}」、渠道「${input.channel}」${input.requirements === null ? '' : `与其他要求「${input.requirements}」`}`,
   ];
@@ -1495,7 +1500,7 @@ export function writingPlan(input: {
     },
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
-      reference: writingReferenceLines(task, exemplarsHere, materials),
+      reference: writingReferenceLines(task, exemplarsHere, materials, projection.authorization !== null),
       send: live
         ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明`
         : '不发送任何内容',
@@ -2252,8 +2257,9 @@ function reviewState(facts: ReviewRunPlanFacts): TaskPlanProjection['state'] {
     case 'failed':
       return { key: 'stopped', label: '运行失败' };
     // A Series Retrieval Exclusion stopped it (Issue #64, S29b; SER-024), and the editor may then have cancelled it.
+    // …or a material behind its pinned 本社审阅偏好 version was 停止今后使用 (Issue #912; LAUD-008): its own words then.
     case 'scope-changed':
-      return { key: 'stopped', label: SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL };
+      return { key: 'stopped', label: facts.stateLabel === LEARNING_INFLUENCE_WITHDRAWN_LABEL ? LEARNING_INFLUENCE_WITHDRAWN_LABEL : SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL };
     case 'cancelled':
       return { key: 'stopped', label: '已取消' };
   }
@@ -2279,6 +2285,11 @@ function frozenRoute(components: Readonly<Record<string, unknown>>): { kind: str
   return { kind: 'none', model: '' };
 }
 
+/** The plan's words when the house has 本社审阅偏好 lines the selected rule does not let leave the machine (Issue #911). */
+export const HOUSE_PREFERENCE_CLOSED = '本社审阅偏好未启用：当前策略未开放';
+/** What a Run reading 本社审阅偏好 does not do with it: advice, never a rule (Issue #911). */
+export const HOUSE_PREFERENCE_NOT_RULE = '不把本社审阅偏好当作规则：它只作参考，不改变审阅类别、条款或编辑定稿';
+
 /**
  * The plan of one Review Run: one step per category — its findings become marks on the manuscript — and
  * the 审阅报告 the Run's findings are summed up in (D7). A Review Run has no revision route (S69): a plan
@@ -2298,6 +2309,11 @@ export function reviewRunPlan(input: {
   const position = scope.kind === 'changed' ? '改动过的章' : reading === null ? scope.label : positionLabel(reading);
   const categories = facts.categories;
   const materials = facts.materials ?? [];
+  // 本社审阅偏好 (Issue #911): each category that reads it names the version; a closed rule says so once.
+  const preferences = facts.housePreferences ?? [];
+  const preferenceLines = facts.housePreferences === undefined ? [] : preferences.length === 0 ? [HOUSE_PREFERENCE_CLOSED]
+    : preferences.map(({ categoryLabel, preference }) => `${categoryLabel}：参考${housePreferenceLabel(preference)}`);
+  const preferenceSent = preferences.length === 0 ? '' : `，以及${[...new Set(preferences.map(({ preference }) => `本社审阅偏好 v${preference.ordinal}`))].join('、')}的摘录`;
   const tasks = categories.filter((category) => category.task !== null);
   const procedures = [...new Set(categories.map((category) => category.procedure.title))];
   const firstProcedure = procedures[0] ?? '审阅工序';
@@ -2366,9 +2382,9 @@ export function reviewRunPlan(input: {
         ? `${category.label}：基线分析的前后不一致线索与未决事项`
         : category.guidelineDocuments.length === 0
           ? `${category.label}：${category.procedure.title}（第 ${category.procedure.version} 版）`
-          : `${category.label}：${category.guidelineDocuments.map((document) => `${document.issuer}《${document.title}》第 ${document.version} 版`).join('、')}`), ...materials.map(taskMaterialReferenceLine),
+          : `${category.label}：${category.guidelineDocuments.map((document) => `${document.issuer}《${document.title}》第 ${document.version} 版`).join('、')}`), ...materials.map(taskMaterialReferenceLine), ...preferenceLines,
         ...(materials.length === 0 ? [] : ['资料库资料只供调用模型的审阅类别参考；事实核查与只读已有线索的类别不参考这些资料。'])],
-      send: facts.materialsRefusedLive === true && materials.length > 0 ? '不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始' : tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取' : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}`,
+      send: facts.materialsRefusedLive === true && materials.length > 0 ? '不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始' : tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取' : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}${preferenceSent}`,
       notRead: scope.kind === 'whole' ? NOT_READ : spans === null ? `所选范围以外的正文；${NOT_READ}` : `${spans}以外的正文；${NOT_READ}`,
     },
     steps: [
@@ -2395,7 +2411,7 @@ export function reviewRunPlan(input: {
             ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
             : '远程模型服务被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行') + ' · ' + (tasks.length === 0 ? '未联网核查' : tasks.map((category) =>
         researchDecisionLine(category.label, category.task!.researchReport, category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined)).join('；')),
-      send: route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，发往为审阅配置的模型服务` : NOTHING_SENT,
+      send: route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往为审阅配置的模型服务` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
       usage: live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: live && allSet,
@@ -2416,7 +2432,7 @@ export function reviewRunPlan(input: {
         ...(selection ? ['不在所选段落以外标出发现：所读范围里别处的发现只计数，不标在稿件上'] : []),
         ...(riskPoints ? ['不给出合规、查重或政策结论'] : []),
       ],
-      technical: [...namedNonEffects(facts.live, unitsRead === 0 ? null : unitsRead)],
+      technical: [...(preferences.length === 0 ? [] : [HOUSE_PREFERENCE_NOT_RULE]), ...namedNonEffects(facts.live, unitsRead === 0 ? null : unitsRead)],
     },
     boundary: {
       adaptable: tasks.length === 0 ? [] : [{ id: 'safe-retry', label: SAFE_RETRY_ADAPTATION, removable: false, removed: false, movable: false, askFirst: false }],
@@ -2431,6 +2447,9 @@ export function reviewRunPlan(input: {
         : '没有开始的类别可以在「审阅」里新建一次审阅再审。',
     },
     technical: [
+      ...(facts.housePreferences === undefined ? [] : preferences.length === 0 ? [{ key: 'house-review-preference', label: '本社审阅偏好', value: HOUSE_PREFERENCE_CLOSED }]
+        : preferences.map(({ categoryLabel, preference }, index) => ({ key: `house-review-preference:${index}`, label: '本社审阅偏好',
+          value: `${categoryLabel} · ${housePreferenceLabel(preference)} · ${preference.versionId} · ${preference.materialSetDigest}` }))),
       ...(materials.length === 0 ? [] : [{ key: 'material-references', label: '资料库参考版本', value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest}`).join('；') }]),
       { key: 'review-run', label: '审阅记录', value: `${facts.label} · ${facts.reviewRunId} · ${facts.createdAt}` },
       { key: 'manuscript', label: '稿件 pin', value: `${facts.manuscript.revisionLabel} · ${facts.manuscript.revisionId} · 修订日志序号 ${facts.manuscript.journalSequence} · ${facts.manuscript.workingDigest}` },

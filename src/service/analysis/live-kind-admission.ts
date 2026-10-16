@@ -1,3 +1,4 @@
+import { liveHouseReviewPreferenceContract } from '../house-review-preference.js';
 import { FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import { FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST } from './factual-review-contract.js';
@@ -182,6 +183,13 @@ export function liveKindAdmission(
         expected.promptContractDigest !== definition.promptContractDigest || expected.systemPrompt !== definition.systemPrompt) return null;
     return liveKindAdmission(policy, wrapped.clarificationBase, binding);
   }
+  const preference = liveHouseReviewPreferenceContract(definition);
+  if (preference !== null) {
+    if (preference.promptContractDigest !== definition.promptContractDigest || preference.systemPrompt !== definition.systemPrompt ||
+        liveKindRule(policy, definition.kind, ['house-review-preference-excerpt']) === null) return null;
+    // Re-enter the unchanged base path, including its own material/deliverable proofs and source categories.
+    return liveKindAdmission(policy, preference.base, binding);
+  }
   const category = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => reviewCategoryKindId(entry.categoryId) === definition.kind ||
     (definition.kind === FACTUAL_REVIEW_KIND && entry.categoryId === 'factual-review'));
   if (category?.categoryId === 'publication-risk') return null;
@@ -193,6 +201,8 @@ export function liveKindAdmission(
 
 /** The categories a kind's payload carries besides the binding's own public or synthetic material. */
 export function liveKindContractCategories(kind: string, definition?: LiveKindDefinition): readonly OutboundDataCategory[] {
+  const preference = definition === undefined ? null : liveHouseReviewPreferenceContract(definition);
+  if (preference !== null) return [...liveKindContractCategories(kind, preference.base), 'house-review-preference-excerpt'];
   return [...(plannedPayloadCategories(kind) ?? []).filter((category) => category !== 'public-or-synthetic'),
     ...(definition === undefined || liveMaterialContract(definition) === null ? [] : ['frozen-material-reference-excerpt'] as const)];
 }

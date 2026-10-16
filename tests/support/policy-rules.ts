@@ -37,3 +37,27 @@ export function withoutRuleFor(policy: LaunchPolicyProjection, kind: string): La
 export function withRepeatedRuleFor(policy: LaunchPolicyProjection, kind: string): LaunchPolicyProjection {
   return withRules(policy, [...policy.providerProcessing.admittedRules, ruleFor(policy, kind)]);
 }
+
+/** The projection with no rule naming `house-review-preference-excerpt`: a rule closed to the 本社审阅偏好 block (#911). */
+export function withoutHouseReviewPreference(policy: LaunchPolicyProjection): LaunchPolicyProjection {
+  return withRules(policy, policy.providerProcessing.admittedRules.map((rule) => ({ ...rule,
+    outboundDataCategories: rule.outboundDataCategories.filter((category) => category !== 'house-review-preference-excerpt') })));
+}
+
+/**
+ * A rule naming `house-review-preference-excerpt` for `kind` (#911): development-ci's v1 admits no rule, so fixture-route tests of the
+ * consumer read this in-memory one; under developer-live, Provider Processing v20's review rule names the category itself.
+ */
+export function withHouseReviewPreferenceFor(policy: LaunchPolicyProjection, kind: string): LaunchPolicyProjection {
+  const previous = ruleFor(policy, kind);
+  const category = 'house-review-preference-excerpt' as const;
+  const stub: AdmittedProviderRule = previous === undefined ? {
+    ruleId: 'test-review-preference', taskKinds: [kind], modelRole: 'Main Editorial Role', route: 'opencode-go', endpoint: 'https://api.opencode.ai/v1',
+    model: 'deepseek-v4.1-flash', credentialSlot: 'opencode-go', outboundDataCategories: ['public-or-synthetic', category],
+    crossUnitSynthesisAllowed: false, materialReferencesAllowed: false, editorialDeliverablesAllowed: false,
+    clarificationQuestionAllowed: false, clarificationTimeoutHours: null, backgroundOrigin: false,
+    matchingActiveDefaultExecutionRuleAllowed: false, webSearchToolAllowed: false, platformTools: null,
+    localTools: localRetrievalRule(), sourceTranslationAllowed: false,
+  } : { ...previous, outboundDataCategories: [...previous.outboundDataCategories, category] };
+  return withRules(policy, [...policy.providerProcessing.admittedRules.filter((rule) => !rule.taskKinds.includes(kind)), stub]);
+}
