@@ -9591,6 +9591,10 @@ export class EditorialStore {
           return;
         }
         if (this.#indexStopped || this.#poisoned) return;
+        if (this.replacementFrozen()) {
+          this.#translationFailures.set(materialId, MATERIAL_LAYERS_READ_ONLY);
+          return;
+        }
         this.#transaction(this.#authority, () => this.#materialIndexCall(() => this.#materialIndex.recordTranslations(next, answer.made,
           batch.map((target, index) => ({ ordinal: target.ordinal, sha256: target.sha256, text: answer.texts[index]! })))));
       }

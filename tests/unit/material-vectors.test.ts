@@ -1,5 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
+import { MAX_FRAME_BYTES, MAX_MATERIAL_SEGMENTS_PAGE } from '../../src/shared/protocol.js';
+import { MAX_MATERIAL_TRANSLATION_CODE_UNITS } from '../../src/service/fast-role/material-translation-contract.js';
 import { cosineSimilarity, vectorBytes, vectorFromBytes, vectorNorm } from '../../src/service/knowledge/embedding.js';
 import { STUB_EMBEDDING_DIMENSIONS, STUB_EMBEDDING_IDENTITY, StubEmbeddingProvider, stubEmbedding, stubFeatures } from '../../src/service/knowledge/embedding-stub.js';
 import { initializeLibraryMaterialSchema } from '../../src/service/library-materials.js';
@@ -239,6 +241,37 @@ describe('the vectors and 来源译文 a build keeps beside it', () => {
     db.exec('DROP TRIGGER material_index_translations_no_update');
     db.exec("UPDATE material_index_translations SET canonical_json = replace(canonical_json, '黎明', '傍晚') WHERE ordinal = 1");
     expect(() => new MaterialIndexLedger(db).page(MATERIAL, '英文资料', 1)).toThrowError(/来源译文记录已损坏/u);
+  });
+
+  it.each(['译', '\u0001'])('pages long translations within the response frame without losing originals (%j)', (character) => {
+    const db = store();
+    const ledger = new MaterialIndexLedger(db);
+    const blocks = Array.from({ length: MAX_MATERIAL_SEGMENTS_PAGE * 2 + 1 }, (_, index) => block(`Synthetic paragraph ${index + 1}.`, index));
+    ledger.record({ materialId: MATERIAL, sha256: SHA, format: 'TXT' }, { ...english, blocks });
+    const next = ledger.translationTargets(MATERIAL, blocks.length);
+    const text = character.repeat(MAX_MATERIAL_TRANSLATION_CODE_UNITS);
+    ledger.recordTranslations(next, { model: 'synthetic-model', route: 'test', policyRuleId: 'test', promptContractDigest: 'd'.repeat(64) },
+      next.targets.map((target) => ({ ordinal: target.ordinal, sha256: target.sha256, text })));
+    const seen: number[] = [];
+    let from: number | null = 1;
+    while (from !== null) {
+      const page = ledger.page(MATERIAL, 'Synthetic notes', from);
+      expect(Buffer.byteLength(JSON.stringify({ id: 'r', ok: true, op: 'inspectLibraryMaterialSegments', result: page }))).toBeLessThanOrEqual(MAX_FRAME_BYTES);
+      expect(page.segments.length).toBeGreaterThan(0);
+      for (const segment of page.segments) {
+        expect(segment.text).toBe(blocks[segment.ordinal - 1]!.text);
+        expect(segment.translation?.text).toBe(text);
+        seen.push(segment.ordinal);
+      }
+      if (page.previous !== null) {
+        const previous = ledger.page(MATERIAL, 'Synthetic notes', page.previous);
+        expect(previous.segments[0]!.ordinal).toBeLessThan(from);
+        expect(previous.segments.at(-1)!.ordinal).toBeGreaterThanOrEqual(from - 1);
+      }
+      from = page.next;
+    }
+    expect(seen).toEqual(blocks.map((_, index) => index + 1));
+    db.close();
   });
 
   it('asks no 来源译文 of a Chinese item', () => {

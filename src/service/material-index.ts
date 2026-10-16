@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   MATERIAL_TRANSLATION_LABEL,
+  MAX_FRAME_BYTES,
   MAX_MATERIAL_SEGMENTS_PAGE,
   MAX_MATERIAL_VECTOR_CANDIDATES,
   type LibraryMaterialFormat,
@@ -762,6 +763,8 @@ export interface MaterialLayerTarget {
 
 /** The longest preview a search candidate carries, in code units. */
 const PREVIEW_CODE_UNITS = 120;
+/** Leave room for the page metadata and service envelope beside translated paragraphs. */
+const MATERIAL_SEGMENTS_PAGE_BYTES = MAX_FRAME_BYTES - 8_192;
 
 /** One build within 最近完成's window, as 待我处理 reads it (ATTN-009). */
 export interface MaterialIndexCompletion {
@@ -1061,6 +1064,28 @@ export class MaterialIndexLedger {
       .all(indexId, from, count) as SqlRow[]).map((row) => this.#segment(row, indexId));
   }
 
+  /** A bounded window with translations attached; the byte bound includes JSON escaping and UTF-8. */
+  #pageSegments(build: StoredBuild, from: number, count: number, backwards = false): MaterialSegmentsPageProjection['segments'] {
+    const segments = this.#segments(build.indexId, from, count);
+    const translations = this.#translations(build, segments);
+    const rows = segments.map((segment) => ({
+      ordinal: segment.ordinal, kind: segment.kind, text: segment.text, sentences: segment.sentences,
+      page: segment.page, pageParagraph: segment.pageParagraph,
+      translation: translations.get(segment.ordinal) ?? null,
+    }));
+    if (backwards) rows.reverse();
+    const page: typeof rows = [];
+    let bytes = 2;
+    for (const row of rows) {
+      const size = Buffer.byteLength(JSON.stringify(row), 'utf8') + 1;
+      if (bytes + size > MATERIAL_SEGMENTS_PAGE_BYTES) break;
+      page.push(row);
+      bytes += size;
+    }
+    requireIndex(page.length > 0, 'MATERIAL_INDEX_RECORD_INVALID', '资料索引的分段记录超出读取范围。');
+    return backwards ? page.reverse() : page;
+  }
+
   /**
    * 查看分段 (KB-009): one page of the item's paragraphs from `from`, each with its sentence ranges, a PDF paragraph with its
    * page, and each paragraph's 来源译文 beside it when one was made (Issue #892); read-only.
@@ -1069,25 +1094,18 @@ export class MaterialIndexLedger {
     requireIndex(UUID_PATTERN.test(materialId) && Number.isSafeInteger(from) && from >= 1, 'MATERIAL_INDEX_CURSOR_INVALID', '分段位置无效。');
     const build = this.#complete(materialId);
     requireIndex(from <= build.segmentCount, 'MATERIAL_INDEX_CURSOR_INVALID', '分段位置无效。');
-    const segments = this.#segments(build.indexId, from, MAX_MATERIAL_SEGMENTS_PAGE);
+    const segments = this.#pageSegments(build, from, MAX_MATERIAL_SEGMENTS_PAGE);
     const last = from + segments.length - 1;
-    const translations = this.#translations(build, segments);
+    const previousFrom = Math.max(1, from - MAX_MATERIAL_SEGMENTS_PAGE);
     return {
       materialId,
       title,
       indexDigest: build.sha256,
       total: build.segmentCount,
       from,
-      segments: segments.map((segment) => {
-        const translation = translations.get(segment.ordinal);
-        return {
-          ordinal: segment.ordinal, kind: segment.kind, text: segment.text, sentences: segment.sentences,
-          page: segment.page, pageParagraph: segment.pageParagraph,
-          translation: translation === undefined ? null : { text: translation.text, model: translation.model },
-        };
-      }),
+      segments,
       next: last < build.segmentCount ? last + 1 : null,
-      previous: from > 1 ? Math.max(1, from - MAX_MATERIAL_SEGMENTS_PAGE) : null,
+      previous: from > 1 ? this.#pageSegments(build, previousFrom, from - previousFrom, true)[0]!.ordinal : null,
     };
   }
 

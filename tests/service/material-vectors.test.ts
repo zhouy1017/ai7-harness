@@ -303,6 +303,49 @@ describe('来源译文 over the real store', () => {
     }
   }, 120_000);
 
+  it('holds a translation answer back when replacement freezes the data while the request is in flight', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let release = (): void => {};
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      const english = await put(store, file('ferry.txt', ENGLISH), 'Ferry notes');
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      const destination = join(roots.inputRoot, 'same.ai7db');
+      const preparation = await store.prepareDatabaseExport(destination, true);
+      expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
+      const preview = await store.inspectDatabaseImport(destination);
+      const translator = double();
+      store.useMaterialTranslator({
+        refusal: translator.refusal,
+        async translate(...args) {
+          await waiting;
+          return translator.translate(...args);
+        },
+      });
+      store.requestMaterialTranslation(english.materialId);
+      expect(store.materialIndexing()).toBe(true);
+      // As in the text-index regression, exercise the store's guard below the service replacement gate.
+      const preparing = store.prepareDatabaseReplacement(preview.previewId);
+      expect(store.replacementFrozen()).toBe(true);
+      const pending = (await preparing).pending!;
+      release();
+      await store.settleMaterialLayers();
+      expect(store.inspectLibraryMaterial(english.materialId).index.translation).toMatchObject({
+        state: 'not-built', translated: 0, lastFailure: '数据库替换正在等待：资料索引暂不建立新的层。',
+      });
+      await store.cancelDatabaseReplacement(pending.replacementId);
+      store.requestMaterialTranslation(english.materialId);
+      await store.settleMaterialLayers();
+      expect(store.inspectLibraryMaterial(english.materialId).index.translation?.state).toBe('complete');
+      store.markCleanShutdown();
+    } finally {
+      release();
+      await store.settleMaterialLayers();
+      store.close();
+    }
+  }, 120_000);
+
   it('sends at most 50 requests — 1,000 paragraphs — per 生成来源译文, says how many remain, and goes on when asked again', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
