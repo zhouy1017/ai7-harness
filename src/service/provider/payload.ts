@@ -80,6 +80,12 @@ export interface AssembledModelPayload {
   readonly messages: ReadonlyArray<AssembledMessage>;
 }
 
+/** Recheck the current Series restriction after assembly, immediately before the final transmission decision. */
+export function seriesScopeRefusal(guard: (() => string | null) | undefined): string | null {
+  if (guard === undefined) return null;
+  try { return guard(); } catch { return '无法核对书系检索范围'; }
+}
+
 /** The text of a message whose every block is text; `null` when any block is not text. */
 export function messageText(message: AssembledMessage): string | null {
   const texts: string[] = [];

@@ -664,7 +664,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     let calls = 0;
     const owner = new BaselineAnalysisExecutionOwner({
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: fakeSecretResolver(),
-      ...(guard === 'series' ? { readGuard: () => (++calls >= 6 ? '书系知识条目「海边小城」（地点）' : null) }
+      ...(guard === 'series' ? { seriesScopeGuard: () => (++calls >= 6 ? '书系知识条目「海边小城」（地点）' : null) }
         : { materialGuard: () => (++calls >= 7 ? { code: 'MATERIAL_REFERENCE_UNAVAILABLE', materialTitle: '合成资料', message: '资料《合成资料》现在不能允许参考。' } : null) }),
     });
     try {

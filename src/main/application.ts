@@ -3490,7 +3490,8 @@ function registerRendererHandlers(
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
-        const result = await service.call('prepareInitialEvaluation', { bookId: route.bookId, ...(input?.materialIds === undefined ? {} : { materialIds: input.materialIds }) });
+        requireDesktop(input?.seriesId == null || (typeof input.seriesId === 'string' && /^[0-9a-f-]{36}$/i.test(input.seriesId)), 'AI7_RENDERER_BOUNDARY_INVALID');
+        const result = await service.call('prepareInitialEvaluation', { bookId: route.bookId, ...(input?.seriesId == null ? {} : { seriesId: input.seriesId }), ...(input?.materialIds === undefined ? {} : { materialIds: input.materialIds }) });
         const prepared = result.result;
         if (result.kind !== 'initial-evaluation-preparation' ||
             (prepared !== null && !('recordCount' in prepared && 'initial' in prepared && prepared.bookId === route.bookId))) {
@@ -4514,7 +4515,9 @@ function registerRendererHandlers(
         return serializeEffect(async () => {
           requireAuthority();
           const route = requireCurrentBookRoute(owned);
+          requireDesktop(input.seriesId == null || (typeof input.seriesId === 'string' && /^[0-9a-f-]{36}$/i.test(input.seriesId)), 'AI7_RENDERER_BOUNDARY_INVALID');
           const result = await service.call('prepareReviewRun', {
+            ...(input.seriesId == null ? {} : { seriesId: input.seriesId }),
             categoryIds: input.categoryIds,
             scope: input.scope,
             ...(input.materialIds === undefined ? {} : { materialIds: input.materialIds }),

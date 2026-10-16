@@ -62,3 +62,11 @@ export function withHouseReviewPreferenceFor(policy: LaunchPolicyProjection, kin
   } : { ...previous, outboundDataCategories: [...previous.outboundDataCategories, category] };
   return withRules(policy, [...policy.providerProcessing.admittedRules.filter((rule) => !taskKindListed(rule.taskKinds, kind)), stub]);
 }
+
+/** Successor admission without altering any policy asset; fixture transport remains local. */
+export function withSeriesKnowledgeFor(policy: LaunchPolicyProjection, kind: string): LaunchPolicyProjection {
+  const seeded = withHouseReviewPreferenceFor(policy, kind);
+  const prior = ruleFor(seeded, kind);
+  return withRuleFor(seeded, kind, { seriesKnowledgeAllowed: true,
+    outboundDataCategories: [...prior.outboundDataCategories.filter((category) => category !== 'house-review-preference-excerpt'), 'series-knowledge-excerpt'] });
+}

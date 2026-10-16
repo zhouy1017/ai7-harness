@@ -979,7 +979,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 准备 AI7 初评: the route's Book; the mode is the service's to decide from the Book's 初评 so far.
     case 'prepareInitialEvaluation': {
-      const input = requireInputWithOptional(value.input, ['bookId'], ['materialIds'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['materialIds', 'seriesId'], tentativeId);
+      if (!optionalOrNull(input, 'seriesId', validUuid)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every(validUuid)))) throw new ProtocolError(tentativeId);
       break;
     }
@@ -1532,7 +1533,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId'], tentativeId);
+      if (!optionalOrNull(input, 'seriesId', validUuid)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||
           !validReviewRunScope(input.scope) ||
           !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every(validUuid))) ||

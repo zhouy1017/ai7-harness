@@ -229,7 +229,7 @@ describe('书系检索排除 over the real store', () => {
       expect(store.inspectSeriesExclusionTargets({ seriesId, kind: 'book', after: null }).targets.map((target) => target.label).sort()).toEqual(['成员图书《书系之外》', '成员图书《星河之一》']);
       const sources = store.inspectSeriesExclusionTargets({ seriesId, kind: 'source-version', after: null }).targets;
       expect(sources).toHaveLength(2);
-      expect(sources.every((target) => !target.read && target.continuing === '只排除这一个来源版本，不包括这本书以后的来源版本。')).toBe(true);
+      expect(sources.every((target) => target.read && target.continuing === '只排除这一个来源版本，不包括这本书以后的来源版本。')).toBe(true);
 
       exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: place } });
       expect(readable(store, member.bookId)).toEqual(['地点「旧港」', '人物「林默」', '正典设定「灯塔」']);
@@ -253,7 +253,7 @@ describe('书系检索排除 over the real store', () => {
       expect(readable(store, member.bookId)).toEqual(['人物「林默」']);
       // A Source Version is recorded so the ledger is whole, and no read reaches one: nothing more is left out.
       const sourceExclusion = exclude(store, seriesId, 'add', { target: { kind: 'source-version', id: sources[0]!.id } });
-      expect(sourceExclusion.revision.target.read).toBe(false);
+      expect(sourceExclusion.revision.target.read).toBe(true);
       expect(readable(store, member.bookId)).toEqual(['人物「林默」']);
       // The last one excluded, the review has nothing left, and says why.
       exclude(store, seriesId, 'add', { target: { kind: 'knowledge-class', id: 'characters' } });

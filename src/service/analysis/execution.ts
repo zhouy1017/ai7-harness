@@ -203,7 +203,7 @@ export interface ExecutionOwnerDependencies {
    * A non-`null` answer names what is excluded, and the Run stops there — its Plan Envelope and authorization predate the
    * exclusion, and that never lets a further read go on. Absent, nothing is guarded: no Series material exists for the Run.
    */
-  readonly readGuard?: ((runRecordId: string) => string | null) | null;
+  readonly seriesScopeGuard?: ((runRecordId: string) => string | null) | null;
   /**
    * The current-read guard over 本社审阅偏好 (Issue #912; LAUD-008), asked with the one above: a non-`null` answer names the
    * pinned version a Learning Material behind it was 停止今后使用 from, and the Run stops there for revalidation — what it
@@ -1435,7 +1435,7 @@ export class BaselineAnalysisExecutionOwner {
       gate: (payload) => {
         if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
         capturePendingLoopUsage();
-        const decision = evaluateEgress(payload, bindingFacts, platformSession?.egressScope ?? { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
+        const decision = evaluateEgress(payload, { ...bindingFacts, seriesScopeGuard: () => this.#deps.seriesScopeGuard?.(facts.runRecordId) ?? null }, platformSession?.egressScope ?? { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
         admittedPayloadDigest = decision.decision === 'refuse' ? null : decision.payloadDigest;
         return decision;
       },
@@ -2040,7 +2040,7 @@ export class BaselineAnalysisExecutionOwner {
           terminalClassification = 'interrupted';
           return true;
         }
-        if (active.cancelRequested || liveInterruption !== null || this.#deps.readGuard?.(facts.runRecordId) == null) return false;
+        if (active.cancelRequested || liveInterruption !== null || this.#deps.seriesScopeGuard?.(facts.runRecordId) == null) return false;
         liveInterruption = 'series-retrieval-scope-changed';
         terminalClassification = 'interrupted';
         return true;
@@ -2746,7 +2746,7 @@ export class BaselineAnalysisExecutionOwner {
           admittedUserMessages, acceptedOutputDigests, liveAdapter, accumulated, ceilingState, live, policy,
           // An exclusion recorded since the revision was persisted keeps the reflection back too (Issue #64, S29b).
           stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
-            (!active.cancelRequested && (this.#deps.readGuard?.(facts.runRecordId) != null || this.#deps.influenceGuard?.(facts.runRecordId) != null)),
+            (!active.cancelRequested && (this.#deps.seriesScopeGuard?.(facts.runRecordId) != null || this.#deps.influenceGuard?.(facts.runRecordId) != null)),
         })), ...(factualAssurance === null ? {} : { factualAssurance }) },
       });
     } finally {

@@ -1,5 +1,6 @@
 import { liveHouseReviewPreferenceContract } from '../house-review-preference.js';
 import { CUSTOM_ANALYSIS_KIND_FAMILY, EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY, taskKindListed } from '../launch-policy.js';
+import { liveSeriesContract } from '../review/series-consistency.js';
 import { FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import { FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST } from './factual-review-contract.js';
@@ -186,6 +187,12 @@ export function liveKindAdmission(
   definition: LiveKindDefinition,
   binding: LiveKindBinding,
 ): LiveKindRule | null {
+  const series = liveSeriesContract(definition);
+  if (series !== null) {
+    if (series.digest !== definition.promptContractDigest || series.system !== definition.systemPrompt ||
+        liveKindRule(policy, definition.kind, ['series-knowledge-excerpt'])?.seriesKnowledgeAllowed !== true) return null;
+    return liveKindAdmission(policy, series.base, binding);
+  }
   const wrapped = definition as LiveKindDefinition & { clarificationBase?: AnalysisKindDefinition };
   if (wrapped.clarificationBase !== undefined) {
     const expected = withModelClarification(wrapped.clarificationBase);
@@ -212,6 +219,8 @@ export function liveKindAdmission(
 
 /** The categories a kind's payload carries besides the binding's own public or synthetic material. */
 export function liveKindContractCategories(kind: string, definition?: LiveKindDefinition): readonly OutboundDataCategory[] {
+  const series = definition === undefined ? null : liveSeriesContract(definition);
+  if (series !== null) return [...liveKindContractCategories(kind, series.base), 'series-knowledge-excerpt'];
   const preference = definition === undefined ? null : liveHouseReviewPreferenceContract(definition);
   if (preference !== null) return [...liveKindContractCategories(kind, preference.base), 'house-review-preference-excerpt'];
   return [...(plannedPayloadCategories(kind) ?? []).filter((category) => category !== 'public-or-synthetic'),

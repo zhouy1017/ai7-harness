@@ -485,7 +485,8 @@ import {
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
 import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPlanFacts, type ReviewRunPreparationProgress } from './review/review-runs.js';
 import { OUTCOME_UNKNOWN_NOT_RESENT } from './analysis/outcome-unknown.js';
-import { newSeriesKnowledgeReadings } from './review/series-consistency.js';
+import { newSeriesKnowledgeReadings, freezeSeriesScope, frozenSeriesScopes, liveSeriesContract, seriesScopeKindDefinition, seriesKnowledgeAllowed, seriesScopeChanged, SERIES_POLICY_CLOSED } from './review/series-consistency.js';
+import type { FrozenSeriesScope } from '../shared/protocol.js';
 import { initializePublicationVersionSchema, PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
 import {
   GLOBAL_ATTENTION_READ_LIMIT,
@@ -505,6 +506,7 @@ import {
   baselineAnalysisPlan,
   baselineClarifications,
   initialEvaluationPlan,
+  seriesScopePlan,
   evaluationMaterialPlan,
   analysisTaskStateLabel,
   readersReportPlan,
@@ -848,6 +850,7 @@ import {
   seriesExclusionPreviewDigest,
   seriesExclusionReason,
   seriesExclusionTarget,
+  knowledgeMaterial,
   type SeriesKnowledgeMaterial,
   type StoredExclusion,
   type StoredExclusionRevision,
@@ -5315,7 +5318,7 @@ export class EditorialStore {
       ledger.bindLaunch(this.#baselineAnalysis.launch);
       return ledger;
     };
-    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}`, make) : make();
+    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}\n${canonicalJson(definition.seriesScopes ?? null)}`, make) : make();
   }
 
   /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
@@ -5390,9 +5393,13 @@ export class EditorialStore {
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
     const base = this.#reviewCategoryDefinitions.obtain(JSON.stringify(input), () => this.#analysisCall(() => reviewCategoryKindDefinition(input)));
+    let scopes = entry.seriesScopes;
+    const finish = (definition: AnalysisKindDefinition): AnalysisKindDefinition => scopes === undefined ? definition
+      : entry.seriesKnowledge === undefined ? seriesScopeKindDefinition(this.#authority, definition, scopes) : { ...definition, seriesScopes: scopes };
     if (materials === undefined && latestForBook !== undefined) {
       const row = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1").get(latestForBook, base.kind) as SqlRow | undefined;
       if (row !== undefined) {
+        scopes ??= frozenSeriesScopes(this.#authority, asString(row.task_intent_id));
         preference = new HouseReviewPreferenceLedger(this.#authority).pinned(asString(row.task_intent_id));
         const records = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?) AND component IN ('execution-plan', 'plan-envelope')").all(asString(row.task_intent_id), asString(row.task_intent_id)) as SqlRow[];
         const components = new Map(records.map((record) => {
@@ -5414,18 +5421,18 @@ export class EditorialStore {
         }
       }
     }
-    if (materials === undefined) return this.reviewCategoryLedger(houseReviewPreferenceKindDefinition(base, preference ?? null, true));
+    if (materials === undefined) return this.reviewCategoryLedger(finish(houseReviewPreferenceKindDefinition(base, preference ?? null, true)));
     const readings = this.#taskMaterialReadings(materials);
     // The frozen digest is the outermost contract's. A readable pin re-derives the material contract and wraps it again, which
     // must give that digest; an unreadable one is the material wrapper's own blocked definition under it, and never sends.
     const refused = readings.some((reading) => reading.refusal !== null);
-    const material = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, preference == null || refused ? frozenPromptDigest : undefined));
+    const material = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, scopes === undefined && (preference == null || refused) ? frozenPromptDigest : undefined));
     const definition = refused ? material : houseReviewPreferenceKindDefinition(material, preference ?? null, true);
-    requireStore(preference == null || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
+    requireStore(scopes !== undefined || preference == null || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
       'HOUSE_REVIEW_PREFERENCE_INVALID', '本社审阅偏好与任务计划不一致。');
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
-    return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
+    return this.reviewCategoryLedger(finish(definition), readings.every((reading) => reading.refusal === null));
   }
 
   #taskMaterialReadings(boundary: TaskMaterialBoundary, surface: '审阅' | '评估' = '审阅'): ReadonlyArray<TaskMaterialReading> {
@@ -5541,6 +5548,7 @@ export class EditorialStore {
     redoOf: string | null = null,
     // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): the draft the one category's Run is prepared from.
     intentDraft: DraftPromotion | null = null,
+    seriesId: string | null = null,
   ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
     const procedure = capturedProcedure === null ? null : this.#procedureCall(() => this.#capturedProcedurePin(bookId, capturedProcedure));
     requireStore(Array.isArray(materialIds) && materialIds.length <= MAX_WRITING_MATERIALS && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) && new Set(materialIds).size === materialIds.length,
@@ -5551,7 +5559,7 @@ export class EditorialStore {
         'REVIEW_MATERIAL_CATEGORY_REQUIRED', REVIEW_MATERIAL_CATEGORY_REQUIRED);
     }
     const references = this.#prepareTaskMaterials(bookId, materialIds);
-    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, redoOf,
+    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, redoOf, seriesId,
       ...(references.length === 0 ? {} : { materialReferences: { bookId, references } }),
       ...(intentDraft === null ? {} : { intentDraft }),
     }));
@@ -5869,14 +5877,18 @@ export class EditorialStore {
       const blocks = this.#analysisCall(() => ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
       // The profile the Task froze (Issue #427), never the house's current one, beside the references its plan froze (#428).
       const profile = this.#initialProfileForTask(projection.taskIntent.taskIntentId);
-      const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
+      const plan = this.#taskPlanCall(() => seriesScopePlan(initialEvaluationPlan({ projection, bookTitle, blocks, profile }), projection.runSourceScope?.seriesScopes));
       return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null && liveMaterialRule(this.#baselineAnalysis.launch.policy, INITIAL_EVALUATION_KIND) === null), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
     const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, reviewRunId));
     const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(facts.manuscript.manuscriptId, facts.inputRevision.revisionId));
-    const reviewed = this.#taskPlanCall(() => reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }));
+    const scopes = [...new Map(facts.categories.flatMap((category) => {
+      const scope = category.task?.components['run-source-scope'] as { seriesScopes?: ReadonlyArray<FrozenSeriesScope> } | undefined;
+      return (scope?.seriesScopes ?? []).map((series) => [series.seriesId, series] as const);
+    })).values()];
+    const reviewed = this.#taskPlanCall(() => seriesScopePlan(reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }), scopes));
     // 结果待确认 (Issue #757): each category that sends again a range an earlier Run of its kind left unconfirmed says so.
     const plan = { ...reviewed, resend: this.#reviewResend(input.bookId, facts) };
     // The route the categories' frozen plans resolve, read from the first Task's Provider Resolution Plan as the
@@ -10323,22 +10335,25 @@ export class EditorialStore {
    * The 初评 ledger of one profile and the 资料库 references a plan lists (Issue #427, #428): the built-in ledger for AI7's default
    * profile with none, else one kept per contract — made afresh when a reference no longer reads, as #428's always was.
    */
-  #initialLedger(profile: EvaluationProfileProjection, materials?: TaskMaterialBoundary, frozenPromptDigest?: string): BaselineAnalysisStore {
+  #initialLedger(profile: EvaluationProfileProjection, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, scopes?: ReadonlyArray<FrozenSeriesScope>): BaselineAnalysisStore {
     const base = this.#initialBaseDefinition(profile);
     const readings = materials === undefined || materials.references.length === 0 ? [] : this.#taskMaterialReadings(materials, '评估');
-    if (readings.length === 0 && base === (this.#initialEvaluation.definition.clarificationBase ?? this.#initialEvaluation.definition)) return this.#initialEvaluation;
-    const definition = readings.length === 0 ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, frozenPromptDigest));
+    if (scopes === undefined && readings.length === 0 && base === (this.#initialEvaluation.definition.clarificationBase ?? this.#initialEvaluation.definition)) return this.#initialEvaluation;
+    const material = readings.length === 0 ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, scopes === undefined ? frozenPromptDigest : undefined));
+    const definition = seriesScopeKindDefinition(this.#authority, material, scopes);
     const make = (): BaselineAnalysisStore => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#initialEvaluation.launch);
       return ledger;
     };
-    return readings.some((reading) => reading.refusal !== null) ? make() : this.#initialEvaluationLedgers.obtain(definition.promptContractDigest, make);
+    return readings.some((reading) => reading.refusal !== null) ? make() : this.#initialEvaluationLedgers.obtain(`${definition.promptContractDigest}\n${canonicalJson(scopes ?? null)}`, make);
   }
 
   /** The profile contract a ledger's Task snapshots its profile under: the base a plan's references wrap, or the contract itself. */
   #initialBaseDigest(ledger: BaselineAnalysisStore): string {
-    return ledger.definition.materialReferences?.basePromptContractDigest ?? ledger.definition.promptContractDigest;
+    const definition = ledger.definition.clarificationBase ?? ledger.definition;
+    return liveSeriesContract(definition)?.base.materialReferences?.basePromptContractDigest ?? liveSeriesContract(definition)?.base.promptContractDigest
+      ?? definition.materialReferences?.basePromptContractDigest ?? definition.promptContractDigest;
   }
 
   /**
@@ -10354,7 +10369,9 @@ export class EditorialStore {
     requireStore(sha256(asString(row.canonical_json)) === row.sha256, 'EVALUATION_PROFILE_DAMAGED', '初评任务计划已损坏。');
     const envelope = parseStoredJson(asString(row.canonical_json), '初评任务计划已损坏。');
     requireStore(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'EVALUATION_PROFILE_DAMAGED', '初评任务方案快照缺失。');
-    const baseDigest = this.#evaluationMaterialPlan(taskIntentId)?.baseDigest ?? envelope.promptContractDigest;
+    const scope = frozenSeriesScopes(this.#authority, taskIntentId);
+    const baseDigest = this.#evaluationMaterialPlan(taskIntentId)?.baseDigest ?? (scope === undefined ? envelope.promptContractDigest :
+      asString(this.#authority.prepare('SELECT prompt_contract_sha256 FROM initial_evaluation_tasks WHERE task_intent_id = ? ORDER BY rowid DESC LIMIT 1').get(taskIntentId)!.prompt_contract_sha256));
     const snapshot = this.#evaluationProfiles.taskProfile(taskIntentId, baseDigest);
     if (snapshot !== null) return snapshot;
     requireStore(baseDigest === this.#initialEvaluation.definition.promptContractDigest, 'EVALUATION_PROFILE_DAMAGED', '初评任务方案快照缺失。');
@@ -10368,7 +10385,7 @@ export class EditorialStore {
     if (frozen !== null) {
       requireStore(frozen.baseDigest === this.#initialBaseDefinition(profile).promptContractDigest, 'ANALYSIS_RECORD_INVALID', '初评参考资料的基础契约与计划不一致。');
     }
-    return this.#initialLedger(profile, frozen?.boundary, frozen?.promptDigest);
+    return this.#initialLedger(profile, frozen?.boundary, frozen?.promptDigest, frozenSeriesScopes(this.#authority, taskIntentId));
   }
 
   /**
@@ -10414,13 +10431,15 @@ export class EditorialStore {
    * 准备 AI7 初评: the evaluation kind's Task in the mode that applies — the first 初评, or 重新初评 once one settled — whose
    * goal is the kind's own fixed text. The preparation is a cooperative job; its plan opens in the Task Drawer.
    */
-  createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null): AnalysisPreparationResult<InitialEvaluationProjection> {
+  createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null, seriesId: string | null = null): AnalysisPreparationResult<InitialEvaluationProjection> {
+    requireStore(seriesId === null || seriesKnowledgeAllowed(launchPolicy, INITIAL_EVALUATION_KIND), 'SERIES_SCOPE_UNAVAILABLE', SERIES_POLICY_CLOSED);
+    const scopes = seriesId === null ? undefined : [freezeSeriesScope(this.#authority, bookId, seriesId)];
     this.#requireEvaluationMaterialScope(materialIds.length > 0, INITIAL_EVALUATION_KIND);
     this.#requireInitialEvaluationScope();
     const current = this.inspectInitialEvaluation(bookId);
     // One reading of the house profile gives both the contract the Task is prepared under and the snapshot it keeps (Issue #427).
     const profile = this.#evaluationProfiles.current();
-    const ledger = this.#initialLedger(profile, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) });
+    const ledger = this.#initialLedger(profile, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) }, undefined, scopes);
     const mode = current.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again';
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
@@ -17964,7 +17983,7 @@ export class EditorialStore {
       seriesTitle: series.title,
       bookTitle,
       // No Task kind can name a Series in its scope before Series-scope pins (Issue #64, S29): none is authorized or running.
-      seriesScopedRuns: 0,
+      seriesScopedRuns: this.#series.tasks(series.seriesId).filter((task) => task.runRecordId !== null).length,
       learningMaterials,
       learningDecided,
       knowledgeFromBook: this.#seriesKnowledge.itemsFromBook(series.seriesId, input.bookId),
@@ -17997,6 +18016,7 @@ export class EditorialStore {
       historyNext: history.nextCursor,
       knowledge: this.#seriesKnowledgeProjection(series.seriesId),
       exclusions: this.#seriesExclusionsProjection(series.seriesId),
+      ...(this.#series.tasks(series.seriesId).length === 0 ? {} : { tasks: this.#series.tasks(series.seriesId) }),
     };
   }
 
@@ -18184,13 +18204,12 @@ export class EditorialStore {
    * exclusion in force reaches of the Series material the Run froze, or `null`. A record it cannot read stops the Run rather
    * than let it read past a restriction it could not check.
    */
-  seriesReadGuard(runRecordId: string): string | null {
+  seriesScopeGuard(runRecordId: string): string | null {
     this.#assertAvailable();
     try {
-      return this.#reviewRuns.seriesReadGuard(runRecordId);
-    } catch (error) {
-      if (error instanceof ReviewRunError || error instanceof SeriesExclusionError) return '无法读取的书系检索排除记录';
-      throw error;
+      return this.#reviewRuns.seriesScopeGuard(runRecordId);
+    } catch {
+      return '无法读取的书系检索排除记录';
     }
   }
 
@@ -18311,7 +18330,8 @@ export class EditorialStore {
     const stillNamed: string[] = [];
     let stillCount = 0;
     for (const item of this.#seriesKnowledge.items(series.seriesId)) {
-      const material = { seriesId: series.seriesId, itemId: item.itemId, knowledgeClass: item.knowledgeClass, sourceBookId: item.current.provenance?.bookId ?? null };
+      const material = knowledgeMaterial(this.#authority, { seriesId: series.seriesId, itemId: item.itemId, revisionId: item.current.revisionId });
+      requireStore(material !== null, 'SERIES_SCOPE_INVALID', '书系知识来源记录无法核对。');
       if (!covers(material)) continue;
       itemCount += 1;
       if (itemsNamed.length < NAMED_EXCLUSION_ENTRIES) itemsNamed.push(`「${item.subject}」`);

@@ -1,4 +1,14 @@
 import { housePreferenceLabel } from './house-review-preference.js';
+import type { FrozenSeriesScope } from '../shared/protocol.js';
+
+export function seriesScopePlan(plan: TaskPlanProjection, scopes?: ReadonlyArray<FrozenSeriesScope>): TaskPlanProjection {
+  if (scopes === undefined || scopes.length === 0) return plan;
+  return { ...plan, scope: { ...plan.scope,
+    reference: [...plan.scope.reference, ...scopes.map((scope) => `允许参考 · 书系《${scope.title}》的知识条目`)],
+    notRead: plan.scope.notRead.replace('不读这本书以外的内容', '不读允许参考范围以外的内容'),
+  }, technical: [...plan.technical, ...scopes.map((scope) => ({ key: `series-scope:${scope.seriesId}`, label: '书系参考范围',
+    value: `《${scope.title}》 · ${scope.seriesId} · ${scope.members.length} 本成员图书的主稿件版本 · ${scope.knowledge.length} 个知识版本 · ${scope.exclusions.length} 条检索排除版本` }))] };
+}
 import { researchDecisionLine } from '../shared/research-status.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import { materialSettledReason, taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';

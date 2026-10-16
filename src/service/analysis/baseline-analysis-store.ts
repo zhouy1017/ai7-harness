@@ -3699,6 +3699,7 @@ export class BaselineAnalysisStore {
       manuscriptId: checkpoint.manuscriptId,
       taskInputRevision: { revisionId: checkpoint.revisionId, revisionDigest: checkpoint.revisionDigest },
       readableScopeKinds: ['current-book-primary-manuscript-revision'],
+      ...(this.#definition.seriesScopes === undefined ? {} : { readableScopeKinds: ['current-book-primary-manuscript-revision', 'series'], seriesScopes: this.#definition.seriesScopes }),
       sourceVersionEvidence: { sourceVersionId: facts.sourceVersionId, readable: false },
       ...(intent.intentDraftParagraphs === null ? {} : {
         draftRangeExpansion: {

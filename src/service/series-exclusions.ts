@@ -16,6 +16,7 @@ import {
   type SeriesKnowledgeClass,
 } from '../shared/protocol.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import { SeriesKnowledgeLedger } from './series-knowledge.js';
 
 /**
  * 书系检索排除 (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-029; ADR 0037). A Series Retrieval Exclusion names one exact
@@ -24,9 +25,8 @@ import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/
  * not-yet-performed read of an authorized or running Run included. `修改检索排除` (its reason) and `停止此排除` append a
  * superseding revision; no revision is ever edited or deleted, and ending one restores nothing it stopped.
  *
- * The one Series read there is today is 书系一致性 (S29a), over Series Knowledge. So an item covers its current and later
- * revisions, a class the items of that class now and later, and a member Book the knowledge taken from its manuscript now and
- * later; a Source Version is recorded so the ledger is whole, and nothing reads one yet. No Cross-project source exists, so an
+ * An item covers its current and later revisions, a class the items of that class now and later, and a member Book its
+ * pinned manuscript and knowledge taken from it. A Source Version covers exact manuscript-derived provenance. No Cross-project source exists, so an
  * exclusion decides no Cross-project access (SER-029).
  *
  * Schema revision 61 owns one relation, a ledger like the others: each revision, canonical and digested, appended once.
@@ -147,12 +147,12 @@ export function seriesExclusionTarget(kind: SeriesExclusionTargetKind, id: strin
       : kind === 'book'
         ? `成员图书《${names.bookTitle ?? ''}》`
         : `来源版本「${names.displayName ?? ''}」（《${names.bookTitle ?? ''}》）`;
-  return { kind, id, label, continuing: SERIES_EXCLUSION_CONTINUING[kind], read: kind !== 'source-version' };
+  return { kind, id, label, continuing: SERIES_EXCLUSION_CONTINUING[kind], read: true };
 }
 
 function isTarget(value: unknown): value is SeriesExclusionTargetProjection {
   return isRecord(value) && isSeriesExclusionTargetKind(value.kind) && typeof value.id === 'string' && typeof value.label === 'string' &&
-    value.continuing === SERIES_EXCLUSION_CONTINUING[value.kind] && value.read === (value.kind !== 'source-version');
+    value.continuing === SERIES_EXCLUSION_CONTINUING[value.kind] && (value.read === true || (value.kind === 'source-version' && value.read === false));
 }
 
 /**
@@ -335,13 +335,14 @@ export interface StoredExclusion {
 /** What one piece of Series Knowledge is, as an exclusion decides whether it reaches it. */
 export interface SeriesKnowledgeMaterial {
   readonly seriesId: string;
-  readonly itemId: string;
-  readonly knowledgeClass: SeriesKnowledgeClass;
+  readonly itemId: string | null;
+  readonly knowledgeClass: SeriesKnowledgeClass | null;
   /** The member Book whose manuscript the revision was taken from; `null` for the editor's own words. */
   readonly sourceBookId: string | null;
+  readonly sourceVersionId?: string | null;
 }
 
-/** Whether a target reaches one piece of knowledge of its own Series. A Source Version reaches none: no Series read reads one. */
+/** Whether a target reaches one exact item or member revision of its own Series. */
 export function seriesExclusionCovers(seriesId: string, target: { readonly kind: SeriesExclusionTargetKind; readonly id: string }, material: SeriesKnowledgeMaterial): boolean {
   if (seriesId !== material.seriesId) return false;
   switch (target.kind) {
@@ -352,7 +353,7 @@ export function seriesExclusionCovers(seriesId: string, target: { readonly kind:
     case 'book':
       return material.sourceBookId !== null && target.id === material.sourceBookId;
     case 'source-version':
-      return false;
+      return material.sourceVersionId != null && target.id === material.sourceVersionId;
   }
 }
 
@@ -372,15 +373,20 @@ export function excludedAfter(chains: ReadonlyArray<StoredExclusion>, material: 
 
 /** The knowledge class and source Book of one exact Series Knowledge revision, read from its rows; `null` when there is none. */
 export function knowledgeMaterial(db: DatabaseSync, pin: { readonly seriesId: string; readonly itemId: string; readonly revisionId: string }): SeriesKnowledgeMaterial | null {
-  const row = db.prepare(`SELECT i.knowledge_class, r.source_book_id FROM series_knowledge_revisions r
-    JOIN series_knowledge_items i ON i.item_id = r.item_id WHERE r.revision_id = ? AND r.item_id = ? AND i.series_id = ?`)
-    .get(pin.revisionId, pin.itemId, pin.seriesId) as SqlRow | undefined;
-  if (row === undefined || !(SERIES_KNOWLEDGE_CLASSES as readonly string[]).includes(String(row.knowledge_class))) return null;
+  const knowledge = new SeriesKnowledgeLedger(db);
+  const item = knowledge.item(pin.itemId);
+  const revision = knowledge.revision(pin.itemId, pin.revisionId);
+  if (item === null || item.seriesId !== pin.seriesId || revision === null) return null;
+  const origin = revision.provenance;
+  const source = origin === null ? undefined : db.prepare('SELECT source_version_id FROM manuscript_revisions WHERE revision_id = ? AND manuscript_id = ?')
+    .get(origin.revisionId, origin.manuscriptId) as SqlRow | undefined;
+  if (origin !== null && source === undefined) return null;
   return {
     seriesId: pin.seriesId,
     itemId: pin.itemId,
-    knowledgeClass: row.knowledge_class as SeriesKnowledgeClass,
-    sourceBookId: row.source_book_id === null ? null : String(row.source_book_id),
+    knowledgeClass: item.knowledgeClass,
+    sourceBookId: origin?.bookId ?? null,
+    sourceVersionId: source === undefined ? null : String(source.source_version_id),
   };
 }
 

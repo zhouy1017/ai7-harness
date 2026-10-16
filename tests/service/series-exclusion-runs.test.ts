@@ -23,6 +23,8 @@ import {
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { J13_PLACE, J13_SERIES_TITLE, makeJ13Series } from '../support/series-consistency.js';
+import { leaveSeries } from '../support/series-consistency.js';
+import { withSeriesKnowledgeFor } from '../support/policy-rules.js';
 
 // Service-integration suite (L2) for the Series Retrieval Exclusion's reach into Review Runs (Issue #64, plan slice S29b;
 // V2-UX-SER-022 to SER-027): a prepared Run's approval refused, an approved Run stopped as the exclusion is recorded, one
@@ -82,7 +84,7 @@ async function withSession(body: (session: Session, bookId: string) => Promise<v
   });
   const owner = new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, unitHold,
-    readGuard: (runRecordId) => store.seriesReadGuard(runRecordId),
+    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
   });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   try {
@@ -146,6 +148,33 @@ function outcomeSummary(runRecordId: string): string {
 }
 
 describe('a Series Retrieval Exclusion over Review Runs', () => {
+  it('pins an opt-in category and an evaluation in the existing plan records, retaining membership pins after removal', async () => {
+    await withSession(async ({ store, seriesId }, bookId) => {
+      const policy = withSeriesKnowledgeFor(withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage'), 'evaluation');
+      expect(() => store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, launchPolicy, null, [], null, seriesId)).toThrow(/当前策略未开放书系知识/u);
+      expect(() => store.createInitialEvaluationPreparationWork(bookId, launchPolicy, [], null, seriesId)).toThrow(/当前策略未开放书系知识/u);
+      let review = store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, policy, null, [], null, seriesId);
+      while (!review.done) review = store.advanceReviewRunPreparationWork(review.workId!);
+      const category = review.projection!.run!.categories[0]!;
+      expect(store.inspectTaskPlan({ bookId, kind: 'review-run', ref: review.projection!.run!.reviewRunId }).scope.reference).toContain(`允许参考 · 书系《${J13_SERIES_TITLE}》的知识条目`);
+      let evaluation = store.createInitialEvaluationPreparationWork(bookId, policy, [], null, seriesId);
+      while (!evaluation.done) evaluation = store.advanceInitialEvaluationPreparationWork(evaluation.workId!);
+      const initial = evaluation.projection!;
+      const scopes = initial.runSourceScope!.seriesScopes!;
+      expect(scopes[0]).toMatchObject({ seriesId, title: J13_SERIES_TITLE, members: [expect.objectContaining({ bookId, revisionId: expect.any(String) })], knowledge: [expect.objectContaining({ revisionId: expect.any(String), digest: expect.any(String) })], exclusions: [] });
+      expect(store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: initial.taskIntent!.taskIntentId }).scope.reference).toContain(`允许参考 · 书系《${J13_SERIES_TITLE}》的知识条目`);
+      const authorization = store.authorizeInitialEvaluation(bookId, initial.taskIntent!.taskIntentId, initial.planEnvelope!.digest);
+      expect(store.seriesScopeGuard(authorization.dispatchRunRecordId!)).toBeNull();
+      expect(store.inspectSeries(seriesId).tasks!.map((task) => task.kind).sort()).toEqual(['editorial-review/typos-and-usage', 'evaluation']);
+      leaveSeries(store, seriesId, bookId);
+      expect(store.inspectInitialEvaluation(bookId).runSourceScope!.seriesScopes).toEqual(scopes);
+      expect(store.seriesScopeGuard(authorization.dispatchRunRecordId!)).toBeNull();
+      exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: itemOf(store, seriesId) } });
+      expect(store.seriesScopeGuard(authorization.dispatchRunRecordId!)).toContain(ITEM_LABEL);
+      expect(category.planEnvelopeDigest).toBeTruthy();
+    }, null, REVIEW_FIXTURE);
+  }, 300_000);
+
   it('refuses a prepared plan, stops an approved Run before its turn, and leaves only 修改计划并重新授权 and 取消任务', async () => {
     await withSession(async ({ store, driver, seriesId }, bookId) => {
       const itemId = itemOf(store, seriesId);
