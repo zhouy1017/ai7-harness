@@ -131,11 +131,11 @@ const OFFICIAL = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[1];
 describe('the configured binding the resolver reads (#853 v13, carried by #863 v15, #473 v17 and #891 v19)', () => {
   const CARRIED = [
     'config/source-checkout-launch-authority.json',
-    'docs/policies/active-policy-set.v13.json',
+    'docs/policies/active-policy-set.v14.json',
     'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v2.json',
-    'docs/policies/provider-processing-policy.v18.json',
-    'docs/policies/provider-processing-policy.v19.json',
+    'docs/policies/provider-processing-policy.v20.json',
+    'docs/policies/provider-processing-policy.v21.json',
     'docs/policies/external-export-policy.v2.json',
   ];
 
@@ -150,7 +150,7 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
   }
 
   it('mirrors exactly the bindings v19 allows both bound roles, Go first, as 设置 › 模型服务 offers them', async () => {
-    const policy = JSON.parse(await readFile(join(REPO_ROOT, 'docs', 'policies', 'provider-processing-policy.v19.json'), 'utf8')) as {
+    const policy = JSON.parse(await readFile(join(REPO_ROOT, 'docs', 'policies', 'provider-processing-policy.v21.json'), 'utf8')) as {
       roleBindings: Record<string, { defaultBinding?: string; allowedBindings: unknown[] }>;
     };
     for (const role of ['Main Editorial Role', 'Fast Interaction Role']) {
@@ -165,9 +165,9 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
 
   it('reports 需设置 with no admitted rule until a route is configured, and transmits nothing', async () => {
     const projection = await resolveSourceCheckoutLaunchPolicy(await checkout(), 'ordinary-production', null);
-    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v13' });
+    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v14' });
     expect(projection.providerProcessing).toMatchObject({
-      version: 'v19', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
+      version: 'v21', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
     });
   });
 
@@ -265,7 +265,7 @@ describe('the Egress Gate under ordinary production (Issue #811)', () => {
     model: 'deepseek-flash',
     systemPrompt: SYSTEM,
     outboundDataCategory: 'unpublished-excerpts',
-    policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v19', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+    policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v21', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
     admittedUserMessages: new Set([UNIT]),
     ruleOutboundCategories: new Set(['public-or-synthetic', 'unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content']),
     ...overrides,

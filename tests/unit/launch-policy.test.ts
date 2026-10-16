@@ -23,7 +23,7 @@ import type { AdmittedLocalTools, AdmittedPlatformTools, AdmittedProviderRule, L
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v13.json';
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v14.json';
 const CARRIED_PATHS = [
   CARRIER_PATH,
   ACTIVE_SET_PATH,
@@ -31,8 +31,8 @@ const CARRIED_PATHS = [
   'docs/policies/provider-processing-policy.v2.json',
   'docs/policies/provider-processing-policy.v3.json',
   'docs/policies/provider-processing-policy.v4.json',
-  'docs/policies/provider-processing-policy.v18.json',
-  'docs/policies/provider-processing-policy.v19.json',
+  'docs/policies/provider-processing-policy.v20.json',
+  'docs/policies/provider-processing-policy.v21.json',
   'docs/policies/external-export-policy.v1.json',
   'docs/policies/external-export-policy.v2.json',
 ] as const;
@@ -40,8 +40,8 @@ const CARRIED_PATHS = [
 const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
-  'ordinary-production': ['v19', 'docs/policies/provider-processing-policy.v19.json', 'f13c6f412adebf863f63b14640799fb7ffcbafcf05d6ace5437b806a0d4ccf16'],
-  'developer-live': ['v18', 'docs/policies/provider-processing-policy.v18.json', '4c0d56cbb3fca6af392ea6d3757a55b93251a345900620564d39373889a09dba'],
+  'ordinary-production': ['v21', 'docs/policies/provider-processing-policy.v21.json', 'd1199f4c110d0c6598e6910c1784e5c612c18866387abdfe6e45b1c7593c6263'],
+  'developer-live': ['v20', 'docs/policies/provider-processing-policy.v20.json', 'd9cd34ed6e945760657345ed7e7bf4eae4489e5367ac7eb2400af413cc28f757'],
 } as const;
 /** Every immutable predecessor asset keeps its exact bytes: v6, v13, v15 and v17 (the old ordinary-production), v11, v12, v14 and v16 (the old developer-live), and sets v9 to v12. */
 const RETAINED_PREDECESSOR_DIGESTS = {
@@ -60,7 +60,7 @@ const RETAINED_PREDECESSOR_DIGESTS = {
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v13 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = '8d3536cf67989693a395c3699d60db3a508acaa3b7f7db6ab147bfb04e15338d';
+const ACTIVE_SET_SHA256 = '1e9f3c4736a0f7b0ac8066978637e3dc813aee6f51d1f98673fe1fba3564a6e9';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -178,7 +178,7 @@ const V16_CHANGED_RULES: Record<string, AdmittedProviderRule> = {
     taskKinds: ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency', ...WEB_REVIEW_KINDS],
     modelRole: 'Main Editorial Role',
     ...GO_BINDING,
-    outboundDataCategories: ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt', ...WEB_CATEGORIES],
+    outboundDataCategories: ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt', 'house-review-preference-excerpt', ...WEB_CATEGORIES],
     crossUnitSynthesisAllowed: false,
     materialReferencesAllowed: true,
     editorialDeliverablesAllowed: true,
@@ -293,6 +293,8 @@ const V16_PATH = 'docs/policies/provider-processing-policy.v16.json';
 const V17_PATH = 'docs/policies/provider-processing-policy.v17.json';
 const V18_PATH = 'docs/policies/provider-processing-policy.v18.json';
 const V19_PATH = 'docs/policies/provider-processing-policy.v19.json';
+const V20_PATH = 'docs/policies/provider-processing-policy.v20.json';
+const V21_PATH = 'docs/policies/provider-processing-policy.v21.json';
 const BASELINE = 0;
 const DIALOGUE = 1;
 const REVIEW = 2;
@@ -303,7 +305,7 @@ const CONFLICT = 6;
 const BACKGROUND = 7;
 const TRANSLATION = 8;
 
-async function readPolicy(path: string = V18_PATH): Promise<Record<string, unknown>> {
+async function readPolicy(path: string = V20_PATH): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(join(REPO_ROOT, ...path.split('/')), 'utf8')) as Record<string, unknown>;
 }
 
@@ -392,9 +394,9 @@ afterEach(async () => {
 
 describe('active policy set v13', () => {
   it('is the sole active set: the carrier pins it, it maps all four scopes, and every pin matches the exact bytes', async () => {
-    expect(ACTIVE_SET_VERSION).toBe('v13');
-    expect(DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION).toBe('v18');
-    expect(ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION).toBe('v19');
+    expect(ACTIVE_SET_VERSION).toBe('v14');
+    expect(DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION).toBe('v20');
+    expect(ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION).toBe('v21');
     const carrier = JSON.parse(await readFile(join(REPO_ROOT, ...CARRIER_PATH.split('/')), 'utf8')) as Record<string, unknown>;
     expect(carrier).toEqual({
       manifestType: 'ai7-source-checkout-launch-authority',
@@ -402,7 +404,7 @@ describe('active policy set v13', () => {
       runtimeForm: 'source-checkout',
       trustedOperationalScope: 'development-ci',
       launchSelectableScopes: ['development-ci', 'developer-live', 'ordinary-production'],
-      activePolicySet: { version: 'v13', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
+      activePolicySet: { version: 'v14', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
     });
     expect(LAUNCH_SELECTABLE_SCOPES).toEqual(carrier.launchSelectableScopes);
     expect(await sha256Of(ACTIVE_SET_PATH)).toBe(ACTIVE_SET_SHA256);
@@ -414,8 +416,8 @@ describe('active policy set v13', () => {
         'external-export-policy': { version: string; canonicalPath: string; sha256: string };
       };
     };
-    expect(activeSet.version).toBe('v13');
-    expect(activeSet.predecessorVersion).toBe('v12');
+    expect(activeSet.version).toBe('v14');
+    expect(activeSet.predecessorVersion).toBe('v13');
     const pins = activeSet.activePolicies['provider-processing-policy'].scopePins;
     expect(Object.keys(pins)).toEqual(Object.keys(EXPECTED_PINS));
     for (const [scope, [version, canonicalPath, sha256]] of Object.entries(EXPECTED_PINS)) {
@@ -453,7 +455,7 @@ describe('active policy set v13', () => {
 
   it('carries every v16 rule, role binding and category into v18 unchanged except the local tools on every rule', async () => {
     const v16 = await readPolicy(V16_PATH);
-    const v18 = await readPolicy();
+    const v18 = await readPolicy(V18_PATH);
     expect(v18.predecessorVersion).toBe('v16');
     expect(v18.predecessorCanonicalPath).toBe(V16_PATH);
     expect(v18.operationalScope).toBe('developer-live');
@@ -528,7 +530,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('development-ci');
     // One active set per launch: development-ci reports v13 while its Provider Processing pin stays v1.
-    expect(projection.activePolicySetVersion).toBe('v13');
+    expect(projection.activePolicySetVersion).toBe('v14');
     expect(projection.providerProcessing.version).toBe('v1');
     expect(projection.providerProcessing.label).toBe('开发与持续集成：零次实时传输');
     expect(projection.providerProcessing.bindingState).toBeUndefined();
@@ -544,9 +546,9 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('developer-live');
-    expect(projection.activePolicySetVersion).toBe('v13');
+    expect(projection.activePolicySetVersion).toBe('v14');
     expect(projection.providerProcessing).toEqual({
-      version: 'v18',
+      version: 'v20',
       decision: 'eligible-only',
       authorizedLiveTransmissionCount: 'bounded-by-run',
       liveTransmissionAllowed: true,
@@ -741,7 +743,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
 
   it('denies a developer-live launch whose v18 policy bytes drifted, while development-ci still verifies', async () => {
     await placeValidCheckout();
-    const target = join(codeRoot, ...V18_PATH.split('/'));
+    const target = join(codeRoot, ...V20_PATH.split('/'));
     await writeFile(target, `${await readFile(target, 'utf8')}\n`);
 
     const live = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'developer-live');
@@ -989,7 +991,7 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
     expect(v19.credentialBoundary).toEqual(v17.credentialBoundary);
     expect(v19.authoritySeparations).toEqual(v17.authoritySeparations);
     expect(v19.trustedSelection).toEqual(v17.trustedSelection);
-    expect(v19.outboundDataCategories).toEqual((await readPolicy()).outboundDataCategories);
+    expect(v19.outboundDataCategories).toEqual((await readPolicy(V18_PATH)).outboundDataCategories);
     for (const index of [BASELINE, DIALOGUE, REVIEW, WRITING, EVALUATION, POLISH, CONFLICT, BACKGROUND]) {
       expect(rulesOf(v19)[index], String(rulesOf(v17)[index]!.ruleId)).toEqual(withLocalTools(rulesOf(v17)[index]!, index));
     }
@@ -998,7 +1000,7 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
   });
 
   it('states the production terms rule by rule: the editor\'s own sources, no cache, web only on the research rules, no default rule but review quick start', async () => {
-    const v17 = await readPolicy(V19_PATH);
+    const v17 = await readPolicy(V21_PATH);
     for (const rule of rulesOf(v17)) {
       const id = rule.ruleId as string;
       const background = id === BACKGROUND_RULE_ID;
@@ -1061,7 +1063,7 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
   });
 
   it('binds the four roles as the Owner decided: Main Editorial and Fast Interaction configurable among two routes, the rest unbound', async () => {
-    const roles = (await readPolicy(V19_PATH)).roleBindings as Record<string, Record<string, unknown>>;
+    const roles = (await readPolicy(V21_PATH)).roleBindings as Record<string, Record<string, unknown>>;
     const allowedBindings = [
       { route: 'opencode-go', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'deepseek-v4.1-flash', credentialSlot: 'opencode-go' },
       { route: 'deepseek-open-platform', endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash', credentialSlot: 'deepseek-api-key' },
@@ -1081,14 +1083,14 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
   });
 
   it('reads the exact v19 bytes without a binding: nine rules, the policy\'s two bindings, nothing filled in', async () => {
-    const reading = verifyOrdinaryProductionPolicy(await readPolicy(V19_PATH));
+    const reading = verifyOrdinaryProductionPolicy(await readPolicy(V21_PATH));
     expect(reading.rules.map((rule) => rule.ruleId)).toEqual(PRODUCTION_RULE_ID_ORDER);
     expect(reading.allowedBindings.map((binding) => binding.route)).toEqual(['opencode-go', 'deepseek-open-platform']);
     expect(reading).toMatchObject({ crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true });
   });
 
   it('fails closed on any single tampered, missing or unknown term (a changed value, a dropped term, an added term, a shorter list)', async () => {
-    const pristine = await readPolicy(V19_PATH);
+    const pristine = await readPolicy(V21_PATH);
     const mutations = productionTamperings(pristine);
     expect(mutations.length).toBeGreaterThan(500);
     const survivors: string[] = [];
@@ -1106,23 +1108,23 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
   });
 
   it('refuses an unknown, repeated or missing rule and a rule that names a role the policy leaves unbound', async () => {
-    const unknown = await readPolicy(V19_PATH);
+    const unknown = await readPolicy(V21_PATH);
     rulesOf(unknown)[REVIEW]!.ruleId = 'ordinary-production-fact-check';
     expect(() => verifyOrdinaryProductionPolicy(unknown)).toThrow('LAUNCH_POLICY_INVALID');
-    const repeated = await readPolicy(V19_PATH);
+    const repeated = await readPolicy(V21_PATH);
     rulesOf(repeated).push(structuredClone(rulesOf(repeated)[DIALOGUE]!));
     expect(() => verifyOrdinaryProductionPolicy(repeated)).toThrow('LAUNCH_POLICY_INVALID');
-    const missing = await readPolicy(V19_PATH);
+    const missing = await readPolicy(V21_PATH);
     rulesOf(missing).splice(WRITING, 1);
     expect(() => verifyOrdinaryProductionPolicy(missing)).toThrow('LAUNCH_POLICY_INVALID');
-    const background = await readPolicy(V19_PATH);
+    const background = await readPolicy(V21_PATH);
     rulesOf(background).splice(BACKGROUND, 1);
     expect(() => verifyOrdinaryProductionPolicy(background)).toThrow('LAUNCH_POLICY_INVALID');
-    const baselineAsBackground = await readPolicy(V19_PATH);
+    const baselineAsBackground = await readPolicy(V21_PATH);
     rulesOf(baselineAsBackground)[BACKGROUND] = { ...structuredClone(rulesOf(baselineAsBackground)[BASELINE]!), ruleId: BACKGROUND_RULE_ID };
     expect(() => verifyOrdinaryProductionPolicy(baselineAsBackground)).toThrow('LAUNCH_POLICY_INVALID');
     for (const modelRole of ['Difficult Escalation Role', 'Frontier Model Role']) {
-      const escalated = await readPolicy(V19_PATH);
+      const escalated = await readPolicy(V21_PATH);
       const binding = rulesOf(escalated)[DIALOGUE]!.providerBinding as Record<string, unknown>;
       binding.modelRole = modelRole;
       expect(() => verifyOrdinaryProductionPolicy(escalated)).toThrow('LAUNCH_POLICY_INVALID');
@@ -1130,8 +1132,8 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
   });
 
   it('does not read the developer-live document as ordinary production, nor this document as developer-live', async () => {
-    expect(() => verifyOrdinaryProductionPolicy(readPolicySync(V18_PATH))).toThrow('LAUNCH_POLICY_INVALID');
-    expect(() => verifyDeveloperLivePolicy(readPolicySync(V19_PATH))).toThrow('LAUNCH_POLICY_INVALID');
+    expect(() => verifyOrdinaryProductionPolicy(readPolicySync(V20_PATH))).toThrow('LAUNCH_POLICY_INVALID');
+    expect(() => verifyDeveloperLivePolicy(readPolicySync(V21_PATH))).toThrow('LAUNCH_POLICY_INVALID');
   });
 
   it('reports setup-required with no admitted rule while no binding is configured', async () => {
@@ -1143,9 +1145,9 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
       expect(projection.integrityState).toBe('verified');
       expect(projection.denialReason).toBeNull();
       expect(projection.operationalScope).toBe('ordinary-production');
-      expect(projection.activePolicySetVersion).toBe('v13');
+      expect(projection.activePolicySetVersion).toBe('v14');
       expect(projection.providerProcessing).toEqual({
-        version: 'v19',
+        version: 'v21',
         decision: 'eligible-only',
         authorizedLiveTransmissionCount: 'bounded-by-run',
         liveTransmissionAllowed: false,
@@ -1170,7 +1172,7 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
     expect(projection.integrityState).toBe('verified');
     expect(projection.operationalScope).toBe('ordinary-production');
     expect(projection.providerProcessing).toEqual({
-      version: 'v19',
+      version: 'v21',
       decision: 'eligible-only',
       authorizedLiveTransmissionCount: 'bounded-by-run',
       liveTransmissionAllowed: true,
@@ -1195,7 +1197,7 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
     expect(new Set(projection.providerProcessing.admittedRules.map((rule) => `${rule.route}|${rule.endpoint}|${rule.model}|${rule.credentialSlot}`)).size).toBe(1);
     expect(JSON.stringify(projection)).not.toContain(binding.credentialReference);
     // Production admission must retain every policy category, including all three unpublished classes.
-    const policyRules = rulesOf(await readPolicy(V19_PATH));
+    const policyRules = rulesOf(await readPolicy(V21_PATH));
     for (const rule of projection.providerProcessing.admittedRules) {
       expect(rule.outboundDataCategories, rule.ruleId).toEqual(policyRules.find((candidate) => candidate.ruleId === rule.ruleId)!.allowedOutboundDataCategories);
     }
@@ -1220,7 +1222,7 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
       expect(projection.operationalScope).toBeNull();
       expectZeroTransmission(projection);
     }
-    const reading = verifyOrdinaryProductionPolicy(await readPolicy(V19_PATH));
+    const reading = verifyOrdinaryProductionPolicy(await readPolicy(V21_PATH));
     expect(bindOrdinaryProductionRules(reading, { ...GO_PRODUCTION_BINDING, model: 'x' })).toBeNull();
     expect(bindOrdinaryProductionRules(reading, GO_PRODUCTION_BINDING)).toEqual(productionAdmittedRules(GO_PRODUCTION_BINDING));
   });
@@ -1234,7 +1236,7 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
 
   it('denies an ordinary-production launch whose v19 bytes drifted, under any binding, while the other scopes still verify', async () => {
     await placeValidCheckout();
-    const target = join(codeRoot, ...V19_PATH.split('/'));
+    const target = join(codeRoot, ...V21_PATH.split('/'));
     await writeFile(target, `${await readFile(target, 'utf8')}\n`);
     for (const binding of [null, GO_PRODUCTION_BINDING]) {
       const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', binding);
@@ -1273,8 +1275,8 @@ const RUN_BASED = [BASELINE, REVIEW, WRITING, EVALUATION, BACKGROUND];
 
 describe('Provider Processing v18 and v19: enrolled background analysis and model-initiated clarification (Issue #863)', () => {
   const documents = [
-    ['v18 (developer-live)', V18_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
-    ['v19 (ordinary-production)', V19_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
+    ['v18 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
+    ['v19 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
   ] as const;
   const flip = (value: unknown): unknown => (typeof value === 'boolean' ? !value : typeof value === 'number' ? value + 1 : `${String(value)}-tampered`);
 
@@ -1488,8 +1490,8 @@ describe('Provider Processing v18 and v19: platform tools on the research rules 
   });
 
   const documents = [
-    ['v18 (developer-live)', V18_PATH, false, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
-    ['v19 (ordinary-production)', V19_PATH, true, (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)],
+    ['v18 (developer-live)', V20_PATH, false, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
+    ['v19 (ordinary-production)', V21_PATH, true, (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)],
   ] as const;
   const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped);
 
@@ -1602,8 +1604,8 @@ describe('Provider Processing v18 and v19: platform tools on the research rules 
   });
 
   it('refuses the other scope\'s block: a developer-live block under production and a production block under developer-live', () => {
-    const v16 = readPolicySync(V18_PATH);
-    const v17 = readPolicySync(V19_PATH);
+    const v16 = readPolicySync(V20_PATH);
+    const v17 = readPolicySync(V21_PATH);
     const crossed16 = structuredClone(v16);
     rulesOf(crossed16)[REVIEW]!.platformTools = structuredClone(rulesOf(v17)[REVIEW]!.platformTools);
     expect(() => verifyDeveloperLivePolicy(crossed16)).toThrow('LAUNCH_POLICY_INVALID');
@@ -1613,8 +1615,8 @@ describe('Provider Processing v18 and v19: platform tools on the research rules 
   });
 
   it.each([
-    ['developer-live', V18_PATH],
-    ['ordinary-production', V19_PATH],
+    ['developer-live', V20_PATH],
+    ['ordinary-production', V21_PATH],
   ] as const)('denies a %s launch after a one-byte change inside a backend host of its pinned bytes', async (scope, path) => {
     await placeValidCheckout();
     const target = join(codeRoot, ...path.split('/'));
@@ -1633,12 +1635,12 @@ describe('Provider Processing v18 and v19: platform tools on the research rules 
 
 describe('Provider Processing v18 and v19: local targeted retrieval on every rule (Issue #891, slice 7d)', () => {
   const documents = [
-    ['v18 (developer-live)', V18_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
-    ['v19 (ordinary-production)', V19_PATH, (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)!],
+    ['v18 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
+    ['v19 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)!],
   ] as const;
   const verifiers = [
-    ['v18 (developer-live)', V18_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
-    ['v19 (ordinary-production)', V19_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
+    ['v18 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
+    ['v19 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
   ] as const;
   /** The rules that admit no model-initiated retrieval: enrolled background analysis and the 来源译文 rule. */
   const NO_RETRIEVAL = [BACKGROUND, TRANSLATION];
@@ -1709,7 +1711,7 @@ describe('Provider Processing v18 and v19: local targeted retrieval on every rul
     }
   });
 
-  it.each([['developer-live', V18_PATH], ['ordinary-production', V19_PATH]] as const)('denies a %s launch after a one-byte change inside the local tools block of its pinned bytes (%s)', async (scope, path) => {
+  it.each([['developer-live', V20_PATH], ['ordinary-production', V21_PATH]] as const)('denies a %s launch after a one-byte change inside the local tools block of its pinned bytes (%s)', async (scope, path) => {
     for (const [from, to] of [['"callsPerUnit": 5', '"callsPerUnit": 6'], ['"candidatesPerCall": 8', '"candidatesPerCall": 9'], ['"scope": "no-egress"', '"scope": "no-egrexs"'], ['"allowed": false', '"allowed": true']] as const) {
       await placeValidCheckout();
       const target = join(codeRoot, ...path.split('/'));
@@ -1727,8 +1729,8 @@ describe('Provider Processing v18 and v19: local targeted retrieval on every rul
 
 describe('Provider Processing v18 and v19: 来源译文 and the source translation term (Issue #891, revisions 2 and 3)', () => {
   const verifiers = [
-    ['v18 (developer-live)', V18_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
-    ['v19 (ordinary-production)', V19_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
+    ['v18 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
+    ['v19 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
   ] as const;
   const refuseEach = (path: string, verify: (policy: Record<string, unknown>) => unknown, label: string, mutate: (policy: Record<string, unknown>, index: number) => void, indexes: readonly number[]): void => {
     for (const index of indexes) {
@@ -1750,7 +1752,7 @@ describe('Provider Processing v18 and v19: 来源译文 and the source translati
   });
 
   it.each(verifiers)('%s fails closed on any widened or altered term of the 来源译文 rule', (_name, path, verify) => {
-    const production = path === V19_PATH;
+    const production = path === V21_PATH;
     const rule = (policy: Record<string, unknown>): Record<string, unknown> => rulesOf(policy)[TRANSLATION]!;
     const block = (policy: Record<string, unknown>, name: string): Record<string, unknown> => rule(policy)[name] as Record<string, unknown>;
     const variants: Array<[string, (policy: Record<string, unknown>) => void]> = [
@@ -1797,8 +1799,8 @@ describe('Provider Processing v18 and v19: 来源译文 and the source translati
   });
 
   it('projects the 来源译文 rule on the Fast Interaction Role under both scopes, selected by its kind alone', () => {
-    const live = verifyDeveloperLivePolicy(readPolicySync(V18_PATH)).admittedRules;
-    const production = bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(readPolicySync(V19_PATH)), GO_PRODUCTION_BINDING)!;
+    const live = verifyDeveloperLivePolicy(readPolicySync(V20_PATH)).admittedRules;
+    const production = bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(readPolicySync(V21_PATH)), GO_PRODUCTION_BINDING)!;
     for (const rules of [live, production]) {
       expect(rules.filter((rule) => rule.taskKinds.includes('material-translation'))).toHaveLength(1);
       const rule = rules[TRANSLATION]!;
@@ -1816,5 +1818,96 @@ describe('Provider Processing v18 and v19: 来源译文 and the source translati
     // Review is the only rule that projects the source translation term.
     expect(live.filter((rule) => rule.sourceTranslationAllowed).map((rule) => rule.ruleId)).toEqual(['developer-live-public-samplebook-reference-free-review']);
     expect(production.filter((rule) => rule.sourceTranslationAllowed).map((rule) => rule.ruleId)).toEqual(['ordinary-production-review']);
+  });
+});
+
+describe('Provider Processing v20 and v21: the house review-preference category (Issue #910, slice 6p)', () => {
+  const CATEGORY = 'house-review-preference-excerpt';
+  const LIVE_REVIEW_ID = 'developer-live-public-samplebook-reference-free-review';
+  const PRODUCTION_REVIEW_ID = 'ordinary-production-review';
+  const DECLARATION = {
+    category: CATEGORY,
+    derivedFrom: 'judged-review-decisions-of-the-same-house',
+    maxLines: 12,
+    maxGraphemesTotal: 200,
+    attributedToRecordVersion: true,
+    manuscriptTextAllowed: false,
+    housePeopleNamesAndRolesStripped: true,
+    authorOrEditorNamesAllowed: false,
+  };
+  const variants = [
+    ['v20 (developer-live)', V20_PATH, V18_PATH, 'v18', LIVE_REVIEW_ID, 'admitted-public-or-synthetic-books-only', (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
+    ['v21 (ordinary-production)', V21_PATH, V19_PATH, 'v19', PRODUCTION_REVIEW_ID, 'ordinary-production-sources-only',
+      (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)!],
+  ] as const;
+
+  it.each(variants)('%s directly succeeds %s\'s bytes: only the review rule and the category vocabulary differ', async (_name, path, predecessorPath, predecessor, reviewId) => {
+    const now = await readPolicy(path);
+    const before = await readPolicy(predecessorPath);
+    expect(now.predecessorVersion).toBe(predecessor);
+    expect(now.predecessorCanonicalPath).toBe(predecessorPath);
+    expect(now.operationalScope).toBe(before.operationalScope);
+    expect(now.roleBindings).toEqual(before.roleBindings);
+    expect(now.credentialBoundary).toEqual(before.credentialBoundary);
+    expect(now.authoritySeparations).toEqual(before.authoritySeparations);
+    expect(now.trustedSelection).toEqual(before.trustedSelection);
+    expect(Object.keys(now.outboundDataCategories as object)).toEqual([...Object.keys(before.outboundDataCategories as object).slice(0, 11), CATEGORY, ...Object.keys(before.outboundDataCategories as object).slice(11)]);
+    expect(rulesOf(now).map((rule) => rule.ruleId)).toEqual(rulesOf(before).map((rule) => rule.ruleId));
+    for (const [index, rule] of rulesOf(now).entries()) {
+      const prior = rulesOf(before)[index]!;
+      if (rule.ruleId !== reviewId) {
+        expect(rule, String(rule.ruleId)).toEqual(prior);
+        continue;
+      }
+      const { houseReviewPreference: _declaration, allowedOutboundDataCategories: categories, ...rest } = rule;
+      const { allowedOutboundDataCategories: priorCategories, ...priorRest } = prior;
+      expect(rest).toEqual(priorRest);
+      expect(categories).toEqual((priorCategories as string[]).flatMap((category) => (category === 'editorial-deliverable-excerpt' ? [category, CATEGORY] : [category])));
+    }
+  });
+
+  it.each(variants)('%s carries the category and its declaration on the review rule and on no other rule', async (_name, path, _p, _v, reviewId, sourceScope, admittedRules) => {
+    const policy = await readPolicy(path);
+    for (const rule of rulesOf(policy)) {
+      const isReview = rule.ruleId === reviewId;
+      expect((rule.allowedOutboundDataCategories as string[]).includes(CATEGORY), String(rule.ruleId)).toBe(isReview);
+      expect(Object.hasOwn(rule, 'houseReviewPreference'), String(rule.ruleId)).toBe(isReview);
+    }
+    const declaration = rulesOf(policy).find((rule) => rule.ruleId === reviewId)!.houseReviewPreference as Record<string, unknown>;
+    const { descriptionZh, ...terms } = declaration;
+    expect(terms).toEqual({ ...DECLARATION, sourceScope });
+    expect(descriptionZh).toContain('至多 12 行');
+    expect(descriptionZh).toContain('至多 200 个字素');
+    expect(descriptionZh).toContain('绝不含稿件正文');
+    const admitted = admittedRules(policy);
+    expect(admitted.filter((rule) => rule.outboundDataCategories.includes(CATEGORY)).map((rule) => rule.ruleId)).toEqual([reviewId]);
+    expect(admitted.find((rule) => rule.ruleId === reviewId)!.taskKinds).toEqual([
+      'editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression',
+      'editorial-review/cross-deliverable-consistency', ...WEB_REVIEW_KINDS,
+    ]);
+  });
+
+  it.each(variants)('%s is unreadable when the category or its declaration is dropped, moved, widened or altered', async (_name, path, _p, _v, reviewId, _scope, admittedRules) => {
+    const cases: Array<[string, (policy: Record<string, unknown>) => void]> = [
+      ['category dropped', (policy) => { const rule = rulesOf(policy).find((candidate) => candidate.ruleId === reviewId)!; rule.allowedOutboundDataCategories = (rule.allowedOutboundDataCategories as string[]).filter((category) => category !== CATEGORY); }],
+      ['declaration dropped', (policy) => { delete rulesOf(policy).find((candidate) => candidate.ruleId === reviewId)!.houseReviewPreference; }],
+      ['lines widened', (policy) => { (rulesOf(policy).find((candidate) => candidate.ruleId === reviewId)!.houseReviewPreference as Record<string, unknown>).maxLines = 13; }],
+      ['graphemes widened', (policy) => { (rulesOf(policy).find((candidate) => candidate.ruleId === reviewId)!.houseReviewPreference as Record<string, unknown>).maxGraphemesTotal = 201; }],
+      ['names allowed', (policy) => { (rulesOf(policy).find((candidate) => candidate.ruleId === reviewId)!.houseReviewPreference as Record<string, unknown>).authorOrEditorNamesAllowed = true; }],
+      ['manuscript text allowed', (policy) => { (rulesOf(policy).find((candidate) => candidate.ruleId === reviewId)!.houseReviewPreference as Record<string, unknown>).manuscriptTextAllowed = true; }],
+      ['other source scope', (policy) => { (rulesOf(policy).find((candidate) => candidate.ruleId === reviewId)!.houseReviewPreference as Record<string, unknown>).sourceScope = 'any-source'; }],
+      ['category on another rule', (policy) => { const rule = rulesOf(policy).find((candidate) => String(candidate.ruleId).endsWith('-writing'))!; rule.allowedOutboundDataCategories = [...(rule.allowedOutboundDataCategories as string[]), CATEGORY]; }],
+      ['declaration on another rule', (policy) => { rulesOf(policy).find((candidate) => String(candidate.ruleId).endsWith('-writing'))!.houseReviewPreference = { ...DECLARATION }; }],
+    ];
+    for (const [label, mutate] of cases) {
+      const policy = readPolicySync(path);
+      mutate(policy);
+      expect(() => admittedRules(policy), label).toThrow('LAUNCH_POLICY_INVALID');
+    }
+  });
+
+  it('predecessors v18 and v19 are no longer the pinned reading: the review rule lacks the category', () => {
+    expect(() => verifyDeveloperLivePolicy(readPolicySync(V18_PATH))).toThrow('LAUNCH_POLICY_INVALID');
+    expect(() => verifyOrdinaryProductionPolicy(readPolicySync(V19_PATH))).toThrow('LAUNCH_POLICY_INVALID');
   });
 });

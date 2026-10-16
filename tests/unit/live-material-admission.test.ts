@@ -41,7 +41,7 @@ describe('material-bearing live kind admission (#809)', () => {
   it.each(ORDINARY_PRODUCTION_ALLOWED_BINDINGS)('keeps material admission on the configured production route $route after restacking #811', async (productionBinding) => {
     const policy = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'ordinary-production',
       { ...productionBinding, credentialReference: '33333333-3333-4333-8333-333333333333' });
-    expect(policy.providerProcessing.version).toBe('v19');
+    expect(policy.providerProcessing.version).toBe('v21');
     for (const definition of [wrap(review), wrap(initial), wrap(report), writing()]) {
       expect(liveKindAdmission(policy, definition, productionBinding)).not.toBeNull();
       expect(liveKindAdmission(withRuleFor(policy, definition.kind, { materialReferencesAllowed: false }), definition, productionBinding)).toBeNull();
@@ -54,7 +54,7 @@ describe('material-bearing live kind admission (#809)', () => {
 
   it.each([() => wrap(review), () => wrap(initial), () => wrap(report), writing])('is admitted by the selected Provider Processing v18 rule exactly as projected', (make) => {
     const definition = make();
-    expect(selected.providerProcessing.version).toBe('v18');
+    expect(selected.providerProcessing.version).toBe('v20');
     expect(liveMaterialRule(selected, definition.kind)).not.toBeNull();
     expect(liveKindAdmission(selected, definition, binding)).not.toBeNull();
   });

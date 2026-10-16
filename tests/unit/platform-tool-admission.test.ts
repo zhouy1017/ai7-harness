@@ -16,7 +16,7 @@ const root = fileURLToPath(new URL('../..', import.meta.url));
 describe('platform tool registration admission', () => {
   it('admits local retrieval from the selected v18 rule for every foreground model kind, never for covered baseline or background (#893)', async () => {
     const policy = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live');
-    expect(policy.providerProcessing.version).toBe('v18');
+    expect(policy.providerProcessing.version).toBe('v20');
     const rules = policy.providerProcessing.admittedRules;
     for (const rule of rules) {
       // The test helper states exactly the terms the launch verified; only background and material translation refuse retrieval.
@@ -43,7 +43,7 @@ describe('platform tool registration admission', () => {
   });
   it('requires a declaring research rule and the exact factual research contract', async () => {
     const policy = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live');
-    expect(policy.providerProcessing.version).toBe('v18');
+    expect(policy.providerProcessing.version).toBe('v20');
     const researchRule = policy.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes('factual-review'))!;
     const template = researchRule;
     const base = factualReviewKindDefinition();
@@ -71,7 +71,7 @@ describe('platform tool registration admission', () => {
     expect(modelAdmitsPlatformTools('opencode-go', 'deepseek-v4-flash')).toBe(false);
     for (const allowed of ORDINARY_PRODUCTION_ALLOWED_BINDINGS) {
       const policy = await resolveSourceCheckoutLaunchPolicy(root, 'ordinary-production', { ...allowed, credentialReference: randomUUID() });
-      expect(policy.providerProcessing.version).toBe('v19');
+      expect(policy.providerProcessing.version).toBe('v21');
       const rule = liveKindRule(policy, 'factual-review')!;
       // The rule names the tools on both routes; only the model with recorded evidence may be handed them.
       expect(rule.platformTools).not.toBeNull();

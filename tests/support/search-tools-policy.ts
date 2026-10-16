@@ -3,7 +3,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { ruleFor } from './policy-rules.js';
 
 const policy = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../..', import.meta.url)), 'developer-live');
-if (policy.integrityState !== 'verified' || policy.providerProcessing.version !== 'v18') throw new Error('SEARCH_TOOLS_POLICY_NOT_VERIFIED');
+if (policy.integrityState !== 'verified' || policy.providerProcessing.version !== 'v20') throw new Error('SEARCH_TOOLS_POLICY_NOT_VERIFIED');
 
-/** A fresh copy of the actual selected v18 research projection for adversarial adapter/gate tests. */
+/** A fresh copy of the actual selected v20 research projection for adversarial adapter/gate tests. */
 export function searchToolsRule() { return structuredClone(ruleFor(policy, 'factual-review')); }

@@ -18,7 +18,7 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 import { withRuleFor } from '../support/policy-rules.js';
 
 // #893: a non-web authorized Run freezes and executes its local-only composition through the real owners under the selected
-// v18 rule. The model transport is an in-process stub under network denial, not a Provider call. Manuscript words come from
+// v20 rule. The model transport is an in-process stub under network denial, not a Provider call. Manuscript words come from
 // exact sample1 at runtime; the two 资料库 items carry clearly synthetic public vocabulary only.
 installNodeNetworkDenial();
 
@@ -31,7 +31,7 @@ async function session(name: string, policyOf: (policy: LaunchPolicyProjection) 
   const roots: ServiceTestRoots = await createServiceTestRoots(`ai7-local-retrieval-${name}-`);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   const selected = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
-  expect(selected.providerProcessing.version).toBe('v18');
+  expect(selected.providerProcessing.version).toBe('v20');
   const policy = policyOf(selected);
   const live = { ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
     runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 100_000 } };
