@@ -23,6 +23,7 @@ export const HIGHLIGHT_COLOR_LABELS: Readonly<Record<PersonalHighlightColor, str
 
 /** The optional reason chips of V2-UX-PDEC-009; none is ever preselected, and `其他 / 自行输入` stands beside them. */
 export const DECISION_REASON_CHIPS: Readonly<Record<ProposalItemDisposition, ReadonlyArray<string>>> = {
+  deferred: ['证据不足', '方向不合适'],
   accepted: ['语言更准确', '保持作者风格'],
   rejected: ['证据不足', '方向不合适', '保持作者风格'],
   'accepted-with-edit': ['语言更准确', '保持作者风格'],
@@ -35,6 +36,7 @@ export const DECISION_REASON_CHIPS: Readonly<Record<ProposalItemDisposition, Rea
  * accord: `补充原因…`, or `改原因…` once one stands.
  */
 export const DECISION_REASON_PROMPTS: Readonly<Record<ProposalItemDisposition, string>> = {
+  deferred: '为什么暂不决定？（可选）',
   accepted: '为什么接受？（可选）',
   rejected: '为什么拒绝？（可选）',
   'accepted-with-edit': '为什么这样改？（可选）',

@@ -531,6 +531,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['applyChangeSuggestionBatch']['output']>(IPC_CHANNELS.applyChangeSuggestionBatch, input),
   reverseAppliedChangeSuggestion: (input: ServiceOperationMap['reverseAppliedChangeSuggestion']['input']) =>
     invoke<ServiceOperationMap['reverseAppliedChangeSuggestion']['output']>(IPC_CHANNELS.reverseAppliedChangeSuggestion, input),
+  inspectProposalWorkspace: (input: ServiceOperationMap['inspectProposalWorkspace']['input']) => invoke<ServiceOperationMap['inspectProposalWorkspace']['output']>(IPC_CHANNELS.inspectProposalWorkspace, input),
+  saveProposalDecisionDraft: (input: ServiceOperationMap['saveProposalDecisionDraft']['input']) => invoke<ServiceOperationMap['saveProposalDecisionDraft']['output']>(IPC_CHANNELS.saveProposalDecisionDraft, input),
+  batchProposalDecisionDraft: (input: ServiceOperationMap['batchProposalDecisionDraft']['input']) => invoke<ServiceOperationMap['batchProposalDecisionDraft']['output']>(IPC_CHANNELS.batchProposalDecisionDraft, input),
+  recordProposalDecision: (input: ServiceOperationMap['recordProposalDecision']['input']) => invoke<ServiceOperationMap['recordProposalDecision']['output']>(IPC_CHANNELS.recordProposalDecision, input),
+  inspectApplyReceipt: (input: ServiceOperationMap['inspectApplyReceipt']['input']) => invoke<ServiceOperationMap['inspectApplyReceipt']['output']>(IPC_CHANNELS.inspectApplyReceipt, input),
+  prepareReverseApply: (input: ServiceOperationMap['prepareReverseApply']['input']) => invoke<ServiceOperationMap['prepareReverseApply']['output']>(IPC_CHANNELS.prepareReverseApply, input),
   getManuscriptApplyOutcome: (input: ServiceOperationMap['getManuscriptApplyOutcome']['input']) =>
     invoke<ServiceOperationMap['getManuscriptApplyOutcome']['output']>(IPC_CHANNELS.getManuscriptApplyOutcome, input),
   inspectProposalConflict: (input: ServiceOperationMap['inspectProposalConflict']['input']) =>

@@ -196,13 +196,13 @@ type ReviewApi = Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' |
   'inspectTaskPlan' | 'quickStartReviewRun' | 'searchReferableMaterials' |
-  'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' |
+  'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
   'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' |
   // 事实核查's retained sources on its finding cards (Issue #425, S70).
-  'inspectResearchEvidence'
+  'inspectProposalWorkspace' | 'inspectResearchEvidence'
 >;
 
 export interface MountReviewWorkspaceOptions {
@@ -224,6 +224,7 @@ export interface MountReviewWorkspaceOptions {
   /** 回到原文: the manuscript at the finding's block, with the mark's card open when the mark still stands. */
   goToText(target: { manuscriptId: string; branchId: string; blockId: string; markId: string | null }): Promise<void>;
   /** 查看计划并开始 (S72 D4, S74a A5): a Review Run's plan opens in the Task Drawer, whose bar approves it. */
+  openProposalWorkspace?(input: { manuscriptId: string; branchId: string; resultId: string | null }): void;
   openPlan(reviewRunId: string): void;
   /** The Run on show changed state: the drawer reads its plan again if it shows it. */
   planChanged(): void;
@@ -264,6 +265,7 @@ interface BatchStrip {
   /** The Effect was refused or its outcome is unknown: only 重新准备应用 is offered, never the same 确认应用 again. */
   refused: boolean;
   capability: boolean;
+  unknown: boolean;
 }
 
 /** The paragraphs a 当前选区 Run named (Issue #423 review, P2-4): 返回修改 asks for the same ones again. */
@@ -780,6 +782,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const title = el('h4', undefined, reviewRunHeading(run.label));
     title.tabIndex = -1;
     heading.append(title, pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
+    appendProposalOffer(heading, run);
     const meta = el('p', 'field-note review-run-meta', `${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(localInstantLabel(run.createdAt))}`);
     meta.append(el('span', 'technical-identity', run.createdAt));
     if (run.authorization !== null) {
@@ -1195,12 +1198,23 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     return wrap;
   }
 
+  function appendProposalOffer(host: HTMLElement, run: ReviewRunProjection): void {
+    if (!options.openProposalWorkspace) return;
+    const input = { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, resultId: run.reviewRunId };
+    void api.inspectProposalWorkspace(input).then((answer) => {
+      if (!host.isConnected || !answer.offerWorkspace) return;
+      const offer = el('button', 'secondary', '在专用工作区审阅'); offer.type = 'button'; offer.dataset['proposalWorkspaceOffer'] = 'true';
+      offer.addEventListener('click', () => options.openProposalWorkspace?.(input)); host.append(offer);
+    }).catch(() => {});
+  }
+
   function renderBatchStrip(run: ReviewRunProjection, strip: BatchStrip): HTMLElement {
     const node = el('section', 'review-batch-strip');
     node.dataset['reviewCategory'] = strip.categoryId;
     node.dataset['reviewBatchCount'] = String(strip.items.length);
     node.dataset['reviewBatchState'] = strip.refused ? 'refused' : strip.items.length === 0 ? 'empty' : 'ready';
     node.setAttribute('role', 'group');
+    appendProposalOffer(node, run);
     const scopeId = uid('batch-scope');
     node.setAttribute('aria-labelledby', scopeId);
     const row = el('div', 'button-row');
@@ -1223,7 +1237,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (strip.excluded > 0) node.append(el('p', 'field-note', reviewBatchExcludedLine(strip.excluded)));
       if (strip.capped) node.append(el('p', 'field-note', reviewBatchCappedLine(MAX_BATCH_APPLY_SUGGESTIONS)));
       node.append(el('p', 'field-note', REVIEW_BATCH_ALL_OR_NONE));
-      if (strip.refused || strip.capability) {
+      if (strip.unknown) {
+        node.append(el('p', 'review-problem', '结果待确认；确认权威记录之前不能再次应用。'));
+        row.append(actionButton('open-manuscript', 'secondary', () => void options.openManuscript()));
+      } else if (strip.refused || strip.capability) {
         const category = run.categories.find((candidate) => candidate.categoryId === strip.categoryId);
         row.append(actionButton('batch-reprepare', 'primary', () => {
           if (category !== undefined) void prepareBatch(run, category);
@@ -1453,6 +1470,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           ...binding(run, finding), markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null,
         }),
         (input) => api.getManuscriptApplyOutcome(input),
+        undefined,
+        async (clientEffectId, recovery) => { options.setStatus(recovery === 'confirming' ? '正在确认应用结果' : '结果待确认', 'busy'); await api.inspectApplyReceipt({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, clientEffectId, recovery }); },
       );
       if (applied.acknowledged) {
         options.setStatus(REVIEW_STATUS_LINES.applied, 'success');
@@ -1580,6 +1599,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         problem: null,
         refused: false,
         capability: false,
+        unknown: false,
       };
       options.setStatus(listed.length === 0 ? REVIEW_BATCH_NOTHING : reviewBatchReadyLine(listed.length));
       pendingFocus = { findingId: null, field: 'batch' };
@@ -1594,6 +1614,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         run.manuscript,
         (clientEffectId) => api.applyChangeSuggestionBatch({ ...binding(run, first), markIds: strip.items.map((item) => item.markId), clientEffectId }),
         (input) => api.getManuscriptApplyOutcome(input),
+        undefined,
+        async (clientEffectId, recovery) => { options.setStatus(recovery === 'confirming' ? '正在确认应用结果' : '结果待确认', 'busy'); await api.inspectApplyReceipt({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, clientEffectId, recovery }); },
       );
       if (applied.acknowledged || applied.outcome?.state === 'committed') {
         ui.batch = null;
@@ -1603,6 +1625,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       // Refused — a suggestion drifted, or was decided meanwhile — or its outcome is unknown: the same
       // 确认应用 is never offered again; 重新准备应用 reads what stands now (V2-UX-EAPP-008).
       strip.refused = true;
+      strip.unknown = applied.outcome === null;
       if (!applied.acknowledged && isCapabilityRefusal(applied.failure)) {
         strip.capability = true;
         strip.problem = REVIEW_CAPABILITY_REASON;
