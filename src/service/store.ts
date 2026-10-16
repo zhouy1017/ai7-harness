@@ -1,5 +1,5 @@
 import { HOUSE_REVIEW_PREFERENCE_CATEGORY } from './launch-policy.js';
-import { HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
+import { HousePreferenceInfluence, HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, withdrawalOf, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
 import { inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
 import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
 import type { ApplyReceiptProjection, BatchProposalDecisionDraftInput, InspectApplyReceiptInput, PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordProposalDecisionInput, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput } from '../shared/protocol.js';
@@ -17,7 +17,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_LINEAGE_TASKS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   ControlTaskRunInput,
   EditTaskPlanInput,
@@ -760,10 +760,12 @@ import {
   learningAuditStanding,
   learningMaterialDigest,
   learningMaterialOrder,
+  LEARNING_REMEDIATION_NAMED,
   learningRemediationPreview,
   proposalDecisionCandidate,
   reviewDispositionCandidate,
   type LearningMaterialCandidate,
+  type LearningRemediationReach,
 } from './learning-eligibility.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry } from './review/category-configuration.js';
 import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from './evaluation-calibration.js';
@@ -12424,7 +12426,55 @@ export class EditorialStore {
         if (kept.length > limit) kept.pop();
       }
     }
-    return { page: kept.map(({ candidate, material }) => ({ material, orderedAt: candidate.orderedAt })), count };
+    // 使用过的任务 for the materials the page keeps (Issue #912; LAUD-001): read once for the page, never for every match.
+    const influence = kept.length === 0 ? null : new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
+    return { page: kept.map(({ candidate, material }) => ({
+      material: { ...material, downstreamTasks: this.#materialInfluence(bookId, material.materialKey, influence!).tasks.length },
+      orderedAt: candidate.orderedAt,
+    })), count };
+  }
+
+  /**
+   * What came of one material after its decisions (Issue #912; LAUD-003, LAUD-004): the 本社审阅偏好 versions of this launch's
+   * scope with a line it supports — its 学习信号 — and every Review Run category whose pinned version carried such a line, as
+   * it is now; its 使用过的任务 are those that sent anything. Only real consumption is read.
+   */
+  #materialInfluence(bookId: string, materialKey: string, influence: HousePreferenceInfluence): {
+    signals: ReturnType<HousePreferenceInfluence['signalsOf']>;
+    uses: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
+    tasks: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
+  } {
+    const decisionIds = new Set(this.#learningEligibility.history(bookId, materialKey).map((entry) => entry.decisionId));
+    const uses = influence.usesOf(decisionIds).flatMap((pin) => {
+      const withdrawn = [...pin.decisionIds].some((id) => decisionIds.has(id) && withdrawalOf(this.#authority, id).withdrawnAt !== null);
+      return this.#reviewRuns.influenceUses([pin]).map((use) => ({ ...use, versionOrdinal: pin.version.ordinal, withdrawn }));
+    });
+    return { signals: influence.signalsOf(decisionIds), uses, tasks: uses.filter((use) => use.dispatched) };
+  }
+
+  /**
+   * What 停止今后使用 of the included materials reaches (Issue #912; LAUD-006, LAUD-008): the lines of the current 本社审阅偏好
+   * version they support, and the Review Run category Tasks whose pinned version reads them — approved and not finished, which
+   * stop before their next read; prepared and not approved, whose approval is refused; finished, which keep their result and
+   * gain the marker.
+   */
+  #remediationReach(bookId: string, materialKeys: ReadonlyArray<string>): ReturnType<LearningRemediationReach> & { approved: Array<{ reviewRunId: string; categoryId: string }> } {
+    const influence = new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
+    const decisionIds = new Set(materialKeys.flatMap((key) => this.#learningEligibility.history(bookId, key).map((entry) => entry.decisionId)));
+    const current = influence.versions.at(-1) ?? null;
+    const uses = this.#reviewRuns.influenceUses(influence.usesOf(decisionIds));
+    const running = uses.filter((use) => use.state === 'running' || use.state === 'approved');
+    const completed = uses.filter((use) => use.state === 'completed');
+    return {
+      currentVersion: current?.ordinal ?? null,
+      linesAffected: current?.lines.filter((line) => line.sources.some((source) => decisionIds.has(source.eligibilityDecisionId))).length ?? 0,
+      running: running.length,
+      prepared: uses.filter((use) => use.state === 'prepared').length,
+      completed: completed.length,
+      runningNamed: running.slice(0, LEARNING_REMEDIATION_NAMED).map((use) => use.label),
+      completedNamed: completed.slice(0, LEARNING_REMEDIATION_NAMED).map((use) => use.label),
+      approved: uses.filter((use) => use.state === 'approved').map(({ reviewRunId, categoryId }) => ({ reviewRunId, categoryId })),
+    };
   }
 
   /**
@@ -12462,7 +12512,21 @@ export class EditorialStore {
           },
         })),
         earlierDecisions: chain.length - shown.length,
-        downstream: { signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 },
+        ...(() => {
+          const { signals, tasks } = this.#materialInfluence(bookId, materialKey, new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope));
+          const current = this.#authority.prepare('SELECT version_id FROM house_review_preference_versions WHERE operational_scope = ? ORDER BY ordinal DESC LIMIT 1')
+            .get(this.#baselineAnalysis.launch.operationalScope) as SqlRow | undefined;
+          const listed = tasks.slice(-MAX_LEARNING_LINEAGE_TASKS);
+          return {
+            downstream: { signals: signals.length, memoryCandidates: 0 as const, activeMemories: 0 as const, tasks: tasks.length },
+            signals: signals.map(({ version, lines }) => ({ versionId: version.versionId, ordinal: version.ordinal, recordedAt: version.recordedAt,
+              current: current !== undefined && asString(current.version_id) === version.versionId, lines })),
+            tasks: listed.map((use) => ({ bookId: use.bookId, reviewRunId: use.reviewRunId, label: use.label, versionOrdinal: use.versionOrdinal,
+              use: use.state === 'completed' ? 'completed' as const : use.state === 'running' ? 'running' as const : 'stopped' as const,
+              marked: use.state === 'completed' && use.withdrawn })),
+            earlierTasks: tasks.length - listed.length,
+          };
+        })(),
       };
     });
   }
@@ -12497,6 +12561,11 @@ export class EditorialStore {
         });
       }
       this.#rebuildHouseReviewPreference();
+      // An approved Review Run category whose pinned version reads them and has not begun stops now (Issue #912; LAUD-008);
+      // one reading now stops before its next range, at the execution owner's guard.
+      for (const run of this.#remediationReach(input.bookId, preview.included.map((entry) => entry.materialKey)).approved) {
+        this.#reviewRuns.stopForWithdrawnInfluence(run.reviewRunId, run.categoryId);
+      }
       return { bookId: input.bookId, recorded: preview.included, leftOut: preview.leftOut };
     }));
   }
@@ -12514,7 +12583,10 @@ export class EditorialStore {
       found.set(candidate.materialKey, candidate);
       standings.set(candidate.materialKey, { candidate, projection });
     }
-    return { preview: learningRemediationPreview({ bookId: input.bookId, title }, input.items, (key) => standings.get(key) ?? null), found };
+    return { preview: learningRemediationPreview({ bookId: input.bookId, title }, input.items, (key) => standings.get(key) ?? null, (keys) => {
+      const { approved: _approved, ...reach } = this.#remediationReach(input.bookId, keys);
+      return reach;
+    }), found };
   }
 
   #readFeedbackHistory(input: FeedbackHistoryInput, exactEntryId: string | null = null): FeedbackHistoryProjection {
@@ -17961,6 +18033,16 @@ export class EditorialStore {
       if (error instanceof ReviewRunError || error instanceof SeriesExclusionError) return '无法读取的书系检索排除记录';
       throw error;
     }
+  }
+
+  /**
+   * The current-read guard over 本社审阅偏好 (Issue #912; LAUD-008), asked by the execution owner before each reading range of a
+   * Run: the pinned version a Learning Material behind what the Run reads was 停止今后使用 from, or `null`. A record it cannot
+   * read stops the Run rather than let it read past a withdrawal it could not check.
+   */
+  learningInfluenceGuard(runRecordId: string): string | null {
+    this.#assertAvailable();
+    return this.#reviewRuns.learningReadGuard(runRecordId);
   }
 
   /** Verify the consuming ledger's frozen material boundary; no material paragraphs are paged or composed here. */

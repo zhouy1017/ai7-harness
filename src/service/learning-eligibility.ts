@@ -633,13 +633,26 @@ export function learningAuditStanding(material: Pick<LearningMaterialProjection,
 
 const REMEDIATION_PREVIEW_SCHEMA = 'ai7.learning-remediation-preview/1';
 
+/** How many Tasks each group of the preview names; the rest are counted. */
+export const LEARNING_REMEDIATION_NAMED = 5;
+
+/**
+ * What 停止今后使用 of some materials reaches through the 本社审阅偏好 that reads them (Issue #912; LAUD-006): the current
+ * version's lines they support and the Review Run category Tasks whose pinned version reads them.
+ */
+export type LearningRemediationReach = (materialKeys: ReadonlyArray<string>) => Pick<LearningRemediationPreviewProjection['groups'],
+  'currentVersion' | 'linesAffected' | 'running' | 'prepared' | 'completed' | 'runningNamed' | 'completedNamed'>;
+
+const NO_REACH: LearningRemediationReach = () => ({ currentVersion: null, linesAffected: 0, running: 0, prepared: 0, completed: 0, runningNamed: [], completedNamed: [] });
+
 /**
  * 学习补救影响预览 for the materials one Book's 停止今后使用 names (LAUD-006, LAUD-010, LAUD-011), from where each stands now.
  * The first one included for learning sets the scope and kind; every other one is included only when it was read at the
  * version and decision count it stands at now, is included for learning in that same scope, and is of that same kind —
- * otherwise it is left out and named with why, never coerced. Nothing reads learning material yet, so no running Task,
- * candidate, enabled memory or completed Task is affected; every decision the included materials hold stays on record.
- * The digest covers what the preview shows and is what the record binds: a preview whose materials moved since reads anew.
+ * otherwise it is left out and named with why, never coerced. What the included materials reach is read by `reach` (Issue
+ * #912): the 本社审阅偏好 lines they support and the Review Run Tasks that read them, running or completed. No candidate or
+ * enabled memory is made of them yet; every decision they hold stays on record. The digest covers what the preview shows and
+ * is what the record binds: a preview whose materials, or the Tasks they reach, moved since reads anew.
  */
 export function learningRemediationPreview(
   book: { readonly bookId: string; readonly title: string },
@@ -648,6 +661,7 @@ export function learningRemediationPreview(
     readonly candidate: Pick<LearningMaterialCandidate, 'kind' | 'originLabel'>;
     readonly projection: Pick<LearningMaterialProjection, 'digest' | 'decisions' | 'state' | 'decision'>;
   },
+  reach: LearningRemediationReach = NO_REACH,
 ): LearningRemediationPreviewProjection {
   const included: Array<{ materialKey: string; originLabel: string; digest: string; decisions: number }> = [];
   const leftOut: Array<{ materialKey: string; originLabel: string | null; reason: LearningRemediationPreviewProjection['leftOut'][number]['reason'] }> = [];
@@ -682,9 +696,8 @@ export function learningRemediationPreview(
   }
   const groups = {
     future: included.length,
-    running: 0 as const,
+    ...(included.length === 0 ? NO_REACH([]) : reach(included.map((entry) => entry.materialKey))),
     memory: 0 as const,
-    completed: 0 as const,
     decisionsKept: included.reduce((sum, entry) => sum + entry.decisions, 0),
   };
   const previewDigest = sha256Hex(canonicalJson({

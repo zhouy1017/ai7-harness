@@ -9,7 +9,7 @@ import { searchBackend, searchBackendConfigurationDigest } from '../provider/sea
 import { admitTicketHost } from '../../shared/network-denial.js';
 import { randomUUID } from 'node:crypto';
 import { backgroundAnalysisShare, backgroundShareFullReason } from '../background-analysis-enrollments.js';
-import { BASELINE_ANALYSIS_KIND, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
+import { BASELINE_ANALYSIS_KIND, LEARNING_INFLUENCE_STOP_SUMMARY, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
 import { liveKindAdmission, liveKindContractCategories, liveKindRule, kindLocalTools, type LiveKindRule } from './live-kind-admission.js';
 import { RetrievalIndex } from '../retrieval/index.js';
 import { prepareRetrievalResult, markRetrievalResult } from '../retrieval/result-validator.js';
@@ -204,6 +204,12 @@ export interface ExecutionOwnerDependencies {
    * exclusion, and that never lets a further read go on. Absent, nothing is guarded: no Series material exists for the Run.
    */
   readonly readGuard?: ((runRecordId: string) => string | null) | null;
+  /**
+   * The current-read guard over 本社审阅偏好 (Issue #912; LAUD-008), asked with the one above: a non-`null` answer names the
+   * pinned version a Learning Material behind it was 停止今后使用 from, and the Run stops there for revalidation — what it
+   * read kept, nothing more sent. Absent, nothing is guarded: no Run reads a 本社审阅偏好 version.
+   */
+  readonly influenceGuard?: ((runRecordId: string) => string | null) | null;
   /** Re-check the consuming ledger's frozen materials before admission and every further model step. */
   readonly materialGuard?: ((runRecordId: string, ledger: BaselineAnalysisStore) => MaterialGuardRefusal | null) | null;
   /**
@@ -390,6 +396,13 @@ const LIVE_INTERRUPTIONS = {
     detail: '书系检索范围已变化：这次运行所依据的书系材料已排除在书系检索之外；已完成单元的结果与缺口均已保留，未再发起任何传输。',
     summary: SERIES_SCOPE_STOP_SUMMARY,
     safeNextAction: '修改计划并重新授权，或取消任务；这次运行不能续行、重试，也不会改用别的材料。',
+  },
+  // A Learning Material behind the Run's pinned 本社审阅偏好 version was 停止今后使用 while it read (Issue #912; LAUD-008): it
+  // stops before the next range and goes on only as a new Task without that influence.
+  'learning-influence-withdrawn': {
+    detail: '本社审阅偏好已停止使用：这次运行参考的偏好版本中有学习材料已停止今后使用；已完成单元的结果与缺口均已保留，未再发起任何传输。',
+    summary: LEARNING_INFLUENCE_STOP_SUMMARY,
+    safeNextAction: '重新执行（不含该影响），或取消任务；这次运行不能续行、重试，也不会改用别的偏好版本。',
   },
   'material-reference-changed': {
     detail: '参考资料在任务运行中已不可用，任务已中断；已完成的单元保留。',
@@ -2022,6 +2035,11 @@ export class BaselineAnalysisExecutionOwner {
        */
       const scopeChanged = (): boolean => {
         if (materialChanged()) return true;
+        if (!active.cancelRequested && liveInterruption === null && this.#deps.influenceGuard?.(facts.runRecordId) != null) {
+          liveInterruption = 'learning-influence-withdrawn';
+          terminalClassification = 'interrupted';
+          return true;
+        }
         if (active.cancelRequested || liveInterruption !== null || this.#deps.readGuard?.(facts.runRecordId) == null) return false;
         liveInterruption = 'series-retrieval-scope-changed';
         terminalClassification = 'interrupted';
@@ -2101,10 +2119,10 @@ export class BaselineAnalysisExecutionOwner {
           // — once every other answer given is applied too, each as the editor chose. The ceiling is read before a pause or
           // AI7 stopping, as at every boundary (Issue #541): a retry it keeps back is never left for a pause to hide.
           // 再试一次 once the scope changed (Issue #64, S29b): the retry is not sent, and the Run stops as the scope changed.
-          if (retry && (liveInterruption === 'series-retrieval-scope-changed' || liveInterruption === 'material-reference-changed' || scopeChanged())) {
+          if (retry && (liveInterruption === 'series-retrieval-scope-changed' || liveInterruption === 'material-reference-changed' || liveInterruption === 'learning-influence-withdrawn' || scopeChanged())) {
             waiting.delete(entry.unitOrdinal);
             settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
-              'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${materialRefusal === null ? SAFE_RETRY_SCOPE_CHANGED : materialInterruptionMessage(materialRefusal)}`);
+              'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${materialRefusal !== null ? materialInterruptionMessage(materialRefusal) : liveInterruption === 'learning-influence-withdrawn' ? '本社审阅偏好已停止使用，没有再试一次' : SAFE_RETRY_SCOPE_CHANGED}`);
             keepSettled(w.unit, w.wallMs);
             spent = true;
             continue;
@@ -2170,7 +2188,8 @@ export class BaselineAnalysisExecutionOwner {
         // The current-read guard (Issue #64, S29b; SER-023): an exclusion recorded since the last range stops the Run before this
         // one forms a request — before a pause or AI7 stopping, which would leave it to be continued past the exclusion.
         // A scope stop decided anywhere since — a retry it kept back included — ends the ranges too (Issue #64 review).
-        if ((liveInterruption as LiveInterruption | null) === 'series-retrieval-scope-changed' || (liveInterruption as LiveInterruption | null) === 'material-reference-changed' || scopeChanged()) {
+        if ((liveInterruption as LiveInterruption | null) === 'series-retrieval-scope-changed' || (liveInterruption as LiveInterruption | null) === 'material-reference-changed' ||
+            (liveInterruption as LiveInterruption | null) === 'learning-influence-withdrawn' || scopeChanged()) {
           unitsEnded = true;
           break;
         }

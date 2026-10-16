@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { HouseReviewPreferenceLedger, HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL, preferenceLines, type HousePreferenceSource } from '../../src/service/house-review-preference.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
+import { LEARNING_ELIGIBILITY_SCHEMA_SQL } from '../../src/service/learning-eligibility.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { dropHouseReviewPreferenceRelations } from '../support/pre74-schema.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
@@ -19,10 +20,16 @@ function source(overrides: Partial<HousePreferenceSource> = {}): HousePreference
     quality: { applied: 0, surviving: 0, editVolume: 0, lineageDigest: 'b'.repeat(64) }, ...overrides };
 }
 
+/** The decision ledger the consumption guard reads (Issue #912), without the Books it names. */
+function withEligibility(db: DatabaseSync): void {
+  db.exec(LEARNING_ELIGIBILITY_SCHEMA_SQL.learning_eligibility_decisions.replace('REFERENCES books(book_id)', ''));
+}
+
 function ledgerOf(): { db: DatabaseSync; ledger: HouseReviewPreferenceLedger } {
   const db = new DatabaseSync(':memory:');
   for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL)) db.exec(sql);
   for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL)) db.exec(sql);
+  withEligibility(db);
   return { db, ledger: new HouseReviewPreferenceLedger(db) };
 }
 
@@ -32,6 +39,7 @@ describe('house review preference ledger', () => {
     try {
       for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL)) db.exec(sql);
       for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL)) db.exec(sql);
+      withEligibility(db);
       const ledger = new HouseReviewPreferenceLedger(db);
       const production = source();
       const development = source({ operationalScope: 'developer-live', materialDigest: 'c'.repeat(64) });
@@ -64,6 +72,7 @@ describe('house review preference ledger', () => {
     try {
       for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL)) db.exec(sql);
       for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL)) db.exec(sql);
+      withEligibility(db);
       const ledger = new HouseReviewPreferenceLedger(db);
       const material = source({ eligibility: 'book' });
       ledger.rebuild('ordinary-production', [material]);

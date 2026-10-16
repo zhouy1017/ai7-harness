@@ -2054,9 +2054,8 @@ describe('house preference review consumption (#911)', () => {
         expect(pins.pinned(task)?.versionId).toBe(version.versionId);
         // Reopening the plan resolves the pinned definition, even after a newer empty house version.
         expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: admitted.reviewRunId }).scope.reference.some((line) => line.includes('本社审阅偏好 v1'))).toBe(true);
-        session.store.authorizeReviewRun(book.bookId, admitted.reviewRunId, approvals(admitted));
-        const report = session.store.generateReviewReport(book.bookId, admitted.reviewRunId).run!.report!;
-        expect(report.record.categorySummaries.entries[0]!.basisStatement.includes('本社审阅偏好 v1')).toBe(true);
+        // The exclusion withdrew the pinned version's only material: the one approval is refused (Issue #912; LAUD-007).
+        expect(() => session.store.authorizeReviewRun(book.bookId, admitted.reviewRunId, approvals(admitted))).toThrowError(/本社审阅偏好 v1 中有 1 条学习材料已停止今后使用/u);
       } finally { db.close(); }
     });
   }, 300_000);
