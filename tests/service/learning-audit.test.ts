@@ -209,7 +209,9 @@ describe('学习回溯 over the real store', () => {
         ['修改建议 · 拒绝', 'different-scope'], ['修改建议 · 拒绝', 'not-included'], [null, 'duplicate'], [null, 'not-found'],
       ]);
       expect(preview.leftOut.slice(0, 3).map((entry) => entry.materialKey)).toEqual([m2.materialKey, m3.materialKey, m0.materialKey]);
-      expect(preview.groups).toEqual({ future: 2, running: 0, memory: 0, completed: 0, decisionsKept: 2 });
+      // No 本社审阅偏好 reads 修改建议 material that came from no 审阅 finding: nothing beyond future use is reached (Issue #912).
+      expect(preview.groups).toEqual({ future: 2, currentVersion: null, linesAffected: 0, running: 0, prepared: 0, memory: 0, completed: 0,
+        runningNamed: [], completedNamed: [], decisionsKept: 2 });
       expect(preview.previewDigest).toMatch(/^[0-9a-f]{64}$/u);
       // A preview is a read: asking again answers the same, digest included.
       expect(store.previewLearningRemediation({ bookId: book.bookId, items: [

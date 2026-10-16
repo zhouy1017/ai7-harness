@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { sha256Hex } from '../../src/service/analysis/canonical.js';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -18,7 +19,8 @@ import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/p
 import { ownBlockTextsOf, ownBlockIdsOf, unitContentDigest, substituteBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
 import { ProviderResultCache, isModelCallLine } from '../../src/service/provider/provider-result-cache.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
-import type { LaunchPolicyProjection, ReviewCategoryResultSetRevisionProjection, ReviewRunProjection } from '../../src/shared/protocol.js';
+import { LEARNING_INFLUENCE_RESULT_MARKER, LEARNING_INFLUENCE_WITHDRAWN_LABEL, type LaunchPolicyProjection, type ReviewCategoryResultSetRevisionProjection, type ReviewRunProjection } from '../../src/shared/protocol.js';
+import { DatabaseSync } from 'node:sqlite';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { withoutHouseReviewPreference } from '../support/policy-rules.js';
 import { HOUSE_PREFERENCE_CLOSED } from '../../src/service/task-plan.js';
@@ -34,10 +36,11 @@ let owner: BaselineAnalysisExecutionOwner;
 let driver: ReviewRunDriver;
 let sent: number;
 let failure: 'none' | 'unknown' | 'quota';
-let holdTurn: number | null;
+let holdTurn: number | 'sampling' | null;
 let arrived: Promise<void>;
 let announce: () => void;
 let release: () => void;
+let held: Promise<void>;
 let recorded: Map<string, ResolvedModelFixture>;
 /** Each request's system words beside its last message, as the transport received them (Issue #911 review). */
 let requests: Array<{ system: string; last: string }>;
@@ -65,18 +68,18 @@ beforeEach(async () => {
   recorded = new Map();
   requests = [];
   arrived = new Promise<void>((resolve) => { announce = resolve; });
-  const held = new Promise<void>((resolve) => { release = resolve; });
+  held = new Promise<void>((resolve) => { release = resolve; });
   const nativeFetch: typeof fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
+    const message = body.messages.at(-1)!.content;
     sent += 1;
-    if (sent === (holdTurn ?? 1)) {
+    if (sent === (holdTurn ?? 1) || (holdTurn === 'sampling' && message.startsWith('保证抽样 '))) {
       announce();
       if (holdTurn !== null) await held;
       if (init?.signal?.aborted) throw new DOMException('Synthetic aborted transport', 'AbortError');
     }
     if (sent === 1 && failure === 'unknown') return new Response('{', { status: 200 });
     if (sent === 1 && failure === 'quota') return new Response(JSON.stringify({ error: { message: 'synthetic account limit' } }), { status: 429 });
-    const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
-    const message = body.messages.at(-1)!.content;
     requests.push({ system: body.messages.filter((entry) => entry.role === 'system').map((entry) => entry.content).join('\n'), last: message });
     const header = parseReviewCategoryUnitMessageHeader(message);
     let result: unknown;
@@ -114,6 +117,8 @@ beforeEach(async () => {
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' },
     developerLive: { launch: { runBudgetCeiling: launch.live.runBudgetCeiling, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: { family: 'reference-free-review', case: 'sample1-whole-book', delta: null } }, nativeFetch },
+    // The 本社审阅偏好 current-read guard, as index.ts wires it (Issue #912).
+    influenceGuard: (runRecordId) => store.learningInfluenceGuard(runRecordId),
   });
   driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
 });
@@ -393,4 +398,240 @@ describe('reference-free review on the Go execution path', () => {
     store.baselineAnalysisLedger.bindLaunch(launch);
     expect(store.rebuildHouseReviewPreference().current!.versionId).toBe(version.versionId);
   });
+});
+
+describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () => {
+  /** Hold the transport's `turn`-th request from now until `release`. */
+  const holdAt = (turn: number | 'sampling'): void => {
+    holdTurn = turn;
+    arrived = new Promise<void>((resolve) => { announce = resolve; });
+    held = new Promise<void>((resolve) => { release = resolve; });
+  };
+  const whole = { kind: 'whole' as const, fromChapterBlockId: null, toChapterBlockId: null };
+  const prepareTypos = (bookId: string, categories: ReadonlyArray<string> = ['typos-and-usage']): ReviewRunProjection => {
+    let progress = store.createReviewRunPreparationWork(bookId, categories, whole, policy);
+    while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
+    return progress.projection!.run!;
+  };
+  const runOf = (bookId: string, reviewRunId: string): ReviewRunProjection => store.inspectReviewWorkspace(bookId, reviewRunId).run!;
+  /** Digests of every earlier row: assertions can never print manuscript-bearing evidence on failure. */
+  const historyRows = (): string[] => {
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      return ['learning_eligibility_decisions', 'house_review_preference_versions', 'review_run_preference_pins', 'quality_signals', 'review_run_category_events',
+        'analysis_result_set_revisions', 'review_runs', 'review_findings', 'review_reports']
+        .flatMap((table) => (db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Array<Record<string, unknown>>).map((row) => `${table}:${sha256Hex(JSON.stringify(row))}`));
+    } finally { db.close(); }
+  };
+  /** One Book whose first finding of each category the editor ignored with a reason: their Learning Materials, not yet decided. */
+  const ignored = async (title: string, categories: ReadonlyArray<string> = ['typos-and-usage']) => {
+    const book = await importSample1Book(store, roots.codeRoot, title);
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+    recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
+    const first = prepareTypos(book.bookId, categories);
+    store.authorizeReviewRun(book.bookId, first.reviewRunId, approvals(first));
+    await driver.drive(first.reviewRunId);
+    const findings = runOf(book.bookId, first.reviewRunId).findings;
+    for (const category of categories) {
+      const finding = findings.find((entry) => entry.markId !== null && entry.categoryId === category)!;
+      store.recordReviewFindingDisposition(book.bookId, first.reviewRunId, finding.findingId, '合成回溯原因：保留原有写法');
+    }
+    const materials = store.inspectLearningMaterials(book.bookId).books[0]!.materials.filter((entry) => entry.kind === 'review-disposition');
+    return { book, material: materials.find((entry) => entry.originLabel.includes('错别字'))!, materials };
+  };
+  const admit = (bookId: string, material: { materialKey: string; digest: string }) => {
+    store.decideLearningMaterial({ bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice: 'house', note: null });
+    return store.inspectHouseReviewPreference().current!;
+  };
+  /** One Book whose ignored typos finding is admitted for the house, and the version it made. */
+  const admitted = async (title: string) => {
+    const { book, material } = await ignored(title);
+    return { book, material, version: admit(book.bookId, material) };
+  };
+  const audited = (bookId: string, materialKey: string) => store.inspectLearningAudit({ bookId }).books[0]!.materials.find((entry) => entry.materialKey === materialKey)!;
+  const typosOutcome = (bookId: string) => store.inspectReviewCategory(bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!))).taskOutcome;
+
+  it('traces material → version → Run, stops a reading Run, marks the completed one, and keeps every history row', async () => {
+    // A 错别字 finding and a 体例 finding ignored with a reason: two materials, the first admitted for the house.
+    const { book, material, materials } = await ignored('L2 sample1 lineage', ['typos-and-usage', 'style-and-format']);
+    const second = materials.find((entry) => entry.materialKey !== material.materialKey)!;
+    const version = admit(book.bookId, material);
+    // No Run read the version yet: a 学习信号 and no Task.
+    let lineage = store.inspectLearningLineage(book.bookId, material.materialKey);
+    expect(lineage.downstream).toEqual({ signals: 1, memoryCandidates: 0, activeMemories: 0, tasks: 0 });
+    expect(lineage.signals).toEqual([{ versionId: version.versionId, ordinal: 1, recordedAt: version.recordedAt, current: true, lines: 1 }]);
+    expect(audited(book.bookId, material.materialKey).downstreamTasks).toBe(0);
+
+    // A Run that read it to the end: 使用过的任务, and 为什么会影响这个结果 names the version and the material behind it.
+    const completed = prepareTypos(book.bookId);
+    store.authorizeReviewRun(book.bookId, completed.reviewRunId, approvals(completed));
+    await driver.drive(completed.reviewRunId);
+    const completedView = store.generateReviewReport(book.bookId, completed.reviewRunId).run!;
+    expect(completedView.state).toBe('settled');
+    expect(completedView.influence).toEqual([{ categoryId: 'typos-and-usage', categoryLabel: '错别字与规范用语', versionId: version.versionId, ordinal: 1, sourceCount: 1,
+      materials: [{ bookId: book.bookId, bookTitle: 'L2 sample1 lineage', materialKey: material.materialKey, kind: 'review-disposition', withdrawnAt: null }], moreMaterials: 0 }]);
+    expect(completedView.historicalMarker).toBeNull();
+    lineage = store.inspectLearningLineage(book.bookId, material.materialKey);
+    expect(lineage.downstream.tasks).toBe(1);
+    const completedLabel = `《L2 sample1 lineage》第 ${completed.ordinal} 次审阅 · 错别字与规范用语`;
+    expect(lineage.tasks).toEqual([{ bookId: book.bookId, reviewRunId: completed.reviewRunId, label: completedLabel, versionOrdinal: 1, use: 'completed', marked: false }]);
+    expect(audited(book.bookId, material.materialKey).downstreamTasks).toBe(1);
+    // The 体例 judgment admitted too makes v2: its 错别字 line is still the first material's, and a Run under it sends again.
+    expect(admit(book.bookId, second)).toMatchObject({ ordinal: 2, sourceCount: 2 });
+
+    // A third Run reads it now: 停止今后使用 names it and the completed one, and the record stops it before its next read.
+    const reading = prepareTypos(book.bookId);
+    store.authorizeReviewRun(book.bookId, reading.reviewRunId, approvals(reading));
+    const heldTurn = sent + 2;
+    holdAt(heldTurn);
+    const loop = driver.drive(reading.reviewRunId);
+    await arrived;
+    const item = { materialKey: material.materialKey, materialDigest: audited(book.bookId, material.materialKey).digest, expectedDecisions: 1 };
+    const preview = store.previewLearningRemediation({ bookId: book.bookId, items: [item] });
+    expect(preview.groups).toEqual({ future: 1, currentVersion: 2, linesAffected: 1, running: 1, prepared: 0, memory: 0, completed: 1,
+      runningNamed: [`《L2 sample1 lineage》第 ${reading.ordinal} 次审阅 · 错别字与规范用语`], completedNamed: [completedLabel], decisionsKept: 1 });
+    const before = historyRows();
+    store.recordLearningRemediation({ bookId: book.bookId, items: [item], previewDigest: preview.previewDigest });
+    // The rebuild supersedes the version without the material; no Run may compose a block from the one that held it.
+    const rebuilt = store.inspectHouseReviewPreference().current!;
+    expect([rebuilt.ordinal, rebuilt.sourceCount, rebuilt.lines.map((line) => line.categoryId)]).toEqual([3, 1, ['style-and-format']]);
+    release();
+    await loop;
+    expect(sent).toBe(heldTurn);
+    const stopped = runOf(book.bookId, reading.reviewRunId);
+    expect([stopped.state, stopped.scopeStop, stopped.canContinue, stopped.stateLabel]).toEqual(['scope-changed', 'house-review-preference', false, LEARNING_INFLUENCE_WITHDRAWN_LABEL]);
+    expect(stopped.categories[0]!.stateLabel).toBe(LEARNING_INFLUENCE_WITHDRAWN_LABEL);
+    expect(typosOutcome(book.bookId)).toMatchObject({ classification: 'interrupted', safeNextAction: '重新执行（不含该影响），或取消任务；这次运行不能续行、重试，也不会改用别的偏好版本。' });
+
+    // The completed Run is never rewritten: its findings stand, and it carries the marker linking to the remediation.
+    const marked = runOf(book.bookId, completed.reviewRunId);
+    expect(sha256Hex(JSON.stringify(marked.findings.map((finding) => ({ ...finding, historicalMarker: null })))))
+      .toBe(sha256Hex(JSON.stringify(completedView.findings)));
+    expect(marked.findings.every((finding) => finding.historicalMarker === LEARNING_INFLUENCE_RESULT_MARKER)).toBe(true);
+    expect(marked.historicalMarker).toMatchObject({ label: LEARNING_INFLUENCE_RESULT_MARKER, remediation: { bookId: book.bookId, materialKey: material.materialKey } });
+    expect(marked.influence[0]!.materials[0]!.withdrawnAt).toBe(marked.historicalMarker!.remediation!.recordedAt);
+    lineage = store.inspectLearningLineage(book.bookId, material.materialKey);
+    expect(lineage.tasks.map((task) => [task.reviewRunId, task.use, task.marked])).toEqual([[completed.reviewRunId, 'completed', true], [reading.reviewRunId, 'stopped', false]]);
+    expect(lineage.signals.map((signal) => [signal.ordinal, signal.current])).toEqual([[1, false], [2, false]]);
+
+    // 重新执行（不含该影响）: cancelled, the way on is a new Run, which reads no version holding the material.
+    store.cancelReviewRun(book.bookId, reading.reviewRunId);
+    expect(runOf(book.bookId, reading.reviewRunId).state).toBe('cancelled');
+    expect(prepareTypos(book.bookId).influence).toEqual([]);
+
+    // Nothing was deleted or rewritten: every row read before the remediation reads the same, and one decision was appended.
+    const after = historyRows();
+    for (const row of before) expect(after).toContain(row);
+    const decisions = (rows: string[]) => rows.filter((row) => row.startsWith('learning_eligibility_decisions:')).length;
+    expect(decisions(after)).toBe(decisions(before) + 1);
+  }, 180_000);
+
+  it('stops after exclusion during sampling without sending the preference again in reflection (#912 review)', async () => {
+    const { book, material } = await admitted('L2 sample1 sampling exclusion');
+    const reading = prepareTypos(book.bookId);
+    store.authorizeReviewRun(book.bookId, reading.reviewRunId, approvals(reading));
+    holdAt('sampling');
+    const loop = driver.drive(reading.reviewRunId);
+    await arrived;
+    const sendsAtExclusion = sent;
+    const item = { materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 1 };
+    const preview = store.previewLearningRemediation({ bookId: book.bookId, items: [item] });
+    store.recordLearningRemediation({ bookId: book.bookId, items: [item], previewDigest: preview.previewDigest });
+    release();
+    await loop;
+    expect(sent).toBe(sendsAtExclusion);
+    expect(runOf(book.bookId, reading.reviewRunId)).toMatchObject({ state: 'scope-changed', scopeStop: 'house-review-preference', canContinue: false });
+    expect(typosOutcome(book.bookId)?.classification).toBe('interrupted');
+  }, 180_000);
+
+  it('keeps zero use when a dispatched review is cancelled before its first model turn (#912 review)', async () => {
+    const { book, material } = await admitted('L2 sample1 unsent preference');
+    const prepared = prepareTypos(book.bookId);
+    store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
+    const steps = store.reviewRunDriveSteps;
+    const handoff = steps.start(prepared.reviewRunId, 'typos-and-usage')!;
+    const before = sent;
+    owner.admitAndDispatch(handoff.runRecordId, handoff.ledger);
+    steps.recordDispatch(prepared.reviewRunId, 'typos-and-usage', handoff.runRecordId);
+    handoff.ledger.requestCancel(book.bookId, prepared.categories[0]!.taskIntentId!);
+    owner.cancelRun(handoff.runRecordId, handoff.ledger);
+    await owner.whenDone(handoff.runRecordId);
+    steps.settle(prepared.reviewRunId, 'typos-and-usage');
+    expect(sent).toBe(before);
+    expect(store.inspectLearningLineage(book.bookId, material.materialKey).downstream.tasks).toBe(0);
+    expect(audited(book.bookId, material.materialKey).downstreamTasks).toBe(0);
+    expect(runOf(book.bookId, prepared.reviewRunId).influence).toEqual([]);
+  }, 180_000);
+
+  it('stops an approved review before its category starts and leaves its pin unchanged (#912 review)', async () => {
+    const { book, material } = await admitted('L2 sample1 approved exclusion');
+    const prepared = prepareTypos(book.bookId);
+    store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
+    const item = { materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 1 };
+    const preview = store.previewLearningRemediation({ bookId: book.bookId, items: [item] });
+    expect(preview.groups).toMatchObject({ running: 1, prepared: 0, completed: 0 });
+    const before = historyRows();
+    const sends = sent;
+    store.recordLearningRemediation({ bookId: book.bookId, items: [item], previewDigest: preview.previewDigest });
+    expect(runOf(book.bookId, prepared.reviewRunId)).toMatchObject({ state: 'scope-changed', scopeStop: 'house-review-preference', canContinue: false, influence: [] });
+    expect(store.reviewRunDriveSteps.start(prepared.reviewRunId, 'typos-and-usage')).toBeNull();
+    expect(sent).toBe(sends);
+    const after = historyRows();
+    for (const digest of before) expect(after).toContain(digest);
+  }, 180_000);
+
+  it('refuses the approval of a prepared Run, and a re-inclusion appends a new decision and version a new Run reads', async () => {
+    const { book, material, version } = await admitted('L2 sample1 reinclusion');
+    const prepared = prepareTypos(book.bookId);
+    expect(prepared.influence).toEqual([]); // A pin alone is not evidence of consumption.
+    expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.reviewRunId }).scope.reference.some((line) => line.includes(`本社审阅偏好 v${version.ordinal}`))).toBe(true);
+    const item = { materialKey: material.materialKey, materialDigest: audited(book.bookId, material.materialKey).digest, expectedDecisions: 1 };
+    const preview = store.previewLearningRemediation({ bookId: book.bookId, items: [item] });
+    expect(preview.groups).toMatchObject({ running: 0, prepared: 1, completed: 0, linesAffected: 1 });
+    store.recordLearningRemediation({ bookId: book.bookId, items: [item], previewDigest: preview.previewDigest });
+    const sentBefore = sent;
+    expect(() => store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared))).toThrowError(/参考的本社审阅偏好 v1 中有 1 条学习材料已停止今后使用/u);
+    expect(sent).toBe(sentBefore);
+
+    // 重新纳入 appends: the exclusion stays in the chain, a third version holds the material again, and a new Run reads it.
+    const excluded = audited(book.bookId, material.materialKey);
+    expect(excluded.standing).toBe('excluded');
+    const beforeReinclusion = historyRows();
+    store.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: excluded.digest, expectedDecisions: 2, choice: 'house', note: null });
+    const afterReinclusion = historyRows();
+    for (const digest of beforeReinclusion) expect(afterReinclusion).toContain(digest);
+    const again = store.inspectHouseReviewPreference().current!;
+    expect([again.ordinal, again.sourceCount]).toEqual([3, 1]);
+    expect(store.inspectLearningLineage(book.bookId, material.materialKey).decisions.map((entry) => entry.choice)).toEqual(['house', 'excluded', 'house']);
+    const fresh = prepareTypos(book.bookId);
+    expect(fresh.influence).toEqual([]);
+    store.authorizeReviewRun(book.bookId, fresh.reviewRunId, approvals(fresh));
+    await driver.drive(fresh.reviewRunId);
+    expect(runOf(book.bookId, fresh.reviewRunId).state).toBe('settled');
+    expect(runOf(book.bookId, fresh.reviewRunId).influence.map((entry) => [entry.ordinal, entry.materials[0]!.withdrawnAt])).toEqual([[3, null]]);
+    expect(sent).toBeGreaterThan(sentBefore);
+    // The version made before the exclusion stays withdrawn for every Run that pinned it: re-inclusion restores none.
+    expect(runOf(book.bookId, prepared.reviewRunId).influence).toEqual([]);
+    const lineage = store.inspectLearningLineage(book.bookId, material.materialKey);
+    expect(lineage.signals.map((signal) => [signal.ordinal, signal.current])).toEqual([[1, false], [3, true]]);
+    expect(lineage.tasks.map((task) => [task.reviewRunId, task.versionOrdinal, task.use])).toEqual([[fresh.reviewRunId, 3, 'completed']]);
+  }, 180_000);
+
+  it('records a batch only over materials of one class and scope as read, naming a drifted member and leaving it standing (LAUD-010, LAUD-011)', async () => {
+    const { book, materials } = await ignored('L2 sample1 batch', ['typos-and-usage', 'style-and-format']);
+    for (const material of materials) admit(book.bookId, material);
+    const [typos, style] = [materials.find((entry) => entry.originLabel.includes('错别字'))!, materials.find((entry) => !entry.originLabel.includes('错别字'))!];
+    const read = (material: { materialKey: string }) => audited(book.bookId, material.materialKey);
+    // The 体例 member was read before its decision: it drifted, and is named rather than coerced into the batch.
+    const items = [{ materialKey: typos.materialKey, materialDigest: read(typos).digest, expectedDecisions: 1 },
+      { materialKey: style.materialKey, materialDigest: read(style).digest, expectedDecisions: 0 }];
+    const preview = store.previewLearningRemediation({ bookId: book.bookId, items });
+    expect([preview.scope, preview.kind, preview.included.map((entry) => entry.materialKey), preview.leftOut.map((entry) => [entry.materialKey, entry.reason])])
+      .toEqual(['house', 'review-disposition', [typos.materialKey], [[style.materialKey, 'changed']]]);
+    expect(preview.groups).toMatchObject({ future: 1, currentVersion: 2, linesAffected: 1 });
+    const outcome = store.recordLearningRemediation({ bookId: book.bookId, items, previewDigest: preview.previewDigest });
+    expect([outcome.recorded.map((entry) => entry.materialKey), outcome.leftOut.map((entry) => entry.reason)]).toEqual([[typos.materialKey], ['changed']]);
+    expect([read(typos).standing, read(style).standing]).toEqual(['excluded', 'house']);
+    expect(store.inspectHouseReviewPreference().current!.lines.map((line) => line.categoryId)).toEqual(['style-and-format']);
+  }, 180_000);
 });

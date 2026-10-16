@@ -30,7 +30,7 @@ import type {
   TaskPlanStartProjection,
   TaskPlanStepProjection,
 } from '../shared/protocol.js';
-import { MODEL_SERVICE_ROUTES, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, READERS_REPORT_TEMPLATE_LABELS, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
+import { MODEL_SERVICE_ROUTES, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, READERS_REPORT_TEMPLATE_LABELS, LEARNING_INFLUENCE_WITHDRAWN_LABEL, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
 import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, EVIDENCE_ASSURANCE_LEVEL_LABELS, type EvidenceAssuranceLevel } from '../shared/protocol.js';
 import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
 import type { ClarificationFacts } from './analysis/clarifications.js';
@@ -2257,8 +2257,9 @@ function reviewState(facts: ReviewRunPlanFacts): TaskPlanProjection['state'] {
     case 'failed':
       return { key: 'stopped', label: '运行失败' };
     // A Series Retrieval Exclusion stopped it (Issue #64, S29b; SER-024), and the editor may then have cancelled it.
+    // …or a material behind its pinned 本社审阅偏好 version was 停止今后使用 (Issue #912; LAUD-008): its own words then.
     case 'scope-changed':
-      return { key: 'stopped', label: SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL };
+      return { key: 'stopped', label: facts.stateLabel === LEARNING_INFLUENCE_WITHDRAWN_LABEL ? LEARNING_INFLUENCE_WITHDRAWN_LABEL : SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL };
     case 'cancelled':
       return { key: 'stopped', label: '已取消' };
   }

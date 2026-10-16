@@ -26,6 +26,11 @@ import {
   learningRemediationLeftOutLine,
   learningRemediationOutcome,
   learningRemediationRereadFailed,
+  learningAuditUse,
+  learningLineageSignalLine,
+  learningLineageTaskLine,
+  learningRemediationRunning,
+  LEARNING_REMEDIATION_RUNNING,
 } from '../../src/renderer/learning-audit-labels.js';
 import { LEARNING_AUDIT_STANDINGS } from '../../src/shared/protocol.js';
 
@@ -111,5 +116,26 @@ describe('学习回溯 words', () => {
     expect(learningAuditChoicesCut('series', 500)).toBe('书系筛选只列出按名称排序的前 500 个书系。');
     expect(learningRemediationRereadFailed('预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。'))
       .toBe('预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。但学习回溯没能重新读取，列表可能还是之前的状态；请稍后重新打开。');
+  });
+
+  it('counts what read a material and says what stopping it reaches, truthfully empty when nothing did (Issue #912)', () => {
+    expect(learningAuditUse(0)).toBe(LEARNING_AUDIT_UNUSED);
+    expect(learningAuditUse(3)).toBe('被 3 个任务使用过');
+    expect(LEARNING_LINEAGE_WHY_EMPTY).toBe('学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。');
+    expect(LEARNING_AUDIT_FILTERS_LATER).not.toContain('也没有任务读取学习材料');
+    const instant = (iso: string) => iso.slice(0, 10);
+    expect(learningLineageSignalLine({ ordinal: 2, recordedAt: '2026-10-17T01:00:00.000Z', current: true, lines: 1 }, instant)).toBe('本社审阅偏好 v2 · 2026-10-17 · 其中 1 行出自这条材料 · 现行版本');
+    expect(learningLineageTaskLine({ label: '《回溯之书》第 2 次审阅 · 错别字与规范用语', versionOrdinal: 1, use: 'completed', marked: true }))
+      .toBe('《回溯之书》第 2 次审阅 · 错别字与规范用语 · 参考 v1 · 已完成 · 已标上「此结果参考的学习材料后来停止今后使用」');
+    expect(learningRemediationRunning({ running: 0, prepared: 0, runningNamed: [] })).toBe(LEARNING_REMEDIATION_RUNNING);
+    expect(LEARNING_REMEDIATION_RUNNING).toBe('没有正在运行的任务使用它们。');
+    expect(learningRemediationRunning({ running: 7, prepared: 1, runningNamed: ['甲', '乙'] })).toContain('7 个已授权或正在运行的审阅任务参考了含有它们的本社审阅偏好版本，会在下一次读取前停下，显示「所参考的本社审阅偏好已停止使用 · 需要重新确认计划」：甲、乙等 7 个。');
+    expect(learningRemediationRunning({ running: 0, prepared: 2, runningNamed: [] })).toBe('2 个已准备、尚未授权的审阅任务不能再授权，需要重新准备。');
+    // Nothing completed reads exactly as before the consumer existed.
+    expect(learningRemediationCompleted(1)).toBe('没有已完成的任务用过它们，因此没有结果需要标记；它们来自的反馈与改动，以及此前的 1 个准入决定，都原样保留。');
+    expect(learningRemediationCompleted(2, { completed: 1, completedNamed: ['甲'] })).toBe(
+      '1 个已完成的审阅任务参考过它们，会标上「此结果参考的学习材料后来停止今后使用」：甲。这些结果、发现和报告都不会改写，标记也不表示结果有错；它们来自的反馈与改动，以及此前的 2 个准入决定，都原样保留。');
+    expect(learningRemediationFuture(1, 'house', '回溯之书', { currentVersion: 3, linesAffected: 2 })).toBe(
+      '1 条学习材料今后不再可用于学习（原来是纳入出版社经验）；它们会显示为明确排除。本社审阅偏好 v3 中有 2 行出自它们，记录后会生成不含它们的新版本，之后的审阅只读新版本。');
   });
 });

@@ -1,4 +1,5 @@
 import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSizeText, similarMaterialsField } from './task-material-selection.js';
+import { LEARNING_AUDIT_KIND_LABELS } from './learning-audit-labels.js';
 import {
   MAX_BATCH_APPLY_SUGGESTIONS,
   REVIEW_FINDING_SEVERITIES,
@@ -101,8 +102,15 @@ import {
   REVIEW_CHAPTER_TO,
   REVIEW_CONSEQUENCE_TERMS,
   REVIEW_CONTINUE_NOTE,
+  REVIEW_INFLUENCE_HEADING,
+  REVIEW_INFLUENCE_NOTE,
+  REVIEW_INFLUENCE_STOP_NOTE,
   REVIEW_SCOPE_CANCEL_NOTE,
   REVIEW_SCOPE_STOP_NOTE,
+  reviewInfluenceLine,
+  reviewInfluenceMaterialLine,
+  reviewInfluenceMore,
+  reviewMarkerRemediationLine,
   REVIEW_CONVERT_NOTE,
   REVIEW_CONVERT_RATIONALE,
   REVIEW_CONVERT_TO,
@@ -261,6 +269,8 @@ export interface MountReviewWorkspaceOptions {
   planChanged(): void;
   /** 在来源与证据中查看 (Issue #901): the Book's 来源与证据 view, brought to one retained source. */
   openSource?(evidenceId: string): void;
+  /** 查看学习来源链 (Issue #912; LAUD-004): 学习回溯 opened at one material's Learning Lineage Explorer. */
+  openLearningLineage?(bookId: string, materialKey: string, reviewRunId: string): void;
 }
 
 type Filters = Omit<ReviewFindingPageRequest, 'findingsAfterOrdinal'>;
@@ -881,7 +891,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         section.append(resume);
       }
       if (run.state === 'scope-changed') section.append(renderScopeStop(run));
-      if (run.historicalMarker !== null) section.append(historicalMarker(run.historicalMarker));
+      if (run.historicalMarker !== null) section.append(historicalMarker(run.historicalMarker, run));
+      if (run.influence.length > 0) section.append(renderInfluence(run));
       section.append(renderResults(next, run), renderReport(run));
     }
     section.append(options.technicalDetails(
@@ -935,7 +946,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    */
   function renderScopeStop(run: ReviewRunProjection): HTMLElement {
     const box = el('div', 'review-scope-stop');
-    box.append(el('p', 'attention-note', REVIEW_SCOPE_STOP_NOTE));
+    const influence = run.scopeStop === 'house-review-preference';
+    if (influence) box.dataset['scopeStop'] = 'house-review-preference';
+    box.append(el('p', 'attention-note', influence ? REVIEW_INFLUENCE_STOP_NOTE : REVIEW_SCOPE_STOP_NOTE));
     const actions = el('div', 'button-row');
     if (scopeCancel === run.reviewRunId) {
       box.append(el('p', 'field-note review-scope-cancel-note', REVIEW_SCOPE_CANCEL_NOTE));
@@ -947,7 +960,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       });
       actions.append(confirm, keep);
     } else {
-      const redo = actionButton('scope-redo', 'primary', () => openSheet(scopeRedoPrefill(run), redo));
+      // 重新执行（不含该影响）(Issue #912): the same sheet, whose new Run reads only the 本社审阅偏好 version current now.
+      const redo = actionButton(influence ? 'influence-redo' : 'scope-redo', 'primary', () => openSheet(scopeRedoPrefill(run), redo));
       const cancel = actionButton('scope-cancel', 'secondary', () => {
         if (working) return;
         scopeCancel = run.reviewRunId;
@@ -975,10 +989,52 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   /** The Historically Affected Result Marker (SER-026): beside the Run, its report and its findings, never in place of them. */
-  function historicalMarker(marker: NonNullable<ReviewRunProjection['historicalMarker']>): HTMLElement {
+  function historicalMarker(marker: NonNullable<ReviewRunProjection['historicalMarker']>, run: ReviewRunProjection): HTMLElement {
     const box = el('div', 'review-historical-marker');
     box.append(el('p', 'review-historical-marker-label', marker.label), el('p', 'field-note', marker.detail));
+    // The marker links to the later remediation (Issue #912; LAUD-008): when, the material in 学习回溯, and the way on without it.
+    const remediation = marker.remediation;
+    if (remediation !== undefined) {
+      box.dataset['remediationMaterial'] = remediation.materialKey;
+      box.append(el('p', 'field-note review-marker-remediation', reviewMarkerRemediationLine(remediation.recordedAt, localInstantLabel)));
+      const actions = el('div', 'button-row');
+      if (options.openLearningLineage !== undefined) {
+        actions.append(actionButton('influence-lineage', 'quiet', () => options.openLearningLineage!(remediation.bookId, remediation.materialKey, run.reviewRunId)));
+      }
+      if (run.state !== 'scope-changed') {
+        const redo = actionButton('influence-redo', 'secondary', () => openSheet(scopeRedoPrefill(run), redo));
+        actions.append(redo);
+      }
+      if (working) for (const button of actions.querySelectorAll('button')) button.disabled = true;
+      box.append(actions);
+    }
     return box;
+  }
+
+  /** 为什么会影响这个结果 (Issue #912; LAUD-004): each category's 本社审阅偏好 version and the materials behind it, closed until asked. */
+  function renderInfluence(run: ReviewRunProjection): HTMLElement {
+    const details = el('details', 'review-influence');
+    details.append(el('summary', undefined, REVIEW_INFLUENCE_HEADING), el('p', 'field-note', REVIEW_INFLUENCE_NOTE));
+    for (const entry of run.influence) {
+      const group = el('div', 'review-influence-category');
+      group.dataset['categoryId'] = entry.categoryId;
+      group.dataset['versionOrdinal'] = String(entry.ordinal);
+      group.append(el('p', 'review-influence-line', reviewInfluenceLine(entry)));
+      const list = el('ul', 'review-influence-materials');
+      for (const material of entry.materials) {
+        const item = el('li', undefined, reviewInfluenceMaterialLine(material, material.kind === null ? '学习材料' : LEARNING_AUDIT_KIND_LABELS[material.kind], localInstantLabel));
+        if (material.withdrawnAt !== null) item.dataset['withdrawn'] = 'true';
+        if (material.materialKey !== null && options.openLearningLineage !== undefined) {
+          const key = material.materialKey;
+          item.append(' ', actionButton('influence-lineage', 'quiet', () => options.openLearningLineage!(material.bookId, key, run.reviewRunId)));
+        }
+        list.append(item);
+      }
+      group.append(list);
+      if (entry.moreMaterials > 0) group.append(el('p', 'field-note', reviewInfluenceMore(entry.moreMaterials)));
+      details.append(group);
+    }
+    return details;
   }
 
   /** The choices a prepared Run was made from, for 返回修改. */

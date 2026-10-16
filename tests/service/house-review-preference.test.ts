@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
-import { HouseReviewPreferenceLedger, HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL, preferenceLines, type HousePreferenceSource } from '../../src/service/house-review-preference.js';
+import { HouseReviewPreferenceLedger, withdrawalOf, HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL, preferenceLines, type HousePreferenceSource } from '../../src/service/house-review-preference.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
+import { LEARNING_ELIGIBILITY_POLICY_BASIS, LEARNING_ELIGIBILITY_SCHEMA_SQL } from '../../src/service/learning-eligibility.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { dropHouseReviewPreferenceRelations } from '../support/pre74-schema.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
@@ -19,10 +21,16 @@ function source(overrides: Partial<HousePreferenceSource> = {}): HousePreference
     quality: { applied: 0, surviving: 0, editVolume: 0, lineageDigest: 'b'.repeat(64) }, ...overrides };
 }
 
+/** The decision ledger the consumption guard reads (Issue #912), without the Books it names. */
+function withEligibility(db: DatabaseSync): void {
+  db.exec(LEARNING_ELIGIBILITY_SCHEMA_SQL.learning_eligibility_decisions.replace('REFERENCES books(book_id)', ''));
+}
+
 function ledgerOf(): { db: DatabaseSync; ledger: HouseReviewPreferenceLedger } {
   const db = new DatabaseSync(':memory:');
   for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL)) db.exec(sql);
   for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL)) db.exec(sql);
+  withEligibility(db);
   return { db, ledger: new HouseReviewPreferenceLedger(db) };
 }
 
@@ -32,6 +40,7 @@ describe('house review preference ledger', () => {
     try {
       for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL)) db.exec(sql);
       for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL)) db.exec(sql);
+      withEligibility(db);
       const ledger = new HouseReviewPreferenceLedger(db);
       const production = source();
       const development = source({ operationalScope: 'developer-live', materialDigest: 'c'.repeat(64) });
@@ -64,6 +73,7 @@ describe('house review preference ledger', () => {
     try {
       for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL)) db.exec(sql);
       for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL)) db.exec(sql);
+      withEligibility(db);
       const ledger = new HouseReviewPreferenceLedger(db);
       const material = source({ eligibility: 'book' });
       ledger.rebuild('ordinary-production', [material]);
@@ -132,4 +142,48 @@ describe('house review preference ledger', () => {
     dropHouseReviewPreferenceRelations(db); db.close();
     await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
   }, 120_000);
+
+  it('traces a pinned category by identity when another category has identical preference text (#912 review)', () => {
+    const { db, ledger } = ledgerOf();
+    try {
+      const first = source({ categoryId: 'typos-and-usage', categoryLabel: '合成同名类别', reason: null });
+      const other = source({ categoryId: 'style-and-format', categoryLabel: '合成同名类别', reason: null });
+      ledger.rebuild('ordinary-production', [first, other]);
+      const run = randomUUID(); const task = randomUUID();
+      db.exec('CREATE TABLE review_runs(review_run_id TEXT PRIMARY KEY); CREATE TABLE analysis_task_intents(task_intent_id TEXT PRIMARY KEY, book_id TEXT, kind TEXT);');
+      db.prepare('INSERT INTO review_runs VALUES (?)').run(run);
+      db.prepare('INSERT INTO analysis_task_intents VALUES (?, ?, ?)').run(task, first.bookId, 'editorial-review/typos-and-usage');
+      ledger.pin(run, task, 'e'.repeat(64), ledger.use('ordinary-production', first.bookId, first.categoryId)!);
+      expect(ledger.pinnedInfluence(task)!.sources.map((entry) => entry.eligibilityDecisionId)).toEqual([first.eligibilityDecisionId]);
+    } finally { db.close(); }
+  });
+
+  it('composes no block from a version whose material was withdrawn after its admission, and a re-inclusion restores none of it (#912)', () => {
+    const { db, ledger } = ledgerOf();
+    try {
+      const material = source();
+      const bookId = material.bookId;
+      const decide = (decisionId: string, ordinal: number, choice: string, supersedes: string | null, recordedAt: string) => {
+        const record = canonicalRecord({ schema: 'ai7.learning-eligibility-decision/1', decisionId, bookId, materialKey: 'review-disposition:x',
+          materialDigest: material.materialDigest, ordinal, choice, supersedes, recordedAt, actor: '本机编辑', basis: LEARNING_ELIGIBILITY_POLICY_BASIS, note: null });
+        db.prepare('INSERT INTO learning_eligibility_decisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(decisionId, bookId, 'review-disposition:x', material.materialDigest,
+          ordinal, choice, supersedes, recordedAt, record.json, record.digest);
+      };
+      decide(material.eligibilityDecisionId, 1, 'house', null, '2026-10-17T00:00:00.000Z');
+      ledger.rebuild('ordinary-production', [material]);
+      expect(ledger.use('ordinary-production', bookId, material.categoryId)).not.toBeNull();
+      expect(withdrawalOf(db, material.eligibilityDecisionId)).toEqual({ materialKey: 'review-disposition:x', withdrawnAt: null });
+      const excluded = randomUUID();
+      decide(excluded, 2, 'excluded', material.eligibilityDecisionId, '2026-10-17T01:00:00.000Z');
+      // The version still holds it (no rebuild in this scope yet): it reads as none, never as a block.
+      expect(ledger.use('ordinary-production', bookId, material.categoryId)).toBeNull();
+      decide(randomUUID(), 3, 'house', excluded, '2026-10-17T02:00:00.000Z');
+      expect(withdrawalOf(db, material.eligibilityDecisionId)).toEqual({ materialKey: 'review-disposition:x', withdrawnAt: '2026-10-17T01:00:00.000Z' });
+      expect(ledger.use('ordinary-production', bookId, material.categoryId)).toBeNull();
+      expect(withdrawalOf(db, randomUUID())).toEqual({ materialKey: null, withdrawnAt: null });
+      // A damaged SQL projection must not make the earlier exclusion disappear from the consumption guard.
+      db.prepare("UPDATE learning_eligibility_decisions SET choice = 'house' WHERE ordinal = 2").run();
+      expect(() => ledger.use('ordinary-production', bookId, material.categoryId)).toThrow('学习准入记录已损坏');
+    } finally { db.close(); }
+  });
 });

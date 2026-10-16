@@ -1,17 +1,22 @@
-import type {
-  LearningAuditStanding,
-  LearningLineageDecisionProjection,
-  LearningLedgerMaterialKind,
-  LearningMaterialKind,
-  LearningRemediationLeftOut,
+import {
+  LEARNING_INFLUENCE_RESULT_MARKER,
+  LEARNING_INFLUENCE_WITHDRAWN_LABEL,
+  type LearningAuditStanding,
+  type LearningLineageDecisionProjection,
+  type LearningLineageSignalProjection,
+  type LearningLineageTaskProjection,
+  type LearningLedgerMaterialKind,
+  type LearningMaterialKind,
+  type LearningRemediationLeftOut,
 } from '../shared/protocol.js';
 import { learningChoiceLabel } from './quality-learning-labels.js';
 
 /**
  * 质量与学习 › 学习回溯's words (Issue #62, plan slice S27a; V2-UX-LAUD-001 to LAUD-012): the Book-grouped audit list and its
- * filters, the Learning Lineage Explorer in its fixed order, and 停止今后使用's 学习补救影响预览. Nothing in AI7 yet makes a
- * Learning Signal, Memory Candidate or memory of learning material, or reads it in a Task, so those stages say they are
- * empty and why, rather than hiding. Pure, so the unit suite pins every one.
+ * filters, the Learning Lineage Explorer in its fixed order, and 停止今后使用's 学习补救影响预览. A material's 学习信号 are the
+ * 本社审阅偏好 versions it supports and its 使用过的任务 the 审阅 that read them (Issue #912); nothing in AI7 yet makes a Memory
+ * Candidate or memory of learning material, so those stages say they are empty and why, rather than hiding. Pure, so the
+ * unit suite pins every one.
  */
 
 export const LEARNING_AUDIT_HEADING = '学习回溯';
@@ -42,9 +47,9 @@ export function learningAuditChoicesCut(filter: 'book' | 'series', listed: numbe
 /** The 书系 filter when the house's Series could not be read: the audit still reads, and the filter offers 全部 alone. */
 export const LEARNING_AUDIT_SERIES_UNAVAILABLE = '书系记录无法读取，书系筛选暂时只有「全部」；学习回溯照常可用。';
 
-/** The filters LAUD-002 names that have nothing to filter yet, and why. */
+/** The filters LAUD-002 names that are not offered yet, and why. */
 export const LEARNING_AUDIT_FILTERS_LATER =
-  '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选：AI7 还没有从学习材料生成学习信号或记忆，也没有任务读取学习材料，这几项目前都是空的。';
+  '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选：AI7 还没有从学习材料生成记忆候选或记忆；每条材料被哪些任务使用过，在它的来源链里查看。';
 export const LEARNING_AUDIT_EMPTY = '还没有学习材料。你在修改建议、分析结果和审阅里写下的原因与改动，会在这里留下来源链。';
 export const LEARNING_AUDIT_NONE_MATCH = '没有符合的学习材料。';
 export const LEARNING_AUDIT_OPEN = '查看来源链…';
@@ -69,8 +74,13 @@ export const LEARNING_AUDIT_STANDING_LABELS: Readonly<Record<LearningAuditStandi
   excluded: '明确排除',
 };
 
-/** A row's downstream-use summary (LAUD-001): nothing reads learning material yet. */
+/** A row's downstream-use summary (LAUD-001): no Task read it yet. */
 export const LEARNING_AUDIT_UNUSED = '尚未被任何任务使用';
+
+/** A row's downstream-use summary (Issue #912): how many Tasks read a 本社审阅偏好 version it supports. */
+export function learningAuditUse(tasks: number): string {
+  return tasks === 0 ? LEARNING_AUDIT_UNUSED : `被 ${tasks} 个任务使用过`;
+}
 
 export function learningAuditBookHeading(book: { readonly title: string; readonly materialCount: number }): string {
   return `《${book.title}》 · ${book.materialCount} 条`;
@@ -91,9 +101,30 @@ export const LEARNING_LINEAGE_STEPS = [
 export const LEARNING_LINEAGE_FORWARD = '后来影响了什么';
 export const LEARNING_LINEAGE_NOT_YET = '尚未生成';
 export const LEARNING_LINEAGE_TASKS_NONE = '尚未被任何任务使用';
-/** Why the forward stages are empty: said once, so an empty stage never reads as a hidden one. */
+/** What the forward stages are, and why two are empty: said once, so an empty stage never reads as a hidden one. */
 export const LEARNING_LINEAGE_WHY_EMPTY =
-  'AI7 目前还没有从学习材料生成学习信号、记忆候选或记忆的功能，也没有任务读取学习材料；这几步因此都是空的，并非被隐藏。';
+  '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。';
+export const LEARNING_LINEAGE_CURRENT = '现行版本';
+
+/** One 学习信号 (Issue #912): a 本社审阅偏好 version the material supports, when it was made, and how much of it. */
+export function learningLineageSignalLine(signal: Pick<LearningLineageSignalProjection, 'ordinal' | 'recordedAt' | 'current' | 'lines'>, instant: (iso: string) => string): string {
+  return `本社审阅偏好 v${signal.ordinal} · ${instant(signal.recordedAt)} · 其中 ${signal.lines} 行出自这条材料${signal.current ? ` · ${LEARNING_LINEAGE_CURRENT}` : ''}`;
+}
+
+export const LEARNING_LINEAGE_TASK_USE: Readonly<Record<LearningLineageTaskProjection['use'], string>> = {
+  running: '正在运行',
+  completed: '已完成',
+  stopped: '已停下',
+};
+
+/** One 使用过的任务 (Issue #912): the 审阅 category, the version it read, where it stands, and its marker. */
+export function learningLineageTaskLine(task: Pick<LearningLineageTaskProjection, 'label' | 'versionOrdinal' | 'use' | 'marked'>): string {
+  return `${task.label} · 参考 v${task.versionOrdinal} · ${LEARNING_LINEAGE_TASK_USE[task.use]}${task.marked ? ` · 已标上「${LEARNING_INFLUENCE_RESULT_MARKER}」` : ''}`;
+}
+
+export function learningLineageEarlierTasks(count: number): string {
+  return `更早还有 ${count} 个任务用过它。`;
+}
 export const LEARNING_LINEAGE_NO_DECISION = '还没有准入决定。';
 export const LEARNING_LINEAGE_BACK = '返回学习回溯';
 export const LEARNING_LINEAGE_STOP = '停止今后使用…';
@@ -134,17 +165,37 @@ export const LEARNING_REMEDIATION_GROUPS = [
 ] as const;
 export const LEARNING_REMEDIATION_CONFIRM = '确认停止今后使用';
 export const LEARNING_REMEDIATION_CANCEL = '取消';
-export const LEARNING_REMEDIATION_RUNNING = '没有正在运行的任务使用它们：AI7 现在还没有读取学习材料的任务。';
+export const LEARNING_REMEDIATION_RUNNING = '没有正在运行的任务使用它们。';
 export const LEARNING_REMEDIATION_MEMORY = '没有由它们生成的记忆候选或已启用记忆：AI7 还没有生成这些。';
 
-export function learningRemediationFuture(count: number, scope: 'book' | 'house' | null, bookTitle: string): string {
-  if (count === 0 || scope === null) return '所选材料中没有可以停止今后使用的。';
-  const was = scope === 'book' ? `仅纳入《${bookTitle}》` : '纳入出版社经验';
-  return `${count} 条学习材料今后不再可用于学习（原来是${was}）；它们会显示为明确排除。`;
+function namedTasks(named: ReadonlyArray<string>, count: number): string {
+  const listed = named.join('、');
+  return count > named.length ? `${listed}等 ${count} 个` : listed;
 }
 
-export function learningRemediationCompleted(decisionsKept: number): string {
-  return `没有已完成的任务用过它们，因此没有结果需要标记；它们来自的反馈与改动，以及此前的 ${decisionsKept} 个准入决定，都原样保留。`;
+export function learningRemediationFuture(count: number, scope: 'book' | 'house' | null, bookTitle: string, version: { readonly currentVersion: number | null; readonly linesAffected: number } = { currentVersion: null, linesAffected: 0 }): string {
+  if (count === 0 || scope === null) return '所选材料中没有可以停止今后使用的。';
+  const was = scope === 'book' ? `仅纳入《${bookTitle}》` : '纳入出版社经验';
+  const lines = version.currentVersion === null || version.linesAffected === 0 ? ''
+    : `本社审阅偏好 v${version.currentVersion} 中有 ${version.linesAffected} 行出自它们，记录后会生成不含它们的新版本，之后的审阅只读新版本。`;
+  return `${count} 条学习材料今后不再可用于学习（原来是${was}）；它们会显示为明确排除。${lines}`;
+}
+
+/** 正在运行 (Issue #912; LAUD-008): the Tasks that stop before their next read, and the prepared Runs that cannot be approved. */
+export function learningRemediationRunning(groups: { readonly running: number; readonly prepared: number; readonly runningNamed: ReadonlyArray<string> }): string {
+  if (groups.running === 0 && groups.prepared === 0) return LEARNING_REMEDIATION_RUNNING;
+  const parts: string[] = [];
+  if (groups.running > 0) {
+    parts.push(`${groups.running} 个已授权或正在运行的审阅任务参考了含有它们的本社审阅偏好版本，会在下一次读取前停下，显示「${LEARNING_INFLUENCE_WITHDRAWN_LABEL}」：${namedTasks(groups.runningNamed, groups.running)}。它们只能「重新执行（不含该影响）」或「取消任务」；已经读到的内容保留，已经发给模型服务的内容无法收回。`);
+  }
+  if (groups.prepared > 0) parts.push(`${groups.prepared} 个已准备、尚未授权的审阅任务不能再授权，需要重新准备。`);
+  return parts.join('');
+}
+
+export function learningRemediationCompleted(decisionsKept: number, completed: { readonly completed: number; readonly completedNamed: ReadonlyArray<string> } = { completed: 0, completedNamed: [] }): string {
+  const kept = `它们来自的反馈与改动，以及此前的 ${decisionsKept} 个准入决定，都原样保留。`;
+  if (completed.completed === 0) return `没有已完成的任务用过它们，因此没有结果需要标记；${kept}`;
+  return `${completed.completed} 个已完成的审阅任务参考过它们，会标上「${LEARNING_INFLUENCE_RESULT_MARKER}」：${namedTasks(completed.completedNamed, completed.completed)}。这些结果、发现和报告都不会改写，标记也不表示结果有错；${kept}`;
 }
 
 export const LEARNING_REMEDIATION_LEFT_OUT: Readonly<Record<LearningRemediationLeftOut, string>> = {

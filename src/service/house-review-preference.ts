@@ -5,7 +5,8 @@ import type { AnalysisKindDefinition } from './analysis/kind-definition.js';
 import { canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import type { HouseReviewPreferenceVersion, HouseReviewPreferenceUse, LearningEligibilityChoice, LearningMaterialState, TrustedOperationalScope } from '../shared/protocol.js';
-import { LearningEligibilityError, type LearningAttribution, type LearningMaterialCandidate } from './learning-eligibility.js';
+import { EDITORIAL_REVIEW_KIND_PREFIX } from '../shared/protocol.js';
+import { LearningEligibilityError, LearningEligibilityLedger, type LearningAttribution, type LearningMaterialCandidate } from './learning-eligibility.js';
 import { NO_EDIT_QUALITY, editQualityOfDecisions, type DecisionEditQuality } from './edit-quality-signals.js';
 import { HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES, HOUSE_REVIEW_PREFERENCE_MAX_LINES } from './launch-policy.js';
 
@@ -216,12 +217,17 @@ export class HouseReviewPreferenceLedger {
     return record;
   }
 
-  /** What one category's Run of one Book may read of the current version: house lines and that Book's own, of that category only. */
+  /**
+   * What one category's Run of one Book may read of the current version: house lines and that Book's own, of that category only.
+   * The consumption guard (Issue #912; LAUD-007): no block is composed from lines a withdrawn material supports — the rebuild
+   * that follows every 停止今后使用 makes such a version current only in a scope not rebuilt since, and there it reads as none.
+   */
   use(scope: TrustedOperationalScope, bookId: string, categoryId: string): HouseReviewPreferenceUse | null {
     const current = this.history(scope).at(-1);
     if (current === undefined) return null;
     const lines = current.lines.filter((line) => line.categoryId === categoryId && (line.bookId === null || line.bookId === bookId));
     if (lines.length === 0) return null;
+    if (lines.some((line) => line.sources.some((source) => withdrawalOf(this.db, source.eligibilityDecisionId).withdrawnAt !== null))) return null;
     return { versionId: current.versionId, ordinal: current.ordinal, materialSetDigest: current.materialSetDigest, lines: lines.map((line) => line.text),
       sourceCount: new Set(lines.flatMap((line) => line.sources.map((source) => source.eligibilityDecisionId))).size };
   }
@@ -244,6 +250,125 @@ export class HouseReviewPreferenceLedger {
     const record = JSON.parse(String(row.canonical_json)) as { reviewRunId: string; taskIntentId: string; planDigest: string; preference: HouseReviewPreferenceUse };
     valid(record.reviewRunId === row.review_run_id && record.taskIntentId === taskIntentId && record.planDigest === row.plan_digest && record.preference.versionId === row.version_id);
     return record.preference;
+  }
+
+  /** One version by identity, read through its scope's verified chain; `null` for none. */
+  version(versionId: string): HouseReviewPreferenceVersion | null {
+    const row = this.db.prepare('SELECT operational_scope FROM house_review_preference_versions WHERE version_id = ?').get(versionId);
+    if (row === undefined) return null;
+    return this.history(String(row.operational_scope) as TrustedOperationalScope).find((entry) => entry.versionId === versionId) ?? null;
+  }
+
+  /**
+   * 为什么会影响这个结果 for one category Task (Issue #912; LAUD-004): the version its pin names, the lines of it the Task read —
+   * those its pin carries, of its own Book or the house — and each material behind them, with any 停止今后使用 recorded on it
+   * since it was admitted. `null` for a Task that read none.
+   */
+  pinnedInfluence(taskIntentId: string): PinnedInfluence | null {
+    const preference = this.pinned(taskIntentId);
+    if (preference === null) return null;
+    const version = this.version(preference.versionId);
+    valid(version !== null);
+    const book = this.db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
+    valid(book !== undefined);
+    const lines = linesOfUse(version, preference, String(book.book_id), String(book.kind));
+    const sources = new Map<string, PinnedInfluence['sources'][number]>();
+    for (const line of lines) {
+      for (const source of line.sources) {
+        if (sources.has(source.eligibilityDecisionId)) continue;
+        sources.set(source.eligibilityDecisionId, { bookId: source.bookId, bookTitle: source.bookTitle, eligibilityDecisionId: source.eligibilityDecisionId,
+          ...withdrawalOf(this.db, source.eligibilityDecisionId) });
+      }
+    }
+    return { preference, version, categoryId: lines[0]?.categoryId ?? null, sources: [...sources.values()] };
+  }
+}
+
+/** One category Task's pinned version and the materials behind what it read (Issue #912). */
+export interface PinnedInfluence {
+  readonly preference: HouseReviewPreferenceUse;
+  readonly version: HouseReviewPreferenceVersion;
+  readonly categoryId: string | null;
+  readonly sources: ReadonlyArray<{
+    readonly bookId: string;
+    readonly bookTitle: string;
+    readonly eligibilityDecisionId: string;
+    readonly materialKey: string | null;
+    readonly withdrawnAt: string | null;
+  }>;
+}
+
+/** Resolve by the consuming Task's category and Book; identical text is never a causal identity. */
+function linesOfUse(version: HouseReviewPreferenceVersion, preference: HouseReviewPreferenceUse, bookId: string, kind: string): HouseReviewPreferenceVersion['lines'] {
+  valid(kind.startsWith(EDITORIAL_REVIEW_KIND_PREFIX));
+  const categoryId = kind.slice(EDITORIAL_REVIEW_KIND_PREFIX.length);
+  const lines = version.lines.filter((line) => line.categoryId === categoryId && (line.bookId === null || line.bookId === bookId));
+  valid(canonicalJson(lines.map((line) => line.text)) === canonicalJson(preference.lines));
+  return lines;
+}
+
+/**
+ * Whether the material an admitting decision bound was 停止今后使用 since (Issue #912; LAUD-007): the first `excluded` decision
+ * its chain records after that one, which a later re-inclusion never undoes for a version made before. A decision this house
+ * no longer holds names no material and no withdrawal.
+ */
+export function withdrawalOf(db: DatabaseSync, eligibilityDecisionId: string): { readonly materialKey: string | null; readonly withdrawnAt: string | null } {
+  const row = db.prepare('SELECT book_id, material_key FROM learning_eligibility_decisions WHERE decision_id = ?').get(eligibilityDecisionId);
+  if (row === undefined) return { materialKey: null, withdrawnAt: null };
+  // The guard must validate the same decision chain the audit reads; unchecked SQL columns cannot erase an exclusion.
+  const chain = new LearningEligibilityLedger(db).history(String(row.book_id), String(row.material_key));
+  const admitted = chain.find((entry) => entry.decisionId === eligibilityDecisionId);
+  valid(admitted !== undefined);
+  const excluded = chain.find((entry) => entry.ordinal > admitted.ordinal && entry.choice === 'excluded');
+  return { materialKey: String(row.material_key), withdrawnAt: excluded?.recordedAt ?? null };
+}
+
+/** One Run pin as the lineage reads it: the category Task, its Review Run and Book, the version, and the decisions behind it. */
+export interface PreferencePinUse {
+  readonly reviewRunId: string;
+  readonly taskIntentId: string;
+  readonly bookId: string;
+  readonly version: HouseReviewPreferenceVersion;
+  readonly decisionIds: ReadonlySet<string>;
+}
+
+/**
+ * The forward lineage of one scope's 本社审阅偏好 (Issue #912; LAUD-003, LAUD-004), read once for a page: each version's lines
+ * by the admitting decisions behind them (学习信号), and each Run pin by the decisions behind the lines it carried (使用过的任务).
+ * Only real consumption is read: a version no Run pinned is a signal, never a Task.
+ */
+export class HousePreferenceInfluence {
+  readonly versions: ReadonlyArray<HouseReviewPreferenceVersion>;
+  readonly pins: ReadonlyArray<PreferencePinUse>;
+
+  constructor(db: DatabaseSync, scope: TrustedOperationalScope) {
+    const ledger = new HouseReviewPreferenceLedger(db);
+    this.versions = ledger.history(scope);
+    const byId = new Map(this.versions.map((version) => [version.versionId, version] as const));
+    const pins: PreferencePinUse[] = [];
+    for (const row of db.prepare(`SELECT p.review_run_id, p.task_intent_id, p.version_id, t.book_id, t.kind FROM review_run_preference_pins p
+        JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id ORDER BY p.rowid`).iterate()) {
+      const version = byId.get(String(row.version_id));
+      if (version === undefined) continue;
+      const preference = ledger.pinned(String(row.task_intent_id));
+      valid(preference !== null);
+      const decisionIds = new Set(linesOfUse(version, preference, String(row.book_id), String(row.kind)).flatMap((line) => line.sources.map((source) => source.eligibilityDecisionId)));
+      pins.push({ reviewRunId: String(row.review_run_id), taskIntentId: String(row.task_intent_id), bookId: String(row.book_id), version, decisionIds });
+    }
+    this.pins = pins;
+  }
+
+  /** The versions with a line one of `decisionIds` supports, oldest first, each with how many such lines. */
+  signalsOf(decisionIds: ReadonlySet<string>): Array<{ readonly version: HouseReviewPreferenceVersion; readonly lines: number }> {
+    return this.versions.flatMap((version) => {
+      const lines = version.lines.filter((line) => line.sources.some((source) => decisionIds.has(source.eligibilityDecisionId))).length;
+      return lines === 0 ? [] : [{ version, lines }];
+    });
+  }
+
+  /** The pins whose carried lines one of `decisionIds` supports, in the order they were made. */
+  usesOf(decisionIds: ReadonlySet<string>): PreferencePinUse[] {
+    return this.pins.filter((pin) => [...pin.decisionIds].some((id) => decisionIds.has(id)));
   }
 }
 

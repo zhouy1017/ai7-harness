@@ -1,4 +1,5 @@
 import {
+  LEARNING_INFLUENCE_WITHDRAWN_LABEL,
   SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL,
   type EditorialMarkKind,
   type ReviewFindingStatus,
@@ -113,6 +114,12 @@ export function reviewRunCategoryStateLabel(state: ReviewRunCategoryState, waiti
  * cancellation are durable: ending the exclusion later restores neither (SER-027).
  */
 export const SERIES_RETRIEVAL_SCOPE_CHANGED = 'SERIES_RETRIEVAL_SCOPE_CHANGED' as const;
+/**
+ * The code a category's terminal event carries when a Learning Material its pinned 本社审阅偏好 version read was 停止今后使用
+ * (Issue #912; LAUD-008). It stops the Run as a scope change does — 重新执行（不含该影响） or 取消任务, never 继续审阅 — in its own
+ * words; a later re-inclusion restores neither the Run nor its approval.
+ */
+export const LEARNING_INFLUENCE_WITHDRAWN = 'LEARNING_INFLUENCE_WITHDRAWN' as const;
 export const REVIEW_RUN_CANCELLED = 'REVIEW_RUN_CANCELLED' as const;
 export const REVIEW_RUN_CANCELLED_LABEL = '已取消' as const;
 /**
@@ -129,6 +136,7 @@ export const REVIEW_RUN_WAITING_LABEL = '等待网络 · 未启动' as const;
 /** How a stopped category reads: the stop's own words, never 未能开始 or 已中断 (SER-024). */
 export function reviewRunCategoryStopLabel(code: unknown): string | null {
   return code === SERIES_RETRIEVAL_SCOPE_CHANGED ? SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL
+    : code === LEARNING_INFLUENCE_WITHDRAWN ? LEARNING_INFLUENCE_WITHDRAWN_LABEL
     : code === REVIEW_RUN_CANCELLED ? REVIEW_RUN_CANCELLED_LABEL
       : code === REVIEW_RUN_PLAN_MOVED ? REVIEW_RUN_PLAN_MOVED_LABEL : null;
 }
@@ -225,6 +233,7 @@ export function reviewRunState(input: {
   return { state: materialized === 0 ? 'failed' : 'partial', canContinue: false };
 }
 
-export function reviewRunStateLabel(state: ReviewRunState, canContinue: boolean): string {
+export function reviewRunStateLabel(state: ReviewRunState, canContinue: boolean, scopeStop: 'series-knowledge' | 'house-review-preference' | null = null): string {
+  if (state === 'scope-changed' && scopeStop === 'house-review-preference') return LEARNING_INFLUENCE_WITHDRAWN_LABEL;
   return state === 'partial' && canContinue ? '部分完成 · 可继续审阅' : REVIEW_RUN_STATE_LABELS[state];
 }
