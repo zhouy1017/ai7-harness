@@ -1,3 +1,5 @@
+import { renderHouseReviewPreference } from './knowledge-base-memory.js';
+import { mountEditQualitySignals } from './quality-learning.js';
 import { mountProposalWorkspace } from './proposal-workspace.js';
 import { renderEvaluationProfiles } from './evaluation-profiles.js';
 import { researchPlanLine, researchStatusLine, researchUnavailableLine } from '../shared/research-status.js';
@@ -5033,6 +5035,13 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
   }
   const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
   // 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005): the profile each 评估 version snapshots, and its use.
+  if (tab === 'memory') {
+    try {
+      renderHouseReviewPreference(panelNode, await window.ai7.inspectHouseReviewPreference(), window.ai7);
+      if (content.isConnected) setStatus('本社审阅偏好已打开');
+    } catch (error) { setStatus(rendererErrorMessage(error, '无法读取本社审阅偏好。'), 'error'); }
+    return;
+  }
   if (tab === 'evaluation') {
     setStatus('正在读取评估方案…', 'busy');
     try {
@@ -5289,6 +5298,10 @@ async function renderQualityLearning(tab: QualityLearningTab, bookId: string | n
       : mountLearningAudit({ root: host, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
   try {
     await surface.load();
+    if (tab === 'feedback') {
+      const metrics = element('div'); section.append(metrics);
+      await mountEditQualitySignals(metrics, window.ai7);
+    }
     if (content.isConnected) setStatus(status.opened);
   } catch (error) {
     setStatus(rendererErrorMessage(error, status.unavailable), 'error');

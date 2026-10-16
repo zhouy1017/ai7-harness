@@ -778,6 +778,12 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.saveCorrectionProposal(request.input) };
     case 'decideLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
+    case 'inspectHouseReviewPreference':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectHouseReviewPreference() };
+    case 'rebuildHouseReviewPreference':
+      return { id: request.id, ok: true, op: request.op, result: store.rebuildHouseReviewPreference() };
+    case 'inspectEditQualitySignals':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEditQualitySignals(request.input.bookId) };
     case 'inspectLearningMaterials':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterials(request.input.bookId, request.input.after) };
     case 'inspectLearningMaterial':

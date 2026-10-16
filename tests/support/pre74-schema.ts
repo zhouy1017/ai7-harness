@@ -1,3 +1,4 @@
+import { HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from '../../src/service/house-review-preference.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, WEB_TOOLS_PLAN_RECORDS_SQL } from '../../src/service/task-authorization.js';
 import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
@@ -6,6 +7,7 @@ import { FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } fro
 
 import { EDITORIAL_MARK_SCHEMA_SQL, PROPOSAL_ITEM_DECISIONS_PRE77_SQL, PROPOSAL_REVIEW_SCHEMA_SQL, PROPOSAL_REVIEW_TRIGGER_SQL } from '../../src/service/editorial-marks.js';
 
+export const HOUSE_REVIEW_PREFERENCE_RELATIONS = Object.keys(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL);
 export const FACTUAL_VERIFICATION_SCHEMA_NAMES = [...Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL), ...Object.keys(FACTUAL_VERIFICATION_TRIGGER_SQL)];
 /** Revision 78's four relations, added empty after a planted predecessor is reopened. */
 export const FACTUAL_VERIFICATION_RELATIONS = Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL);
@@ -25,6 +27,7 @@ export function pre77SchemaRows<T extends { name: string; sql: unknown }>(rows: 
 /** Plant an actual predecessor, including revision 74's newly widened component CHECK and house settings. */
 export function execPre74Fixture(db: DatabaseSync, sql: string): void {
   const version = /PRAGMA user_version\s*=\s*(\d+)/iu.exec(sql)?.[1];
+  if (version !== undefined && Number(version) < 79) dropHouseReviewPreferenceRelations(db);
   if (version !== undefined && Number(version) < 78) dropFactualVerificationRelations(db);
   if (version !== undefined && Number(version) < 77) restoreProposalReviewPredecessor(db);
   if (version !== undefined && Number(version) < 76) dropMaterialIndexLayerRelations(db);
@@ -52,6 +55,7 @@ export function execPre74Fixture(db: DatabaseSync, sql: string): void {
 export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]): Array<{ name: string; sql: unknown }> {
   const materialIndex = rows.some((row) => row.name === 'material_index_builds');
   return [
+    ...Object.entries({ ...HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, ...HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...rows.map((row) => row.name === 'analysis_plan_records' ? { ...row, sql: WEB_TOOLS_PLAN_RECORDS_SQL }
       : row.name === 'proposal_item_decisions' ? { ...row, sql: EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions } : row),
     ...Object.entries({ ...PROPOSAL_REVIEW_SCHEMA_SQL, ...PROPOSAL_REVIEW_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
@@ -102,4 +106,10 @@ export function dropMaterialIndexLayerRelations(db: DatabaseSync): void {
 export function dropResearchEvidenceRelations(db: DatabaseSync): void {
   for (const trigger of Object.keys(RESEARCH_EVIDENCE_TRIGGER_SQL)) db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
   for (const table of Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE IF EXISTS ${table}`);
+}
+
+/** Remove the version/pin pair before planting a predecessor older than 79. */
+export function dropHouseReviewPreferenceRelations(db: DatabaseSync): void {
+  for (const trigger of Object.keys(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL)) db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
+  for (const table of Object.keys(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE IF EXISTS ${table}`);
 }

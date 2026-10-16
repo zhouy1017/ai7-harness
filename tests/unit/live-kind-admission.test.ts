@@ -1,3 +1,6 @@
+import { taskMaterialKindDefinition, liveMaterialContract } from '../../src/service/task-material-references.js';
+import { houseReviewPreferenceKindDefinition } from '../../src/service/house-review-preference.js';
+import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { kindResearchDeclaration, liveKindAdmission, liveKindAdmitted, liveKindContractCategories, liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
@@ -10,7 +13,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { liveReviewKindAdmitted } from '../../src/service/review/live-review-admission.js';
-import { withRepeatedRuleFor, withRuleFor, withoutRuleFor } from '../support/policy-rules.js';
+import { withRepeatedRuleFor, withRuleFor, withoutHouseReviewPreference, withoutRuleFor } from '../support/policy-rules.js';
 
 // #429: the generic admission every live non-baseline kind passes, over the real selected Provider Processing v11 projection
 // and in-memory variants of it; no transport, credential or manuscript.
@@ -137,5 +140,34 @@ describe('live kind admission (#429)', () => {
     expect(liveKindContractCategories('readers-report')).toEqual(['editor-authored-evaluation-text', 'house-exemplar-excerpt']);
     expect(liveKindContractCategories('evaluation-rewrite')).toEqual(['editor-authored-evaluation-text']);
     expect(liveKindContractCategories('editorial-review/typos-and-usage')).toEqual([]);
+  });
+});
+
+
+describe('house preference live admission (#911)', () => {
+  it('admits only owner-wrapped review definitions under the exact selected category, and preserves the base admission path', () => {
+    const entry = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => category.categoryId === 'typos-and-usage')!;
+    const base = reviewCategoryKindDefinition(reviewCategoryContractInput(entry));
+    const preference = { versionId: '10000000-0000-4000-8000-000000000001', ordinal: 1, sourceCount: 1, materialSetDigest: 'a'.repeat(64), lines: ['用语：保留原有写法。'] };
+    const wrapped = houseReviewPreferenceKindDefinition(base, preference, true);
+    // Provider Processing v20's own review rule names the category (#910); the same rule without it is closed.
+    const admitted = policy;
+    expect(liveKindAdmission(withoutHouseReviewPreference(policy), wrapped, binding)).toBeNull();
+    expect(liveKindAdmission(admitted, wrapped, binding)).not.toBeNull();
+    expect(liveKindAdmission(withHouseReviewPreferenceFor(policy, base.kind), wrapped, binding)).not.toBeNull();
+    expect(liveKindAdmission(admitted, { ...wrapped }, binding)).toBeNull();
+    expect(liveKindAdmission(admitted, { ...wrapped, systemPrompt: wrapped.systemPrompt + '伪造' }, binding)).toBeNull();
+    expect(liveKindAdmission(withRepeatedRuleFor(admitted, base.kind), wrapped, binding)).toBeNull();
+    expect(liveKindAdmission(policy, houseReviewPreferenceKindDefinition(base, null, true), binding)).toEqual(liveKindAdmission(policy, base, binding));
+    expect(liveKindContractCategories(base.kind, base)).not.toContain('house-review-preference-excerpt');
+    expect(liveKindContractCategories(wrapped.kind, wrapped)).toEqual(['house-review-preference-excerpt']);
+    const source = { materialId: '20000000-0000-4000-8000-000000000001', indexDigest: 'c'.repeat(64), title: '合成参考资料', characters: 2, sha256: 'd'.repeat(64) };
+    const materials = taskMaterialKindDefinition(base, { bookId: '30000000-0000-4000-8000-000000000001', references: [source] }, [{ source, paragraphs: ['合成参考段落。'], refusal: null }]);
+    const combined = houseReviewPreferenceKindDefinition(materials, preference, true);
+    expect(liveKindAdmission(admitted, combined, binding)).not.toBeNull();
+    expect(liveKindContractCategories(combined.kind, combined)).toEqual(['frozen-material-reference-excerpt', 'house-review-preference-excerpt']);
+    expect(liveMaterialContract(combined)?.materials).toEqual(liveMaterialContract(materials)?.materials);
+    const forgedBase = { ...base, promptContractDigest: 'b'.repeat(64) };
+    expect(liveKindAdmission(admitted, houseReviewPreferenceKindDefinition(forgedBase, preference, true), binding)).toBeNull();
   });
 });

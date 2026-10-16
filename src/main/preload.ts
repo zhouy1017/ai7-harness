@@ -445,6 +445,9 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['recordProposalDecisionReason']['output']>(IPC_CHANNELS.recordProposalDecisionReason, input),
   recordProposalDecisionFeedback: (input: ServiceOperationMap['recordProposalDecisionFeedback']['input']) =>
     invoke<ServiceOperationMap['recordProposalDecisionFeedback']['output']>(IPC_CHANNELS.recordProposalDecisionFeedback, input),
+  inspectHouseReviewPreference: () => invoke<ServiceOperationMap['inspectHouseReviewPreference']['output']>(IPC_CHANNELS.inspectHouseReviewPreference, {}),
+  rebuildHouseReviewPreference: () => invoke<ServiceOperationMap['rebuildHouseReviewPreference']['output']>(IPC_CHANNELS.rebuildHouseReviewPreference, {}),
+  inspectEditQualitySignals: (input: ServiceOperationMap['inspectEditQualitySignals']['input']) => invoke<ServiceOperationMap['inspectEditQualitySignals']['output']>(IPC_CHANNELS.inspectEditQualitySignals, input),
   inspectLearningMaterials: (input: ServiceOperationMap['inspectLearningMaterials']['input']) =>
     invoke<ServiceOperationMap['inspectLearningMaterials']['output']>(IPC_CHANNELS.inspectLearningMaterials, input),
   inspectLearningMaterial: (input: ServiceOperationMap['inspectLearningMaterial']['input']) =>

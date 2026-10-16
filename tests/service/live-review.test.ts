@@ -20,6 +20,8 @@ import { ProviderResultCache, isModelCallLine } from '../../src/service/provider
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import type { LaunchPolicyProjection, ReviewCategoryResultSetRevisionProjection, ReviewRunProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { withoutHouseReviewPreference } from '../support/policy-rules.js';
+import { HOUSE_PREFERENCE_CLOSED } from '../../src/service/task-plan.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 
 // #809 / J-04, J-05: real store, broker, Go adapter, egress, accounting and review drive loop.
@@ -37,6 +39,8 @@ let arrived: Promise<void>;
 let announce: () => void;
 let release: () => void;
 let recorded: Map<string, ResolvedModelFixture>;
+/** Each request's system words beside its last message, as the transport received them (Issue #911 review). */
+let requests: Array<{ system: string; last: string }>;
 
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-live-review-');
@@ -59,6 +63,7 @@ beforeEach(async () => {
   failure = 'none';
   holdTurn = null;
   recorded = new Map();
+  requests = [];
   arrived = new Promise<void>((resolve) => { announce = resolve; });
   const held = new Promise<void>((resolve) => { release = resolve; });
   const nativeFetch: typeof fetch = async (_url, init) => {
@@ -72,6 +77,7 @@ beforeEach(async () => {
     if (sent === 1 && failure === 'quota') return new Response(JSON.stringify({ error: { message: 'synthetic account limit' } }), { status: 429 });
     const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
     const message = body.messages.at(-1)!.content;
+    requests.push({ system: body.messages.filter((entry) => entry.role === 'system').map((entry) => entry.content).join('\n'), last: message });
     const header = parseReviewCategoryUnitMessageHeader(message);
     let result: unknown;
     let capturedText: string | null = null;
@@ -318,5 +324,73 @@ describe('reference-free review on the Go execution path', () => {
     expect(revision.gaps.every((gap) => gap.code === (mode === 'interrupt' && gap.unitOrdinal === 1 ? 'interrupted' : 'not-attempted'))).toBe(true);
     const view = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
     expect(view.categories[0]!.detail?.includes('ANALYSIS_STATE')).not.toBe(true);
+  });
+
+  it('keeps developer-live 本社审阅偏好 to developer-live judgments and sends its block only under a rule naming the category (#911 review)', async () => {
+    const book = await importSample1Book(store, roots.codeRoot, 'L2 sample1 live preference');
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+    recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
+    store.updateBookPeople({ bookId: book.bookId, expectedVersion: 0, authors: ['尹十二'], editors: ['柏十三'], related: [] });
+    const kind = 'editorial-review/typos-and-usage';
+    const runUnder = async (selected: LaunchPolicyProjection): Promise<ReviewRunProjection> => {
+      let progress = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, selected);
+      while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
+      const run = progress.projection!.run!;
+      store.authorizeReviewRun(book.bookId, run.reviewRunId, approvals(run));
+      await driver.drive(run.reviewRunId);
+      const settled = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
+      expect(settled.categories.map((category) => category.state)).toEqual(['settled']);
+      return settled;
+    };
+    // The selected review rule with the category taken out: v18's reading.
+    const closedPolicy = withoutHouseReviewPreference(policy);
+    const launch = store.baselineAnalysisLedger.launch;
+    store.baselineAnalysisLedger.bindLaunch({ ...launch, policy: closedPolicy });
+    const first = await runUnder(closedPolicy);
+    const finding = first.findings.find((entry) => entry.markId !== null)!;
+    store.recordReviewFindingDisposition(book.bookId, first.reviewRunId, finding.findingId, '尹十二坚持保留原有写法');
+    const material = store.inspectLearningMaterials(book.bookId).books[0]!.materials.find((entry) => entry.kind === 'review-disposition')!;
+    store.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice: 'house', note: null });
+    const record = store.inspectHouseReviewPreference();
+    expect(record.operationalScope).toBe('developer-live');
+    const version = record.current!;
+    expect(version.lines[0]!.text).toContain('坚持保留原有写法');
+    expect(version.lines[0]!.text).not.toContain('尹十二');
+    const block = `『本社审阅偏好 v${version.ordinal}（来源：1 条已判定反馈）』`;
+
+    // A rule closed to the category: the plan says so, sends nothing of the record, and the unchanged contract reuses the
+    // first Run's units.
+    requests = [];
+    const closed = await runUnder(closedPolicy);
+    const closedPlan = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: closed.reviewRunId });
+    expect(closedPlan.scope.reference).toContain(HOUSE_PREFERENCE_CLOSED);
+    expect(closedPlan.scope.send).not.toContain('本社审阅偏好');
+    expect(requests.some((request) => request.system.includes('本社审阅偏好') || request.last.includes('本社审阅偏好'))).toBe(false);
+
+    // The selected v20 review rule names it: every unit request of the category carries the framed block, and the egress gate
+    // admitted it.
+    expect(policy.providerProcessing.admittedRules!.find((rule) => rule.taskKinds.includes(kind))!.outboundDataCategories).toContain('house-review-preference-excerpt');
+    store.baselineAnalysisLedger.bindLaunch(launch);
+    requests = [];
+    const admitted = await runUnder(policy);
+    const plan = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: admitted.reviewRunId });
+    expect(plan.scope.reference).toContain(`错别字与规范用语：参考本社审阅偏好 v${version.ordinal}（来源：1 条已判定反馈）`);
+    expect(plan.scope.send).toContain(`本社审阅偏好 v${version.ordinal}的摘录`);
+    const units = requests.filter((request) => parseReviewCategoryUnitMessageHeader(request.last) !== null);
+    expect(units.length).toBeGreaterThan(0);
+    expect(units.every((request) => request.system.includes(block) && request.system.includes('不是规则或事实证据') && request.system.includes('坚持保留原有写法'))).toBe(true);
+    // The attributed people stay on the local sources: no system words name them.
+    expect(requests.every((request) => !request.system.includes('尹十二') && !request.system.includes('柏十三'))).toBe(true);
+    expect(store.generateReviewReport(book.bookId, admitted.reviewRunId).run!.report!.record.categorySummaries.entries[0]!.basisStatement)
+      .toContain(`参考本社审阅偏好 v${version.ordinal}`);
+
+    // The development-data rule from the other side: a developer-live judgment reaches neither a development-ci nor a
+    // production record, and the developer-live record stands as it was.
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', policy: await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'development-ci'), live: null });
+    expect(store.rebuildHouseReviewPreference()).toMatchObject({ operationalScope: 'development-ci', current: null, history: [] });
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null), live: null });
+    expect(store.rebuildHouseReviewPreference()).toMatchObject({ operationalScope: 'ordinary-production', current: null, history: [] });
+    store.baselineAnalysisLedger.bindLaunch(launch);
+    expect(store.rebuildHouseReviewPreference().current!.versionId).toBe(version.versionId);
   });
 });

@@ -1522,6 +1522,28 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 本社审阅偏好 with no input and 编辑改动质量信号 for the house or one Book (Issue #911)', () => {
+    const inputs: ReadonlyArray<AcceptedInput> = [
+      { op: 'inspectHouseReviewPreference', input: {} },
+      { op: 'rebuildHouseReviewPreference', input: {} },
+      { op: 'inspectEditQualitySignals', input: { bookId: null } },
+      { op: 'inspectEditQualitySignals', input: { bookId: randomUUID() } },
+    ];
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['inspectHouseReviewPreference', { scope: 'ordinary-production' }],
+      ['rebuildHouseReviewPreference', { bookId: null }],
+      ['inspectEditQualitySignals', {}],
+      ['inspectEditQualitySignals', { bookId: 'book' }],
+      ['inspectEditQualitySignals', { bookId: null, operationalScope: 'developer-live' }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 学习回溯: filters before the page, one lineage, and 停止今后使用 on exact versions (Issue #62, S27a)', () => {
     const bookId = randomUUID();
     const item: InputOf<'previewLearningRemediation'>['items'][number] = {

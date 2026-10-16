@@ -353,6 +353,8 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   material_index_translations: 'derived',
   // Factual verification (Issue #901): a Book's results, decisions and Correction Proposal lineage travel with it.
   factual_run_assurance: 'owned',
+  house_review_preference_versions: 'house',
+  review_run_preference_pins: 'owned',
   factual_verification_results: 'owned',
   factual_review_decisions: 'owned',
   correction_proposals: 'owned',
