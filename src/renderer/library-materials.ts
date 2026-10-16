@@ -1,5 +1,6 @@
 import {
   LIBRARY_MATERIAL_KINDS,
+  MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS,
   type BookSummaryCursor,
   type LearningEligibilityChoice,
   type LibraryMaterialCursor,
@@ -8,6 +9,7 @@ import {
   type LibraryMaterialPreviewProjection,
   type LibraryMaterialProjection,
   type MaterialSegmentsPageProjection,
+  type MaterialVectorSearchProjection,
   type RendererApi,
 } from '../shared/protocol.js';
 import {
@@ -59,10 +61,21 @@ import {
   MATERIAL_SEGMENTS_NEXT,
   MATERIAL_SEGMENTS_OPEN,
   MATERIAL_SEGMENTS_PREVIOUS,
+  MATERIAL_TRANSLATION_FAILED,
+  MATERIAL_TRANSLATION_REQUEST,
+  MATERIAL_TRANSLATION_TERM,
+  MATERIAL_VECTORS_BUILD,
+  MATERIAL_VECTORS_BUILD_FAILED,
+  MATERIAL_VECTORS_SEARCH,
+  MATERIAL_VECTORS_SEARCH_FAILED,
+  MATERIAL_VECTORS_SEARCH_LABEL,
+  MATERIAL_VECTORS_SEARCH_NOTE,
   materialAnchorLabel,
   materialIndexLayerLine,
   materialIndexStateLine,
+  materialParagraphAnchorLabel,
   materialSegmentsHeading,
+  materialVectorResultsHeading,
 } from './knowledge-base-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 
@@ -82,11 +95,17 @@ import { localInstantLabel } from './plan-preview-labels.js';
  * not provide as 「未提供（需要本地依赖）」 — and, once the text was read, `查看分段` pages its paragraphs with every sentence's
  * position anchor. While an index waits or is being built its item alone is read again, every second, and only the card's index
  * is drawn again, until it is built.
+ *
+ * Issue #892 adds the two layers made on request: `构建相似索引` makes the item's similarity vectors on this machine, and once
+ * they are built `相似段落检索` finds its paragraphs nearest a text the editor writes; `生成来源译文` asks for a non-Chinese item's
+ * machine translation — shown disabled, with why, when the selected policy names no rule for it — and 查看分段 shows each
+ * paragraph's 来源译文 beneath it, labelled. While either is being made the item is read again as an index being built is.
  */
 export interface MountLibraryMaterialsOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'inspectLibraryMaterials' | 'inspectLibraryMaterial' | 'previewLibraryMaterial' | 'addLibraryMaterial' |
-    'decideLibraryMaterial' | 'listBooks' | 'readLibraryDecisionReason' | 'inspectLibraryMaterialSegments'>;
+    'decideLibraryMaterial' | 'listBooks' | 'readLibraryDecisionReason' | 'inspectLibraryMaterialSegments' | 'buildMaterialVectors' |
+    'queryMaterialVectors' | 'requestMaterialTranslation'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly technicalDetails: (key: string, ...rows: HTMLElement[]) => HTMLElement;
@@ -151,7 +170,16 @@ export function startsWaiting(waiting: ReadonlyArray<string>, polled: ReadonlySe
   return waiting.some((materialId) => !polled.has(materialId));
 }
 
-const indexWaits = (material: LibraryMaterialProjection): boolean => material.index.state === 'queued' || material.index.state === 'indexing';
+/** Whether a card's index is still being made: built, or one of its two on-request layers (Issue #892). */
+const indexWaits = (material: LibraryMaterialProjection): boolean => material.index.state === 'queued' || material.index.state === 'indexing' ||
+  material.index.vectors?.state === 'building' || material.index.translation?.state === 'building';
+
+/** What a read of a waiting card compares to say whether its index moved. */
+function indexSignature(material: LibraryMaterialProjection): string {
+  const { index } = material;
+  return JSON.stringify([index.state, index.digest, index.vectors?.state ?? null, index.vectors?.built ?? null, index.translation?.state ?? null,
+    index.translation?.translated ?? null, index.translation?.request.available ?? null, index.translation?.lastFailure ?? null]);
+}
 
 export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { load(): Promise<void> } {
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
@@ -173,6 +201,8 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   let chooser: Chooser | null = null;
   /** A refusal, beside the item it concerns, or at the top for an arrival. */
   let refusal: { materialId: string | null; message: string } | null = null;
+  /** 相似段落检索's last text and answer for each item (Issue #892), so a repaint keeps them. */
+  const searches = new Map<string, { text: string; result: MaterialVectorSearchProjection | null }>();
   /** The next read of the cards whose index waits or is being built, how long it waits, and the cards it was set for. */
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let pollDelay = INDEX_POLL_MS;
@@ -248,7 +278,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       }
       if (!root.isConnected) return;
       const now = shown().find((entry) => entry.materialId === next.materialId);
-      if (now === undefined || (now.index.state === next.index.state && now.index.digest === next.index.digest)) continue;
+      if (now === undefined || indexSignature(now) === indexSignature(next)) continue;
       moved = true;
       replace(next);
       // Only the index of the card whose index moved is drawn again: nothing the editor is in — a focused heading, an open
@@ -419,10 +449,141 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       layers.append(el('dt', undefined, MATERIAL_INDEX_LAYER_TERMS[layer]), line);
     }
     section.append(heading, layers, el('p', 'field-note material-index-boundary', MATERIAL_INDEX_BOUNDARY));
+    const layerActions = indexActions(material);
+    if (layerActions !== null) section.append(layerActions);
+    if (index.vectors?.state === 'complete') section.append(vectorSearch(material));
     if (index.state === 'complete') section.append(segmentsReader(material));
     if (index.digest !== null) {
       section.append(technicalDetails('material-index-facts', el('dt', undefined, '资料索引摘要'), el('dd', 'technical-identity', index.digest)));
     }
+    return section;
+  };
+
+  /**
+   * The two on-request layers' actions (Issue #892): 构建相似索引 while the vectors are not complete, and 生成来源译文 while a
+   * non-Chinese item's translation is not — disabled, with the reason beside it, when it cannot be asked now.
+   */
+  const indexActions = (material: LibraryMaterialProjection): HTMLElement | null => {
+    const { vectors, translation } = material.index;
+    const row = el('div', 'button-row material-index-actions');
+    const notes: HTMLElement[] = [];
+    if (vectors !== null && (vectors.state === 'not-built' || vectors.state === 'building')) {
+      const build = action(MATERIAL_VECTORS_BUILD, 'secondary', 'build-vectors', () => void layerRequest(material, 'vectors'));
+      build.disabled = busy || vectors.state === 'building';
+      row.append(build);
+    }
+    if (translation !== null && translation.state !== 'complete') {
+      const request = action(MATERIAL_TRANSLATION_REQUEST, 'secondary', 'request-translation', () => void layerRequest(material, 'translation'));
+      request.disabled = busy || !translation.request.available;
+      row.append(request);
+      if (!translation.request.available && translation.request.reason !== null) {
+        const note = el('p', 'field-note material-translation-note', translation.request.reason);
+        note.id = `material-translation-note-${material.materialId}`;
+        request.setAttribute('aria-describedby', note.id);
+        notes.push(note);
+      }
+    }
+    if (row.childElementCount === 0) return null;
+    const wrapper = el('div', 'material-index-layer-actions');
+    wrapper.append(row, ...notes);
+    return wrapper;
+  };
+
+  /** 构建相似索引 or 生成来源译文: asked once; the item as it then reads, and its index read again while it is made. */
+  const layerRequest = async (material: LibraryMaterialProjection, layer: 'vectors' | 'translation'): Promise<void> => {
+    if (busy) return;
+    busy = true;
+    refusal = null;
+    setStatus(layer === 'vectors' ? `正在请求${MATERIAL_VECTORS_BUILD}…` : `正在请求${MATERIAL_TRANSLATION_REQUEST}…`, 'busy');
+    paint(null);
+    const focus = `[data-material-id="${material.materialId}"] .material-index-heading h4`;
+    try {
+      const now = layer === 'vectors'
+        ? await api.buildMaterialVectors({ materialId: material.materialId })
+        : await api.requestMaterialTranslation({ materialId: material.materialId });
+      if (!root.isConnected) return;
+      replace(now);
+      busy = false;
+      setStatus(layer === 'vectors' ? `已开始在本机${MATERIAL_VECTORS_BUILD}：「${material.title}」。` : `已开始${MATERIAL_TRANSLATION_REQUEST}：「${material.title}」。`, 'success');
+      paint(focus);
+    } catch (error) {
+      if (!root.isConnected) return;
+      busy = false;
+      const message = errorMessage(error, layer === 'vectors' ? MATERIAL_VECTORS_BUILD_FAILED : MATERIAL_TRANSLATION_FAILED);
+      refusal = { materialId: material.materialId, message };
+      setStatus(message, 'error');
+      try {
+        replace(await api.inspectLibraryMaterial({ materialId: material.materialId }));
+      } catch {
+        // The refusal already says what happened.
+      }
+      if (!root.isConnected) return;
+      paint(focus);
+    }
+  };
+
+  /**
+   * 相似段落检索 (Issue #892): the item's paragraphs nearest a text the editor writes, by the vectors built on this machine,
+   * each with its anchor and its first words. The ranking is a lead, never the text: 查看分段 shows the paragraph itself.
+   */
+  const vectorSearch = (material: LibraryMaterialProjection): HTMLElement => {
+    const section = el('section', 'material-vector-search');
+    const fieldId = `material-vector-query-${material.materialId}`;
+    const label = el('label', undefined, MATERIAL_VECTORS_SEARCH_LABEL);
+    label.htmlFor = fieldId;
+    const input = el('input');
+    input.type = 'search';
+    input.id = fieldId;
+    input.maxLength = MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS;
+    input.dataset['libraryField'] = 'vector-query';
+    const saved = searches.get(material.materialId);
+    input.value = saved?.text ?? '';
+    const results = el('div', 'material-vector-results');
+    results.setAttribute('aria-live', 'polite');
+    const show = (projection: MaterialVectorSearchProjection): void => {
+      const list = el('ol', 'material-vector-list');
+      for (const candidate of projection.candidates) {
+        const item = el('li', 'material-vector-candidate');
+        item.dataset['candidateOrdinal'] = String(candidate.ordinal);
+        item.append(el('span', 'material-anchor', materialParagraphAnchorLabel(candidate.ordinal, candidate.page, candidate.pageParagraph)),
+          document.createTextNode(` ${candidate.preview}`));
+        list.append(item);
+      }
+      results.replaceChildren(el('p', 'material-vector-results-heading', materialVectorResultsHeading(projection.candidates.length)), list);
+    };
+    if (saved?.result !== undefined && saved.result !== null) show(saved.result);
+    const run = action(MATERIAL_VECTORS_SEARCH, 'secondary', 'vector-search', () => void search());
+    let searching = false;
+    const search = async (): Promise<void> => {
+      const text = input.value.trim();
+      if (searching) return;
+      if (text.length === 0) {
+        input.focus();
+        return;
+      }
+      searching = true;
+      run.disabled = true;
+      try {
+        const projection = await api.queryMaterialVectors({ materialId: material.materialId, text, k: 5 });
+        searches.set(material.materialId, { text, result: projection });
+        if (!section.isConnected) return;
+        show(projection);
+      } catch (error) {
+        if (!section.isConnected) return;
+        results.replaceChildren(alert(errorMessage(error, MATERIAL_VECTORS_SEARCH_FAILED)));
+      } finally {
+        searching = false;
+        run.disabled = false;
+      }
+    };
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      void search();
+    });
+    const row = el('div', 'button-row');
+    row.append(input, run);
+    section.append(label, row, el('p', 'field-note material-vector-note', MATERIAL_VECTORS_SEARCH_NOTE), results);
     return section;
   };
 
@@ -440,16 +601,26 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       for (const segment of page.segments) {
         const item = el('li', `material-segment material-segment-${segment.kind}`);
         item.dataset['segmentOrdinal'] = String(segment.ordinal);
+        const page = segment.page === null || segment.pageParagraph === null ? null : { page: segment.page, paragraph: segment.pageParagraph };
+        if (page !== null) item.dataset['segmentPage'] = String(page.page);
         segment.sentences.forEach(([start, end], index) => {
           const sentence = el('span', 'material-sentence');
           sentence.dataset['anchor'] = `${segment.ordinal}.${index + 1}`;
-          const label = materialAnchorLabel(segment.ordinal, index + 1);
-          const anchor = el('span', 'material-anchor', `${segment.ordinal}·${index + 1}`);
+          const label = materialAnchorLabel(segment.ordinal, index + 1, page);
+          const anchor = el('span', 'material-anchor', page === null ? `${segment.ordinal}·${index + 1}` : `${page.page}页${page.paragraph}·${index + 1}`);
           anchor.title = label;
           anchor.setAttribute('aria-label', label);
           sentence.append(anchor, document.createTextNode(segment.text.slice(start, end)));
           item.append(sentence, document.createTextNode(' '));
         });
+        // Its 来源译文 beneath it, labelled as the machine's, never in its place (Issue #892).
+        if (segment.translation !== null) {
+          const translation = el('p', 'material-translation');
+          translation.lang = 'zh-CN';
+          translation.append(el('span', 'material-translation-label', `${MATERIAL_TRANSLATION_TERM}（${segment.translation.model}）`),
+            document.createTextNode(segment.translation.text));
+          item.append(translation);
+        }
         list.append(item);
       }
       const row = el('div', 'button-row');

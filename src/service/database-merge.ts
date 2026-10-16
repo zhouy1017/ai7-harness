@@ -342,6 +342,10 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   // here again at the next start, never carried.
   material_index_builds: 'derived',
   material_index_segments: 'derived',
+  // 相似段落检索 and 来源译文 (Issue #892): kept beside the build they were made from, which a merge never carries; a merged
+  // item's are made again here on request, from the build made here.
+  material_index_vectors: 'derived',
+  material_index_translations: 'derived',
 };
 
 /** What stays behind when a Book merges, said to the editor. */

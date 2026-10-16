@@ -6,7 +6,8 @@ import { EditorialStore } from '../../src/service/store.js';
 import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
 import { LATEST_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { RetainedEvidence, RetainedUnit } from '../../src/service/analysis/factual-review-evidence.js';
-import { dropResearchEvidenceRelations } from '../support/pre74-schema.js';
+import { dropMaterialIndexLayerRelations, dropResearchEvidenceRelations } from '../support/pre74-schema.js';
+import { MATERIAL_INDEX_LAYER_SCHEMA_SQL, MATERIAL_INDEX_LAYER_TRIGGER_SQL } from '../../src/service/material-index.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book } from '../support/sample1-baseline.js';
 import { ResearchEvidenceLedger } from '../../src/service/research-evidence.js';
@@ -73,19 +74,22 @@ describe('the research evidence ledger, schema 75', () => {
     let store: EditorialStore | undefined;
     try {
       expect(RESEARCH_EVIDENCE_SCHEMA_VERSION).toBe(75);
-      expect(LATEST_SCHEMA_VERSION).toBe(RESEARCH_EVIDENCE_SCHEMA_VERSION);
+      // Revision 76 (Issue #892) follows it; a revision-74 store is migrated through both.
+      expect(LATEST_SCHEMA_VERSION).toBe(RESEARCH_EVIDENCE_SCHEMA_VERSION + 1);
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       await importSample1Book(store, roots.codeRoot, '迁移回归');
       store.close(); store = undefined;
       const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
       const terminal = schemaRows(path);
-      // The predecessor is planted as revision 74 left it: none of revision 75's relations or triggers.
+      // The predecessor is planted as revision 74 left it: none of revision 75's relations or triggers, nor revision 76's.
       const plant = new DatabaseSync(path);
+      dropMaterialIndexLayerRelations(plant);
       dropResearchEvidenceRelations(plant);
       plant.exec(`PRAGMA user_version = ${SEARCH_BACKEND_SCHEMA_VERSION}`);
       plant.close();
       const predecessor = schemaRows(path);
-      const added = [...Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL), ...Object.keys(RESEARCH_EVIDENCE_TRIGGER_SQL)];
+      const added = [...Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL), ...Object.keys(RESEARCH_EVIDENCE_TRIGGER_SQL),
+        ...Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL), ...Object.keys(MATERIAL_INDEX_LAYER_TRIGGER_SQL)];
       expect(predecessor.filter((row) => added.includes(row.name))).toEqual([]);
       expect(predecessor).toEqual(terminal.filter((row) => !added.includes(row.name)));
 
@@ -93,7 +97,7 @@ describe('the research evidence ledger, schema 75', () => {
       store.close(); store = undefined;
       expect(schemaRows(path)).toEqual(terminal);
       const migrated = new DatabaseSync(path);
-      expect(migrated.prepare('PRAGMA user_version').get()!.user_version).toBe(75);
+      expect(migrated.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
       for (const name of Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL)) expect(migrated.prepare(`SELECT count(*) AS n FROM ${name}`).get()!.n).toBe(0);
       // A store stamped 75 that lost them is refused, never rebuilt.
       dropResearchEvidenceRelations(migrated);

@@ -13,6 +13,10 @@ import {
   PLATFORM_TOOL_NAMES,
   PLATFORM_TOOL_SCHEMAS,
   PLATFORM_TOOL_SCHEMA_DIGEST,
+  LOCAL_TOOL_NAMES,
+  LOCAL_TOOL_SCHEMA_DIGEST,
+  ruleNamedToolSchemas,
+  type PlatformToolSchema,
   toolSetEqualsPlatformSchemas,
   type PlatformToolName,
 } from '../provider/platform-tools.js';
@@ -50,7 +54,7 @@ export interface HarnessCompositionDescriptor {
   readonly services: typeof HARNESS_SERVICE_SET;
   readonly systemPrompt: { readonly includeHarnessIdentity: false; readonly includeRuntimeContext: false; readonly persona: ''; readonly completeSection: typeof PROMPT_SECTION_NAME };
   /** `registeredTools` is 0 on every composition but one that registers the two platform tools (Issue #473), where it is 2. */
-  readonly tools: { readonly mode: 'native'; readonly maxParallelSubCalls: 1; readonly registeredTools: 0 | 2 };
+  readonly tools: { readonly mode: 'native'; readonly maxParallelSubCalls: 1; readonly registeredTools: number };
   readonly agentLoop: { readonly maxParallelToolCalls: 1; readonly configuredAgents: 0 };
   readonly subagents: false;
   readonly route: ExecutionRoute;
@@ -68,6 +72,7 @@ export interface HarnessCompositionDescriptor {
    * selected Provider Processing rule names them — keeps its descriptor and its digest byte-identical.
    */
   readonly platformTools?: { readonly names: typeof PLATFORM_TOOL_NAMES; readonly schemaDigest: string };
+  readonly localTools?: { readonly names: typeof LOCAL_TOOL_NAMES; readonly schemaDigest: string };
   /** SHA-256 over every field above in canonical JSON; the Execution Binding pins it. */
   readonly digest: string;
 }
@@ -81,6 +86,7 @@ export interface CompositionOptions {
   readonly sessionLog?: boolean;
   /** The composition registers the two platform tools (Issue #473); only for a Run whose rule names them and whose plan declares web search. */
   readonly platformTools?: boolean;
+  readonly localTools?: boolean;
 }
 
 export function describeComposition(route: ExecutionRoute, model: string, promptContractDigest: string, options: CompositionOptions = {}): HarnessCompositionDescriptor {
@@ -93,7 +99,7 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
     packages: HARNESS_PACKAGE_PINS,
     services: HARNESS_SERVICE_SET,
     systemPrompt: { includeHarnessIdentity: false as const, includeRuntimeContext: false as const, persona: '' as const, completeSection: PROMPT_SECTION_NAME },
-    tools: { mode: 'native' as const, maxParallelSubCalls: 1 as const, registeredTools: withTools ? (2 as const) : (0 as const) },
+    tools: { mode: 'native' as const, maxParallelSubCalls: 1 as const, registeredTools: ruleNamedToolSchemas(withTools, options.localTools === true).length },
     agentLoop: { maxParallelToolCalls: 1 as const, configuredAgents: 0 as const },
     subagents: false as const,
     route,
@@ -104,6 +110,7 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
       ? { sessionLog: { package: { '@deepseek-ai/dsh-session-persistence': SESSION_LOG_PACKAGE_PIN }, storage: 'agent-data-root-jsonl' as const } }
       : {}),
     ...(withTools ? { platformTools: { names: PLATFORM_TOOL_NAMES, schemaDigest: PLATFORM_TOOL_SCHEMA_DIGEST } } : {}),
+    ...(options.localTools === true ? { localTools: { names: LOCAL_TOOL_NAMES, schemaDigest: LOCAL_TOOL_SCHEMA_DIGEST } } : {}),
   };
   return { ...body, digest: sha256Hex(canonicalJson(body)) };
 }
@@ -203,6 +210,7 @@ export interface HarnessExecutionRequest {
    * its descriptor and digest are unchanged.
    */
   readonly platformTools?: PlatformToolOwner;
+  readonly localTools?: PlatformToolOwner;
 }
 
 export interface PrimaryAgentHarnessHandle {
@@ -264,10 +272,12 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     INVALID_CREDENTIAL_CODE: llm.INVALID_CREDENTIAL_CODE,
     CONTEXT_WINDOW_EXCEEDED_CODE: llm.CONTEXT_WINDOW_EXCEEDED_CODE,
   };
-  const toolOwner = request.platformTools ?? null;
+  const toolOwner = request.platformTools ?? request.localTools ?? null;
+  const schemas = ruleNamedToolSchemas(request.platformTools !== undefined, request.localTools !== undefined);
   const composition = describeComposition(request.route, request.model, request.promptContractDigest, {
     sessionLog: request.sessionLogRoot !== undefined,
-    ...(toolOwner === null ? {} : { platformTools: true }),
+    platformTools: request.platformTools !== undefined,
+    localTools: request.localTools !== undefined,
   });
   const context: Context = new cordis.Context();
   let bound = false;
@@ -283,7 +293,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     await context.plugin(llm.LlmRuntime);
     await context.plugin(prompt.SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false, persona: '' });
     await context.plugin(tools.ToolRuntime, { mode: 'native', maxParallelSubCalls: 1 });
-    if (toolOwner !== null) registerPlatformTools(context, toolOwner);
+    if (toolOwner !== null) registerPlatformTools(context, toolOwner, schemas, request.localTools);
     await context.plugin(loop.AgentLoop, { maxParallelToolCalls: 1, agents: [] });
     context.systemPrompt.suppressRuntimeContext();
     context.systemPrompt.section({ name: PROMPT_SECTION_NAME, order: 0, text: request.systemPrompt, complete: true });
@@ -295,6 +305,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
       // before its calls run and before the next model call carries it back through the gate (Issue #473).
       if (toolOwner !== null && event.type === 'assistant/message' && assistantToolCalls(event.data.message) !== null) {
         toolOwner.acceptToolCallMessage(assistantToolCallDigest(event.data.message.content));
+        if (request.localTools !== undefined && request.localTools !== toolOwner) request.localTools.acceptToolCallMessage(assistantToolCallDigest(event.data.message.content));
       }
       if (streamReader === null || event.type !== 'assistant/chunk') return;
       const { chunk } = event.data;
@@ -311,7 +322,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     // Zero tools, or exactly the two platform tool schemas when an owner was given: never anything in between or beyond.
     const toolsExact = toolOwner === null
       ? context.tools.schemas().length === 0 && assembly.tools.length === 0
-      : toolSetEqualsPlatformSchemas(context.tools.schemas()) && toolSetEqualsPlatformSchemas(assembly.tools);
+      : toolSetEqualsPlatformSchemas(context.tools.schemas(), schemas) && toolSetEqualsPlatformSchemas(assembly.tools, schemas);
     requireHarness(
       HARNESS_SERVICE_SET.every((name) => context.get(name) !== undefined) &&
         toolsExact &&
@@ -498,9 +509,10 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
  * success, refusal, or a pipeline failure — immediately before materializing it, fixes the one text the model will read
  * and has the owner admit it, so no result can reach the payload that the owner did not admit.
  */
-function registerPlatformTools(context: Context, owner: PlatformToolOwner): void {
-  for (const schema of PLATFORM_TOOL_SCHEMAS) {
+function registerPlatformTools(context: Context, owner: PlatformToolOwner, schemas: ReadonlyArray<PlatformToolSchema>, localOwner?: PlatformToolOwner): void {
+  for (const schema of schemas) {
     const tool = schema.name;
+    const selectedOwner = tool === 'retrieve' || tool === 'exact_fetch' ? localOwner ?? owner : owner;
     const definition: ToolDefinition = {
       name: tool,
       description: schema.description,
@@ -510,7 +522,7 @@ function registerPlatformTools(context: Context, owner: PlatformToolOwner): void
         render: (_args, value) => [{ type: 'text', text: (value as { text: string }).text }],
       },
       async execute(args, exec) {
-        const outcome = await owner.execute({ callId: exec.callId, tool, arguments: args, signal: exec.signal });
+        const outcome = await selectedOwner.execute({ callId: exec.callId, tool, arguments: args, signal: exec.signal });
         return { text: outcome.text, sourceUrl: outcome.sourceUrl ?? '' };
       },
       finalizeContent(exec, result) {
@@ -523,7 +535,7 @@ function registerPlatformTools(context: Context, owner: PlatformToolOwner): void
           text = typeof value.text === 'string' ? value.text : '';
           sourceUrl = typeof value.sourceUrl === 'string' && value.sourceUrl.length > 0 ? value.sourceUrl : null;
         }
-        owner.admit({ callId: exec.callId, tool, sourceUrl, text });
+        selectedOwner.admit({ callId: exec.callId, tool, sourceUrl, text });
         return [{ type: 'text', text }];
       },
     };

@@ -9,7 +9,9 @@ import { admitTicketHost } from '../../shared/network-denial.js';
 import { randomUUID } from 'node:crypto';
 import { backgroundAnalysisShare, backgroundShareFullReason } from '../background-analysis-enrollments.js';
 import { BASELINE_ANALYSIS_KIND, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
-import { liveKindAdmission, liveKindContractCategories, liveKindRule, type LiveKindRule } from './live-kind-admission.js';
+import { liveKindAdmission, liveKindContractCategories, liveKindRule, kindLocalTools, type LiveKindRule } from './live-kind-admission.js';
+import { RetrievalIndex } from '../retrieval/index.js';
+import { prepareRetrievalResult, markRetrievalResult } from '../retrieval/result-validator.js';
 import { liveMaterialContract } from '../task-material-references.js';
 import { buildClarificationAnswerMessage } from '../provider/clarification-contract.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
@@ -161,6 +163,8 @@ export const EXECUTION_WAITING_CAPACITY = 64;
 export { remapReusedResult } from './reused-result.js';
 
 export interface ExecutionOwnerDependencies {
+  /** The Run's disposable retrieval index over exactly its pinned sources (#893); a manuscript-only index when absent. */
+  readonly retrievalIndex?: (runRecordId: string, ledger: BaselineAnalysisStore) => RetrievalIndex;
   /** Trusted composition may lower, but never exceed, the fixed waiting-memory bound. */
   readonly waitingCapacity?: number;
   /** The baseline kind's ledger: the one a dispatch that names no ledger runs against. */
@@ -888,6 +892,7 @@ export class BaselineAnalysisExecutionOwner {
     const { route, model } = routeFactsOf(facts, live);
     const composition = describeComposition(route, model, ledger.definition.promptContractDigest, {
       platformTools: facts.webToolsBackend !== undefined,
+      localTools: kindLocalTools(this.#policy(), ledger.definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground') !== null,
       ...(facts.webToolsBackend === undefined ? {} : { researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } as const }),
     });
     const rebuilt = executionBindingRecordOf({
@@ -1272,6 +1277,11 @@ export class BaselineAnalysisExecutionOwner {
       await cache.open();
     }
     const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
+    const localRule = live === null ? null : kindLocalTools(policy, definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
+    const retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(facts.runRecordId, ledger) ?? new RetrievalIndex([{
+      sourceKind: 'manuscript', sourceId: facts.checkpoint.manuscriptId, digest: facts.checkpoint.revisionDigest,
+      read: () => ({ digest: facts.checkpoint.revisionDigest, segments: ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId).map((block) => ({ blockId: block.blockId, text: block.text })) }),
+    }]);
     const blocksById = new Map(blocks.map((block) => [block.blockId, block] as const));
     const manifest = facts.manifest;
     const update = facts.update;
@@ -1335,6 +1345,11 @@ export class BaselineAnalysisExecutionOwner {
     // transport. Nothing but the count crosses this closure.
     active.transmissions = () => liveAdapter.instance?.transmissions ?? 0;
     const harness = await prepareExecution({
+      ...(localRule === null ? {} : { localTools: {
+        execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
+        admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
+        acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
+      } }),
       ...(facts.webToolsBackend === undefined ? {} : { platformTools: {
         execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
         admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
@@ -1473,6 +1488,7 @@ export class BaselineAnalysisExecutionOwner {
             ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
             : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages,
+        ...(localRule === null ? {} : { localTools: localRule }),
       };
       if (facts.webToolsBackend !== undefined && live !== null) {
         const selectedRule = liveKindRule(policy, definition.kind);
@@ -1487,10 +1503,13 @@ export class BaselineAnalysisExecutionOwner {
         const ready = await this.#broker.checkPlanReadiness(backend.declaration.credentialSlot, facts.searchCredentialReference);
         if (ready !== 'present') throw new ExecutionAdmissionError('SEARCH_CREDENTIAL_MISSING', `${backend.declaration.displayName} 缺少密钥；请在 设置 › 模型服务 › 联网检索 配置。`);
         platformSession = new PlatformToolSession({ binding: bindingFacts, scope: { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState },
+          ...(retrieval === null ? {} : { retrieval }),
           fetch: live.nativeFetch, admitHost: admitTicketHost, broker: this.#broker, cache, snapshots, purpose: testItemPurpose, evidenceSearchRoundTripOnly: bootstrap,
           onUsage: (usage) => accumulated.push(usage),
         });
       }
+      if (platformSession === null && retrieval !== null) platformSession = new PlatformToolSession({ binding: bindingFacts,
+        scope: { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState }, retrieval, purpose: testItemPurpose });
       harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
       // 取消任务 before the Run kept any unit (CTRL-008): nothing of it is left to gather, so it ends here without
       // provider work and without a revision. A stopped Run that kept units — or whose units asked the editor, their first
@@ -1812,8 +1831,16 @@ export class BaselineAnalysisExecutionOwner {
             active.progress.attemptState = null;
             return 'waiting';
           }
-          const parsed = definition.parseUnitResult(candidate.text, unit);
+          const validated = prepareRetrievalResult(candidate.text, retrieval);
+          if (validated.rejected.some((entry) => entry.collection !== 'findings' && entry.collection !== 'assertions')) {
+            acceptedOutputDigests.add(candidate.digest);
+            gap('contract-invalid', '未经精确取文');
+            keepSettled(unit, s.wallMs);
+            return 'settled';
+          }
+          const parsed = definition.parseUnitResult(validated.text, unit);
           if (parsed.ok) {
+            markRetrievalResult(parsed.result, validated.rejected);
             unitObservations.set(unit.ordinal, observation);
             acceptedOutputDigests.add(candidate.digest);
             outcomes.push({ unitOrdinal: unit.ordinal, state: 'closed', result: parsed.result });
@@ -1892,7 +1919,8 @@ export class BaselineAnalysisExecutionOwner {
       const retainUnit = async (unit: CoverageManifestUnitProjection): Promise<void> => {
         const sink = this.#deps.researchEvidence;
         const session = platformSession;
-        if (session === null || sink === undefined || sink === null || (definition.platformToolBase ?? definition).kind !== FACTUAL_REVIEW_KIND) return;
+        // A session that carries only the local tools retains no external evidence (#893).
+        if (session === null || facts.webToolsBackend === undefined || sink === undefined || sink === null || (definition.platformToolBase ?? definition).kind !== FACTUAL_REVIEW_KIND) return;
         const outcome = outcomes.find((entry) => entry.unitOrdinal === unit.ordinal);
         if (outcome === undefined) return;
         let retentionFailure: 'capture-processing' | 'storage' = 'capture-processing';
@@ -2458,11 +2486,13 @@ export class BaselineAnalysisExecutionOwner {
             if (canonical?.kind === 'empty-answer') {
               crossUnit = gap('contract-invalid', named(crossUnitEmptyAnswerGapReason(canonical.reasoningPresent)));
             } else if (step !== null) {
-              const parsed = step.parse(candidate.text, closedOutcomes);
+              const validated = prepareRetrievalResult(candidate.text, retrieval);
+              const parsed = validated.rejected.length > 0 ? { ok: false as const, code: 'not-exact-fetched', detail: '未经精确取文' }
+                : step.parse(validated.text, closedOutcomes);
               const refused = parsed.ok ? null : step.refusalReason?.(parsed.code, parsed.detail) ?? null;
               crossUnit = parsed.ok
                 ? { state: 'closed', findings: [], requestDigest, usage: crossUnitUsage, result: parsed.result }
-                : gap('contract-invalid', refused ?? named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)));
+                : gap('contract-invalid', parsed.code === 'not-exact-fetched' ? '未经精确取文' : refused ?? named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)));
             } else {
               const parsed = parseCrossUnitResult(candidate.text, {
                 closedOrdinals: closedOutcomes.map((outcome) => outcome.unitOrdinal),
@@ -2674,6 +2704,7 @@ export class BaselineAnalysisExecutionOwner {
       active.progress.currentUnitStartedAt = null;
       active.progress.attemptState = null;
       await harness.finish();
+      retrieval?.dispose();
     }
   }
 

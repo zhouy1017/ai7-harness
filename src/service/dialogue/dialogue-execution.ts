@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { RetrievalIndex } from '../retrieval/index.js';
+import { PlatformToolSession } from '../provider/platform-tool-session.js';
+import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import { sha256Hex } from '../analysis/canonical.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../analysis/execution.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
@@ -12,7 +15,7 @@ import {
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
-import { Ai7LocalDeterministicAdapter, type AnswerHold } from '../provider/local-deterministic-adapter.js';
+import { Ai7LocalDeterministicAdapter, dialogueRetrievalFixtureRule, type AnswerHold } from '../provider/local-deterministic-adapter.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
   LOCAL_DETERMINISTIC_ROUTE,
@@ -71,6 +74,8 @@ export interface DialogueLiveRoute {
 }
 
 export interface DialogueExecutionDeps {
+  /** The attempt's disposable retrieval index over the dialogue's pinned revision (#893); empty when absent. */
+  readonly retrievalIndex?: (dialogueId: string) => RetrievalIndex;
   readonly records: DialogueRecords;
   /** The J-04 adapter's fixture when the launch binds one; `null` binds no local dialogue route. */
   readonly fixture: ResolvedModelFixture | null;
@@ -140,6 +145,7 @@ export function dialogueRouteRefusal(deps: Pick<DialogueExecutionDeps, 'fixture'
 }
 
 interface ActiveAnswer {
+  retrieval?: RetrievalIndex | null;
   readonly attemptId: string;
   readonly message: DialogueMessageInput;
   streamed: string;
@@ -179,7 +185,8 @@ export class DialogueExecutionOwner {
     const active = this.#active;
     const queued = this.#queued.find((turn) => turn.attemptId === attemptId);
     if (queued !== undefined) return { message: queued.message, streamed: '', queued: true };
-    return active !== null && active.attemptId === attemptId ? { message: active.message, streamed: active.streamed } : null;
+    return active !== null && active.attemptId === attemptId ? { message: active.message, streamed: active.streamed,
+      exactFetched: active.retrieval?.exactFetchedCandidates() ?? new Map() } : null;
   }
 
   get answering(): boolean {
@@ -249,19 +256,24 @@ export class DialogueExecutionOwner {
     const live = this.#deps.live;
     const message = buildDialogueMessage(turn.message);
     const sessionId = randomUUID();
-    const promptContractDigest = DIALOGUE_PROMPT_CONTRACT_DIGEST;
-    const systemPrompt = DIALOGUE_PROMPT_CONTRACT.systemPrompt;
+    const localRule = live?.route?.localTools ?? (live === null && this.#deps.fixture !== null ? dialogueRetrievalFixtureRule(this.#deps.fixture, turn.message) : null);
+    let retrieval: RetrievalIndex | null = null;
+    const promptContractDigest = localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
+    const systemPrompt = localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
     let current: string | null = null;
     let spanOpened = false;
     let outcome: HarnessTurnOutcome | null = null;
     let failure: string | null = null;
     try {
+      // Inside the attempt: a source that cannot be read settles the attempt as failed rather than leaving it answering.
+      retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(turn.dialogueId) ?? new RetrievalIndex([]);
+      active.retrieval = retrieval;
       const route = live === null ? null : live.route!;
       // Read once: under ordinary-production the configured reference may change while this answer is in flight (Issue #811).
       const credentialReference = live === null ? '' : live.credentialReference;
       const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
       const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
-      const composition = describeComposition(executionRoute, model, promptContractDigest, { sessionLog: true });
+      const composition = describeComposition(executionRoute, model, promptContractDigest, { sessionLog: true, localTools: localRule !== null });
       const bindingDigest = sha256Hex(`${turn.attemptId}\u0000${sessionId}\u0000${composition.digest}`);
       const slotBinding: CredentialSlotBinding | null = live === null || route === null ? null : {
         bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference,
@@ -281,8 +293,12 @@ export class DialogueExecutionOwner {
             : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion as DeveloperLiveProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         // The one message this attempt may send: the selected words and the question, and what a stopped answer kept.
         admittedUserMessages: new Set([message]),
+        ...(localRule === null ? {} : { localTools: localRule }),
         ...(route === null ? {} : { ruleOutboundCategories: route.outboundDataCategories }),
       };
+      const acceptedOutputDigests = new Set<string>();
+      const scope = { currentBindingDigest: () => current, acceptedOutputDigests, ...(route === null ? {} : { ceilingState: () => 'not-applicable' as const }) };
+      const toolSession = retrieval === null ? null : new PlatformToolSession({ binding: bindingFacts, scope, retrieval, purpose: DIALOGUE_TEST_ITEM_PURPOSE });
       // Development validation only (ADR 0089, Issue #808): the Provider Test Ledger and Result Cache answer, refuse or record
       // the request. A live launch outside one is business, and the request reaches the transport itself.
       // Ordinary production has no development validation, so no answer ever reaches the developer cache or ledger (Issue #811).
@@ -295,6 +311,7 @@ export class DialogueExecutionOwner {
       // The single-use ticket the gate issued for the turn in flight; the live adapter takes it or refuses.
       let pendingTicket: TransmitTicket | null = null;
       const harness: PrimaryAgentHarnessHandle = await prepareExecution({
+        ...(toolSession === null ? {} : { localTools: toolSession }),
         sessionId,
         route: executionRoute,
         model,
@@ -343,12 +360,7 @@ export class DialogueExecutionOwner {
             },
           });
         },
-        gate: (payload) => evaluateEgress(payload, bindingFacts, {
-          currentBindingDigest: () => current,
-          acceptedOutputDigests: new Set(),
-          // A dialogue has no Run, so no per-Run ceiling applies; its single bounded payload is its bound (ADR 0088 §4).
-          ...(route === null ? {} : { ceilingState: () => 'not-applicable' as const }),
-        }),
+        gate: (payload) => evaluateEgress(payload, bindingFacts, toolSession?.egressScope ?? scope),
         onTransmitTicket: (ticket) => {
           if (route === null) throw new DialogueError('DIALOGUE_REMOTE_FORBIDDEN', 'development-ci 下对话不得签发远程传输。');
           pendingTicket = ticket;
@@ -398,6 +410,7 @@ export class DialogueExecutionOwner {
       } finally {
         current = null;
         await harness.finish();
+        retrieval?.dispose();
       }
     } catch (error) {
       failure = error instanceof Error && 'code' in error && typeof (error as { code: unknown }).code === 'string'

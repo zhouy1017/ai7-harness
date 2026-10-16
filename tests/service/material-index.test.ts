@@ -1,6 +1,6 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strToU8, zipSync, type Zippable } from 'fflate';
@@ -17,6 +17,9 @@ import { sample1Path } from '../support/sample1-baseline.js';
 import { analysisRunAuthorizationsShape, downgradeAnalysisRunAuthorizationsToRevision65 } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
+import { syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
+import { RetrievalIndex } from '../../src/service/retrieval/index.js';
+import { materialRetrievalSources } from '../../src/service/retrieval/source-readers.js';
 
 // Service-integration suite (L2) for ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009,
 // ATTN-009) over the real store on a temporary Agent Data Root. The collected book is exact `sample1` — an admitted Public
@@ -78,9 +81,63 @@ function watcher(): { changed(): boolean; close(): void } {
   return { changed: () => version() !== before, close: () => database.close() };
 }
 
+/** Every file under the data root with its size, and its modification time where SQLite's shared-memory index cannot move it. */
+function dataRootFiles(): string[] {
+  const files: string[] = [];
+  const walk = (directory: string, prefix: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) { walk(path, `${prefix}${entry.name}/`); continue; }
+      const stat = statSync(path);
+      files.push(`${prefix}${entry.name}:${stat.size}${/-shm$/u.test(entry.name) ? '' : `:${stat.mtimeMs}`}`);
+    }
+  };
+  walk(roots.dataRoot, '');
+  return files.sort();
+}
+
 const CHINESE = '第一章 春\n\n她推开窗。风从河上吹来，带着潮湿的气味！他问：“你还记得吗？”\n\n第二段只有一句话\n\n圆周率约等于3.14。最后一句……';
 
 describe('资料索引 over the real store', () => {
+  it('searches only referable materials without writes, bounds previews, and refuses withdrawal mid-Run (#893)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const bookId = emptyBook(store, '检索边界回归');
+      const item = await put(store, file('retrieval.md', '# Public synthetic vocabulary\n\nalpha beta gamma\n\nalpha delta'), '检索词表');
+      store.startMaterialIndexing(); await store.settleMaterialIndexing();
+      expect((await store.searchReferableMaterials({ bookId, query: 'alpha', k: 8 })).candidates.length).toBe(0);
+      store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+      store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      const pin = store.pinMaterialReference(bookId, item.materialId);
+      const boundary = { bookId, references: [pin] };
+      const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => store.readMaterialIndexForTask(scope, id, from)));
+      const watching = watcher();
+      const files = dataRootFiles();
+      try {
+        const page = await store.searchReferableMaterials({ bookId, query: 'alpha', k: 1 });
+        expect(page.candidates.length).toBe(1);
+        expect(page.candidates.every((candidate) => candidate.sourceId === item.materialId && candidate.preview.length <= 200 && candidate.anchor.segmentOrdinal !== undefined)).toBe(true);
+        const candidates = await index.retrieve('alpha');
+        expect(index.exactFetch(candidates[0]!.candidateId).text.length > 0).toBe(true);
+        expect(watching.changed()).toBe(false);
+        // Nothing persisted: no index, embedding or projection file is written anywhere under the data root.
+        expect(dataRootFiles()).toEqual(files);
+        await expect(store.searchReferableMaterials({ bookId, query: 'alpha', k: 9 })).rejects.toMatchObject({ code: 'RETRIEVAL_ARGUMENTS_INVALID' });
+        // Hybrid ranking (#892 seam): without the item's vectors only the lexical rank counts; once the editor builds them, the
+        // pinned build's own vectors rank the same paragraph too and reciprocal-rank fusion lifts it above a single rank.
+        expect(Math.max(...(await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 })).candidates.map((candidate) => candidate.score))).toBeLessThanOrEqual(1 / 61);
+        store.buildMaterialVectors(item.materialId);
+        await store.settleMaterialLayers();
+        const hybrid = await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 });
+        expect(hybrid.candidates[0]!.score).toBeGreaterThan(1 / 61);
+        expect(hybrid.candidates.every((candidate) => candidate.sourceId === item.materialId && candidate.revisionOrIndexDigest === pin.indexDigest)).toBe(true);
+        store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+        expect((await index.retrieve('alpha')).length).toBe(0);
+        expect(() => index.exactFetch(candidates[0]!.candidateId)).toThrowError('MATERIAL_REFERENCE_UNAVAILABLE');
+      } finally { watching.close(); index.dispose(); }
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
   it('builds the four layers of a collected book on this machine, pages its sentence anchors, and says 索引完成', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -88,8 +145,8 @@ describe('资料索引 over the real store', () => {
       // A store that does not serve builds nothing by itself: the item waits, every layer but the original pending, the
       // deferred ones not provided from the start.
       expect(added.index).toEqual({
-        state: 'queued', reason: null, builtAt: null, digest: null, metadata: null,
-        layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending', vectors: 'deferred' },
+        state: 'queued', reason: null, builtAt: null, digest: null, metadata: null, vectors: null, translation: null,
+        layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending', vectors: 'pending' },
       });
       expect(await refusal(() => store.inspectLibraryMaterialSegments({ materialId: added.materialId, from: 1 }))).toBe('MATERIAL_INDEX_NOT_READY');
 
@@ -98,7 +155,8 @@ describe('资料索引 over the real store', () => {
       const built = store.inspectLibraryMaterial(added.materialId).index;
       expect(built.state).toBe('complete');
       expect(built.reason).toBeNull();
-      expect(built.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'deferred' });
+      // Its similarity vectors wait for the editor to ask (Issue #892): never built on open.
+      expect(built.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'not-built' });
       expect(built.metadata!.language).toBe('zh');
       expect(built.metadata!.paragraphs).toBeGreaterThan(MAX_MATERIAL_SEGMENTS_PAGE);
       expect(built.metadata!.sentences).toBeGreaterThanOrEqual(built.metadata!.paragraphs);
@@ -171,7 +229,8 @@ describe('资料索引 over the real store', () => {
     try {
       const chinese = await put(store, file('中文笔记.txt', CHINESE), '中文笔记');
       const english = await put(store, file('notes.md', '# Field notes\n\nThe river rose at dawn. Nobody slept.\n\nA second paragraph, with pi near 3.14 inside it.\n'), 'Field notes');
-      const pdf = await put(store, file('scan.pdf', '%PDF-1.4\n% synthetic test bytes, not a real document\n'), '扫描件');
+      // A scan: a PDF whose one page carries only an image (Issue #892).
+      const pdf = await put(store, file('scan.pdf', syntheticPdf({ pages: [[['x']]], imageOnly: new Set([0]) })), '扫描件');
       const page = await put(store, file('page.html', '<!doctype html><html><body><p>网页</p></body></html>'), '网页', 'web');
       const blank = await put(store, file('blank.txt', '   \n\n  \n'), '空白');
       // A Word file AI7 itself would write for no paragraphs at all: the parser finds no text block in it.
@@ -181,7 +240,7 @@ describe('资料索引 over the real store', () => {
 
       const zh = store.inspectLibraryMaterial(chinese.materialId).index;
       expect([zh.state, zh.metadata, zh.layers.translation]).toEqual(['complete',
-        { documentTitle: null, language: 'zh', paragraphs: 4, headings: 0, sentences: 7, characters: zh.metadata!.characters }, 'not-needed']);
+        { documentTitle: null, language: 'zh', paragraphs: 4, headings: 0, sentences: 7, characters: zh.metadata!.characters, pages: null }, 'not-needed']);
       const segments = store.inspectLibraryMaterialSegments({ materialId: chinese.materialId, from: 1 }).segments;
       expect(segments.map((segment) => segment.sentences.map(([start, end]) => segment.text.slice(start, end)))).toEqual([
         ['第一章 春'],
@@ -191,15 +250,17 @@ describe('资料索引 over the real store', () => {
       ]);
 
       const en = store.inspectLibraryMaterial(english.materialId).index;
-      // Non-Chinese text: its 来源译文 needs a Model Role and is not provided — never a fabricated translation.
-      expect([en.state, en.metadata!.language, en.metadata!.headings, en.layers.translation, en.layers.segments]).toEqual(['complete', 'other', 1, 'deferred', 'complete']);
+      // Non-Chinese text: its 来源译文 is offered, and refused while no rule of the selected policy names it — never a
+      // fabricated translation (Issue #892).
+      expect([en.state, en.metadata!.language, en.metadata!.headings, en.layers.translation, en.layers.segments]).toEqual(['complete', 'other', 1, 'not-built', 'complete']);
+      expect(en.translation).toEqual({ state: 'not-built', translated: 0, total: 3, model: null, request: { available: false, reason: '当前策略未开放来源译文' }, lastFailure: null });
       expect(store.inspectLibraryMaterialSegments({ materialId: english.materialId, from: 1 }).segments.map((segment) => segment.sentences.length)).toEqual([1, 2, 1]);
 
-      // A PDF's text and recognition need a local dependency the Owner has not admitted; a file with no text has none. Each
-      // is a build that says so, and the original and metadata stand. A web page is read since Issue #428's formats.
+      // A scan needs recognition, which is not provided (Issue #892); a file with no text has none. Each is a build that says
+      // so, and the original and metadata stand. A web page is read since Issue #428's formats.
       expect(store.inspectLibraryMaterial(pdf.materialId).index).toMatchObject({
-        state: 'unsupported', reason: 'needs-local-dependency',
-        layers: { original: 'complete', metadata: 'complete', text: 'deferred', recognition: 'deferred', translation: 'deferred', segments: 'deferred', vectors: 'deferred' },
+        state: 'unsupported', reason: 'needs-recognition', vectors: null, translation: null,
+        layers: { original: 'complete', metadata: 'complete', text: 'unsupported', recognition: 'deferred', translation: 'unsupported', segments: 'unsupported', vectors: 'unsupported' },
       });
       expect(store.inspectLibraryMaterial(page.materialId).index).toMatchObject({
         state: 'complete', reason: null, layers: { text: 'complete', recognition: 'not-needed', segments: 'complete' },
@@ -265,7 +326,7 @@ describe('资料索引 over the real store', () => {
         const index = store.inspectLibraryMaterial(item.materialId).index;
         expect([index.state, index.reason, index.metadata?.documentTitle, index.metadata?.language, index.metadata?.headings, index.metadata?.paragraphs])
           .toEqual(['complete', null, title, 'zh', 1, sentences.length]);
-        expect(index.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'deferred' });
+        expect(index.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'not-built' });
         const segments = segmentsOf(item.materialId);
         expect(segments.map((segment) => segment.sentences.map(([start, end]) => segment.text.slice(start, end)))).toEqual(sentences);
         expect(segments.map((segment) => segment.kind)).toEqual(['heading', ...sentences.slice(1).map(() => 'paragraph')]);

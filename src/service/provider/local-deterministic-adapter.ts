@@ -1,4 +1,7 @@
-import type { LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
+import type { CallId, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
+import { isRecord } from '../analysis/canonical.js';
+import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
+import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage, dialogueQuestionDigest, type DialogueMessageInput } from '../dialogue/contract.js';
 import { sha256Hex } from '../analysis/canonical.js';
 import { clarificationMessageRequestDigest } from './clarification-contract.js';
 import {
@@ -58,8 +61,20 @@ import {
 } from '../writing/writing-contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
-import { lastUserMessageText } from './payload.js';
+import { lastUserMessageText, messageText, toolResultOf } from './payload.js';
 import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type ResolvedModelFixture } from './model-fixture.js';
+
+/** Explicit authored fixture stimulus only; recorded fixtures and every remote route remain outside this stub. */
+export function dialogueRetrievalFixtureRule(fixture: ResolvedModelFixture, message: DialogueMessageInput): LocalToolsRule | null {
+  if (fixture.provenance !== 'authored') return null;
+  const key = dialogueRequestDigest(DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, message.kind, dialogueQuestionDigest(message.question));
+  const entry = resolveFixtureEntry(fixture.entries, 0, key, 1);
+  if (entry?.capture !== undefined || entry?.response.kind !== 'unit-result') return null;
+  try {
+    const value: unknown = JSON.parse(entry.response.text);
+    return isRecord(value) && value.schema === 'ai7.local-retrieval-stimulus/1' && value.query === 'selected-words' ? localToolsFromProjection(value) : null;
+  } catch { return null; }
+}
 
 /**
  * The AI7 local deterministic model adapter: replays an admitted fixture in-process and
@@ -394,6 +409,37 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     if (options.provider !== LOCAL_DETERMINISTIC_ROUTE || options.model !== LOCAL_DETERMINISTIC_MODEL) {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '确定性适配器只服务本地确定性路由。');
       return;
+    }
+    if (this.#promptContractDigest === DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST) {
+      const first = options.messages.find((message) => message.role === 'user' && message.source.kind === 'user');
+      const original = first === undefined ? null : messageText(first);
+      const message = original === null ? null : parseDialogueMessage(original);
+      if (message !== null && dialogueRetrievalFixtureRule(this.#fixture, message) !== null) {
+        const last = options.messages.at(-1);
+        const result = last === undefined ? null : toolResultOf(last);
+        let value: unknown = null;
+        try { value = result === null ? null : JSON.parse(result.text); } catch { /* Refusal produces an incomplete answer. */ }
+        const candidate = Array.isArray(value) ? value[0] as unknown : null;
+        const exact = isRecord(value) && isRecord(value.candidate) ? value.candidate : null;
+        if (result === null || (isRecord(candidate) && typeof candidate.candidateId === 'string')) {
+          const name = result === null ? 'retrieve' : 'exact_fetch';
+          const id = `local-retrieval-${result === null ? '1' : '2'}` as CallId;
+          const args = JSON.stringify(result === null ? { query: message.selection.slice(0, 1_000), k: 1, sourceKinds: ['manuscript'] } : { candidateId: (candidate as { candidateId: string }).candidateId });
+          yield { type: 'block-start', index: 0, blockType: 'tool-call' };
+          yield { type: 'tool-call-delta', index: 0, id, name, argumentsDelta: args };
+          yield { type: 'block-end', index: 0, block: { type: 'tool-call', id, name, arguments: args } };
+          yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } };
+          yield { type: 'finish', reason: { kind: 'tool-calls' } };
+          return;
+        }
+        const answer = exact !== null && typeof exact.candidateId === 'string' ? `已找到相关段落。[retrieval:${exact.candidateId}]` : '检索未完成。';
+        yield { type: 'block-start', index: 0, blockType: 'text' };
+        yield { type: 'text-delta', index: 0, text: answer };
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: answer } };
+        yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } };
+        yield { type: 'finish', reason: { kind: 'stop' } };
+        return;
+      }
     }
     const text = lastUserMessageText(options);
     const dialogue = text === null ? null : parseDialogueMessageHeader(text);

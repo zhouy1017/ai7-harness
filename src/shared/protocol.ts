@@ -2,7 +2,18 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 139 as const;
+export const SERVICE_PROTOCOL_VERSION = 142 as const;
+
+/** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
+export interface LocalRetrievalCandidateProjection {
+  readonly candidateId: string;
+  readonly sourceKind: 'manuscript' | 'material' | 'retained-source';
+  readonly sourceId: string;
+  readonly revisionOrIndexDigest: string;
+  readonly anchor: { readonly blockId?: string; readonly segmentOrdinal?: number; readonly start: number; readonly end: number };
+  readonly score: number;
+  readonly preview: string;
+}
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -139,6 +150,10 @@ export const IPC_CHANNELS = {
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
   inspectLibraryMaterialSegments: 'ai7:j15:inspect-library-material-segments',
+  buildMaterialVectors: 'ai7:j15:build-material-vectors',
+  queryMaterialVectors: 'ai7:j15:query-material-vectors',
+  requestMaterialTranslation: 'ai7:j15:request-material-translation',
+  searchReferableMaterials: 'ai7:search-referable-materials',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -1914,24 +1929,24 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ordinary-production';
 /**
- * Historical v5, v9, v10, v11, v12, v14 and the superseded web reservation v8 remain readable identities; selected v16 admits
+ * Historical v5, v9, v10, v11, v12, v14, v16 and the superseded web reservation v8 remain readable identities; selected v18 admits
  * baseline analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable
  * consistency and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and
  * 润色 and conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules, and AI7's platform
- * tools (websearch through the user-selected backend, webfetch) on review, writing and evaluation. A type member does
- * not select or activate a policy.
+ * tools (websearch through the user-selected backend, webfetch) on review, writing and evaluation, and AI7's local targeted-retrieval
+ * tool on every rule but enrolled background analysis and material translation. A type member does not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17';
-/** Historical v5, v7, v8, v9, v10 and v11, the superseded web reservation v6, and selected v12. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19';
+/** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, and selected v13. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
- * Provider Processing v16 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
+ * Provider Processing v18 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
  * resolved once the manifest freezes and before the plan does.
  */
 export type DeveloperLiveCeiling =
@@ -2206,6 +2221,16 @@ export interface AdmittedProviderRule {
   readonly webSearchToolAllowed: boolean;
   /** The rule's platform tools as the launch verified them, or `null` exactly when `webSearchToolAllowed` is `false`. */
   readonly platformTools: AdmittedPlatformTools | null;
+  /**
+   * The rule's local tools as the launch verified them (Provider Processing v18 and v19): present on every admitted rule, with
+   * `targetedRetrieval.allowed` `false` for enrolled background analysis and material translation.
+   */
+  readonly localTools: AdmittedLocalTools;
+  /**
+   * Whether the rule lets a retained external source's passage be translated into Chinese by the Run's own model (来源译文;
+   * `sourceTranslationAllowed`, Provider Processing v18 and v19): `true` for the research review rule alone, `false` for every other rule.
+   */
+  readonly sourceTranslationAllowed: boolean;
 }
 
 /**
@@ -2237,6 +2262,31 @@ export interface AdmittedSearchBackend {
   readonly credentialSlot: string;
 }
 
+/**
+ * AI7's local tools one admitted rule names (Provider Processing v18 and v19, Issue #891; ADR 0026, ADR 0047), as the launch verified
+ * them against the bounds of this build: eligibility only. Targeted retrieval reads only the sources the Run's authorization pinned,
+ * returns ranked candidates with anchors, sends nothing outside the process and counts its calls and tokens into the Run ceiling; a
+ * citation needs an Exact Fetch of the pinned revision. Executing the tool belongs to the retrieval slice.
+ */
+export interface AdmittedLocalTools {
+  readonly targetedRetrieval: {
+    /** `false` exactly for enrolled background analysis and material translation: neither may initiate retrieval. */
+    readonly allowed: boolean;
+    /** The tool reads only what the Run was authorized to read: the manuscript revision, 允许参考 items at their frozen index version, retained sources. */
+    readonly source: 'authorized-pinned-sources-only';
+    /** At most this many retrieval calls per Run unit. */
+    readonly callsPerUnit: number;
+    /** Each call returns at most this many ranked candidates. */
+    readonly candidatesPerCall: number;
+    /** A citation without an Exact Fetch of the pinned revision is refused by the result validator. */
+    readonly exactFetchRequiredBeforeCitation: true;
+    /** Nothing leaves the process: no Egress Gate ticket, no host. */
+    readonly scope: 'no-egress';
+  };
+  /** The per-unit circuit breaker: after `roundTrips` consecutive tool round trips the unit ends, disclosed as `end` (检索未完成). */
+  readonly breaker: { readonly roundTrips: number; readonly end: string };
+}
+
 export interface LaunchPolicyProjection {
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
@@ -2250,20 +2300,20 @@ export interface LaunchPolicyProjection {
     liveTransmissionAllowed: boolean;
     /**
      * Whether the active Provider Processing policy names the cross-unit reduction's transmission
-     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v16 document it
+     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v18 document it
      * is `true`, and anything else — absent included — means the reduction does not dispatch.
      */
     crossUnitReductionAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the assurance sampling suboperation's
-     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v16
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v18
      * document it is `true`; anything else — absent included — means the suboperation does not
      * dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
-     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v16 document it is
+     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v18 document it is
      * `true`; anything else — absent included — means the turn does not dispatch and the report
      * records `policy-bounded` with its reason.
      */
@@ -2274,7 +2324,7 @@ export interface LaunchPolicyProjection {
      */
     readonly admittedRules: readonly AdmittedProviderRule[];
     /**
-     * Only under `ordinary-production` (Provider Processing v17): `setup-required` while the editor's own model service is not
+     * Only under `ordinary-production` (Provider Processing v19): `setup-required` while the editor's own model service is not
      * configured, so no rule is admitted; `configured` once the launch supplied a binding the policy allows, which fills every
      * admitted rule's route, endpoint, model and credential slot. Absent under every other scope.
      */
@@ -2740,6 +2790,9 @@ export const RUN_REPORT_USAGE_STAGES = ['units', 'cross-unit-reduction', 'assura
 export type RunReportUsageStageId = (typeof RUN_REPORT_USAGE_STAGES)[number];
 
 export interface RunReportUsageProjection {
+  retrievalCalls?: number;
+  exactFetchCalls?: number;
+  refusedRetrievalCalls?: number;
   searchCalls?: Readonly<Record<string, number>>;
   refusedSearchCalls?: number;
   fetchCount?: number;
@@ -4167,7 +4220,7 @@ export interface FactualReviewFindingProjection {
 }
 
 /** Why an assertion never became a finding: its quotation could not be anchored in the block it named. */
-export type FactualExclusionReason = 'quote-not-found' | 'quote-ambiguous';
+export type FactualExclusionReason = 'quote-not-found' | 'quote-ambiguous' | 'not-exact-fetched';
 
 /**
  * The excluded appendix (ADR 0066): an assertion the model listed whose quotation Reference Integrity
@@ -4513,7 +4566,7 @@ export interface ReviewCategoryFindingProjection {
  * not in the block it named, or is there more than once — and the third is a 修改建议 whose replacement
  * is exactly the text already there, which proposes nothing.
  */
-export type ReviewFindingExclusionReason = 'quote-not-found' | 'quote-ambiguous' | 'replacement-identical';
+export type ReviewFindingExclusionReason = 'quote-not-found' | 'quote-ambiguous' | 'replacement-identical' | 'not-exact-fetched';
 
 /** The excluded appendix: what the model listed that the service could not anchor; never a mark. */
 export interface ReviewCategoryExcludedProjection {
@@ -6687,6 +6740,11 @@ export interface ExemplarBookProjection {
    */
   readonly withdrawn: boolean;
   readonly exemplars: ReadonlyArray<ExemplarProjection>;
+  /**
+   * The (imported) 范例 of this Book whose records no longer read, each named by Book and document type as 写作任务 names them
+   * (Issue #799, #800): they are skipped while the rest of the Book stays listed. Absent when nothing was skipped.
+   */
+  readonly skipped?: ReadonlyArray<string>;
   /** The Book's 审稿意见 as 范例 offers them (Issue #429; KB-006): one per template with a draft, the version 图书交付包 pins. */
   readonly readersReports: ReadonlyArray<ReadersReportExemplarProjection>;
 }
@@ -7367,7 +7425,8 @@ export type MaterialIndexState = 'queued' | 'indexing' | 'complete' | 'unsupport
  * recognition), AI7 reads no text of this format yet, the text crossed the local reading bounds, the file could not be
  * read, the kept original no longer matches its record, or the file holds no text. Since protocol 121 (Issue #428): the file
  * is encrypted or carries DRM (an EPUB's, an ODT saved with a password), or it declares entities or an internal DTD subset,
- * which AI7 never expands or fetches.
+ * which AI7 never expands or fetches. Since protocol 140 (Issue #892): a PDF whose pages carry no text layer to speak of — a
+ * scan — needs recognition (需要识别), which this build does not provide.
  */
 export type MaterialIndexReason =
   | 'needs-local-dependency'
@@ -7377,14 +7436,17 @@ export type MaterialIndexReason =
   | 'original-changed'
   | 'empty'
   | 'encrypted'
-  | 'external-entity';
+  | 'external-entity'
+  | 'needs-recognition';
 
 /**
  * One layer's state, in the five layers of KB-009 and the two parts its text layer names (recognition, Source
- * Translation). `deferred` is a layer this build of AI7 does not provide: similarity vectors and recognition need a local
- * dependency the Owner has not admitted, and machine Source Translation needs a Model Role.
+ * Translation). `deferred` is a layer this build of AI7 does not provide: recognition (OCR) needs a local dependency the
+ * Owner has not admitted. Since protocol 140 (Issue #892) the two layers made on request say where they stand: `not-built`
+ * before the editor asks (构建相似索引, 生成来源译文), `building` while they are made, `partial` when 来源译文 stopped part way,
+ * and `needs-model` when the similarity provider's model files are missing or do not match (需要模型文件).
  */
-export type MaterialIndexLayerState = 'complete' | 'pending' | 'unsupported' | 'failed' | 'deferred' | 'not-needed';
+export type MaterialIndexLayerState = 'complete' | 'pending' | 'unsupported' | 'failed' | 'deferred' | 'not-needed' | 'not-built' | 'building' | 'partial' | 'needs-model';
 
 /** The language the extracted text is mostly in: Chinese, another language, or no letters at all. */
 export type MaterialIndexLanguage = 'zh' | 'other' | 'none';
@@ -7414,7 +7476,69 @@ export interface MaterialIndexProjection {
     readonly headings: number;
     readonly sentences: number;
     readonly characters: number;
+    /** A PDF's page count (Issue #892); `null` for every format without pages. */
+    readonly pages: number | null;
   };
+  /**
+   * 相似段落检索 (Issue #892): the similarity vectors of the current build, made only when the editor asks, never on open;
+   * `null` until the text was read.
+   */
+  readonly vectors: null | MaterialVectorsProjection;
+  /** 来源译文 (Issue #892): the machine translation of a non-Chinese item's text, a separate layer; `null` when none is needed. */
+  readonly translation: null | MaterialTranslationProjection;
+}
+
+/** Where the current build's similarity vectors stand, and what makes them (Issue #892). */
+export interface MaterialVectorsProjection {
+  readonly state: 'not-built' | 'building' | 'complete' | 'needs-model';
+  /** The provider's identity, e.g. `ai7-embedding/stub-1`: what the vectors are made by. */
+  readonly embedding: string;
+  readonly dimensions: number;
+  /** How many of the build's paragraphs have their vector, of `total`. */
+  readonly built: number;
+  readonly total: number;
+  /** When the last vector was recorded; `null` before any. */
+  readonly builtAt: string | null;
+  /** The model digest the provider expects when its model files are missing or do not match; `null` otherwise. */
+  readonly expectedDigest: string | null;
+}
+
+/** Where the current build's 来源译文 stands, and whether the editor may ask for it now (Issue #892). */
+export interface MaterialTranslationProjection {
+  readonly state: 'not-built' | 'building' | 'complete' | 'partial';
+  /** How many of the build's paragraphs have their 来源译文, of `total`. */
+  readonly translated: number;
+  readonly total: number;
+  /** The model that made the translations on record; `null` before any. */
+  readonly model: string | null;
+  /** Whether 生成来源译文 may be asked now; `reason` says why not (「当前策略未开放来源译文」 when no rule names it). */
+  readonly request: { readonly available: boolean; readonly reason: string | null };
+  /** Why the last request stopped part way, in the editor's words; `null` when it did not. */
+  readonly lastFailure: string | null;
+}
+
+/** What a 来源译文 is labelled wherever it is shown or read: it is the machine's, never the original. */
+export const MATERIAL_TRANSLATION_LABEL = '来源译文';
+
+/** The candidates one 相似段落检索 answers at most, and the longest text it compares. */
+export const MAX_MATERIAL_VECTOR_CANDIDATES = 32;
+export const MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS = 2_000;
+
+/**
+ * 相似段落检索 in an item's 查看索引 (Issue #892): its paragraphs nearest the editor's text, each with its anchor and a short
+ * preview. The ranking finds candidates; the words are read where the anchor points (ADR 0026).
+ */
+export interface MaterialVectorSearchProjection {
+  readonly materialId: string;
+  readonly indexDigest: string;
+  readonly embedding: string;
+  readonly candidates: ReadonlyArray<{
+    readonly ordinal: number;
+    readonly page: number | null;
+    readonly pageParagraph: number | null;
+    readonly score: number;
+    readonly preview: string;
+  }>;
 }
 
 /** The paragraphs one answer of 查看分段 carries at most: one frame holds them at the paragraph bound. */
@@ -7440,6 +7564,11 @@ export interface MaterialSegmentsPageProjection {
     readonly text: string;
     /** Each sentence as `[start, end)` in UTF-16 code units of `text`, in order. */
     readonly sentences: ReadonlyArray<readonly [number, number]>;
+    /** A PDF paragraph's page and its place on that page (Issue #892); `null` for every format without pages. */
+    readonly page: number | null;
+    readonly pageParagraph: number | null;
+    /** Its 来源译文 when one was made (Issue #892): labelled, attributed to this paragraph, never in place of it. */
+    readonly translation: null | { readonly text: string; readonly model: string };
   }>;
   readonly next: number | null;
   readonly previous: number | null;
@@ -11088,6 +11217,8 @@ export interface DialogueAttemptProjection {
  * a Proposal (DIALOG-016).
  */
 export interface DialogueProjection {
+  readonly anchors?: ReadonlyArray<LocalRetrievalCandidateProjection>;
+  readonly retrievalWarning?: '未经精确取文' | null;
   readonly dialogueId: string;
   readonly bookId: string;
   readonly manuscriptId: string;
@@ -11989,6 +12120,25 @@ export interface ServiceOperationMap {
     input: { materialId: string; from: number };
     output: MaterialSegmentsPageProjection;
   };
+  /** 构建相似索引 (Issue #892): the current build's similarity vectors made on this machine, on request; the item as it now reads. */
+  buildMaterialVectors: {
+    input: { materialId: string };
+    output: LibraryMaterialProjection;
+  };
+  /** 相似段落检索 (Issue #892): an item's paragraphs nearest the editor's text, by its built vectors; read-only. */
+  queryMaterialVectors: {
+    input: { materialId: string; text: string; k: number };
+    output: MaterialVectorSearchProjection;
+  };
+  /** 生成来源译文 (Issue #892): a non-Chinese item's 来源译文 asked for, under the selected policy's rule; the item as it now reads. */
+  requestMaterialTranslation: {
+    input: { materialId: string };
+    output: LibraryMaterialProjection;
+  };
+  searchReferableMaterials: {
+    input: { bookId: string; query: string; k: number };
+    output: { candidates: ReadonlyArray<LocalRetrievalCandidateProjection> };
+  };
   /** 放入资料…: the absolute path main's picker returned, read as it would arrive; nothing is kept. */
   previewLibraryMaterial: {
     input: { path: string };
@@ -12660,6 +12810,13 @@ export interface RendererApi {
   readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;
   /** 查看分段: one page of the item's segments, read-only. */
   inspectLibraryMaterialSegments(input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']): Promise<MaterialSegmentsPageProjection>;
+  /** 构建相似索引: made on this machine; nothing is sent. */
+  buildMaterialVectors(input: ServiceOperationMap['buildMaterialVectors']['input']): Promise<LibraryMaterialProjection>;
+  /** 相似段落检索 in 查看索引: read-only. */
+  queryMaterialVectors(input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection>;
+  /** 生成来源译文: refused unless the selected policy's rule names it. */
+  requestMaterialTranslation(input: ServiceOperationMap['requestMaterialTranslation']['input']): Promise<LibraryMaterialProjection>;
+  searchReferableMaterials(input: ServiceOperationMap['searchReferableMaterials']['input']): Promise<ServiceOperationMap['searchReferableMaterials']['output']>;
   /** 放入资料…: the native picker, then the file as it would arrive; `null` when the picker was cancelled. */
   previewLibraryMaterial(): Promise<LibraryMaterialPreviewProjection | null>;
   addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection>;

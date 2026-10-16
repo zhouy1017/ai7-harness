@@ -50,7 +50,7 @@ const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f4
  * The J-04 model adapter's fixture: `sample1-baseline-happy` — every unit, the reduction and the sample of exact `sample1`
  * answered — with the one dialogue question J-16 asks answered over it (Issue #52, S17a).
  */
-const FIXTURE_IDENTITY = 'sample1-dialogue';
+const FIXTURE_IDENTITY = 'sample1-dialogue-retrieval';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
@@ -1366,6 +1366,24 @@ async function main() {
       markCard.suggestion.decision === null && markCard.suggestion.application === null, 'dialogue-mark', markCard);
     requireJourney((await workingDigest()) === digestBefore, 'dialogue-manuscript-unchanged');
     await waitForDialogue(renderer, (dialogue) => dialogue.attempts[2]?.converted === '已从这次回答新建 1 条修改建议。', 'dialogue-converted-line');
+
+    at('dialogue-retrieval-anchors');
+    // #893: the authored fixture explicitly asks the real registered local tools for a candidate and Exact Fetch.
+    // Only anchors cross this assertion boundary; no manuscript words enter a fixture or diagnostic.
+    await assertRenderer(renderer, MARK_HELPERS, 'dialogue-retrieval-helpers');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'dialogue-retrieval-close');
+    await openSelectionMenu(renderer, askBlock, 2, 22, 'dialogue-retrieval-menu');
+    await assertRenderer(renderer, `(() => { window.__j16.item('ask-on-selection')?.click(); return true; })()`, 'dialogue-retrieval-choose');
+    await waitFor(renderer, `window.__j16.composer()?.dataset.markComposer === 'ask-about-selection'`, 'dialogue-retrieval-composer');
+    await assertRenderer(renderer, `(() => { const input = window.__j16.composer()?.querySelector('[data-mark-field="question"]'); if (!(input instanceof HTMLTextAreaElement)) return false; input.value = '找到书中哪里有相近的文字？'; input.dispatchEvent(new Event('input', { bubbles: true })); return window.__j16.act('submit'); })()`, 'dialogue-retrieval-submit');
+    await waitFor(renderer, `document.querySelector('#task-drawer .dialogue [data-dialogue-retrieval-anchor]') instanceof HTMLButtonElement`, 'dialogue-retrieval-anchor-visible', 60_000);
+    const retrievalDialogue = await renderer.evaluate(`(() => { const dialogueId = document.querySelector('#task-drawer .dialogue')?.dataset.dialogueId; return window.ai7.inspectDialogue({ dialogueId, afterFragment: 0 }); })()`);
+    requireJourney(retrievalDialogue?.attempts[0]?.state === 'completed' && retrievalDialogue.anchors?.length === 1 &&
+      retrievalDialogue.anchors[0].sourceKind === 'manuscript' && retrievalDialogue.anchors[0].anchor.blockId === askBlock &&
+      retrievalDialogue.anchors[0].anchor.end > retrievalDialogue.anchors[0].anchor.start && retrievalDialogue.retrievalWarning === null,
+      'dialogue-retrieval-exact-anchor');
+    await clickSelector(renderer, '#task-drawer .dialogue [data-dialogue-retrieval-anchor]', 'dialogue-retrieval-jump');
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${askBlock}"]') !== null`, 'dialogue-retrieval-jumped');
 
     // ---- 就这段发起任务… (Issue #423, plan slice S77b; TASK-001 to 004, TASK-044, TASK-046) -------------------------------
     at('selection-task-menu');

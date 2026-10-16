@@ -45,6 +45,7 @@ function harness(items: Item[]) {
   let identities = 0;
   let paints = 0;
   const context = createContext({
+    api: {},
     busy: false, CSS: { escape: (value: string) => value }, writingMaterialLabel, writingMaterialsMore, WRITING_MATERIALS_AT_LIMIT, writingMaterialsOverTotalNote,
     el: (tag: string, className?: string, text?: string) => new Element(tag, className, text),
     uid: () => `control-${++identities}`,

@@ -1,30 +1,33 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedLocalTools, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/provider-configuration.generated.js';
 import {
   PLATFORM_TOOL_BREAKER_END, PLATFORM_TOOL_ROUND_TRIP_BREAKER, WEBFETCH_MAX_BYTES, WEBFETCH_TIMEOUT_SECONDS, isConfiguredPlatformTools, readPlatformToolsRule,
 } from './provider/platform-tools.js';
+import {
+  LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_CALLS_PER_UNIT, LOCAL_TOOL_CANDIDATES_PER_CALL, LOCAL_TOOL_ROUND_TRIP_BREAKER, readLocalToolsRule,
+} from './provider/local-tools.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v12, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v13, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
- * Provider Processing v16; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v17, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * Provider Processing v18; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
+ * and binds v19, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v12' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v12.json';
-const ACTIVE_SET_SHA256 = 'e841b438da109d866d990cc788ffd7c45edcb38a5121d8b18c41a0345e75693e';
+export const ACTIVE_SET_VERSION = 'v13' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v13.json';
+const ACTIVE_SET_SHA256 = '8d3536cf67989693a395c3699d60db3a508acaa3b7f7db6ab147bfb04e15338d';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -37,14 +40,14 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v17',
-    canonicalPath: 'docs/policies/provider-processing-policy.v17.json',
-    sha256: 'e5dba26a71704016b9af9864c56aa508aa2bcebe75225a8e4e7af1c1fa67236b',
+    version: 'v19',
+    canonicalPath: 'docs/policies/provider-processing-policy.v19.json',
+    sha256: 'f13c6f412adebf863f63b14640799fb7ffcbafcf05d6ace5437b806a0d4ccf16',
   },
   'developer-live': {
-    version: 'v16',
-    canonicalPath: 'docs/policies/provider-processing-policy.v16.json',
-    sha256: 'c6c3b51c346d4ab4011f03835f8650c503dd87dfa02617bde4b3a0707cd8701d',
+    version: 'v18',
+    canonicalPath: 'docs/policies/provider-processing-policy.v18.json',
+    sha256: '4c0d56cbb3fca6af392ea6d3757a55b93251a345900620564d39373889a09dba',
   },
 } as const;
 /**
@@ -460,7 +463,59 @@ function verifyPlatformTools(rule: Record<string, unknown>, scope: 'developer-li
   };
 }
 
-/** The rule id of the enrolled background analysis rule, the same in Provider Processing v14 to v17 (the one rule with a background origin). */
+/**
+ * The `localTools` block every rule of Provider Processing v18 (developer-live) and v19 (ordinary-production) must state (Issue
+ * #891; ADR 0026, ADR 0047): targeted retrieval over the Run's authorized pinned sources, no egress, an Exact Fetch before any
+ * citation, at most 5 calls of 8 candidates per unit, and a 128-round-trip breaker ending 检索未完成. Enrolled background analysis
+ * and 来源译文 state the same block with retrieval not allowed. The bounds are this build's constants.
+ */
+function expectedLocalTools(allowed: boolean): Record<string, unknown> {
+  return {
+    targetedRetrieval: {
+      allowed,
+      source: 'authorized-pinned-sources-only',
+      callsPerUnit: LOCAL_TOOL_CALLS_PER_UNIT,
+      candidatesPerCall: LOCAL_TOOL_CANDIDATES_PER_CALL,
+      exactFetchRequiredBeforeCitation: true,
+      scope: 'no-egress',
+    },
+    breaker: { roundTrips: LOCAL_TOOL_ROUND_TRIP_BREAKER, end: LOCAL_TOOL_BREAKER_END },
+  };
+}
+
+/**
+ * A rule's local tools (Provider Processing v18 and v19), read whole: every rule states exactly the expected block, with
+ * `targetedRetrieval.allowed` false for the enrolled background rule and the 来源译文 rule (a bounded translation of one excerpt
+ * has nothing to search) and true for every other. A missing, malformed or tampered
+ * term, a changed bound, or retrieval allowed in the background is a policy this launch cannot read. Returns the projection of
+ * the verified block.
+ */
+function verifyLocalTools(rule: Record<string, unknown>, noRetrieval: boolean): AdmittedLocalTools {
+  requirePolicy(sameValue(rule['localTools'], expectedLocalTools(!noRetrieval)));
+  let reading: ReturnType<typeof readLocalToolsRule>;
+  try {
+    reading = readLocalToolsRule(rule);
+  } catch {
+    reading = null;
+  }
+  requirePolicy(reading !== null);
+  return { targetedRetrieval: { ...reading.targetedRetrieval }, breaker: { ...reading.breaker } };
+}
+
+/** The task kind of 来源译文 of a 资料库 material (Provider Processing v18 and v19, Issue #891): one foreground attempt on the Fast Interaction Role. */
+export const MATERIAL_TRANSLATION_KIND = 'material-translation';
+
+/**
+ * A rule's `sourceTranslationAllowed` (Provider Processing v18 and v19): the research review rule states `true` so a retained external
+ * source's passage may be translated into Chinese by the Run's own model; every other rule names no such term. A missing,
+ * non-`true` or unexpected term is a policy this launch cannot read.
+ */
+function verifySourceTranslation(rule: Record<string, unknown>, allowed: boolean): boolean {
+  requirePolicy(allowed ? rule['sourceTranslationAllowed'] === true : !Object.hasOwn(rule, 'sourceTranslationAllowed'));
+  return allowed;
+}
+
+/** The rule id of the enrolled background analysis rule, the same in Provider Processing v14 to v19 (the one rule with a background origin). */
 export const BACKGROUND_ANALYSIS_RULE_ID = 'enrolled-background-manuscript-analysis-processing';
 /** A Run-based rule's model-initiated clarification (v14 to v17): one question per unit, the unit waits, an unanswered question times out at 24 hours. */
 const CLARIFICATION_ASKS = {
@@ -549,6 +604,8 @@ interface DeveloperLiveRuleReading {
   readonly background?: true;
   /** Whether the rule may research (Provider Processing v16): its web switch is on and it names the platform tools block. */
   readonly platformTools: boolean;
+  /** Whether the rule states `sourceTranslationAllowed: true` (Provider Processing v18): the research review rule alone; every other rule names no such term. */
+  readonly sourceTranslation?: true;
   readonly verify: (rule: Record<string, unknown>) => void;
 }
 
@@ -602,6 +659,38 @@ function verifySuggestionRule(rule: Record<string, unknown>, sourceKey: 'editorS
   // The output is a Suggestion the editor decides on, never a manuscript change.
   const output = rule['output'];
   requirePolicy(isRecord(output) && output['suggestionsOnly'] === true && output['appliesManuscriptChange'] === false);
+}
+
+/**
+ * 来源译文 of one frozen 资料库 excerpt (Provider Processing v18): one foreground editor action, one session and one bounded payload on the
+ * Fast Interaction Role, no Run and so no Run ceiling, no synthesis, reflection or assurance sample, no web, no Series Knowledge.
+ */
+function verifyMaterialTranslationRule(rule: Record<string, unknown>): void {
+  const origin = rule['authorityOrigin'];
+  requirePolicy(isRecord(origin) && origin['foregroundEditorActionRequired'] === true &&
+    origin['matchingActiveDefaultExecutionRuleAllowed'] === false && origin['backgroundAnalysisEnrollmentAllowed'] === false &&
+    origin['idleScheduledImportTriggeredOrCrossRunDispatchAllowed'] === false);
+  const source = rule['source'] as Record<string, unknown>;
+  requirePolicy(source['frozenMaterialExcerptOnly'] === true && source['materialReferencesAllowed'] === true &&
+    source['seriesKnowledgeAllowed'] === false && source['editorialDeliverablesAllowed'] === false);
+  const transmissions = rule['transmissions'] as Record<string, unknown>;
+  requirePolicy(
+    transmissions['oneTechnicalSessionPerAttempt'] === true &&
+      transmissions['oneBoundedPayloadPerAttempt'] === true &&
+      transmissions['payloadLimitedToFrozenContractAndMaterialExcerpt'] === true &&
+      transmissions['crossUnitSynthesisAllowed'] === false &&
+      transmissions['crossUnitReductionAllowed'] === false &&
+      transmissions['assuranceSamplingAllowed'] === false &&
+      transmissions['runReportReflectionAllowed'] === false &&
+      transmissions['automaticResendInsideStoppedSessionAllowed'] === false,
+  );
+  const preconditions = rule['authorizationPreconditions'];
+  requirePolicy(isRecord(preconditions) && preconditions['exactProviderBindingRequired'] === true &&
+    preconditions['finalProviderPayloadEgressGateRequired'] === true && preconditions['frozenBeforeTransmission'] === true && preconditions['runBudgetCeilingApplies'] === false);
+  const limit = rule['providerAccountLimit'] as Record<string, unknown>;
+  requirePolicy(limit['endsAttemptAsProviderAccountLimit'] === true);
+  // A translation is a transmission that adds nothing to the manuscript: no output block, nothing to apply.
+  requirePolicy(!Object.hasOwn(rule, 'output'));
 }
 
 const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> = {
@@ -670,6 +759,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     crossUnitSynthesisAllowed: false,
     clarification: true,
     platformTools: true,
+    sourceTranslation: true,
     verify: (rule) => {
       // Since v14 the review kind also admits its matching active Default Execution Rule (审阅 快速开始), as writing does.
       verifyPlannedRunOrigin(rule, true, true);
@@ -732,11 +822,21 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     platformTools: false,
     verify: verifyBackgroundRule,
   },
+  // 来源译文 of 资料库 materials (Provider Processing v18, Issue #891): the Fast Interaction Role translates one frozen excerpt of an admitted public text.
+  'developer-live-public-samplebook-material-translation': {
+    modelRole: 'Fast Interaction Role',
+    taskKinds: [MATERIAL_TRANSLATION_KIND],
+    outboundDataCategories: ['public-or-synthetic'],
+    crossUnitSynthesisAllowed: false,
+    clarification: false,
+    platformTools: false,
+    verify: verifyMaterialTranslationRule,
+  },
 };
 
 /**
- * Provider Processing v16 (and v14, v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one
- * this launch can read and each bound exactly to the one Go route. All eight rules of v16 must be present, the three that may research
+ * Provider Processing v18 (and v16, v14, v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one
+ * this launch can read and each bound exactly to the one Go route. All nine rules of v18 must be present, the three that may research
  * (review, writing, evaluation) each with the platform tools block the search backend registry implies. The baseline analysis rule must be among them; its three
  * declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling default of ADR 0070, and the house-people
  * redaction rule of ADR 0079 §4.4 are read as v9 read them. Every other rule is read from its own entry of
@@ -792,6 +892,8 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
     reading.verify(rule);
     verifyClarification(rule, reading.clarification);
     const platformTools = verifyPlatformTools(rule, 'developer-live', reading.platformTools);
+    const localTools = verifyLocalTools(rule, reading.background === true || reading.taskKinds.includes(MATERIAL_TRANSLATION_KIND));
+    const sourceTranslationAllowed = verifySourceTranslation(rule, reading.sourceTranslation === true);
     admittedRules.push({
       ruleId,
       taskKinds: [...reading.taskKinds],
@@ -810,6 +912,8 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
       matchingActiveDefaultExecutionRuleAllowed: (rule['authorityOrigin'] as Record<string, unknown>)['matchingActiveDefaultExecutionRuleAllowed'] === true,
       webSearchToolAllowed: platformTools !== null,
       platformTools,
+      localTools,
+      sourceTranslationAllowed,
     });
   }
   requirePolicy(seen.has(DEVELOPER_LIVE_POLICY_BINDING.ruleId) && seen.size === Object.keys(DEVELOPER_LIVE_RULES).length);
@@ -1005,6 +1109,18 @@ const PRODUCTION_SUGGESTION_TRANSMISSIONS = {
   runReportReflectionAllowed: false,
 } as const;
 const PRODUCTION_SUGGESTION_OUTPUT = { suggestionsOnly: true, appliesManuscriptChange: false } as const;
+const PRODUCTION_TRANSLATION_TRANSMISSIONS = {
+  oneTechnicalSessionPerAttempt: true,
+  oneBoundedPayloadPerAttempt: true,
+  payloadLimitedToFrozenContractAndMaterialExcerpt: true,
+  crossUnitSynthesisAllowed: false,
+  automaticResendInsideStoppedSessionAllowed: false,
+  identicalRequestReplaysFromProviderResultCache: false,
+  webSearchToolAllowed: false,
+  crossUnitReductionAllowed: false,
+  assuranceSamplingAllowed: false,
+  runReportReflectionAllowed: false,
+} as const;
 const PRODUCTION_ADMITTED_INPUTS = 'user-owned-manuscripts-and-house-knowledge';
 /** The identifiers Provider Processing v6 introduced for the editor's own unpublished material. */
 const PRODUCTION_UNPUBLISHED_CLASSES = ['unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content'] as const;
@@ -1020,7 +1136,7 @@ function sameBlock(actual: unknown, expected: Readonly<Record<string, unknown>>)
 function productionSource(
   materialReferences: boolean,
   editorialDeliverables: boolean,
-  kindTerm?: 'editorSelectedPassageOnly' | 'singleManuscriptConflictRegionOnly',
+  kindTerm?: 'editorSelectedPassageOnly' | 'singleManuscriptConflictRegionOnly' | 'frozenMaterialExcerptOnly',
 ): Readonly<Record<string, unknown>> {
   return {
     admittedInputs: PRODUCTION_ADMITTED_INPUTS,
@@ -1047,6 +1163,10 @@ interface OrdinaryProductionRuleReading {
   readonly background: boolean;
   /** Whether the rule may research (v17): its web switch is on and it names the platform tools block, compared whole. */
   readonly platformTools: boolean;
+  /** Whether the rule states `sourceTranslationAllowed: true` (v19): the research review rule alone. */
+  readonly sourceTranslation: boolean;
+  /** Whether this rule admits no model-initiated retrieval (v19): enrolled background analysis and 来源译文. */
+  readonly noRetrieval: boolean;
   readonly blocks: {
     readonly authorityOrigin: Readonly<Record<string, unknown>>;
     readonly executionMode: Readonly<Record<string, unknown>>;
@@ -1070,7 +1190,7 @@ function productionReading(
 ): OrdinaryProductionRuleReading {
   const policyCategories = [...gateCategories, ...PRODUCTION_UNPUBLISHED_CLASSES];
   return { modelRole, taskKinds, policyCategories, outboundDataCategories: policyCategories, crossUnitSynthesisAllowed,
-    clarification: blocks.clarification === CLARIFICATION_ASKS, background, platformTools: false, blocks };
+    clarification: blocks.clarification === CLARIFICATION_ASKS, background, platformTools: false, sourceTranslation: false, noRetrieval: background, blocks };
 }
 
 /**
@@ -1100,7 +1220,7 @@ const FOREGROUND_BLOCKS = {
 } as const;
 
 /**
- * The eight ordinary-production rules of Provider Processing v17, by rule id: the same kinds as developer-live v16, each
+ * The nine ordinary-production rules of Provider Processing v19, by rule id: the same kinds as developer-live v18, each
  * `eligible-only`, bound to the editor's own configured role binding rather than to one fixed route, and each read whole. Review,
  * writing and evaluation may research through the backend the editor configures with their own key.
  */
@@ -1109,10 +1229,10 @@ const ORDINARY_PRODUCTION_RULES: Readonly<Record<string, OrdinaryProductionRuleR
     { ...RUN_BLOCKS, source: productionSource(false, false), transmissions: PRODUCTION_BASELINE_TRANSMISSIONS }),
   'ordinary-production-editorial-dialogue': productionReading('Fast Interaction Role', ['editorial-dialogue'], ['editor-selected-manuscript-excerpt'],
     { ...FOREGROUND_BLOCKS, authorityOrigin: PRODUCTION_DIALOGUE_ORIGIN, source: productionSource(false, false, 'editorSelectedPassageOnly'), transmissions: PRODUCTION_DIALOGUE_TRANSMISSIONS, output: null }),
-  'ordinary-production-review': researchReading(productionReading('Main Editorial Role',
+  'ordinary-production-review': { ...researchReading(productionReading('Main Editorial Role',
     ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency'],
     ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt'],
-    { ...RUN_BLOCKS, authorityOrigin: PRODUCTION_REVIEW_ORIGIN, source: productionSource(true, true), transmissions: PRODUCTION_REVIEW_TRANSMISSIONS }), WEB_REVIEW_KINDS),
+    { ...RUN_BLOCKS, authorityOrigin: PRODUCTION_REVIEW_ORIGIN, source: productionSource(true, true), transmissions: PRODUCTION_REVIEW_TRANSMISSIONS }), WEB_REVIEW_KINDS), sourceTranslation: true },
   'ordinary-production-writing': researchReading(productionReading('Main Editorial Role', ['writing'],
     ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
     { ...RUN_BLOCKS, source: productionSource(true, false), transmissions: PRODUCTION_SYNTHESIS_TRANSMISSIONS }, true)),
@@ -1127,6 +1247,9 @@ const ORDINARY_PRODUCTION_RULES: Readonly<Record<string, OrdinaryProductionRuleR
   [BACKGROUND_ANALYSIS_RULE_ID]: productionReading('Main Editorial Role', ['baseline-manuscript-analysis'], ['public-or-synthetic'],
     { ...RUN_BLOCKS, authorityOrigin: BACKGROUND_ORIGIN, executionMode: PRODUCTION_BACKGROUND_EXECUTION_MODE, scopeLimits: BACKGROUND_SCOPE_LIMITS,
       authorizationPreconditions: BACKGROUND_PRECONDITIONS, source: productionSource(false, false), transmissions: PRODUCTION_BASELINE_TRANSMISSIONS }, false, true),
+  // 来源译文 of 资料库 materials (v19, Issue #891): one foreground attempt on the Fast Interaction Role over one frozen excerpt.
+  'ordinary-production-material-translation': { ...productionReading('Fast Interaction Role', [MATERIAL_TRANSLATION_KIND], ['frozen-material-reference-excerpt'],
+    { ...FOREGROUND_BLOCKS, authorityOrigin: PRODUCTION_FOREGROUND_ORIGIN, source: productionSource(true, false, 'frozenMaterialExcerptOnly'), transmissions: PRODUCTION_TRANSLATION_TRANSMISSIONS, output: null }), noRetrieval: true },
 };
 /** The rule every ordinary-production policy must carry, whose reading the projection's suboperation flags come from. */
 const ORDINARY_PRODUCTION_BASELINE_RULE_ID = 'ordinary-production-baseline-analysis';
@@ -1168,6 +1291,8 @@ export interface OrdinaryProductionPolicyReading {
     readonly reading: OrdinaryProductionRuleReading;
     readonly allowedRoutes: readonly string[];
     readonly platformTools: AdmittedPlatformTools | null;
+    /** The rule's verified local tools (v19): retrieval allowed on every rule but enrolled background analysis and material translation. */
+    readonly localTools: AdmittedLocalTools;
   }>;
 }
 
@@ -1184,7 +1309,7 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
 }
 
 /**
- * Provider Processing v17 (ordinary-production): default deny with eight eligible-only rules this launch can read, each bound to
+ * Provider Processing v19 (ordinary-production): default deny with nine eligible-only rules this launch can read, each bound to
  * a user-configured role binding, the three that may research each with the platform tools block the search backend registry implies. Everything is read whole and fails closed: a missing term, an unknown term, a rule id outside
  * `ORDINARY_PRODUCTION_RULES`, a repeated id, or any value that differs from the reading is a policy the launch cannot read.
  * The routing values themselves (route, endpoint, model, credential slot) are never source constants here: they are read from
@@ -1250,7 +1375,7 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
   requirePolicy(isRecord(decision) && exactKeys(decision, ['default', 'providerAllowRules']) && decision['default'] === 'deny' &&
     Array.isArray(decision['providerAllowRules']) && decision['providerAllowRules'].length === Object.keys(ORDINARY_PRODUCTION_RULES).length);
   const seen = new Set<string>();
-  const rules: Array<{ ruleId: string; reading: OrdinaryProductionRuleReading; allowedRoutes: readonly string[]; platformTools: AdmittedPlatformTools | null }> = [];
+  const rules: Array<{ ruleId: string; reading: OrdinaryProductionRuleReading; allowedRoutes: readonly string[]; platformTools: AdmittedPlatformTools | null; localTools: AdmittedLocalTools }> = [];
   for (const rule of decision['providerAllowRules'] as unknown[]) {
     requirePolicy(isRecord(rule) && typeof rule['ruleId'] === 'string' && !seen.has(rule['ruleId']) && Object.hasOwn(ORDINARY_PRODUCTION_RULES, rule['ruleId']));
     const ruleId = rule['ruleId'] as string;
@@ -1259,7 +1384,8 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
     const blocks = reading.blocks;
     requirePolicy(exactKeys(rule, [
       'ruleId', 'policyResult', 'purpose', 'authorityOrigin', 'executionMode', 'source', 'allowedOutboundDataCategories', 'redaction', 'providerBinding',
-      'transmissions', 'clarification', 'authorizationPreconditions', 'providerAccountLimit', 'capture', 'additionalPrivacyPrompts', 'allowedTaskKinds',
+      'transmissions', 'clarification', 'authorizationPreconditions', 'providerAccountLimit', 'capture', 'additionalPrivacyPrompts', 'allowedTaskKinds', 'localTools',
+      ...(reading.sourceTranslation ? ['sourceTranslationAllowed'] : []),
       ...(blocks.output === null ? [] : ['output']),
       ...(blocks.scopeLimits === null ? [] : ['scopeLimits']),
       ...(reading.platformTools ? ['platformTools'] : []),
@@ -1286,7 +1412,9 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
       productionDefaultsChanged: false,
     }));
     const platformTools = verifyPlatformTools(rule, 'ordinary-production', reading.platformTools);
-    rules.push({ ruleId, reading, allowedRoutes: routes, platformTools });
+    const localTools = verifyLocalTools(rule, reading.noRetrieval);
+    verifySourceTranslation(rule, reading.sourceTranslation);
+    rules.push({ ruleId, reading, allowedRoutes: routes, platformTools, localTools });
   }
   requirePolicy(seen.has(ORDINARY_PRODUCTION_BASELINE_RULE_ID));
   return { crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true, allowedBindings: mainBindings, rules };
@@ -1306,7 +1434,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
     candidate.route === binding.route && candidate.endpoint === binding.endpoint && candidate.model === binding.model && candidate.credentialSlot === binding.credentialSlot);
   if (allowed === undefined) return null;
   const admitted: AdmittedProviderRule[] = [];
-  for (const { ruleId, reading: kind, allowedRoutes, platformTools } of reading.rules) {
+  for (const { ruleId, reading: kind, allowedRoutes, platformTools, localTools } of reading.rules) {
     if (!allowedRoutes.includes(allowed.route)) return null;
     admitted.push({
       ruleId,
@@ -1326,6 +1454,8 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
       matchingActiveDefaultExecutionRuleAllowed: kind.blocks.authorityOrigin['matchingActiveDefaultExecutionRuleAllowed'] === true,
       webSearchToolAllowed: platformTools !== null,
       platformTools,
+      localTools: { targetedRetrieval: { ...localTools.targetedRetrieval }, breaker: { ...localTools.breaker } },
+      sourceTranslationAllowed: kind.sourceTranslation,
     });
   }
   return admitted;

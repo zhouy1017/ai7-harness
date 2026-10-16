@@ -29,6 +29,7 @@ import {
   CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST,
 } from './conflict-regenerate-contract.js';
 import { FastRoleError } from './fast-role-error.js';
+import { MATERIAL_TRANSLATION_KIND, MATERIAL_TRANSLATION_PROMPT_CONTRACT, MATERIAL_TRANSLATION_PROMPT_CONTRACT_DIGEST } from './material-translation-contract.js';
 import { EDITORIAL_POLISH_KIND, EDITORIAL_POLISH_PROMPT_CONTRACT, EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST } from './polish-contract.js';
 
 export { FastRoleError };
@@ -49,13 +50,18 @@ export { FastRoleError };
  * captured answer and nothing is sent twice; a request whose answer may have been billed and never came back whole is
  * outcome-unknown as `transmitOnce` defines it. Outside one — actual business — the request reaches the transport itself.
  */
-export type FastRoleKindId = typeof EDITORIAL_POLISH_KIND | typeof CONFLICT_REGENERATE_KIND;
+export type FastRoleKindId = typeof EDITORIAL_POLISH_KIND | typeof CONFLICT_REGENERATE_KIND | typeof MATERIAL_TRANSLATION_KIND;
 
 export interface FastRoleKindDefinition {
   readonly kindId: FastRoleKindId;
   /** The action as the editor names it, which every reason says. */
   readonly label: string;
   readonly category: OutboundDataCategory;
+  /**
+   * The category its words go out under ordinary production when it differs (生成来源译文, Issue #892: a 资料库 item's words
+   * are the house's material there, `frozen-material-reference-excerpt`); `category` otherwise.
+   */
+  readonly productionCategory?: OutboundDataCategory;
   readonly slice: ProviderTestItemSlice;
   readonly systemPrompt: string;
   readonly promptContractDigest: string;
@@ -78,7 +84,23 @@ export const FAST_ROLE_KINDS: Readonly<Record<FastRoleKindId, FastRoleKindDefini
     systemPrompt: CONFLICT_REGENERATE_PROMPT_CONTRACT.systemPrompt,
     promptContractDigest: CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST,
   },
+  // 生成来源译文 (Issue #892): a 资料库 item's paragraphs, a bounded batch per request. Under developer-live only an admitted
+  // public original goes (`material-translation-contract.ts`), as public-or-synthetic material.
+  [MATERIAL_TRANSLATION_KIND]: {
+    kindId: MATERIAL_TRANSLATION_KIND,
+    label: '生成来源译文',
+    category: 'public-or-synthetic',
+    productionCategory: 'frozen-material-reference-excerpt',
+    slice: 'S80',
+    systemPrompt: MATERIAL_TRANSLATION_PROMPT_CONTRACT.systemPrompt,
+    promptContractDigest: MATERIAL_TRANSLATION_PROMPT_CONTRACT_DIGEST,
+  },
 };
+
+/** The category a kind's words go out under in a live scope. */
+function categoryIn(kind: FastRoleKindDefinition, scope: 'developer-live' | 'ordinary-production'): OutboundDataCategory {
+  return scope === 'ordinary-production' ? kind.productionCategory ?? kind.category : kind.category;
+}
 
 /**
  * What a live launch gives the fast-role kinds: its runtime, the broker, and each kind's admitted route, if any. Under
@@ -95,11 +117,15 @@ export interface FastRoleLiveRoutes {
 
 /** The fast-role routes of a developer-live launch: each kind's route as the verified projection's policy admits it, or none. */
 export function fastRoleLiveRoutes(runtime: DeveloperLiveRuntime, policy: LaunchPolicyProjection, secretResolver: SecretResolver): FastRoleLiveRoutes {
-  const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => admittedFastRoleRoute(policy, kind.kindId, kind.category);
+  const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => admittedFastRoleRoute(policy, kind.kindId, categoryIn(kind, 'developer-live'));
   return {
     runtime,
     broker: new CredentialBroker(secretResolver),
-    routes: { [EDITORIAL_POLISH_KIND]: route(FAST_ROLE_KINDS[EDITORIAL_POLISH_KIND]), [CONFLICT_REGENERATE_KIND]: route(FAST_ROLE_KINDS[CONFLICT_REGENERATE_KIND]) },
+    routes: {
+      [EDITORIAL_POLISH_KIND]: route(FAST_ROLE_KINDS[EDITORIAL_POLISH_KIND]),
+      [CONFLICT_REGENERATE_KIND]: route(FAST_ROLE_KINDS[CONFLICT_REGENERATE_KIND]),
+      [MATERIAL_TRANSLATION_KIND]: route(FAST_ROLE_KINDS[MATERIAL_TRANSLATION_KIND]),
+    },
     credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
   };
 }
@@ -115,14 +141,18 @@ export function productionFastRoleRoutes(
   secretResolver: SecretResolver,
 ): FastRoleLiveRoutes {
   const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => {
-    const admitted = admittedFastRoleRoute(policy(), kind.kindId, kind.category);
+    const admitted = admittedFastRoleRoute(policy(), kind.kindId, categoryIn(kind, 'ordinary-production'));
     return admitted !== null && credentialReference() !== null ? admitted : null;
   };
   return {
     runtime,
     broker: new CredentialBroker(secretResolver, { developmentReferences: 'refused' }),
     get routes() {
-      return { [EDITORIAL_POLISH_KIND]: route(FAST_ROLE_KINDS[EDITORIAL_POLISH_KIND]), [CONFLICT_REGENERATE_KIND]: route(FAST_ROLE_KINDS[CONFLICT_REGENERATE_KIND]) };
+      return {
+        [EDITORIAL_POLISH_KIND]: route(FAST_ROLE_KINDS[EDITORIAL_POLISH_KIND]),
+        [CONFLICT_REGENERATE_KIND]: route(FAST_ROLE_KINDS[CONFLICT_REGENERATE_KIND]),
+        [MATERIAL_TRANSLATION_KIND]: route(FAST_ROLE_KINDS[MATERIAL_TRANSLATION_KIND]),
+      };
     },
     get credentialReference() {
       return credentialReference() ?? '';
@@ -154,7 +184,8 @@ export function fastRoleRouteRefusal(deps: FastRoleExecutionDeps, kindId: FastRo
     }
     return null;
   }
-  if (deps.fixture === null) return `当前运行范围未允许${kind.label}：这次启动没有可用的模型。`;
+  // The launch's deterministic fixture answers no 来源译文 (Issue #892): development-ci admits none.
+  if (deps.fixture === null || kindId === MATERIAL_TRANSLATION_KIND) return `当前运行范围未允许${kind.label}：这次启动没有可用的模型。`;
   return null;
 }
 
@@ -250,7 +281,7 @@ export class FastRoleExecutionOwner {
       model,
       systemPrompt,
       // The editor's own manuscript words, under the kind's own category: the local route, or a remote one whose rule names it.
-      outboundDataCategory: kind.category,
+      outboundDataCategory: route === null ? kind.category : categoryIn(kind, route.operationalScope),
       policy: route === null
         ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
         : route.operationalScope === 'ordinary-production'
@@ -258,7 +289,13 @@ export class FastRoleExecutionOwner {
           : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion as DeveloperLiveProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
       // The one message this request may send.
       admittedUserMessages: new Set([message]),
-      ...(route === null ? {} : { ruleOutboundCategories: route.outboundDataCategories }),
+      // 生成来源译文's production category is not one the route reader carries (Issue #892); its route was admitted only because
+      // the rule names exactly that category, so it is the rule's own, carried for this kind alone.
+      ...(route === null ? {} : {
+        ruleOutboundCategories: kind.kindId === MATERIAL_TRANSLATION_KIND
+          ? new Set([...route.outboundDataCategories, categoryIn(kind, route.operationalScope)])
+          : route.outboundDataCategories,
+      }),
     };
     // Ordinary production has no development validation, so no request ever reaches the developer cache or ledger (Issue #811).
     const validation = live === null || isOrdinaryProductionRuntime(live.runtime) ? null : live.runtime.launch.validation;
@@ -320,8 +357,14 @@ export class FastRoleExecutionOwner {
         gate: (payload) => evaluateEgress(payload, bindingFacts, {
           currentBindingDigest: () => current,
           acceptedOutputDigests: new Set(),
-          // No Run, so no per-Run ceiling applies; the single bounded payload is the bound, as the dialogue's is.
-          ...(route === null ? {} : { ceilingState: () => 'not-applicable' as const }),
+          // No Run, so no per-Run ceiling applies; the single bounded payload is the bound, as the dialogue's is. 生成来源译文's
+          // words are no manuscript excerpt, so that waiver is not theirs (Issue #892, brief revision 5): under developer-live each
+          // request is within its batch bound (20 paragraphs, 6,000 characters; a job at most 50 requests, each on the live-once
+          // ledger), and ordinary production leaves the ceiling to the editor as for a Run without one.
+          ...(route === null ? {} : {
+            ceilingState: () => kind.kindId !== MATERIAL_TRANSLATION_KIND ? 'not-applicable' as const
+              : route.operationalScope === 'developer-live' ? 'within' as const : 'unset' as const,
+          }),
         }),
         onTransmitTicket: (ticket) => {
           if (route === null) throw new FastRoleError('FAST_ROLE_REMOTE_FORBIDDEN', 'development-ci 下不得签发远程传输。');

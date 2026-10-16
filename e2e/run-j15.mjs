@@ -297,6 +297,24 @@ const READ_LIBRARY = `(() => {
         index: card.querySelector('section.material-index')?.dataset.indexState ?? null,
         indexLine: card.querySelector('.material-index-state')?.textContent ?? null,
         layers: Array.from(card.querySelectorAll('.material-index-layer'), (line) => [line.dataset.indexLayer, line.dataset.layerState, line.textContent]),
+        layerActions: (() => {
+          const build = card.querySelector('[data-library-action="build-vectors"]');
+          const request = card.querySelector('[data-library-action="request-translation"]');
+          return {
+            build: build instanceof HTMLButtonElement ? build.disabled : null,
+            translation: request instanceof HTMLButtonElement ? request.disabled : null,
+            translationNote: card.querySelector('.material-translation-note')?.textContent ?? null,
+            described: request instanceof HTMLElement ? request.getAttribute('aria-describedby') === card.querySelector('.material-translation-note')?.id : null,
+          };
+        })(),
+        vectorSearch: (() => {
+          const section = card.querySelector('.material-vector-search');
+          if (!(section instanceof HTMLElement)) return null;
+          return {
+            heading: section.querySelector('.material-vector-results-heading')?.textContent ?? null,
+            candidates: Array.from(section.querySelectorAll('.material-vector-candidate'), (item) => [item.dataset.candidateOrdinal, item.querySelector('.material-anchor')?.textContent ?? null]),
+          };
+        })(),
         segments: (() => {
           const reader = card.querySelector('.material-segments');
           if (!(reader instanceof HTMLElement) || reader.dataset.segmentsFrom === undefined) return null;
@@ -315,6 +333,48 @@ const READ_LIBRARY = `(() => {
     focus: active instanceof HTMLElement ? { tag: active.tagName, action: active.dataset.libraryAction ?? null, choice: active.dataset.libraryChoice ?? null } : null,
   };
 })()`;
+/**
+ * A synthetic two-page PDF in the runner's own words, never a manuscript (Issue #892): Chinese text in a Type0 font whose
+ * ToUnicode map is the identity, three paragraphs over two pages, and the document's own title in its information.
+ */
+function syntheticPdf() {
+  const hex = (text) => Array.from({ length: text.length }, (_, index) => text.charCodeAt(index).toString(16).padStart(4, '0')).join('');
+  const stream = (content) => `<< /Length ${Buffer.byteLength(content, 'latin1')} >>\nstream\n${content}\nendstream`;
+  const page = (paragraphs) => {
+    const operations = ['BT /F1 12 Tf'];
+    let y = 760;
+    for (const line of paragraphs) {
+      operations.push(`1 0 0 1 72 ${y} Tm <${hex(line)}> Tj`);
+      y -= 28;
+    }
+    operations.push('ET');
+    return stream(operations.join('\n'));
+  };
+  const toUnicode = '/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def /CMapName /Adobe-Identity-UCS def /CMapType 2 def 1 begincodespacerange <0000> <FFFF> endcodespacerange 1 beginbfrange <0000> <FFFF> <0000> endbfrange endcmap CMapName currentdict /CMap defineresource pop end end';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [8 0 R 10 0 R] /Count 2 >>',
+    '<< /Type /Font /Subtype /Type0 /BaseFont /AI7Synthetic /Encoding /Identity-H /DescendantFonts [4 0 R] /ToUnicode 5 0 R >>',
+    '<< /Type /Font /Subtype /CIDFontType2 /BaseFont /AI7Synthetic /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor 6 0 R /DW 500 >>',
+    stream(toUnicode),
+    '<< /Type /FontDescriptor /FontName /AI7Synthetic /Flags 4 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>',
+    page(['运行器自己写的第一页第一段。', '第一页第二段，有两句。这是第二句。']),
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>',
+    page(['第二页只有一段。']),
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R >>',
+    `<< /Title <FEFF${hex('合成 PDF')}> >>`,
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets = [];
+  objects.forEach((body, index) => {
+    offsets.push(Buffer.byteLength(out, 'latin1'));
+    out += `${index + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(out, 'latin1');
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 11 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
 /**
  * A synthetic EPUB in the runner's own words, never a manuscript (Issue #428): two chapters in reading order, the second
  * placed first in the manifest, and the book's own title in its package metadata.
@@ -402,6 +462,8 @@ async function constructPredecessorV12(dataRoot, bookId) {
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE material_index_translations;
+      DROP TABLE material_index_vectors;
       DROP TABLE analysis_outcome_resolutions;
       DROP TABLE material_index_segments;
       DROP TABLE material_index_builds;
@@ -1118,9 +1180,9 @@ async function main() {
 
     // ---- 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) ----------------------------
     at('knowledge-library-index');
-    // Built on this machine as it arrived, nothing asked: four layers read, and the three this build does not provide said so —
-    // recognition is not needed for a Word file, sample1 is Chinese so it needs no 来源译文, and similarity vectors wait for a
-    // local dependency. The anchors are positions: a Word file has no page numbers.
+    // Built on this machine as it arrived, nothing asked: four layers read — recognition is not needed for a Word file, sample1
+    // is Chinese so it needs no 来源译文, and similarity vectors wait for the editor to ask (Issue #892), never built on open.
+    // The anchors are positions: a Word file has no page numbers.
     const libraryIndexed = await readLibrary(renderer, (page) => page.cards[0]?.index === 'complete', 'library-index-built');
     const layers = new Map(libraryIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
     requireJourney(libraryIndexed.cards[0].indexLine === '已在本机建好' && layers.size === 7 &&
@@ -1130,7 +1192,8 @@ async function main() {
       JSON.stringify(layers.get('recognition')) === JSON.stringify(['not-needed', '不需要：文件里就是文字']) &&
       JSON.stringify(layers.get('translation')) === JSON.stringify(['not-needed', '不需要：中文资料']) &&
       layers.get('segments')?.[0] === 'complete' && /^\d+ 段 · \d+ 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）$/u.test(layers.get('segments')?.[1] ?? '') &&
-      JSON.stringify(layers.get('vectors')) === JSON.stringify(['deferred', '未提供（需要本地依赖）']),
+      JSON.stringify(layers.get('vectors')) === JSON.stringify(['not-built', '未构建：可以「构建相似索引」（在本机建立，不发送任何内容）']) &&
+      libraryIndexed.cards[0].layerActions.build === false && libraryIndexed.cards[0].layerActions.translation === null && libraryIndexed.cards[0].vectorSearch === null,
     'library-index-layers', libraryIndexed.cards[0].layers);
     const indexService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.state, material.index.reason, /^[0-9a-f]{64}$/u.test(material.index.digest ?? ''), material.index.metadata?.language ?? null, material.index.metadata?.paragraphs ?? 0])`);
     requireJourney(indexService[0] === 'complete' && indexService[1] === null && indexService[2] === true && indexService[3] === 'zh' && indexService[4] > 16,
@@ -1163,6 +1226,24 @@ async function main() {
       indexListed.next === '安全的下一步：查看索引', 'library-index-attention-words', indexListed);
     await clickSelector(renderer, `${indexSelector} button.global-attention-open`, 'library-index-attention-open');
     await readLibrary(renderer, (page) => page.state === 'ready' && page.cards.some((card) => card.id === materialId && card.index === 'complete'), 'library-index-attention-opened');
+
+    // 相似段落检索 (Issue #892): built on this machine only when the editor asks, by the built-in provider on this guest, then
+    // searched with the runner's own words. Only anchors are read back here, never the paragraphs' words.
+    at('knowledge-library-index-vectors');
+    const vectorCard = `article.library-material[data-material-id="${materialId}"]`;
+    await clickSelector(renderer, `${vectorCard} [data-library-action="build-vectors"]`, 'library-vectors-build');
+    const vectorsBuilt = await readLibrary(renderer, (page) => page.cards.find((card) => card.id === materialId)?.layers.some(([layer, state]) => layer === 'vectors' && state === 'complete') === true, 'library-vectors-built');
+    const vectorsLayer = vectorsBuilt.cards.find((card) => card.id === materialId).layers.find(([layer]) => layer === 'vectors');
+    requireJourney(vectorsLayer[2] === `已构建：${indexService[4]} 段 · 本机内置相似向量（按字词相近）`, 'library-vectors-layer', vectorsLayer);
+    const vectorsService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.vectors?.state ?? null, material.index.vectors?.embedding ?? null, material.index.vectors?.built ?? null, material.index.vectors?.total ?? null])`);
+    requireJourney(vectorsService[0] === 'complete' && vectorsService[1] === 'ai7-embedding/stub-1' && vectorsService[2] === indexService[4] && vectorsService[3] === indexService[4],
+      'library-vectors-service', vectorsService);
+    await fill(renderer, `${vectorCard} [data-library-field="vector-query"]`, '他们说话', 'library-vectors-query');
+    await clickSelector(renderer, `${vectorCard} [data-library-action="vector-search"]`, 'library-vectors-search');
+    const vectorsFound = await readLibrary(renderer, (page) => (page.cards.find((card) => card.id === materialId)?.vectorSearch?.candidates.length ?? 0) > 0, 'library-vectors-found');
+    const search = vectorsFound.cards.find((card) => card.id === materialId).vectorSearch;
+    requireJourney(/^相近段落：[1-5] 条（按相近程度排序；原文以分段为准）$/u.test(search.heading ?? '') && search.candidates.length <= 5 &&
+      search.candidates.every(([ordinal, anchor]) => /^\d+$/u.test(ordinal ?? '') && anchor === `第 ${ordinal} 段`), 'library-vectors-candidates', search);
 
     at('j14-library-reflow-forced-colors');
     // At 200% the item, its decisions and an open choice reflow into the width; under forced colours the card and the choice keep
@@ -1233,14 +1314,19 @@ async function main() {
       await readLibrary(renderer, (page) => page.cards.length === 20 && page.focus?.tag === 'H3', 'library-page-newest');
     }
 
-    // 资料索引 of a non-Chinese reference (Issue #428, S80a): its 来源译文 needs a Model Role and is not provided — said, never
-    // made up. The newest arrival is the runner's own English label.
+    // 资料索引 of a non-Chinese reference (Issue #428; Issue #892): it offers 生成来源译文, which this guest's rule set does not
+    // name — so the action is shown disabled, with 「当前策略未开放来源译文」 beside it, and nothing is ever made up. The newest
+    // arrival is the runner's own English label.
     at('knowledge-library-index-translation');
     const englishIndexed = await readLibrary(renderer, (page) => page.cards[0]?.index === 'complete', 'library-index-english-built');
     const englishLayers = new Map(englishIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
-    requireJourney(JSON.stringify(englishLayers.get('translation')) === JSON.stringify(['deferred', '未提供：非中文资料的机器译文要经模型服务，尚未接通']) &&
-      /^非中文 · 1 段/u.test(englishLayers.get('metadata')?.[1] ?? '') && englishLayers.get('segments')?.[0] === 'complete',
-    'library-index-translation-deferred', englishIndexed.cards[0].layers);
+    requireJourney(JSON.stringify(englishLayers.get('translation')) === JSON.stringify(['not-built', '未生成：非中文资料可以「生成来源译文」（每次至多 1,000 段）']) &&
+      /^非中文 · 1 段/u.test(englishLayers.get('metadata')?.[1] ?? '') && englishLayers.get('segments')?.[0] === 'complete' &&
+      englishIndexed.cards[0].layerActions.translation === true && englishIndexed.cards[0].layerActions.translationNote === '当前策略未开放来源译文' &&
+      englishIndexed.cards[0].layerActions.described === true,
+    'library-index-translation-not-admitted', englishIndexed.cards[0].layers);
+    const translationService = await renderer.evaluate(`window.ai7.requestMaterialTranslation({ materialId: ${JSON.stringify(englishIndexed.cards[0].id)} }).then(() => 'requested', (error) => String(error?.code ?? error?.message ?? 'refused'))`);
+    requireJourney(translationService !== 'requested', 'library-index-translation-refused', translationService);
 
     // 资料索引 of an EPUB (Issue #428): the runner's synthetic book arrives through the real picker, review and commit, and its
     // chapters are read on this machine in reading order into paragraphs with sentence anchors, under the book's own title.
@@ -1275,6 +1361,38 @@ async function main() {
     ]), 'library-epub-anchors', epubSegments.cards[0].segments);
     await clickSelector(renderer, `${epubCard} [data-library-action="segments-close"]`, 'library-epub-segments-close');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${epubCard} .material-segments [data-library-action="segments"]`)}) === document.activeElement`, 'library-epub-segments-closed', 10_000);
+    // 资料索引 of a PDF (Issue #892): the runner's synthetic two-page PDF arrives through the real picker, review and commit; its
+    // text layer is read on this machine into paragraphs, each cited by its page and its place on that page.
+    await closeBrowser();
+    const pdfPath = resolve(runRoot, 'library-reference.pdf');
+    await writeFile(pdfPath, syntheticPdf());
+    manager = await launch(pdfPath);
+    renderer = await waitForRenderer(manager, 'library-pdf-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'library-pdf-ready');
+    await click(renderer, '知识库', 'library-pdf-knowledge');
+    await click(renderer, '资料库', 'library-pdf-tab');
+    await readLibrary(renderer, (page) => page.state === 'ready', 'library-pdf-loaded');
+    await clickSelector(renderer, '[data-library-action="add"]', 'library-pdf-add');
+    await readLibrary(renderer, (page) => page.preview?.heading === '放入资料库：library-reference.pdf', 'library-pdf-preview');
+    await fill(renderer, '[data-library-field="title"]', '合成 PDF', 'library-pdf-title');
+    await clickSelector(renderer, '[data-library-choice="document"]', 'library-pdf-kind');
+    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-pdf-confirm');
+    const pdfIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === '合成 PDF' && page.cards[0].index === 'complete', 'library-pdf-indexed');
+    const pdfLayers = new Map(pdfIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
+    requireJourney(pdfLayers.get('metadata')?.[1] === '中文 · 3 段 · 0 个标题 · 文件自带标题「合成 PDF」' && pdfLayers.get('text')?.[0] === 'complete' &&
+      JSON.stringify(pdfLayers.get('recognition')) === JSON.stringify(['not-needed', '不需要：文件里就是文字']) &&
+      JSON.stringify(pdfLayers.get('segments')) === JSON.stringify(['complete', '3 段 · 4 句 · 2 页；每句可按「第 p 页第 m 段第 s 句」引用']),
+    'library-pdf-layers', pdfIndexed.cards[0].layers);
+    const pdfCard = `article.library-material[data-material-id="${pdfIndexed.cards[0].id}"]`;
+    await clickSelector(renderer, `${pdfCard} [data-library-action="segments"]`, 'library-pdf-segments-open');
+    const pdfSegments = await readLibrary(renderer, (page) => page.cards[0]?.segments?.from === '1', 'library-pdf-segments');
+    requireJourney(JSON.stringify(pdfSegments.cards[0].segments.items) === JSON.stringify([
+      ['1', [['1.1', '第 1 页第 1 段第 1 句']]],
+      ['2', [['2.1', '第 1 页第 2 段第 1 句'], ['2.2', '第 1 页第 2 段第 2 句']]],
+      ['3', [['3.1', '第 2 页第 1 段第 1 句']]],
+    ]), 'library-pdf-anchors', pdfSegments.cards[0].segments);
+    await clickSelector(renderer, `${pdfCard} [data-library-action="segments-close"]`, 'library-pdf-segments-close');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${pdfCard} .material-segments [data-library-action="segments"]`)}) === document.activeElement`, 'library-pdf-segments-closed', 10_000);
     at('knowledge-library-bounded-readers');
 
     // Populate the Book chooser through the ordinary creation form, then retain one explicit choice across replacement pages.

@@ -10,6 +10,9 @@ import { Ai7LocalDeterministicAdapter } from '../../src/service/provider/local-d
 import { fixtureEntryKey, loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { HARNESS_PACKAGE_PINS, describeComposition, prepareExecution } from '../../src/service/harness/primary-agent-harness.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
+import { EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST } from '../../src/service/fast-role/polish-contract.js';
+import { CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST } from '../../src/service/fast-role/conflict-regenerate-contract.js';
+import { DIALOGUE_PROMPT_CONTRACT_DIGEST } from '../../src/service/dialogue/contract.js';
 
 // The composition is exercised over the real pinned DSH packages with the deterministic adapter and
 // a synthetic fixture; no Provider, socket, or credential is involved. Network denial is installed
@@ -36,6 +39,23 @@ function bindingFacts(bindingDigest: string): EgressBindingFacts {
 }
 
 describe('PrimaryAgentHarness', () => {
+  it('keeps the no-tool 润色, conflict regeneration and /1 dialogue compositions byte-identical to their predecessors (#893 rev 8)', () => {
+    // Values computed at the 7d base (4dacb862) and at this head: the frozen no-tool contracts register nothing under v18.
+    expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST).digest).toBe('8ce79c998b3b9fb45a7af33f5ceb105941e5bf71a0fbac41aaf9b7aee4eea247');
+    expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST).digest).toBe('d345e282bedeb39f8178a6fed51f4a6aad25d1fde41f3c124ffe053e2c6ba105');
+    expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', DIALOGUE_PROMPT_CONTRACT_DIGEST, { sessionLog: true }).digest).toBe('4d9cbce7647bd951989a00a9a1ffe4e00e01671d76ceb7e6775c46be650da809');
+    expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST, { platformTools: false, localTools: false }).tools.registeredTools).toBe(0);
+  });
+  it('pins the exact local subset and the combined four-tool composition (#893)', () => {
+    const local = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST, { localTools: true });
+    const both = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST, { platformTools: true, localTools: true });
+    expect(local.tools.registeredTools).toBe(2);
+    expect(local.localTools?.names).toEqual(['exact_fetch', 'retrieve']);
+    expect(local).not.toHaveProperty('platformTools');
+    expect(local.digest).toBe('85a2d753073c658ef6f44fea3d7895391565c4f7fe0b68af722247e6b6cdbbcd');
+    expect(both.tools.registeredTools).toBe(4);
+    expect(both.digest).toBe('2fb2e380b426c9c341b7bd29c8fe0d061a4337383e9ece825604fd5329221bba');
+  });
   it('pins the research declaration in tool compositions and preserves non-web compositions (#744)', () => {
     const plain = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST);
     const web = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST, { platformTools: true });

@@ -130,7 +130,7 @@ import {
   evaluationUnsavedLine,
   evaluationVersionLine,
 } from './evaluation-labels.js';
-import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSendLine } from './task-material-selection.js';
+import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSendLine, similarMaterialsField } from './task-material-selection.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 
 /**
@@ -143,7 +143,7 @@ import { localInstantLabel } from './plan-preview-labels.js';
  */
 export interface MountEvaluationOptions {
   readonly root: HTMLElement;
-  readonly api: Pick<RendererApi, 'inspectEvaluation' | 'startEvaluation' | 'saveEvaluation' | 'prepareInitialEvaluation' | 'prepareReadersReport' |
+  readonly api: Pick<RendererApi, 'searchReferableMaterials' | 'inspectEvaluation' | 'startEvaluation' | 'saveEvaluation' | 'prepareInitialEvaluation' | 'prepareReadersReport' |
     'createReadersReportDraft' | 'prepareEvaluationRewrite' | 'decideEvaluationRewrite' | 'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
@@ -288,9 +288,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       : null,
   });
 
-  const materialsNode = (page: EvaluationWorkspaceProjection, kind: 'initial' | 'readersReport', selected: Set<string>, available: boolean): HTMLElement =>
-    evaluationMaterialsField(page, kind, selected, available, busy,
+  const materialsNode = (page: EvaluationWorkspaceProjection, kind: 'initial' | 'readersReport', selected: Set<string>, available: boolean): HTMLElement => {
+    const field = evaluationMaterialsField(page, kind, selected, available, busy,
       (materialId) => paint(`[data-evaluation-materials="${kind}"] [data-evaluation-material="${materialId}"]`, true));
+    if (available && !busy) field.append(similarMaterialsField(api, page.bookId, page.materials?.items ?? [], selected, (id) => {
+      selected.add(id); paint(`[data-evaluation-materials="${kind}"]`, true);
+    }));
+    return field;
+  };
 
   /**
    * 审稿意见 (Issue #429, S81c; EVAL-013): the 定稿 version it drafts from, that the house has no 审稿意见 among its 范例 yet,

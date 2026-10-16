@@ -285,7 +285,8 @@ function assembleRunReport(
 export function runReportAccountingOf(report: RunReportRecord): RunReportAccounting {
   const { seed: _seed, ...assurance } = report.assurance;
   return {
-    ...(report.usagePerStage['platform-tools']?.requests > 0 || (report.usagePerStage['platform-tools']?.refusedSearchCalls ?? 0) > 0 ? { platformTools: report.usagePerStage['platform-tools'] } : {}),
+    ...(report.usagePerStage['platform-tools']?.requests > 0 || (report.usagePerStage['platform-tools']?.refusedSearchCalls ?? 0) > 0 ||
+      (report.usagePerStage['platform-tools']?.retrievalCalls ?? 0) + (report.usagePerStage['platform-tools']?.exactFetchCalls ?? 0) > 0 ? { platformTools: report.usagePerStage['platform-tools'] } : {}),
     classification: report.classification,
     stages: report.stages.map((stage) => ({ stage: stage.stage, state: stage.state })),
     units: report.units,

@@ -746,8 +746,17 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterial(request.input.materialId) };
     case 'readLibraryDecisionReason':
       return { id: request.id, ok: true, op: request.op, result: store.readLibraryDecisionReason(request.input) };
+    case 'searchReferableMaterials':
+      return { id: request.id, ok: true, op: request.op, result: await store.searchReferableMaterials(request.input) };
     case 'inspectLibraryMaterialSegments':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterialSegments(request.input) };
+    // 构建相似索引, 相似段落检索 and 生成来源译文 (Issue #892).
+    case 'buildMaterialVectors':
+      return { id: request.id, ok: true, op: request.op, result: store.buildMaterialVectors(request.input.materialId) };
+    case 'queryMaterialVectors':
+      return { id: request.id, ok: true, op: request.op, result: await store.searchLibraryMaterialVectors(request.input) };
+    case 'requestMaterialTranslation':
+      return { id: request.id, ok: true, op: request.op, result: store.requestMaterialTranslation(request.input.materialId) };
     case 'previewLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
     case 'addLibraryMaterial':
@@ -1755,6 +1764,7 @@ async function run(): Promise<void> {
     { FastRoleRequests: FastRoleRequestsClass, fastInteractionRoutes },
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
     { baselinePromptContractForLaunch },
+    { materialTranslator, MATERIAL_TRANSLATION_KIND },
   ] =
     await Promise.all([
       import('./store.js'),
@@ -1770,6 +1780,7 @@ async function run(): Promise<void> {
       import('./fast-role/fast-role-suggestions.js'),
       import('./background-analysis.js'),
       import('./analysis/kind-definition.js'),
+      import('./fast-role/material-translation-contract.js'),
     ]);
   StoreErrorClass = StoreError;
   fastInteractionRoutesOf = fastInteractionRoutes;
@@ -1936,6 +1947,7 @@ async function run(): Promise<void> {
       // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
       readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
       materialGuard: (runRecordId, ledger) => guardedStore.materialGuard(runRecordId, ledger),
+      retrievalIndex: (runRecordId, ledger) => guardedStore.retrievalIndexForRun(runRecordId, ledger),
       // External Evidence Retention (Issue #425, S70): each research unit's retained sources, kept as the unit settles.
       researchEvidence: (input) => { guardedStore.recordResearchEvidence(input); },
     });
@@ -1988,6 +2000,7 @@ async function run(): Promise<void> {
     store.reconcileDialogueAttempts();
     dialogues = new DialogueExecutionOwner({
       records: store,
+      retrievalIndex: (dialogueId) => guardedStore.dialogueRetrievalIndex(dialogueId),
       fixture,
       sessionLogRoot: await ensureCanonicalDataDirectory(dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
       // Under developer-live, the route the selected policy admits for the dialogue, if any (Issue #52, S17c).
@@ -2010,6 +2023,13 @@ async function run(): Promise<void> {
           : null,
     });
     fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store) };
+    // 生成来源译文 (Issue #892): the same owner, under the rule the selected policy names for the kind — none, under every
+    // policy before one names it, which refuses it with 「当前策略未开放来源译文」.
+    store.useMaterialTranslator(materialTranslator(
+      fastRoleOwner,
+      developerLive !== null ? 'developer-live' : production !== null ? 'ordinary-production' : 'development-ci',
+      () => (launchPolicy.providerProcessing.admittedRules ?? []).filter((rule) => rule.taskKinds.includes(MATERIAL_TRANSLATION_KIND)).length,
+    ));
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the
     // live route reaches its model over the network, and so — under that control only — does J-04's route.
     const owner = analysisExecution;

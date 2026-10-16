@@ -8,6 +8,7 @@ import type {
 } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { taskPlanQuickStartFellBack } from './task-drawer-labels.js';
+import { similarMaterialsField } from './task-material-selection.js';
 import {
   WRITING_ACTIONS,
   WRITING_CONSEQUENCE_TERMS,
@@ -57,7 +58,7 @@ export interface WritingTaskSurface {
   destroy(): void;
 }
 
-type WritingApi = Pick<RendererApi, 'inspectWritingTask' | 'prepareWritingTask' | 'quickStartWritingTask' | 'createWritingDraft'>;
+type WritingApi = Pick<RendererApi, 'inspectWritingTask' | 'prepareWritingTask' | 'quickStartWritingTask' | 'createWritingDraft'> & Partial<Pick<RendererApi, 'searchReferableMaterials'>>;
 
 export interface MountWritingTaskOptions {
   root: HTMLElement;
@@ -329,6 +330,9 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   function materialsNode(page: WritingTaskProjection, state: Sheet): HTMLElement {
     const node = el('dd', 'writing-materials');
     const offer = page.references.materials;
+    if (!busy && api.searchReferableMaterials !== undefined) node.append(similarMaterialsField({ searchReferableMaterials: api.searchReferableMaterials }, page.bookId, offer.items, new Set(state.materialIds), (id) => {
+      state.materialIds.push(id); state.problem = null; paint(null);
+    }));
     node.append(el('p', 'writing-materials-statement', offer.statement));
     // An item no longer offered is no longer ticked.
     state.materialIds = state.materialIds.filter((id) => offer.items.some((item) => item.materialId === id && item.selectable));

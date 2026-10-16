@@ -118,6 +118,11 @@ const REFLECTION = {
 };
 
 describe('Run Report', () => {
+  it('accounts local retrieval and refusal counts even when no web request occurred (#893)', () => {
+    const tools = { requests: 0, inputTokens: 0, outputTokens: 0, retrievalCalls: 5, exactFetchCalls: 1, refusedRetrievalCalls: 1 };
+    const report = buildRunReport(facts({ platformTools: tools }), REFLECTION);
+    expect(runReportAccountingOf(report).platformTools).toEqual(tools);
+  });
   it('accounts backend calls and fetched bytes with the full tool-chain usage', () => {
     const tools = { requests: 3, inputTokens: 20, outputTokens: 10, searchCalls: { 'search-tinyfish': 2 }, refusedSearchCalls: 1, fetchCount: 1, fetchBytes: 1024 };
     const report = buildRunReport(facts({ platformTools: tools }), REFLECTION);

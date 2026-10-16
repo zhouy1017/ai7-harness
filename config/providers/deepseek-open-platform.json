@@ -79,7 +79,7 @@
             "reasoningChannel": { "value": "message-reasoning-content", "evidence": "chat-completions-reference" }
           },
           "context": { "tokens": 1000000, "evidence": "models-and-pricing" },
-          "note": "The vendor's current id for V4.1 Flash, named by Provider Processing v17's ordinary-production binding for the DeepSeek 开放平台（官方） route (Issue #811). Answer and reasoning channels are the vendor's documented response contract, which the #811 ordinary-production observation of 2026-10-15 (one baseline Task, recorded on the Issue, no ledger line by design) agreed with; it sends no unverified format, reasoning-control or tool parameters."
+          "note": "The vendor's current id for V4.1 Flash, named by Provider Processing v19's ordinary-production binding for the DeepSeek 开放平台（官方） route (Issue #811). Answer and reasoning channels are the vendor's documented response contract, which the #811 ordinary-production observation of 2026-10-15 (one baseline Task, recorded on the Issue, no ledger line by design) agreed with; it sends no unverified format, reasoning-control or tool parameters."
         }
       ]
     }
