@@ -111,6 +111,20 @@ describe('foreign Skill inert lifecycle (ADR 0045, ADR 0090)', () => {
     expect(skills.validate(acquired.revisionId).state).toBe('restricted');
   });
 
+  it('restricts synthetic executable headers in resources even when their names look like inert data', async () => {
+    const source = join(scratch, 'renamed');
+    await cp(fixture('plain'), source, { recursive: true });
+    // Synthetic markers only, not executable programs or third-party content.
+    await writeFile(join(source, 'native.dat'), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x00]));
+    await writeFile(join(source, 'note.txt'), '#! synthetic inert marker\n');
+    const acquired = await skills.importPackage(source);
+    const verdict = skills.validate(acquired.revisionId);
+    expect(verdict.state).toBe('restricted');
+    expect(verdict.conversion.unsupported.join('')).toContain('native.dat');
+    expect(verdict.conversion.unsupported.join('')).toContain('note.txt');
+    expect(() => skills.install(verdict.revisionId, verdict.previewDigest)).toThrow();
+  });
+
   it('pins append-only table constraints and keeps the maximum accepted detail within one frame', async () => {
     const revision = await skills.importPackage(fixture('plain'));
     skills.validate(revision.revisionId);

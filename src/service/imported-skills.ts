@@ -179,7 +179,12 @@ export function convertSkillFiles(files: readonly ImportedSkillFile[], digest: s
     }
   }
   for (const file of files) {
-    if (EXECUTABLE.test(file.path) || /(?:^|\/)(?:package\.json|requirements\.txt|Cargo\.toml|Makefile|cordis\.patch\.ya?ml)$/iu.test(file.path)) {
+    // Static signatures catch renamed native/script resources too; recognizing bytes never requires executing them.
+    const head = Buffer.from(file.base64.slice(0, 16), 'base64');
+    const magic = head.subarray(0, 4).toString('hex');
+    const executableBytes = head.subarray(0, 2).toString('ascii') === '#!' || head.subarray(0, 2).toString('ascii') === 'MZ' ||
+      ['7f454c46', '0061736d', 'feedface', 'cefaedfe', 'feedfacf', 'cffaedfe', 'cafebabe', 'bebafeca'].includes(magic);
+    if (executableBytes || EXECUTABLE.test(file.path) || /(?:^|\/)(?:package\.json|requirements\.txt|Cargo\.toml|Makefile|cordis\.patch\.ya?ml)$/iu.test(file.path)) {
       report.unsupported.push(`${file.path}：脚本、宿主配置或代码不会执行。`);
     }
   }
