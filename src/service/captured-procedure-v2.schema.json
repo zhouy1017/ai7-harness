@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai7.captured-procedure/2",
+  "title": "Captured Procedure /2 (ADR 0090)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "title", "runAs", "steps", "parameters", "authorityCeiling"],
+  "properties": {
+    "schema": { "const": "ai7.captured-procedure/2" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "runAs": { "const": "review-run" },
+    "steps": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["categoryId", "procedure", "output", "model", "searchEngine"],
+        "properties": {
+          "categoryId": { "type": "string", "minLength": 1, "maxLength": 48 },
+          "procedure": {
+            "type": "object", "additionalProperties": false, "required": ["procedureId", "version"],
+            "properties": { "procedureId": { "type": "string", "minLength": 1 }, "version": { "type": "string", "minLength": 1 } }
+          },
+          "output": { "enum": ["annotation", "change-suggestion"] },
+          "model": { "type": "boolean" }, "searchEngine": { "type": "boolean" }
+        }
+      }
+    },
+    "parameters": {
+      "type": "object", "additionalProperties": false, "required": ["scope"],
+      "properties": { "scope": { "enum": ["whole", "chapters"] } }
+    },
+    "authorityCeiling": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runSourceScope", "steps", "outputs", "model", "searchEngine"],
+      "properties": {
+        "runSourceScope": { "enum": ["current-book", "series"] },
+        "steps": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["categoryId", "executor"],
+            "properties": {
+              "categoryId": { "type": "string", "minLength": 1, "maxLength": 48 },
+              "executor": { "enum": ["review-category-contract", "baseline-leads", "factual-review-kind", "series-knowledge"] }
+            }
+          }
+        },
+        "outputs": { "type": "array", "uniqueItems": true, "items": { "enum": ["annotation", "change-suggestion"] } },
+        "model": { "type": "boolean" }, "searchEngine": { "type": "boolean" }
+      },
+      "allOf": [{
+        "if": { "properties": { "runSourceScope": { "const": "series" } } },
+        "then": { "properties": { "steps": { "contains": { "properties": { "executor": { "const": "series-knowledge" } }, "required": ["executor"] } } } }
+      }]
+    }
+  },
+  "$comment": "The runtime validator also requires canonical JSON/digest, distinct ordered categories and exact step/ceiling correspondence. /1 remains current-book and byte-preserved."
+}

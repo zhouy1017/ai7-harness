@@ -7490,6 +7490,8 @@ export interface KnowledgeProceduresProjection {
 
 /** The one schema a Captured Procedure version's document is written in (ADR 0087 §1). */
 export const CAPTURED_PROCEDURE_SCHEMA = 'ai7.captured-procedure/1' as const;
+/** ADR 0090: additive successor; existing /1 documents and their exact digests never move. */
+export const CAPTURED_PROCEDURE_SCHEMA_V2 = 'ai7.captured-procedure/2' as const;
 /**
  * The one parameter slot a Captured Procedure carries: the review scope kind. The chapters are chosen at each run. `selection`
  * (Issue #423, S77 deferred item a) is the scope a Run pins when the house's procedure runs on the paragraphs 就这段发起任务… handed
@@ -7545,7 +7547,7 @@ export interface CapturedProcedureStepDocument {
  * authorization, receipt, plan digest, Provider, route or model, and no guideline clause or version.
  */
 export interface CapturedProcedureDocument {
-  readonly schema: typeof CAPTURED_PROCEDURE_SCHEMA;
+  readonly schema: typeof CAPTURED_PROCEDURE_SCHEMA | typeof CAPTURED_PROCEDURE_SCHEMA_V2;
   readonly title: string;
   readonly runAs: 'review-run';
   readonly steps: ReadonlyArray<CapturedProcedureStepDocument>;
@@ -7555,7 +7557,7 @@ export interface CapturedProcedureDocument {
    * calls a model or a search engine, and the current-Book Run Source Scope.
    */
   readonly authorityCeiling: {
-    readonly runSourceScope: 'current-book';
+    readonly runSourceScope: 'current-book' | 'series';
     readonly steps: ReadonlyArray<{ readonly categoryId: string; readonly executor: string }>;
     readonly outputs: ReadonlyArray<ReviewCategoryOutputKind>;
     readonly model: boolean;
