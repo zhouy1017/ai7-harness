@@ -3571,7 +3571,9 @@ export class BaselineAnalysisStore {
     const admittedToolRule = this.#definition.kind === BASELINE_ANALYSIS_KIND || intent.preparedByEnrollmentVersionId !== null ? null
       : liveKindRule(this.#launch.policy, this.#definition.kind);
     const toolsProjection: unknown = admittedToolRule !== null && 'platformTools' in admittedToolRule ? admittedToolRule.platformTools : null;
-    const researchDeclaration = kindResearchDeclaration(this.#launch.policy, this.#definition.kind, this.#definition.researchDeclaration);
+    // A Task a 后台分析登记 prepared declares no research, as before the declaration existed (#744 keeps #887's guard).
+    const researchDeclaration = admittedToolRule === null ? { webSearch: false, searchEngine: null } as const
+      : kindResearchDeclaration(this.#launch.policy, this.#definition.kind, this.#definition.researchDeclaration);
     const toolsDeclared = live !== null && researchDeclaration.webSearch;
     let webToolsBackend: FrozenWebToolsBackend | undefined;
     let searchCredentialReference: string | undefined;

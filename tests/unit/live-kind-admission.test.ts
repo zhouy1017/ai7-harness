@@ -31,7 +31,7 @@ describe('live kind admission (#429)', () => {
   it('declares research only for the selected tool rule and exact-model live evidence (#744)', () => {
     const enabled = { webSearch: true, searchEngine: 'user-selected-backend' };
     const disabled = { webSearch: false, searchEngine: null };
-    for (const kind of ['evaluation', 'readers-report', 'evaluation-rewrite', 'writing', 'factual-review', 'editorial-review/factual-review', 'editorial-review/academic-integrity']) {
+    for (const kind of ['evaluation', 'writing', 'factual-review', 'editorial-review/factual-review', 'editorial-review/academic-integrity']) {
       expect(kindResearchDeclaration(policy, kind)).toEqual(enabled);
       expect(kindResearchDeclaration(withoutRuleFor(policy, kind), kind)).toEqual(disabled);
       expect(kindResearchDeclaration(withRuleFor(policy, kind, { webSearchToolAllowed: false }), kind)).toEqual(disabled);
@@ -39,9 +39,12 @@ describe('live kind admission (#429)', () => {
       // A historical model and the same id on a different route never inherit the V4.1 observation.
       expect(kindResearchDeclaration(withRuleFor(policy, kind, { model: 'deepseek-v4-flash' }), kind)).toEqual(disabled);
       expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform' }), kind)).toEqual(disabled);
+      // Production DeepSeek declares the function loop from the vendor guide only, never a live-test item: no research.
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform', model: 'deepseek-flash' }), kind)).toEqual(disabled);
       expect(kindResearchDeclaration(policy, kind, disabled)).toEqual(disabled);
     }
-    for (const kind of [BASELINE_ANALYSIS_KIND, 'editorial-dialogue', 'editorial-review/publication-risk', 'editorial-review/typos-and-usage']) {
+    // 审稿意见 (row 16) and the score rewrite (row 14) carry no web even under a rule that names the tools.
+    for (const kind of [BASELINE_ANALYSIS_KIND, 'readers-report', 'evaluation-rewrite', 'editorial-dialogue', 'editorial-review/publication-risk', 'editorial-review/typos-and-usage']) {
       expect(kindResearchDeclaration(policy, kind)).toEqual(disabled);
     }
     expect(kindResearchDeclaration(undefined, 'writing')).toEqual(disabled);

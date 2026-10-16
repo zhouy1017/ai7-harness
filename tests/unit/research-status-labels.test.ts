@@ -34,6 +34,11 @@ describe('research status (#744)', () => {
       .toBe('联网核查未完成 · TinyFish · 检索调用被拒绝');
     expect(researchDecisionLine('允许执行', { ...report, classification: 'cancelled' })).toContain('联网核查未完成 · TinyFish · 运行未完成');
   });
+  it('says a Run that stopped before its first search did not complete its research', () => {
+    const unsearched = { ...report, usagePerStage: { ...report.usagePerStage, 'platform-tools': noUsage } };
+    expect(researchStatusLine({ ...unsearched, classification: 'cancelled' })).toBe('联网核查未完成 · TinyFish · 运行未完成');
+    expect(researchStatusLine(unsearched)).toBe('未联网核查 · TinyFish · 本次运行未执行检索');
+  });
   it('keeps a drawer with no report unverified and names only its frozen selection', () => {
     expect(researchDecisionLine('允许执行', null)).toBe('允许执行 · 未联网核查');
     expect(researchDecisionLine('允许执行', undefined, backend)).toContain('未联网核查 · TinyFish · 已冻结后端，尚未执行');

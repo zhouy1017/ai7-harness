@@ -211,10 +211,14 @@ export function kindResearchDeclaration(
   return { webSearch, searchEngine: webSearch ? 'user-selected-backend' : null };
 }
 
-/** Review categories use their current declaration; a policy allowance alone never turns non-web review into research. */
+/**
+ * Review categories use their current declaration; a policy allowance alone never turns non-web review into research.
+ * Of the evaluation and writing kinds only 初评 (its market section, row 15) and writing (row 17) are web-bearing: 审稿意见
+ * (row 16) and rewriting the editor's scores (row 14) declare no web even where a rule names the tools.
+ */
 export function taskDeclaresPlatformTools(kind: string): boolean {
   if (kind === FACTUAL_REVIEW_KIND) return true;
   const review = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => reviewCategoryKindId(entry.categoryId) === kind);
   if (review !== undefined) return review.researchDeclaration?.webSearch === true && review.searchEngine && review.categoryId !== 'publication-risk';
-  return [WRITING_KIND, INITIAL_EVALUATION_KIND, EVALUATION_REWRITE_KIND, READERS_REPORT_KIND].some((candidate) => candidate === kind);
+  return kind === WRITING_KIND || kind === INITIAL_EVALUATION_KIND;
 }

@@ -37,11 +37,12 @@ export function researchStatusLine(report: Pick<RunReportProjection, 'webToolsBa
   const usage = report.usagePerStage['platform-tools'];
   const calls = Object.values(usage.searchCalls ?? {}).reduce((sum, count) => sum + count, 0);
   const suffix = ` · ${researchBackendName(backend)}`;
-  if (calls === 0 && (usage.refusedSearchCalls ?? 0) === 0) return `未联网核查${suffix} · 本次运行未执行检索`;
+  // A Run that froze a backend and stopped short never reads as 未联网核查, even before its first search.
   if (report.classification !== 'completed' || report.failures.length > 0 || (usage.refusedSearchCalls ?? 0) > 0) {
     const reason = report.failures.map((failure) => failure.reason).join('；') ||
       ((usage.refusedSearchCalls ?? 0) > 0 ? '检索调用被拒绝' : '运行未完成');
     return `联网核查未完成${suffix} · ${reason}`;
   }
+  if (calls === 0) return `未联网核查${suffix} · 本次运行未执行检索`;
   return `联网核查已完成${suffix} · 已执行检索，事实结论仍需核对来源`;
 }

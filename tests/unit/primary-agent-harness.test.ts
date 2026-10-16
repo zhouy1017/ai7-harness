@@ -42,6 +42,10 @@ describe('PrimaryAgentHarness', () => {
     expect(web.researchDeclaration).toEqual({ webSearch: true, searchEngine: 'user-selected-backend' });
     expect(web.digest).toBe('ba328a177e73f47501260431dea68b98bc660d39e8850390ce85491e2aa97bc2');
     expect(plain).not.toHaveProperty('researchDeclaration');
+    // Flipping the declaration flips the digest, both ways.
+    expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST,
+      { platformTools: true, researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } }).digest).toBe(web.digest);
+    expect(web.digest).not.toBe(plain.digest);
     expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST,
       { researchDeclaration: { webSearch: false, searchEngine: null } }).digest).toBe(plain.digest);
     expect(() => describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST,
