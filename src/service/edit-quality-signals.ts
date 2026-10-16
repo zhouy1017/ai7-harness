@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { followSpanEdit, graphemesOf } from '../shared/mark-anchor.js';
+import { deriveSpanEdit, followBlockTextChange, followSpanEdit, graphemesOf } from '../shared/mark-anchor.js';
 import type { EditQualitySignalsProjection } from '../shared/protocol.js';
 import { canonicalJson, sha256Hex } from './analysis/canonical.js';
 
@@ -66,19 +66,43 @@ export function inspectEditQualitySignals(db: DatabaseSync, bookId: string | nul
       (target.current_digest === target.resulting_block_digest || rangeDigest === target.replacement_text_digest);
     let volume = target.disposition === 'accepted-with-edit' ? graphemeEditVolume(String(target.proposed_text), String(target.edited_text ?? '')) : 0;
     let range = { fromGrapheme: Number(target.resulting_from_grapheme), toGrapheme: Number(target.resulting_to_grapheme) };
-    const edits = db.prepare(`SELECT sequence, from_grapheme, to_grapheme, insert_text, resulting_block_digest, command_kind
-      FROM edit_journal_entries WHERE branch_id = ? AND block_id = ? AND sequence > ? ORDER BY sequence`).all(
-      target.branch_id!, target.block_id!, target.resulting_journal_sequence!);
+    // Bulk replacements and undo/redo record one synthetic journal row for several blocks. Their
+    // command ledger supplies each block's actual before/after text; the journal's 0..0 range is not an edit.
+    const edits = db.prepare(`SELECT e.sequence, e.from_grapheme, e.to_grapheme, e.insert_text,
+        e.resulting_block_digest, e.command_kind, ce.before_text, ce.after_text, ce.before_digest, ce.after_digest,
+        EXISTS(SELECT 1 FROM manuscript_effect_receipts r WHERE r.command_group_id = e.command_group_id) AS effect_command
+      FROM edit_journal_entries e
+      LEFT JOIN manuscript_command_edits ce ON ce.command_group_id = e.command_group_id AND ce.block_id = ?
+      WHERE e.branch_id = ? AND e.sequence > ? AND (e.block_id = ? OR ce.block_id IS NOT NULL)
+      ORDER BY e.sequence`).all(target.block_id!, target.branch_id!, target.resulting_journal_sequence!, target.block_id!);
     const lineage: unknown[] = [];
     for (const edit of edits) {
-      const inserted = graphemesOf(String(edit.insert_text)).length;
-      const span = { fromGrapheme: Number(edit.from_grapheme), toGrapheme: Number(edit.to_grapheme), insertedGraphemes: inserted };
-      const followed = followSpanEdit(range, span);
-      // An applied deletion is an empty range. Insertion at that point also changes its survival/effort evidence.
-      const touches = followed.touched || (range.fromGrapheme === range.toGrapheme && span.fromGrapheme <= range.fromGrapheme && span.toGrapheme >= range.toGrapheme);
-      if (touches && edit.command_kind === 'edit') volume += span.toGrapheme - span.fromGrapheme + inserted;
-      range = followed;
-      lineage.push({ sequence: edit.sequence, digest: edit.resulting_block_digest, touches });
+      let touches: boolean;
+      let editedVolume: number;
+      if (edit.command_kind !== 'edit' && typeof edit.before_text === 'string' && typeof edit.after_text === 'string') {
+        const beforeText = edit.command_kind === 'undo' ? edit.after_text : edit.before_text;
+        const afterText = edit.command_kind === 'undo' ? edit.before_text : edit.after_text;
+        const before = graphemesOf(beforeText);
+        const after = graphemesOf(afterText);
+        const span = deriveSpanEdit(before, after);
+        const priorText = before.slice(range.fromGrapheme, range.toGrapheme).join('');
+        const followed = followBlockTextChange(range, priorText, beforeText, afterText);
+        // Disjoint replacements on both sides may bracket this range. An exactly retained range
+        // contributes no effort merely because the command's bounding span crosses it.
+        touches = span !== null && (followed.state !== 'exact' || (priorText === '' &&
+          span.fromGrapheme <= range.fromGrapheme && span.toGrapheme >= range.toGrapheme));
+        editedVolume = touches ? graphemeEditVolume(priorText, after.slice(followed.fromGrapheme, followed.toGrapheme).join('')) : 0;
+        range = followed;
+      } else {
+        const inserted = graphemesOf(String(edit.insert_text)).length;
+        const span = { fromGrapheme: Number(edit.from_grapheme), toGrapheme: Number(edit.to_grapheme), insertedGraphemes: inserted };
+        const followed = followSpanEdit(range, span);
+        touches = followed.touched || (range.fromGrapheme === range.toGrapheme && span.fromGrapheme <= range.fromGrapheme && span.toGrapheme >= range.toGrapheme);
+        editedVolume = touches ? span.toGrapheme - span.fromGrapheme + inserted : 0;
+        range = followed;
+      }
+      if (edit.effect_command === 0) volume += editedVolume;
+      lineage.push({ sequence: edit.sequence, digest: edit.command_kind === 'undo' ? edit.before_digest : edit.after_digest ?? edit.resulting_block_digest, touches });
     }
     metric.applied += 1;
     metric.surviving += survives ? 1 : 0;

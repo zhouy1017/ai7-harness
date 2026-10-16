@@ -128,6 +128,42 @@ function typeInto(store: EditorialStore, book: Imported, blockId: string, from: 
 }
 
 describe('AI7 Apply on a Change Suggestion', () => {
+  it('counts bulk replacements on an applied range in another block and ignores replacements around a retained range', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const blocks = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null));
+      const replace = (query: string, replacement: string) => {
+        const search = store.createSearch(book.manuscriptId, book.branchId, query).searchId;
+        while (!store.advanceSearch(search).done) { /* bounded search */ }
+        const preview = store.prepareReplacement(search, replacement, []);
+        while (!store.advanceReplacementWork(preview.previewId).done) { /* prepare */ }
+        store.freezeReplacement(preview.previewId, []);
+        while (!store.advanceReplacementWork(preview.previewId).done) { /* validate */ }
+        return store.commitReplacement(preview.previewId);
+      };
+      typeInto(store, book, blocks[0]!.blockId, 0, 0, '〔批量靶〕');
+      const marked = suggest(store, book, blocks[1]!.blockId, 4, 8, '〔批量靶〕');
+      store.applyChangeSuggestion({ ...binding(store, book), markId: marked.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      expect(store.inspectEditQualitySignals(null)).toMatchObject({ surviving: 1, editVolume: 0 });
+      expect(replace('〔批量靶〕', '〔改定〕').committedCount).toBe(2);
+      const changed = store.inspectEditQualitySignals(null);
+      expect(changed.surviving).toBe(0);
+      expect(changed.editVolume).toBeGreaterThan(0);
+      store.undoManuscript(book.manuscriptId, book.branchId, store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest);
+      expect(store.inspectEditQualitySignals(null).surviving).toBe(1);
+      const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, marked.markId);
+      typeInto(store, book, blocks[1]!.blockId, card.toGrapheme, card.toGrapheme, '〔外侧靶〕');
+      typeInto(store, book, blocks[1]!.blockId, 0, 0, '〔外侧靶〕');
+      const beforeOutside = store.inspectEditQualitySignals(null);
+      expect(replace('〔外侧靶〕', '〔外侧改〕').committedCount).toBe(2);
+      const afterOutside = store.inspectEditQualitySignals(null);
+      expect(afterOutside.surviving).toBe(1);
+      expect(afterOutside.editVolume).toBe(beforeOutside.editVolume);
+      expect(afterOutside.lineageDigest).not.toBe(beforeOutside.lineageDigest);
+    } finally { store.markCleanShutdown(); store.close(); }
+  }, 120_000);
+
   it('projects judged suggestion survival and edit effort through unrelated, reverting and reverse-apply edits', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
