@@ -376,7 +376,10 @@ export class ManuscriptApplyStore {
     const reversed = this.#db.prepare('SELECT 1 FROM manuscript_effect_intents WHERE reverses_effect_id = ?').get(original.effect_id!);
     const members = this.#reverseMembers(input);
     const exact = members.every((member) => member.status === 'applied' && member.anchorState === 'exact');
-    return { originalEffectId: String(original.effect_id), bookId: String(book.book_id), branchId: input.branchId, revisionId: window.revisionId,
+    return { ranges: members.map((member) => ({ markId: member.markId,
+      position: Number(this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, member.blockId)?.position ?? 0),
+      fromGrapheme: member.fromGrapheme, toGrapheme: member.toGrapheme })),
+      originalEffectId: String(original.effect_id), bookId: String(book.book_id), branchId: input.branchId, revisionId: window.revisionId,
       journalSequence: window.journalSequence, markId: input.markId, blockId: target.blockId, ready: exact && reversed === undefined,
       reason: !exact ? '应用后的文字又改过，请解决稿件冲突。' : reversed !== undefined ? '本次应用已经撤销。' : `将创建一次新的受控应用，撤销 ${members.length} 项精确修改；原应用凭据保持原样。` };
   }

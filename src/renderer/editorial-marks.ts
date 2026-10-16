@@ -1,3 +1,4 @@
+import { readProposalWorkspace } from './proposal-workspace.js';
 import type { ApplyReceiptProjection } from '../shared/protocol.js';
 import { MAX_DIALOGUE_QUESTION_CHARACTERS, SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS } from '../shared/protocol.js';
 import type { AskAboutSelectionInput, DialogueProjection, EditorialPolishProjection, FastInteractionRoutesProjection, PolishSelectionInput } from '../shared/protocol.js';
@@ -999,7 +1000,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       }
       if (applied === null && pendingReceipt?.state !== 'unresolved' && pendingReceipt?.state !== 'confirming') {
         const drafts = el('div', 'button-row'); yours.append(drafts);
-        void api.inspectProposalWorkspace({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, resultId: null }).then((workspace) => {
+        void readProposalWorkspace(api, { manuscriptId: binding().manuscriptId, branchId: binding().branchId, resultId: null }).then((workspace) => {
           if (!drafts.isConnected) return;
           const item = workspace.items.find((entry) => entry.markId === card.markId); if (!item) return;
           const members = item.atomicGroupId === null ? [item] : workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId);
@@ -1063,7 +1064,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             quote: null,
             fields: [],
             submitLabel: '确认撤销本次应用',
-            note: `${reverseApplyNote(shown, suggestion.currentText)} 将创建一次新的受控应用；原应用凭据保持原样。当前修订 ${preparation.revisionId}`,
+            note: `${reverseApplyNote(shown, suggestion.currentText)} ${preparation.reason} 当前修订 ${preparation.revisionId} · 修订日志序号 ${preparation.journalSequence}。范围：${preparation.ranges.map((range) => `第 ${range.position} 段 ${range.fromGrapheme}–${range.toGrapheme}`).join('；')}`,
             submit: () => writeManuscript(card.markId, (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId: card.markId, clientEffectId }), '已撤销本次应用；原文已写回稿件。'),
             cancel,
           })); }).catch((error) => options.setStatus(options.errorMessage(error, '无法准备撤销。'), 'error'))));

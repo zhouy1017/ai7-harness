@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
-import { applyReceiptState, legacyApplyOutcome, type ManuscriptWindowProjection } from '../../src/shared/protocol.js';
+import { MAX_FRAME_BYTES, applyReceiptState, legacyApplyOutcome, type ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import { applyOnce } from '../../src/renderer/manuscript-apply.js';
+import { readProposalWorkspace } from '../../src/renderer/proposal-workspace.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { EDITORIAL_MARK_TRIGGER_SQL, PROPOSAL_ITEM_DECISIONS_PRE78_SQL, PROPOSAL_REVIEW_SCHEMA_SQL } from '../../src/service/editorial-marks.js';
+import { EDITORIAL_MARK_TRIGGER_SQL, PROPOSAL_ITEM_DECISIONS_PRE77_SQL, PROPOSAL_REVIEW_SCHEMA_SQL } from '../../src/service/editorial-marks.js';
 import { readApplyOutcomeAttention } from '../../src/service/global-attention.js';
 
 // Service-integration suite (L2) for AI7 Apply on Change Suggestions (Issue #408). The manuscript is
@@ -112,6 +113,33 @@ function typeInto(store: EditorialStore, book: Imported, blockId: string, from: 
 }
 
 describe('Proposal decision workspace', () => {
+  it('pages 501 navigator records with long group reasons below the response bound and reconstructs one scope', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const block = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[0]!;
+      const groupId = randomUUID();
+      store.createProducedEditorialMarks(Array.from({ length: 501 }, () => ({ ...book, blockId: block.blockId, fromGrapheme: 0, toGrapheme: 2,
+        pinnedText: graphemesOf(block.text).slice(0, 2).join(''), kind: 'change-suggestion' as const, body: '', proposedText: PROPOSED, rationale: null,
+        atomicGroupId: groupId, atomicReason: '合成依赖'.repeat(400), source: { kind: 'ai7' as const, origin: 'task' as const, taskId: null, label: '合成测试' }, basis: [] })), (ids) => ids);
+      const input = { ...book, resultId: null };
+      let pages = 0;
+      const read = await readProposalWorkspace({ inspectProposalWorkspace: async (request) => {
+        const page = store.inspectProposalWorkspace(request); pages++;
+        expect(page.items.length).toBeLessThanOrEqual(50);
+        expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(MAX_FRAME_BYTES - 1024);
+        return page;
+      } }, input);
+      expect(pages).toBe(11); expect(read.items).toHaveLength(501); expect(new Set(read.items.map((item) => item.markId)).size).toBe(501);
+      let offset: number | null = 0; let excluded = 0;
+      while (offset !== null) {
+        const page = store.batchProposalDecisionDraft({ ...input, offset, scope: 'filter', markIds: [], chapterBlockId: null, changeType: null, review: 'all', disposition: 'accepted', confirmDigest: null });
+        expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(MAX_FRAME_BYTES - 1024);
+        expect(page.scopeDigest).toMatch(/^[a-f0-9]{64}$/u); excluded += page.excluded.length; offset = page.nextOffset;
+      }
+      expect(excluded).toBe(501);
+    } finally { store.close(); }
+  });
   it('freezes the preview, excludes every unsafe scope, and refuses a stale confirmation', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -226,7 +254,7 @@ describe('Proposal decision workspace', () => {
     } finally { store.close(); }
   });
 
-  it('migrates a real pre-78 CHECK with every existing value and rowid unchanged', async () => {
+  it('migrates a real pre-77 CHECK with every existing value and rowid unchanged', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     try {
@@ -240,7 +268,7 @@ describe('Proposal decision workspace', () => {
       for (const table of Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE ${table}`);
       const columns = db.prepare("SELECT name FROM pragma_table_info('proposal_item_decisions') ORDER BY cid").all().map((row) => String(row.name)).join(', ');
       db.exec('CREATE TEMP TABLE saved_decisions AS SELECT rowid AS old_rowid, * FROM proposal_item_decisions; DROP TABLE proposal_item_decisions');
-      db.exec(PROPOSAL_ITEM_DECISIONS_PRE78_SQL);
+      db.exec(PROPOSAL_ITEM_DECISIONS_PRE77_SQL);
       db.exec(`INSERT INTO proposal_item_decisions(rowid, ${columns}) SELECT old_rowid, ${columns} FROM saved_decisions ORDER BY old_rowid; DROP TABLE saved_decisions`);
       for (const [name, sql] of Object.entries(EDITORIAL_MARK_TRIGGER_SQL)) if (name.startsWith('proposal_item_decisions_')) db.exec(sql);
       const before = db.prepare('SELECT rowid, * FROM proposal_item_decisions ORDER BY rowid').all();

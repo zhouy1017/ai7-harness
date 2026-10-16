@@ -143,7 +143,7 @@ import {
   EDITORIAL_MARK_FOREIGN_KEYS,
   EDITORIAL_MARK_REVISION_22_SQL,
   EDITORIAL_MARK_SCHEMA_SQL,
-  PROPOSAL_ITEM_DECISIONS_PRE78_SQL, PROPOSAL_REVIEW_SCHEMA_SQL, PROPOSAL_REVIEW_TRIGGER_SQL, PROPOSAL_REVIEW_FOREIGN_KEYS,
+  PROPOSAL_ITEM_DECISIONS_PRE77_SQL, PROPOSAL_REVIEW_SCHEMA_SQL, PROPOSAL_REVIEW_TRIGGER_SQL, PROPOSAL_REVIEW_FOREIGN_KEYS,
   EDITORIAL_MARK_TRIGGER_SQL,
   PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL,
   followBlockTextChangeForMarks,
@@ -2760,7 +2760,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEditorialMarkTables
         ? {
             ...EDITORIAL_MARK_SCHEMA_SQL,
-            proposal_item_decisions: [PROPOSAL_ITEM_DECISIONS_PRE78_SQL, EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions],
+            proposal_item_decisions: committed(PROPOSAL_REVIEW_SCHEMA_SQL) ? [EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions] : [PROPOSAL_ITEM_DECISIONS_PRE77_SQL, EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions],
             ...(includeManuscriptEffectTables
               ? {}
               : { editorial_marks: [EDITORIAL_MARK_REVISION_22_SQL.editorial_marks, EDITORIAL_MARK_SCHEMA_SQL.editorial_marks] }),

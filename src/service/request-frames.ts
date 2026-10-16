@@ -1904,7 +1904,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'saveProposalDecisionDraft':
     case 'batchProposalDecisionDraft':
     case 'recordProposalDecision': {
-      const common = ['manuscriptId', 'branchId', 'resultId'];
+      const common = ['manuscriptId', 'branchId', 'resultId', ...((value.input !== null && typeof value.input === 'object' && !Array.isArray(value.input) && 'offset' in value.input) ? ['offset'] : [])];
       const extras = value.op === 'saveProposalDecisionDraft' ? ['markIds', 'disposition', 'atomicGroupId', 'expectedScopeDigest']
         : value.op === 'batchProposalDecisionDraft' ? ['scope', 'markIds', 'chapterBlockId', 'changeType', 'review', 'disposition', 'confirmDigest']
           : value.op === 'recordProposalDecision' ? ['expectedScopeDigest', 'clientDecisionId'] : [];
@@ -1915,7 +1915,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const disposition = (v: unknown): boolean => v === 'accepted' || v === 'rejected' || v === 'deferred';
       const review = (v: unknown): boolean => v === 'all' || v === 'unreviewed' || v === 'reviewed' || v === 'stale' || v === 'conflicting';
       const changeType = (v: unknown): boolean => v === null || v === 'replace' || v === 'insert' || v === 'delete';
-      if (!uuid(input.manuscriptId) || !uuid(input.branchId) || !nullableUuid(input.resultId)) throw new ProtocolError(tentativeId);
+      if ((input.offset !== undefined && (!Number.isSafeInteger(input.offset) || Number(input.offset) < 0 || Number(input.offset) > 10000)) || !uuid(input.manuscriptId) || !uuid(input.branchId) || !nullableUuid(input.resultId)) throw new ProtocolError(tentativeId);
       if (input.returnPosition !== undefined && input.returnPosition !== null) {
         const pos = requireInput(input.returnPosition, ['blockId', 'activeMarkId', 'comparison', 'review', 'chapterBlockId', 'changeType', 'expanded'], tentativeId);
         if (!(pos.blockId === null || (typeof pos.blockId === 'string' && MARK_BLOCK_PATTERN.test(pos.blockId))) || !nullableUuid(pos.activeMarkId) ||

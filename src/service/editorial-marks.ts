@@ -890,7 +890,7 @@ export interface ProducedEditorialMarkInput {
   status?: 'open' | 'resolved';
 }
 
-export const PROPOSAL_ITEM_DECISIONS_PRE78_SQL = EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions.replace(
+export const PROPOSAL_ITEM_DECISIONS_PRE77_SQL = EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions.replace(
   "'withdrawn', 'deferred'", "'withdrawn'",
 );
 
@@ -951,12 +951,12 @@ export const PROPOSAL_REVIEW_TRIGGER_SQL: Readonly<Record<string, string>> = Obj
 
 /** Byte-preserving CHECK widening. Restore keys, triggers, indexes and rowids in one transaction. */
 export function initializeProposalReviewSchema(db: DatabaseSync): void {
-  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 78) {
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 77) {
     requireMark(Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL).every((name) => db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(name) !== undefined), 'SCHEMA_MIGRATION_FAILED', '提案审阅记录缺失。');
   }
   if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'proposal_decisions'").get()) return;
   const shape = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'proposal_item_decisions'").get() as SqlRow;
-  const widen = foldedSql(text(shape.sql)) === foldedSql(PROPOSAL_ITEM_DECISIONS_PRE78_SQL);
+  const widen = foldedSql(text(shape.sql)) === foldedSql(PROPOSAL_ITEM_DECISIONS_PRE77_SQL);
   requireMark(widen || foldedSql(text(shape.sql)) === foldedSql(EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions),
     'SCHEMA_MIGRATION_FAILED', '提案决定表结构不兼容。');
   const restore = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
@@ -1062,7 +1062,27 @@ export class EditorialMarkStore {
    * A mark made by AI7 or carried in from an imported file. The range is verified against the working
    * state exactly as an editor's is; nothing reaches the manuscript surface unanchored.
    */
-  inspectProposalWorkspace(input: ProposalWorkspaceInput): ProposalWorkspaceProjection {
+  #pageWorkspace(workspace: ProposalWorkspaceProjection, offset = 0): ProposalWorkspaceProjection {
+    const items = workspace.items.slice(offset, offset + 50);
+    const ids = new Set(items.map((item) => item.markId));
+    return { ...workspace, items, nextOffset: offset + 50 < workspace.items.length ? offset + 50 : null,
+      decision: workspace.decision === null ? null : { ...workspace.decision,
+        baseRevisionIds: workspace.decision.baseRevisionIds.filter((id) => items.some((item) => item.baseRevisionId === id)),
+        items: workspace.decision.items.filter((item) => ids.has(item.markId)), unresolved: workspace.decision.unresolved.filter((id) => ids.has(id)) } };
+  }
+
+  inspectProposalWorkspace(input: ProposalWorkspaceInput): ProposalWorkspaceProjection { return this.#pageWorkspace(this.#proposalWorkspace(input), input.offset); }
+  saveProposalDecisionDraft(input: SaveProposalDecisionDraftInput): ProposalWorkspaceProjection { return this.#pageWorkspace(this.#saveProposalDecisionDraft(input), input.offset); }
+  recordProposalDecision(input: RecordProposalDecisionInput): ProposalWorkspaceProjection { return this.#pageWorkspace(this.#recordProposalDecision(input), input.offset); }
+  batchProposalDecisionDraft(input: BatchProposalDecisionDraftInput): ProposalDraftBatchProjection {
+    const full = this.#batchProposalDecisionDraft(input); const offset = input.offset ?? 0;
+    const candidates = [...full.included.map((markId) => ({ markId, reason: null })), ...full.excluded].slice(offset, offset + 50);
+    return { ...full, included: candidates.filter((item) => item.reason === null).map((item) => item.markId),
+      excluded: candidates.filter((item): item is ProposalDraftBatchProjection['excluded'][number] => item.reason !== null),
+      nextOffset: offset + 50 < full.included.length + full.excluded.length ? offset + 50 : null, workspace: this.#pageWorkspace(full.workspace) };
+  }
+
+  #proposalWorkspace(input: ProposalWorkspaceInput): ProposalWorkspaceProjection {
     requireMark(UUID_PATTERN.test(input.manuscriptId) && UUID_PATTERN.test(input.branchId) &&
       (input.resultId === null || UUID_PATTERN.test(input.resultId)), 'MARK_INVALID', '提案范围无效。');
     const state = this.#branchState(input.manuscriptId, input.branchId);
@@ -1074,6 +1094,7 @@ export class EditorialMarkStore {
       (SELECT d.disposition FROM proposal_decision_drafts d WHERE d.item_id = i.item_id ORDER BY d.ordinal DESC LIMIT 1) draft,
       (SELECT MAX(d.ordinal) FROM proposal_decision_drafts d WHERE d.item_id = i.item_id) draft_ordinal,
       (SELECT d.disposition FROM proposal_item_decisions d WHERE d.item_id = i.item_id ORDER BY d.ordinal DESC LIMIT 1) disposition,
+      (SELECT d.decision_id FROM proposal_item_decisions d WHERE d.item_id = i.item_id ORDER BY d.ordinal DESC LIMIT 1) item_decision_id,
       (SELECT r.resulting_revision_id FROM manuscript_effect_targets t JOIN manuscript_effect_receipts r ON r.effect_id = t.effect_id WHERE t.item_id = i.item_id ORDER BY r.resulting_journal_sequence DESC LIMIT 1) applied_revision,
       0 conflicting
       FROM editorial_marks m JOIN proposal_change_items i ON i.mark_id = m.mark_id
@@ -1086,27 +1107,27 @@ export class EditorialMarkStore {
     const items: ProposalNavigatorItem[] = rows.slice(0, 10000).map((row) => ({
       markId: text(row.mark_id), itemId: text(row.item_id), blockId: text(row.block_id),
       position: row.position === null ? 0 : integer(row.position), fromGrapheme: integer(row.from_grapheme), toGrapheme: integer(row.to_grapheme),
-      chapterBlockId: nullableText(row.chapter_id), chapter: nullableText(row.chapter) ?? '未分章',
+      chapterBlockId: nullableText(row.chapter_id), chapter: nullableText(row.chapter)?.slice(0, 120) ?? '未分章',
       changeType: text(row.change_type) as ProposalNavigatorItem['changeType'], baseRevisionId: text(row.pinned_revision_id),
       stale: row.pinned_revision_id !== state.revisionId || Number(row.pinned_journal_sequence) !== state.journalSequence, conflict: row.anchor_state !== 'exact' || Number(row.conflicting) === 1,
       loaded: row.position !== null, otherVersion: false,
       atomicGroupId: nullableText(row.atomic_group_id), atomicReason: nullableText(row.atomic_reason),
       draft: nullableText(row.draft) as ProposalNavigatorItem['draft'], draftOrdinal: Number(row.draft_ordinal ?? 0),
-      disposition: row.disposition === 'withdrawn' ? null : nullableText(row.disposition) as ProposalNavigatorItem['disposition'],
+      decisionId: nullableText(row.item_decision_id), disposition: row.disposition === 'withdrawn' ? null : nullableText(row.disposition) as ProposalNavigatorItem['disposition'],
       appliedRevisionId: row.status === 'applied' ? nullableText(row.applied_revision) : null,
     }));
     const recorded = this.#db.prepare('SELECT canonical_json FROM proposal_decisions WHERE branch_id = ? AND result_id IS ? ORDER BY rowid DESC LIMIT 1').get(input.branchId, input.resultId);
     const decision = recorded ? JSON.parse(String(recorded.canonical_json)) as ProposalDecisionProjection : null;
-    return { bookId: state.bookId, manuscriptId: input.manuscriptId, branchId: input.branchId, resultId: input.resultId,
+    return { totalItems: items.length, nextOffset: null, bookId: state.bookId, manuscriptId: input.manuscriptId, branchId: input.branchId, resultId: input.resultId,
       revisionId: state.revisionId, journalSequence: state.journalSequence, items, truncated: rows.length > 10000,
       offerWorkspace: items.length > 20, decision,
       scopeDigest: sha256(JSON.stringify({ revisionId: state.revisionId, journalSequence: state.journalSequence, items, decisionId: decision?.decisionId ?? null })),
       returnPosition: proposalReviewPosition(this.#db, input.branchId, input.resultId, input.returnPosition) };
   }
 
-  saveProposalDecisionDraft(input: SaveProposalDecisionDraftInput): ProposalWorkspaceProjection {
+  #saveProposalDecisionDraft(input: SaveProposalDecisionDraftInput): ProposalWorkspaceProjection {
     return transact(this.#db, () => {
-      const workspace = this.inspectProposalWorkspace(input);
+      const workspace = this.#proposalWorkspace(input);
       requireMark(workspace.scopeDigest === input.expectedScopeDigest && !workspace.truncated, 'PROPOSAL_SCOPE_MOVED', '范围已变，请重新检查。');
       requireMark(input.markIds.length > 0 && new Set(input.markIds).size === input.markIds.length, 'MARK_INVALID', '请选择精确修改项。');
       const selected = workspace.items.filter((item) => input.markIds.includes(item.markId));
@@ -1123,13 +1144,13 @@ export class EditorialMarkStore {
       const now = new Date().toISOString();
       for (const item of selected) this.#db.prepare("INSERT INTO proposal_decision_drafts(draft_id, item_id, ordinal, disposition, actor, updated_at) VALUES (?, ?, ?, ?, 'editor', ?)")
         .run(randomUUID(), item.itemId, item.draftOrdinal + 1, input.disposition, now);
-      return this.inspectProposalWorkspace(input);
+      return this.#proposalWorkspace(input);
     });
   }
 
-  batchProposalDecisionDraft(input: BatchProposalDecisionDraftInput): ProposalDraftBatchProjection {
+  #batchProposalDecisionDraft(input: BatchProposalDecisionDraftInput): ProposalDraftBatchProjection {
     return transact(this.#db, () => {
-      const workspace = this.inspectProposalWorkspace(input);
+      const workspace = this.#proposalWorkspace(input);
       const scope = workspace.items.filter((item) => input.scope === 'selection' ? input.markIds.includes(item.markId)
         : input.scope === 'chapter' ? item.chapterBlockId === input.chapterBlockId
           : input.scope === 'change-type' ? item.changeType === input.changeType
@@ -1151,21 +1172,21 @@ export class EditorialMarkStore {
       const scopeDigest = sha256(JSON.stringify({ digest: workspace.scopeDigest, scope: input.scope, included, excluded, disposition: input.disposition }));
       if (input.confirmDigest !== null) {
         requireMark(input.confirmDigest === scopeDigest && !workspace.truncated, 'PROPOSAL_SCOPE_MOVED', '批量范围已变，请重新检查全部排除项。');
-        if (included.length > 0) this.saveProposalDecisionDraft({ ...input, expectedScopeDigest: workspace.scopeDigest, markIds: included, atomicGroupId: null });
+        if (included.length > 0) this.#saveProposalDecisionDraft({ ...input, expectedScopeDigest: workspace.scopeDigest, markIds: included, atomicGroupId: null });
       }
-      return { scopeDigest, included, excluded, saved: input.confirmDigest !== null, workspace: input.confirmDigest === null ? workspace : this.inspectProposalWorkspace(input) };
+      return { nextOffset: null, scopeDigest, included, excluded, saved: input.confirmDigest !== null, workspace: input.confirmDigest === null ? workspace : this.#proposalWorkspace(input) };
     });
   }
 
-  recordProposalDecision(input: RecordProposalDecisionInput): ProposalWorkspaceProjection {
+  #recordProposalDecision(input: RecordProposalDecisionInput): ProposalWorkspaceProjection {
     requireMark(UUID_PATTERN.test(input.clientDecisionId), 'MARK_INVALID', '决定标识无效。');
     return transact(this.#db, () => {
       const prior = this.#db.prepare('SELECT branch_id, result_id FROM proposal_decisions WHERE client_decision_id = ?').get(input.clientDecisionId);
       if (prior) {
         requireMark(prior.branch_id === input.branchId && prior.result_id === input.resultId, 'IDEMPOTENCY_CONFLICT', '决定标识已用于其他范围。');
-        return this.inspectProposalWorkspace(input);
+        return this.#proposalWorkspace(input);
       }
-      const workspace = this.inspectProposalWorkspace(input);
+      const workspace = this.#proposalWorkspace(input);
       requireMark(workspace.scopeDigest === input.expectedScopeDigest && !workspace.truncated, 'PROPOSAL_SCOPE_MOVED', '决定范围已变，请重新检查。');
       const chosen = workspace.items.filter((item) => item.draft !== null && item.appliedRevisionId === null);
       requireMark(chosen.length > 0, 'PROPOSAL_EMPTY', '请先选择拟采纳、拟拒绝或暂不决定。');
@@ -1187,7 +1208,7 @@ export class EditorialMarkStore {
       };
       this.#db.prepare("INSERT INTO proposal_decisions(decision_id, client_decision_id, branch_id, result_id, current_revision_id, journal_sequence, canonical_json, supersedes, actor, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'editor', ?)")
         .run(decision.decisionId, input.clientDecisionId, input.branchId, input.resultId, workspace.revisionId, workspace.journalSequence, JSON.stringify(decision), decision.supersedes, now);
-      return this.inspectProposalWorkspace(input);
+      return this.#proposalWorkspace(input);
     });
   }
 

@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 144 as const;
+export const SERVICE_PROTOCOL_VERSION = 143 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -1643,6 +1643,8 @@ export function legacyApplyOutcome(receipt: Pick<ApplyReceiptProjection, 'state'
 
 export type ProposalDraftDisposition = 'accepted' | 'rejected' | 'deferred';
 export interface ProposalWorkspaceInput {
+  /** Bounded metadata page; scope digests always bind the full result. */
+  offset?: number;
   manuscriptId: string;
   branchId: string;
   /** Exact Review Run or producing Task; null is the editor's branch-local proposals. */
@@ -1677,6 +1679,7 @@ export interface ProposalNavigatorItem {
   atomicReason: string | null;
   draft: ProposalDraftDisposition | null;
   draftOrdinal: number;
+  decisionId: string | null;
   disposition: ProposalItemDisposition | null;
   appliedRevisionId: string | null;
 }
@@ -1692,6 +1695,8 @@ export interface ProposalDecisionProjection {
   unresolved: ReadonlyArray<string>;
 }
 export interface ProposalWorkspaceProjection {
+  totalItems: number;
+  nextOffset: number | null;
   bookId: string;
   manuscriptId: string;
   branchId: string;
@@ -1722,6 +1727,7 @@ export interface BatchProposalDecisionDraftInput extends ProposalWorkspaceInput 
   confirmDigest: string | null;
 }
 export interface ProposalDraftBatchProjection {
+  nextOffset: number | null;
   scopeDigest: string;
   included: ReadonlyArray<string>;
   excluded: ReadonlyArray<{ markId: string; reason: 'conflict' | 'unclassified-stale' | 'unloaded' | 'other-version' | 'atomic-group' | 'applied' }>;
@@ -1744,6 +1750,7 @@ export interface PrepareReverseApplyInput {
   markId: string;
 }
 export interface ReverseApplyPreparationProjection {
+  ranges: ReadonlyArray<{ markId: string; position: number; fromGrapheme: number; toGrapheme: number }>;
   originalEffectId: string;
   bookId: string;
   branchId: string;

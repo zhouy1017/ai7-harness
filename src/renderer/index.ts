@@ -998,11 +998,12 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
 async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysisRevisionId?: string): Promise<void> {
   switch (target.kind) {
     case 'apply-receipt':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async () => {
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
         await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
         const receipt = await window.ai7.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'settled' });
         const content = panel(); content.append(element('h2', undefined, receipt.state === 'applied' ? '已应用' : receipt.state === 'not-applied' ? '未应用' : '结果待确认'), element('p', undefined, receipt.reason));
         const details = element('details'); details.append(element('summary', undefined, '查看完整凭据'), element('pre', undefined, JSON.stringify(receipt, null, 2))); content.append(details);
+        content.append(button('在稿件中查看', 'secondary', async () => { const opened = await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }); await openEditorWindow(opened, route.bookTitle); }), button('返回提案', 'secondary', () => renderProposalWorkspace({ manuscriptId: target.manuscriptId, branchId: target.branchId, resultId: null }, target.bookId, route.bookTitle)));
         replaceScreen('apply-receipt', content);
       });
       return;
@@ -2523,7 +2524,10 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
  * with the card it came from, or the new version's, open again.
  */
 async function renderProposalWorkspace(input: { manuscriptId: string; branchId: string; resultId: string | null }, bookId: string, bookTitle: string): Promise<void> {
-  await window.ai7.getManuscriptWindow({ manuscriptId: input.manuscriptId, branchId: input.branchId, cursor: null });
+  const origin = screen.firstElementChild;
+  try { await window.ai7.getManuscriptWindow({ manuscriptId: input.manuscriptId, branchId: input.branchId, cursor: null }); }
+  catch (error) { setStatus(rendererErrorMessage(error, '无法打开提案审阅工作区。'), 'error'); return; }
+  if (screen.firstElementChild !== origin) return;
   const content = panel(); content.dataset['bookId'] = bookId; content.classList.add('proposal-workspace');
   const surface = mountProposalWorkspace({ root: content, api: window.ai7, input, bookTitle, setStatus,
     returnToManuscript: async (blockId, markId) => {

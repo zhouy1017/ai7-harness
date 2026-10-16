@@ -464,7 +464,7 @@ export const RESEARCH_EVIDENCE_SCHEMA_VERSION = 75;
  * relations moves. No task-authorization or analysis relation changes. This is the terminal version.
  */
 export const MATERIAL_INDEX_LAYER_SCHEMA_VERSION = 76;
-export const PROPOSAL_REVIEW_SCHEMA_VERSION = 78;
+export const PROPOSAL_REVIEW_SCHEMA_VERSION = 77;
 export const LATEST_SCHEMA_VERSION = PROPOSAL_REVIEW_SCHEMA_VERSION;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
