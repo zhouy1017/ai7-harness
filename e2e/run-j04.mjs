@@ -73,8 +73,7 @@ const BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；接受修改�
 const CHANGE_SUGGESTION_APPLY_MEMBERS = [
   // Synchronized delta with Issue #902: four-state receipt and reverse preflight.
   'inspectApplyReceipt', 'prepareReverseApply',
-  // Synchronized delta with Issue #902: receipt inspection and reverse preparation only.
-  'inspectApplyReceipt', 'prepareReverseApply','applyChangeSuggestion', 'applyChangeSuggestionBatch', 'getManuscriptApplyOutcome'];
+  'applyChangeSuggestion', 'applyChangeSuggestionBatch', 'getManuscriptApplyOutcome'];
 // Synchronized delta with Issue #413: 交付物's four 导出 members, the only ones named like an export. They reach
 // no Provider, session or scheduler: a local file the system dialog chose, approved per file.
 // Synchronized delta with Issue #416 (S67b): a 图书交付包 version's export adds three — the same ledger's files in a folder

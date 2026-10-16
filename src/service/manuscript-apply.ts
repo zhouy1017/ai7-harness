@@ -252,12 +252,12 @@ export class ManuscriptApplyStore {
       decision = { disposition: 'accepted-with-edit', editedText: input.editedText, reason: input.reason };
     } else {
       requireApply(
-        input.interaction === 'apply-recorded-decision' && target.decision?.disposition === 'accepted-with-edit' &&
-          target.decision.editedText !== null && input.editedText === null && input.reason === null,
+        input.interaction === 'apply-recorded-decision' && (target.decision?.disposition === 'accepted' ||
+          (target.decision?.disposition === 'accepted-with-edit' && target.decision.editedText !== null)) && input.editedText === null && input.reason === null,
         'APPLY_INVALID',
         '没有已记录、尚未写入的「修改后接受」。',
       );
-      insertText = target.decision.editedText;
+      insertText = target.decision.editedText ?? target.proposedText;
       decision = { existingDecisionId: target.decision.decisionId };
     }
     return this.#commit(input, 'apply', input.interaction, input.clientEffectId, null, [{
@@ -316,11 +316,21 @@ export class ManuscriptApplyStore {
       'APPLY_INVALID',
       '这次应用已经撤销过。',
     );
-    return this.#commit(input, 'reverse-apply', 'confirm-reverse-apply', input.clientEffectId, original.effect_id, [{
-      markId: input.markId, itemId: target.itemId, blockId: target.blockId, fromGrapheme: target.fromGrapheme,
-      toGrapheme: target.toGrapheme, expectedText: target.standingText, insertText: target.currentText,
-      decision: { disposition: 'withdrawn', editedText: null, reason: null }, standsAs: 'open',
-    }], input.markId);
+    const members = this.#reverseMembers(input);
+    return this.#commit(input, 'reverse-apply', 'confirm-reverse-apply', input.clientEffectId, original.effect_id, members.map((member) => {
+      requireApply(member.status === 'applied' && member.anchorState === 'exact', 'APPLY_TARGET_DRIFTED', '原子组中有应用后的文字改过；本次撤销没有写入稿件。');
+      requireApply(this.#db.prepare('SELECT 1 FROM manuscript_effect_targets WHERE effect_id = ? AND item_id = ?').get(original.effect_id!, member.itemId) !== undefined, 'PROPOSAL_ATOMIC_SCOPE', '原子组成员不属于同一次应用。');
+      return { markId: member.markId, itemId: member.itemId, blockId: member.blockId, fromGrapheme: member.fromGrapheme,
+        toGrapheme: member.toGrapheme, expectedText: member.standingText, insertText: member.currentText,
+        decision: { disposition: 'withdrawn' as const, editedText: null, reason: null }, standsAs: 'open' as const };
+    }), input.markId);
+  }
+
+  #reverseMembers(input: PrepareReverseApplyInput): Array<ReturnType<EditorialMarkStore['suggestionTarget']> & { markId: string }> {
+    const group = this.#db.prepare('SELECT atomic_group_id FROM proposal_change_items WHERE mark_id = ?').get(input.markId);
+    const ids = group?.atomic_group_id === null || group?.atomic_group_id === undefined ? [{ mark_id: input.markId }]
+      : this.#db.prepare('SELECT mark_id FROM proposal_change_items WHERE atomic_group_id = ? ORDER BY rowid').all(group.atomic_group_id);
+    return ids.map((row) => ({ ...this.#marks.suggestionTarget({ ...input, markId: String(row.mark_id) }), markId: String(row.mark_id) }));
   }
 
   #requireAtomicScope(branchId: string, itemIds: ReadonlyArray<string>): void {
@@ -364,9 +374,11 @@ export class ManuscriptApplyStore {
     const book = this.#db.prepare('SELECT book_id FROM manuscripts WHERE manuscript_id = ?').get(input.manuscriptId)!;
     const window = this.#manuscript.getWindow(input.manuscriptId, input.branchId, { kind: 'window-start', blockId: target.blockId });
     const reversed = this.#db.prepare('SELECT 1 FROM manuscript_effect_intents WHERE reverses_effect_id = ?').get(original.effect_id!);
+    const members = this.#reverseMembers(input);
+    const exact = members.every((member) => member.status === 'applied' && member.anchorState === 'exact');
     return { originalEffectId: String(original.effect_id), bookId: String(book.book_id), branchId: input.branchId, revisionId: window.revisionId,
-      journalSequence: window.journalSequence, markId: input.markId, blockId: target.blockId, ready: target.anchorState === 'exact' && reversed === undefined,
-      reason: target.anchorState !== 'exact' ? '应用后的文字又改过，请解决稿件冲突。' : reversed !== undefined ? '本次应用已经撤销。' : '将创建一次新的受控应用；原应用凭据保持原样。' };
+      journalSequence: window.journalSequence, markId: input.markId, blockId: target.blockId, ready: exact && reversed === undefined,
+      reason: !exact ? '应用后的文字又改过，请解决稿件冲突。' : reversed !== undefined ? '本次应用已经撤销。' : `将创建一次新的受控应用，撤销 ${members.length} 项精确修改；原应用凭据保持原样。` };
   }
 
   /** Apply Outcome Recovery: what the store holds for one Effect identity, and nothing else. */
@@ -424,6 +436,9 @@ export class ManuscriptApplyStore {
     planned: ReadonlyArray<PlannedTarget>,
     projectedMarkId: string,
   ): ManuscriptApplyCommandProjection {
+    requireApply(this.#db.prepare(`SELECT 1 FROM manuscript_outcome_recovery o WHERE o.manuscript_id = ? AND o.branch_id = ? AND o.state = 'unresolved'
+      AND NOT EXISTS(SELECT 1 FROM manuscript_effect_intents i JOIN manuscript_effect_receipts r ON r.effect_id = i.effect_id WHERE i.idempotency_key = o.client_effect_id) LIMIT 1`).get(binding.manuscriptId, binding.branchId) === undefined,
+      'APPLY_OUTCOME_UNRESOLVED', '这份稿件有尚未确认的应用结果，不能重复应用；请查看应用凭据。');
     const targets: ExactReplacementTarget[] = planned.map((target) => ({
       blockId: target.blockId,
       fromGrapheme: target.fromGrapheme,

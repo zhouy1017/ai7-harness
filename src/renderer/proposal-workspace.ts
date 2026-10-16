@@ -22,6 +22,7 @@ export function mountProposalWorkspace(options: {
   openConflict(markId: string): void;
 }): { start(): void; destroy(): void; settle(): Promise<boolean> } {
   const { root, api, input } = options;
+  const binding = { manuscriptId: input.manuscriptId, branchId: input.branchId };
   let workspace: ProposalWorkspaceProjection | null = null;
   let active: ProposalNavigatorItem | null = null;
   let position: ProposalReviewReturnPosition = { blockId: null, activeMarkId: null, comparison: 'inline', review: 'all', chapterBlockId: null, changeType: null, expanded: false };
@@ -29,7 +30,7 @@ export function mountProposalWorkspace(options: {
   let batch: ProposalDraftBatchProjection | null = null;
   let prepared: string[] | null = null;
   let preparedDecision: string | null = null;
-  let draftUndo: { ids: string[]; disposition: ProposalDraftDisposition | null; group: string | null } | null = null;
+  let draftUndo: Array<{ ids: string[]; disposition: ProposalDraftDisposition | null; group: string | null }> | null = null;
   const selected = new Set<string>();
   const header = el('header'); const toolbar = el('div', undefined, 'proposal-toolbar');
   const layout = el('div', undefined, 'proposal-layout');
@@ -39,7 +40,7 @@ export function mountProposalWorkspace(options: {
   const returnButton = button('返回稿件', 'return', () => void act(async () => { await persist(); await options.returnToManuscript(position.blockId, position.activeMarkId); }));
   header.append(el('h2', '提案审阅工作区'), el('p', options.bookTitle), returnButton);
   nav.append(navigator, railTrack); layout.append(nav, comparison); root.append(header, toolbar, layout, controls, message);
-  const rail = mountPositionRail({ track: railTrack, api, binding: () => input,
+  const rail = mountPositionRail({ track: railTrack, api, binding: () => binding,
     jumpToBlock: (blockId) => { const index = filtered().findIndex((item) => item.blockId === blockId); if (index >= 0) list.activate(index); }, onError: () => {} });
   const list = mountWindowedList({ root: navigator, rowHeight: 64, viewportHeight: 448, label: '修改导航', key: (item: ProposalNavigatorItem) => item.markId,
     render: (item) => {
@@ -49,7 +50,7 @@ export function mountProposalWorkspace(options: {
       checkbox.addEventListener('change', () => { if (checkbox.checked) selected.add(item.markId); else selected.delete(item.markId); });
       row.append(checkbox, el('span', `${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme} · ${item.changeType === 'replace' ? '替换' : item.changeType === 'insert' ? '插入' : '删除'}`),
         el('small', `${item.draft === null ? item.disposition === null ? '未审阅' : '已记录' : dispositions[item.draft]}${item.stale ? ' · 旧基准' : ''}${item.conflict ? ' · 冲突' : ''}${item.atomicGroupId ? ' · 原子组' : ''}`)); return row;
-    }, onActivate: (item) => { active = item; position = { ...position, blockId: item.blockId, activeMarkId: item.markId }; rail.setPosition(workspace === null ? 0 : workspace.items.indexOf(item) / Math.max(1, workspace.items.length - 1)); void persist(); void loadComparison(item); },
+    }, onActivate: (item) => { active = item; position = { ...position, blockId: item.blockId, activeMarkId: item.markId }; rail.setPosition(workspace === null ? 0 : workspace.items.indexOf(item) / Math.max(1, workspace.items.length - 1)); void persist(); void loadComparison(item).catch(() => { message.textContent = '无法加载此修改的精确对比。'; }); },
   });
   async function act(run: () => Promise<void>): Promise<void> {
     if (working || destroyed) return; working = true; root.setAttribute('aria-busy', 'true');
@@ -98,7 +99,7 @@ export function mountProposalWorkspace(options: {
     }
     if (item.appliedRevisionId === null) for (const disposition of ['accepted', 'rejected', 'deferred'] as const) {
       const control = button(dispositions[disposition], `draft-${disposition}`, () => void act(async () => {
-        draftUndo = { ids: group.map((entry) => entry.markId), disposition: item.draft, group: item.atomicGroupId };
+        draftUndo = [{ ids: group.map((entry) => entry.markId), disposition: item.draft, group: item.atomicGroupId }];
         workspace = await api.saveProposalDecisionDraft({ ...input, markIds: group.map((entry) => entry.markId), disposition, atomicGroupId: item.atomicGroupId, expectedScopeDigest: workspace!.scopeDigest });
         await refresh();
         if (autoAdvance) { const index = filtered().findIndex((entry) => entry.draft === null && entry.disposition === null && entry.appliedRevisionId === null); if (index >= 0) list.activate(index); }
@@ -108,9 +109,9 @@ export function mountProposalWorkspace(options: {
     yours.append(el('p', item.appliedRevisionId !== null ? `已应用 · 稿件修订 ${item.appliedRevisionId}` : item.disposition === 'accepted' || item.disposition === 'accepted-with-edit' ? '已采纳 · 尚未应用' : item.draft !== null ? `${dispositions[item.draft]} · 草稿已保存，尚未记录决定` : '尚未选择处理。'));
     comparison.replaceChildren(el('p', `基准修订 ${item.baseRevisionId} · 当前修订 ${window.revisionId}${item.stale ? ' · 旧基准，按精确范围核对' : ''}`),
       button(position.comparison === 'inline' ? '并排对比' : '行内对比', 'comparison', () => { position.comparison = position.comparison === 'inline' ? 'side-by-side' : 'inline'; void persist(); paintComparison(item, card, window); }),
-      region('修改内容', content, el('p', context)), region('修改理由', el('p', suggestion.rationale || '没有填写修改理由。')),
+      region('修改内容', content, (() => { const detail = el('details'); detail.open = position.expanded; detail.append(el('summary', '周围语境'), el('p', context)); detail.addEventListener('toggle', () => { position.expanded = detail.open; void persist(); }); return detail; })()), region('修改理由', el('p', suggestion.rationale || '没有填写修改理由。')),
       region('依据与核查', el('p', '支持资料与核查状态见原修改建议卡。'), button('在稿件中查看', 'source-card', () => void options.returnToManuscript(item.blockId, item.markId))), yours);
-    if (suggestion.application !== null) void api.inspectApplyReceipt({ ...input, clientEffectId: suggestion.application.effectId, recovery: 'settled' }).then((receipt) => { if (!destroyed && active?.markId === item.markId) yours.append(receiptCard(receipt)); }).catch(() => {});
+    if (suggestion.application !== null) void api.inspectApplyReceipt({ ...binding, clientEffectId: suggestion.application.effectId, recovery: 'settled' }).then((receipt) => { if (!destroyed && active?.markId === item.markId) yours.append(receiptCard(receipt)); }).catch(() => {});
   }
   function receiptCard(receipt: ApplyReceiptProjection): HTMLElement {
     const node = el('section', undefined, 'proposal-receipt'); node.dataset['applyReceiptState'] = receipt.state;
@@ -122,7 +123,7 @@ export function mountProposalWorkspace(options: {
   function renderControls(): void {
     controls.replaceChildren(); if (!workspace) return;
     if (draftUndo) controls.append(button('撤销上次草稿处理', 'draft-undo', () => void act(async () => {
-      const undo = draftUndo!; workspace = await api.saveProposalDecisionDraft({ ...input, markIds: undo.ids, disposition: undo.disposition, atomicGroupId: undo.group, expectedScopeDigest: workspace!.scopeDigest }); draftUndo = null; await refresh();
+      for (const undo of draftUndo!) workspace = await api.saveProposalDecisionDraft({ ...input, markIds: undo.ids, disposition: undo.disposition, atomicGroupId: undo.group, expectedScopeDigest: workspace!.scopeDigest }); draftUndo = null; await refresh();
     })));
     for (const [scope, label] of [['selection', '已选修改'], ['chapter', '当前章节'], ['change-type', '当前修改类型'], ['filter', '当前筛选']] as const) {
       for (const disposition of ['accepted', 'rejected', 'deferred'] as const) {
@@ -146,12 +147,13 @@ export function mountProposalWorkspace(options: {
     const included = el('ul'); for (const markId of frozen.included) { const item = workspace!.items.find((entry) => entry.markId === markId)!; included.append(el('li', `纳入：${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme}`)); }
     const excluded = el('ul'); for (const item of frozen.excluded) excluded.append(el('li', `${item.markId} · ${exclusionLabels[item.reason]}`));
     controls.append(included, excluded, button('确认保存批量草稿', 'batch-confirm', () => void act(async () => {
-      await api.batchProposalDecisionDraft({ ...input, scope, markIds: [...selected], chapterBlockId: position.chapterBlockId, changeType: position.changeType, review: position.review, disposition, confirmDigest: frozen.scopeDigest }); await refresh();
+      const undo = frozen.included.map((id) => { const item = frozen.workspace.items.find((entry) => entry.markId === id)!; return { ids: [id], disposition: item.draft, group: null }; });
+      await api.batchProposalDecisionDraft({ ...input, scope, markIds: [...selected], chapterBlockId: position.chapterBlockId, changeType: position.changeType, review: position.review, disposition, confirmDigest: frozen.scopeDigest }); draftUndo = undo; await refresh();
     })), button('返回处理', 'batch-cancel', renderControls));
   }
   function renderPreparation(): void {
     if (!workspace || prepared === null) return;
-    controls.replaceChildren(el('h3', '准备应用'), el('p', `${options.bookTitle} · 当前分支 · 当前修订 ${workspace.revisionId} · 决定 ${preparedDecision ?? '尚未记录'} · 纳入 ${prepared.length} 项 · 预计创建一个新稿件修订`), el('p', '尚未批准应用，稿件未发生变化'));
+    controls.replaceChildren(el('h3', '准备应用'), el('p', `${options.bookTitle} · 分支 ${workspace.branchId} · 当前修订 ${workspace.revisionId} · 决定 ${preparedDecision ?? '尚未记录'} · 纳入 ${prepared.length} 项 · 预计创建一个新稿件修订`), el('p', '尚未批准应用，稿件未发生变化'));
     const rows = el('ul'); for (const markId of prepared) { const item = workspace.items.find((entry) => entry.markId === markId)!; const row = el('li', `${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme}`);
       row.append(button('从本次应用移除', 'remove', () => { const group = item.atomicGroupId; prepared = prepared!.filter((id) => group === null ? id !== markId : workspace!.items.find((entry) => entry.markId === id)?.atomicGroupId !== group); renderPreparation(); })); rows.append(row); }
     controls.append(rows, el('p', `排除 ${workspace.items.length - prepared.length} 项（含未采纳、冲突、已应用与本次移除项）；移除项保持已采纳 · 尚未应用。`));
@@ -160,10 +162,11 @@ export function mountProposalWorkspace(options: {
       if (fresh.scopeDigest !== workspace!.scopeDigest || fresh.decision?.decisionId !== preparedDecision) { await refresh(); message.textContent = '决定或稿件已变，请重新准备应用。'; return; }
       const first = workspace!.items.find((item) => item.markId === prepared![0])!;
       const result = await applyOnce(input, (clientEffectId) => api.applyChangeSuggestionBatch({ manuscriptId: input.manuscriptId, branchId: input.branchId, windowStartBlockId: first.blockId, markIds: prepared!, clientEffectId }),
-        (binding) => api.getManuscriptApplyOutcome(binding), undefined, (clientEffectId, state) => {
-          void api.inspectApplyReceipt({ ...input, clientEffectId, recovery: state }).then((receipt) => { if (!destroyed) controls.replaceChildren(receiptCard(receipt)); }).catch(() => {});
+        (target) => api.getManuscriptApplyOutcome(target), undefined, async (clientEffectId, state) => {
+          const status = el('p', state === 'confirming' ? '正在确认应用结果' : '结果待确认'); status.dataset['applyReceiptState'] = state; controls.replaceChildren(status);
+          const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId, recovery: state }); if (!destroyed) controls.replaceChildren(receiptCard(receipt));
         });
-      if (result.acknowledged) { const receipt = await api.inspectApplyReceipt({ ...input, clientEffectId: result.result.application.effectId, recovery: 'settled' }); await refresh(); controls.prepend(receiptCard(receipt)); }
+      if (result.acknowledged) { const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId: result.result.application.effectId, recovery: 'settled' }); await refresh(); controls.prepend(receiptCard(receipt)); }
       else if (result.outcome !== null) { await refresh(); message.textContent = result.outcome.state === 'committed' ? '已应用，结果从记录确认。' : '未应用，请重新准备。'; }
     })); confirm.disabled = prepared.length === 0 || preparedDecision === null; controls.append(confirm, button('取消准备', 'cancel-prepare', renderControls));
   }

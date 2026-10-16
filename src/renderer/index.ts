@@ -2522,11 +2522,13 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
  * and back: 返回稿件 — and every way the conflict is left — opens the manuscript at the conflict's paragraph
  * with the card it came from, or the new version's, open again.
  */
-function renderProposalWorkspace(input: { manuscriptId: string; branchId: string; resultId: string | null }, bookId: string, bookTitle: string): void {
+async function renderProposalWorkspace(input: { manuscriptId: string; branchId: string; resultId: string | null }, bookId: string, bookTitle: string): Promise<void> {
+  await window.ai7.getManuscriptWindow({ manuscriptId: input.manuscriptId, branchId: input.branchId, cursor: null });
   const content = panel(); content.dataset['bookId'] = bookId; content.classList.add('proposal-workspace');
   const surface = mountProposalWorkspace({ root: content, api: window.ai7, input, bookTitle, setStatus,
     returnToManuscript: async (blockId, markId) => {
-      const opened = blockId === null ? await window.ai7.getManuscriptWindow({ ...input, cursor: null }) : await window.ai7.getManuscriptWindowAt({ ...input, target: { kind: 'block', blockId } });
+      const binding = { manuscriptId: input.manuscriptId, branchId: input.branchId };
+      const opened = blockId === null ? await window.ai7.getManuscriptWindow({ ...binding, cursor: null }) : await window.ai7.getManuscriptWindowAt({ ...binding, target: { kind: 'block', blockId } });
       await openEditorWindow(opened, bookTitle, undefined, undefined, markId ?? undefined);
     }, openConflict: (markId) => renderProposalConflict({ ...input, bookId, markId }, bookTitle),
   });
@@ -9180,6 +9182,10 @@ function renderEditorWindow(
     },
     openReviewFinding: (target) => void leaveForReview({ reviewRunId: target.reviewRunId, findingId: target.findingId }),
     openConflict: (markId) => void leaveForConflict(markId),
+    openProposalWorkspace: () => void (async () => {
+      try { if (!(await settleLocalEdit())) return; await rememberEntryPosition(); renderProposalWorkspace({ manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId, resultId: null }, initialWindow.bookId, bookTitle); }
+      catch (error) { setStatus(rendererErrorMessage(error, '无法打开提案审阅工作区。'), 'error'); }
+    })(),
     // 书系知识 (Issue #63, S28b): a member Book's manuscript offers its selected words to each Series it is in; a Production
     // Document offers nothing of 书系.
     ...(isDocument ? {} : {

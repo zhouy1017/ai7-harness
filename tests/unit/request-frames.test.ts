@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
@@ -24,6 +24,34 @@ import {
 import type { ServiceOperation, ServiceOperationMap, ServiceRequest } from '../../src/shared/protocol.js';
 
 const encoder = new TextEncoder();
+
+describe('Proposal workspace commands (#902)', () => {
+  it('decodes the six exact inputs and refuses forged write or approval fields', () => {
+    const common = { manuscriptId: randomUUID(), branchId: randomUUID(), resultId: null };
+    const frames: ServiceRequest[] = [
+      { id: randomUUID(), op: 'inspectProposalWorkspace', input: common },
+      { id: randomUUID(), op: 'saveProposalDecisionDraft', input: { ...common, markIds: [randomUUID()], disposition: 'deferred', atomicGroupId: null, expectedScopeDigest: 'a'.repeat(64) } },
+      { id: randomUUID(), op: 'batchProposalDecisionDraft', input: { ...common, scope: 'filter', markIds: [], chapterBlockId: null, changeType: null, review: 'unreviewed', disposition: 'accepted', confirmDigest: null } },
+      { id: randomUUID(), op: 'recordProposalDecision', input: { ...common, expectedScopeDigest: 'a'.repeat(64), clientDecisionId: randomUUID() } },
+      { id: randomUUID(), op: 'inspectApplyReceipt', input: { manuscriptId: common.manuscriptId, branchId: common.branchId, clientEffectId: randomUUID(), recovery: 'confirming' } },
+      { id: randomUUID(), op: 'prepareReverseApply', input: { manuscriptId: common.manuscriptId, branchId: common.branchId, markId: randomUUID() } },
+    ];
+    for (const frame of frames) {
+      expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+      expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...frame.input, approved: true } })))).toThrow(ProtocolError);
+    }
+  });
+
+  it('preserves the existing batch Apply request bytes', () => {
+    const frame: ServiceRequest = { id: '00000000-0000-4000-8000-000000000001', op: 'applyChangeSuggestionBatch', input: {
+      manuscriptId: '00000000-0000-4000-8000-000000000002', branchId: '00000000-0000-4000-8000-000000000003', windowStartBlockId: `blk_${'1'.repeat(24)}`,
+      markIds: ['00000000-0000-4000-8000-000000000004'], clientEffectId: '00000000-0000-4000-8000-000000000005',
+    } };
+    const bytes = encoder.encode(JSON.stringify(frame));
+    expect(decodeRequest(bytes)).toEqual(frame);
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe('ed7778ff78462d22336d877cb57a7d82e25cc34c1b5803a0de61efe1f6698b78');
+  });
+});
 
 /**
  * Every accepted frame in this suite is typed against the protocol (Issue #746): a frame literal is `satisfies

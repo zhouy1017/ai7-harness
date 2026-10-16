@@ -951,6 +951,9 @@ export const PROPOSAL_REVIEW_TRIGGER_SQL: Readonly<Record<string, string>> = Obj
 
 /** Byte-preserving CHECK widening. Restore keys, triggers, indexes and rowids in one transaction. */
 export function initializeProposalReviewSchema(db: DatabaseSync): void {
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 78) {
+    requireMark(Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL).every((name) => db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(name) !== undefined), 'SCHEMA_MIGRATION_FAILED', '提案审阅记录缺失。');
+  }
   if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'proposal_decisions'").get()) return;
   const shape = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'proposal_item_decisions'").get() as SqlRow;
   const widen = foldedSql(text(shape.sql)) === foldedSql(PROPOSAL_ITEM_DECISIONS_PRE78_SQL);
@@ -1064,7 +1067,7 @@ export class EditorialMarkStore {
       (input.resultId === null || UUID_PATTERN.test(input.resultId)), 'MARK_INVALID', '提案范围无效。');
     const state = this.#branchState(input.manuscriptId, input.branchId);
     const rows = this.#db.prepare(`SELECT m.mark_id, m.block_id, m.from_grapheme, m.to_grapheme,
-      m.pinned_revision_id, m.anchor_state, m.status, i.item_id, i.change_type, i.atomic_group_id,
+      m.pinned_revision_id, m.pinned_journal_sequence, m.anchor_state, m.status, i.item_id, i.change_type, i.atomic_group_id,
       w.position, g.reason atomic_reason,
       (SELECT h.block_id FROM working_blocks h WHERE h.branch_id = m.branch_id AND h.kind = 'heading' AND h.position <= w.position ORDER BY h.position DESC LIMIT 1) chapter_id,
       (SELECT h.text FROM working_blocks h WHERE h.branch_id = m.branch_id AND h.kind = 'heading' AND h.position <= w.position ORDER BY h.position DESC LIMIT 1) chapter,
@@ -1085,7 +1088,7 @@ export class EditorialMarkStore {
       position: row.position === null ? 0 : integer(row.position), fromGrapheme: integer(row.from_grapheme), toGrapheme: integer(row.to_grapheme),
       chapterBlockId: nullableText(row.chapter_id), chapter: nullableText(row.chapter) ?? '未分章',
       changeType: text(row.change_type) as ProposalNavigatorItem['changeType'], baseRevisionId: text(row.pinned_revision_id),
-      stale: row.pinned_revision_id !== state.revisionId, conflict: row.anchor_state !== 'exact' || Number(row.conflicting) === 1,
+      stale: row.pinned_revision_id !== state.revisionId || Number(row.pinned_journal_sequence) !== state.journalSequence, conflict: row.anchor_state !== 'exact' || Number(row.conflicting) === 1,
       loaded: row.position !== null, otherVersion: false,
       atomicGroupId: nullableText(row.atomic_group_id), atomicReason: nullableText(row.atomic_reason),
       draft: nullableText(row.draft) as ProposalNavigatorItem['draft'], draftOrdinal: Number(row.draft_ordinal ?? 0),
@@ -1141,7 +1144,10 @@ export class EditorialMarkStore {
           : item.conflict ? (item.stale ? 'unclassified-stale' : 'conflict') : item.appliedRevisionId !== null ? 'applied' : null;
         if (reason === null) included.push(item.markId); else excluded.push({ markId: item.markId, reason });
       }
-      for (const markId of input.markIds) if (input.scope === 'selection' && !scope.some((item) => item.markId === markId)) excluded.push({ markId, reason: 'unloaded' });
+      for (const markId of input.markIds) if (input.scope === 'selection' && !scope.some((item) => item.markId === markId)) {
+        const old = this.#db.prepare("SELECT 1 FROM editorial_marks WHERE mark_id = ? AND manuscript_id = ? AND branch_id = ? AND status = 'converted'").get(markId, input.manuscriptId, input.branchId);
+        excluded.push({ markId, reason: old === undefined ? 'unloaded' : 'other-version' });
+      }
       const scopeDigest = sha256(JSON.stringify({ digest: workspace.scopeDigest, scope: input.scope, included, excluded, disposition: input.disposition }));
       if (input.confirmDigest !== null) {
         requireMark(input.confirmDigest === scopeDigest && !workspace.truncated, 'PROPOSAL_SCOPE_MOVED', '批量范围已变，请重新检查全部排除项。');
@@ -1381,8 +1387,9 @@ export class EditorialMarkStore {
       const mark = this.#liveMark(input);
       requireMark(mark.kind === 'change-suggestion', 'MARK_ACTION_INVALID', '只有修改建议可以这样处理。');
       requireMark(mark.status !== 'applied', 'MARK_DECISION_INVALID', '这条修改建议已经应用；要改回去，请准备撤销本次应用。');
-      const item = this.#db.prepare('SELECT item_id, current_text FROM proposal_change_items WHERE mark_id = ?').get(input.markId) as SqlRow | undefined;
+      const item = this.#db.prepare('SELECT item_id, current_text, atomic_group_id FROM proposal_change_items WHERE mark_id = ?').get(input.markId) as SqlRow | undefined;
       requireMark(item !== undefined, 'MARK_STORE_INVALID', '修改建议缺少提案修改项。');
+      requireMark(item.atomic_group_id === null, 'PROPOSAL_ATOMIC_SCOPE', '原子组只能记录一个整体处理。');
       const itemId = text(item.item_id);
       const current = this.#db.prepare(
         'SELECT decision_id, ordinal, disposition FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1',

@@ -130,6 +130,7 @@ interface MountOptions {
    * Without it, the entry is not offered.
    */
   openConflict?(markId: string): void;
+  openProposalWorkspace?(): void;
   /**
    * The Series the Book is in now (Issue #63, S28b): for each, the selection menu offers 提议为书系「…」的知识… on the selected
    * words. Without it — a Production Document, or a Book in no Series — the menu offers nothing of 书系.
@@ -1002,6 +1003,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           if (!drafts.isConnected) return;
           const item = workspace.items.find((entry) => entry.markId === card.markId); if (!item) return;
           const members = item.atomicGroupId === null ? [item] : workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId);
+          if ((workspace.offerWorkspace || item.atomicGroupId !== null) && options.openProposalWorkspace) drafts.append(actionButton('proposal-workspace', '在专用工作区审阅', 'secondary', () => options.openProposalWorkspace?.()));
           const reading = el('p', 'muted', item.draft === null ? '尚无处理草稿。' : item.draft === 'accepted' ? '拟采纳 · 草稿已保存' : item.draft === 'rejected' ? '拟拒绝 · 草稿已保存' : '暂不决定 · 草稿已保存'); drafts.append(reading);
           if (item.atomicGroupId !== null) {
             drafts.append(el('p', 'muted', `原子组：${item.atomicReason ?? '依赖说明缺失'}；部分采纳会造成上述不一致。拆分需要新的提案版本。`));
@@ -1112,7 +1114,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           ? card.conflict?.outcome === 'keep-current' ? '已拒绝 · 保留当前稿件' : '已拒绝 · 原文保留'
           : decision.disposition === 'deferred' ? '已记录 · 暂不决定' : '已采纳 · 尚未应用');
         recorded.dataset['markDecision'] = decision.disposition;
-        if (decision.disposition === 'accepted-with-edit') {
+        if (decision.disposition === 'accepted-with-edit' || decision.disposition === 'accepted') {
           disposition.append(exact
             ? actionButton('apply-recorded', '应用到稿件', 'primary', () => void writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
                 ...binding(), markId: card.markId, clientEffectId, interaction: 'apply-recorded-decision', editedText: null, reason: null,
@@ -1358,10 +1360,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         (clientEffectId) => options.writeManuscript(() => run(clientEffectId), done),
         (input) => api.getManuscriptApplyOutcome(input),
         undefined,
-        (clientEffectId, state) => {
-          void api.inspectApplyReceipt({ manuscriptId: editor.currentWindow().manuscriptId, branchId: editor.currentWindow().branchId, clientEffectId, recovery: state }).then((receipt) => {
-            recoveryCards.set(markId, receipt); options.setStatus(state === 'confirming' ? '正在确认应用结果' : '结果待确认', 'busy');
-          }).catch(() => {});
+        async (clientEffectId, state) => {
+          const label = state === 'confirming' ? '正在确认应用结果' : '结果待确认';
+          const status = el('p', 'editorial-mark-recorded', label); status.dataset['applyReceiptState'] = state;
+          (floating?.querySelector('[data-mark-region="disposition"]') ?? layer).append(status); options.setStatus(label, 'busy');
+          const receipt = await api.inspectApplyReceipt({ manuscriptId: editor.currentWindow().manuscriptId, branchId: editor.currentWindow().branchId, clientEffectId, recovery: state });
+          recoveryCards.set(markId, receipt); status.remove();
+          if (state === 'unresolved') await openCard(markId);
         },
       );
       if (applied.acknowledged) {

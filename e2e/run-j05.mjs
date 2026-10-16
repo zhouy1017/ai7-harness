@@ -834,11 +834,68 @@ async function main() {
     await waitFor(renderer, `window.__j05.mark('change-suggestion', ${JSON.stringify(second)}).length > 0 && window.__j05.composer() === null`, 'lost-ack-suggestion-drawn');
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); window.__j05Journal = page.journalSequence; return true; })()`, 'lost-ack-journal-before');
     await openMarkCard(renderer, 'change-suggestion', second, 'lost-ack-card');
-    await assertRenderer(renderer, `window.__j05.act('accept-and-apply')`, 'lost-ack-accept-and-apply');
+    await assertRenderer(renderer, `(() => { window.__j05ReceiptStates = []; new MutationObserver((records) => { for (const record of records) for (const node of record.addedNodes) if (node instanceof HTMLElement) { if (node.dataset.applyReceiptState) window.__j05ReceiptStates.push(node.dataset.applyReceiptState); for (const child of node.querySelectorAll('[data-apply-receipt-state]')) window.__j05ReceiptStates.push(child.dataset.applyReceiptState); } }).observe(document.body, { childList: true, subtree: true }); return window.__j05.act('accept-and-apply'); })()`, 'lost-ack-accept-and-apply');
     await waitFor(renderer, `window.__j05.status().includes('写入结果已从记录确认') && window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(${JSON.stringify(second)}) === window.__j05Second.slice(0, ${RANGES.applied[0]}) + ${JSON.stringify(LOST_ACK_TEXT)} + window.__j05Second.slice(${RANGES.applied[1]})`, 'lost-ack-answered-from-the-records');
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); return page.journalSequence === window.__j05Journal + 1 && window.__j05.card().querySelector('[data-mark-action="accept-and-apply"]') === null && window.__j05.card().querySelector('[data-mark-state]').textContent === '已应用'; })()`, 'lost-ack-wrote-exactly-once');
     await press(renderer, 'Escape');
     await settled(renderer, 'lost-ack-settled');
+
+    at('apply-receipt-four-states');
+    // The existing lost-ack hook commits first: unresolved is service-tested, never faked by this hook.
+    await waitFor(renderer, `window.__j05ReceiptStates.includes('confirming')`, 'receipt-confirming-before-recovery');
+    await openMarkCard(renderer, 'change-suggestion', second, 'receipt-recovered-card');
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-apply-receipt-state="applied"]')`, 'receipt-applied-from-record');
+    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const receipt = await window.ai7.inspectApplyReceipt({ manuscriptId: work.manuscriptId, branchId: work.branchId, clientEffectId: crypto.randomUUID(), recovery: 'settled' }); return receipt.state === 'not-applied' && receipt.safeRetry; })()`, 'receipt-proven-noncommit');
+    await press(renderer, 'Escape');
+
+    at('proposal-workspace-offer');
+    // Seed ordinary synthetic proposals through the existing producer-facing command; every decision uses the UI.
+    const proposalBlock = await renderer.evaluate(`(async () => {
+      const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)});
+      const binding = { manuscriptId: work.manuscriptId, branchId: work.branchId };
+      const page = await window.ai7.getManuscriptWindowAt({ ...binding, target: { kind: 'start' } });
+      const block = page.blocks.filter((entry) => entry.kind === 'paragraph' && Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(entry.text)).length >= 10)[2];
+      const words = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(block.text), (part) => part.segment);
+      for (let index = 0; index < 21; index++) await window.ai7.createEditorialMark({ ...binding, windowStartBlockId: page.blocks[0].blockId, clientMarkId: crypto.randomUUID(), baseRevisionId: page.revisionId, expectedJournalSequence: page.journalSequence, blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 2, selectedText: words.slice(0, 2).join(''), kind: 'change-suggestion', highlightColor: null, body: '', proposedText: '〔工作区合成建议〕', rationale: null });
+      return block.blockId;
+    })()`);
+    requireJourney(typeof proposalBlock === 'string' && /^blk_[0-9a-f]{24}$/.test(proposalBlock), 'proposal-synthetic-location');
+    await settled(renderer, 'proposal-before-relaunch'); await close(); renderer = await launch();
+    await waitFor(renderer, `document.querySelector('.recent-work-item button')`, 'proposal-restart-recent');
+    await assertRenderer(renderer, `(() => { document.querySelector('.recent-work-item button').click(); return true; })()`, 'proposal-restart-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] .editorial-mark')`, 'proposal-restart-editor');
+    await assertRenderer(renderer, PAGE_HELPERS, 'proposal-page-helpers');
+    await openMarkCard(renderer, 'change-suggestion', proposalBlock, 'proposal-offer-card');
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-action="proposal-workspace"]')`, 'proposal-explicit-offer');
+    await assertRenderer(renderer, `document.querySelector('[data-screen="editor"]') && window.__j05.act('proposal-workspace')`, 'proposal-stays-contextual-until-chosen');
+    await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"] [data-proposal-active]')`, 'proposal-workspace-active');
+    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const workspace = await window.ai7.inspectProposalWorkspace({ manuscriptId: work.manuscriptId, branchId: work.branchId, resultId: null }); window.__j05WorkspaceMarkId = workspace.items.find((item) => item.blockId === ${JSON.stringify(proposalBlock)}).markId; const row = document.getElementById('windowed-' + window.__j05WorkspaceMarkId); if (!row) return false; row.click(); return true; })()`, 'proposal-activate-synthetic-change');
+    await waitFor(renderer, `document.querySelector('[data-proposal-active]')?.dataset.proposalActive === window.__j05WorkspaceMarkId`, 'proposal-synthetic-active');
+    await click(renderer, '并排对比', 'proposal-side-by-side');
+    await waitFor(renderer, `document.querySelector('[data-comparison-mode="side-by-side"]')`, 'proposal-comparison-mode');
+    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="proposal-workspace"]'); window.__j05ProposalBinding = null; return root.querySelectorAll('[data-windowed-index]').length <= 14 && root.textContent.includes('提案基准') && root.textContent.includes('当前权威稿件') && root.textContent.includes('提议内容（未应用）'); })()`, 'proposal-bounded-labeled-comparison');
+
+    at('proposal-decision-draft-batch');
+    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="proposal-workspace"]'); document.getElementById('windowed-' + window.__j05WorkspaceMarkId).querySelector('input').click(); root.querySelector('[data-proposal-action="batch-selection-deferred"]').click(); return true; })()`, 'proposal-preview-batch');
+    await waitFor(renderer, `document.querySelector('[data-proposal-action="batch-confirm"]')`, 'proposal-frozen-scope');
+    await assertRenderer(renderer, `document.querySelector('.proposal-controls').textContent.includes('批量草稿范围（已冻结）') && document.querySelector('.proposal-controls').textContent.includes('1 项纳入')`, 'proposal-scope-visible');
+    await click(renderer, '确认保存批量草稿', 'proposal-confirm-draft');
+    await waitFor(renderer, `document.querySelector('[data-proposal-action="draft-undo"]') && document.querySelector('.proposal-navigator').textContent.includes('暂不决定')`, 'proposal-draft-saved');
+    await click(renderer, '撤销上次草稿处理', 'proposal-draft-undo');
+    await waitFor(renderer, `!document.querySelector('[data-proposal-action="draft-undo"]')`, 'proposal-undo-saved');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-proposal-action="draft-deferred"]').click(); return true; })()`, 'proposal-save-deferred');
+    await waitFor(renderer, `document.querySelector('.proposal-navigator').textContent.includes('暂不决定') && document.querySelector('[data-screen="proposal-workspace"]').getAttribute('aria-busy') === 'false'`, 'proposal-deferred-saved');
+
+    at('proposal-decision-record');
+    await click(renderer, '记录提案决定', 'proposal-record');
+    await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"]').textContent.includes('提案决定已记录；稿件未发生变化。')`, 'proposal-recorded-partial');
+    await click(renderer, '准备应用', 'proposal-prepare');
+    await waitFor(renderer, `document.querySelector('.proposal-controls').textContent.includes('尚未批准应用，稿件未发生变化')`, 'proposal-preparation-line');
+    await assertRenderer(renderer, `document.querySelector('[data-proposal-action="confirm"]').disabled && document.querySelector('.proposal-controls').textContent.includes('纳入 0 项')`, 'proposal-deferred-not-applied');
+    await click(renderer, '取消准备', 'proposal-cancel-preparation');
+    await click(renderer, '返回稿件', 'proposal-return');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'proposal-back-to-manuscript');
+    await settled(renderer, 'proposal-settled');
 
     at('completion-browser-close');
     await close();
