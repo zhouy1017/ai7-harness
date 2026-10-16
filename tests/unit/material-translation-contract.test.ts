@@ -75,7 +75,7 @@ describe('who may ask for 来源译文', () => {
     } as unknown as FastRoleExecutionOwner;
     return { owner: double, asked };
   }
-  const answered = (text: string) => ({
+  const answered = (text: string): Awaited<ReturnType<FastRoleExecutionOwner['ask']>> => ({
     kind: 'answered' as const, text,
     binding: { kindId: MATERIAL_TRANSLATION_KIND, promptContractDigest: MATERIAL_TRANSLATION_PROMPT_CONTRACT_DIGEST, route: 'opencode-go', model: 'deepseek-v4-flash', operationalScope: 'developer-live' as const, policyRuleId: 'rule', fixtureSha256: null },
   });

@@ -1,6 +1,7 @@
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { MATERIAL_TRANSLATION_LABEL } from '../../shared/protocol.js';
 import { FastRoleError } from './fast-role-error.js';
+import { MATERIAL_TRANSLATION_KIND } from '../launch-policy.js';
 import type { FastRoleExecutionOwner } from './fast-role-execution.js';
 
 /**
@@ -18,7 +19,7 @@ import type { FastRoleExecutionOwner } from './fast-role-execution.js';
  *
  * The contract is frozen text; its digest binds every request, so changing one character of it changes every request digest.
  */
-export const MATERIAL_TRANSLATION_KIND = 'material-translation' as const;
+export { MATERIAL_TRANSLATION_KIND };
 export const MATERIAL_TRANSLATION_PROMPT_CONTRACT_SCHEMA = 'ai7.material-translation-prompt-contract/1' as const;
 export const MATERIAL_TRANSLATION_CONTRACT_VERSION = 'ai7.material-translation/1' as const;
 export const MATERIAL_TRANSLATION_RESULT_SCHEMA = 'ai7.material-translation.result/1' as const;
