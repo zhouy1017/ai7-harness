@@ -45,6 +45,11 @@ export class ProcedureRecommendationSelection {
     this.projection = projection; this.#shownIntent = key; return true;
   }
   choose(candidate: ProcedureRecommendationCandidate): void { this.selected = candidate; this.#selectedIntent = this.#intent; }
+  /**
+   * A choice the surface then fills itself from — 新建审阅 ticks the chosen revision's categories and scope. That fill follows from
+   * the choice and is no goal change: the intent after it becomes what later edits are measured against (TASK-014).
+   */
+  adopt(candidate: ProcedureRecommendationCandidate): void { this.choose(candidate); this.#shownIntent = this.#intent; }
   clear(): void { this.selected = null; this.#selectedIntent = null; }
 }
 

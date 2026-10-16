@@ -72,4 +72,16 @@ describe('deterministic recommendation under ADR 0090', () => {
     expect(state.selected?.versionId).toBe('b-v2');
     state.clear(); expect(state.selected).toBeNull();
   });
+  it('treats the sheet filling itself from a chosen revision as no goal change, and marks a later edit (Reviewer, #66)', () => {
+    const state = new ProcedureRecommendationSelection();
+    const opened = { ...input, categoryIds: [] };
+    const answer = recommendProcedures(opened, [reading('a')]);
+    expect(state.receive(state.update(opened), answer)).toBe(true);
+    // 新建审阅 ticks the chosen revision's categories, then the sheet adopts the choice.
+    state.update({ ...opened, categoryIds: ['style-and-format'] });
+    state.adopt(answer.candidates[0]!);
+    expect([state.stale, state.selectedNeedsUpdate, state.selected?.versionId]).toEqual([false, false, 'a-v2']);
+    state.update({ ...opened, categoryIds: ['style-and-format', 'series-consistency'] });
+    expect([state.stale, state.selectedNeedsUpdate, state.selected?.versionId]).toEqual([true, true, 'a-v2']);
+  });
 });

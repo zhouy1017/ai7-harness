@@ -2045,7 +2045,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       choose: async (candidate) => {
         await chooseProcedure(state, candidate.procedureId, candidate.versionId);
         if (state.procedure?.resolved?.versionId !== candidate.versionId) throw new Error('PROCEDURE_CHOICE_UNAVAILABLE');
-        state.recommendation.choose(candidate);
+        state.recommendation.adopt(candidate);
         if (projection !== null && sheetState === state) renderSheet(projection, state);
       },
       edit: () => sheet.querySelector<HTMLElement>('[data-review-field="scope"], input[name="review-category"]')?.focus(),
