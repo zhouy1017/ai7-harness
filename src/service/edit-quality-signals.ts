@@ -3,7 +3,7 @@ import { followSpanEdit, graphemesOf } from '../shared/mark-anchor.js';
 import type { EditQualitySignalsProjection } from '../shared/protocol.js';
 import { canonicalJson, sha256Hex } from './analysis/canonical.js';
 
-/** Editorial effort counts graphemes, never elapsed Task time. Replacements count removed plus inserted graphemes. */
+/** Grapheme Levenshtein distance for accepted-with-edit text; common edges avoid work on unchanged prose. */
 export function graphemeEditVolume(before: string, after: string): number {
   const left = graphemesOf(before);
   const right = graphemesOf(after);
@@ -11,7 +11,19 @@ export function graphemeEditVolume(before: string, after: string): number {
   while (start < left.length && start < right.length && left[start] === right[start]) start += 1;
   let end = 0;
   while (end < left.length - start && end < right.length - start && left[left.length - 1 - end] === right[right.length - 1 - end]) end += 1;
-  return left.length + right.length - 2 * (start + end);
+  let a = left.slice(start, left.length - end);
+  let b = right.slice(start, right.length - end);
+  if (a.length > b.length) [a, b] = [b, a];
+  const row = Uint32Array.from({ length: a.length + 1 }, (_, index) => index);
+  for (let j = 1; j <= b.length; j += 1) {
+    let diagonal = row[0]!; row[0] = j;
+    for (let i = 1; i <= a.length; i += 1) {
+      const above = row[i]!;
+      row[i] = Math.min(above + 1, row[i - 1]! + 1, diagonal + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return row[a.length]!;
 }
 
 /** Stable effort weights: expression 3, format 2, other categories 1; these are effort units, not quality scores. */
@@ -20,7 +32,7 @@ export function editCategoryWeight(categoryId: string): number {
 }
 
 /** Read-only projection over explicitly accepted Apply targets, their receipts and later durable journal edits. */
-export function inspectEditQualitySignals(db: DatabaseSync, bookId: string | null): EditQualitySignalsProjection {
+export function inspectEditQualitySignals(db: DatabaseSync, bookId: string | null, operationalScope?: import('../shared/protocol.js').TrustedOperationalScope): EditQualitySignalsProjection {
   const targets = db.prepare(`SELECT t.*, i.book_id, i.branch_id, r.resulting_journal_sequence, r.receipt_digest,
       d.disposition, d.edited_text, p.proposed_text, m.anchor_state, m.status, m.from_grapheme, m.to_grapheme,
       w.digest AS current_digest, w.text AS current_text,
@@ -36,6 +48,16 @@ export function inspectEditQualitySignals(db: DatabaseSync, bookId: string | nul
     ORDER BY i.book_id, i.effect_id, t.ordinal`).all(bookId, bookId);
   const categories = new Map<string, { categoryId: string; applied: number; surviving: number; editVolume: number; lineage: unknown[] }>();
   for (const target of targets) {
+    if (operationalScope !== undefined) {
+      const origin = db.prepare(`SELECT r.canonical_json, r.sha256 FROM review_findings f
+        JOIN review_run_category_events e ON e.review_run_id = f.review_run_id AND e.category_id = f.category_id AND e.state = 'materialized'
+        JOIN analysis_result_set_revisions r ON r.revision_id = e.result_set_revision_id
+        JOIN proposal_change_items p ON p.mark_id = f.mark_id
+        WHERE p.item_id = ? ORDER BY f.rowid, e.sequence DESC LIMIT 1`).get(target.item_id!);
+      if (origin === undefined || sha256Hex(String(origin.canonical_json)) !== origin.sha256) continue;
+      const record = JSON.parse(String(origin.canonical_json)) as { policyPin?: { operationalScope?: string } };
+      if (record.policyPin?.operationalScope !== operationalScope) continue;
+    }
     const categoryId = String(target.category_id);
     const metric = categories.get(categoryId) ?? { categoryId, applied: 0, surviving: 0, editVolume: 0, lineage: [] };
     const current = target.current_text === null ? null : graphemesOf(String(target.current_text));

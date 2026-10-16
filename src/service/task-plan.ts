@@ -2438,7 +2438,7 @@ export function reviewRunPlan(input: {
         : '没有开始的类别可以在「审阅」里新建一次审阅再审。',
     },
     technical: [
-      ...preferenceLines.map((line, index) => ({ key: `house-review-preference:${index}`, label: '本社审阅偏好', value: line })),
+      ...preferenceLines.map((line, index) => ({ key: `house-review-preference:${index}`, label: '本社审阅偏好', value: `${line}${facts.housePreferences?.[index] === undefined ? '' : ` · ${facts.housePreferences[index]!.versionId} · ${facts.housePreferences[index]!.materialSetDigest}`}` })),
       ...(materials.length === 0 ? [] : [{ key: 'material-references', label: '资料库参考版本', value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest}`).join('；') }]),
       { key: 'review-run', label: '审阅记录', value: `${facts.label} · ${facts.reviewRunId} · ${facts.createdAt}` },
       { key: 'manuscript', label: '稿件 pin', value: `${facts.manuscript.revisionLabel} · ${facts.manuscript.revisionId} · 修订日志序号 ${facts.manuscript.journalSequence} · ${facts.manuscript.workingDigest}` },

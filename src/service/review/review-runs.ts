@@ -1020,8 +1020,13 @@ export class ReviewRunStore {
         requireReview(plan.kind !== 'refused', 'REVIEW_SCOPE_UNAVAILABLE', `「${entry.label}」：${plan.kind === 'refused' ? plan.reason : ''}`);
         return { position: position + 1, entry, plan };
       });
+    const offeredPreferences = this.#ledgers.housePreference?.(bookId, input.launchPolicy);
+    const housePreferences = offeredPreferences === undefined ? undefined : Object.fromEntries(planned
+      .filter((category) => category.entry.executor === 'review-category-contract')
+      .map((category) => this.#ledgers.ledgerOf(category.entry).definition.kind)
+      .filter((kind) => offeredPreferences[kind] !== undefined).map((kind) => [kind, offeredPreferences[kind]!]));
     const work: PreparationWork = {
-      housePreferences: this.#ledgers.housePreference?.(bookId, input.launchPolicy),
+      ...(housePreferences === undefined ? {} : { housePreferences }),
       redoOf: input.redoOf ?? null,
       workId: randomUUID(),
       bookId,

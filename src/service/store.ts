@@ -4768,7 +4768,8 @@ export class EditorialStore {
       housePreference: (bookId, policy) => {
         const use = new HouseReviewPreferenceLedger(this.#authority).use(this.#baselineAnalysis.launch.operationalScope, bookId);
         if (use === null) return undefined;
-        return Object.fromEntries(policy.providerProcessing.admittedRules.filter((rule) => rule.outboundDataCategories.some((category) => String(category) === 'house-review-preference-excerpt')).flatMap((rule) => rule.taskKinds.map((kind) => [kind, use])));
+        const rules = policy.providerProcessing.admittedRules.filter((rule) => !rule.backgroundOrigin);
+        return Object.fromEntries(rules.filter((rule) => rule.outboundDataCategories.includes('house-review-preference-excerpt')).flatMap((rule) => rule.taskKinds.filter((kind) => rules.filter((entry) => entry.taskKinds.includes(kind)).length === 1).map((kind) => [kind, use])));
       },
       materialReadings: (boundary) => this.#taskMaterialReadings(boundary),
       materialOffers: (bookId) => this.#taskMaterialOffers(bookId),
@@ -5350,6 +5351,8 @@ export class EditorialStore {
     if (materials === undefined) return this.reviewCategoryLedger(houseReviewPreferenceKindDefinition(base, preference ?? null, true));
     const readings = this.#taskMaterialReadings(materials);
     const definition = houseReviewPreferenceKindDefinition(this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, preference == null ? frozenPromptDigest : undefined)), preference ?? null, true);
+    requireStore(preference == null || frozenPromptDigest === undefined || readings.some((reading) => reading.refusal !== null) || definition.promptContractDigest === frozenPromptDigest,
+      'HOUSE_REVIEW_PREFERENCE_INVALID', '本社审阅偏好与任务计划不一致。');
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
     return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
@@ -12244,14 +12247,14 @@ export class EditorialStore {
   #rebuildHouseReviewPreference(): void {
     const scope = this.#baselineAnalysis.launch.operationalScope;
     const sources: HousePreferenceSource[] = [];
-    for (const book of this.#authority.prepare('SELECT book_id FROM books ORDER BY book_id').iterate()) {
+    for (const book of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY book_id').iterate()) {
       const bookId = asString(book.book_id);
-      const quality = readEditQualitySignals(this.#authority, bookId);
+      const quality = readEditQualitySignals(this.#authority, bookId, scope);
       for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false))) {
         if (projection.state !== 'decided' || (projection.decision?.choice !== 'house' && projection.decision?.choice !== 'book')) continue;
         let finding: SqlRow | undefined;
         if (candidate.source.kind === 'review') {
-          finding = this.#authority.prepare('SELECT review_run_id, category_id FROM review_findings WHERE review_run_id = ? AND finding_id = ?').get(candidate.source.reviewRunId, candidate.source.findingId) as SqlRow | undefined;
+          finding = this.#authority.prepare(`SELECT f.review_run_id, f.category_id, (SELECT q.disposition_id FROM quality_signals q WHERE q.review_run_id = f.review_run_id AND q.finding_id = f.finding_id ORDER BY q.recorded_at DESC, q.rowid DESC LIMIT 1) AS disposition_id FROM review_findings f WHERE f.review_run_id = ? AND f.finding_id = ?`).get(candidate.source.reviewRunId, candidate.source.findingId) as SqlRow | undefined;
         } else if (candidate.source.kind === 'decision') {
           finding = this.#authority.prepare(`SELECT f.review_run_id, f.category_id FROM proposal_item_decisions d JOIN proposal_change_items i ON i.item_id = d.item_id
             JOIN review_findings f ON f.mark_id = i.mark_id WHERE d.decision_id = ? ORDER BY f.rowid LIMIT 1`).get(candidate.source.decisionId) as SqlRow | undefined;
@@ -12268,10 +12271,10 @@ export class EditorialStore {
         const content = candidate.content as { disposition?: string; reason?: string | null };
         const categoryId = asString(finding.category_id);
         const metric = quality.categories.find((entry) => entry.categoryId === categoryId);
-        sources.push({ bookId, categoryId, categoryLabel: reviewCategoryEntry(categoryId)?.label ?? categoryId,
-          materialDigest: projection.digest, decisionId: candidate.source.kind === 'decision' ? candidate.source.decisionId : candidate.materialKey,
+        sources.push({ bookId, bookTitle: asString(book.title), categoryId, categoryLabel: reviewCategoryEntry(categoryId)?.label ?? categoryId,
+          materialDigest: projection.digest, decisionId: candidate.source.kind === 'decision' ? candidate.source.decisionId : asString(finding.disposition_id),
           eligibilityDecisionId: decision.decisionId, eligibility: projection.decision.choice, operationalScope: scope,
-          disposition: content.disposition ?? 'ignored', reason: typeof content.reason === 'string' ? content.reason : null,
+          disposition: content.disposition ?? 'ignored', reason: typeof content.reason === 'string' && (candidate.content as { reasonSource?: string }).reasonSource !== 'suggested' ? content.reason : null,
           attribution: decision.attribution ?? { peopleVersion: 0, authors: [], editors: [] },
           quality: metric ?? { applied: 0, surviving: 0, editVolume: 0, lineageDigest: quality.lineageDigest } });
       }
@@ -12498,6 +12501,7 @@ export class EditorialStore {
           remediationPreview: preview.previewDigest,
         });
       }
+      this.#rebuildHouseReviewPreference();
       return { bookId: input.bookId, recorded: preview.included, leftOut: preview.leftOut };
     }));
   }

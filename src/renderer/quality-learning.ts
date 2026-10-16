@@ -346,7 +346,7 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
 }
 
 /** Passive Apply-ledger metrics: the house or one selected Book, with auditable digests and no time tracking. */
-export async function mountEditQualitySignals(root: HTMLElement, api: Pick<import('../shared/protocol.js').RendererApi, 'inspectEditQualitySignals' | 'inspectFeedbackHistory'>): Promise<void> {
+export async function mountEditQualitySignals(root: HTMLElement, api: Pick<import('../shared/protocol.js').RendererApi, 'inspectEditQualitySignals' | 'listBooks'>): Promise<void> {
   const section = document.createElement('section');
   section.dataset['editQualitySignals'] = '';
   const heading = document.createElement('h3');
@@ -355,10 +355,19 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
   select.setAttribute('aria-label', '改动质量信号的图书');
   const all = document.createElement('option');
   all.value = ''; all.textContent = '本社全部图书'; select.append(all);
-  const feedback = await api.inspectFeedbackHistory({});
-  for (const book of feedback.books) {
-    const option = document.createElement('option'); option.value = book.bookId; option.textContent = book.title; select.append(option);
-  }
+  let cursor: import('../shared/protocol.js').BookSummaryCursor | null = null;
+  const more = document.createElement('button'); more.type = 'button'; more.textContent = '更多图书…';
+  const loadBooks = async () => {
+    more.disabled = true;
+    try {
+      const page = await api.listBooks({ after: cursor });
+      for (const book of page.items) {
+        const option = document.createElement('option'); option.value = book.bookId; option.textContent = book.title; select.append(option);
+      }
+      cursor = page.nextCursor; more.hidden = cursor === null;
+    } finally { more.disabled = false; }
+  };
+  more.addEventListener('click', () => void loadBooks().catch(() => { body.textContent = '无法读取更多图书。'; }));
   const body = document.createElement('p');
   body.setAttribute('role', 'status');
   let generation = 0;
@@ -370,6 +379,6 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
     body.dataset['lineageDigest'] = metric.lineageDigest;
   };
   select.addEventListener('change', () => void load().catch(() => { body.textContent = '无法读取编辑改动质量信号。'; }));
-  section.append(heading, select, body); root.append(section);
-  await load();
+  section.append(heading, select, more, body); root.append(section);
+  await Promise.all([load(), loadBooks()]);
 }

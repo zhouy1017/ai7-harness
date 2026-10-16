@@ -41,7 +41,7 @@ export function renderHouseReviewPreference(root: HTMLElement, projection: House
         for (const name of source.attribution.authors) count(authors, name);
         for (const name of source.attribution.editors) count(editors, name);
       }
-      item.append(el('p', `图书来源：${books.size} 本 · ${line.sources.length} 条`),
+      item.append(el('p', `图书来源：${[...books].map(([id, ids]) => `《${line.sources.find((source) => source.bookId === id)!.bookTitle}》（${ids.size} 条）`).join('、')}`),
         el('p', `作者：${[...authors].map(([name, ids]) => `${name}（${ids.size} 条）`).join('、') || '未记录'}`),
         el('p', `责编：${[...editors].map(([name, ids]) => `${name}（${ids.size} 条）`).join('、') || '未记录'}`));
       lines.append(item);

@@ -2317,6 +2317,7 @@ export type OutboundDataCategoryId =
   | 'editor-selected-manuscript-excerpt'
   | 'editor-authored-evaluation-text'
   | 'house-exemplar-excerpt'
+  | 'house-review-preference-excerpt'
   | 'book-metadata-and-synopsis'
   | 'manuscript-conflict-region-excerpt'
   | 'frozen-material-reference-excerpt'
@@ -6205,6 +6206,7 @@ export interface HouseReviewPreferenceUse {
   lines: ReadonlyArray<string>;
 }
 export interface HouseReviewPreferenceVersion {
+  schema: 'ai7.house-review-preference/1';
   versionId: string;
   ordinal: number;
   supersedes: string | null;
@@ -6214,7 +6216,7 @@ export interface HouseReviewPreferenceVersion {
   sourceCount: number;
   lines: ReadonlyArray<{
     text: string; categoryId: string; bookId: string | null;
-    sources: ReadonlyArray<{ bookId: string; materialDigest: string; decisionId: string; eligibilityDecisionId: string;
+    sources: ReadonlyArray<{ bookId: string; bookTitle: string; materialDigest: string; decisionId: string; eligibilityDecisionId: string; qualityLineageDigest: string;
       attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> } }>;
   }>;
 }

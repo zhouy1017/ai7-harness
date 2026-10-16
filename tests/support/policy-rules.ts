@@ -37,3 +37,18 @@ export function withoutRuleFor(policy: LaunchPolicyProjection, kind: string): La
 export function withRepeatedRuleFor(policy: LaunchPolicyProjection, kind: string): LaunchPolicyProjection {
   return withRules(policy, [...policy.providerProcessing.admittedRules, ruleFor(policy, kind)]);
 }
+
+/** #911 opt-in under an in-memory rule, while #910's immutable policy successor lands separately. */
+export function withHouseReviewPreferenceFor(policy: LaunchPolicyProjection, kind: string): LaunchPolicyProjection {
+  const previous = ruleFor(policy, kind);
+  const category = 'house-review-preference-excerpt' as const;
+  const stub: AdmittedProviderRule = previous === undefined ? {
+    ruleId: 'test-review-preference', taskKinds: [kind], modelRole: 'Main Editorial Role', route: 'opencode-go', endpoint: 'https://api.opencode.ai/v1',
+    model: 'deepseek-v4.1-flash', credentialSlot: 'opencode-go', outboundDataCategories: ['public-or-synthetic', category],
+    crossUnitSynthesisAllowed: false, materialReferencesAllowed: false, editorialDeliverablesAllowed: false,
+    clarificationQuestionAllowed: false, clarificationTimeoutHours: null, backgroundOrigin: false,
+    matchingActiveDefaultExecutionRuleAllowed: false, webSearchToolAllowed: false, platformTools: null,
+    localTools: localRetrievalRule(), sourceTranslationAllowed: false,
+  } : { ...previous, outboundDataCategories: [...previous.outboundDataCategories, category] };
+  return withRules(policy, [...policy.providerProcessing.admittedRules.filter((rule) => !rule.taskKinds.includes(kind)), stub]);
+}

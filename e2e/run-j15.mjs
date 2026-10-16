@@ -948,7 +948,7 @@ async function main() {
       JSON.stringify(opened.cards[0].versions) === JSON.stringify(['第 1 版 · AI7 内置默认 · 内置 · 4 条 · 还没有审阅用过']) && opened.cards.every((card) => card.older === null) &&
       opened.cards.every((card, index) => card.fixed === (GUIDELINE_FIXED.get(index) ?? null) && card.importable === !GUIDELINE_FIXED.has(index)),
     'knowledge-guidelines-cards', opened);
-    // A class a later slice brings says what it will hold and that it is not there yet.
+    // #911 synchronized delta: the memory tab exposes the local preference record and explicit rebuild.
     await click(renderer, '社级编辑记忆', 'knowledge-memory-tab');
     const memory = await readKnowledge(renderer, (page) => page.tab === 'memory' && page.housePreference !== null, 'knowledge-memory-tab-open');
     requireJourney(memory.pending === null && memory.housePreference.includes('本社审阅偏好') && memory.housePreference.includes('更新本社审阅偏好') && memory.cards.length === 0, 'knowledge-pending', memory);

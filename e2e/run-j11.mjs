@@ -2492,6 +2492,8 @@ async function main() {
     await readHistory(renderer, (page) => page.entries.length === 4 && page.filters.editor?.[0] === THIRD_PEOPLE.editors, 'later-editor-keeps');
 
     at('feedback-history-open');
+    // #911 synchronized delta: passive provider-free edit metrics share this history page.
+    await waitFor(renderer, `(document.querySelector('[data-edit-quality-signals]')?.textContent ?? '').includes('建议保留率：')`, 'open-history');
     // Each entry opens its exact record: the rejection, the manuscript with its 修改建议's card and the reason as it stands; the
     // entity's judgment, ②A on the revision it judged — the current one — on 人物与名称, not the tab ②A opens at, with the
     // judged item in view and focused (Issue #61 review).

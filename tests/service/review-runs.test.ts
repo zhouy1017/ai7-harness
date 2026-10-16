@@ -1,3 +1,5 @@
+import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
+import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -2008,6 +2010,51 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
         .toBe(SELECTION_GONE_REASON);
       expect(workspace(session, book).runs).toEqual([]);
       expect(store.inspectBookTasks(book.bookId, () => null).groups.every((group) => group.total === 0)).toBe(true);
+    });
+  }, 300_000);
+});
+
+
+describe('house preference review consumption (#911)', () => {
+  it('automatically rebuilds eligible review feedback, stays neutral without policy admission, and freezes one pin per category Run', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const first = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      const finding = first.findings.find((entry) => entry.markId !== null)!;
+      session.store.recordReviewFindingDisposition(book.bookId, first.reviewRunId, finding.findingId, '保留本书体例');
+      const material = session.store.inspectLearningMaterials(book.bookId).books[0]!.materials.find((entry) => entry.kind === 'review-disposition')!;
+      const decide = (choice: 'house' | 'book' | 'excluded' | 'deferred', expectedDecisions: number) => session.store.decideLearningMaterial({
+        bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions, choice, note: null,
+      });
+      decide('deferred', 0);
+      expect(session.store.inspectHouseReviewPreference().current).toBeNull();
+      decide('house', 1);
+      const version = session.store.inspectHouseReviewPreference().current!;
+      expect(version.sourceCount).toBe(1);
+      expect(version.lines[0]!.sources[0]!.eligibilityDecisionId).toBeTruthy();
+      const noPolicy = prepare(session, book, [TYPOS], WHOLE);
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: noPolicy.reviewRunId }).scope.reference).toContain('本社审阅偏好未启用：当前策略未开放');
+      const kind = reviewCategoryKindDefinition(TYPOS_AND_USAGE).kind;
+      launchPolicy = withHouseReviewPreferenceFor(launchPolicy, kind);
+      const admitted = prepare(session, book, [TYPOS], WHOLE);
+      const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: admitted.reviewRunId });
+      expect(plan.scope.reference.some((line) => line.includes('本社审阅偏好 v1'))).toBe(true);
+      expect(plan.technical.some((line) => line.value.includes(version.versionId))).toBe(true);
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        const pins = new HouseReviewPreferenceLedger(db);
+        const task = admitted.categories[0]!.taskIntentId!;
+        const pin = pins.pinned(task, admitted.categories[0]!.planEnvelopeDigest!);
+        expect(pin?.versionId).toBe(version.versionId);
+        expect(db.prepare('SELECT count(*) AS n FROM review_run_preference_pins WHERE review_run_id = ?').get(admitted.reviewRunId)!.n).toBe(1);
+        decide('excluded', 2);
+        expect(session.store.inspectHouseReviewPreference().current!.ordinal).toBe(2);
+        expect(pins.pinned(task)?.versionId).toBe(version.versionId);
+        // Reopening the plan resolves the pinned definition, even after a newer empty house version.
+        expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: admitted.reviewRunId }).scope.reference.some((line) => line.includes('本社审阅偏好 v1'))).toBe(true);
+        session.store.authorizeReviewRun(book.bookId, admitted.reviewRunId, approvals(admitted));
+        const report = session.store.generateReviewReport(book.bookId, admitted.reviewRunId).run!.report!;
+        expect(report.record.categorySummaries.entries[0]!.basisStatement.includes('本社审阅偏好 v1')).toBe(true);
+      } finally { db.close(); }
     });
   }, 300_000);
 });
