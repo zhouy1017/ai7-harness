@@ -96,6 +96,9 @@ export const REVIEW_ACTION_LABELS = {
   // A Run a Series Retrieval Exclusion stopped (Issue #64, S29b; SER-024): exactly these two ways on, never 继续审阅.
   'scope-redo': '修改计划并重新授权',
   'scope-cancel': '取消任务',
+  // A Run whose 本社审阅偏好 version read a material later 停止今后使用 (Issue #912; LAUD-007, LAUD-008): the way on without it.
+  'influence-redo': '重新执行（不含该影响）',
+  'influence-lineage': '查看学习来源链…',
   'scope-cancel-confirm': '确认取消任务',
   'scope-cancel-keep': '不取消',
   /** 将以上工序保存为可复用工序 (Issue #65, S30; ADR 0087 §2). */
@@ -519,6 +522,30 @@ export const REVIEW_STATUS_LINES = {
  */
 export const REVIEW_SCOPE_STOP_NOTE = '这次审阅所依据的书系材料已排除在书系检索之外，它在下一次读取前停下了。已经写到稿件上的发现和已形成的结果都保持原样，已经发给模型服务的内容无法收回。只能修改计划并重新授权，或取消任务；不能继续审阅、重试或改用别的材料。';
 /** What 取消任务 of such a Run does, said before it is confirmed. */
+/** A Run stopped because a material behind its pinned 本社审阅偏好 version was 停止今后使用 (Issue #912; LAUD-008). */
+export const REVIEW_INFLUENCE_STOP_NOTE = '这次审阅参考的本社审阅偏好中有学习材料已停止今后使用，它在下一次读取前停下了。已经写到稿件上的发现和已形成的结果都保持原样，已经发给模型服务的内容无法收回。只能重新执行（不含该影响），或取消任务；不能继续审阅或重试。';
+/** 为什么会影响这个结果 (Issue #912; LAUD-004): the version each category read, and the materials behind it. */
+export const REVIEW_INFLUENCE_HEADING = '为什么会影响这个结果';
+export const REVIEW_INFLUENCE_NOTE = '本社审阅偏好只供参考，不是规则或事实证据。这里列出这次审阅读到的版本，以及它出自哪些已判定的反馈；打开来源链可以看到每条反馈后来影响了什么。';
+
+export function reviewInfluenceLine(entry: { readonly categoryLabel: string; readonly ordinal: number; readonly sourceCount: number }): string {
+  return `${entry.categoryLabel}：参考本社审阅偏好 v${entry.ordinal}（来源：${entry.sourceCount} 条已判定反馈）`;
+}
+
+/** One material behind a version, by its Book and kind; one 停止今后使用 since says so, and when. */
+export function reviewInfluenceMaterialLine(material: { readonly bookTitle: string; readonly withdrawnAt: string | null }, kindLabel: string, instant: (iso: string) => string): string {
+  return `《${material.bookTitle}》 · ${kindLabel}${material.withdrawnAt === null ? '' : ` · ${instant(material.withdrawnAt)} 已停止今后使用`}`;
+}
+
+export function reviewInfluenceMore(count: number): string {
+  return `另有 ${count} 条反馈，见学习回溯。`;
+}
+
+/** What a marked result's remediation was, and when (interaction-spec: the marker states what changed later and when). */
+export function reviewMarkerRemediationLine(recordedAt: string, instant: (iso: string) => string): string {
+  return `${instant(recordedAt)} 在学习回溯中停止今后使用。`;
+}
+
 export const REVIEW_SCOPE_CANCEL_NOTE = '取消后这次审阅不再继续，也不再提供「修改计划并重新授权」；已经写到稿件上的发现和已形成的结果都保持原样。';
 
 export function reviewBatchReadyLine(count: number): string {

@@ -28,7 +28,11 @@ import {
   LEARNING_AUDIT_STANDING_LABELS,
   LEARNING_AUDIT_SERIES_UNAVAILABLE,
   LEARNING_AUDIT_STATUS,
-  LEARNING_AUDIT_UNUSED,
+  learningAuditUse,
+  learningLineageEarlierTasks,
+  learningLineageSignalLine,
+  learningLineageTaskLine,
+  learningRemediationRunning,
   LEARNING_LINEAGE_BACK,
   LEARNING_LINEAGE_FORWARD,
   LEARNING_LINEAGE_NO_DECISION,
@@ -45,7 +49,6 @@ import {
   LEARNING_REMEDIATION_GROUPS,
   LEARNING_REMEDIATION_HEADING,
   LEARNING_REMEDIATION_MEMORY,
-  LEARNING_REMEDIATION_RUNNING,
   learningAuditBatchStop,
   learningAuditBookHeading,
   learningAuditChoicesCut,
@@ -91,6 +94,11 @@ export interface MountLearningAuditOptions {
     'decideLearningMaterial'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
+  /**
+   * The material to open its Learning Lineage Explorer for once the list reads (Issue #912; LAUD-004): a 审阅 result's
+   * Historically Affected Result Marker opens the remediation it links to here.
+   */
+  readonly openMaterial?: { readonly bookId: string; readonly materialKey: string } | null;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -429,7 +437,9 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     item.append(head);
     const reason = material.excerpt.at(-1);
     if (reason !== undefined) item.append(el('p', 'learning-audit-excerpt', reason));
-    item.append(el('p', 'field-note learning-audit-use', LEARNING_AUDIT_UNUSED));
+    const use = el('p', 'field-note learning-audit-use', learningAuditUse(material.downstreamTasks));
+    use.dataset['downstreamTasks'] = String(material.downstreamTasks);
+    item.append(use);
     const open = action(LEARNING_AUDIT_OPEN, 'quiet', 'open', () => void openLineage(book.bookId, material.materialKey));
     open.setAttribute('aria-label', learningAuditOpenLabel(nameOf(material)));
     open.disabled = busy || batch !== null;
@@ -525,10 +535,10 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       section.append(el('p', 'field-note', LEARNING_REMEDIATION_INCLUDED), included);
     }
     const texts: Record<(typeof LEARNING_REMEDIATION_GROUPS)[number]['group'], string> = {
-      future: learningRemediationFuture(preview.groups.future, preview.scope, preview.bookTitle),
-      running: LEARNING_REMEDIATION_RUNNING,
+      future: learningRemediationFuture(preview.groups.future, preview.scope, preview.bookTitle, preview.groups),
+      running: learningRemediationRunning(preview.groups),
       memory: LEARNING_REMEDIATION_MEMORY,
-      completed: learningRemediationCompleted(preview.groups.decisionsKept),
+      completed: learningRemediationCompleted(preview.groups.decisionsKept, preview.groups),
     };
     const counts: Record<(typeof LEARNING_REMEDIATION_GROUPS)[number]['group'], number> = {
       future: preview.groups.future, running: preview.groups.running, memory: preview.groups.memory, completed: preview.groups.completed,
@@ -757,7 +767,8 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     backward.append(step(1, decisionBody, read.decisions.length + read.earlierDecisions));
     section.append(backward);
 
-    // 后来影响了什么 (LAUD-004): each stage after the decision, empty because nothing makes it yet, and saying so.
+    // 后来影响了什么 (LAUD-004): each stage after the decision — the 本社审阅偏好 versions it supports and the 审阅 that read
+    // them (Issue #912), and the two memory stages nothing makes yet — an empty one saying so.
     const forward = el('section', 'learning-lineage-forward');
     forward.setAttribute('aria-label', LEARNING_LINEAGE_FORWARD);
     forward.append(el('h5', 'learning-lineage-forward-heading', LEARNING_LINEAGE_FORWARD), el('p', 'field-note learning-lineage-why', LEARNING_LINEAGE_WHY_EMPTY));
@@ -766,7 +777,27 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     const counts = [read.downstream.signals, read.downstream.memoryCandidates, read.downstream.activeMemories, read.downstream.tasks];
     counts.forEach((count, offset) => {
       const empty = offset === 3 ? LEARNING_LINEAGE_TASKS_NONE : LEARNING_LINEAGE_NOT_YET;
-      later.append(step(2 + offset, [el('p', 'learning-lineage-empty', empty)], count));
+      const body: HTMLElement[] = [];
+      if (offset === 0 && read.signals.length > 0) {
+        const list = el('ul', 'learning-lineage-signals');
+        for (const signal of read.signals) {
+          const line = el('li', undefined, learningLineageSignalLine(signal, localInstantLabel));
+          line.dataset['versionOrdinal'] = String(signal.ordinal);
+          list.append(line);
+        }
+        body.push(list);
+      } else if (offset === 3 && read.tasks.length > 0) {
+        const list = el('ul', 'learning-lineage-tasks');
+        for (const task of read.tasks) {
+          const line = el('li', undefined, learningLineageTaskLine(task));
+          line.dataset['taskUse'] = task.use;
+          if (task.marked) line.dataset['taskMarked'] = 'true';
+          list.append(line);
+        }
+        body.push(list);
+        if (read.earlierTasks > 0) body.push(el('p', 'field-note', learningLineageEarlierTasks(read.earlierTasks)));
+      } else body.push(el('p', 'learning-lineage-empty', empty));
+      later.append(step(2 + offset, body, count));
     });
     forward.append(later);
     section.append(forward);
@@ -843,13 +874,16 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       // page they were read at. A kept Series or Book may be gone since: the service refuses either, and the page then opens
       // unfiltered at its start.
       const kept = remembered;
+      let read = false;
       if (kept !== null) {
         try {
-          if (await request({ ...kept.chosen }, kept.pageAfter, null)) return;
+          read = await request({ ...kept.chosen }, kept.pageAfter, null);
         } catch { /* read afresh below */ }
-        remembered = null;
+        if (!read) remembered = null;
       }
-      await request(chosen, null, null);
+      if (!read) await request(chosen, null, null);
+      const target = options.openMaterial ?? null;
+      if (target !== null && root.isConnected) await openLineage(target.bookId, target.materialKey);
     },
   };
 }

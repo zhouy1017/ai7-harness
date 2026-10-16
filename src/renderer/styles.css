@@ -238,6 +238,15 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-historical-marker { display: grid; gap: .2rem; margin-top: .6rem; padding: .5rem .8rem; border-left: 3px solid #b9774b; }
 .review-historical-marker p { margin: 0; overflow-wrap: anywhere; }
 .review-historical-marker-label { font-weight: 700; color: #7a4a26; }
+/* 为什么会影响这个结果 (Issue #912): closed until asked, one group per category's 本社审阅偏好 version. */
+.review-influence { margin-top: .6rem; padding: .4rem .8rem; border: 1px solid #c9cfc4; border-radius: 6px; }
+.review-influence > summary { cursor: pointer; font-weight: 700; }
+.review-influence-category { display: grid; gap: .2rem; margin-top: .4rem; }
+.review-influence-category p, .review-influence-materials li { margin: 0; overflow-wrap: anywhere; }
+.review-influence-materials { margin: 0; padding-left: 1.2rem; }
+.review-influence-materials li[data-withdrawn="true"] { color: #7a4a26; }
+.learning-lineage-signals, .learning-lineage-tasks { margin: 0; padding-left: 1.2rem; }
+.learning-lineage-signals li, .learning-lineage-tasks li { overflow-wrap: anywhere; }
 .review-progress { display: grid; gap: .45rem; margin: .55rem 0 0; padding-left: 1.4rem; }
 .review-progress > li { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
 .review-progress-label { font-weight: 800; }
@@ -1541,7 +1550,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .learning-book, .learning-card, .learning-choices, .feedback-book, .calibration-section,
   .learning-audit-batch, .learning-lineage, .learning-lineage-step, .learning-remediation-preview, .learning-remediation-group,
   .series-create-form, .series-add-chooser, .series-preview, .knowledge-form, .knowledge-review, .knowledge-targets, .knowledge-reuse,
-  .series-exclusion, .series-exclusion-chooser, .series-exclusion-change, .series-exclusion-preview, .review-historical-marker,
+  .series-exclusion, .series-exclusion-chooser, .series-exclusion-change, .series-exclusion-preview, .review-historical-marker, .review-influence,
   .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
   .task-plan-budget-form, .task-plan-budget-input,
   .captured-procedure, .captured-procedure-version, .captured-procedure-validation, .captured-procedure-run, .captured-procedure-stop, .developer-proposal,
