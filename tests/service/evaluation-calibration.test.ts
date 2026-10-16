@@ -1,4 +1,4 @@
-import { execPre74Fixture, expectedSchema74 } from '../support/pre74-schema.js';
+import { execPre74Fixture, expectedSchema75 } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -398,7 +398,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       const after = tablesOf(database);
       // Revision 52's Series relations (Issue #63, S28a) return with it, as the planted store lacked them too.
-      expect(after.filter((entry) => !/^(publication_actuals|evaluation_preferences|series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|dialogue_|readers_report_|captured_procedure|review_run_procedure_pins|developer_capability_proposal|evaluation_rewrite_|writing_|material_index_|analysis_outcome_resolutions)/u.test(entry.name))).toEqual(expectedSchema74(before!));
+      expect(after.filter((entry) => !/^(publication_actuals|evaluation_preferences|series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|dialogue_|readers_report_|captured_procedure|review_run_procedure_pins|developer_capability_proposal|evaluation_rewrite_|writing_|material_index_|analysis_outcome_resolutions)/u.test(entry.name))).toEqual(expectedSchema75(before!));
       expect(after.filter((entry) => ACTUALS_TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(ACTUALS_TABLES.slice().sort().map((table) => EVALUATION_CALIBRATION_SCHEMA_SQL[table as keyof typeof EVALUATION_CALIBRATION_SCHEMA_SQL]));
       expect(counts()).toEqual({ publication_actuals: 0, evaluation_preferences: 0 });

@@ -2,6 +2,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import { ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, WEB_TOOLS_PLAN_RECORDS_SQL } from '../../src/service/task-authorization.js';
 import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
 
+export const RESEARCH_EVIDENCE_RELATIONS = Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL);
+
 /** Plant an actual predecessor, including revision 74's newly widened component CHECK and house settings. */
 export function execPre74Fixture(db: DatabaseSync, sql: string): void {
   const version = /PRAGMA user_version\s*=\s*(\d+)/iu.exec(sql)?.[1];
@@ -20,9 +22,12 @@ export function execPre74Fixture(db: DatabaseSync, sql: string): void {
   db.exec(sql);
 }
 
-/** All pre-existing schema rows remain exact except revision 74's explicitly widened component CHECK. */
-export function expectedSchema74<T extends { name: string; sql: unknown }>(rows: readonly T[]): T[] {
-  return rows.map((row) => row.name === 'analysis_plan_records' ? { ...row, sql: WEB_TOOLS_PLAN_RECORDS_SQL } : row);
+/** Revision 74 widens one CHECK; revision 75 adds its four empty ledgers and their immutable triggers. */
+export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]): Array<{ name: string; sql: unknown }> {
+  return [
+    ...rows.map((row) => row.name === 'analysis_plan_records' ? { ...row, sql: WEB_TOOLS_PLAN_RECORDS_SQL } : row),
+    ...Object.entries({ ...RESEARCH_EVIDENCE_SCHEMA_SQL, ...RESEARCH_EVIDENCE_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
+  ].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 }
 
 /** Drop revision 75's research evidence relations and triggers (Issue #425), so a planted store is the predecessor it claims. */
