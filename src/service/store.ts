@@ -6088,7 +6088,10 @@ export class EditorialStore {
       const ledger = this.#analysisLedgerOfTask(input.bookId, input.ref);
       const custom = ledger === this.#baselineAnalysis ? null : this.#customAnalysisPlanVersion(input.ref);
       // The execution owner's progress feeds the activity card of a Run under way (Issue #422, AUTH-011).
-      const projection = this.#analysisCall(() => ledger.inspect(input.bookId, progress)) as BaselineAnalysisProjection;
+      const inspected = this.#analysisCall(() => ledger.inspect(input.bookId, progress)) as BaselineAnalysisProjection;
+      // The ledger names a redo only on the baseline's Tasks; a dimension's Task is read as one that redoes nothing.
+      const projection: BaselineAnalysisProjection = custom === null || inspected.taskIntent === null ? inspected
+        : { ...inspected, taskIntent: { redoOf: null, ...inspected.taskIntent } };
       const checkpoint = projection.checkpoint;
       requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '这项分析还没有准备计划。');
       current(projection.taskIntent.taskIntentId);

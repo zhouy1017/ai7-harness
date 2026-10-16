@@ -342,7 +342,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
           actions.append(actionButton(CUSTOM_DIMENSION_STOP, 'secondary', 'stop', () =>
             act('正在停用…', () => api.stopCustomAnalysisDimension({ versionId: version.versionId }), () => customDimensionStoppedLine(version.title, version.version))));
         }
-        if (actions.childElementCount > 0) item.append(actions);
+        if (actions.children.length > 0) item.append(actions);
         versions.append(item);
       }
       card.append(versions, el('p', 'field-note', CUSTOM_DIMENSION_STOP_NOTE));
