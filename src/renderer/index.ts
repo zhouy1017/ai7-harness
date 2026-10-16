@@ -248,6 +248,8 @@ import type { ComposerRange } from './task-panel.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
+import { ANALYSIS_TAB_SHOWN_EVENT, mountCustomAnalysisDimensions, mountCustomAnalysisTab } from './custom-analysis.js';
+import { CUSTOM_TAB_LABEL } from './custom-analysis-labels.js';
 import { mountTaskDrawer } from './task-drawer.js';
 import {
   TASK_DRAWER_TITLE,
@@ -3326,6 +3328,8 @@ const ANALYSIS_TABS = [
   ['relationships', '关系'],
   ['settings', '设定'],
   ['chapters', '各章'],
+  // 自定义分析维度 (Issue #922, slice 7f): each enabled dimension's latest result on this Book, its 运行 and its per-unit answers.
+  ['custom', CUSTOM_TAB_LABEL],
   ['history', '历史与更新'],
 ] as const;
 type AnalysisTabId = (typeof ANALYSIS_TABS)[number][0];
@@ -3367,6 +3371,7 @@ function analysisTabs(card: HTMLElement, bookId: string, initial: AnalysisTabId)
     tab.addEventListener('click', () => {
       analysisTabChoice.set(bookId, id);
       select(id);
+      panels[id].dispatchEvent(new Event(ANALYSIS_TAB_SHOWN_EVENT));
     });
     tab.addEventListener('keydown', (event) => {
       const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
@@ -3377,6 +3382,7 @@ function analysisTabs(card: HTMLElement, bookId: string, initial: AnalysisTabId)
       const next = ANALYSIS_TABS[target]![0];
       analysisTabChoice.set(bookId, next);
       select(next);
+      panels[next].dispatchEvent(new Event(ANALYSIS_TAB_SHOWN_EVENT));
       tabs[next].focus();
     });
     const panel = element('section', 'analysis-panel');
@@ -4253,6 +4259,14 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
       ? { historical: true, current: projection.inspectedRevision.current }
       : { historical: false, current: true });
     records = panels.history;
+    mountCustomAnalysisTab(panels.custom, {
+      bookId: projection.bookId,
+      api: window.ai7,
+      setStatus,
+      errorMessage: rendererErrorMessage,
+      openPlan: (taskIntentId) => openTaskPlan(projection.bookId, 'baseline-analysis', taskIntentId),
+      jump: (blockId) => void jumpToManuscript(projection.bookId, { manuscriptId: null, blockId, markId: null }, '这段原文已不在当前稿件中。'),
+    });
   }
   if (projection.checkpoint !== null) renderFrozenAnalysisPlan(records, projection);
 
@@ -5504,9 +5518,15 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
         }
       },
     });
-    panelNode.append(section, captured, element('h3', undefined, RULES_HEADING));
+    // 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4): the house's own per-unit questions, beside its 工序.
+    const custom = element('div', 'knowledge-custom');
+    const customSurface = mountCustomAnalysisDimensions({ root: custom, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails, localInstantLabel });
+    panelNode.append(section, captured, custom, element('h3', undefined, RULES_HEADING));
     void surface.load().catch((error: unknown) => {
       if (captured.isConnected) captured.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取可复用工序。')));
+    });
+    void customSurface.load().catch((error: unknown) => {
+      if (custom.isConnected) custom.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取自定义分析维度。')));
     });
   }
   panelNode.append(element('p', 'field-note', projection.statement));

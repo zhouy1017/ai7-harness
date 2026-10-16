@@ -615,3 +615,41 @@ export function materialIndexCompletedReason(outcome: 'complete' | 'unsupported'
       return '资料索引已建立，但没能提取文字：打开资料看原因。';
   }
 }
+
+// ---- 工序与规则 › 自定义分析维度 (Issue #922, wave 10 slice 7f; ADR 0090 item 4) ----------------------------------------------
+
+export const CUSTOM_DIMENSIONS_HEADING = '自定义分析维度';
+export const CUSTOM_DIMENSIONS_NOTE =
+  '为每个阅读单元写一个提问，AI7 在「分析 › 自定义」里逐单元回答并定位所依据的原文。名称只在本机显示，不会发送；提问模板不能包含稿件正文。';
+export const CUSTOM_DIMENSIONS_EMPTY = '还没有自定义分析维度。';
+export const CUSTOM_DIMENSION_NEW = '新建维度…';
+export const CUSTOM_DIMENSION_REVISE = '修改为新版本…';
+export const CUSTOM_DIMENSION_SAVE = '保存为待验证';
+export const CUSTOM_DIMENSION_CANCEL = '取消';
+export const CUSTOM_DIMENSION_ENABLE = '验证并启用';
+export const CUSTOM_DIMENSION_STOP = '停用';
+export const CUSTOM_DIMENSION_TITLE_LABEL = '维度名称';
+export const CUSTOM_DIMENSION_TEMPLATE_LABEL = '每个单元的提问';
+export const CUSTOM_DIMENSION_TEMPLATE_HINT = '用中文写一段，最多 400 字；可以用 {本单元} 标出本单元所在的位置，不要粘贴稿件原文。';
+/** What AI7 fixes for every dimension, in the editor's words, beside the template they write. */
+export const CUSTOM_DIMENSION_FIXED_LINES = [
+  '回答格式由 AI7 固定：每条回答不超过 300 字，附一段不超过 80 字的原文引文与所在段落，以及不超过 120 字的把握说明；不打分。',
+  '权限上限由 AI7 固定：只读当前这本书的稿件，不改动稿件，不使用联网或本机工具，不跨单元归纳。',
+] as const;
+export const CUSTOM_DIMENSION_STOP_NOTE = '停用后这个版本不能再运行；已经用它完成的分析仍然保留，并一直标明所用的版本。';
+
+export function customDimensionVersionLine(version: { version: number; stateLabel: string; taskCount: number }): string {
+  return `第 ${version.version} 版 · ${version.stateLabel} · ${version.taskCount === 0 ? '还没有运行过' : `用于 ${version.taskCount} 项任务`}`;
+}
+
+export function customDimensionSavedLine(title: string): string {
+  return `已保存「${title}」的新版本，状态为待验证；验证并启用后才能在分析中运行。`;
+}
+
+export function customDimensionEnabledLine(title: string, version: number): string {
+  return `已启用「${title}」第 ${version} 版；可以在书的「分析 › 自定义」中运行。`;
+}
+
+export function customDimensionStoppedLine(title: string, version: number): string {
+  return `已停用「${title}」第 ${version} 版；已完成的分析仍保留。`;
+}
