@@ -1918,7 +1918,8 @@ export class BaselineAnalysisExecutionOwner {
       const retainUnit = async (unit: CoverageManifestUnitProjection): Promise<void> => {
         const sink = this.#deps.researchEvidence;
         const session = platformSession;
-        if (session === null || sink === undefined || sink === null || (definition.platformToolBase ?? definition).kind !== FACTUAL_REVIEW_KIND) return;
+        // A session that carries only the local tools retains no external evidence (#893).
+        if (session === null || facts.webToolsBackend === undefined || sink === undefined || sink === null || (definition.platformToolBase ?? definition).kind !== FACTUAL_REVIEW_KIND) return;
         const outcome = outcomes.find((entry) => entry.unitOrdinal === unit.ordinal);
         if (outcome === undefined) return;
         let retentionFailure: 'capture-processing' | 'storage' = 'capture-processing';

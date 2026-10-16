@@ -9,8 +9,10 @@ interface RejectedCitation { readonly collection: string; readonly ordinal: numb
 export function prepareRetrievalResult(text: string, index: RetrievalIndex | null): {
   readonly text: string; readonly rejected: readonly RejectedCitation[];
 } {
+  // The same fenced body the unit parsers accept, so an anchored citation in a fenced answer is validated, not refused as unknown keys.
+  const body = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text)?.[1] ?? text;
   let value: unknown;
-  try { value = JSON.parse(text); } catch { return { text, rejected: [] }; }
+  try { value = JSON.parse(body); } catch { return { text, rejected: [] }; }
   if (!isRecord(value)) return { text, rejected: [] };
   const rejected: RejectedCitation[] = [];
   let changed = false;

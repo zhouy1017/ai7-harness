@@ -1,10 +1,14 @@
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { RetrievalIndex, RetrievalError, chunkRanges, retrievalTokens, reciprocalRankFusion, type RetrievalSource } from '../../src/service/retrieval/index.js';
 import { prepareRetrievalResult, markRetrievalResult, notExactFetched, dialogueRetrievalCitations } from '../../src/service/retrieval/result-validator.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 import { PlatformToolSession } from '../../src/service/provider/platform-tool-session.js';
-import { LOCAL_TOOL_SCHEMAS, canonicalToolArguments, ruleNamedToolSchemas, toolSetEqualsPlatformSchemas } from '../../src/service/provider/platform-tools.js';
-import { LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, evaluateEgress, type EgressBindingFacts } from '../../src/service/provider/egress-gate.js';
+import { AI7_FAILURE_CODES } from '../../src/service/provider/classification.js';
+import { LOCAL_TOOL_SCHEMAS, PLATFORM_TOOL_SCHEMAS, canonicalToolArguments, readPlatformToolsRule, ruleNamedToolSchemas, toolSetEqualsPlatformSchemas, type PlatformToolsRule } from '../../src/service/provider/platform-tools.js';
+import { LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, assistantToolCallDigest, evaluateEgress, toolResultKey, type EgressAttemptScope, type EgressBindingFacts } from '../../src/service/provider/egress-gate.js';
+import type { AssembledContentBlock, AssembledModelPayload } from '../../src/service/provider/payload.js';
 import { localRetrievalRule } from '../support/policy-rules.js';
 
 // Clearly public synthetic ranking vocabulary; no manuscript fixture or derivative is stored.
@@ -106,6 +110,32 @@ describe('Run-local pinned retrieval', () => {
     const ordinary = ' { "findings": [] }\n';
     expect(prepareRetrievalResult(ordinary, index).text).toBe(ordinary);
   });
+  it('validates an anchored citation inside the fenced body the unit parsers accept', async () => {
+    const index = new RetrievalIndex([source('one', 'alpha beta')]);
+    const [candidate] = await index.retrieve('alpha');
+    const fenced = '```json\n' + JSON.stringify({ findings: [{ quote: 'alpha', retrievalAnchor: candidate!.candidateId }] }) + '\n```';
+    const unverified = prepareRetrievalResult(fenced, index);
+    expect(unverified.rejected.map((entry) => [entry.collection, entry.ordinal])).toEqual([['findings', 0]]);
+    expect(JSON.parse(unverified.text)).toEqual({ findings: [{ quote: 'alpha' }] });
+    index.exactFetch(candidate!.candidateId);
+    const verified = prepareRetrievalResult(fenced, index);
+    expect(verified.rejected).toEqual([]);
+    expect(JSON.parse(verified.text)).toEqual({ findings: [{ quote: 'alpha' }] });
+    // A quotation the exact text does not contain is refused even after Exact Fetch.
+    expect(prepareRetrievalResult(fenced.replace('"alpha"', '"gamma"'), index).rejected).toHaveLength(1);
+    const ordinary = '```json\n{"findings":[]}\n```';
+    expect(prepareRetrievalResult(ordinary, index).text).toBe(ordinary);
+  });
+  it('keeps the retrieval owner free of any filesystem, network or process seam', () => {
+    const root = new URL('../../src/service/retrieval/', import.meta.url);
+    const files = readdirSync(root).filter((name) => name.endsWith('.ts')).sort();
+    expect(files).toEqual(['index.ts', 'local-rule.ts', 'result-validator.ts', 'source-readers.ts']);
+    for (const name of files) {
+      const text = readFileSync(new URL(name, root), 'utf8');
+      expect(text).not.toMatch(/from '(?:node:)?(?:fs|fs\/promises|net|http|https|http2|tls|dgram|dns|child_process|worker_threads)'/u);
+      expect(text).not.toMatch(/\b(?:fetch|writeFile|writeFileSync|appendFile|createWriteStream|mkdir|mkdirSync)\(/u);
+    }
+  });
 });
 
 describe('registered local tools without egress', () => {
@@ -140,5 +170,63 @@ describe('registered local tools without egress', () => {
     expect(session.usage).toMatchObject({ requests: 0, retrievalCalls: 128, exactFetchCalls: 1, refusedRetrievalCalls: 124 });
     expect(session.egressScope.localBreakerState?.()).toBe('tripped');
     expect(socketSeamCalls).toBe(0);
+    // The local breaker ends the unit with its own disclosure, never the web breaker's 联网核查未完成.
+    const failed = { terminal: 'failed', signals: [{ kind: 'failed', failure: { code: AI7_FAILURE_CODES.PLATFORM_TOOL_BREAKER_TRIPPED } }] };
+    expect(session.unitEnd(failed as unknown as Parameters<PlatformToolSession['unitEnd']>[0])?.disclosure).toBe('检索未完成');
+    session.startUnit();
+    expect(session.egressScope.localBreakerState?.()).toBe('intact');
+    expect(session.unitEnd(failed as unknown as Parameters<PlatformToolSession['unitEnd']>[0])).toBeNull();
+  });
+});
+
+describe('the Egress Gate admits exactly the rule-named tool set (#893 review)', () => {
+  const policy = JSON.parse(readFileSync(new URL('../../docs/policies/provider-processing-policy.v7.json', import.meta.url), 'utf8')) as { decision: { providerAllowRules: unknown[] } };
+  const web = readPlatformToolsRule(policy.decision.providerAllowRules[0]) as PlatformToolsRule;
+  const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
+  const user = { role: 'user' as const, source: { kind: 'user' as const }, content: [{ type: 'text' as const, text: 'synthetic' }] };
+  const facts = (platformTools: PlatformToolsRule | null, local: boolean | null): EgressBindingFacts => ({
+    bindingDigest: 'b'.repeat(64), route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL, systemPrompt: 'synthetic',
+    outboundDataCategory: 'public-or-synthetic', admittedUserMessages: new Set(['synthetic']), platformTools,
+    ...(local === null ? {} : { localTools: localRetrievalRule(local) }),
+    policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v18', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+  });
+  const decide = (binding: EgressBindingFacts, tools: ReadonlyArray<unknown>, messages: AssembledModelPayload['messages'] = [user], scope: Partial<EgressAttemptScope> = {}) =>
+    evaluateEgress({ provider: binding.route, model: binding.model, system: binding.systemPrompt, tools, messages }, binding,
+      { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set<string>(), ...scope });
+
+  it('compares the payload with the selected rule: web, local, both, or neither', () => {
+    const both = [...LOCAL_TOOL_SCHEMAS, ...PLATFORM_TOOL_SCHEMAS];
+    const cases: Array<[EgressBindingFacts, ReadonlyArray<unknown>, boolean]> = [
+      [facts(web, null), PLATFORM_TOOL_SCHEMAS, true], [facts(web, null), LOCAL_TOOL_SCHEMAS, false], [facts(web, null), both, false],
+      [facts(null, true), LOCAL_TOOL_SCHEMAS, true], [facts(null, true), PLATFORM_TOOL_SCHEMAS, false], [facts(null, true), both, false],
+      [facts(web, true), both, true], [facts(web, true), PLATFORM_TOOL_SCHEMAS, false], [facts(web, true), LOCAL_TOOL_SCHEMAS, false],
+      [facts(null, false), LOCAL_TOOL_SCHEMAS, false], [facts(web, false), both, false], [facts(null, null), LOCAL_TOOL_SCHEMAS, false],
+      [facts(web, true), [...both, { name: 'unnamed', description: '', parameters: {} }], false],
+      [facts(null, true), [LOCAL_TOOL_SCHEMAS[0]!], false],
+    ];
+    for (const [binding, tools, admitted] of cases) {
+      const decision = decide(binding, tools);
+      expect(admitted ? decision.decision : decision).toEqual(admitted ? 'transmit-local' : expect.objectContaining({ decision: 'refuse', reason: 'tools-present' }));
+    }
+  });
+
+  it('refuses a call to a tool the rule does not name and ends a tripped unit with 检索未完成', () => {
+    const history = (name: string): AssembledModelPayload['messages'] => {
+      const content: AssembledContentBlock[] = [{ type: 'tool-call', id: 'c1', name, arguments: '{}' }];
+      return [user, { role: 'assistant', source: { kind: 'model', provider: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL }, content },
+        { role: 'user', source: { kind: 'tool', callId: 'c1' }, content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: '[]' }] }] }] as AssembledModelPayload['messages'];
+    };
+    const scope = (name: 'retrieve' | 'webfetch', breaker: 'intact' | 'tripped' = 'intact'): Partial<EgressAttemptScope> => ({
+      acceptedToolCallDigests: new Set([assistantToolCallDigest(history(name)[1]!.content)]),
+      admittedToolResults: new Map([[toolResultKey('c1', name), { callId: 'c1', sourceKind: 'tool', tool: name, sourceUrl: null, sha256: sha('[]'), byteCount: 2 }]]),
+      localBreakerState: () => breaker,
+    });
+    const local = facts(null, true);
+    expect(decide(local, LOCAL_TOOL_SCHEMAS, history('retrieve'), scope('retrieve')).decision).toBe('transmit-local');
+    expect(decide(local, LOCAL_TOOL_SCHEMAS, history('webfetch'), scope('webfetch'))).toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
+    const tripped = decide(local, LOCAL_TOOL_SCHEMAS, history('retrieve'), scope('retrieve', 'tripped'));
+    expect(tripped).toMatchObject({ decision: 'refuse', reason: 'circuit-breaker-tripped' });
+    expect(JSON.stringify(tripped)).toContain('检索未完成');
+    expect(JSON.stringify(tripped)).not.toContain('联网核查未完成');
   });
 });

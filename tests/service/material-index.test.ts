@@ -1,6 +1,6 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strToU8, zipSync, type Zippable } from 'fflate';
@@ -81,6 +81,21 @@ function watcher(): { changed(): boolean; close(): void } {
   return { changed: () => version() !== before, close: () => database.close() };
 }
 
+/** Every file under the data root with its size, and its modification time where SQLite's shared-memory index cannot move it. */
+function dataRootFiles(): string[] {
+  const files: string[] = [];
+  const walk = (directory: string, prefix: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) { walk(path, `${prefix}${entry.name}/`); continue; }
+      const stat = statSync(path);
+      files.push(`${prefix}${entry.name}:${stat.size}${/-shm$/u.test(entry.name) ? '' : `:${stat.mtimeMs}`}`);
+    }
+  };
+  walk(roots.dataRoot, '');
+  return files.sort();
+}
+
 const CHINESE = '第一章 春\n\n她推开窗。风从河上吹来，带着潮湿的气味！他问：“你还记得吗？”\n\n第二段只有一句话\n\n圆周率约等于3.14。最后一句……';
 
 describe('资料索引 over the real store', () => {
@@ -97,6 +112,7 @@ describe('资料索引 over the real store', () => {
       const boundary = { bookId, references: [pin] };
       const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => store.readMaterialIndexForTask(scope, id, from)));
       const watching = watcher();
+      const files = dataRootFiles();
       try {
         const page = await store.searchReferableMaterials({ bookId, query: 'alpha', k: 1 });
         expect(page.candidates.length).toBe(1);
@@ -104,6 +120,8 @@ describe('资料索引 over the real store', () => {
         const candidates = await index.retrieve('alpha');
         expect(index.exactFetch(candidates[0]!.candidateId).text.length > 0).toBe(true);
         expect(watching.changed()).toBe(false);
+        // Nothing persisted: no index, embedding or projection file is written anywhere under the data root.
+        expect(dataRootFiles()).toEqual(files);
         await expect(store.searchReferableMaterials({ bookId, query: 'alpha', k: 9 })).rejects.toMatchObject({ code: 'RETRIEVAL_ARGUMENTS_INVALID' });
         store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
         expect((await index.retrieve('alpha')).length).toBe(0);

@@ -256,8 +256,7 @@ export class DialogueExecutionOwner {
     const message = buildDialogueMessage(turn.message);
     const sessionId = randomUUID();
     const localRule = live?.route?.localTools ?? (live === null && this.#deps.fixture !== null ? dialogueRetrievalFixtureRule(this.#deps.fixture, turn.message) : null);
-    const retrieval = localRule === null ? null : new RetrievalIndex(this.#deps.retrievalSources?.(turn.dialogueId) ?? []);
-    active.retrieval = retrieval;
+    let retrieval: RetrievalIndex | null = null;
     const promptContractDigest = localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
     const systemPrompt = localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
     let current: string | null = null;
@@ -265,6 +264,9 @@ export class DialogueExecutionOwner {
     let outcome: HarnessTurnOutcome | null = null;
     let failure: string | null = null;
     try {
+      // Inside the attempt: a source that cannot be read settles the attempt as failed rather than leaving it answering.
+      retrieval = localRule === null ? null : new RetrievalIndex(this.#deps.retrievalSources?.(turn.dialogueId) ?? []);
+      active.retrieval = retrieval;
       const route = live === null ? null : live.route!;
       // Read once: under ordinary-production the configured reference may change while this answer is in flight (Issue #811).
       const credentialReference = live === null ? '' : live.credentialReference;
