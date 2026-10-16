@@ -10,7 +10,7 @@ import { liveKindAdmission, liveKindContractCategories, liveKindRule, type LiveK
 import { liveMaterialContract } from '../task-material-references.js';
 import { buildClarificationAnswerMessage } from '../provider/clarification-contract.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
-import { describeComposition, prepareExecution, type HarnessExecutionSpan, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
+import { PLATFORM_TOOL_CALL_PROGRESS, describeComposition, prepareExecution, type HarnessExecutionSpan, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import {
   ACTIVE_SET_VERSION,
@@ -1297,10 +1297,20 @@ export class BaselineAnalysisExecutionOwner {
     // ceiling sees exactly what the Run has spent at the instant the gate asks, before each dispatch.
     const accumulated: UsageFacts[] = [];
     const pendingLoopUsage: UsageFacts[] = [];
+    // Every tool-call result counted once for the whole Run, even when a unit ended on one (a tripped breaker).
     const seenLoopResults = new Set<object>();
     let platformSession: PlatformToolSession | null = null;
+    // The tool loop's model turns spend tokens before the unit's turn ends: each is counted the moment anything asks the ceiling —
+    // the next model call and also the tool call it asked for, so no search leaves past a reached ceiling (#473).
+    const capturePendingLoopUsage = (): void => {
+      const last = liveAdapter.instance?.lastCanonicalResult;
+      if (platformSession !== null && last !== null && last !== undefined && last.kind === 'tool-calls' && last.usage !== null && !seenLoopResults.has(last)) {
+        pendingLoopUsage.push(last.usage); seenLoopResults.add(last);
+      }
+    };
     const ceilingState = (): EgressCeilingState => {
       if (runBudgetCeiling.kind === 'unset') return 'unset';
+      capturePendingLoopUsage();
       return evaluateRunBudgetCeiling([...accumulated, ...pendingLoopUsage], runBudgetCeiling).state === 'reached' ? 'reached' : 'within';
     };
     // The single-use ticket the gate issued for the step in flight; the adapter takes it or refuses.
@@ -1368,10 +1378,7 @@ export class BaselineAnalysisExecutionOwner {
       },
       gate: (payload) => {
         if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
-        const last = liveAdapter.instance?.lastCanonicalResult;
-        if (platformSession !== null && last !== null && last !== undefined && last.kind === 'tool-calls' && last.usage !== null && !seenLoopResults.has(last)) {
-          pendingLoopUsage.push(last.usage); seenLoopResults.add(last);
-        }
+        capturePendingLoopUsage();
         const decision = evaluateEgress(payload, bindingFacts, platformSession?.egressScope ?? { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
         admittedPayloadDigest = decision.decision === 'refuse' ? null : decision.payloadDigest;
         return decision;
@@ -1510,9 +1517,11 @@ export class BaselineAnalysisExecutionOwner {
         'cross-unit-reduction': { requests: 0, inputTokens: 0, outputTokens: 0 },
         'assurance-sampling': { requests: 0, inputTokens: 0, outputTokens: 0 },
       };
-      const countTurn = (stage: RunReportRevisionUsageStageId, turnUsage: { inputTokens: number; outputTokens: number } | null): void => {
-        usage.requests += 1;
-        stageUsage[stage].requests += 1;
+      // A turn whose model asked for platform tools made one request per step of its loop, and the Run Report counts each (#473).
+      const countTurn = (stage: RunReportRevisionUsageStageId, turnUsage: { inputTokens: number; outputTokens: number } | null, signals: ReadonlyArray<HarnessSignal> = []): void => {
+        const requests = 1 + signals.filter((signal) => signal.kind === 'progress' && signal.label === PLATFORM_TOOL_CALL_PROGRESS).length;
+        usage.requests += requests;
+        stageUsage[stage].requests += requests;
         if (turnUsage === null) return;
         usage.inputTokens += turnUsage.inputTokens;
         usage.outputTokens += turnUsage.outputTokens;
@@ -1693,7 +1702,6 @@ export class BaselineAnalysisExecutionOwner {
         const turn = await harness.submitUnit(message);
         if (platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
         pendingLoopUsage.length = 0;
-        seenLoopResults.clear();
         // Read before anything else can start a turn: the adapter clears this at the start of every
         // stream, so it is this attempt's result or nothing.
         const canonical = liveAdapter.instance?.lastCanonicalResult ?? null;
@@ -1705,7 +1713,7 @@ export class BaselineAnalysisExecutionOwner {
         ledger.recordSpan(attemptId, spanOrdinal, turn.span, unit.ordinal, { attemptIndex, payloadDigest, unitMessageDigest, adaptationId });
         const usageSignal = turn.signals.find((signal) => signal.kind === 'usage');
         const unitUsage = usageSignal?.kind === 'usage' ? (platformSession === null ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens } : { ...usageSignal.usage }) : null;
-        countTurn('units', unitUsage);
+        countTurn('units', unitUsage, turn.signals);
         // One model turn came back. It counts whether it transmitted, replayed from the Provider Result
         // Cache, or read the deterministic fixture: what the reader learns is that the Run is moving.
         active.progress.completedAttempts += 1;
@@ -2361,10 +2369,9 @@ export class BaselineAnalysisExecutionOwner {
           active.progress.attemptState = 'dispatched';
           active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
           platformSession?.startUnit();
-        const turn = await harness.submitUnit(message);
-        if (platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
-        pendingLoopUsage.length = 0;
-        seenLoopResults.clear();
+          const turn = await harness.submitUnit(message);
+          if (platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
+          pendingLoopUsage.length = 0;
           // Every later turn of the Run keeps the Run's own category again.
           if (production !== null && step !== null && bindingFacts !== null) bindingFacts = { ...bindingFacts, outboundDataCategory: 'unpublished-excerpts' };
           if (this.#deps.stageHold) await this.#deps.stageHold('cross-unit-reduction');
@@ -2376,7 +2383,7 @@ export class BaselineAnalysisExecutionOwner {
           const crossUnitUsage = usageSignal?.kind === 'usage'
             ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens }
             : null;
-          countTurn('cross-unit-reduction', crossUnitUsage);
+          countTurn('cross-unit-reduction', crossUnitUsage, turn.signals);
           active.progress.completedAttempts += 1;
           const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
           if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
@@ -2683,7 +2690,7 @@ export class BaselineAnalysisExecutionOwner {
       const turnUsage = usageSignal?.kind === 'usage'
         ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens }
         : null;
-      context.countTurn('assurance-sampling', turnUsage);
+      context.countTurn('assurance-sampling', turnUsage, result.signals);
       if (turnUsage !== null) {
         sampled.inputTokens += turnUsage.inputTokens;
         sampled.outputTokens += turnUsage.outputTokens;
@@ -2970,7 +2977,7 @@ interface AssuranceSamplingContext {
   readonly acceptedOutputDigests: Set<string>;
   readonly liveAdapter: { instance: DeepSeekOpenAiCompatibleAdapter | null };
   /** Counts one settled model turn against both the Run's total and its Run Report stage. */
-  readonly countTurn: (stage: RunReportRevisionUsageStageId, usage: { inputTokens: number; outputTokens: number } | null) => void;
+  readonly countTurn: (stage: RunReportRevisionUsageStageId, usage: { inputTokens: number; outputTokens: number } | null, signals?: ReadonlyArray<HarnessSignal>) => void;
   /** The owner's own clock; the suboperation opens its stage only once a turn is actually dispatched. */
   readonly clock: RunStageClock;
   readonly ceilingState: () => EgressCeilingState;

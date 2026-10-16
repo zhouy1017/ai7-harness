@@ -37,6 +37,9 @@ export const HARNESS_PACKAGE_PINS = {
   '@deepseek-ai/dsh-tools': '0.1.0-rc.6',
 } as const;
 
+/** The progress label of one model request that asked for platform tools: a step of the turn's loop, counted as its own request. */
+export const PLATFORM_TOOL_CALL_PROGRESS = '平台工具调用';
+
 export const HARNESS_SERVICE_SET = ['agents', 'sessions', 'llm', 'systemPrompt', 'tools', 'agentLoop'] as const;
 export const PROMPT_SECTION_NAME = 'ai7:baseline-analysis-contract' as const;
 
@@ -348,7 +351,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
         case 'assistant/message': {
           // A tool-call message is a step of the loop, not an answer: it counts its usage and is never a content candidate.
           if (assistantToolCalls(event.data.message) !== null) {
-            signals.push({ kind: 'progress', label: '平台工具调用' });
+            signals.push({ kind: 'progress', label: PLATFORM_TOOL_CALL_PROGRESS });
             if (event.data.usage !== undefined) recordUsage(event.data.usage);
             break;
           }

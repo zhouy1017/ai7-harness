@@ -60,6 +60,7 @@ export class PlatformToolSession implements PlatformToolOwner {
   readonly #onUsage: ((usage: { inputTokens: number; outputTokens: number }) => void) | undefined;
   readonly #runResults = new Map<string, { readonly text: string; readonly sourceUrl: string | null }>();
   #inFlight = false;
+  #refusedRoundTrips = 0;
   readonly #oneQueryPerUnit: boolean;
   #unitSearchQuery: string | null = null;
   #unitSearchHasResult = false;
@@ -187,10 +188,20 @@ export class PlatformToolSession implements PlatformToolOwner {
   }
 
   async execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
-    if (this.#inFlight) return refusal('平台工具必须顺序调用。');
+    if (this.#inFlight) return this.#refuseCounted('平台工具必须顺序调用。');
     this.#inFlight = true;
     try { return await this.#execute(call); }
     finally { this.#inFlight = false; }
+  }
+
+  /**
+   * A refused call is still one of the unit's tool round trips (ADR 0080 §7.4): it counts toward the breaker, so a model that
+   * keeps asking — a different query after the unit's one, a malformed or repeated call — ends at 128 with 联网核查未完成
+   * instead of looping; the refusal itself never trips the breaker earlier.
+   */
+  #refuseCounted(text: string): { readonly text: string; readonly sourceUrl: null } {
+    this.#refusedRoundTrips += 1;
+    return this.#breaker.observe(`refused:${this.#refusedRoundTrips}`) === 'tripped' ? refusal('联网核查未完成：本单元的工具往返已达到熔断上限。') : refusal(text);
   }
 
   async #settle<Authorized>(item: PlatformToolCallItem, call: { authorize(): Authorized; send(authorized: Authorized): Promise<PlatformToolCallResult> }): Promise<{ snapshot: ResearchSnapshot | null; status: number; replayed: boolean }> {
@@ -229,18 +240,18 @@ export class PlatformToolSession implements PlatformToolOwner {
   }
 
   async #execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
-    if (this.#executedCallIds.has(call.callId)) return refusal('调用标识已在本次尝试中使用过；不执行。');
+    if (this.#executedCallIds.has(call.callId)) return this.#refuseCounted('调用标识已在本次尝试中使用过；不执行。');
     this.#executedCallIds.add(call.callId);
     const args = canonicalToolArguments(call.tool, call.arguments);
-    if (args === null) return refusal('参数不是这个工具接受的形式。');
-    if (this.#evidenceOnly && args.tool === 'webfetch') return refusal('此最小证据项只执行一次检索往返；不取回网页。');
+    if (args === null) return this.#refuseCounted('参数不是这个工具接受的形式。');
+    if (this.#evidenceOnly && args.tool === 'webfetch') return this.#refuseCounted('此最小证据项只执行一次检索往返；不取回网页。');
     const digest = toolArgumentsDigest(args);
     if (args.tool === 'websearch' && this.#oneQueryPerUnit) {
       if (this.#unitSearchQuery !== null && this.#unitSearchQuery !== digest) {
         this.usage.refusedSearchCalls += 1;
         this.#unitSearchRefused = true;
-        const disclosure = this.unitDisclosure!;
-        return refusal(`本单元的检索次数已用完；请使用已有结果。${disclosure}。`);
+        // The model is told only that the unit's one search is spent, never that anything was verified.
+        return this.#refuseCounted(`本单元的检索次数已用完；请使用已有结果。${this.unitDisclosure === '联网核查未完成' ? '联网核查未完成。' : ''}`);
       }
       this.#unitSearchQuery = digest;
       const reused = this.#runResults.get(digest);
