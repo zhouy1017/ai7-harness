@@ -951,7 +951,8 @@ async function main() {
     // #911 synchronized delta: the memory tab exposes the local preference record and explicit rebuild.
     await click(renderer, '社级编辑记忆', 'knowledge-memory-tab');
     const memory = await readKnowledge(renderer, (page) => page.tab === 'memory' && page.housePreference !== null, 'knowledge-memory-tab-open');
-    requireJourney(memory.pending === null && memory.housePreference.includes('本社审阅偏好') && memory.housePreference.includes('更新本社审阅偏好') && memory.cards.length === 0, 'knowledge-pending', memory);
+    requireJourney(memory.pending === null && memory.housePreference.includes('本社审阅偏好') && memory.housePreference.includes('更新本社审阅偏好') &&
+      memory.housePreference.includes('尚无符合学习准入的审阅反馈。') && memory.cards.length === 0, 'knowledge-pending', memory);
     await click(renderer, '审阅规范文件', 'knowledge-back-to-guidelines');
     await readKnowledge(renderer, (page) => page.tab === 'guidelines' && page.guidelines === 'ready', 'knowledge-guidelines-again');
 

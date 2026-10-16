@@ -497,7 +497,7 @@ describe('来源译文 over the real store', () => {
 describe('revision 76', () => {
   it('migrates an exact revision-75 store by adding its two relations, moving nothing else, and refuses a 76 without them', async () => {
     expect(MATERIAL_INDEX_LAYER_SCHEMA_VERSION).toBe(76);
-    // Synchronized delta with Issue #901: revision 79 (house review preference) is the terminal version.
+    // Synchronized delta with Issue #911: revision 79 (house review preference) is the terminal version.
     expect(LATEST_SCHEMA_VERSION).toBe(MATERIAL_INDEX_LAYER_SCHEMA_VERSION + 3);
     const schemaRows = (): Array<{ name: string; sql: string }> => {
       const database = new DatabaseSync(storePath(), { readOnly: true });
