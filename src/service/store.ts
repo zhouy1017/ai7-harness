@@ -891,7 +891,36 @@ import {
 import { dialogueProjection, harnessHistoryReader, keptText, resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue/dialogue-history.js';
 import { dialogueQuestion } from './dialogue/contract.js';
 import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from './harness/session-log.js';
-import type { DialogueTaskReading, MaterialIndexAttentionReading, WaitingTaskAttentionReading } from './global-attention.js';
+import type { DialogueTaskReading, MaterialIndexAttentionReading, TaskIntentDraftAttentionReading, WaitingTaskAttentionReading } from './global-attention.js';
+import {
+  DRAFT_FIRST_BASELINE_UNAVAILABLE,
+  DRAFT_RANGE_STATE_LABELS,
+  TaskIntentDraftError,
+  TaskIntentDraftLedger,
+  draftAnswer,
+  draftGoal,
+  draftOutcomeClass,
+  goalFromText,
+  initializeTaskIntentDraftSchema,
+  requireDraft,
+  resolutionOffers,
+  resolveDraft,
+  type DraftResolutionFacts,
+  type StoredDraft,
+  type StoredDraftRange,
+} from './task-intent-drafts.js';
+import type {
+  DialogueSelectionInput,
+  InspectTaskIntentDraftsInput,
+  PromoteAnswerToTaskIntentDraftInput,
+  PromoteTaskIntentDraftInput,
+  SaveTaskIntentDraftInput,
+  TaskIntentDraftProjection,
+  TaskIntentDraftRangeProjection,
+  TaskIntentDraftsProjection,
+} from '../shared/protocol.js';
+import { MAX_TASK_INTENT_DRAFT_RANGES } from '../shared/protocol.js';
+import { graphemesOf } from '../shared/mark-anchor.js';
 import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
@@ -1071,7 +1100,7 @@ import {
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   MODEL_CLARIFICATION_SCHEMA_VERSION,
-  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION,
+  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -2362,7 +2391,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2426,7 +2455,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2804,7 +2833,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2857,7 +2886,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -3002,7 +3031,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3054,7 +3083,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3551,7 +3580,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3603,7 +3632,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4510,6 +4539,23 @@ const MATERIAL_VECTOR_BATCH = 256;
 /** Why the two on-request layers are not made while a database replacement waits (Issue #892). */
 const MATERIAL_LAYERS_READ_ONLY = '数据库替换正在等待：资料索引暂不建立新的层。';
 
+/** 准备计划's draft as a preparation carries it (Issue #423, slice 7a): its version, its sentence, and how the promotion is recorded. */
+export interface DraftPromotion {
+  readonly versionId: string;
+  readonly goal: string;
+  promoted(task: { readonly taskIntentId: string | null; readonly reviewRunId: string | null }): void;
+}
+
+/** What 准备计划 starts (Issue #423, slice 7a): the existing preparation of one kind, with the draft it is prepared from. */
+export type DraftPreparation =
+  | { readonly kind: 'baseline'; readonly goal: BaselineAnalysisGoal; readonly update: BaselineAnalysisUpdateRequest | null; readonly intentDraft: DraftPromotion }
+  | { readonly kind: 'review'; readonly categoryId: string; readonly scope: ReviewRunScopeRequest; readonly intentDraft: DraftPromotion }
+  | {
+    readonly kind: 'writing';
+    readonly request: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds: ReadonlyArray<string> };
+    readonly intentDraft: DraftPromotion;
+  };
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -4626,6 +4672,8 @@ export class EditorialStore {
   readonly #outcomeResolutions: OutcomeResolutionLedger;
   /** 就这段提问… (Issue #52, S17a): the dialogue Tasks, and the reader that joins them to the Harness Session Ledger. */
   readonly #dialogues: DialogueLedger;
+  /** The editor's Task Intent Drafts (Issue #423, wave 10 slice 7a). */
+  readonly #drafts: TaskIntentDraftLedger;
   readonly #dialogueHistory: DialogueHistoryReader;
   readonly #productionDocuments: ProductionDocuments;
   /** Each Production Document's Deliverable Workflow (Issue #415, S66c). */
@@ -4702,6 +4750,7 @@ export class EditorialStore {
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#seriesExclusions = new SeriesExclusionLedger(authority);
     this.#dialogues = new DialogueLedger(authority);
+    this.#drafts = new TaskIntentDraftLedger(authority);
     this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
@@ -5047,6 +5096,9 @@ export class EditorialStore {
       // Revision 78 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
       initializeFactualVerificationSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeHouseReviewPreferenceSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
+      // Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts; `initializeTaskAuthorizationSchema` rebuilds the Task
+      // Intents for the drafts' sentences and stamps the version.
+      initializeTaskIntentDraftSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -5477,6 +5529,8 @@ export class EditorialStore {
     capturedProcedure: { versionId: string; documentSha256: string } | null = null,
     materialIds: ReadonlyArray<string> = [],
     redoOf: string | null = null,
+    // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): the draft the one category's Run is prepared from.
+    intentDraft: DraftPromotion | null = null,
   ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
     const procedure = capturedProcedure === null ? null : this.#procedureCall(() => this.#capturedProcedurePin(bookId, capturedProcedure));
     requireStore(Array.isArray(materialIds) && materialIds.length <= MAX_WRITING_MATERIALS && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) && new Set(materialIds).size === materialIds.length,
@@ -5489,6 +5543,7 @@ export class EditorialStore {
     const references = this.#prepareTaskMaterials(bookId, materialIds);
     return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, redoOf,
       ...(references.length === 0 ? {} : { materialReferences: { bookId, references } }),
+      ...(intentDraft === null ? {} : { intentDraft: { versionId: intentDraft.versionId, goal: intentDraft.goal, promoted: intentDraft.promoted } }),
     }));
   }
 
@@ -5679,6 +5734,12 @@ export class EditorialStore {
         const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun, ledger);
         plan = withLedgerRunControls(plan, projection, blocks, stopped ?? undefined, ledger.launch.operationalScope === 'developer-live');
       }
+    }
+    // A Task prepared from a Task Intent Draft shows the draft's sentence in its 目标块 (Issue #423, slice 7a).
+    const promoted = input.kind === 'baseline-analysis' || input.kind === 'review-run' || input.kind === 'writing'
+      ? this.#draftCall(() => this.#drafts.promotedInto(plan.ref)) : null;
+    if (promoted !== null && promoted.bookId === input.bookId) {
+      plan = { ...plan, goal: { ...plan.goal, draft: { draftId: promoted.draftId, sentence: promoted.latest.goal } } };
     }
     return { ...found, plan: { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) } };
   }
@@ -5903,8 +5964,15 @@ export class EditorialStore {
     launchPolicy: LaunchPolicyProjection,
     reconfirm = false,
     redoOf: string | null = null,
+    // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): a new Task Intent holding the draft's sentence.
+    intentDraft: DraftPromotion | null = null,
   ): AnalysisPreparationResult<BaselineAnalysisProjection> {
-    return this.#baselineProgress(() => this.#baselineAnalysis.prepare({ phase: 'start', bookId, goal, update, reconfirm, launchPolicy, redoOf }));
+    return this.#baselineProgress(() => this.#baselineAnalysis.prepare({ phase: 'start', bookId, goal, update, reconfirm, launchPolicy, redoOf,
+      ...(intentDraft === null ? {} : {
+        goal: intentDraft.goal as BaselineAnalysisGoal,
+        intentDraft: { versionId: intentDraft.versionId, promoted: (taskIntentId: string) => intentDraft.promoted({ taskIntentId, reviewRunId: null }) },
+      }),
+    }));
   }
 
   advanceBaselineAnalysisPreparationWork(workId: string): AnalysisPreparationResult<BaselineAnalysisProjection> {
@@ -11164,6 +11232,9 @@ export class EditorialStore {
     request: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> },
     launchPolicy: LaunchPolicyProjection,
     redoOf: string | null = null,
+    // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): a new Task Intent holding the draft's sentence, which is also the
+    // Task's 其他要求.
+    intentDraft: DraftPromotion | null = null,
   ): AnalysisPreparationResult<WritingProjection> {
     // 允许参考's 资料库 items the editor ticked (Issue #428): each once, by identity.
     const materialIds = request.materialIds ?? [];
@@ -11216,12 +11287,15 @@ export class EditorialStore {
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
       bookId,
-      goal: WRITING_MODE_GOALS[mode],
+      goal: intentDraft === null ? WRITING_MODE_GOALS[mode] : intentDraft.goal as typeof WRITING_MODE_GOALS[typeof mode],
       redoOf,
       update: mode === 'writing-first' ? null : { mode, selectedRange: null },
       reconfirm: false,
       launchPolicy,
       ...(newTask ? { newTask } : {}),
+      ...(intentDraft === null ? {} : {
+        intentDraft: { versionId: intentDraft.versionId, promoted: (taskIntentId: string) => intentDraft.promoted({ taskIntentId, reviewRunId: null }) },
+      }),
     }));
     // Which type, words and reference set the Task drafts from, recorded once for it and this contract.
     const taskIntentId = this.#writingCall(() => this.#writingTasks.latestTaskIntentId(bookId));
@@ -19543,6 +19617,8 @@ export class EditorialStore {
           learningMaterials: this.#learningAttention(limit),
           materialIndexes: this.#materialIndexAttention(since, limit),
           unconfirmed: this.#unconfirmedAttention(limit),
+          // Every Book's unfinished Task Intent Drafts (Issue #423, slice 7a): in 待我处理 only as their own card.
+          drafts: this.#draftCall(() => this.#draftAttention(null)),
           busy,
           waitingFor,
         }, now);
@@ -19582,12 +19658,346 @@ export class EditorialStore {
           waitingFor,
           // Its dialogue Tasks (Issue #52, S17a; TASK-044), each read through the Harness Session Ledger.
           dialogues: this.#dialogueCall(() => this.#dialogueTaskReadings(bookId, dialogueLive)),
+          // Its unfinished Task Intent Drafts (Issue #423, slice 7a), in 等你处理.
+          drafts: this.#draftCall(() => this.#draftAttention(bookId)),
         });
       } catch (error) {
         if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
         throw error;
       }
     });
+  }
+
+  // ---- Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b; V2-UX-TASK-001 to 009, 042, 043, DIALOG-013, 016) ------
+
+  /**
+   * The Book's Task Intent Drafts — those not yet promoted, then the latest promoted ones — or, `draftId` set, that one draft with
+   * the Task 准备计划 would make of it (TASK-004 to 007). A read: nothing is written, and no model is asked.
+   */
+  inspectTaskIntentDrafts(input: InspectTaskIntentDraftsInput): TaskIntentDraftsProjection {
+    return this.#draftCall(() => {
+      requireDraft(typeof input === 'object' && input !== null && (input.draftId === null || UUID_PATTERN.test(input.draftId)),
+        'TASK_INTENT_DRAFT_INVALID', '任务意图草稿请求无效。');
+      const bookTitle = this.#evaluationBookTitle(input.bookId);
+      if (input.draftId !== null) {
+        const draft = this.#drafts.draft(input.draftId);
+        requireDraft(draft !== null && draft.bookId === input.bookId, 'TASK_INTENT_DRAFT_NOT_FOUND', '这份任务意图草稿不在这本书里。');
+        return { bookId: input.bookId, drafts: [this.#draftProjection(draft, bookTitle, true)] };
+      }
+      const drafts = [...this.#drafts.unpromoted(input.bookId, GLOBAL_ATTENTION_READ_LIMIT), ...this.#drafts.promoted(input.bookId, 10)];
+      return { bookId: input.bookId, drafts: drafts.map((draft) => this.#draftProjection(draft, bookTitle, false)) };
+    });
+  }
+
+  /**
+   * 准备任务 in the Context-bound Task Composer — a new draft — or 保存修改 on one (TASK-004, 005): the goal, the target with each
+   * range pinned exactly where the editor selected it, and the intended outcome, as a new version. Only the Book's own manuscript
+   * is read to verify the ranges; nothing is sent, and no Task Intent, plan, Run Record or authorization is made.
+   */
+  saveTaskIntentDraft(input: SaveTaskIntentDraftInput, now: Date = new Date()): TaskIntentDraftProjection {
+    return this.#draftCall(() => {
+      requireDraft(typeof input === 'object' && input !== null && typeof input.target === 'object' && input.target !== null &&
+        (input.draftId === null ? input.expectedOrdinal === null : UUID_PATTERN.test(input.draftId) && Number.isSafeInteger(input.expectedOrdinal) && (input.expectedOrdinal as number) >= 1) &&
+        (input.origin === 'composer-selection' || input.origin === 'composer-book'),
+      'TASK_INTENT_DRAFT_INVALID', '任务意图草稿请求无效。');
+      const bookTitle = this.#evaluationBookTitle(input.bookId);
+      const goal = draftGoal(input.goal);
+      const outcomeClass = draftOutcomeClass(input.outcomeClass);
+      const previous = input.draftId === null ? null : this.#drafts.draft(input.draftId);
+      requireDraft(input.draftId === null || (previous !== null && previous.bookId === input.bookId), 'TASK_INTENT_DRAFT_NOT_FOUND', '这份任务意图草稿不在这本书里。');
+      let ranges: StoredDraftRange[] = [];
+      if (input.target.kind === 'ranges') {
+        const requested = input.target.ranges;
+        requireDraft(Array.isArray(requested) && requested.length >= 1 && requested.length <= MAX_TASK_INTENT_DRAFT_RANGES,
+          'TASK_INTENT_DRAFT_RANGE_INVALID', `一份草稿带 1–${MAX_TASK_INTENT_DRAFT_RANGES} 段所选文字。`);
+        ranges = requested.map((range) => {
+          requireDraft(typeof range === 'object' && range !== null && (range.kind === 'kept' || range.kind === 'new'), 'TASK_INTENT_DRAFT_RANGE_INVALID', '所选文字无效。');
+          if (range.kind === 'new') return this.#pinDraftRange(input.bookId, range.span);
+          // A range the draft already pinned keeps its original pin and provenance; it is never rebound in place (TASK-041).
+          const kept = previous?.latest.ranges.find((candidate) => candidate.rangeId === range.rangeId);
+          requireDraft(kept !== undefined, 'TASK_INTENT_DRAFT_RANGE_INVALID', '这段所选文字不在这份草稿里。');
+          return kept;
+        });
+        requireDraft(new Set(ranges.map((range) => range.rangeId)).size === ranges.length, 'TASK_INTENT_DRAFT_RANGE_INVALID', '同一段所选文字只加入一次。');
+      } else {
+        requireDraft(input.target.kind === 'book', 'TASK_INTENT_DRAFT_INVALID', '任务意图草稿请求无效。');
+      }
+      const content = { goal, target: input.target.kind, outcomeClass, ranges, answer: previous?.latest.answer ?? null };
+      const stored = this.#transaction(this.#authority, () => input.draftId === null
+        ? this.#drafts.create(input.bookId, input.origin, content, now)
+        : this.#drafts.saveVersion(input.draftId, input.bookId, input.expectedOrdinal as number, content, now));
+      return this.#draftProjection(stored, bookTitle, true);
+    });
+  }
+
+  /**
+   * 准备计划 on a draft (decision 1): its exact latest version checked — every range still holding its words (TASK-043) — and
+   * resolved to the one existing preparation it names, which the caller starts as the same cooperative job 先看计划 starts. That
+   * preparation records the promotion in the very write that makes the Task Intent (or, for a 审阅, the Review Run), so a draft
+   * is promoted once; the Task still needs 开始任务 (AUTH-002). Nothing is sent.
+   */
+  taskIntentDraftPreparation(input: PromoteTaskIntentDraftInput, now: Date = new Date()): DraftPreparation {
+    return this.#draftCall(() => {
+      requireDraft(typeof input === 'object' && input !== null && typeof input.draftId === 'string' && UUID_PATTERN.test(input.draftId) &&
+        typeof input.versionId === 'string' && UUID_PATTERN.test(input.versionId) && typeof input.choice === 'object' && input.choice !== null,
+      'TASK_INTENT_DRAFT_INVALID', '任务意图草稿请求无效。');
+      this.#evaluationBookTitle(input.bookId);
+      const draft = this.#drafts.draft(input.draftId);
+      requireDraft(draft !== null && draft.bookId === input.bookId, 'TASK_INTENT_DRAFT_NOT_FOUND', '这份任务意图草稿不在这本书里。');
+      requireDraft(draft.promotion === null, 'TASK_INTENT_DRAFT_PROMOTED', '这份草稿已经准备成任务；请在任务计划里继续。');
+      requireDraft(draft.latest.versionId === input.versionId, 'TASK_INTENT_DRAFT_STALE', '这份草稿在你准备计划之前已有新的版本；请看最新的版本。');
+      const moved = this.#draftRanges(draft.latest.ranges).find((range) => range.state === 'reselect');
+      requireDraft(moved === undefined, 'TASK_INTENT_DRAFT_RANGE_RESELECT', '任务范围需要重新选择：有一段所选文字已经改动或不在当前稿件中；请重新选择或移除它。');
+      const resolution = resolveDraft(draft.latest, this.#draftFacts(draft.bookId));
+      const offered = resolutionOffers(resolution, input.choice);
+      requireDraft(offered !== null, 'TASK_INTENT_DRAFT_UNSUPPORTED',
+        resolution.state === 'unsupported' ? resolution.reason : '这份草稿不能这样准备计划；请从草稿给出的选项中选择。');
+      const promoted = (task: { readonly taskIntentId: string | null; readonly reviewRunId: string | null }): void => {
+        try {
+          this.#drafts.promote(draft.draftId, draft.latest.versionId, { taskKind: offered.taskKind, ...task }, now);
+        } catch (error) {
+          if (error instanceof TaskIntentDraftError) throw new StoreError(error.code, error.message);
+          throw error;
+        }
+      };
+      const intentDraft: DraftPromotion = { versionId: draft.latest.versionId, goal: draft.latest.goal, promoted };
+      const block = draft.latest.ranges[0]?.blockId ?? null;
+      const choice = offered.choice;
+      switch (choice.kind) {
+        case 'baseline':
+          return {
+            kind: 'baseline',
+            goal: BASELINE_ANALYSIS_MODE_GOALS[choice.mode],
+            update: choice.mode === 'first-baseline' ? null
+              : choice.mode === 'reanalyze-range' && block !== null
+                ? { mode: choice.mode, selectedRange: null, selectedBlocks: { fromBlockId: block, toBlockId: block } }
+                : { mode: choice.mode, selectedRange: null },
+            intentDraft,
+          };
+        case 'review':
+          return {
+            kind: 'review',
+            categoryId: choice.categoryId,
+            scope: block === null
+              ? { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }
+              : { kind: 'selection', fromChapterBlockId: block, toChapterBlockId: block },
+            intentDraft,
+          };
+        case 'writing': {
+          const writing = input.writing;
+          requireDraft(typeof writing === 'object' && writing !== null && typeof writing.audience === 'string' && typeof writing.channel === 'string',
+            'TASK_INTENT_DRAFT_WRITING_INVALID', '请写下这份文档的受众和渠道。');
+          return {
+            kind: 'writing',
+            request: { typeId: choice.typeId, audience: writing.audience, channel: writing.channel, requirements: draft.latest.goal, materialIds: [] },
+            intentDraft,
+          };
+        }
+      }
+    });
+  }
+
+  /**
+   * 转为任务意图草稿 (DIALOG-016; #52 S17b): a new draft — or the one this answer already made, still unpromoted — from the
+   * dialogue's latest attempt, which must be a completed answer (DIALOG-013) whose selected words still stand where they were
+   * asked about. It carries the answer's complete fragments (bounded) and its rows, with the dialogue, the attempt and the
+   * selection's digest as provenance; its goal starts as the editor's question, its one range is the selection. Nothing is sent,
+   * the dialogue contract and its records are untouched, and the Live Reasoning Summary never enters it.
+   */
+  promoteAnswerToTaskIntentDraft(input: PromoteAnswerToTaskIntentDraftInput, now: Date = new Date()): TaskIntentDraftProjection {
+    const bookId = input.bookId;
+    const content = this.#dialogueCall(() => {
+      const task = this.#requireDialogueTask(bookId, input.dialogueId);
+      const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, () => null);
+      const latest = resolved.attempts.at(-1);
+      requireStore(latest !== undefined && latest.attempt.attemptId === input.attemptId, 'DIALOGUE_STALE', '这段对话已有新的回答；请看最新的回答再操作。');
+      requireStore(latest.state === 'completed' && latest.fragments.length > 0, 'DIALOGUE_INCOMPLETE', '内容不完整的回答不能转为任务意图草稿。');
+      const first = resolved.first;
+      requireStore(first !== null && sha256(first.selection) === task.selectionSha256, 'DIALOGUE_HISTORY_MISSING', '这个问题的记录不在本机，不能转为任务意图草稿。');
+      const block = this.#authority.prepare('SELECT text, digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(task.branchId, task.blockId) as SqlRow | undefined;
+      requireStore(block !== undefined && graphemesOf(asString(block.text)).slice(task.fromGrapheme, task.toGrapheme).join('') === first.selection,
+        'DIALOGUE_SELECTION_MOVED', '所选文字已经改动或不在当前稿件中；不能把这次回答转为任务意图草稿。');
+      const state = this.#draftBranchState(task.branchId);
+      const answer = draftAnswer(latest.fragments);
+      const question = first.question.trim();
+      return {
+        goal: goalFromText(question),
+        range: {
+          rangeId: randomUUID(), manuscriptId: task.manuscriptId, branchId: task.branchId, blockId: task.blockId, blockDigest: asString(block.digest),
+          fromGrapheme: task.fromGrapheme, toGrapheme: task.toGrapheme, revisionId: state.revisionId, revisionLabel: state.revisionLabel,
+          journalSequence: state.journalSequence, pendingSave: state.pendingSave, text: first.selection,
+        } satisfies StoredDraftRange,
+        answer: {
+          dialogueId: task.dialogueId, attemptId: latest.attempt.attemptId, attemptOrdinal: latest.attempt.ordinal, selectionSha256: task.selectionSha256,
+          text: answer.text, rows: answer.rows, truncated: answer.truncated,
+        },
+      };
+    });
+    return this.#draftCall(() => {
+      const bookTitle = this.#evaluationBookTitle(bookId);
+      // The same answer opens the draft it already made while that draft waits (TASK-004: 创建或打开).
+      const existing = this.#drafts.unpromoted(bookId, GLOBAL_ATTENTION_READ_LIMIT).find((draft) => draft.origin === 'dialogue-answer' &&
+        draft.latest.answer?.attemptId === content.answer.attemptId);
+      if (existing !== undefined) return this.#draftProjection(existing, bookTitle, true);
+      const stored = this.#transaction(this.#authority, () => this.#drafts.create(bookId, 'dialogue-answer',
+        { goal: content.goal, target: 'ranges', outcomeClass: null, ranges: [content.range], answer: content.answer }, now));
+      return this.#draftProjection(stored, bookTitle, true);
+    });
+  }
+
+  /** One range the composer pinned now: the exact words selected in the Book's primary manuscript, verified as a mark's are. */
+  #pinDraftRange(bookId: string, span: DialogueSelectionInput): StoredDraftRange {
+    requireDraft(typeof span === 'object' && span !== null && typeof span.manuscriptId === 'string' && UUID_PATTERN.test(span.manuscriptId),
+      'TASK_INTENT_DRAFT_RANGE_INVALID', '所选文字无效。');
+    const manuscript = this.#authority.prepare('SELECT book_id, role FROM manuscripts WHERE manuscript_id = ?').get(span.manuscriptId) as SqlRow | undefined;
+    requireDraft(manuscript !== undefined && manuscript.book_id === bookId && manuscript.role === 'primary', 'TASK_INTENT_DRAFT_RANGE_INVALID', '所选文字不在这本书的稿件中。');
+    const verified = this.#markCall(() => this.#editorialMarks.verifySpan(span));
+    requireDraft(verified.bookId === bookId && verified.text.length > 0 && span.toGrapheme - span.fromGrapheme <= MAX_DIALOGUE_SELECTION_GRAPHEMES,
+      'TASK_INTENT_DRAFT_RANGE_INVALID', `所选文字最多 ${MAX_DIALOGUE_SELECTION_GRAPHEMES} 个字。`);
+    const state = this.#draftBranchState(span.branchId);
+    return {
+      rangeId: randomUUID(), manuscriptId: span.manuscriptId, branchId: span.branchId, blockId: span.blockId, blockDigest: span.baseBlockDigest,
+      fromGrapheme: span.fromGrapheme, toGrapheme: span.toGrapheme, revisionId: verified.revisionId, revisionLabel: verified.revisionLabel,
+      journalSequence: verified.journalSequence, pendingSave: state.pendingSave, text: verified.text,
+    };
+  }
+
+  /** Where a branch stands: its revision, its journal, and whether the journal holds edits no revision holds yet (TASK-039). */
+  #draftBranchState(branchId: string): { revisionId: string; revisionLabel: string; journalSequence: number; lastCheckpointSequence: number; pendingSave: boolean } {
+    const row = this.#authority.prepare(
+      `SELECT s.base_revision_id, s.journal_sequence, s.last_checkpoint_sequence, r.label
+       FROM branch_working_state s JOIN manuscript_revisions r ON r.revision_id = s.base_revision_id WHERE s.branch_id = ?`,
+    ).get(branchId) as SqlRow | undefined;
+    requireDraft(row !== undefined, 'TASK_INTENT_DRAFT_RANGE_INVALID', '稿件工作状态不存在。');
+    const journalSequence = asNumber(row.journal_sequence);
+    const lastCheckpointSequence = asNumber(row.last_checkpoint_sequence);
+    return { revisionId: asString(row.base_revision_id), revisionLabel: asString(row.label), journalSequence, lastCheckpointSequence, pendingSave: journalSequence > lastCheckpointSequence };
+  }
+
+  /**
+   * How each pinned range stands now (TASK-002, 031, 043): its words gone or changed — 任务范围需要重新选择 — or pinned on edits
+   * no revision holds yet — 待保存修订版 — or pinned on a revision the manuscript has moved past — 待核对到任务修订版 — or exact.
+   */
+  #draftRanges(ranges: ReadonlyArray<StoredDraftRange>): TaskIntentDraftRangeProjection[] {
+    return ranges.map((range) => {
+      const block = this.#authority.prepare('SELECT text, position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(range.branchId, range.blockId) as SqlRow | undefined;
+      const holds = block !== undefined && graphemesOf(asString(block.text)).slice(range.fromGrapheme, range.toGrapheme).join('') === range.text;
+      const branch = this.#authority.prepare('SELECT base_revision_id, last_checkpoint_sequence FROM branch_working_state WHERE branch_id = ?').get(range.branchId) as SqlRow | undefined;
+      const state: TaskIntentDraftRangeProjection['state'] = !holds || branch === undefined ? 'reselect'
+        : range.pendingSave && asNumber(branch.last_checkpoint_sequence) < range.journalSequence ? 'pending-save'
+          : range.pendingSave || asString(branch.base_revision_id) !== range.revisionId ? 'awaiting-resolution' : 'exact';
+      return {
+        rangeId: range.rangeId,
+        manuscriptId: range.manuscriptId,
+        blockId: range.blockId,
+        fromGrapheme: range.fromGrapheme,
+        toGrapheme: range.toGrapheme,
+        text: range.text,
+        revisionLabel: range.revisionLabel,
+        journalSequence: range.journalSequence,
+        state,
+        stateLabel: DRAFT_RANGE_STATE_LABELS[state],
+        position: block === undefined ? null : asNumber(block.position),
+      };
+    });
+  }
+
+  #draftProjection(draft: StoredDraft, bookTitle: string, withResolution: boolean): TaskIntentDraftProjection {
+    const latest = draft.latest;
+    const promotion = draft.promotion;
+    return {
+      draftId: draft.draftId,
+      bookId: draft.bookId,
+      bookTitle,
+      origin: draft.origin,
+      createdAt: draft.createdAt,
+      version: {
+        versionId: latest.versionId,
+        ordinal: latest.ordinal,
+        goal: latest.goal,
+        target: latest.target,
+        outcomeClass: latest.outcomeClass,
+        ranges: this.#draftRanges(latest.ranges),
+        answer: latest.answer,
+        createdAt: latest.createdAt,
+      },
+      promotion: promotion === null ? null : {
+        taskKind: promotion.taskKind,
+        taskIntentId: promotion.taskIntentId,
+        planRef: promotion.taskKind === 'review-run' ? promotion.reviewRunId! : promotion.taskIntentId!,
+        promotedAt: promotion.promotedAt,
+      },
+      resolution: withResolution && promotion === null ? resolveDraft(latest, this.#draftFacts(draft.bookId)) : null,
+    };
+  }
+
+  /** What the Book's existing preparations offer now, read from their own projections; one that cannot be read offers nothing. */
+  #draftFacts(bookId: string): DraftResolutionFacts {
+    const read = <T>(body: () => T): T | null => {
+      try { return body(); } catch (error) {
+        if (error instanceof StoreFatalError) throw error;
+        return null;
+      }
+    };
+    const baseline = read(() => this.inspectBaselineAnalysis(bookId));
+    const controls = baseline?.updateControls ?? null;
+    const review = read(() => this.inspectReviewWorkspace(bookId, null));
+    const writing = read(() => this.inspectWritingTask(bookId));
+    return {
+      analysis: baseline === null ? null : controls === null
+        ? { first: true, firstAvailable: baseline.actions.canPrepare, firstReason: baseline.actions.canPrepare ? null : DRAFT_FIRST_BASELINE_UNAVAILABLE, modes: [] }
+        : {
+          first: false,
+          firstAvailable: false,
+          firstReason: null,
+          modes: (['sync-current', 'reanalyze-book', 'reanalyze-range'] as const).map((mode) => {
+            const action = controls.actions[mode];
+            return {
+              mode,
+              label: action.label,
+              available: action.available && !controls.blockedByActiveRun,
+              reason: controls.blockedByActiveRun ? controls.blockedReason : action.unavailableReason,
+            };
+          }),
+        },
+      review: review === null ? null : {
+        available: review.newReview.available,
+        reason: review.newReview.unavailableReason,
+        categories: review.categories.filter((category) => category.available)
+          .map((category) => ({ categoryId: category.categoryId, label: category.label, book: category.scopes.whole.available, selection: category.scopes.selection.available })),
+      },
+      writing: writing === null ? null : writing.types.map((type) => ({
+        typeId: type.typeId,
+        label: type.label,
+        available: writing.unavailable === null && type.prepare.allowed,
+        reason: writing.unavailable ?? (type.prepare.allowed ? null : type.prepare.reason),
+      })),
+      writingRequirementsLimit: MAX_WRITING_REQUIREMENTS_GRAPHEMES,
+    };
+  }
+
+  /** The unfinished drafts of a Book — or of every Book — as the 任务 panel and 待我处理 list them. */
+  #draftAttention(bookId: string | null): TaskIntentDraftAttentionReading[] {
+    return this.#drafts.unpromoted(bookId, GLOBAL_ATTENTION_READ_LIMIT).map((draft) => ({
+      bookId: draft.bookId,
+      bookTitle: this.#evaluationBookTitle(draft.bookId),
+      draftId: draft.draftId,
+      goal: draft.latest.goal,
+      origin: draft.origin,
+      ranges: draft.latest.ranges.length,
+      ordinal: draft.latest.ordinal,
+      at: draft.latest.createdAt,
+    }));
+  }
+
+  #draftCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof TaskIntentDraftError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   // ---- 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016, TASK-044) ---------------------------

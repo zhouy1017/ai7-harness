@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { ControlTaskRunInput, LaunchPolicyProjection, ServiceJobProjection } from '../shared/protocol.js';
-import { StoreError, StoreFatalError, type EditorialStore } from './store.js';
+import type { ControlTaskRunInput, LaunchPolicyProjection, PromoteTaskIntentDraftInput, ServiceJobProjection } from '../shared/protocol.js';
+import { StoreError, StoreFatalError, type DraftPromotion, type EditorialStore } from './store.js';
 
 const MAX_ACTIVE_JOBS = 4;
 const MAX_RETAINED_JOBS = 32;
@@ -30,6 +30,22 @@ export class CooperativeJobOwner {
       case 'evaluation-rewrite': return this.startEvaluationRewritePreparation(input.bookId, request.recordId, policy, request.redoOf);
       case 'writing': return this.startWritingPreparation(input.bookId, request.request, policy, request.redoOf);
       case 'review-run': return this.startReviewRunPreparation(input.bookId, request.categoryIds, request.scope, policy, null, request.materialIds, request.redoOf);
+    }
+  }
+  /**
+   * 准备计划 on a Task Intent Draft (Issue #423, slice 7a; decision 1): the existing preparation the draft resolves to, started as
+   * the same cooperative job 先看计划 starts — 稿件分析's, 审阅's or 写作任务's — with the draft's sentence as the Task Intent's goal.
+   */
+  startTaskIntentDraftPromotion(input: PromoteTaskIntentDraftInput, policy: LaunchPolicyProjection): ServiceJobProjection {
+    this.#requireCapacity();
+    const preparation = this.#store.taskIntentDraftPreparation(input);
+    switch (preparation.kind) {
+      case 'baseline':
+        return this.startBaselineAnalysisPreparation(input.bookId, preparation.goal, preparation.update, policy, false, null, preparation.intentDraft);
+      case 'review':
+        return this.startReviewRunPreparation(input.bookId, [preparation.categoryId], preparation.scope, policy, null, [], null, preparation.intentDraft);
+      case 'writing':
+        return this.startWritingPreparation(input.bookId, preparation.request, policy, null, preparation.intentDraft);
     }
   }
   readonly #store: EditorialStore;
@@ -276,9 +292,10 @@ export class CooperativeJobOwner {
     request: Parameters<EditorialStore['createWritingPreparationWork']>[1],
     launchPolicy: Parameters<EditorialStore['createWritingPreparationWork']>[2],
     redoOf: string | null = null,
+    intentDraft: DraftPromotion | null = null,
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createWritingPreparationWork(bookId, request, launchPolicy, redoOf);
+    const work = this.#store.createWritingPreparationWork(bookId, request, launchPolicy, redoOf, intentDraft);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,
@@ -313,9 +330,10 @@ export class CooperativeJobOwner {
     launchPolicy: Parameters<EditorialStore['createBaselineAnalysisPreparationWork']>[3],
     reconfirm: boolean,
     redoOf: string | null = null,
+    intentDraft: DraftPromotion | null = null,
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createBaselineAnalysisPreparationWork(bookId, goal, update, launchPolicy, reconfirm, redoOf);
+    const work = this.#store.createBaselineAnalysisPreparationWork(bookId, goal, update, launchPolicy, reconfirm, redoOf, intentDraft);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,
@@ -355,9 +373,10 @@ export class CooperativeJobOwner {
     capturedProcedure: Parameters<EditorialStore['createReviewRunPreparationWork']>[4] = null,
     materialIds: ReadonlyArray<string> = [],
     redoOf: string | null = null,
+    intentDraft: DraftPromotion | null = null,
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds, redoOf);
+    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds, redoOf, intentDraft);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,

@@ -101,6 +101,20 @@ export function globalAttentionTruncatedLine(group: GlobalAttentionGroupKey, sho
 
 // ---- one item: its state, words and a shape (editor-surfaces §0.3) ---------------------------------------
 
+/**
+ * A Task Intent Draft as 待我处理 and the 任务 panel name it (Issue #423, slice 7a; TASK-004 to 006): unfinished until 准备计划
+ * makes it a prepared Task, and 继续编辑草稿 opens it beside its own Book's manuscript.
+ */
+export const TASK_INTENT_DRAFT_STATE_LABEL = '任务草稿 · 尚未准备计划';
+export const TASK_INTENT_DRAFT_CONTINUE = '继续编辑草稿';
+export const TASK_INTENT_DRAFT_REASON = '还没有准备计划：继续编辑，或在草稿里准备计划后它才成为任务；它不会自己开始，也不会发送任何内容。';
+/** The most characters of a draft's sentence a card names before it is cut short. */
+export const TASK_INTENT_DRAFT_TITLE_CHARACTERS = 24;
+export function taskIntentDraftTitle(goal: string): string {
+  const words = [...goal.trim().replace(/\s+/gu, ' ')];
+  return `任务草稿 · 「${words.length > TASK_INTENT_DRAFT_TITLE_CHARACTERS ? `${words.slice(0, TASK_INTENT_DRAFT_TITLE_CHARACTERS).join('')}…` : words.join('')}」`;
+}
+
 /** Each item's exact state or named decision, in the words its own record already uses. */
 export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionStateKey, string>> = {
   'apply-outcome-unresolved': '应用结果待确认',
@@ -175,6 +189,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'dialogue-stopped': DIALOGUE_STATE_LABELS.stopped,
   'dialogue-interrupted': DIALOGUE_STATE_LABELS.interrupted,
   'dialogue-failed': DIALOGUE_STATE_LABELS.failed,
+  // A Task Intent Draft (Issue #423, slice 7a; TASK-004 to 006): nothing is prepared, sent or started until 准备计划.
+  'draft-unfinished': TASK_INTENT_DRAFT_STATE_LABEL,
 };
 
 /** The state pill's tone and shape: words and a shape, never colour alone. */
@@ -218,6 +234,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'review-completed': { tone: 'good', shape: 'check' },
   'analysis-prepared': { tone: 'neutral', shape: 'ring' },
   'review-prepared': { tone: 'neutral', shape: 'ring' },
+  'draft-unfinished': { tone: 'neutral', shape: 'ring' },
   'analysis-cancelled': { tone: 'neutral', shape: 'square' },
   'maintenance-pending': { tone: 'attention', shape: 'triangle' },
   'maintenance-waiting': { tone: 'neutral', shape: 'ring' },
@@ -275,6 +292,7 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'open-dialogue': DIALOGUE_OPEN_LABEL,
   // A 资料库 item's index (Issue #428, S80a): its card, with the layers and 查看分段.
   'view-material-index': '查看索引',
+  'continue-draft': TASK_INTENT_DRAFT_CONTINUE,
 };
 /**
  * A 审阅 started on a selection (Issue #423, S77b; review P3-4): it reads the reading ranges holding the selected words'
@@ -357,6 +375,9 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
     // 结果待确认 a completed Run left (Issue #757): the Task kind, and what is unconfirmed.
     case 'unconfirmed':
       return `${UNCONFIRMED_TASK_KIND_LABELS[object.taskKind]} · ${unconfirmedWhat(object.ranges, object.steps)}`;
+    // A Task Intent Draft (Issue #423, slice 7a): the editor's own sentence, cut short.
+    case 'draft':
+      return taskIntentDraftTitle(object.goal);
   }
 }
 
@@ -510,6 +531,8 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
     case 'dialogue-interrupted':
     case 'dialogue-failed':
       return DIALOGUE_CARD_REASONS[item.state];
+    case 'draft-unfinished':
+      return TASK_INTENT_DRAFT_REASON;
   }
 }
 

@@ -60,6 +60,9 @@ import {
   REVIEW_FINDING_STATUSES,
   REVIEW_SCOPE_KINDS,
   TASK_PLAN_KINDS,
+  MAX_TASK_INTENT_GOAL_LENGTH,
+  MAX_TASK_INTENT_DRAFT_RANGES,
+  TASK_INTENT_OUTCOME_CLASSES,
   isReviewCategoryId,
   publicationText,
   SERIES_KNOWLEDGE_CLASSES,
@@ -708,13 +711,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         throw new ProtocolError(tentativeId);
       }
       const update = input.update;
+      // 重新确认计划 of a Task promoted from a Task Intent Draft names the draft's sentence (Issue #423, slice 7a): bounded here,
+      // and checked by the ledger against the Task it reconfirms.
+      const draftGoal = input.reconfirm === true && isBoundedString(input.goal, MAX_TASK_INTENT_GOAL_LENGTH) && input.goal.trim() === input.goal && input.goal.length > 0;
       if (update === null) {
-        if (input.goal !== BASELINE_ANALYSIS_MODE_GOALS['first-baseline']) throw new ProtocolError(tentativeId);
+        if (input.goal !== BASELINE_ANALYSIS_MODE_GOALS['first-baseline'] && !draftGoal) throw new ProtocolError(tentativeId);
         break;
       }
       if (!isRecord(update) || !(hasExactKeys(update, ['mode', 'selectedRange']) || hasExactKeys(update, ['mode', 'selectedRange', 'selectedBlocks'])) ||
           !BASELINE_ANALYSIS_UPDATE_MODES.includes(update.mode as BaselineAnalysisUpdateMode) ||
-          input.goal !== BASELINE_ANALYSIS_MODE_GOALS[update.mode as BaselineAnalysisUpdateMode]) {
+          (input.goal !== BASELINE_ANALYSIS_MODE_GOALS[update.mode as BaselineAnalysisUpdateMode] && !draftGoal)) {
         throw new ProtocolError(tentativeId);
       }
       const range = update.selectedRange;

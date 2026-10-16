@@ -131,7 +131,7 @@ import {
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
 import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION } from '../launch-policy.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
-import { MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
+import { MAX_TASK_INTENT_GOAL_LENGTH, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
 import {
   deriveReusePlan,
@@ -459,6 +459,8 @@ interface PendingIntent {
   readonly backgroundRunBudgetCeiling: BackgroundRunBudgetCeiling | null;
   readonly predecessor: { readonly revisionId: string; readonly digest: string } | null;
   readonly selectedRange: BaselineAnalysisSelectedRange | null;
+  /** The Task Intent Draft version 准备计划 promoted into this Task (Issue #423, slice 7a); `null` for every other Task. */
+  readonly intentDraftVersionId: string | null;
 }
 
 /** The tokens ceiling a 后台分析登记 holds each Run it starts to: the Book's share of the Enrollment's ceiling (Issue #864). */
@@ -490,6 +492,8 @@ interface IntentFacts {
   readonly preparedByEnrollmentVersionId: string | null;
   /** The ceiling that dispatcher holds the Task's Run to (Issue #864); `null` for the editor's Tasks and for one made before #864. */
   readonly backgroundRunBudgetCeiling: BackgroundRunBudgetCeiling | null;
+  /** The Task Intent Draft version this Task was promoted from (Issue #423, slice 7a): its goal is that draft's sentence. */
+  readonly intentDraftVersionId: string | null;
 }
 
 /**
@@ -588,6 +592,12 @@ export type BaselineAnalysisPrepareInput =
      * at another build are the same contract, and only a Task of its own can freeze the new pins.
      */
     newTask?: boolean;
+    /**
+     * 准备计划 on a Task Intent Draft (Issue #423, slice 7a; decision 1): always a new Task Intent, whose goal is the draft's own
+     * bounded sentence — `goal` — and whose record names the draft version; `promoted` records the promotion in the very write
+     * that makes the Task Intent, so a refused promotion leaves no Task behind. Never with a redo, a reconfirmation or a dispatcher.
+     */
+    intentDraft?: { versionId: string; promoted(taskIntentId: string): void };
   }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
@@ -841,6 +851,11 @@ function transact<T>(db: DatabaseSync, body: () => T): T {
     }
     throw error;
   }
+}
+
+/** A Task Intent Draft's sentence as a goal (Issue #423, slice 7a): trimmed, one to `MAX_TASK_INTENT_GOAL_LENGTH` characters. */
+function isDraftGoal(goal: unknown): goal is string {
+  return typeof goal === 'string' && goal.trim() === goal && goal.length >= 1 && goal.length <= MAX_TASK_INTENT_GOAL_LENGTH;
 }
 
 function sameRange(left: BaselineAnalysisSelectedRange | null, right: BaselineAnalysisSelectedRange | null): boolean {
@@ -2421,8 +2436,13 @@ export class BaselineAnalysisStore {
   #intentFacts(row: SqlRow): IntentFacts {
     const mode = asString(row.mode) as AnalysisTaskMode;
     const goal = asString(row.goal);
-    requireAnalysis(goal === this.#definition.mode(mode).goal, 'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
     const record = parseCanonicalJson(asString(row.canonical_json));
+    // A Task promoted from a draft holds the draft's sentence (Issue #423, slice 7a); every other Task its mode's fixed goal.
+    const intentDraftVersionId = isRecord(record) && typeof record.intentDraftVersionId === 'string' && UUID_PATTERN.test(record.intentDraftVersionId)
+      ? record.intentDraftVersionId : null;
+    requireAnalysis(isRecord(record) && (record.intentDraftVersionId === undefined || intentDraftVersionId !== null) &&
+      (intentDraftVersionId === null ? goal === this.#definition.mode(mode).goal : isDraftGoal(goal) && record.goal === goal),
+    'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
     requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string' &&
       (record.redoOfRunRecordId === undefined || (typeof record.redoOfRunRecordId === 'string' && UUID_PATTERN.test(record.redoOfRunRecordId))) &&
       (record.preparedByEnrollmentVersionId === undefined ||
@@ -2446,6 +2466,7 @@ export class BaselineAnalysisStore {
       redoOfRunRecordId: record.redoOfRunRecordId === undefined ? null : record.redoOfRunRecordId as string,
       preparedByEnrollmentVersionId: record.preparedByEnrollmentVersionId === undefined ? null : record.preparedByEnrollmentVersionId as string,
       backgroundRunBudgetCeiling: record.backgroundRunBudgetCeiling === undefined ? null : record.backgroundRunBudgetCeiling as BackgroundRunBudgetCeiling,
+      intentDraftVersionId,
     };
   }
 
@@ -3336,7 +3357,14 @@ export class BaselineAnalysisStore {
     const modeDefinition = this.#definition.modes.find((entry) => entry.mode === mode);
     const firstRange = update !== null && modeDefinition !== undefined && modeDefinition.initial && modeDefinition.rangeBound;
     requireAnalysis(update === null || firstRange || this.#definition.updateModes.includes(mode), 'ANALYSIS_UPDATE_MODE_UNAVAILABLE', '本分析种类没有该更新方式。');
-    requireAnalysis(input.goal === this.#definition.mode(mode).goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选更新方式的固定目标不一致。');
+    // A Task promoted from a draft keeps the draft's sentence as its goal (Issue #423, slice 7a); 重新确认计划 of such a Task names
+    // that sentence again, which is checked against the Task once it is read. Every other preparation names the mode's fixed goal.
+    const fixedGoal = input.goal === this.#definition.mode(mode).goal;
+    const intentDraft = input.intentDraft ?? null;
+    requireAnalysis(fixedGoal || (intentDraft !== null && isDraftGoal(input.goal)) || (input.reconfirm && isDraftGoal(input.goal)),
+      'ANALYSIS_GOAL_INVALID', '任务目标与所选更新方式的固定目标不一致。');
+    requireAnalysis(intentDraft === null || (UUID_PATTERN.test(intentDraft.versionId) && input.background == null && input.redoOf == null && !input.reconfirm),
+      'ANALYSIS_GOAL_INVALID', '任务意图草稿的准备参数无效。');
     this.#requireDeniedPolicy(input.launchPolicy);
     const background = input.background ?? null;
     if (background === null) {
@@ -3419,6 +3447,8 @@ export class BaselineAnalysisStore {
     }
     const binding = this.#binding(input.bookId);
     const latestIntent = existing.taskIntent === null ? null : this.#intentFacts(this.#latestIntentRow(input.bookId)!);
+    requireAnalysis(fixedGoal || intentDraft !== null || (latestIntent !== null && latestIntent.intentDraftVersionId !== null && latestIntent.goal === input.goal),
+      'ANALYSIS_GOAL_INVALID', '任务目标与所选更新方式的固定目标不一致。');
     // The dispatcher never steps in beside the editor's own plan, prepared and not started (#713 review, P1-2).
     requireAnalysis(background === null || latestIntent === null || latestIntent.preparedByEnrollmentVersionId !== null ||
       existing.planEnvelope === null || existing.authorization !== null,
@@ -3442,7 +3472,7 @@ export class BaselineAnalysisStore {
     const planDerives = existing.coverageManifest === null || existing.authorization !== null || this.#frozenPlanDerives(existing.update, existing.coverageManifest);
     // A Task the 后台分析登记 dispatcher prepared is never the editor's to revise or resume, and the dispatcher never takes up any
     // Task Intent but the one it creates now (#713 review, P1-2): each side's preparation is a Task of its own.
-    const sameTask = background === null && input.newTask !== true && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
+    const sameTask = background === null && input.newTask !== true && intentDraft === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
       existing.run === null && latestIntent.mode === mode &&
       latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent && planDerives;
     if (sameTask && existing.checkpoint !== null) {
@@ -3461,8 +3491,14 @@ export class BaselineAnalysisStore {
       backgroundRunBudgetCeiling: background === null ? null : { kind: 'tokens', maxTotalTokens: background.runBudgetCeiling.maxTotalTokens },
       predecessor: initial ? null : { revisionId: latest!.revisionId, digest: latest!.digest },
       selectedRange,
+      intentDraftVersionId: intentDraft?.versionId ?? null,
     };
-    if (pendingIntent !== null && background === null) this.#insertIntent(pendingIntent);
+    if (pendingIntent !== null && background === null) {
+      transact(this.#db, () => {
+        this.#insertIntent(pendingIntent);
+        intentDraft?.promoted(pendingIntent.taskIntentId);
+      });
+    }
     const active = Array.from(this.#work.values()).find((work) => work.taskIntentId === taskIntentId);
     if (active !== undefined) return { done: false, workId: active.workId, completed: 0, total: active.total, projection: null };
     const checkpoint = this.#checkpointOwner.createManuscriptCheckpointWork(binding.manuscriptId, binding.branchId, TASK_INPUT_CHECKPOINT_PURPOSE,
@@ -3497,6 +3533,7 @@ export class BaselineAnalysisStore {
       ...(intent.redoOf === null ? {} : { redoOfRunRecordId: intent.redoOf }),
       ...(intent.preparedByEnrollmentVersionId === null ? {} : { preparedByEnrollmentVersionId: intent.preparedByEnrollmentVersionId }),
       ...(intent.backgroundRunBudgetCeiling === null ? {} : { backgroundRunBudgetCeiling: { ...intent.backgroundRunBudgetCeiling } }),
+      ...(intent.intentDraftVersionId === null ? {} : { intentDraftVersionId: intent.intentDraftVersionId }),
     };
     // A whole first Task's record is the base alone, as it has been since revision 15. Every Task that
     // carries a plan also states its mode, its predecessor and its range — and a range-bound first

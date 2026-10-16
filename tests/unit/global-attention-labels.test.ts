@@ -400,6 +400,9 @@ describe('each item', () => {
       ...Object.fromEntries((['dialogue-answering', 'dialogue-answered', 'dialogue-stopped', 'dialogue-interrupted', 'dialogue-failed'] as const)
         .map((state) => [state, globalAttentionReason(item(state, { object: { kind: 'dialogue', question: '这段的叙述视角是否一致？' }, nextStep: 'open-dialogue' }))])) as
         Record<'dialogue-answering' | 'dialogue-answered' | 'dialogue-stopped' | 'dialogue-interrupted' | 'dialogue-failed', string>,
+      'draft-unfinished': globalAttentionReason(item('draft-unfinished', {
+        object: { kind: 'draft', goal: '统一全书的人名译法', origin: 'composer-book', ranges: 0 }, nextStep: 'continue-draft',
+      })),
     };
     expect(reasons).toEqual({
       'apply-outcome-unresolved': '本地权威记录尚不能证明本次应用结果；禁止自动重试、重做或重复应用。',
@@ -463,6 +466,8 @@ describe('each item', () => {
       'dialogue-stopped': '你停止了回答，只保留了完整的句子；可以继续回答或重新回答。',
       'dialogue-interrupted': '回答被中断，只保留了完整的句子；可以继续回答或重新回答。',
       'dialogue-failed': '回答没有完成；可以重新回答。',
+      // Issue #423 (slice 7a; TASK-004 to 006): a Task Intent Draft is no Task until 准备计划, and sends nothing.
+      'draft-unfinished': '还没有准备计划：继续编辑，或在草稿里准备计划后它才成为任务；它不会自己开始，也不会发送任何内容。',
     });
     const maintenance = (classification: 'correction' | 'reissue', nextStep: 'maintenance-link-proposal' | 'maintenance-link-publication' | 'maintenance-conclude') =>
       globalAttentionReason(item(classification === 'reissue' ? 'maintenance-waiting' : 'maintenance-pending', {
