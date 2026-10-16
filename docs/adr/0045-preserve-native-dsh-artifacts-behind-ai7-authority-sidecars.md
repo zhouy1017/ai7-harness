@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> Amended by [ADR 0090](./0090-admit-procedure-recommendation-foreign-skill-import-and-custom-analysis-dimensions.md) (§2, §3, §4): the Issue #88 paragraph's exclusion of file-picker import, update checking, reconciliation and the Artifact Update Rule no longer bars a locally imported Skill, which stays inert until a Skill executor exists; the single instruction unit gains one bounded AI7 document, the Custom Analysis Dimension template. The Issue #88 carrier allowlist is unchanged.
+
 # Preserve native DSH artifacts behind AI7 authority sidecars
 
 This ADR records the Owner-approved native-artifact direction for Issue #86. It authorizes no discovery, installation, dependency change, executable admission, Provider call, product implementation, release, or `main` action.
