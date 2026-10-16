@@ -2465,6 +2465,8 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     },
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
     planChanged: () => taskDrawer.refresh('review-run'),
+    // 在来源与证据中查看 (Issue #901): the Evidence Workspace's deep link into the Book's retained sources.
+    openSource: (evidenceId) => renderBookSources(bookId, bookTitle, evidenceId),
   });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(REVIEW_DESTINATION_ACTIONS[0], 'primary', async () => {
@@ -2626,7 +2628,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
  * ② 资料与记录 › 来源与证据 (Issue #425, S70; IA-012, SRC-013): the Book's retained external sources, with the way back to the
  * manuscript and to 工作概览 that every destination of the Book keeps. Read-only but for 保存为来源材料.
  */
-function renderBookSources(bookId: string, bookTitle: string): void {
+function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: string): void {
   const content = panel();
   content.classList.add('book-sources');
   content.dataset['bookId'] = bookId;
@@ -2665,7 +2667,17 @@ function renderBookSources(bookId: string, bookTitle: string): void {
   setStatus(SOURCES_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
-      if (content.isConnected) setStatus(SOURCES_STATUS.opened);
+      if (!content.isConnected) return;
+      setStatus(SOURCES_STATUS.opened);
+      // 在来源与证据中查看 from the Evidence Workspace (Issue #901; EVID-005): the retained source it names, when on this page.
+      if (focusEvidenceId !== undefined) {
+        const card = content.querySelector<HTMLElement>(`[data-evidence-id="${CSS.escape(focusEvidenceId)}"]`);
+        if (card !== null) {
+          card.tabIndex = -1;
+          card.scrollIntoView({ block: 'center' });
+          card.focus();
+        }
+      }
     },
     (error: unknown) => {
       if (content.isConnected) setStatus(rendererErrorMessage(error, SOURCES_STATUS.unavailable), 'error');
