@@ -270,7 +270,7 @@ export interface MountReviewWorkspaceOptions {
   /** 在来源与证据中查看 (Issue #901): the Book's 来源与证据 view, brought to one retained source. */
   openSource?(evidenceId: string): void;
   /** 查看学习来源链 (Issue #912; LAUD-004): 学习回溯 opened at one material's Learning Lineage Explorer. */
-  openLearningLineage?(bookId: string, materialKey: string): void;
+  openLearningLineage?(bookId: string, materialKey: string, reviewRunId: string): void;
 }
 
 type Filters = Omit<ReviewFindingPageRequest, 'findingsAfterOrdinal'>;
@@ -999,7 +999,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       box.append(el('p', 'field-note review-marker-remediation', reviewMarkerRemediationLine(remediation.recordedAt, localInstantLabel)));
       const actions = el('div', 'button-row');
       if (options.openLearningLineage !== undefined) {
-        actions.append(actionButton('influence-lineage', 'quiet', () => options.openLearningLineage!(remediation.bookId, remediation.materialKey)));
+        actions.append(actionButton('influence-lineage', 'quiet', () => options.openLearningLineage!(remediation.bookId, remediation.materialKey, run.reviewRunId)));
       }
       if (run.state !== 'scope-changed') {
         const redo = actionButton('influence-redo', 'secondary', () => openSheet(scopeRedoPrefill(run), redo));
@@ -1026,7 +1026,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         if (material.withdrawnAt !== null) item.dataset['withdrawn'] = 'true';
         if (material.materialKey !== null && options.openLearningLineage !== undefined) {
           const key = material.materialKey;
-          item.append(' ', actionButton('influence-lineage', 'quiet', () => options.openLearningLineage!(material.bookId, key)));
+          item.append(' ', actionButton('influence-lineage', 'quiet', () => options.openLearningLineage!(material.bookId, key, run.reviewRunId)));
         }
         list.append(item);
       }

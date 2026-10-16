@@ -3248,6 +3248,18 @@ export class ReviewRunStore {
     }
   }
 
+  /** Dispatch is scheduling, not consumption: only a recorded model turn admitted with this Task's frozen prompt proves use. */
+  #preferenceConsumed(taskIntentId: string): boolean {
+    for (const row of this.#db.prepare(`SELECT s.canonical_json, s.sha256 FROM analysis_harness_spans s
+      JOIN analysis_execution_attempts a ON a.attempt_id = s.attempt_id
+      JOIN analysis_run_records r ON r.run_record_id = a.run_record_id
+      WHERE r.task_intent_id = ? ORDER BY s.ordinal`).iterate(taskIntentId) as IterableIterator<SqlRow>) {
+      const span = recordOf(text(row.canonical_json), text(row.sha256));
+      if (typeof span.payloadDigest === 'string') return true;
+    }
+    return false;
+  }
+
   /**
    * What each Run pin of a material is now (Issue #912; LAUD-004, LAUD-006): its Review Run and category by name, and whether
    * the category was only prepared, approved and not begun, reading, finished with a result, or stopped — and whether it sent
@@ -3260,7 +3272,7 @@ export class ReviewRunStore {
     readonly label: string;
     readonly route: string;
     readonly state: 'prepared' | 'superseded' | 'approved' | 'running' | 'completed' | 'stopped';
-    readonly dispatched: boolean;
+    readonly consumed: boolean;
   }> {
     return pins.flatMap((pin) => {
       const row = this.#db.prepare(`SELECT r.*, b.title book_title, (SELECT max(r2.ordinal) FROM review_runs r2 WHERE r2.book_id = r.book_id) latest_ordinal
@@ -3271,13 +3283,14 @@ export class ReviewRunStore {
       if (category === undefined) return [];
       const events = this.#events(snapshot.reviewRunId, category.categoryId);
       const dispatched = events.some((event) => event.state === 'dispatched');
+      const consumed = this.#preferenceConsumed(pin.taskIntentId);
       const authorized = this.#authorizationOf(snapshot.reviewRunId) !== null;
-      const state = events.some((event) => event.state === 'materialized' || event.state === 'settled') ? 'completed' as const
+      const state = consumed && events.some((event) => event.state === 'materialized' || event.state === 'settled') ? 'completed' as const
         : !authorized ? integer(row.ordinal) === integer(row.latest_ordinal) ? 'prepared' as const : 'superseded' as const
           : events.some((event) => TERMINAL_CATEGORY_EVENTS.has(event.state)) || this.#stoppedFor(snapshot.reviewRunId) !== null ? 'stopped' as const
             : dispatched ? 'running' as const : 'approved' as const;
       const route = `《${text(row.book_title)}》第 ${snapshot.ordinal} 次审阅`;
-      return [{ reviewRunId: snapshot.reviewRunId, categoryId: category.categoryId, bookId: snapshot.bookId, route, label: `${route} · ${category.entry.label}`, state, dispatched }];
+      return [{ reviewRunId: snapshot.reviewRunId, categoryId: category.categoryId, bookId: snapshot.bookId, route, label: `${route} · ${category.entry.label}`, state, consumed }];
     });
   }
 
@@ -3287,6 +3300,7 @@ export class ReviewRunStore {
    */
   #influenceProjection(snapshot: RunSnapshot): ReviewRunInfluenceProjection[] {
     return snapshot.categories.flatMap((category) => {
+      if (category.task === null || !this.#preferenceConsumed(category.task.taskIntentId)) return [];
       let influence: ReturnType<HouseReviewPreferenceLedger['pinnedInfluence']>;
       try {
         influence = this.#influenceOf(category);
@@ -3316,10 +3330,14 @@ export class ReviewRunStore {
   /** The first withdrawal behind a marked category's result, which the marker links to (Issue #912; LAUD-008). */
   #influenceRemediation(snapshot: RunSnapshot, affected: ReadonlyMap<string, string>): { bookId: string; materialKey: string; recordedAt: string } | null {
     for (const category of snapshot.categories) {
-      if (affected.get(category.categoryId) !== LEARNING_INFLUENCE_RESULT_MARKER) continue;
-      const source = this.#influenceOf(category)?.sources.filter((entry) => entry.withdrawnAt !== null && entry.materialKey !== null)
-        .sort((a, b) => a.withdrawnAt! < b.withdrawnAt! ? -1 : a.withdrawnAt! > b.withdrawnAt! ? 1 : 0)[0];
-      if (source !== undefined) return { bookId: source.bookId, materialKey: source.materialKey!, recordedAt: source.withdrawnAt! };
+      if (!affected.has(category.categoryId) || category.task === null || !this.#preferenceConsumed(category.task.taskIntentId)) continue;
+      try {
+        const source = this.#influenceOf(category)?.sources.filter((entry) => entry.withdrawnAt !== null && entry.materialKey !== null)
+          .sort((a, b) => a.withdrawnAt! < b.withdrawnAt! ? -1 : a.withdrawnAt! > b.withdrawnAt! ? 1 : 0)[0];
+        if (source !== undefined) return { bookId: source.bookId, materialKey: source.materialKey!, recordedAt: source.withdrawnAt! };
+      } catch (error) {
+        if (!(error instanceof LearningEligibilityError)) throw error;
+      }
     }
     return null;
   }
@@ -3346,7 +3364,7 @@ export class ReviewRunStore {
     // A result that read a 本社审阅偏好 version whose material was 停止今后使用 afterwards (Issue #912; LAUD-008): the Run, its
     // findings and its reports stay as they are, and the append-only decision ledger keeps the marker.
     for (const category of snapshot.categories) {
-      if (affected.has(category.categoryId) || category.task === null) continue;
+      if (affected.has(category.categoryId) || category.task === null || !this.#preferenceConsumed(category.task.taskIntentId)) continue;
       if (this.#db.prepare("SELECT 1 FROM review_run_category_events WHERE review_run_id = ? AND category_id = ? AND state = 'materialized'")
         .get(snapshot.reviewRunId, category.categoryId) === undefined) continue;
       try {
@@ -4010,10 +4028,11 @@ export class ReviewRunStore {
         report: reports.at(-1) ?? null,
         reportVersions: reports.map((report) => ({ reportId: report.reportId, version: report.version, generatedAt: report.generatedAt, digest: report.digest })),
         historicalMarker: view.historicallyAffected.size === 0 ? null : (() => {
+          // A Series marker must not hide a later learning remediation on the same result.
+          const remediation = this.#influenceRemediation(snapshot, view.historicallyAffected);
           const learning = [...view.historicallyAffected.values()].every((label) => label === LEARNING_INFLUENCE_RESULT_MARKER);
           if (learning) {
             const named = snapshot.categories.filter((category) => view.historicallyAffected.has(category.categoryId)).map((category) => `「${category.entry.label}」`).join('、');
-            const remediation = this.#influenceRemediation(snapshot, view.historicallyAffected);
             return { label: LEARNING_INFLUENCE_RESULT_MARKER,
               detail: `${named}参考的本社审阅偏好版本中，有学习材料在这次审阅之后停止今后使用。这次审阅的结果、发现和报告都保持原样；这个标记不表示结果有错。`,
               ...(remediation === null ? {} : { remediation }) };
@@ -4021,9 +4040,10 @@ export class ReviewRunStore {
           const series = new Map([...view.historicallyAffected].filter(([, label]) => label !== LEARNING_INFLUENCE_RESULT_MARKER));
           const named = snapshot.categories.filter((category) => series.has(category.categoryId)).map((category) => `「${category.entry.label}」`).join('、');
           const unverifiable = [...series.values()].every((label) => label === HISTORICAL_MARKER_UNVERIFIABLE);
-          return unverifiable
+          const marker = unverifiable
             ? { label: HISTORICAL_MARKER_UNVERIFIABLE, detail: `${named}所依据的书系材料有没有在这次审阅之后被排除，书系检索排除记录无法读取，无法核对。这次审阅的结果、发现和报告都保持原样。` }
             : { label: HISTORICALLY_AFFECTED_RESULT_MARKER, detail: `${named}所依据的书系材料在这次审阅之后被排除在书系检索之外。这次审阅的结果、发现和报告都保持原样；这个标记不表示结果有错。` };
+          return remediation === null ? marker : { ...marker, detail: `${marker.detail}这次审阅参考的学习材料后来也停止今后使用。`, remediation };
         })(),
         influence: this.#influenceProjection(snapshot),
         scopeStop: view.scopeStop,

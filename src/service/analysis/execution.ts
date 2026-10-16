@@ -2619,7 +2619,7 @@ export class BaselineAnalysisExecutionOwner {
         onAccountLimit: (condition) => {
           if (active.resumableOnInterrupt && (live === null || production !== null)) accountLimit = { unitOrdinal: null, condition };
         },
-        materialChanged,
+        materialChanged: scopeChanged,
       });
       if (stopWithoutEnding()) return;
       // The second reducer pass: the sample joins the revision and re-labels the assurance axis, and
@@ -2660,7 +2660,7 @@ export class BaselineAnalysisExecutionOwner {
         liveInterruption = null;
       }
       // The reflection consumes the same frozen system prompt; check once more before recording the final outcome.
-      materialChanged();
+      scopeChanged();
       const interruptionKey = liveInterruption as LiveInterruption | null;
       const materialStop = materialRefusal as MaterialGuardRefusal | null;
       const interruption = interruptionKey === null ? null : interruptionKey === 'material-reference-changed' && materialStop !== null
@@ -2746,7 +2746,7 @@ export class BaselineAnalysisExecutionOwner {
           admittedUserMessages, acceptedOutputDigests, liveAdapter, accumulated, ceilingState, live, policy,
           // An exclusion recorded since the revision was persisted keeps the reflection back too (Issue #64, S29b).
           stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
-            (!active.cancelRequested && this.#deps.readGuard?.(facts.runRecordId) != null),
+            (!active.cancelRequested && (this.#deps.readGuard?.(facts.runRecordId) != null || this.#deps.influenceGuard?.(facts.runRecordId) != null)),
         })), ...(factualAssurance === null ? {} : { factualAssurance }) },
       });
     } finally {

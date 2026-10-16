@@ -985,7 +985,7 @@ const auditRow = (key) => `[data-screen="quality-learning"] li.learning-audit-ma
 // Issue #912: 审阅 Runs read 本社审阅偏好 versions now, so the audit no longer says no Task reads learning material; with no
 // Run having read any in this Journey, every count stays 0 and every empty stage keeps its own words.
 const AUDIT_LATER = '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选：AI7 还没有从学习材料生成记忆候选或记忆；每条材料被哪些任务使用过，在它的来源链里查看。';
-const AUDIT_WHY_EMPTY = '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。';
+const AUDIT_WHY_EMPTY = '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。';
 const AUDIT_STALE = '预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。';
 
 async function main() {

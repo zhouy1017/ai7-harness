@@ -103,7 +103,7 @@ export const LEARNING_LINEAGE_NOT_YET = '尚未生成';
 export const LEARNING_LINEAGE_TASKS_NONE = '尚未被任何任务使用';
 /** What the forward stages are, and why two are empty: said once, so an empty stage never reads as a hidden one. */
 export const LEARNING_LINEAGE_WHY_EMPTY =
-  '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。';
+  '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。';
 export const LEARNING_LINEAGE_CURRENT = '现行版本';
 
 /** One 学习信号 (Issue #912): a 本社审阅偏好 version the material supports, when it was made, and how much of it. */

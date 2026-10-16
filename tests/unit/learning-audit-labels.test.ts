@@ -121,7 +121,7 @@ describe('学习回溯 words', () => {
   it('counts what read a material and says what stopping it reaches, truthfully empty when nothing did (Issue #912)', () => {
     expect(learningAuditUse(0)).toBe(LEARNING_AUDIT_UNUSED);
     expect(learningAuditUse(3)).toBe('被 3 个任务使用过');
-    expect(LEARNING_LINEAGE_WHY_EMPTY).toBe('学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。');
+    expect(LEARNING_LINEAGE_WHY_EMPTY).toBe('学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。');
     expect(LEARNING_AUDIT_FILTERS_LATER).not.toContain('也没有任务读取学习材料');
     const instant = (iso: string) => iso.slice(0, 10);
     expect(learningLineageSignalLine({ ordinal: 2, recordedAt: '2026-10-17T01:00:00.000Z', current: true, lines: 1 }, instant)).toBe('本社审阅偏好 v2 · 2026-10-17 · 其中 1 行出自这条材料 · 现行版本');

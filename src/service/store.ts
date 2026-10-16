@@ -12449,7 +12449,7 @@ export class EditorialStore {
       const withdrawn = [...pin.decisionIds].some((id) => decisionIds.has(id) && withdrawalOf(this.#authority, id).withdrawnAt !== null);
       return this.#reviewRuns.influenceUses([pin]).map((use) => ({ ...use, versionOrdinal: pin.version.ordinal, withdrawn }));
     });
-    return { signals: influence.signalsOf(decisionIds), uses, tasks: uses.filter((use) => use.dispatched) };
+    return { signals: influence.signalsOf(decisionIds), uses, tasks: uses.filter((use) => use.consumed) };
   }
 
   /**

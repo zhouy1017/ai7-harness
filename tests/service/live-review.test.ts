@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { sha256Hex } from '../../src/service/analysis/canonical.js';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -35,7 +36,7 @@ let owner: BaselineAnalysisExecutionOwner;
 let driver: ReviewRunDriver;
 let sent: number;
 let failure: 'none' | 'unknown' | 'quota';
-let holdTurn: number | null;
+let holdTurn: number | 'sampling' | null;
 let arrived: Promise<void>;
 let announce: () => void;
 let release: () => void;
@@ -69,16 +70,16 @@ beforeEach(async () => {
   arrived = new Promise<void>((resolve) => { announce = resolve; });
   held = new Promise<void>((resolve) => { release = resolve; });
   const nativeFetch: typeof fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
+    const message = body.messages.at(-1)!.content;
     sent += 1;
-    if (sent === (holdTurn ?? 1)) {
+    if (sent === (holdTurn ?? 1) || (holdTurn === 'sampling' && message.startsWith('保证抽样 '))) {
       announce();
       if (holdTurn !== null) await held;
       if (init?.signal?.aborted) throw new DOMException('Synthetic aborted transport', 'AbortError');
     }
     if (sent === 1 && failure === 'unknown') return new Response('{', { status: 200 });
     if (sent === 1 && failure === 'quota') return new Response(JSON.stringify({ error: { message: 'synthetic account limit' } }), { status: 429 });
-    const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
-    const message = body.messages.at(-1)!.content;
     requests.push({ system: body.messages.filter((entry) => entry.role === 'system').map((entry) => entry.content).join('\n'), last: message });
     const header = parseReviewCategoryUnitMessageHeader(message);
     let result: unknown;
@@ -401,7 +402,7 @@ describe('reference-free review on the Go execution path', () => {
 
 describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () => {
   /** Hold the transport's `turn`-th request from now until `release`. */
-  const holdAt = (turn: number): void => {
+  const holdAt = (turn: number | 'sampling'): void => {
     holdTurn = turn;
     arrived = new Promise<void>((resolve) => { announce = resolve; });
     held = new Promise<void>((resolve) => { release = resolve; });
@@ -413,12 +414,13 @@ describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () =>
     return progress.projection!.run!;
   };
   const runOf = (bookId: string, reviewRunId: string): ReviewRunProjection => store.inspectReviewWorkspace(bookId, reviewRunId).run!;
-  /** Every row of the learning history and what it came from, as read: what 停止今后使用 and 重新纳入 may only append to. */
+  /** Digests of every earlier row: assertions can never print manuscript-bearing evidence on failure. */
   const historyRows = (): string[] => {
     const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
-      return ['learning_eligibility_decisions', 'house_review_preference_versions', 'review_run_preference_pins', 'quality_signals', 'review_run_category_events', 'analysis_result_set_revisions']
-        .flatMap((table) => (db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Array<Record<string, unknown>>).map((row) => `${table}:${JSON.stringify(row)}`));
+      return ['learning_eligibility_decisions', 'house_review_preference_versions', 'review_run_preference_pins', 'quality_signals', 'review_run_category_events',
+        'analysis_result_set_revisions', 'review_runs', 'review_findings', 'review_reports']
+        .flatMap((table) => (db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Array<Record<string, unknown>>).map((row) => `${table}:${sha256Hex(JSON.stringify(row))}`));
     } finally { db.close(); }
   };
   /** One Book whose first finding of each category the editor ignored with a reason: their Learning Materials, not yet decided. */
@@ -464,7 +466,7 @@ describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () =>
     const completed = prepareTypos(book.bookId);
     store.authorizeReviewRun(book.bookId, completed.reviewRunId, approvals(completed));
     await driver.drive(completed.reviewRunId);
-    const completedView = runOf(book.bookId, completed.reviewRunId);
+    const completedView = store.generateReviewReport(book.bookId, completed.reviewRunId).run!;
     expect(completedView.state).toBe('settled');
     expect(completedView.influence).toEqual([{ categoryId: 'typos-and-usage', categoryLabel: '错别字与规范用语', versionId: version.versionId, ordinal: 1, sourceCount: 1,
       materials: [{ bookId: book.bookId, bookTitle: 'L2 sample1 lineage', materialKey: material.materialKey, kind: 'review-disposition', withdrawnAt: null }], moreMaterials: 0 }]);
@@ -503,7 +505,8 @@ describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () =>
 
     // The completed Run is never rewritten: its findings stand, and it carries the marker linking to the remediation.
     const marked = runOf(book.bookId, completed.reviewRunId);
-    expect(marked.findings.map((finding) => ({ ...finding, historicalMarker: null }))).toEqual(completedView.findings);
+    expect(sha256Hex(JSON.stringify(marked.findings.map((finding) => ({ ...finding, historicalMarker: null })))))
+      .toBe(sha256Hex(JSON.stringify(completedView.findings)));
     expect(marked.findings.every((finding) => finding.historicalMarker === LEARNING_INFLUENCE_RESULT_MARKER)).toBe(true);
     expect(marked.historicalMarker).toMatchObject({ label: LEARNING_INFLUENCE_RESULT_MARKER, remediation: { bookId: book.bookId, materialKey: material.materialKey } });
     expect(marked.influence[0]!.materials[0]!.withdrawnAt).toBe(marked.historicalMarker!.remediation!.recordedAt);
@@ -523,10 +526,65 @@ describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () =>
     expect(decisions(after)).toBe(decisions(before) + 1);
   }, 180_000);
 
+  it('stops after exclusion during sampling without sending the preference again in reflection (#912 review)', async () => {
+    const { book, material } = await admitted('L2 sample1 sampling exclusion');
+    const reading = prepareTypos(book.bookId);
+    store.authorizeReviewRun(book.bookId, reading.reviewRunId, approvals(reading));
+    holdAt('sampling');
+    const loop = driver.drive(reading.reviewRunId);
+    await arrived;
+    const sendsAtExclusion = sent;
+    const item = { materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 1 };
+    const preview = store.previewLearningRemediation({ bookId: book.bookId, items: [item] });
+    store.recordLearningRemediation({ bookId: book.bookId, items: [item], previewDigest: preview.previewDigest });
+    release();
+    await loop;
+    expect(sent).toBe(sendsAtExclusion);
+    expect(runOf(book.bookId, reading.reviewRunId)).toMatchObject({ state: 'scope-changed', scopeStop: 'house-review-preference', canContinue: false });
+    expect(typosOutcome(book.bookId)?.classification).toBe('interrupted');
+  }, 180_000);
+
+  it('keeps zero use when a dispatched review is cancelled before its first model turn (#912 review)', async () => {
+    const { book, material } = await admitted('L2 sample1 unsent preference');
+    const prepared = prepareTypos(book.bookId);
+    store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
+    const steps = store.reviewRunDriveSteps;
+    const handoff = steps.start(prepared.reviewRunId, 'typos-and-usage')!;
+    const before = sent;
+    owner.admitAndDispatch(handoff.runRecordId, handoff.ledger);
+    steps.recordDispatch(prepared.reviewRunId, 'typos-and-usage', handoff.runRecordId);
+    handoff.ledger.requestCancel(book.bookId, prepared.categories[0]!.taskIntentId!);
+    owner.cancelRun(handoff.runRecordId, handoff.ledger);
+    await owner.whenDone(handoff.runRecordId);
+    steps.settle(prepared.reviewRunId, 'typos-and-usage');
+    expect(sent).toBe(before);
+    expect(store.inspectLearningLineage(book.bookId, material.materialKey).downstream.tasks).toBe(0);
+    expect(audited(book.bookId, material.materialKey).downstreamTasks).toBe(0);
+    expect(runOf(book.bookId, prepared.reviewRunId).influence).toEqual([]);
+  }, 180_000);
+
+  it('stops an approved review before its category starts and leaves its pin unchanged (#912 review)', async () => {
+    const { book, material } = await admitted('L2 sample1 approved exclusion');
+    const prepared = prepareTypos(book.bookId);
+    store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
+    const item = { materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 1 };
+    const preview = store.previewLearningRemediation({ bookId: book.bookId, items: [item] });
+    expect(preview.groups).toMatchObject({ running: 1, prepared: 0, completed: 0 });
+    const before = historyRows();
+    const sends = sent;
+    store.recordLearningRemediation({ bookId: book.bookId, items: [item], previewDigest: preview.previewDigest });
+    expect(runOf(book.bookId, prepared.reviewRunId)).toMatchObject({ state: 'scope-changed', scopeStop: 'house-review-preference', canContinue: false, influence: [] });
+    expect(store.reviewRunDriveSteps.start(prepared.reviewRunId, 'typos-and-usage')).toBeNull();
+    expect(sent).toBe(sends);
+    const after = historyRows();
+    for (const digest of before) expect(after).toContain(digest);
+  }, 180_000);
+
   it('refuses the approval of a prepared Run, and a re-inclusion appends a new decision and version a new Run reads', async () => {
     const { book, material, version } = await admitted('L2 sample1 reinclusion');
     const prepared = prepareTypos(book.bookId);
-    expect(prepared.influence.map((entry) => entry.versionId)).toEqual([version.versionId]);
+    expect(prepared.influence).toEqual([]); // A pin alone is not evidence of consumption.
+    expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.reviewRunId }).scope.reference.some((line) => line.includes(`本社审阅偏好 v${version.ordinal}`))).toBe(true);
     const item = { materialKey: material.materialKey, materialDigest: audited(book.bookId, material.materialKey).digest, expectedDecisions: 1 };
     const preview = store.previewLearningRemediation({ bookId: book.bookId, items: [item] });
     expect(preview.groups).toMatchObject({ running: 0, prepared: 1, completed: 0, linesAffected: 1 });
@@ -538,18 +596,22 @@ describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () =>
     // 重新纳入 appends: the exclusion stays in the chain, a third version holds the material again, and a new Run reads it.
     const excluded = audited(book.bookId, material.materialKey);
     expect(excluded.standing).toBe('excluded');
+    const beforeReinclusion = historyRows();
     store.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: excluded.digest, expectedDecisions: 2, choice: 'house', note: null });
+    const afterReinclusion = historyRows();
+    for (const digest of beforeReinclusion) expect(afterReinclusion).toContain(digest);
     const again = store.inspectHouseReviewPreference().current!;
     expect([again.ordinal, again.sourceCount]).toEqual([3, 1]);
     expect(store.inspectLearningLineage(book.bookId, material.materialKey).decisions.map((entry) => entry.choice)).toEqual(['house', 'excluded', 'house']);
     const fresh = prepareTypos(book.bookId);
-    expect(fresh.influence.map((entry) => [entry.ordinal, entry.materials[0]!.withdrawnAt])).toEqual([[3, null]]);
+    expect(fresh.influence).toEqual([]);
     store.authorizeReviewRun(book.bookId, fresh.reviewRunId, approvals(fresh));
     await driver.drive(fresh.reviewRunId);
     expect(runOf(book.bookId, fresh.reviewRunId).state).toBe('settled');
+    expect(runOf(book.bookId, fresh.reviewRunId).influence.map((entry) => [entry.ordinal, entry.materials[0]!.withdrawnAt])).toEqual([[3, null]]);
     expect(sent).toBeGreaterThan(sentBefore);
     // The version made before the exclusion stays withdrawn for every Run that pinned it: re-inclusion restores none.
-    expect(runOf(book.bookId, prepared.reviewRunId).influence[0]!.materials[0]!.withdrawnAt).not.toBeNull();
+    expect(runOf(book.bookId, prepared.reviewRunId).influence).toEqual([]);
     const lineage = store.inspectLearningLineage(book.bookId, material.materialKey);
     expect(lineage.signals.map((signal) => [signal.ordinal, signal.current])).toEqual([[1, false], [3, true]]);
     expect(lineage.tasks.map((task) => [task.reviewRunId, task.versionOrdinal, task.use])).toEqual([[fresh.reviewRunId, 3, 'completed']]);
@@ -573,4 +635,3 @@ describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () =>
     expect(store.inspectHouseReviewPreference().current!.lines.map((line) => line.categoryId)).toEqual(['style-and-format']);
   }, 180_000);
 });
-

@@ -5,7 +5,8 @@ import type { AnalysisKindDefinition } from './analysis/kind-definition.js';
 import { canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import type { HouseReviewPreferenceVersion, HouseReviewPreferenceUse, LearningEligibilityChoice, LearningMaterialState, TrustedOperationalScope } from '../shared/protocol.js';
-import { LearningEligibilityError, type LearningAttribution, type LearningMaterialCandidate } from './learning-eligibility.js';
+import { EDITORIAL_REVIEW_KIND_PREFIX } from '../shared/protocol.js';
+import { LearningEligibilityError, LearningEligibilityLedger, type LearningAttribution, type LearningMaterialCandidate } from './learning-eligibility.js';
 import { NO_EDIT_QUALITY, editQualityOfDecisions, type DecisionEditQuality } from './edit-quality-signals.js';
 import { HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES, HOUSE_REVIEW_PREFERENCE_MAX_LINES } from './launch-policy.js';
 
@@ -268,9 +269,9 @@ export class HouseReviewPreferenceLedger {
     if (preference === null) return null;
     const version = this.version(preference.versionId);
     valid(version !== null);
-    const book = this.db.prepare('SELECT book_id FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
+    const book = this.db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
     valid(book !== undefined);
-    const lines = linesOfUse(version, preference, String(book.book_id));
+    const lines = linesOfUse(version, preference, String(book.book_id), String(book.kind));
     const sources = new Map<string, PinnedInfluence['sources'][number]>();
     for (const line of lines) {
       for (const source of line.sources) {
@@ -297,10 +298,12 @@ export interface PinnedInfluence {
   }>;
 }
 
-/** The lines of `version` a pin carries: its texts, of the Task's own Book or the house. */
-function linesOfUse(version: HouseReviewPreferenceVersion, preference: HouseReviewPreferenceUse, bookId: string): HouseReviewPreferenceVersion['lines'] {
-  const lines = version.lines.filter((line) => preference.lines.includes(line.text) && (line.bookId === null || line.bookId === bookId));
-  valid(lines.length >= preference.lines.length);
+/** Resolve by the consuming Task's category and Book; identical text is never a causal identity. */
+function linesOfUse(version: HouseReviewPreferenceVersion, preference: HouseReviewPreferenceUse, bookId: string, kind: string): HouseReviewPreferenceVersion['lines'] {
+  valid(kind.startsWith(EDITORIAL_REVIEW_KIND_PREFIX));
+  const categoryId = kind.slice(EDITORIAL_REVIEW_KIND_PREFIX.length);
+  const lines = version.lines.filter((line) => line.categoryId === categoryId && (line.bookId === null || line.bookId === bookId));
+  valid(canonicalJson(lines.map((line) => line.text)) === canonicalJson(preference.lines));
   return lines;
 }
 
@@ -310,11 +313,14 @@ function linesOfUse(version: HouseReviewPreferenceVersion, preference: HouseRevi
  * no longer holds names no material and no withdrawal.
  */
 export function withdrawalOf(db: DatabaseSync, eligibilityDecisionId: string): { readonly materialKey: string | null; readonly withdrawnAt: string | null } {
-  const row = db.prepare(`SELECT s.material_key, (SELECT min(l.recorded_at) FROM learning_eligibility_decisions l WHERE l.book_id = s.book_id
-      AND l.material_key = s.material_key AND l.ordinal > s.ordinal AND l.choice = 'excluded') AS withdrawn_at
-    FROM learning_eligibility_decisions s WHERE s.decision_id = ?`).get(eligibilityDecisionId);
+  const row = db.prepare('SELECT book_id, material_key FROM learning_eligibility_decisions WHERE decision_id = ?').get(eligibilityDecisionId);
   if (row === undefined) return { materialKey: null, withdrawnAt: null };
-  return { materialKey: String(row.material_key), withdrawnAt: row.withdrawn_at === null ? null : String(row.withdrawn_at) };
+  // The guard must validate the same decision chain the audit reads; unchecked SQL columns cannot erase an exclusion.
+  const chain = new LearningEligibilityLedger(db).history(String(row.book_id), String(row.material_key));
+  const admitted = chain.find((entry) => entry.decisionId === eligibilityDecisionId);
+  valid(admitted !== undefined);
+  const excluded = chain.find((entry) => entry.ordinal > admitted.ordinal && entry.choice === 'excluded');
+  return { materialKey: String(row.material_key), withdrawnAt: excluded?.recordedAt ?? null };
 }
 
 /** One Run pin as the lineage reads it: the category Task, its Review Run and Book, the version, and the decisions behind it. */
@@ -340,13 +346,13 @@ export class HousePreferenceInfluence {
     this.versions = ledger.history(scope);
     const byId = new Map(this.versions.map((version) => [version.versionId, version] as const));
     const pins: PreferencePinUse[] = [];
-    for (const row of db.prepare(`SELECT p.review_run_id, p.task_intent_id, p.version_id, t.book_id FROM review_run_preference_pins p
+    for (const row of db.prepare(`SELECT p.review_run_id, p.task_intent_id, p.version_id, t.book_id, t.kind FROM review_run_preference_pins p
         JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id ORDER BY p.rowid`).iterate()) {
       const version = byId.get(String(row.version_id));
       if (version === undefined) continue;
       const preference = ledger.pinned(String(row.task_intent_id));
       valid(preference !== null);
-      const decisionIds = new Set(linesOfUse(version, preference, String(row.book_id)).flatMap((line) => line.sources.map((source) => source.eligibilityDecisionId)));
+      const decisionIds = new Set(linesOfUse(version, preference, String(row.book_id), String(row.kind)).flatMap((line) => line.sources.map((source) => source.eligibilityDecisionId)));
       pins.push({ reviewRunId: String(row.review_run_id), taskIntentId: String(row.task_intent_id), bookId: String(row.book_id), version, decisionIds });
     }
     this.pins = pins;

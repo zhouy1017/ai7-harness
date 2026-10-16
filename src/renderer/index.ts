@@ -2497,7 +2497,8 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     // 在来源与证据中查看 (Issue #901): the Evidence Workspace's deep link into the Book's retained sources.
     openSource: (evidenceId) => renderBookSources(bookId, bookTitle, evidenceId),
     // 查看学习来源链 (Issue #912): 质量与学习 › 学习回溯 at the material a result's preference came from.
-    openLearningLineage: (materialBookId, materialKey) => void renderQualityLearning('audit', null, false, { bookId: materialBookId, materialKey }),
+    openLearningLineage: (materialBookId, materialKey, reviewRunId) => void renderQualityLearning('audit', null, false,
+      { bookId: materialBookId, materialKey }, () => renderBookReview(bookId, bookTitle, { reviewRunId, findingId: null })),
   });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(REVIEW_DESTINATION_ACTIONS[0], 'primary', async () => {
@@ -5241,7 +5242,7 @@ function readersReportExemplars(book: ExemplarBookProjection): HTMLElement {
  * audit of every material's lineage and 停止今后使用.
  */
 async function renderQualityLearning(tab: QualityLearningTab, bookId: string | null, tabFocused = false,
-  openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null): Promise<void> {
+  openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null): Promise<void> {
   const content = panel();
   content.classList.add('quality-learning');
   content.dataset['qualityTab'] = tab;
@@ -5282,6 +5283,7 @@ async function renderQualityLearning(tab: QualityLearningTab, bookId: string | n
     back.append(all);
   }
   back.append(button('返回', 'quiet', () => void initializeStartup()));
+  if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
   content.append(
     element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${heading}`),
     element('h2', undefined, QUALITY_LEARNING_TITLE),

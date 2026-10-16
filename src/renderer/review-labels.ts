@@ -521,7 +521,6 @@ export const REVIEW_STATUS_LINES = {
  * recalled, and the only two ways on.
  */
 export const REVIEW_SCOPE_STOP_NOTE = '这次审阅所依据的书系材料已排除在书系检索之外，它在下一次读取前停下了。已经写到稿件上的发现和已形成的结果都保持原样，已经发给模型服务的内容无法收回。只能修改计划并重新授权，或取消任务；不能继续审阅、重试或改用别的材料。';
-/** What 取消任务 of such a Run does, said before it is confirmed. */
 /** A Run stopped because a material behind its pinned 本社审阅偏好 version was 停止今后使用 (Issue #912; LAUD-008). */
 export const REVIEW_INFLUENCE_STOP_NOTE = '这次审阅参考的本社审阅偏好中有学习材料已停止今后使用，它在下一次读取前停下了。已经写到稿件上的发现和已形成的结果都保持原样，已经发给模型服务的内容无法收回。只能重新执行（不含该影响），或取消任务；不能继续审阅或重试。';
 /** 为什么会影响这个结果 (Issue #912; LAUD-004): the version each category read, and the materials behind it. */
@@ -546,6 +545,7 @@ export function reviewMarkerRemediationLine(recordedAt: string, instant: (iso: s
   return `${instant(recordedAt)} 在学习回溯中停止今后使用。`;
 }
 
+/** What 取消任务 of such a Run does, said before it is confirmed. */
 export const REVIEW_SCOPE_CANCEL_NOTE = '取消后这次审阅不再继续，也不再提供「修改计划并重新授权」；已经写到稿件上的发现和已形成的结果都保持原样。';
 
 export function reviewBatchReadyLine(count: number): string {
