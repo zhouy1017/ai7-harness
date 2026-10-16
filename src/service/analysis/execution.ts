@@ -91,7 +91,7 @@ import {
 } from './reducers.js';
 import { CARRIED_GAP_REASON, OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
 import { SERIES_SCOPE_STOP_SUMMARY } from '../series-exclusions.js';
-import { materialInterruptionMessage as referenceInterruptionMessage, type MaterialGuardRefusal } from '../task-material-references.js';
+import { materialInterruptionMessage as referenceInterruptionMessage, materialInterruptionNextAction, type MaterialGuardRefusal } from '../task-material-references.js';
 import {
   RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
   buildRunReportReflectionMessage,
@@ -2645,7 +2645,8 @@ export class BaselineAnalysisExecutionOwner {
       const interruptionKey = liveInterruption as LiveInterruption | null;
       const materialStop = materialRefusal as MaterialGuardRefusal | null;
       const interruption = interruptionKey === null ? null : interruptionKey === 'material-reference-changed' && materialStop !== null
-        ? { ...LIVE_INTERRUPTIONS[interruptionKey], detail: materialInterruptionMessage(materialStop), summary: materialInterruptionMessage(materialStop) }
+        ? { ...LIVE_INTERRUPTIONS[interruptionKey], detail: materialInterruptionMessage(materialStop), summary: materialInterruptionMessage(materialStop),
+            safeNextAction: materialInterruptionNextAction(materialStop.code) ?? LIVE_INTERRUPTIONS[interruptionKey].safeNextAction }
         : LIVE_INTERRUPTIONS[interruptionKey];
       ledger.recordRunState(facts.runRecordId, terminalClassification, {
         detail: terminalClassification === 'cancelled'

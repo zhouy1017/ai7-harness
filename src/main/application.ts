@@ -59,6 +59,7 @@ import {
   type ModelServiceUnsupportedProviderProjection,
   type ModelRoleStatus,
   type ModelRoleStatusLabel,
+  MAX_WRITING_MATERIALS,
   MODEL_SERVICE_ROUTE_BINDINGS,
   MODEL_SERVICE_ROUTE_EFFECT_LABEL,
   MODEL_SERVICE_ROUTES,
@@ -3424,7 +3425,7 @@ function registerRendererHandlers(
     envelope(async () => {
       const owned = requireSender(event);
       requireDesktop(input === undefined || (input !== null && typeof input === 'object' &&
-        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every((id) => typeof id === 'string' && id.length <= 64)))), 'AI7_RENDERER_BOUNDARY_INVALID');
+        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every((id) => typeof id === 'string' && id.length <= 64)))), 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
@@ -3469,7 +3470,7 @@ function registerRendererHandlers(
     envelope(async () => {
       const owned = requireSender(event);
       requireDesktop(input !== null && typeof input === 'object' && (input.template === 'author' || input.template === 'editorial') &&
-        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every((id) => typeof id === 'string' && id.length <= 64))), 'AI7_RENDERER_BOUNDARY_INVALID');
+        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every((id) => typeof id === 'string' && id.length <= 64))), 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
@@ -3604,7 +3605,7 @@ function registerRendererHandlers(
       requireDesktop(input !== null && typeof input === 'object' && typeof input.typeId === 'string' && typeof input.audience === 'string' &&
         typeof input.channel === 'string' && (input.requirements === null || typeof input.requirements === 'string') &&
         // 允许参考's ticked 资料库 items (Issue #428): identities only; the service reads, pins and bounds them.
-        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 &&
+        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS &&
           input.materialIds.every((id) => typeof id === 'string' && id.length <= 64))), 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
@@ -4428,6 +4429,9 @@ function registerRendererHandlers(
     (event, input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>
       envelope(async () => {
         const owned = requireSender(event);
+        requireDesktop(input !== null && typeof input === 'object' &&
+          (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS &&
+            input.materialIds.every((id) => typeof id === 'string' && id.length <= 64))), 'AI7_RENDERER_BOUNDARY_INVALID');
         return serializeEffect(async () => {
           requireAuthority();
           const route = requireCurrentBookRoute(owned);

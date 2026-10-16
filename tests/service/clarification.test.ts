@@ -356,7 +356,7 @@ describe('Clarification Requests over the real store', () => {
       expect(settled.run!.transitions.at(-1)!.detail).toBe('资料《合成资料》在任务运行中已撤回允许参考，任务已中断；已完成的单元保留。');
       expect(settled.resultSetRevision!.units.map((unit) => unit.state)).toEqual(['closed', 'gap', 'closed', 'closed', 'gap', 'closed', 'closed', 'closed']);
       expect(settled.taskOutcome!.classification).toBe('interrupted');
-      expect(settled.taskOutcome!.safeNextAction).toBe('核对参考资料，重新准备计划并授权；已完成的单元保留。');
+      expect(settled.taskOutcome!.safeNextAction).toBe('这份资料已撤回允许参考；在资料库重新准入后重新准备计划并授权，或在新计划里去掉这份资料；已完成的单元保留。');
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

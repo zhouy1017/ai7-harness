@@ -30,6 +30,8 @@ import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+import { WRITING_REQUEST } from '../support/writing-task.js';
 
 // Service-integration suite (L2) for merging a Book (Issue #434, plan slice S86d; V2-UX-DSTO-017; ADR 0079 §1.5) over two real
 // stores: a Book with a manuscript and its history, an edit, a mark, a milestone, a 发稿版本, a Production Document delivered
@@ -1132,6 +1134,49 @@ describe('what a merge refuses, puts back and brings forward', () => {
       materialId, expectedDecisions, decision: { kind: 'attribution', attribution: bookId === null ? { scope: 'house' } : { scope: 'book', bookId } },
     });
   }
+
+  it.each(['writing', 'review', 'evaluation'] as const)('warns about missing %s material pins before merging and after reopening (Issue #759)', async (kind) => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string;
+    try {
+      const { bookId } = await importSample1Book(source, roots.codeRoot, '合成参考合并测试');
+      await pinEditorialWorkspaceProfileRevision2(source, bookId);
+      recordMissingCredentialConnection(source, '合成参考测试连接');
+      const id = await libraryItem(source, '合成参考', '仅用于验证合并提示的合成资料。');
+      attribute(source, id, 0, bookId);
+      source.decideLibraryMaterial({ materialId: id, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      source.startMaterialIndexing();
+      await source.settleMaterialIndexing();
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+      if (kind === 'writing') {
+        let work = source.createWritingPreparationWork(bookId, { ...WRITING_REQUEST, materialIds: [id] }, policy);
+        while (!work.done) work = source.advanceWritingPreparationWork(work.workId!);
+        expect(work.projection!.taskIntent).not.toBeNull();
+      } else if (kind === 'review') {
+        let work = source.createReviewRunPreparationWork(bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy, null, [id]);
+        while (!work.done) work = source.advanceReviewRunPreparationWork(work.workId!);
+        expect(work.projection!.run).not.toBeNull();
+      } else {
+        let work = source.createInitialEvaluationPreparationWork(bookId, policy, [id]);
+        while (!work.done) work = source.advanceInitialEvaluationPreparationWork(work.workId!);
+        expect(work.projection!.taskIntent).not.toBeNull();
+      }
+      packagePath = await exportedFrom(source, '合成参考.ai7db');
+    } finally { source.close(); }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const preview = await target.inspectDatabaseImport(packagePath);
+      expect(preview.mergeNotices).toEqual(['writing-material']);
+      expect(preview.mergeRefusal).toBeNull();
+      await target.prepareDatabaseMerge(preview.previewId, T);
+    } finally { target.close(); }
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect((await target.inspectDatabaseReplacements()).replacements[0]!.outcome).toBe('applied');
+      expect((await target.inspectDatabaseImport(packagePath)).mergeNotices).toEqual([]);
+      target.markCleanShutdown();
+    } finally { target.close(); }
+  }, 180_000);
 
   it("brings a Book's 资料库 items with their whole history and originals, and nothing of the house's (Issue #434 review; ADR 0079 §1.5)", async () => {
     const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

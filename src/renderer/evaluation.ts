@@ -130,7 +130,7 @@ import {
   evaluationUnsavedLine,
   evaluationVersionLine,
 } from './evaluation-labels.js';
-import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSendLine, similarMaterialsField } from './task-material-selection.js';
+import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSendLine, taskMaterialSizeText, reconcileTaskMaterialSelection, acknowledgeTaskMaterialRemovals, similarMaterialsField } from './task-material-selection.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 
 /**
@@ -231,9 +231,11 @@ export function evaluationMaterialsField(
     ? '资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'
     : '资料只提供背景，不改变本社评估方案，也不覆盖初评的分数、评语与结论。'));
   const items = page.materials?.items ?? [];
-  const retained = taskMaterialSelection(items, selected);
+  // A choice the page no longer offers, or no longer lets be ticked, leaves the selection with its reason (Issue #759).
+  const { kept: retained, removals } = reconcileTaskMaterialSelection(selected, items, selected);
   selected.clear();
   for (const id of retained) selected.add(id);
+  for (const note of removals) fieldset.append(el('p', 'field-note evaluation-material-removed', note));
   for (const item of items) {
     const label = el('label', 'evaluation-choice');
     const input = el('input');
@@ -243,11 +245,12 @@ export function evaluationMaterialsField(
     const reason = taskMaterialSelectionReason(item, items, selected);
     input.disabled = busy || !available || (reason !== null && !input.checked);
     input.addEventListener('change', () => {
+      acknowledgeTaskMaterialRemovals(selected);
       if (input.checked) selected.add(item.materialId);
       else selected.delete(item.materialId);
       repaint(item.materialId);
     });
-    label.append(input, el('span', undefined, `《${item.title}》 · 已提取 ${item.characters.toLocaleString('en-US')} 字`));
+    label.append(input, el('span', undefined, `《${item.title}》 · ${taskMaterialSizeText(item)}`));
     if (reason !== null) label.append(el('span', 'field-note', reason));
     fieldset.append(label);
   }

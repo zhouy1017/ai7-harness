@@ -111,6 +111,18 @@ describe('the 允许参考 fieldset of 新建审阅', () => {
     expect(view.reasonOf('c').textContent).toBe('这份资料现在不在可参考的清单中。');
   });
 
+  it('lists a damaged index without a size, unticks it and says why (Issue #759)', () => {
+    const damaged = { ...item('a', 0), selectable: false, reason: '索引记录已损坏 · 不可选' };
+    const view = mount([damaged, item('b')]);
+    expect(view.field.all().map((node) => node.textContent)).toContain('《资料a》 · 这本书 · 字数未知');
+    view.state.materialIds.add('a');
+    view.sync([damaged, item('b')], ['typos-and-usage']);
+    expect([...view.state.materialIds]).toEqual([]);
+    expect(view.box('a').checked).toBe(false);
+    expect(view.box('a').disabled).toBe(true);
+    expect(view.reasonOf('a').textContent).toBe('索引记录已损坏 · 不可选');
+  });
+
   it('stops a fifth item and a total past 6,000 characters, leaving the ticked ones free to untick', () => {
     const offers = ['a', 'b', 'c', 'd', 'e'].map((id) => item(id));
     const view = mount(offers);

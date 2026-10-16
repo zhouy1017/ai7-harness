@@ -143,6 +143,51 @@ describe('review categories reference exact local library versions', () => {
     expect(state.detail).toContain('已完成的单元保留');
     expect(state.cause).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
   });
+  it.each([
+    ['MATERIAL_INDEX_MOVED', '在任务运行中的索引版本已不在本机', '计划冻结的索引版本已不在本机；重新准备计划'],
+    ['MATERIAL_INDEX_RECORD_INVALID', '在任务运行中的索引记录已损坏', '的索引记录已损坏；先在资料库处理这份资料'],
+  ] as const)('interrupts under way on %s with that reason and its own next step, not the withdrawal wording (Issue #759)', async (code, detail, next) => {
+    const id = await material();
+    const run = prepare([id]);
+    answerEveryUnit(run, id);
+    store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run));
+    unitBoundary = () => {
+      unitBoundary = null;
+      database((db) => {
+        for (const name of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
+        if (code === 'MATERIAL_INDEX_MOVED') {
+          db.prepare('DELETE FROM material_index_segments WHERE index_id IN (SELECT index_id FROM material_index_builds WHERE material_id = ?)').run(id);
+          db.prepare('DELETE FROM material_index_builds WHERE material_id = ?').run(id);
+        } else db.prepare("UPDATE material_index_builds SET canonical_json = '{}' WHERE material_id = ?").run(id);
+        for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
+      }, true);
+    };
+    await driver.drive(run.reviewRunId);
+    const state = JSON.parse(String(database((db) => db.prepare("SELECT canonical_json FROM analysis_run_states WHERE state = 'interrupted' ORDER BY rowid DESC LIMIT 1").get())!.canonical_json));
+    expect(state.detail).toContain(detail);
+    expect(state.detail).not.toContain('已撤回允许参考');
+    expect(state.detail).toContain('已完成的单元保留');
+    expect(state.cause).toBe(code);
+    const outcome = JSON.parse(String(database((db) => db.prepare('SELECT canonical_json FROM analysis_task_outcomes ORDER BY rowid DESC LIMIT 1').get())!.canonical_json));
+    expect(outcome.safeNextAction).toContain(next);
+    expect(outcome.summary).toContain(detail);
+  });
+
+  it('offers a damaged index as a named, unselectable choice instead of failing the 审阅 page or dropping it (Issue #759)', async () => {
+    const damaged = await material();
+    const healthy = await material('另一份可读取的合成资料。');
+    await close();
+    database((db) => {
+      for (const name of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
+      db.prepare("UPDATE material_index_builds SET canonical_json = '{}' WHERE material_id = ?").run(damaged);
+      for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
+    }, true);
+    await open();
+    const offers = store.inspectReviewWorkspace(bookId, null).materials!;
+    expect(offers.items.find((item) => item.materialId === damaged)).toMatchObject({ selectable: false, reason: '索引记录已损坏 · 不可选', characters: 0 });
+    expect(offers.items.find((item) => item.materialId === healthy)).toMatchObject({ selectable: true, reason: null });
+  });
+
   it('offers eligible items and freezes read-only pins in the Run and consuming Task plans, across reopen', async () => {
     const id = await material();
     const before = indexRows();
@@ -167,7 +212,7 @@ describe('review categories reference exact local library versions', () => {
     expect(database((db) => db.prepare('PRAGMA user_version').get()!.user_version)).toBe(LATEST_SCHEMA_VERSION);
   });
 
-  it('runs both referenced categories through the real execution owner, then still reads settled results with the build gone', async () => {
+  it.each(['missing', 'withdrawn', 'corrupt'] as const)('keeps completed review results readable with a precise %s note (Issue #759)', async (change) => {
     const id = await material();
     const run = prepare([id], ['typos-and-usage', 'style-and-format']);
     for (const category of run.categories) {
@@ -182,12 +227,19 @@ describe('review categories reference exact local library versions', () => {
     expect(result.categories.every((category) => category.state === 'settled')).toBe(true);
     expect(result.state).toBe('settled');
     expect(indexRows()).toBe(before);
-    await close();
-    removeBuild(id);
-    await open();
+    if (change === 'withdrawn') store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    else if (change === 'missing') removeBuild(id);
+    else database((db) => {
+      for (const name of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
+      db.prepare("UPDATE material_index_builds SET canonical_json = '{}' WHERE material_id = ?").run(id);
+      for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
+    }, true);
+    await close(); await open();
     const completed = store.inspectReviewWorkspace(bookId, run.reviewRunId).run!;
     expect(completed.state).toBe('settled');
     expect(plan(run).scope.reference.some((line) => line.includes('不能再开始'))).toBe(false);
+    // …and it says so (Issue #759): the build is gone, the result stays readable, a further run needs a plan prepared anew.
+    expect(plan(run).scope.reference.join(' ')).toContain(`${change === 'missing' ? '计划冻结的索引版本现已不在本机' : change === 'withdrawn' ? '这份资料现已撤回允许参考' : '这份资料的索引记录现已损坏'}；已有的结果仍可查看，再次运行需重新准备计划`);
     expect(plan(run).drift).toBeNull();
   });
 
@@ -231,7 +283,12 @@ describe('review categories reference exact local library versions', () => {
     expect(referenced.categories[0]!.taskIntentId).not.toBe(task);
     expect(referenced.categories[0]!.planEnvelopeDigest).not.toBe(plain.categories[0]!.planEnvelopeDigest);
     expect(plan(plain).scope.reference.some((line) => line.includes('资料库资料'))).toBe(false);
+    const promptDigest = (taskId: string) => database((db) => JSON.parse(String(db.prepare("SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'plan-envelope' ORDER BY plan_version DESC LIMIT 1").get(taskId)!.canonical_json)).promptContractDigest);
+    const digest = promptDigest(referenced.categories[0]!.taskIntentId!);
+    expect(digest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(digest).not.toBe(promptDigest(plain.categories[0]!.taskIntentId!));
     const repeated = prepare([id]);
+    expect(promptDigest(repeated.categories[0]!.taskIntentId!)).toBe(digest);
     expect(repeated.categories[0]!.taskIntentId).toBe(referenced.categories[0]!.taskIntentId);
     expect(repeated.categories[0]!.planEnvelopeDigest).toBe(referenced.categories[0]!.planEnvelopeDigest);
   });

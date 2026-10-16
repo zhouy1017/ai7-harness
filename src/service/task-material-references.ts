@@ -50,18 +50,62 @@ export interface MaterialGuardRefusal {
   readonly message: string;
 }
 
+/** The three reasons a frozen reference stops reading (Issue #759), by the Material Index's own code. */
+export type MaterialReasonCode = 'MATERIAL_INDEX_MOVED' | 'MATERIAL_REFERENCE_UNAVAILABLE' | 'MATERIAL_INDEX_RECORD_INVALID';
+
+/**
+ * One vocabulary for every kind and stage: what a reference says about its material before the Task starts (after `资料《…》`),
+ * what a Run says when the material stops reading under way, and where the editor goes next.
+ */
+const MATERIAL_REASONS: Readonly<Record<MaterialReasonCode, { readonly before: string; readonly during: string; readonly settled: string; readonly next: string }>> = {
+  MATERIAL_INDEX_MOVED: {
+    before: '计划冻结的索引版本已不在本机',
+    during: '的索引版本已不在本机',
+    settled: '计划冻结的索引版本现已不在本机',
+    next: '这份资料计划冻结的索引版本已不在本机；重新准备计划（会按资料现在的索引版本冻结）并授权，或在新计划里去掉这份资料；已完成的单元保留。',
+  },
+  MATERIAL_REFERENCE_UNAVAILABLE: {
+    before: '现在不能列进这本书任务的「允许参考」',
+    during: '已撤回允许参考',
+    settled: '这份资料现已撤回允许参考',
+    next: '这份资料已撤回允许参考；在资料库重新准入后重新准备计划并授权，或在新计划里去掉这份资料；已完成的单元保留。',
+  },
+  MATERIAL_INDEX_RECORD_INVALID: {
+    before: '的索引记录已损坏',
+    during: '的索引记录已损坏',
+    settled: '这份资料的索引记录现已损坏',
+    next: '这份资料的索引记录已损坏；先在资料库处理这份资料，再重新准备计划并授权，或在新计划里去掉它；已完成的单元保留。',
+  },
+};
+
+function materialReason(code: string): (typeof MATERIAL_REASONS)[MaterialReasonCode] | null {
+  return Object.hasOwn(MATERIAL_REASONS, code) ? MATERIAL_REASONS[code as MaterialReasonCode] : null;
+}
+
+/** Why a Run stopped under way for one frozen reference, in the reference's own reason; any other code reads as unavailable. */
 export function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
-  const why = refusal.code === 'MATERIAL_INDEX_MOVED' ? '的索引版本已不在本机'
-    : refusal.code === 'MATERIAL_INDEX_RECORD_INVALID' ? '的索引记录已损坏' : '已撤回允许参考';
+  const why = materialReason(refusal.code)?.during ?? '已不可用';
   return `资料《${refusal.materialTitle}》在任务运行中${why}，任务已中断；已完成的单元保留。`;
 }
 
+/** A reference that no longer reads, said of a Task already started (its result stays readable), or `null` for any other code. */
+export function materialSettledReason(code: string): string | null {
+  return materialReason(code)?.settled ?? null;
+}
+
+/** What the editor does next after a reference stopped a Run, or `null` for a stop that is not one of the three reasons. */
+export function materialInterruptionNextAction(code: string): string | null {
+  return materialReason(code)?.next ?? null;
+}
+
 export type TaskMaterialReading =
-  | { readonly source: TaskMaterialSource; readonly paragraphs: ReadonlyArray<string>; readonly refusal: null }
+  | { readonly source: TaskMaterialSource; readonly paragraphs: ReadonlyArray<string>; readonly refusal: null; readonly settledNote?: string }
   | { readonly source: TaskMaterialSource; readonly paragraphs: null; readonly refusal: { readonly code: string; readonly message: string } };
 
 export const TASK_MATERIALS_NONE = '资料库里还没有这本书可以参考的资料：资料定了归属（这本书或社级）与学习准入、建好索引以后，才能在这里勾选，列进「允许参考」。';
 export const TASK_MATERIALS_STATEMENT = '可以勾选资料库里这本书允许参考的资料；只参照，不照抄。最多 4 份，每份不超过 3,000 字，合计不超过 6,000 字。';
+/** An item the Book may list whose index record is damaged: offered with its reason, never dropped and never failing the page (Issue #759). */
+export const TASK_MATERIAL_OFFER_DAMAGED = '索引记录已损坏 · 不可选';
 export const TASK_MATERIAL_LIVE_UNAVAILABLE = '资料库资料不能列进这个运行范围的计划：资料是编辑自己收集的材料，当前的模型处理策略只允许发送本社指定的公开样书，不能把资料库的文字发送给模型。';
 export const REVIEW_MATERIAL_CATEGORY_REQUIRED = '资料库资料只供调用模型的审阅类别参考；情节逻辑与前后一致只读已有线索，事实核查本次不参考资料库。请先选择其他审阅类别，或去掉参考资料。';
 
@@ -93,18 +137,28 @@ export function taskMaterialWords(source: TaskMaterialSource, paragraphs: Readon
 }
 
 export function taskMaterialRefusal(source: TaskMaterialSource, code: string, surface: '审阅' | '评估' | '写作' = '审阅'): TaskMaterialReading {
-  requireAnalysis(code === 'MATERIAL_INDEX_MOVED' || code === 'MATERIAL_REFERENCE_UNAVAILABLE' || code === 'MATERIAL_INDEX_RECORD_INVALID',
-    'TASK_MATERIAL_RECORD_INVALID', '任务参考资料记录无法核对。');
-  const why = code === 'MATERIAL_INDEX_MOVED' ? '计划冻结的索引版本已不在本机'
-    : code === 'MATERIAL_INDEX_RECORD_INVALID' ? '的索引记录已损坏' : '现在不能列进这本书任务的「允许参考」';
+  const reason = materialReason(code);
+  requireAnalysis(reason !== null, 'TASK_MATERIAL_RECORD_INVALID', '任务参考资料记录无法核对。');
   const next = surface === '写作' ? '可以用「新建文档…」重新准备。' : `可以在「${surface}」重新准备计划。`;
-  return { source, paragraphs: null, refusal: { code, message: `资料《${source.title}》${why}，这份计划不能再开始；${next}` } };
+  return { source, paragraphs: null, refusal: { code, message: `资料《${source.title}》${reason!.before}，这份计划不能再开始；${next}` } };
 }
 
-export function taskMaterialReferenceLine(material: Pick<TaskMaterialReading, 'source' | 'refusal'>): string {
+/**
+ * A Task already authorized read its reference as the plan pinned (the pre-start refusal is for a plan not yet started): when that
+ * reference no longer reads, the plan says so without calling the Task unstartable — what it did stays readable, and a further
+ * run needs a plan prepared anew (Issue #759).
+ */
+export function taskMaterialSettled(reading: TaskMaterialReading): TaskMaterialReading {
+  const base = { source: reading.source, paragraphs: reading.paragraphs ?? [], refusal: null } as const;
+  if (reading.refusal === null) return base;
+  const settled = materialSettledReason(reading.refusal.code);
+  return settled === null ? base : { ...base, settledNote: `${settled}；已有的结果仍可查看，再次运行需重新准备计划` };
+}
+
+export function taskMaterialReferenceLine(material: Pick<TaskMaterialReading, 'source' | 'refusal'> & { readonly settledNote?: string }): string {
   const { source, refusal } = material;
   const line = `资料库资料《${source.title}》：已提取 ${source.characters.toLocaleString('en-US')} 字，按计划冻结的索引版本读取（只参照，不照抄）`;
-  return refusal === null ? line : `${line}——${refusal.message}`;
+  return refusal === null ? material.settledNote === undefined ? line : `${line}——${material.settledNote}` : `${line}——${refusal.message}`;
 }
 
 /** The opt-in wrapper changes no bytes of a kind without references; the SQL contract version remains its base's. */
