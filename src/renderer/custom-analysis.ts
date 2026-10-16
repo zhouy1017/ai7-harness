@@ -148,6 +148,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
           const link = el('button', 'quiet custom-anchor', customRowAnchorLabel(row));
           link.type = 'button';
           link.dataset['customAction'] = 'jump';
+          link.dataset['analysisAction'] = 'custom-jump';
           link.dataset['blockId'] = row.sourceRange.blockId;
           const { blockId } = row.sourceRange;
           link.addEventListener('click', () => options.jump(blockId));
@@ -192,11 +193,14 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       card.append(heading);
       const actions = el('div', 'button-row');
       const start = actionButton(CUSTOM_TAB_RUN, 'primary', 'run', () => run(dimension));
+      start.dataset['analysisAction'] = 'custom-run';
       start.disabled = book?.unavailableReason != null;
       actions.append(start);
       if (book?.taskState != null) {
         const { taskIntentId } = book.taskState;
-        actions.append(actionButton('查看计划', 'secondary', 'open-plan', () => options.openPlan(taskIntentId)));
+        const open = actionButton('查看计划', 'secondary', 'open-plan', () => options.openPlan(taskIntentId));
+        open.dataset['analysisAction'] = 'custom-open-plan';
+        actions.append(open);
       }
       card.append(actions);
       if (book?.unavailableReason != null) card.append(el('p', 'field-note custom-unavailable', book.unavailableReason));

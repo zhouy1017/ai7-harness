@@ -190,7 +190,9 @@ export function customAnalysisKindDefinition(version: CustomAnalysisVersionInput
   };
   const contract = customAnalysisContract(contractInput);
   const promptContractDigest = customAnalysisContractDigest(contract);
-  const dimension: CustomAnalysisDimensionPin = contract.dimension;
+  const dimension: CustomAnalysisDimensionPin = {
+    dimensionId: version.dimensionId, versionId: version.versionId, version: version.version, documentDigest: version.documentDigest,
+  };
   const modes: ReadonlyArray<AnalysisModeDefinition> = (['first-baseline', ...BASELINE_ANALYSIS_UPDATE_MODES] as const).map((mode: BaselineAnalysisTaskMode) => ({
     mode,
     goal: customAnalysisModeGoal(version.title, mode),

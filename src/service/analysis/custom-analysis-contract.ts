@@ -109,7 +109,11 @@ export function customAnalysisDocumentDigest(document: CustomAnalysisDimensionDo
   return sha256Hex(canonicalJson(document));
 }
 
-/** What one dimension version contributes to its frozen contract: its identity and digest, and its question. Never its title. */
+/**
+ * What one dimension version brings to its kind: its identity, digest and question. The frozen contract takes the version's number,
+ * its document digest and its question — never its title, and never the identities, which are this store's own: two stores that hold
+ * the same version of the same document ask the same thing, and a fixture keyed by the contract answers both.
+ */
 export interface CustomAnalysisContractInput {
   readonly dimensionId: string;
   readonly versionId: string;
@@ -142,7 +146,7 @@ export interface CustomAnalysisPromptContract {
   readonly schema: typeof CUSTOM_ANALYSIS_PROMPT_CONTRACT_SCHEMA;
   readonly contractVersion: typeof CUSTOM_ANALYSIS_CONTRACT_VERSION;
   readonly responseSchema: typeof CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA;
-  readonly dimension: { readonly dimensionId: string; readonly versionId: string; readonly version: number; readonly documentDigest: string };
+  readonly dimension: { readonly version: number; readonly documentDigest: string };
   readonly questionTemplate: string;
   readonly fixed: typeof CUSTOM_ANALYSIS_FIXED_TERMS;
   readonly systemPrompt: string;
@@ -163,7 +167,7 @@ export function customAnalysisContract(input: CustomAnalysisContractInput): Cust
     schema: CUSTOM_ANALYSIS_PROMPT_CONTRACT_SCHEMA,
     contractVersion: CUSTOM_ANALYSIS_CONTRACT_VERSION,
     responseSchema: CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA,
-    dimension: { dimensionId: frozen.dimensionId, versionId: frozen.versionId, version: frozen.version, documentDigest: frozen.documentDigest },
+    dimension: { version: frozen.version, documentDigest: frozen.documentDigest },
     questionTemplate: frozen.questionTemplate,
     fixed: CUSTOM_ANALYSIS_FIXED_TERMS,
     systemPrompt: systemPromptOf(frozen),
