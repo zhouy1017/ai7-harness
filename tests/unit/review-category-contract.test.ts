@@ -80,9 +80,9 @@ describe('the built-in review categories', () => {
 
   it('state their basis once, search-engine use included (V2-UX-REV-010, REV-012)', () => {
     expect(reviewCategoryBasisStatement(entry('typos-and-usage')))
-      .toBe('依据：AI7 内置默认 · 文字规范条款（第 1 版） · 工序：错别字与规范用语审阅工序（第 1 版） · 不使用搜索引擎');
+      .toBe('依据：AI7 内置默认 · 文字规范条款（第 1 版） · 工序：错别字与规范用语审阅工序（第 1 版） · 不使用搜索引擎 · 未联网核查');
     expect(reviewCategoryBasisStatement(entry('academic-integrity')))
-      .toBe('依据：AI7 内置默认 · 引用与学术规范条款（第 1 版） · 工序：引用风险点标注（第 1 版） · 会使用搜索引擎（外部核查接入前为「未联网核查」）');
+      .toBe('依据：AI7 内置默认 · 引用与学术规范条款（第 1 版） · 工序：引用风险点标注（第 1 版） · 使用用户所选的联网检索后端；是否完成以本次运行的核查状态为准');
     expect(reviewCategoryBasisStatement(entry('plot-consistency')))
       .toBe('依据：这本书最新的基线分析结果 · 工序：线索转批注（第 1 版） · 不调用模型，不使用搜索引擎');
     expect(reviewCategoryBasisStatement(entry('series-consistency'))).toBe('依据：书系知识 · 工序：书系一致性检查（第 1 版）');

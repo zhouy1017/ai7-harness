@@ -86,6 +86,8 @@ async function driveAcademicIntegrity(name: string): Promise<{ bookId: string; r
   let progress = store.createReviewRunPreparationWork(book.bookId, ['academic-integrity'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
   while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
   const run = progress.projection!.run!;
+  expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }).service.decision)
+    .toContain('学术道德与引用 · 未联网核查 · TinyFish');
   expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }).service.provider).toContain('联网检索 · TinyFish');
   store.authorizeReviewRun(book.bookId, run.reviewRunId, run.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
   await driver.drive(run.reviewRunId);
@@ -116,6 +118,8 @@ describe('a web-bearing review Run on the frozen backend', () => {
     const report = category.taskOutcome!.report!;
     expect(report.webToolsBackend).toMatchObject({ backendId: 'search-tinyfish', host: TINYFISH.host });
     expect(report.usagePerStage['platform-tools']).toMatchObject({ requests: 1, searchCalls: { 'search-tinyfish': 1 }, refusedSearchCalls: 0, fetchCount: 0, fetchBytes: 0 });
+    expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: book.reviewRunId }).service.decision)
+      .toContain('学术道德与引用 · 联网核查已完成 · TinyFish');
     // The units' stage carries every model turn of each tool loop; the revision's usage reconciles with the stages plus the tools.
     expect(report.usagePerStage.units.requests).toBe(toolCallsAsked * 2);
     expect(runReportUsageReconciles(report, category.resultSetRevision!.usage)).toBe(true);

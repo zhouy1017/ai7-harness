@@ -10,7 +10,7 @@ import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } fr
 import { reviewCategoryKindDefinition } from '../review/review-category-kind.js';
 import { liveMaterialContract } from '../task-material-references.js';
 import { withModelClarification } from '../provider/clarification-contract.js';
-import { factualReviewKindDefinition, withFactualResearch, type AnalysisKindDefinition } from './kind-definition.js';
+import { factualReviewKindDefinition, withFactualResearch, type AnalysisKindDefinition, type ResearchDeclaration } from './kind-definition.js';
 
 /** The rule facts a live step reads from the one selected rule that admitted its kind. */
 export interface LiveKindRule {
@@ -193,13 +193,32 @@ export function liveKindContractCategories(kind: string, definition?: LiveKindDe
  * writing and evaluation run on it without tools, as they did before the rule named them.
  */
 export function modelAdmitsPlatformTools(route: string, model: string): boolean {
-  return modelProfileFor(route as RemoteExecutionRoute, model)?.capabilities.toolCalling === 'function';
+  const profile = modelProfileFor(route as RemoteExecutionRoute, model);
+  return profile?.capabilities.toolCalling === 'function' && profile.evidence.toolCalling.kind === 'live-test-item' &&
+    profile.evidence.toolCalling.itemIds.length > 0;
 }
 
-/** Review categories use their current declaration; a policy allowance alone never turns non-web review into research. */
+/** ADR 0080 rows 15/17 and the two admitted review categories; row 10 remains excluded this wave. */
+export function kindResearchDeclaration(
+  policy: LaunchPolicyProjection | undefined,
+  kind: string,
+  declaration?: ResearchDeclaration,
+): ResearchDeclaration {
+  const rule = liveKindRule(policy, kind);
+  const webSearch = taskDeclaresPlatformTools(kind) && declaration?.webSearch !== false &&
+    rule?.webSearchToolAllowed === true && platformToolsFromProjection(rule) !== null &&
+    modelAdmitsPlatformTools(rule.route, rule.model);
+  return { webSearch, searchEngine: webSearch ? 'user-selected-backend' : null };
+}
+
+/**
+ * Review categories use their current declaration; a policy allowance alone never turns non-web review into research.
+ * Of the evaluation and writing kinds only 初评 (its market section, row 15) and writing (row 17) are web-bearing: 审稿意见
+ * (row 16) and rewriting the editor's scores (row 14) declare no web even where a rule names the tools.
+ */
 export function taskDeclaresPlatformTools(kind: string): boolean {
   if (kind === FACTUAL_REVIEW_KIND) return true;
   const review = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => reviewCategoryKindId(entry.categoryId) === kind);
-  if (review !== undefined) return review.searchEngine && review.categoryId !== 'publication-risk';
-  return [WRITING_KIND, INITIAL_EVALUATION_KIND, EVALUATION_REWRITE_KIND, READERS_REPORT_KIND].some((candidate) => candidate === kind);
+  if (review !== undefined) return review.researchDeclaration?.webSearch === true && review.searchEngine && review.categoryId !== 'publication-risk';
+  return kind === WRITING_KIND || kind === INITIAL_EVALUATION_KIND;
 }
