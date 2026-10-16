@@ -7550,6 +7550,34 @@ export interface ImportedSkillsProjection {
   readonly nextBefore: string | null;
   readonly revision: ImportedSkillRevisionProjection | null;
 }
+/**
+ * What acquisition discloses before anything is kept (ADR 0090 §2; REUSE-021): exact identity, kind, source revision, provenance,
+ * license and notices, content digest and the conversion it would keep. Nothing of it is written until the editor keeps it.
+ */
+export interface ImportedSkillAcquisitionProjection {
+  /** The disclosed package, held in the service's memory only until it is kept or dropped. */
+  readonly acquisitionId: string;
+  readonly name: string;
+  readonly sourceRevision: string;
+  readonly kind: 'DSH Skill';
+  readonly sourcePath: string;
+  readonly contentSha256: string;
+  readonly license: string | null;
+  readonly notices: readonly string[];
+  readonly files: readonly Omit<ImportedSkillFile, 'base64'>[];
+  readonly conversion: SkillConversionReport;
+  readonly ceiling: ImportedSkillCeiling;
+  readonly problems: readonly string[];
+  /** A package without a SKILL.md is not a Skill: it is disclosed and never kept. */
+  readonly keepable: boolean;
+  /** The working revision already holding exactly this content, when it was kept before: keeping it again adds nothing. */
+  readonly keptRevisionId: string | null;
+}
+/** 导入 Skill…: the disclosure, and the kept working revision once the editor keeps it (`null` until then). */
+export interface ImportedSkillImportProjection {
+  readonly acquisition: ImportedSkillAcquisitionProjection;
+  readonly revision: ImportedSkillRevisionProjection | null;
+}
 export interface ProcedureRecommendationInput {
   readonly bookId: string;
   readonly goal: string;
@@ -13054,11 +13082,20 @@ export interface ServiceOperationMap {
   };
   /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): names no Book. */
   inspectCapturedProcedures: { input: Record<string, never>; output: CapturedProceduresProjection };
-  importSkillPackage: { input: { path: string }; output: ImportedSkillRevisionProjection };
+  /**
+   * 外部 Skill (ADR 0045, ADR 0090 §2): acquisition from the path the platform picker gave main discloses and keeps nothing
+   * (`path`); keeping the disclosed package is a second, separate call (`keep`, its acquisition id). Exactly one is given.
+   */
+  importSkillPackage: { input: { path: string | null; keep: string | null }; output: ImportedSkillImportProjection };
+  /** A provider-free validation stage over the exact working files; it never installs or enables (REUSE-023, REUSE-024). */
   validateImportedSkill: { input: { revisionId: string }; output: ImportedSkillRevisionProjection };
+  /** Installation, finished disabled, of a validated revision whose preview the editor confirmed (REUSE-026). */
   installImportedSkill: { input: { revisionId: string; previewDigest: string }; output: ImportedSkillRevisionProjection };
+  /** Scoped enablement for one Book after the ceiling was shown: no executor, Run scope, Provider or Effect follows (REUSE-028). */
   enableImportedSkill: { input: { revisionId: string; bookId: string; previewDigest: string }; output: ImportedSkillRevisionProjection };
+  /** The house's imported Skills, newest revision each, a page at a time, and one exact revision when asked. A read. */
   inspectImportedSkills: { input: { revisionId: string | null; before: string | null }; output: ImportedSkillsProjection };
+  /** 工序推荐 (ADR 0090 §1; TASK-010 to 016): a deterministic read; it selects, acquires, enables or authorizes nothing. */
   recommendProcedures: { input: ProcedureRecommendationInput; output: ProcedureRecommendationProjection };
   /** One Captured Procedure with a page of its versions, newest first, below `before` when it is given. */
   inspectCapturedProcedure: { input: { procedureId: string; before: number | null }; output: CapturedProcedureProjection };
@@ -13822,7 +13859,8 @@ export interface RendererApi {
   inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection>;
   /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): names no Book. */
   inspectCapturedProcedures(): Promise<CapturedProceduresProjection>;
-  importSkillPackage(input?: { kind: 'zip' | 'directory' }): Promise<ImportedSkillRevisionProjection | null>;
+  /** `{ kind }` opens the platform picker and discloses what it chose, keeping nothing; `{ keep }` keeps that disclosure. */
+  importSkillPackage(input?: { kind: 'zip' | 'directory' } | { keep: string }): Promise<ImportedSkillImportProjection | null>;
   validateImportedSkill(input: { revisionId: string }): Promise<ImportedSkillRevisionProjection>;
   installImportedSkill(input: { revisionId: string; previewDigest: string }): Promise<ImportedSkillRevisionProjection>;
   enableImportedSkill(input: { revisionId: string; bookId: string; previewDigest: string }): Promise<ImportedSkillRevisionProjection>;

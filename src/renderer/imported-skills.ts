@@ -1,4 +1,6 @@
-import type { BookSummaryCursor, BookSummaryProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection, RendererApi } from '../shared/protocol.js';
+import type {
+  BookSummaryCursor, BookSummaryProjection, ImportedSkillAcquisitionProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection, RendererApi,
+} from '../shared/protocol.js';
 import { importedSkillCeilingLines, importedSkillIdentityLine, IMPORTED_SKILLS_HEADING, IMPORTED_SKILLS_NO_EXECUTOR } from './imported-skill-labels.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
@@ -10,46 +12,78 @@ interface Options {
   setStatus(text: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
 }
-/** ADR 0090: inert files and conversion are inspectable before separate installation and scoped enablement. */
+/**
+ * ADR 0090: what was picked is disclosed before anything is kept; kept files and conversion are inspectable before separate
+ * installation and scoped enablement.
+ */
 export function mountImportedSkills({ root, api, setStatus, errorMessage }: Options): { load(): Promise<void> } {
   let projection: ImportedSkillsProjection = { skills: [], revision: null, nextBefore: null };
+  let acquisition: ImportedSkillAcquisitionProjection | null = null;
   let busy = false;
   let books: BookSummaryProjection[] = [];
   let booksAfter: BookSummaryCursor | null = null;
   let selectedBook = '';
-  const button = (text: string, action: string, run: () => Promise<void>): HTMLButtonElement => {
+  const button = (text: string, action: string, run: () => Promise<string | null | void>): HTMLButtonElement => {
     const node = el('button', text); node.type = 'button'; node.className = 'quiet'; node.dataset['skillAction'] = action;
     node.disabled = busy; node.addEventListener('click', () => void act(run)); return node;
   };
-  async function act(run: () => Promise<void>): Promise<void> {
+  /** `run` answers the status line to show, or `null` when nothing changed (a cancelled picker, a page read). */
+  async function act(run: () => Promise<string | null | void>): Promise<void> {
     if (busy) return;
     busy = true; render();
-    try { await run(); setStatus('外部 Skill 记录已更新'); }
+    try { const done = await run(); if (typeof done === 'string') setStatus(done); }
     catch (error) { setStatus(errorMessage(error, '无法处理这个 Skill。'), 'error'); }
-    finally { busy = false; if (root.isConnected) { render(); root.querySelector<HTMLElement>('[data-skill-detail] h4')?.focus(); } }
+    finally { busy = false; if (root.isConnected) { render(); root.querySelector<HTMLElement>('[data-skill-acquisition] h4, [data-skill-detail] h4')?.focus(); } }
   }
   async function inspect(revisionId: string | null, before: string | null = null): Promise<void> {
     const next = await api.inspectImportedSkills({ revisionId, before });
     if (!root.isConnected) return;
     projection = next;
   }
-  async function changed(revision: ImportedSkillRevisionProjection): Promise<void> {
+  async function changed(revision: ImportedSkillRevisionProjection): Promise<string> {
     await inspect(revision.revisionId);
+    return '外部 Skill 记录已更新';
+  }
+  async function disclose(kind: 'zip' | 'directory'): Promise<string | null> {
+    const read = await api.importSkillPackage({ kind });
+    if (read === null || !root.isConnected) return null;
+    acquisition = read.acquisition;
+    return '已读取所选 Skill，尚未保留';
   }
   async function readBooks(more = false): Promise<void> {
     const page = await api.listBooks({ after: more ? booksAfter : null });
     books = more ? [...books, ...page.items] : [...page.items]; booksAfter = page.nextCursor;
   }
+  /** REUSE-021: identity, kind, source revision, provenance, license and notices, digest and conversion — before keeping. */
+  function acquisitionPanel(read: ImportedSkillAcquisitionProjection): HTMLElement {
+    const panel = el('article'); panel.className = 'imported-skill-detail'; panel.dataset['skillAcquisition'] = read.acquisitionId;
+    const title = el('h4', `${read.name} · ${read.kind} · 来源 ${read.sourceRevision} · 尚未保留`); title.tabIndex = -1;
+    panel.append(title, el('p', `来源：${read.sourcePath}`), el('p', `许可：${read.license ?? '未提供'}`),
+      el('p', `声明文件：${read.notices.join('、') || '未提供'}`), el('p', `内容 SHA-256 ${read.contentSha256}`));
+    const files = el('ul');
+    for (const file of read.files) files.append(el('li', `${file.path} · ${file.bytes} 字节 · SHA-256 ${file.sha256}`));
+    panel.append(el('h5', '所选文件'), files, el('h5', '转换报告'));
+    for (const [key, label] of [['preserved', '保留'], ['mapped', '确定性映射'], ['reviewRequired', '需要审查'], ['unsupported', '不支持']] as const) {
+      panel.append(el('p', `${label}：${read.conversion[key].join('；') || '无'}`));
+    }
+    for (const line of importedSkillCeilingLines(read.ceiling)) panel.append(el('p', line));
+    for (const problem of read.problems) panel.append(el('p', problem));
+    panel.append(el('p', read.keptRevisionId !== null ? '这些内容已经保留过；再次保留不会新增记录。'
+      : read.keepable ? '读取不运行任何内容。保留后才会存为不可更改的来源快照与待验证的工作修订；之后仍要另行验证、安装与启用。'
+        : '所选内容里没有 SKILL.md，不是 Skill 包，不能保留。'));
+    const keep = button('保留此 Skill', 'keep', async () => {
+      const kept = await api.importSkillPackage({ keep: read.acquisitionId });
+      acquisition = null;
+      return kept?.revision == null ? null : changed(kept.revision);
+    });
+    keep.disabled ||= !read.keepable;
+    panel.append(keep, button('不保留', 'discard', async () => { acquisition = null; return '已放弃所选 Skill，没有保留任何内容'; }));
+    return panel;
+  }
   function render(): void {
     const heading = el('h3', IMPORTED_SKILLS_HEADING);
-    const importButton = button('导入 Skill…', 'import', async () => {
-      const revision = await api.importSkillPackage();
-      if (revision !== null) await changed(revision);
-    });
-    const directoryButton = button('从目录导入 Skill…', 'import-directory', async () => {
-      const revision = await api.importSkillPackage({ kind: 'directory' });
-      if (revision !== null) await changed(revision);
-    });
+    const importButton = button('导入 Skill…', 'import', () => disclose('zip'));
+    const directoryButton = button('从目录导入 Skill…', 'import-directory', () => disclose('directory'));
     const list = el('ul'); list.className = 'imported-skill-list';
     for (const skill of projection.skills) {
       const item = el('li'); item.dataset['skillId'] = skill.skillId;
@@ -60,6 +94,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     root.replaceChildren(heading, el('p', IMPORTED_SKILLS_NO_EXECUTOR), importButton, directoryButton, list);
     if (projection.skills.length === 0) root.append(el('p', '尚未导入外部 Skill。'));
     if (projection.nextBefore !== null) root.append(button('更多 Skill', 'more', () => inspect(null, projection.nextBefore)));
+    if (acquisition !== null) root.append(acquisitionPanel(acquisition));
     if (projection.revision === null) return;
     const revision = projection.revision;
     const detail = el('article'); detail.className = 'imported-skill-detail'; detail.dataset['skillDetail'] = revision.revisionId;

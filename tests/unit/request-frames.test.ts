@@ -1544,6 +1544,41 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 外部 Skill disclosure or keeping, its staged lifecycle, and 工序推荐 (Issue #66; ADR 0090)', () => {
+    const revisionId = randomUUID();
+    const inputs: ReadonlyArray<AcceptedInput> = [
+      { op: 'importSkillPackage', input: { path: '/synthetic/skill', keep: null } },
+      { op: 'importSkillPackage', input: { path: null, keep: randomUUID() } },
+      { op: 'validateImportedSkill', input: { revisionId } },
+      { op: 'installImportedSkill', input: { revisionId, previewDigest: 'a'.repeat(64) } },
+      { op: 'enableImportedSkill', input: { revisionId, bookId: randomUUID(), previewDigest: 'b'.repeat(64) } },
+      { op: 'inspectImportedSkills', input: { revisionId: null, before: null } },
+      { op: 'inspectImportedSkills', input: { revisionId, before: randomUUID() } },
+      { op: 'recommendProcedures', input: { bookId: randomUUID(), goal: '体例审阅', taskKind: 'review-run', scope: 'whole', categoryIds: ['style-and-format'] } },
+      { op: 'recommendProcedures', input: { bookId: randomUUID(), goal: 'a'.repeat(64), taskKind: 'unclassified', scope: 'selection', categoryIds: [] } },
+    ];
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['importSkillPackage', { path: '/synthetic/skill', keep: randomUUID() }],
+      ['importSkillPackage', { path: null, keep: null }],
+      ['importSkillPackage', { path: '', keep: null }],
+      ['importSkillPackage', { path: null, keep: 'not-an-acquisition' }],
+      ['importSkillPackage', { path: '/synthetic/skill' }],
+      ['validateImportedSkill', { revisionId: 'r' }],
+      ['installImportedSkill', { revisionId, previewDigest: 'A'.repeat(64) }],
+      ['enableImportedSkill', { revisionId, previewDigest: 'a'.repeat(64) }],
+      ['inspectImportedSkills', { revisionId: null }],
+      ['recommendProcedures', { bookId: randomUUID(), goal: '', taskKind: 'review-run', scope: 'whole', categoryIds: [] }],
+      ['recommendProcedures', { bookId: randomUUID(), goal: 'x', taskKind: 'review', scope: 'whole', categoryIds: [] }],
+      ['recommendProcedures', { bookId: randomUUID(), goal: 'x', taskKind: 'review-run', scope: 'whole-book', categoryIds: [] }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 学习回溯: filters before the page, one lineage, and 停止今后使用 on exact versions (Issue #62, S27a)', () => {
     const bookId = randomUUID();
     const item: InputOf<'previewLearningRemediation'>['items'][number] = {

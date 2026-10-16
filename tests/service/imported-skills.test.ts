@@ -37,7 +37,14 @@ describe('imported Skill store boundary', () => {
         expect(after.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all().filter((row) => !added.has(String(row.name)))).toEqual(before!);
         for (const table of Object.keys(IMPORTED_SKILL_SCHEMA_SQL)) expect(MERGE_TABLE_POLICY[table as keyof typeof MERGE_TABLE_POLICY]).toBe('house');
       } finally { after.close(); }
-      const imported = await store.importSkillPackage(resolve('tests/fixtures/skills/plain'));
+      // Acquisition discloses and keeps nothing; keeping is the editor's separate act (ADR 0090 §2).
+      const disclosed = await store.importSkillPackage({ path: resolve('tests/fixtures/skills/plain'), keep: null });
+      expect(disclosed.revision).toBeNull();
+      expect(store.inspectImportedSkills(null, null).skills).toEqual([]);
+      const keptPackage = await store.importSkillPackage({ path: null, keep: disclosed.acquisition.acquisitionId });
+      await expect(store.importSkillPackage({ path: null, keep: disclosed.acquisition.acquisitionId })).rejects.toMatchObject({ code: 'SKILL_ACQUISITION_GONE' });
+      const imported = keptPackage.revision!;
+      expect(imported.snapshotSha256).toBe(disclosed.acquisition.contentSha256);
       const validated = store.validateImportedSkill(imported.revisionId);
       const installed = store.installImportedSkill(validated.revisionId, validated.previewDigest);
       const enabled = store.enableImportedSkill(installed.revisionId, bookId, installed.previewDigest);
@@ -56,5 +63,23 @@ describe('imported Skill store boundary', () => {
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.inspectImportedSkills(enabled.revisionId, null).revision).toEqual(enabled);
     } finally { store.markCleanShutdown(); store.close(); }
+  });
+
+  it('refuses a revision-81 store without its four relations rather than giving them anew (Reviewer, #66)', async () => {
+    roots = await createServiceTestRoots('ai7-imported-skill-refusal-');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    store.markCleanShutdown(); store.close();
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const planted = new DatabaseSync(path);
+    try {
+      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(81);
+      for (const trigger of Object.keys(IMPORTED_SKILL_TRIGGER_SQL)) planted.exec(`DROP TRIGGER ${trigger}`);
+      for (const table of Object.keys(IMPORTED_SKILL_SCHEMA_SQL).reverse()) planted.exec(`DROP TABLE ${table}`);
+    } finally { planted.close(); }
+    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
+    const after = new DatabaseSync(path, { readOnly: true });
+    try {
+      expect(after.prepare("SELECT name FROM sqlite_schema WHERE name LIKE 'imported_skill%'").all()).toEqual([]);
+    } finally { after.close(); }
   });
 });

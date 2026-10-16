@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { IMPORTED_SKILL_SCHEMA_VERSION } from './task-authorization.js';
 
 /** ADR 0090: sibling ledgers; the sole native_artifact_installations carrier CHECK never changes. */
 export const IMPORTED_SKILL_SCHEMA_SQL = {
@@ -30,7 +31,7 @@ export const IMPORTED_SKILL_SCHEMA_SQL = {
   sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
   CHECK((ordinal = 1) = (previous_revision_id IS NULL)),
   UNIQUE(skill_id, ordinal),
-  FOREIGN KEY(snapshot_id) REFERENCES imported_skill_snapshots(snapshot_id)
+  FOREIGN KEY(snapshot_id, skill_id) REFERENCES imported_skill_snapshots(snapshot_id, skill_id)
 ) STRICT`,
   imported_skill_states: `CREATE TABLE imported_skill_states (
   revision_id TEXT NOT NULL REFERENCES imported_skill_revisions(revision_id),
@@ -63,7 +64,9 @@ export const IMPORTED_SKILL_FOREIGN_KEYS = {
   imported_skill_revisions: [
     'skill_id>imported_skills.skill_id:NO ACTION/NO ACTION/NONE',
     'previous_revision_id>imported_skill_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    // A revision names a snapshot of its own Skill only: the pair is one reference.
     'snapshot_id>imported_skill_snapshots.snapshot_id:NO ACTION/NO ACTION/NONE',
+    'skill_id>imported_skill_snapshots.skill_id:NO ACTION/NO ACTION/NONE',
   ],
   imported_skill_states: [
     'revision_id>imported_skill_revisions.revision_id:NO ACTION/NO ACTION/NONE',
@@ -71,8 +74,13 @@ export const IMPORTED_SKILL_FOREIGN_KEYS = {
   ],
 };
 
-export function initializeImportedSkillSchema(db: DatabaseSync): void {
-  if (Object.keys(IMPORTED_SKILL_SCHEMA_SQL).some((name) => db.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(name) !== undefined)) return;
+/**
+ * Revision 81 adds the four relations to an earlier store. A store already at 81 or later is never given them anew: one that
+ * lacks them is refused by the exact schema check, as every revision's missing relations are.
+ */
+export function initializeImportedSkillSchema(db: DatabaseSync, version: number): void {
+  if (version >= IMPORTED_SKILL_SCHEMA_VERSION ||
+    Object.keys(IMPORTED_SKILL_SCHEMA_SQL).some((name) => db.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(name) !== undefined)) return;
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const sql of Object.values(IMPORTED_SKILL_SCHEMA_SQL)) db.exec(sql);

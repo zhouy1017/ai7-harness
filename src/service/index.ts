@@ -714,8 +714,9 @@ async function dispatch(
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): deterministic, provider-free; running one is an ordinary Review Run.
     case 'inspectCapturedProcedures':
       return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedures() };
+    // 外部 Skill and 工序推荐 (Issue #66; ADR 0045, ADR 0090): inert records and a deterministic read; nothing here runs a Skill.
     case 'importSkillPackage':
-      return { id: request.id, ok: true, op: request.op, result: await store.importSkillPackage(request.input.path) };
+      return { id: request.id, ok: true, op: request.op, result: await store.importSkillPackage(request.input) };
     case 'validateImportedSkill':
       return { id: request.id, ok: true, op: request.op, result: store.validateImportedSkill(request.input.revisionId) };
     case 'installImportedSkill':

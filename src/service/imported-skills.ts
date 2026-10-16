@@ -4,12 +4,13 @@ import { basename, extname, isAbsolute, join, relative, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { unzipSync } from 'fflate';
 import type {
-  ImportedSkillCeiling, ImportedSkillFile, ImportedSkillRevisionProjection, ImportedSkillsProjection,
+  ImportedSkillAcquisitionProjection, ImportedSkillCeiling, ImportedSkillFile, ImportedSkillRevisionProjection, ImportedSkillsProjection,
   ImportedSkillState, SkillConversionReport,
 } from '../shared/protocol.js';
-import { canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex, UUID_PATTERN } from './analysis/canonical.js';
+import { canonicalJson, canonicalRecord, hasExactKeys, isRecord, parseCanonicalJson, sha256Hex, UUID_PATTERN } from './analysis/canonical.js';
 
 /** ADR 0045 / ADR 0090: acquisition, conversion, validation, installation and scoped enablement are separate inert stages.
+ * Acquisition discloses before anything is kept; keeping is the editor's separate act (ADR 0090 §2, REUSE-021).
  * This module owns all snapshot/revision/state writes so #89 can extend their provenance without another write path.
  * No imported text is evaluated, dispatched, interpolated into a prompt, or treated as authority.
  */
@@ -130,13 +131,17 @@ interface Conversion {
   readonly ceiling: ImportedSkillCeiling;
   readonly problems: readonly string[];
 }
+function isSkillFile(file: Pick<ImportedSkillFile, 'path'>): boolean {
+  return file.path === 'SKILL.md' || file.path.endsWith('/SKILL.md');
+}
+
 /** Deliberately bounded front-matter subset: scalar fields, scalar lists and description blocks; uncertain YAML is rejected. */
 export function convertSkillFiles(files: readonly ImportedSkillFile[], digest: string, fallback: string): Conversion {
   const report: { preserved: string[]; mapped: string[]; reviewRequired: string[]; unsupported: string[] } = {
     preserved: files.map((file) => file.path), mapped: [], reviewRequired: [], unsupported: [],
   };
   const problems: string[] = [];
-  const skillFiles = files.filter((file) => file.path === 'SKILL.md' || file.path.endsWith('/SKILL.md'));
+  const skillFiles = files.filter(isSkillFile);
   const fields = new Map<string, string>();
   const skillFile = skillFiles.length === 1 ? skillFiles[0] : undefined;
   if (skillFile === undefined) problems.push('包中必须有唯一的 SKILL.md。');
@@ -223,42 +228,125 @@ function filesOf(value: unknown, expected: string): ImportedSkillFile[] {
   requireSkill(bytes <= MAX_SKILL_PACKAGE_BYTES && sha256Hex(canonicalJson(value)) === expected, 'IMPORTED_SKILL_RECORD_INVALID', 'Skill 内容摘要不一致。');
   return value as ImportedSkillFile[];
 }
+function textsOf(value: unknown): string[] {
+  requireSkill(Array.isArray(value) && value.every((item) => typeof item === 'string'), 'IMPORTED_SKILL_RECORD_INVALID', 'Skill 记录无效。');
+  return value as string[];
+}
+/** The conversion report and ceiling as recorded when kept: history reads as it was written, whatever a later converter says. */
+function conversionOf(value: unknown): SkillConversionReport {
+  requireSkill(isRecord(value) && hasExactKeys(value, ['preserved', 'mapped', 'reviewRequired', 'unsupported']), 'IMPORTED_SKILL_RECORD_INVALID', 'Skill 转换报告记录无效。');
+  return { preserved: textsOf(value.preserved), mapped: textsOf(value.mapped), reviewRequired: textsOf(value.reviewRequired), unsupported: textsOf(value.unsupported) };
+}
+function ceilingOf(value: unknown): ImportedSkillCeiling {
+  requireSkill(isRecord(value) && hasExactKeys(value, ['requestedCapabilities', 'executor', 'runSourceScope', 'provider', 'effect', 'credentials', 'network', 'backgroundAnalysis', 'apply']) &&
+    value.executor === false && value.runSourceScope === 'none' && value.provider === false && value.effect === false && value.credentials === false &&
+    value.network === false && value.backgroundAnalysis === false && value.apply === false, 'IMPORTED_SKILL_RECORD_INVALID', 'Skill 权限上限记录无效。');
+  return {
+    requestedCapabilities: textsOf(value.requestedCapabilities), executor: false, runSourceScope: 'none', provider: false, effect: false,
+    credentials: false, network: false, backgroundAnalysis: false, apply: false,
+  };
+}
+
+/** One local package read and converted in memory, before anything of it is kept. */
+export interface AcquiredSkillPackage {
+  readonly sourcePath: string;
+  readonly files: readonly ImportedSkillFile[];
+  readonly contentSha256: string;
+  readonly conversion: Conversion;
+}
+export async function acquireSkillPackage(path: string): Promise<AcquiredSkillPackage> {
+  const source = await readSkillPackage(path);
+  const contentSha256 = sha256Hex(canonicalJson(source.files));
+  return { ...source, contentSha256, conversion: convertSkillFiles(source.files, contentSha256, basename(source.sourcePath)) };
+}
+
+/** Acquisitions disclosed and not yet kept (ADR 0090 §2): a few, in this process's memory only, never written. */
+export class SkillAcquisitions {
+  readonly #staged = new Map<string, AcquiredSkillPackage>();
+  stage(acquired: AcquiredSkillPackage): string {
+    const acquisitionId = randomUUID();
+    while (this.#staged.size >= 4) this.#staged.delete(this.#staged.keys().next().value!);
+    this.#staged.set(acquisitionId, acquired);
+    return acquisitionId;
+  }
+  read(acquisitionId: string): AcquiredSkillPackage {
+    const staged = typeof acquisitionId === 'string' && UUID_PATTERN.test(acquisitionId) ? this.#staged.get(acquisitionId) : undefined;
+    requireSkill(staged !== undefined, 'SKILL_ACQUISITION_GONE', '请重新选择要导入的 Skill。');
+    return staged;
+  }
+  release(acquisitionId: string): void { this.#staged.delete(acquisitionId); }
+}
+
+interface Placement {
+  readonly existing: Row | undefined;
+  readonly identity: Row | undefined;
+  readonly sourceKey: string;
+  readonly skillId: string | null;
+  readonly latest: Row | undefined;
+  readonly kept: string | null;
+}
 
 export class ImportedSkills {
   constructor(readonly db: DatabaseSync) {}
 
-  /** Acquisition produces immutable source + inert working revision only. A repeat with unchanged content is idempotent. */
-  async importPackage(path: string): Promise<ImportedSkillRevisionProjection> {
-    const source = await readSkillPackage(path);
-    const contentSha256 = sha256Hex(canonicalJson(source.files));
-    const conversion = convertSkillFiles(source.files, contentSha256, basename(source.sourcePath));
+  /**
+   * Where kept content goes: the Skill an identical snapshot already belongs to — exact content is one snapshot, of one Skill —
+   * else the Skill first kept from this source, else a new one; and the working revision already holding it, if any.
+   */
+  #placement(acquired: AcquiredSkillPackage): Placement {
+    const existing = this.db.prepare('SELECT * FROM imported_skill_snapshots WHERE content_sha256 = ?').get(acquired.contentSha256) as Row | undefined;
+    const sourceKey = sha256Hex(process.platform === 'win32' ? acquired.sourcePath.toLowerCase() : acquired.sourcePath);
+    const identity = this.db.prepare('SELECT * FROM imported_skills WHERE source_key = ?').get(sourceKey) as Row | undefined;
+    const skillId = existing !== undefined ? String(existing.skill_id) : identity !== undefined ? String(identity.skill_id) : null;
+    const latest = skillId === null ? undefined
+      : this.db.prepare('SELECT * FROM imported_skill_revisions WHERE skill_id = ? ORDER BY ordinal DESC LIMIT 1').get(skillId) as Row | undefined;
+    const kept = existing !== undefined && latest !== undefined && latest.snapshot_id === existing.snapshot_id && latest.working_sha256 === acquired.contentSha256
+      ? String(latest.revision_id) : null;
+    return { existing, identity, sourceKey, skillId, latest, kept };
+  }
+
+  /** What acquisition discloses (REUSE-021): identity, kind, source revision, provenance, license and notices, digest. A read. */
+  disclose(acquired: AcquiredSkillPackage, acquisitionId: string): ImportedSkillAcquisitionProjection {
+    const { conversion } = acquired;
+    return {
+      acquisitionId, name: conversion.name, sourceRevision: conversion.sourceRevision, kind: 'DSH Skill', sourcePath: acquired.sourcePath,
+      contentSha256: acquired.contentSha256, license: conversion.license, notices: conversion.notices,
+      files: acquired.files.map(({ path, bytes, sha256 }) => ({ path, bytes, sha256 })),
+      conversion: conversion.conversion, ceiling: conversion.ceiling, problems: conversion.problems,
+      keepable: acquired.files.some(isSkillFile), keptRevisionId: this.#placement(acquired).kept,
+    };
+  }
+
+  /** Keeping a disclosed package: immutable source + inert working revision only. Keeping unchanged content again is idempotent. */
+  keep(acquired: AcquiredSkillPackage): ImportedSkillRevisionProjection {
+    requireSkill(acquired.files.some(isSkillFile), 'SKILL_NOT_A_PACKAGE', '所选内容里没有 SKILL.md，不是 Skill 包；不会保留。');
     return this.#transaction(() => {
-      const existing = this.db.prepare('SELECT * FROM imported_skill_snapshots WHERE content_sha256 = ?').get(contentSha256) as Row | undefined;
-      const sourceKey = sha256Hex(process.platform === 'win32' ? source.sourcePath.toLowerCase() : source.sourcePath);
-      const identity = this.db.prepare('SELECT * FROM imported_skills WHERE source_key = ?').get(sourceKey) as Row | undefined;
+      const placed = this.#placement(acquired);
+      if (placed.identity !== undefined) recordOf(placed.identity);
+      if (placed.kept !== null) return this.revision(placed.kept);
       const now = new Date().toISOString();
-      const skillId = identity !== undefined ? String(identity.skill_id) : existing !== undefined ? String(existing.skill_id) : randomUUID();
-      if (identity !== undefined) recordOf(identity);
-      if (existing === undefined && identity === undefined) {
-        const record = canonicalRecord({ schema: 'ai7.imported-skill/1', skillId, sourceKey, createdAt: now });
-        this.db.prepare('INSERT INTO imported_skills VALUES (?, ?, ?, ?, ?)').run(skillId, sourceKey, now, record.json, record.digest);
+      const skillId = placed.skillId ?? randomUUID();
+      if (placed.skillId === null) {
+        const record = canonicalRecord({ schema: 'ai7.imported-skill/1', skillId, sourceKey: placed.sourceKey, createdAt: now });
+        this.db.prepare('INSERT INTO imported_skills VALUES (?, ?, ?, ?, ?)').run(skillId, placed.sourceKey, now, record.json, record.digest);
       }
-      const snapshotId = existing === undefined ? randomUUID() : String(existing.snapshot_id);
-      if (existing === undefined) {
-        const record = canonicalRecord({ schema: 'ai7.source-skill-snapshot/1', snapshotId, skillId, ...source, contentSha256, createdAt: now });
-        this.db.prepare('INSERT INTO imported_skill_snapshots VALUES (?, ?, ?, ?, ?, ?)').run(snapshotId, skillId, contentSha256, now, record.json, record.digest);
+      const snapshotId = placed.existing === undefined ? randomUUID() : String(placed.existing.snapshot_id);
+      if (placed.existing === undefined) {
+        const record = canonicalRecord({
+          schema: 'ai7.source-skill-snapshot/1', snapshotId, skillId, sourcePath: acquired.sourcePath, files: acquired.files,
+          contentSha256: acquired.contentSha256, createdAt: now,
+        });
+        this.db.prepare('INSERT INTO imported_skill_snapshots VALUES (?, ?, ?, ?, ?, ?)').run(snapshotId, skillId, acquired.contentSha256, now, record.json, record.digest);
       }
-      const latest = this.db.prepare('SELECT * FROM imported_skill_revisions WHERE skill_id = ? ORDER BY ordinal DESC LIMIT 1').get(skillId) as Row | undefined;
-      if (latest !== undefined && latest.snapshot_id === snapshotId && latest.working_sha256 === contentSha256) return this.revision(String(latest.revision_id));
       const revisionId = randomUUID();
-      const ordinal = latest === undefined ? 1 : Number(latest.ordinal) + 1;
-      const previousRevisionId = latest === undefined ? null : String(latest.revision_id);
+      const ordinal = placed.latest === undefined ? 1 : Number(placed.latest.ordinal) + 1;
+      const previousRevisionId = placed.latest === undefined ? null : String(placed.latest.revision_id);
       const record = canonicalRecord({
         schema: 'ai7.imported-skill-working-revision/1', revisionId, skillId, snapshotId, ordinal, previousRevisionId,
-        files: source.files, workingSha256: contentSha256, ...conversion, createdAt: now,
+        files: acquired.files, workingSha256: acquired.contentSha256, ...acquired.conversion, createdAt: now,
       });
       this.db.prepare('INSERT INTO imported_skill_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(revisionId, skillId, snapshotId, ordinal, previousRevisionId, contentSha256, now, record.json, record.digest);
+        .run(revisionId, skillId, snapshotId, ordinal, previousRevisionId, acquired.contentSha256, now, record.json, record.digest);
       return this.revision(revisionId);
     });
   }
@@ -281,15 +369,20 @@ export class ImportedSkills {
     const row = this.db.prepare('SELECT * FROM imported_skill_revisions WHERE revision_id = ?').get(revisionId) as Row | undefined;
     requireSkill(row !== undefined, 'IMPORTED_SKILL_NOT_FOUND', '这一版 Skill 不存在。');
     const record = recordOf(row);
-    requireSkill(record.schema === 'ai7.imported-skill-working-revision/1' && record.revisionId === revisionId && record.skillId === row.skill_id && record.snapshotId === row.snapshot_id && record.ordinal === row.ordinal && record.workingSha256 === row.working_sha256, 'IMPORTED_SKILL_RECORD_INVALID', 'Skill 修订记录不一致。');
+    requireSkill(record.schema === 'ai7.imported-skill-working-revision/1' && record.revisionId === revisionId && record.skillId === row.skill_id &&
+      record.snapshotId === row.snapshot_id && record.ordinal === row.ordinal && record.workingSha256 === row.working_sha256 &&
+      typeof record.name === 'string' && typeof record.sourceRevision === 'string' && (record.license === null || typeof record.license === 'string'),
+    'IMPORTED_SKILL_RECORD_INVALID', 'Skill 修订记录不一致。');
     const source = this.db.prepare('SELECT * FROM imported_skill_snapshots WHERE snapshot_id = ?').get(String(row.snapshot_id)) as Row | undefined;
-    requireSkill(source !== undefined, 'IMPORTED_SKILL_RECORD_INVALID', 'Skill 来源快照缺失。');
+    requireSkill(source !== undefined && source.skill_id === row.skill_id, 'IMPORTED_SKILL_RECORD_INVALID', 'Skill 来源快照缺失。');
     const snapshot = recordOf(source);
     requireSkill(snapshot.schema === 'ai7.source-skill-snapshot/1' && snapshot.snapshotId === source.snapshot_id && snapshot.skillId === source.skill_id && snapshot.contentSha256 === source.content_sha256 && typeof snapshot.sourcePath === 'string', 'IMPORTED_SKILL_RECORD_INVALID', 'Skill 快照记录不一致。');
     const files = filesOf(snapshot.files, String(source.content_sha256));
     const workingFiles = filesOf(record.files, String(row.working_sha256));
-    const converted = convertSkillFiles(workingFiles, String(row.working_sha256), basename(snapshot.sourcePath));
-    requireSkill(canonicalJson(record.conversion) === canonicalJson(converted.conversion) && canonicalJson(record.ceiling) === canonicalJson(converted.ceiling), 'IMPORTED_SKILL_RECORD_INVALID', 'Skill 转换或权限上限记录不一致。');
+    // The report and ceiling read as recorded when kept, never as a later converter would say them.
+    const conversion = conversionOf(record.conversion);
+    const ceiling = ceilingOf(record.ceiling);
+    const notices = textsOf(record.notices);
     const states = this.db.prepare('SELECT * FROM imported_skill_states WHERE revision_id = ? ORDER BY sequence').all(revisionId) as Row[];
     let state: ImportedSkillState = 'pending-validation';
     let reasons: readonly string[] = [];
@@ -302,24 +395,25 @@ export class ImportedSkills {
       if (stateRow.book_id !== null) enabledBooks.push(String(stateRow.book_id));
     }
     const projection = {
-      skillId: String(row.skill_id), revisionId, ordinal: Number(row.ordinal), name: String(record.name),
-      sourceRevision: String(record.sourceRevision), kind: 'DSH Skill' as const, state, stateLabel: LABELS[state],
+      skillId: String(row.skill_id), revisionId, ordinal: Number(row.ordinal), name: record.name,
+      sourceRevision: record.sourceRevision, kind: 'DSH Skill' as const, state, stateLabel: LABELS[state],
       snapshotId: String(row.snapshot_id), previousRevisionId: row.previous_revision_id === null ? null : String(row.previous_revision_id),
       sourcePath: snapshot.sourcePath, snapshotSha256: String(source.content_sha256), workingSha256: String(row.working_sha256),
-      files, workingFiles, license: converted.license, notices: converted.notices, conversion: converted.conversion,
-      reasons, enabledBooks, ceiling: converted.ceiling, createdAt: String(row.created_at),
+      files, workingFiles, license: record.license, notices, conversion,
+      reasons, enabledBooks, ceiling, createdAt: String(row.created_at),
     };
-    return { ...projection, previewDigest: sha256Hex(canonicalJson({ revisionId, sha256: row.sha256, state, enabledBooks, ceiling: converted.ceiling, conversion: converted.conversion })) };
+    return { ...projection, previewDigest: sha256Hex(canonicalJson({ revisionId, sha256: row.sha256, state, enabledBooks, ceiling, conversion })) };
   }
 
   validate(revisionId: string): ImportedSkillRevisionProjection {
     return this.#transaction(() => {
       const revision = this.revision(revisionId);
       if (revision.state !== 'pending-validation') return revision;
+      // Validation is its own provider-free stage: today's validator over the exact working files, never their execution.
       const converted = convertSkillFiles(revision.workingFiles, revision.workingSha256, revision.name);
       const reasons = [...converted.problems, ...converted.conversion.unsupported, ...converted.conversion.reviewRequired];
       const state = converted.problems.length > 0 ? 'rejected' : converted.conversion.unsupported.length + converted.conversion.reviewRequired.length > 0 ? 'restricted' : 'validated';
-      this.appendState(revisionId, state, null, reasons);
+      this.appendState(revisionId, state, null, reasons, null);
       return this.revision(revisionId);
     });
   }
@@ -328,7 +422,7 @@ export class ImportedSkills {
     return this.#transaction(() => {
       const revision = this.#confirmed(revisionId, previewDigest);
       requireSkill(revision.state === 'validated', 'IMPORTED_SKILL_NOT_VALIDATED', '先验证通过，才能另行安装；受限内容不能安装。');
-      this.appendState(revisionId, 'installed-disabled', null, []);
+      this.appendState(revisionId, 'installed-disabled', null, [], revision);
       return this.revision(revisionId);
     });
   }
@@ -338,7 +432,7 @@ export class ImportedSkills {
       requireSkill(typeof bookId === 'string' && UUID_PATTERN.test(bookId) && this.db.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_INVALID', '请选择启用的图书。');
       const revision = this.#confirmed(revisionId, previewDigest);
       requireSkill(revision.state === 'installed-disabled' || revision.state === 'enabled', 'IMPORTED_SKILL_NOT_INSTALLED', '先安装，再另行为图书启用。');
-      if (!revision.enabledBooks.includes(bookId)) this.appendState(revisionId, 'enabled', bookId, []);
+      if (!revision.enabledBooks.includes(bookId)) this.appendState(revisionId, 'enabled', bookId, [], revision);
       return this.revision(revisionId);
     });
   }
@@ -349,11 +443,18 @@ export class ImportedSkills {
     return revision;
   }
 
-  /** The sole append path for this lifecycle; importer/validator never call installation or enablement. */
-  private appendState(revisionId: string, state: Exclude<ImportedSkillState, 'pending-validation'>, bookId: string | null, reasons: readonly string[]): void {
+  /**
+   * The sole append path for this lifecycle; importer/validator never call installation or enablement. An installation or an
+   * enablement records the preview the editor confirmed and the authority ceiling it showed (REUSE-027).
+   */
+  private appendState(revisionId: string, state: Exclude<ImportedSkillState, 'pending-validation'>, bookId: string | null, reasons: readonly string[],
+    confirmed: Pick<ImportedSkillRevisionProjection, 'previewDigest' | 'ceiling'> | null): void {
     const sequence = Number(this.db.prepare('SELECT coalesce(max(sequence), 0) + 1 AS n FROM imported_skill_states WHERE revision_id = ?').get(revisionId)?.n);
     const recordedAt = new Date().toISOString();
-    const record = canonicalRecord({ schema: 'ai7.imported-skill-state/1', revisionId, sequence, state, bookId, reasons, actor: '本机编辑', recordedAt });
+    const record = canonicalRecord({
+      schema: 'ai7.imported-skill-state/1', revisionId, sequence, state, bookId, reasons, actor: '本机编辑', recordedAt,
+      ...(confirmed === null ? {} : { confirmedPreviewDigest: confirmed.previewDigest, ceiling: confirmed.ceiling }),
+    });
     this.db.prepare('INSERT INTO imported_skill_states VALUES (?, ?, ?, ?, ?, ?, ?)').run(revisionId, sequence, state, bookId, recordedAt, record.json, record.digest);
   }
 

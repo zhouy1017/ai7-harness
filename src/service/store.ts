@@ -1,6 +1,6 @@
-import { ImportedSkills, ImportedSkillError } from './imported-skills.js';
+import { acquireSkillPackage, ImportedSkills, ImportedSkillError, SkillAcquisitions, type AcquiredSkillPackage } from './imported-skills.js';
 import { recommendProcedures, type RecommendationReading } from './procedure-recommendation.js';
-import type { ImportedSkillRevisionProjection, ImportedSkillsProjection, ProcedureRecommendationInput, ProcedureRecommendationProjection } from '../shared/protocol.js';
+import type { ImportedSkillImportProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection, ProcedureRecommendationInput, ProcedureRecommendationProjection } from '../shared/protocol.js';
 import { initializeImportedSkillSchema } from './imported-skill-schema.js';
 import { HOUSE_REVIEW_PREFERENCE_CATEGORY } from './launch-policy.js';
 import { HousePreferenceInfluence, HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, withdrawalOf, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
@@ -4609,6 +4609,8 @@ export class EditorialStore {
   #writingTasks!: WritingTasks;
   #readersReports!: ReadersReports;
   #importedExemplars!: ImportedExemplars;
+  /** 导入 Skill…'s disclosed packages not yet kept (ADR 0090 §2): memory only. */
+  readonly #skillAcquisitions = new SkillAcquisitions();
   /** 按我的评分重写评语 (Issue #429, S81b2): one ledger per frozen rewrite contract, made when first asked for; bounded. */
   readonly #evaluationRewriteLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The ledger each rewrite preparation in flight belongs to, by its work. */
@@ -5105,7 +5107,8 @@ export class EditorialStore {
       // Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts; `initializeTaskAuthorizationSchema` rebuilds the Task
       // Intents for the drafts' sentences and stamps the version.
       initializeTaskIntentDraftSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      initializeImportedSkillSchema(authority);
+      // Revision 81 (Issue #66; ADR 0090): the inert imported-Skill ledgers beside the native artifact's.
+      initializeImportedSkillSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -8771,13 +8774,32 @@ export class EditorialStore {
     });
   }
 
-  async importSkillPackage(path: string): Promise<ImportedSkillRevisionProjection> {
+  /**
+   * 导入 Skill… (ADR 0090 §2; REUSE-021, REUSE-022): acquisition reads the picked package into memory and discloses it, keeping
+   * nothing; `keep` then keeps exactly those bytes — the source snapshot and an inert working revision — and nothing more.
+   */
+  async importSkillPackage(input: { path: string | null; keep: string | null }): Promise<ImportedSkillImportProjection> {
     this.#assertAvailable();
-    try { return await new ImportedSkills(this.#authority).importPackage(path); }
+    const { keep } = input;
+    if (keep !== null) {
+      return this.#procedureCall(() => {
+        const acquired = this.#skillAcquisitions.read(keep);
+        const skills = new ImportedSkills(this.#authority);
+        const revision = skills.keep(acquired);
+        this.#skillAcquisitions.release(keep);
+        return { acquisition: skills.disclose(acquired, keep), revision };
+      });
+    }
+    let acquired: AcquiredSkillPackage;
+    try { acquired = await acquireSkillPackage(input.path ?? ''); }
     catch (error) {
       if (error instanceof ImportedSkillError) throw new StoreError(error.code, error.message);
       throw error;
     }
+    return this.#procedureCall(() => {
+      const acquisition = new ImportedSkills(this.#authority).disclose(acquired, this.#skillAcquisitions.stage(acquired));
+      return { acquisition, revision: null };
+    });
   }
 
   inspectImportedSkills(revisionId: string | null, before: string | null): ImportedSkillsProjection {
@@ -9223,7 +9245,7 @@ export class EditorialStore {
    * 按已保存的工序 on one Book's 新建审阅 (Issue #66, plan slice S31b; REUSE-046, REUSE-053, REUSE-054): every enabled Captured
    * Procedure of the house, each with the one version a new use takes — its latest eligible — and how many of that version's
    * steps this Book can take now, the Series steps chosen apart among them, and why each other is left out. Deterministic and
-   * provider-free, and a read: no procedure is recommended (ADR 0087 §4) and none is ruled out — a mismatch is said, and the
+   * provider-free, and a read: it recommends nothing itself — 工序推荐 reads it (ADR 0090 §1) — and rules none out: a mismatch is said, and the
    * editor may still choose it by hand. With `scope: 'selection'` (Issue #423, S77 deferred item a) each applies to a 当前选区 of
    * the Book instead of its own slot, for the selection menu's list of the house's procedures.
    */

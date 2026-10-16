@@ -289,6 +289,7 @@ const api: RendererApi = Object.freeze({
   inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
   // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087).
   inspectCapturedProcedures: () => invoke<ServiceOperationMap['inspectCapturedProcedures']['output']>(IPC_CHANNELS.inspectCapturedProcedures),
+  // 外部 Skill and 工序推荐 (Issue #66; ADR 0090): the picker opens in main; nothing here names a path.
   importSkillPackage: (input?: Parameters<RendererApi['importSkillPackage']>[0]) => invoke<Awaited<ReturnType<RendererApi['importSkillPackage']>>>(IPC_CHANNELS.importSkillPackage, input),
   validateImportedSkill: (input: Parameters<RendererApi['validateImportedSkill']>[0]) => invoke<ServiceOperationMap['validateImportedSkill']['output']>(IPC_CHANNELS.validateImportedSkill, input),
   installImportedSkill: (input: Parameters<RendererApi['installImportedSkill']>[0]) => invoke<ServiceOperationMap['installImportedSkill']['output']>(IPC_CHANNELS.installImportedSkill, input),

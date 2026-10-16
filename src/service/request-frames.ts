@@ -1559,8 +1559,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'importSkillPackage': {
-      const input = requireInput(value.input, ['path'], tentativeId);
-      if (!isBoundedString(input.path, 2048) || input.path.length === 0) throw new ProtocolError(tentativeId);
+      // Exactly one: the picked path to disclose, or the acquisition the editor keeps.
+      const input = requireInput(value.input, ['path', 'keep'], tentativeId);
+      const disclose = input.keep === null && isBoundedString(input.path, 2048) && input.path.length > 0;
+      if (!disclose && !(input.path === null && validUuid(input.keep))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'validateImportedSkill': {

@@ -3186,24 +3186,28 @@ function registerRendererHandlers(
       return service.call('inspectCapturedProcedures', {});
     }),
   );
-  // ADR 0090: the path comes only from the platform picker; the renderer cannot select an arbitrary path.
+  // ADR 0090 §2: the path comes only from the platform picker; the renderer cannot select an arbitrary path. Picking discloses
+  // and keeps nothing; `keep` names the disclosed acquisition the service holds, never a path.
   ipcMain.handle(IPC_CHANNELS.importSkillPackage, (event, input: Parameters<RendererApi['importSkillPackage']>[0]) => envelope(async () => {
     const owned = requireSender(event);
-    requireDesktop(input === undefined || (input !== null && typeof input === 'object' && (input.kind === 'zip' || input.kind === 'directory')));
+    requireDesktop(input === undefined || (input !== null && typeof input === 'object' && (
+      ('kind' in input && (input.kind === 'zip' || input.kind === 'directory')) || ('keep' in input && typeof input.keep === 'string' && UUID_PATTERN.test(input.keep)))));
     return serializeEffect(async () => {
       requireAuthority();
+      if (input !== undefined && 'keep' in input) return service.call('importSkillPackage', { path: null, keep: input.keep });
+      const kind = input?.kind;
       let path = owned.injectedPickerPath;
       owned.injectedPickerPath = undefined;
       if (path === undefined) {
         const picked = await dialog.showOpenDialog(owned.window, {
-          title: '选择要导入的 Skill', buttonLabel: '导入 Skill', properties: input?.kind === 'directory' ? ['openDirectory'] : ['openFile'],
-          filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }],
+          title: '选择要导入的 Skill', buttonLabel: '查看 Skill', properties: kind === 'directory' ? ['openDirectory'] : ['openFile'],
+          ...(kind === 'directory' ? {} : { filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }] }),
         });
         if (picked.canceled || picked.filePaths.length !== 1) return null;
         path = picked.filePaths[0];
       }
       requireDesktop(path !== undefined && isAbsolute(path));
-      return service.call('importSkillPackage', { path });
+      return service.call('importSkillPackage', { path, keep: null });
     });
   }));
   ipcMain.handle(IPC_CHANNELS.inspectImportedSkills, (event, input: Parameters<RendererApi['inspectImportedSkills']>[0]) => envelope(async () => {

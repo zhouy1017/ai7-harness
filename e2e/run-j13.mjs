@@ -2207,7 +2207,11 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'skill-ready');
     await openProcedures(renderer, 'skill-import');
     await clickSelector(renderer, '[data-skill-action="import"]', 'skill-pick-synthetic');
-    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='pending-validation'`, 'skill-acquired');
+    // ADR 0090 §2: acquisition discloses before it keeps — identity, source revision, license, digest — and nothing is kept yet.
+    await waitFor(renderer, `document.querySelector('[data-skill-acquisition]')?.textContent.includes('尚未保留')`, 'skill-disclosed');
+    await assertRenderer(renderer, `(async () => { const panel=document.querySelector('[data-skill-acquisition]'); const text=panel?.textContent??''; const kept=await window.ai7.inspectImportedSkills({revisionId:null,before:null}); return text.includes('synthetic-style-review') && text.includes('1.0.0') && text.includes('MIT') && /SHA-256 [0-9a-f]{64}/.test(text) && text.includes('Run 可读范围：无') && kept.skills.length===0 && !document.querySelector('[data-skill-detail]'); })()`, 'skill-disclosed-nothing-kept');
+    await clickSelector(renderer, '[data-skill-action="keep"]', 'skill-keep');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='pending-validation' && !document.querySelector('[data-skill-acquisition]')`, 'skill-acquired');
     await assertRenderer(renderer, `(() => { const detail=document.querySelector('[data-skill-detail]'); const text=detail?.textContent??''; return text.includes('synthetic-style-review') && text.includes('1.0.0') && text.includes('MIT') && text.includes('转换报告') && text.includes('来源快照') && text.includes('工作修订') && text.includes('Run 可读范围：无') && !detail.querySelector('[data-skill-action="install"], [data-skill-action="enable"]'); })()`, 'skill-identity-and-ceiling');
     const importedSkillId = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillDetail`);
     requireJourney(UUID_PATTERN.test(importedSkillId ?? ''), 'skill-exact-revision');
