@@ -878,6 +878,21 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // 来源与证据 (Issue #425, S70): the Book, the rowid cursor of the page, and the staleness threshold in days.
+    case 'inspectResearchEvidence': {
+      const input = requireInputWithOptional(value.input, ['bookId', 'after', 'staleAfterDays'], ['taskIntentId', 'reviewFindingId'], tentativeId);
+      if (!validUuid(input.bookId) || !(input.after === null || isSafeInteger(input.after, 1)) ||
+          !(input.taskIntentId === undefined || validUuid(input.taskIntentId)) ||
+          !(input.reviewFindingId === undefined || (input.taskIntentId !== undefined && typeof input.reviewFindingId === 'string' && /^rvf_[0-9a-f]{24}$/u.test(input.reviewFindingId))) ||
+          !(input.staleAfterDays === null || (isSafeInteger(input.staleAfterDays, 1) && Number(input.staleAfterDays) <= 3650))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 保存为来源材料 (Issue #425, S70): the Book, one retained source, and the title the editor gave it or none.
+    case 'saveEvidenceAsMaterial': {
+      const input = requireInput(value.input, ['bookId', 'evidenceId', 'title'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.evidenceId) || !(input.title === null || isBoundedString(input.title, 2_000))) throw new ProtocolError(tentativeId);
+      break;
+    }
     // ②C 评估 (Issue #429, S81a): the route's Book, and a version by its identity or the latest.
     case 'inspectEvaluation': {
       const input = requireInputWithOptional(value.input, ['bookId', 'recordId'], ['recordsBefore'], tentativeId);

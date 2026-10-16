@@ -3061,6 +3061,28 @@ async function main() {
     // both need review; the row offers only what changed (V2-UX-REV-007).
     await assertRenderer(renderer, `(() => { const row=(id)=>document.querySelector('table.review-coverage tbody tr[data-review-category="'+id+'"]'); return row('typos-and-usage')?.dataset.coverage==='needs-review' && row('style-and-format')?.dataset.coverage==='needs-review' && row('typos-and-usage').querySelector('[data-review-action="rereview-changed"]')?.textContent==='只审改动过的章'; })()`, 'review-coverage-needs-review');
 
+    // ---- 来源与证据 (Issue #425, plan slice S70; V2-UX-SRC-013, IA-012) ----
+    // Synchronized delta with Issue #425: 资料与记录 gains 来源与证据 between 分析 and 工作概览. This Book's Runs read on the
+    // deterministic route, which has no research path, so nothing was retained: the source view and the service's reading
+    // both say so, list no source and no researched range, and offer nothing to save. Retention itself — a citation 对应,
+    // 部分对应 or 未能对应, 来源仅片段, 可能已过期 and 保存为来源材料 — is proven over the real store, owner, harness and gate on a
+    // socket-free transport by tests/service/research-evidence-run.test.ts.
+    at('research-evidence-source-view');
+    await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll('[data-screen="book-review"] .workbench-actions button')).find((item)=>item.textContent==='打开稿件'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'sources-open-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'sources-manuscript');
+    await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-records-group'); const order=Array.from(group?.querySelectorAll('button') ?? []).map((item)=>item.textContent); const open=group?.querySelector('button[data-records-destination="sources"]'); if(JSON.stringify(order)!==JSON.stringify(['分析','来源与证据','返回图书工作概览'])||!(open instanceof HTMLButtonElement)||open.disabled)return false; open.click(); return true; })()`, 'sources-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-sources"] .research-evidence')?.dataset.evidenceCount==='0'`, 'sources-view');
+    const sources = await renderer.evaluate(`window.ai7.inspectResearchEvidence({ bookId: ${JSON.stringify(imported.bookId)} })`);
+    requireJourney(sources?.bookId === imported.bookId && sources.staleAfterDays === 90 && sources.records.length === 0 && sources.next === null &&
+      sources.units.length === 0 && sources.findings.length === 0 && sources.statement === '这本书还没有留存的外部来源：外部来源只在联网核查的运行中留存。',
+    'sources-provider-free-reading', sources);
+    await assertRenderer(renderer, `(() => { const view=document.querySelector('[data-screen="book-sources"]'); return view?.querySelector('.research-evidence-statement')?.textContent===${JSON.stringify(sources.statement)} && view.querySelectorAll('.research-evidence-card, [data-evidence-action="save-as-material"]').length===0 && JSON.stringify(Array.from(view.querySelectorAll('.workbench-actions button')).map((item)=>item.textContent))===JSON.stringify(['打开稿件','工作概览']); })()`, 'sources-nothing-to-save');
+    await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll('[data-screen="book-sources"] .workbench-actions button')).find((item)=>item.textContent==='打开稿件'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'sources-back-to-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'sources-back-manuscript');
+    await openReviewDestination(renderer, 'sources-back-to-review');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'sources-back-to-review-settled');
+    cancellation.throwIfRequested();
+
     at('review-return-to-analysis');
     await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll('[data-screen="book-review"] .workbench-actions button')).find((item)=>item.textContent==='打开稿件'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'review-open-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'review-manuscript');

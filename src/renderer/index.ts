@@ -84,6 +84,8 @@ import { mountBookPeople } from './book-people.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountEvaluation } from './evaluation.js';
+import { mountResearchEvidence } from './research-evidence.js';
+import { SOURCES_ENTRY_LABEL, SOURCES_LEDE, SOURCES_STATUS, SOURCES_TITLE } from './research-evidence-labels.js';
 import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
 import type { LearningMaterialTarget } from '../shared/protocol.js';
@@ -2615,6 +2617,57 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
     },
     (error: unknown) => {
       if (content.isConnected) setStatus(rendererErrorMessage(error, EVALUATION_STATUS.unavailable), 'error');
+    },
+  );
+}
+
+/**
+ * ② 资料与记录 › 来源与证据 (Issue #425, S70; IA-012, SRC-013): the Book's retained external sources, with the way back to the
+ * manuscript and to 工作概览 that every destination of the Book keeps. Read-only but for 保存为来源材料.
+ */
+function renderBookSources(bookId: string, bookTitle: string): void {
+  const content = panel();
+  content.classList.add('book-sources');
+  content.dataset['bookId'] = bookId;
+  const host = element('div', 'research-evidence-host');
+  content.append(
+    element('p', 'section-label', `资料与记录 · ${SOURCES_TITLE} · 《${bookTitle}》`),
+    element('h2', undefined, SOURCES_TITLE),
+    element('p', 'field-note', SOURCES_LEDE),
+    host,
+  );
+  const surface = mountResearchEvidence({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
+  const actions = element('div', 'button-row workbench-actions');
+  const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
+    openManuscript.disabled = true;
+    setStatus('正在打开稿件…', 'busy');
+    try {
+      await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
+    } catch (error) {
+      openManuscript.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
+    }
+  });
+  const openOverview = button(DELIVERABLES_DESTINATION_ACTIONS[1], 'secondary', async () => {
+    openOverview.disabled = true;
+    setStatus('正在打开图书工作概览…', 'busy');
+    try {
+      renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
+    } catch (error) {
+      openOverview.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开图书工作概览。'), 'error');
+    }
+  });
+  actions.append(openManuscript, openOverview);
+  content.append(actions);
+  replaceScreen('book-sources', content);
+  setStatus(SOURCES_STATUS.loading, 'busy');
+  void surface.load().then(
+    () => {
+      if (content.isConnected) setStatus(SOURCES_STATUS.opened);
+    },
+    (error: unknown) => {
+      if (content.isConnected) setStatus(rendererErrorMessage(error, SOURCES_STATUS.unavailable), 'error');
     },
   );
 }
@@ -7544,6 +7597,23 @@ function renderEditorWindow(
     }
   });
   openAnalysis.dataset['recordsDestination'] = 'analysis';
+  // 来源与证据 (Issue #425, S70; IA-012) leaves the manuscript as 分析 does: local edits settled and the position taken first.
+  const openSources = button(SOURCES_ENTRY_LABEL, 'secondary', async () => {
+    openSources.disabled = true;
+    setStatus(SOURCES_STATUS.leaving, 'busy');
+    try {
+      if (!(await settleLocalEdit())) {
+        openSources.disabled = false;
+        return;
+      }
+      await rememberEntryPosition();
+      renderBookSources(currentWindow.bookId, bookTitle);
+    } catch (error) {
+      openSources.disabled = false;
+      setStatus(rendererErrorMessage(error, SOURCES_STATUS.openFailed), 'error');
+    }
+  });
+  openSources.dataset['recordsDestination'] = 'sources';
   // Leaving for 审阅 is leaving the manuscript too: local edits are settled and the position is taken
   // first, exactly as for 分析. A Mark Card's 查看任务 leaves the same way, for its Review Run and finding.
   const leaveForReview = async (focus: ReviewFocus | null): Promise<boolean> => {
@@ -7627,7 +7697,7 @@ function renderEditorWindow(
   // the group names where it leads without renaming what it does.
   const recordsGroup = element('nav', 'book-records-group');
   recordsGroup.setAttribute('aria-label', '资料与记录');
-  recordsGroup.append(element('span', 'section-label', '资料与记录'), ...(isDocument ? [] : [openAnalysis]), backToOverview);
+  recordsGroup.append(element('span', 'section-label', '资料与记录'), ...(isDocument ? [] : [openAnalysis, openSources]), backToOverview);
   // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物): 审阅 (editor-surfaces §4), 评估 (§5) and 交付物 (§9) — a document has
   // only its way back. They are destinations of the Book beside 资料与记录, never entries on the right edge, whose three
   // entries are 导航 / 分析 / 任务.

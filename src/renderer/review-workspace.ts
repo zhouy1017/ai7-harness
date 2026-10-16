@@ -20,9 +20,11 @@ import {
   type ReviewWorkspaceCategoryProjection,
   type ReviewWorkspaceProjection,
   type RendererApi,
+  type ResearchEvidenceBookProjection,
   type ServiceJobProjection,
   type WritingTaskMaterialProjection,
 } from '../shared/protocol.js';
+import { findingResearchLines, readFindingResearch } from './research-evidence-labels.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
 import { openProcedureCapture } from './procedure-capture.js';
@@ -198,7 +200,9 @@ type ReviewApi = Pick<
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
-  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun'
+  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' |
+  // 事实核查's retained sources on its finding cards (Issue #425, S70).
+  'inspectResearchEvidence'
 >;
 
 export interface MountReviewWorkspaceOptions {
@@ -415,11 +419,27 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   const filtersInput = (): Filters => ({ ...query.filters });
 
+  /**
+   * The Book's retained external sources, read beside a Run that has 事实核查 (Issue #425, S70): each of its finding cards
+   * lists the sources retained for it, or why there is none. A read that fails leaves the cards as they were.
+   */
+  let research = new Map<string, ResearchEvidenceBookProjection>();
+  const loadResearch = async (run: ReviewWorkspaceProjection['run']): Promise<void> => {
+    const next = new Map<string, ResearchEvidenceBookProjection>();
+    const task = run?.categories.find((category) => category.categoryId === 'factual-review')?.taskIntentId;
+    if (run !== null && task != null) {
+      for (const finding of run.findings.filter((entry) => entry.categoryId === 'factual-review')) {
+        try { next.set(finding.findingId, await readFindingResearch(api, bookId, task, finding.findingId)); } catch { /* The read failure grants no source. */ }
+      }
+    }
+    research = next;
+  };
+
   /** The workspace with as many pages of findings as the editor has asked to see, read one after another. */
   const load = async (): Promise<ReviewWorkspaceProjection> => {
     const first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput() });
     const run = first.run;
-    if (run === null || query.pages <= 1 || !run.findingsTruncated) return first;
+    if (run === null || query.pages <= 1 || !run.findingsTruncated) { await loadResearch(run); return first; }
     const findings = [...run.findings];
     let truncated: boolean = run.findingsTruncated;
     for (let page = 2; page <= query.pages && truncated && findings.length > 0; page += 1) {
@@ -428,7 +448,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       findings.push(...next.run.findings);
       truncated = next.run.findingsTruncated;
     }
-    return { ...first, run: { ...run, findings, findingsTruncated: truncated } };
+    const result = { ...first, run: { ...run, findings, findingsTruncated: truncated } };
+    await loadResearch(result.run);
+    return result;
   };
 
   const clearPoll = (): void => {
@@ -1034,6 +1056,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const lines = [finding.stateLine, finding.anchorState === 'anchor-changed' ? REVIEW_ANCHOR_CHANGED : null]
       .filter((line, index, all): line is string => line !== null && all.indexOf(line) === index);
     for (const line of lines) article.append(el('p', 'review-finding-state', line));
+    const retained = research.get(finding.findingId);
+    const sources = category.categoryId === 'factual-review' && retained !== undefined ? findingResearchLines(retained, finding, localInstantLabel) : null;
+    for (const line of sources ?? []) article.append(el('p', 'review-finding-source', line));
     if (finding.status !== 'pending') article.append(el('p', 'review-finding-status-detail', finding.statusDetail));
     if (finding.ignoreReason !== null) article.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
     if (finding.historicalMarker !== null) article.append(el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker));

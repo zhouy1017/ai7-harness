@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 138 as const;
+export const SERVICE_PROTOCOL_VERSION = 139 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -115,6 +115,8 @@ export const IPC_CHANNELS = {
   addLibraryMaterial: 'ai7:j15:add-library-material',
   decideLibraryMaterial: 'ai7:j15:decide-library-material',
   inspectLibraryMaterial: 'ai7:j15:inspect-library-material',
+  inspectResearchEvidence: 'ai7:j04:inspect-research-evidence',
+  saveEvidenceAsMaterial: 'ai7:j04:save-evidence-as-material',
   inspectEvaluationProfiles: 'ai7:j11:inspect-evaluation-profiles',
   saveEvaluationProfile: 'ai7:kb:save-evaluation-profile',
   inspectEvaluation: 'ai7:j11:inspect-evaluation',
@@ -4218,6 +4220,136 @@ export interface FactualReviewResearchProjection {
   statement: string;
 }
 
+// ---- External Evidence Retention (Issue #425, plan slice S70; V2-UX-SRC-013, EGR-003, KB-008/009, FACT-009) -------------
+
+/** How a retained source was captured: AI7's own fetch of the page, the excerpt the search returned, or nothing (EGR-003). */
+export type ResearchEvidenceCaptureState = 'full-text' | 'snippet-only' | 'failed';
+export const RESEARCH_EVIDENCE_CAPTURE_STATES: readonly ResearchEvidenceCaptureState[] = ['full-text', 'snippet-only', 'failed'];
+export const RESEARCH_EVIDENCE_CAPTURE_LABELS: Readonly<Record<ResearchEvidenceCaptureState, string>> = {
+  'full-text': '来源全文',
+  'snippet-only': '来源仅片段',
+  failed: '未能取回',
+};
+/** Whether the words a citation names are in the captured text: all of them, some of them, or none (sentence alignment). */
+export type ResearchEvidenceAlignment = 'aligned' | 'partial' | 'unaligned';
+export const RESEARCH_EVIDENCE_ALIGNMENTS: readonly ResearchEvidenceAlignment[] = ['aligned', 'partial', 'unaligned'];
+export const RESEARCH_EVIDENCE_ALIGNMENT_LABELS: Readonly<Record<ResearchEvidenceAlignment, string>> = {
+  aligned: '对应',
+  partial: '部分对应',
+  unaligned: '未能对应',
+};
+/** The age after which a retained source reads 可能已过期 unless the caller names another. */
+export const RESEARCH_EVIDENCE_STALE_AFTER_DAYS = 90;
+export const RESEARCH_EVIDENCE_STALE_LABEL = '可能已过期';
+/** The label every model-produced translation of a retained passage carries; it never replaces the original. */
+export const SOURCE_TRANSLATION_LABEL = '来源译文';
+/** Query class: the assertion category of the finding a source was retained for, or `uncited` for a page no finding named. */
+export type ResearchEvidenceQueryClass = FactualAssertionCategory | 'uncited';
+/** How a unit's search ended (ADR 0080 §7.4): its one search answered, cut short (联网核查未完成), or never made. */
+export type ResearchEvidenceUnitState = 'completed' | 'incomplete' | 'not-searched';
+export const RESEARCH_EVIDENCE_UNIT_LABELS: Readonly<Record<ResearchEvidenceUnitState, string>> = {
+  completed: '联网核查已完成',
+  incomplete: '联网核查未完成',
+  'not-searched': '本单元未联网检索',
+};
+/** A finding's research outcome: a retained source names it, its unit's search ended without one, or the search was cut short. */
+export type ResearchEvidenceFindingState = 'sourced' | 'unsupported' | 'incomplete';
+export const RESEARCH_EVIDENCE_FINDING_LABELS: Readonly<Record<ResearchEvidenceFindingState, string>> = {
+  sourced: '已留存外部来源',
+  unsupported: '没有找到可留存的外部来源',
+  incomplete: '联网核查未完成',
+};
+export const MAX_RESEARCH_EVIDENCE_PAGE = 32;
+
+/** One range of the captured text the citation's words occupy (UTF-16 offsets), and the 1-based sentence it starts in. */
+export interface ResearchEvidenceAnchor {
+  from: number;
+  to: number;
+  sentence: number;
+}
+
+/** 来源译文: produced only under a rule that admits it, labelled as machine translation and attributed to the original. */
+export type ResearchEvidenceTranslation =
+  | {
+    state: 'translated';
+    label: typeof SOURCE_TRANSLATION_LABEL;
+    machine: true;
+    targetLanguage: 'zh-Hans';
+    text: string;
+    route: string;
+    model: string;
+    attribution: { url: string; contentSha256: string; from: number; to: number };
+  }
+  | { state: 'refused'; reason: string };
+
+export interface ResearchEvidenceProjection {
+  evidenceId: string;
+  bookId: string;
+  runRecordId: string;
+  unitOrdinal: number;
+  /** The finding the source was retained for; `null` for a page the model fetched that no finding named. */
+  findingId: string | null;
+  backendId: string | null;
+  queryClass: ResearchEvidenceQueryClass;
+  url: string;
+  sourceTitle: string | null;
+  capturedAt: string;
+  captureState: ResearchEvidenceCaptureState;
+  captureLabel: string;
+  contentSha256: string | null;
+  pageSha256: string | null;
+  /** The Research Snapshot the capture was read from: the fetched page's, or the search answer's for an excerpt. */
+  snapshotDigest: string | null;
+  /** The words the alignment looked for: the model's quotation in its basis, else the finding's own quotation. */
+  claim: { text: string; origin: 'basis-quotation' | 'finding-quote' } | null;
+  alignment: ResearchEvidenceAlignment;
+  alignmentLabel: string;
+  anchors: ReadonlyArray<ResearchEvidenceAnchor>;
+  /** Bounded captured passage; when unaligned, the source's beginning. A translation shows its exact attributed original. */
+  passage: string | null;
+  translation: ResearchEvidenceTranslation | null;
+  staleness: { state: 'current' | 'possibly-stale'; reasons: ReadonlyArray<'age' | 'hash-changed'>; label: string | null };
+  savedMaterialId: string | null;
+  /** Why 保存为来源材料 is not offered; `null` when it is. */
+  saveRefusal: string | null;
+}
+
+export interface ResearchEvidenceUnitProjection {
+  retentionFailure?: 'capture-processing' | 'storage';
+  runRecordId: string;
+  unitOrdinal: number;
+  backendId: string | null;
+  state: ResearchEvidenceUnitState;
+  label: string;
+  searchCalls: number;
+  retentionFetches: number;
+  failedRetrievals: number;
+  unsupportedFindings: number;
+}
+
+export interface ResearchEvidenceFindingProjection {
+  findingId: string;
+  runRecordId: string;
+  unitOrdinal: number;
+  blockId: string;
+  quote: string;
+  state: ResearchEvidenceFindingState;
+  label: string;
+  sources: number;
+}
+
+/** 来源与证据 (②): a Book's retained external sources, newest first, a page at a time, with each research unit's outcome. */
+export interface ResearchEvidenceBookProjection {
+  bookId: string;
+  staleAfterDays: number;
+  records: ReadonlyArray<ResearchEvidenceProjection>;
+  /** The rowid cursor of the next page, or `null` when this page is the last. */
+  next: number | null;
+  units: ReadonlyArray<ResearchEvidenceUnitProjection>;
+  findings: ReadonlyArray<ResearchEvidenceFindingProjection>;
+  statement: string;
+}
+
 /**
  * The factual kind's Result Set Revision: the findings, the excluded appendix, the assertion counts,
  * and the research disclosure in place of the baseline kind's entities, events, relationships, and
@@ -7205,6 +7337,21 @@ export interface LibraryMaterialProjection {
   readonly decisions: ReadonlyArray<LibraryMaterialDecisionProjection>;
   /** Its Material Index, layer by layer, as it stands on this machine (Issue #428, S80a; KB-009). */
   readonly index: MaterialIndexProjection;
+  /** Where it came from when 保存为来源材料 made it of a retained external source (Issue #425, S70); absent otherwise. */
+  readonly provenance?: LibraryMaterialProvenance;
+}
+
+/** A 来源材料's provenance: the retained source, the Run that retained it and the capture's identities (Issue #425, S70). */
+export interface LibraryMaterialProvenance {
+  readonly kind: 'research-evidence';
+  readonly evidenceId: string;
+  readonly bookId: string;
+  readonly runRecordId: string;
+  readonly url: string;
+  readonly capturedAt: string;
+  readonly contentSha256: string;
+  readonly pageSha256: string | null;
+  readonly snapshotDigest: string | null;
 }
 
 // ---- ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) -------------------
@@ -11823,6 +11970,16 @@ export interface ServiceOperationMap {
     input: { materialId: string };
     output: LibraryMaterialProjection;
   };
+  /** 来源与证据 (Issue #425, S70): a page of a Book's retained external sources and its research units' outcomes; read-only. */
+  inspectResearchEvidence: {
+    input: { bookId: string; after: number | null; staleAfterDays: number | null; taskIntentId?: string; reviewFindingId?: string };
+    output: ResearchEvidenceBookProjection;
+  };
+  /** 保存为来源材料 (Issue #425, S70): one retained full-text source made a 资料库 item with its provenance; nothing is sent. */
+  saveEvidenceAsMaterial: {
+    input: { bookId: string; evidenceId: string; title: string | null };
+    output: { evidenceId: string; material: LibraryMaterialProjection };
+  };
   readLibraryDecisionReason: {
     input: { materialId: string; ordinal: number; offset: number };
     output: LibraryDecisionReasonPage;
@@ -12496,6 +12653,10 @@ export interface RendererApi {
   inspectLibraryMaterials(input?: { after: LibraryMaterialCursor | null }): Promise<LibraryMaterialsProjection>;
   /** One 资料库 item, by its identity. */
   inspectLibraryMaterial(input: { materialId: string }): Promise<LibraryMaterialProjection>;
+  /** 来源与证据: a page of the Book's retained external sources, newest first; read-only. */
+  inspectResearchEvidence(input: { bookId: string; after?: number | null; staleAfterDays?: number | null; taskIntentId?: string; reviewFindingId?: string }): Promise<ResearchEvidenceBookProjection>;
+  /** 保存为来源材料: the editor's explicit keep of one retained source as a 资料库 item; publishes and exports nothing. */
+  saveEvidenceAsMaterial(input: { bookId: string; evidenceId: string; title?: string | null }): Promise<ServiceOperationMap['saveEvidenceAsMaterial']['output']>;
   readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;
   /** 查看分段: one page of the item's segments, read-only. */
   inspectLibraryMaterialSegments(input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']): Promise<MaterialSegmentsPageProjection>;

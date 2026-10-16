@@ -1,4 +1,4 @@
-import { execPre74Fixture, expectedSchema74 } from '../support/pre74-schema.js';
+import { execPre74Fixture, expectedSchema75 } from '../support/pre74-schema.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -494,7 +494,7 @@ describe('书系知识 over the real store', () => {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       const after = schemaOf(database);
       // Revision 54's version ledger (Issue #433, S85a) returns with it, as the planted store lacked it too.
-      expect(after.filter((entry) => !/^(series_knowledge|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|dialogue_|series_retrieval_exclusions|readers_report_|captured_procedure|review_run_procedure_pins|developer_capability_proposal|evaluation_rewrite_|writing_|material_index_|analysis_outcome_resolutions)/u.test(entry.name))).toEqual(expectedSchema74(before!));
+      expect(after.filter((entry) => !/^(series_knowledge|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|dialogue_|series_retrieval_exclusions|readers_report_|captured_procedure|review_run_procedure_pins|developer_capability_proposal|evaluation_rewrite_|writing_|material_index_|analysis_outcome_resolutions)/u.test(entry.name))).toEqual(expectedSchema75(before!));
       expect(after.filter((entry) => TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(TABLES.slice().sort().map((table) => SERIES_KNOWLEDGE_SCHEMA_SQL[table as keyof typeof SERIES_KNOWLEDGE_SCHEMA_SQL]));
       expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_conflicts: 0, series_knowledge_promotions: 0 });
