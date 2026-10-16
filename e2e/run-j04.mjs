@@ -154,6 +154,8 @@ const RETRY_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 // every request the earlier stages froze and the review categories' requests over the manuscript as this
 // Journey leaves it — both of its edits in the first block.
 const REVIEW_FIXTURE_IDENTITY = 'sample1-review-authored';
+// Issue #901: contract /2 at 标准核查, layered on sample1-factual-authored; provider-free, nothing fetched.
+const FACTUAL_FIXTURE_IDENTITY = 'sample1-factual-verified';
 const RECORDED_FIXTURE_IDENTITY = 'sample1-recorded-v41-baseline';
 /** The reviewed recorded range recomputation of units 1 and 2 under the current contracts (Issue #826). */
 const RECORDED_RANGE_FIXTURE_IDENTITY = 'sample1-recorded-v41-range';
@@ -3098,6 +3100,120 @@ async function main() {
     // The old `/enrol/` guard's intent kept (#713 review, P3-9): this Book was never enrolled, and nothing was started by an Enrollment.
     await assertRenderer(renderer, `window.ai7.inspectBackgroundAnalysisEnrollment().then((enrollment) => enrollment.state === 'none' && enrollment.enrollment === null && enrollment.startedRunCount === 0 && enrollment.historyCount === 0)`, 'no-background-enrollment');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
+
+    // ---- 事实核查 at its Evidence Assurance Levels (Issue #901; FACT, EVID, EASSURE, FREV, CORR) ----
+    // Synchronized delta with Issue #901: a fresh, unedited sample1 Book on the provider-free `sample1-factual-verified` fixture,
+    // which answers contract /2 at 标准核查 and layers v1's own answers beneath it. The deterministic route fetches nothing, so
+    // every relation the fixture states stays 候选来源 · 尚未核对 and no result can be 证据支持 or 疑似错误 here; checked
+    // evidence, 严格核查's independence gate, the offline downgrade and Apply/reversal of a Correction Proposal are proven over
+    // the real store on a socket-free transport by tests/service/factual-verification.test.ts. A Book holds one 事实核查 Run until
+    // the factual update modes land (#905).
+    at('factual-level-plan');
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    modelAdapterIdentity = FACTUAL_FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'factual-launch-ready');
+    const factualBook = await importSample1(renderer, cancellation, true);
+    at('factual-level-plan');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'factual-artifact-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'factual-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'factual-artifact-enabled');
+    await click(renderer, '返回图书列表', 'factual-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'factual-library');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(factualBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'factual-open-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(factualBook.bookId)}]')`, 'factual-manuscript-ready');
+    await openReviewDestination(renderer, 'factual-review-destination');
+    await reviewAction(renderer, '[data-review-action="new-review"]', 'factual-review-new');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'factual-sheet-open');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled||box.checked)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'factual-prepare-start');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='factual-review'`, 'factual-prepared', 120_000);
+    const factualPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    requireJourney(factualPrepared?.state === 'prepared' && UUID_PATTERN.test(factualPrepared.reviewRunId), 'factual-prepared-run');
+    await drawerShowing(renderer, factualPrepared.reviewRunId, 'ready', 'factual-drawer');
+    // One compact selector: three levels, 标准核查 by default, each with its consequence, none disabled while the policy names no
+    // minimum (EASSURE-001, EASSURE-008); it names no model, provider or quality ladder (EASSURE-013).
+    const selector = await renderer.evaluate(`(() => { const box=document.querySelector('#task-drawer fieldset.task-plan-assurance'); if(!(box instanceof HTMLElement))return null; return { shown:box.dataset.taskPlanAssurance, options:Array.from(box.querySelectorAll('input[type=radio]')).map((input)=>({ level:input.value, checked:input.checked, disabled:input.disabled, label:input.closest('label')?.querySelector('strong')?.textContent, consequence:input.closest('label')?.querySelector('.field-note')?.textContent ?? '' })) }; })()`);
+    requireJourney(selector?.shown === 'standard' && JSON.stringify(selector.options.map((option) => [option.level, option.label, option.checked, option.disabled])) ===
+      JSON.stringify([['quick', '快速整理', false, false], ['standard', '标准核查', true, false], ['strict', '严格核查', false, false]]) &&
+      selector.options.every((option) => option.consequence.length > 0 && !/更正确|模型/u.test(option.consequence)), 'factual-level-selector', selector);
+    const factualPlanBefore = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'review-run', ref: ${JSON.stringify(factualPrepared.reviewRunId)} })`);
+    // 严格核查 is chosen, made the plan through 更新计划, and then 标准核查 again: two plan edits of the one 事实核查 Task, each a
+    // diff line 证据保证级别 the drawer names; the fixture answers 标准核查, which the Run then freezes.
+    for (const level of ['strict', 'standard']) {
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('#task-drawer [data-task-plan-edit="assurance:${level}"]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, `factual-level-choose-${level}`);
+      await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-assurance-edited') !== null`, `factual-level-pending-${level}`);
+      await reviewAction(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', `factual-level-update-${level}`);
+      await waitFor(renderer, `document.querySelector('#task-drawer fieldset.task-plan-assurance')?.dataset.taskPlanAssurance===${JSON.stringify(level)} && document.querySelector('#task-drawer .task-plan-assurance-edited')===null && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, `factual-level-updated-${level}`, 60_000);
+      const plan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'review-run', ref: ${JSON.stringify(factualPrepared.reviewRunId)} })`);
+      requireJourney(plan?.edit?.assurance?.level === level && plan.edit.lastEdit?.entries?.some((entry) => entry.field === 'evidenceAssuranceLevel') === true &&
+        plan.edit.planEnvelopeDigest !== factualPlanBefore?.edit?.planEnvelopeDigest, `factual-level-plan-${level}`, plan?.edit);
+    }
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'factual-start');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'factual-settled', 180_000);
+    cancellation.throwIfRequested();
+
+    at('factual-evidence-workspace');
+    // The Fact-check Lens inside 事实核查's group: the three states in their own columns, the level the Run executed, over the
+    // service's cursor; no result here is 证据支持 or 疑似错误, because nothing was checked (FACT-004, FACT-005, FACT-007).
+    await waitFor(renderer, `document.querySelectorAll('section.review-group[data-review-category="factual-review"] .fact-lens .fact-lens-row').length > 0`, 'factual-lens');
+    const lens = await renderer.evaluate(`window.ai7.inspectFactualVerification({ bookId: ${JSON.stringify(factualBook.bookId)}, reviewRunId: ${JSON.stringify(factualPrepared.reviewRunId)}, after: null, chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null })`);
+    const sourced = (lens?.results ?? []).find((result) => result.sourceCounts.candidates === 3);
+    requireJourney(lens?.total > 0 && lens.results.every((result) => result.level === 'standard' && result.states.referenceIntegrity === 'verified' &&
+      ['待核查', '证据不足'].includes(result.states.factualVerification) && result.policyPin.document === 'docs/policies/factual-verification-policy.md') &&
+      sourced?.states.factualVerification === '证据不足' && sourced.sourceCounts.checked === 0 && lens.run?.plannedLevel === 'standard' && lens.run.disclosure === null,
+    'factual-lens-results', { total: lens?.total, counts: lens?.counts });
+    await assertRenderer(renderer, `(() => { const row=document.querySelector('.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]'); return row?.dataset.outcome==='证据不足' && JSON.stringify(Array.from(row.querySelectorAll('[data-state-term]')).map((cell)=>cell.dataset.stateTerm))===JSON.stringify(['引文完整性','断言支持','事实核查']); })()`, 'factual-lens-columns');
+    await reviewAction(renderer, `.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}] [data-fact-action="fact-workspace"]`, 'factual-workspace-open');
+    const workspaceSelector = `.evidence-workspace[data-result-id=${JSON.stringify(sourced.resultId)}]`;
+    await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} .evidence-card').length===3`, 'factual-workspace-cards');
+    // Candidates only: never quoted, never counted, each check a discrete state; the summary labelled 非证据 (EVID-003/004/010).
+    await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const cards=Array.from(ws.querySelectorAll('.evidence-card')); return cards.every((card)=>card.dataset.checkState==='candidate' && card.querySelector('.evidence-excerpt')===null && card.querySelector('dd')?.textContent==='候选来源 · 尚未核对') && JSON.stringify(cards.map((card)=>card.dataset.relation))===JSON.stringify(['支持','反驳','仅提供背景']) && ws.querySelector('.evidence-summary')?.dataset.label==='非证据' && ws.querySelector('.evidence-quote')?.textContent===${JSON.stringify(sourced.quote)} && ws.querySelector('.evidence-matrix')?.dataset.pinnedCount==='0'; })()`, 'factual-workspace-candidates');
+    // Two cards pinned make the comparison; reading and comparing write nothing (EVID-006, EVID-012).
+    for (const index of [0, 1]) {
+      await assertRenderer(renderer, `(() => { const pin=document.querySelectorAll('${workspaceSelector} [data-evidence-pin]')[${index}]; if(!(pin instanceof HTMLInputElement)||pin.disabled)return false; pin.click(); return true; })()`, `factual-pin-${index}`);
+    }
+    await waitFor(renderer, `document.querySelector('${workspaceSelector} .evidence-matrix')?.dataset.pinnedCount==='2' && document.querySelectorAll('${workspaceSelector} .evidence-matrix-table tr:first-child th').length===3`, 'factual-matrix');
+    const lensAgain = await renderer.evaluate(`window.ai7.inspectFactualVerification({ bookId: ${JSON.stringify(factualBook.bookId)}, reviewRunId: ${JSON.stringify(factualPrepared.reviewRunId)}, after: null, chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null })`);
+    requireJourney(JSON.stringify(lensAgain?.results) === JSON.stringify(lens.results), 'factual-workspace-no-mutation');
+    cancellation.throwIfRequested();
+
+    at('factual-review-decision');
+    // Five unselected choices directly after the result; 维持未决 with one reason taken as suggested is recorded once, bound to
+    // the version read (FREV-004, FREV-005, FREV-006, FREV-009).
+    await assertRenderer(renderer, `(() => { const radios=Array.from(document.querySelectorAll('${workspaceSelector} [data-decision-choice]')); return JSON.stringify(radios.map((radio)=>radio.dataset.decisionChoice))===JSON.stringify(['accept','request-evidence','keep-pending','decline','own-words']) && radios.every((radio)=>!radio.checked) && document.querySelector('${workspaceSelector} [data-evidence-action="record-decision"]')?.disabled===true; })()`, 'factual-decision-unselected');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('${workspaceSelector} [data-decision-choice="keep-pending"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return true; })()`, 'factual-decision-choose');
+    await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="record-decision"]')?.disabled===false`, 'factual-decision-ready');
+    await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="reason-suggestion"]`, 'factual-reason-suggestion');
+    await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="reason-suggestion"][aria-pressed="true"]') !== null`, 'factual-reason-selected');
+    await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="record-decision"]`, 'factual-decision-record');
+    await waitFor(renderer, `document.querySelector('${workspaceSelector} .evidence-decision-recorded')?.dataset.superseded==='false' && document.querySelector('${workspaceSelector} [data-decision-choice]')===null`, 'factual-decision-recorded');
+    const decided = await renderer.evaluate(`window.ai7.inspectEvidenceWorkspace({ bookId: ${JSON.stringify(factualBook.bookId)}, resultId: ${JSON.stringify(sourced.resultId)}, sourcesAfter: null })`);
+    requireJourney(decided?.decisions?.length === 1 && decided.decisions[0].disposition === 'keep-pending' && decided.decisions[0].boundVersion === 1 &&
+      decided.decisions[0].reason?.state === 'selected' && decided.result.pendingReview === false && decided.result.correctionAvailable === true, 'factual-decision-bound', decided?.decisions);
+    cancellation.throwIfRequested();
+
+    at('factual-correction-proposal');
+    // 准备更正提案 on a result below the formal gate: the Run's two variants and 自行编辑, none selected; the range set holds the
+    // finding's own words, included; saving makes one ordinary 修改建议 whose card keeps 证据核查未完成 (CORR-001 to CORR-011,
+    // EASSURE-012).
+    await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="prepare-correction"]`, 'factual-correction-prepare');
+    await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} [data-correction-variant]').length===3`, 'factual-correction-draft');
+    await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const variants=Array.from(ws.querySelectorAll('[data-correction-variant]')); const ranges=Array.from(ws.querySelectorAll('[data-correction-range]')); return JSON.stringify(variants.map((input)=>input.dataset.correctionVariant))===JSON.stringify(['v1','v2','own-edit']) && variants.every((input)=>!input.checked) && ws.querySelector('.correction-assurance-label')?.textContent==='证据核查未完成' && ranges.some((input)=>input.dataset.primary==='true' && input.checked) && ranges.filter((input)=>input.checked).length===1 && ws.querySelector('[data-evidence-action="save-correction"]')?.disabled===true; })()`, 'factual-correction-unselected');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('${workspaceSelector} [data-correction-variant="v1"]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'factual-correction-choose');
+    await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="save-correction"]')?.disabled===false`, 'factual-correction-ready');
+    await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="save-correction"]`, 'factual-correction-save');
+    await waitFor(renderer, `(document.querySelector('${workspaceSelector} .correction-saved')?.dataset.markIds ?? '').length===36`, 'factual-correction-saved');
+    const correctionMarkId = await renderer.evaluate(`document.querySelector('${workspaceSelector} .correction-saved')?.dataset.markIds`);
+    const correctionCard = await renderer.evaluate(`window.ai7.getEditorialMarkCard({ manuscriptId: ${JSON.stringify(factualPrepared.manuscript.manuscriptId)}, branchId: ${JSON.stringify(factualPrepared.manuscript.branchId)}, markId: ${JSON.stringify(correctionMarkId)} })`);
+    requireJourney(correctionCard?.kind === 'change-suggestion' && correctionCard.status === 'open' && correctionCard.suggestion?.decision === null &&
+      correctionCard.suggestion.atomicGroupId === null && correctionCard.source?.label === '事实核查 · 更正提案' &&
+      correctionCard.factualCorrection?.assuranceLabel === '证据核查未完成' && correctionCard.factualCorrection.resultId === sourced.resultId &&
+      correctionCard.factualCorrection.states.factualVerification === '证据不足', 'factual-correction-mark', correctionCard?.factualCorrection);
+    // The manuscript is unchanged: the proposal waits for the editor's own decision and Apply.
+    await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="go-to-correction"]`, 'factual-correction-go');
+    await waitFor(renderer, `document.querySelector('.editorial-mark-card[data-mark-card=${JSON.stringify(correctionMarkId)}] .editorial-mark-factual-incomplete')?.textContent==='证据核查未完成'`, 'factual-correction-card');
+    cancellation.throwIfRequested();
 
     // S41-f1 (#387): a fresh, unedited sample1 Book keeps the real recorded result independent of
     // every synthetic retry/update above. Launch, import, prepare and start all use the product path.
