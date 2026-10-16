@@ -101,7 +101,7 @@ describe('the words of 就这段发起任务…', () => {
       failed: '润色这段没有完成。',
       unreadable: '无法读取润色的结果；已生成的修改建议仍在稿件里。',
     });
-    expect(SELECTION_JOIN_REFUSED).toBe('只就这一段发起；不提供「再选一段加入」，合并两段会把范围扩大到没有选中的文字。');
+    expect(SELECTION_JOIN_REFUSED).toBe('要再选一段加入，请在任务草稿中操作。');
     expect(SELECTION_TASK_CHOSEN_APART_LEGEND).toBe('要另行勾选的类别');
     // The group's note: no procedures yet is said only once the house's are known; the refusal always.
     expect(selectionTaskGroupNote(null)).toBe(SELECTION_JOIN_REFUSED);

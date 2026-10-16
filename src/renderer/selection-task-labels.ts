@@ -76,7 +76,7 @@ export const SELECTION_POLISH_STATUS = {
   unreadable: '无法读取润色的结果；已生成的修改建议仍在稿件里。',
 } as const;
 /** 再选一段加入 is refused (PR #700's reading): joining a second range would widen the Task to text never selected. */
-export const SELECTION_JOIN_REFUSED = '只就这一段发起；不提供「再选一段加入」，合并两段会把范围扩大到没有选中的文字。';
+export const SELECTION_JOIN_REFUSED = '要再选一段加入，请在任务草稿中操作。';
 /** Steps whose Series material the editor chooses apart at each run (REUSE-049, REUSE-050): unticked, the editor's to tick. */
 export const SELECTION_TASK_CHOSEN_APART_LEGEND = '要另行勾选的类别';
 
