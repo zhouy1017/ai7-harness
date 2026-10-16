@@ -2566,7 +2566,16 @@ async function main() {
         drafted: Array.from(section.querySelectorAll('ul.writing-drafted > li'), (item) => [item.dataset.writingTypeId ?? null, item.querySelector('.writing-drafted-line')?.textContent ?? null]),
         open: section.querySelector('form.writing-sheet') !== null,
         types: Array.from(section.querySelectorAll('.writing-type'), (item) => { const radio = item.querySelector('input'); return [item.dataset.writingTypeId ?? null, item.querySelector('label')?.textContent ?? null, radio?.checked ?? null, radio?.disabled ?? null]; }),
-        references: Array.from(section.querySelectorAll('dl.writing-references > dd'), (node) => node.textContent ?? ''),
+        references: Array.from(section.querySelectorAll('dl.writing-references > dd'), (node) => {
+          const reference = node.cloneNode(true);
+          reference.querySelectorAll('.similar-materials').forEach((field) => field.remove());
+          return reference.textContent ?? '';
+        }),
+        similarMaterials: Array.from(section.querySelectorAll('.similar-materials'), (field) => [
+          field.querySelectorAll('textarea').length, field.querySelector('textarea')?.getAttribute('aria-label') ?? null,
+          field.querySelector('textarea')?.maxLength ?? null,
+          Array.from(field.querySelectorAll('button'), (button) => [button.textContent, button.type, button.disabled]),
+        ]),
         consequences: Array.from(section.querySelectorAll('dl.writing-consequences > dt, dl.writing-consequences > dd'), (node) => node.textContent ?? ''),
         problem: section.querySelector('.writing-problem')?.textContent ?? null,
         quick: quick === null ? null : [quick.disabled, document.getElementById(quick.getAttribute('aria-describedby') ?? '')?.textContent ?? null],
@@ -2590,6 +2599,8 @@ async function main() {
       JSON.stringify(writingBefore.buttons) === JSON.stringify([['new', '新建文档…', false]]), 'writing-section-words', writingBefore);
     await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="new"]', 'writing-new');
     const writingSheet = await readWriting((page) => page.open, 'writing-sheet-open');
+    requireJourney(JSON.stringify(writingSheet.similarMaterials) === JSON.stringify([[1, '相似段落检索', 1_000,
+      [['使用当前选中文字', 'button', false], ['检索相似段落', 'button', false]]]]), 'writing-sheet-retrieval-control', writingSheet.similarMaterials);
     requireJourney(JSON.stringify(writingSheet.types) === JSON.stringify(WRITING_TYPES.map(([typeId, label]) => [typeId, label, false, false])) &&
       JSON.stringify(writingSheet.references) === JSON.stringify([
         '本书尚无基线分析，本次不参考梗概与人物', '本书尚无定稿的评估，本次不参考评估结论与营销要点', '选好类型后显示',
