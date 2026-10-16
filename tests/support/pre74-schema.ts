@@ -7,6 +7,8 @@ import { FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } fro
 import { EDITORIAL_MARK_SCHEMA_SQL, PROPOSAL_ITEM_DECISIONS_PRE77_SQL, PROPOSAL_REVIEW_SCHEMA_SQL, PROPOSAL_REVIEW_TRIGGER_SQL } from '../../src/service/editorial-marks.js';
 
 export const FACTUAL_VERIFICATION_SCHEMA_NAMES = [...Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL), ...Object.keys(FACTUAL_VERIFICATION_TRIGGER_SQL)];
+/** Revision 78's four relations, added empty after a planted predecessor is reopened. */
+export const FACTUAL_VERIFICATION_RELATIONS = Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL);
 export const RESEARCH_EVIDENCE_RELATIONS = Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL);
 /** Revision 76's two relations (Issue #892), which a planted predecessor gains empty beside its revision-67 ones. */
 export const MATERIAL_INDEX_LAYER_RELATIONS = Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL);
