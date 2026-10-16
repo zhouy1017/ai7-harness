@@ -19,9 +19,13 @@ Every rule that admits a model task kind carries a `localTools` block. Enrolled 
 6. **来源译文 of a 资料库 material.** The ninth rule, `developer-live-public-samplebook-material-translation` (kind `material-translation`), runs on the Fast Interaction Role with the same route, model and credential slot as the dialogue rule. It is one foreground editor action: one session and one bounded payload — a frozen excerpt of a 资料库 item, which under developer-live is an admitted public text (outbound category `public-or-synthetic`) — and the model returns a Chinese translation labelled as machine translation. It has no Run and so no Run ceiling, no web, no question and no retrieval; its output replaces nothing and applies nothing, and an account limit ends the attempt.
 7. **来源译文 of a retained external source.** The research review rule also states `sourceTranslationAllowed: true`: a passage of an external source the Run retained may be translated into Chinese by the Run's own model, labelled as machine translation, attributed to the exact captured range, and never in place of the original. No other rule states the term.
 
+Material translation admits no synthesis, cross-unit reduction, assurance sampling or Run Report reflection and names no output block.
+
 ## What does not use retrieval
 
 **Enrolled background analysis** and the **来源译文 rule** carry the same block with `targetedRetrieval.allowed: false`: a background Run makes no model-initiated retrieval, and a bounded translation of one excerpt has nothing to search. The other terms are stated identically so the block reads the same in every rule; apart from the ninth rule and the review rule's translation term, every rule's other terms are byte-for-byte v16's.
+
+The baseline analysis rule states `localTools.targetedRetrieval.allowed: true` to keep the rule family uniform. Covered baseline analysis does not exercise that allowance: the product registers no local tools for it, and it deterministically enumerates the pinned revision under ADR 0047's separate covered-analysis contract.
 
 ## What stays exactly as v16
 
