@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 146 as const;
+export const SERVICE_PROTOCOL_VERSION = 147 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -294,6 +294,11 @@ export const IPC_CHANNELS = {
   continueDialogueAnswer: 'ai7:j16:continue-dialogue-answer',
   regenerateDialogueAnswer: 'ai7:j16:regenerate-dialogue-answer',
   convertDialogueToChangeSuggestion: 'ai7:j16:convert-dialogue-to-change-suggestion',
+  // Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b).
+  inspectTaskIntentDrafts: 'ai7:j16:inspect-task-intent-drafts',
+  saveTaskIntentDraft: 'ai7:j16:save-task-intent-draft',
+  promoteTaskIntentDraft: 'ai7:j16:promote-task-intent-draft',
+  promoteAnswerToTaskIntentDraft: 'ai7:j16:promote-answer-to-task-intent-draft',
   inspectFastInteractionRoutes: 'ai7:j05:inspect-fast-interaction-routes',
   polishSelection: 'ai7:j05:polish-selection',
   inspectFastInteractionRequest: 'ai7:j05:inspect-fast-interaction-request',
@@ -13498,6 +13503,14 @@ export interface ServiceOperationMap {
   regenerateDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
   /** 转为修改建议: an AI7-produced 修改建议 on the dialogue's selected words, from a completed answer; never applied. */
   convertDialogueToChangeSuggestion: { input: ConvertDialogueToChangeSuggestionInput & { bookId: string }; output: DialogueConversionProjection };
+  /** The Book's Task Intent Drafts, or one with the Task 准备计划 would make of it (Issue #423, slice 7a): a read. */
+  inspectTaskIntentDrafts: { input: InspectTaskIntentDraftsInput; output: TaskIntentDraftsProjection };
+  /** 准备任务 in the composer, or 保存修改 on a draft: a new version; nothing is sent and no Task is made. */
+  saveTaskIntentDraft: { input: SaveTaskIntentDraftInput; output: TaskIntentDraftProjection };
+  /** 准备计划 on a draft: the existing preparation of the kind it resolves to, as one cooperative job; still needs 开始任务. */
+  promoteTaskIntentDraft: { input: PromoteTaskIntentDraftInput; output: ServiceJobProjection };
+  /** 转为任务意图草稿 (DIALOG-016): a draft from a completed dialogue answer, with its provenance; nothing is sent. */
+  promoteAnswerToTaskIntentDraft: { input: PromoteAnswerToTaskIntentDraftInput; output: TaskIntentDraftProjection };
   /** Whether 润色这段 and 基于当前稿件重新生成建议 can be asked for the Book under this launch (Issue #842): a read. */
   inspectFastInteractionRoutes: { input: { bookId: string }; output: FastInteractionRoutesProjection };
   /** 润色这段 (Issue #842): the selected words to the Fast Interaction Role; its answer becomes open 修改建议, never applied. */
@@ -13969,6 +13982,11 @@ export interface RendererApi {
   continueDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
   regenerateDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
   convertDialogueToChangeSuggestion(input: ConvertDialogueToChangeSuggestionInput): Promise<DialogueConversionProjection>;
+  /** The Task Intent Drafts of the Book this window shows (Issue #423, slice 7a): a read. */
+  inspectTaskIntentDrafts(input: Omit<InspectTaskIntentDraftsInput, 'bookId'>): Promise<TaskIntentDraftsProjection>;
+  saveTaskIntentDraft(input: Omit<SaveTaskIntentDraftInput, 'bookId'>): Promise<TaskIntentDraftProjection>;
+  promoteTaskIntentDraft(input: Omit<PromoteTaskIntentDraftInput, 'bookId'>): Promise<ServiceJobProjection>;
+  promoteAnswerToTaskIntentDraft(input: Omit<PromoteAnswerToTaskIntentDraftInput, 'bookId'>): Promise<TaskIntentDraftProjection>;
   /** Whether 润色这段 and 基于当前稿件重新生成建议 can be asked for the Book this window shows (Issue #842): a read. */
   inspectFastInteractionRoutes(): Promise<FastInteractionRoutesProjection>;
   /** 润色这段 on the Book this window shows (Issue #842): only the selected words and their paragraph's context are sent. */

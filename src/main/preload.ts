@@ -611,6 +611,14 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['regenerateDialogueAnswer']['output']>(IPC_CHANNELS.regenerateDialogueAnswer, input),
   convertDialogueToChangeSuggestion: (input: Parameters<RendererApi['convertDialogueToChangeSuggestion']>[0]) =>
     invoke<ServiceOperationMap['convertDialogueToChangeSuggestion']['output']>(IPC_CHANNELS.convertDialogueToChangeSuggestion, input),
+  inspectTaskIntentDrafts: (input: Parameters<RendererApi['inspectTaskIntentDrafts']>[0]) =>
+    invoke<ServiceOperationMap['inspectTaskIntentDrafts']['output']>(IPC_CHANNELS.inspectTaskIntentDrafts, input),
+  saveTaskIntentDraft: (input: Parameters<RendererApi['saveTaskIntentDraft']>[0]) =>
+    invoke<ServiceOperationMap['saveTaskIntentDraft']['output']>(IPC_CHANNELS.saveTaskIntentDraft, input),
+  promoteTaskIntentDraft: (input: Parameters<RendererApi['promoteTaskIntentDraft']>[0]) =>
+    invoke<ServiceOperationMap['promoteTaskIntentDraft']['output']>(IPC_CHANNELS.promoteTaskIntentDraft, input),
+  promoteAnswerToTaskIntentDraft: (input: Parameters<RendererApi['promoteAnswerToTaskIntentDraft']>[0]) =>
+    invoke<ServiceOperationMap['promoteAnswerToTaskIntentDraft']['output']>(IPC_CHANNELS.promoteAnswerToTaskIntentDraft, input),
   inspectFastInteractionRoutes: () =>
     invoke<ServiceOperationMap['inspectFastInteractionRoutes']['output']>(IPC_CHANNELS.inspectFastInteractionRoutes),
   polishSelection: (input: Parameters<RendererApi['polishSelection']>[0]) =>

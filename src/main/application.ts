@@ -37,6 +37,11 @@ import {
   type DialogueAttemptInput,
   type DialogueProjection,
   type InspectDialogueInput,
+  type InspectTaskIntentDraftsInput,
+  type PromoteAnswerToTaskIntentDraftInput,
+  type PromoteTaskIntentDraftInput,
+  type SaveTaskIntentDraftInput,
+  type TaskIntentDraftProjection,
   type CommitNewBookRendererInput,
   type CommitManuscriptReimportRendererInput,
   type CommitSourceImportRendererInput,
@@ -4807,6 +4812,81 @@ function registerRendererHandlers(
         requireCurrentRouteGeneration(owned, routeGeneration);
         requireDialogueOfRoute(route, result.dialogue);
         return result;
+      });
+    }),
+  );
+  // Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b): the route's Book always, never the renderer's; a draft read or
+  // saved is the route's Book's, and 准备计划 starts the existing preparation job of the kind the draft resolves to.
+  const requireDraftOfRoute = (route: { bookId: string }, draft: TaskIntentDraftProjection): TaskIntentDraftProjection => {
+    if (draft.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务意图草稿不属于当前图书工作台。');
+    return draft;
+  };
+  ipcMain.handle(IPC_CHANNELS.inspectTaskIntentDrafts, (event, input: Omit<InspectTaskIntentDraftsInput, 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectTaskIntentDrafts', { bookId: route.bookId, draftId: input.draftId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务意图草稿不属于当前图书工作台。');
+      for (const draft of result.drafts) requireDraftOfRoute(route, draft);
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveTaskIntentDraft, (event, input: Omit<SaveTaskIntentDraftInput, 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && input.target !== null && typeof input.target === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        // A newly pinned range is the exact selection of the manuscript this window holds (TASK-003).
+        if (input.target.kind === 'ranges') {
+          for (const range of input.target.ranges) if (range !== null && typeof range === 'object' && range.kind === 'new') requireManuscriptCapability(owned, range.span);
+        }
+        const result = await service.call('saveTaskIntentDraft', {
+          bookId: route.bookId, draftId: input.draftId, expectedOrdinal: input.expectedOrdinal, origin: input.origin, goal: input.goal,
+          target: input.target, outcomeClass: input.outcomeClass, ...(input.procedurePin === undefined ? {} : { procedurePin: input.procedurePin }),
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return requireDraftOfRoute(route, result);
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.promoteTaskIntentDraft, (event, input: Omit<PromoteTaskIntentDraftInput, 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const result = await service.call('promoteTaskIntentDraft', {
+          bookId: route.bookId, draftId: input.draftId, versionId: input.versionId, choice: input.choice,
+          ...(input.writing === undefined ? {} : { writing: input.writing }),
+        });
+        const operation = result.kind === 'baseline-analysis-preparation' ? 'baseline-analysis'
+          : result.kind === 'review-run-preparation' ? 'review-run' : result.kind === 'writing-preparation' ? 'writing' : null;
+        if (operation === null) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '准备计划的结果类型无效。');
+        rememberEditorResource(owned, 'job', result.jobId, { operation, bookId: route.bookId, manuscriptId: null, branchId: null });
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.promoteAnswerToTaskIntentDraft, (event, input: Omit<PromoteAnswerToTaskIntentDraftInput, 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('promoteAnswerToTaskIntentDraft', { bookId: route.bookId, dialogueId: input.dialogueId, attemptId: input.attemptId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return requireDraftOfRoute(route, result);
       });
     }),
   );

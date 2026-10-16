@@ -67,6 +67,7 @@ const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'learning-materials-pending', 'learning-materials-deferred',
   'dialogue-answering', 'dialogue-answered', 'dialogue-stopped', 'dialogue-interrupted', 'dialogue-failed',
   'indexing-completed',
+  'draft-unfinished',
 ];
 
 function item(state: GlobalAttentionStateKey, overrides: Partial<GlobalAttentionItemProjection> = {}): GlobalAttentionItemProjection {
@@ -207,6 +208,8 @@ describe('each item', () => {
       'dialogue-stopped': '回答已停止 · 内容不完整',
       'dialogue-interrupted': '回答中断 · 内容不完整',
       'dialogue-failed': '回答未能完成 · 内容不完整',
+      // An unfinished Task Intent Draft (Issue #423, slice 7a): no Task until 准备计划.
+      'draft-unfinished': '任务草稿 · 尚未准备计划',
     });
     for (const state of STATES) {
       expect(GLOBAL_ATTENTION_STATE_PILLS[state].shape).toMatch(/^(circle|ring|half|triangle|square|diamond|check|dash)$/u);
@@ -257,6 +260,8 @@ describe('each item', () => {
       'open-dialogue': '打开对话',
       // A 资料库 item's index (Issue #428, S80a): its card, with the layers and 查看分段.
       'view-material-index': '查看索引',
+      // A Task Intent Draft beside its own Book's manuscript (Issue #423, slice 7a).
+      'continue-draft': '继续编辑草稿',
     });
     // The drawer's own words for the way on from a Run the ceiling stopped (Issue #51, S16a).
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['adjust-budget-redo']).toBe(TASK_BAR_ADJUST_BUDGET_REDO);
