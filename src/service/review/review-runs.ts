@@ -1032,15 +1032,17 @@ export class ReviewRunStore {
     const resolved = this.#forBook(bookId, house);
     const selected = input.seriesId == null ? undefined : [freezeSeriesScope(this.#db, bookId, input.seriesId)];
     const configuration = { ...resolved, categories: resolved.categories.map((entry) => {
-      if (!input.categoryIds.includes(entry.categoryId)) return entry;
-      if (selected !== undefined) {
-        requireReview(entry.executor === 'review-category-contract', 'SERIES_SCOPE_UNAVAILABLE', '这个审阅类别本次不能参考书系知识。');
-        requireReview(seriesKnowledgeAllowed(input.launchPolicy, reviewCategoryKindId(entry.categoryId)),
-          'SERIES_SCOPE_UNAVAILABLE', SERIES_POLICY_CLOSED);
-        return { ...entry, seriesScopes: selected };
+      if (!input.categoryIds.includes(entry.categoryId) || entry.executor === 'unavailable') return entry;
+      // 书系一致性 reads exactly the knowledge it pinned, whatever Series the other categories were given (Issue #64 review).
+      if (entry.seriesKnowledge !== undefined) {
+        return { ...entry, seriesScopes: entry.seriesKnowledge.series.filter((series) => entry.seriesKnowledge!.revisions.some((pin) => pin.seriesId === series.seriesId)).map((series) =>
+          freezeSeriesScope(this.#db, bookId, series.seriesId, entry.seriesKnowledge!.revisions.filter((pin) => pin.seriesId === series.seriesId))) };
       }
-      return entry.seriesKnowledge === undefined ? entry : { ...entry, seriesScopes: entry.seriesKnowledge.series.filter((series) => entry.seriesKnowledge!.revisions.some((pin) => pin.seriesId === series.seriesId)).map((series) =>
-        freezeSeriesScope(this.#db, bookId, series.seriesId, entry.seriesKnowledge!.revisions.filter((pin) => pin.seriesId === series.seriesId))) };
+      if (selected === undefined) return entry;
+      requireReview(entry.executor === 'review-category-contract', 'SERIES_SCOPE_UNAVAILABLE', '这个审阅类别本次不能参考书系知识。');
+      requireReview(seriesKnowledgeAllowed(input.launchPolicy, reviewCategoryKindId(entry.categoryId)),
+        'SERIES_SCOPE_UNAVAILABLE', SERIES_POLICY_CLOSED);
+      return { ...entry, seriesScopes: selected };
     }) };
     requireReview(Array.isArray(input.categoryIds) && input.categoryIds.length >= 1 && input.categoryIds.length <= configuration.categories.length &&
       new Set(input.categoryIds).size === input.categoryIds.length, 'REVIEW_CATEGORIES_INVALID', '请选择至少一个审阅类别，且不要重复。');
@@ -3058,7 +3060,15 @@ export class ReviewRunStore {
 
   /** What each Series Knowledge revision a category pinned is — its class and source Book — read from the knowledge's rows. */
   #pinnedMaterial(category: SnapshotCategory): SeriesKnowledgeMaterial[] {
-    if (category.entry.seriesScopes !== undefined) return seriesScopeMaterials(this.#db, category.entry.seriesScopes);
+    if (category.entry.seriesScopes !== undefined) {
+      try {
+        return seriesScopeMaterials(this.#db, category.entry.seriesScopes);
+      } catch (error) {
+        // As for the pins below: a frozen record that no longer reads is named as such, never taking 审阅 down with it.
+        if (error instanceof AnalysisError) throw new ReviewRunError('REVIEW_RECORD_INVALID', '审阅所依据的书系知识记录无效。');
+        throw error;
+      }
+    }
     const pins = category.entry.seriesKnowledge;
     if (pins === undefined) return [];
     return pins.revisions.map((pin) => {

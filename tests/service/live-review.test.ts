@@ -195,6 +195,27 @@ describe('reference-free review on the Go execution path', () => {
     expect(completed.state).toBe('settled');
     expect(completed.categories[0]!.basisStatement).toContain(`允许参考 · 书系《${J13_SERIES_TITLE}》的知识条目`);
     expect(requests.some((request) => request.system.includes(J13_SERIES_TITLE))).toBe(true);
+    // The opt-in wrapper is admitted only as its owner derived it: a copy, or a changed contract, fails closed.
+    const task = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const row = task.prepare('SELECT run_record_id FROM analysis_run_records WHERE task_intent_id = ?').get(prepared.categories[0]!.taskIntentId!)!;
+      const definition = store.executionLedgerForRun(String(row.run_record_id)).definition;
+      const wrapper = definition.clarificationBase ?? definition;
+      expect(wrapper.seriesScopes?.[0]?.seriesId).toBe(seriesId);
+      expect(liveKindAdmission(admitted, wrapper, original.live!)).not.toBeNull();
+      expect(liveKindAdmission(admitted, { ...wrapper }, original.live!)).toBeNull();
+      expect(liveKindAdmission(admitted, { ...wrapper, promptContractDigest: 'a'.repeat(64) }, original.live!)).toBeNull();
+      expect(liveKindAdmission(withRuleFor(admitted, 'editorial-review/typos-and-usage', { seriesKnowledgeAllowed: false }), wrapper, original.live!)).toBeNull();
+    } finally { task.close(); }
+    // A later exclusion marks the completed result and rewrites nothing of it (SER-026).
+    const itemId = store.inspectSeries(seriesId).knowledge.items[0]!.itemId;
+    const request = { seriesId, action: 'add' as const, exclusionId: null, target: { kind: 'knowledge-item' as const, id: itemId }, reason: '' };
+    store.recordSeriesExclusion({ ...request, previewDigest: store.previewSeriesExclusion(request).previewDigest });
+    const marked = store.inspectReviewWorkspace(book.bookId, prepared.reviewRunId).run!;
+    expect(marked.historicalMarker?.label).toBe('此结果使用的材料后来被排除');
+    const unmarked = (findings: typeof completed.findings) => findings.map(({ historicalMarker: _marker, ...finding }) => finding);
+    expect(unmarked(marked.findings)).toEqual(unmarked(completed.findings));
+    expect(marked.findings.every((finding) => finding.historicalMarker === '此结果使用的材料后来被排除')).toBe(true);
   });
   it.each(['synthetic', 'recorded'] as const)('dispatches all admitted categories with %s unit answers, grounds findings and carries a mark through Apply and reversal', async (source) => {
     if (source === 'recorded') {

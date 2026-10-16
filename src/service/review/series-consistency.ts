@@ -219,7 +219,8 @@ function readSeries(db: DatabaseSync, knowledge: SeriesKnowledgeLedger, seriesId
   for (const item of knowledge.itemsCurrentlyFor(seriesId, CONSISTENCY_REUSE_SCOPES)) {
     // The current-read guard (SER-023): an item an exclusion in force reaches is never read, nor counted against the bound.
     const material = knowledgeMaterial(db, { seriesId, itemId: item.itemId, revisionId: item.current.revisionId });
-    requireAnalysis(material !== null, 'SERIES_SCOPE_INVALID', '书系知识来源无法核对。');
+    // A source that no longer verifies makes this category unavailable, never the Book's whole 审阅 (Issue #64 review).
+    if (material === null) throw new SeriesKnowledgeError('SERIES_KNOWLEDGE_RECORD_INVALID', '书系知识来源无法核对。');
     if (coveringExclusions(exclusions, material).length > 0) {
       excluded += 1;
       continue;
@@ -296,6 +297,11 @@ export function seriesKnowledgeAllowed(policy: import('../../shared/protocol.js'
   return rules.length === 1 && rules[0]!.seriesKnowledgeAllowed === true && rules[0]!.outboundDataCategories.includes('series-knowledge-excerpt');
 }
 
+/** Why a selected Series cannot be referred to whole: its eligible knowledge passes what one Task may carry. */
+export function seriesScopeTooManyReason(title: string): string {
+  return `书系「${title}」可供任务参考的书系知识超过 ${MAX_SERIES_KNOWLEDGE_CLAUSES} 条依据，一次任务带不下；请在书系中合并或精简这些书系知识。`;
+}
+
 /** Expand one explicitly selected Series. Empty member Books are named with null manuscript pins. */
 export function freezeSeriesScope(db: DatabaseSync, bookId: string, seriesId: string,
   selected?: SeriesKnowledgePins['revisions']): FrozenSeriesScope {
@@ -315,11 +321,15 @@ export function freezeSeriesScope(db: DatabaseSync, bookId: string, seriesId: st
       revisionId: manuscript === undefined ? null : String(manuscript.revision_id), revisionDigest: manuscript === undefined ? null : String(manuscript.revision_digest), sourceVersionId });
   }
   const knowledge: Array<FrozenSeriesScope['knowledge'][number]> = [];
+  // Every request of the Run repeats these words, so one Task carries no more than one consistency review may (7b review).
+  let clauses = 0;
   for (const item of new SeriesKnowledgeLedger(db).itemsCurrentlyFor(seriesId, selected === undefined ? ['series-tasks'] : CONSISTENCY_REUSE_SCOPES)) {
     if (selected !== undefined && !selected.some((pin) => pin.itemId === item.itemId && pin.revisionId === item.current.revisionId)) continue;
     const material = knowledgeMaterial(db, { seriesId, itemId: item.itemId, revisionId: item.current.revisionId });
     requireAnalysis(material !== null, 'SERIES_SCOPE_INVALID', '书系知识来源记录无法核对。');
     if (coveringExclusions(exclusions, material).length > 0) continue;
+    clauses += seriesKnowledgeItemClauses(1, { subject: item.subject, knowledgeClass: item.knowledgeClass, content: item.current.content }).length;
+    requireAnalysis(clauses <= MAX_SERIES_KNOWLEDGE_CLAUSES, 'SERIES_SCOPE_UNAVAILABLE', seriesScopeTooManyReason(record.title));
     knowledge.push({ itemId: item.itemId, revisionId: item.current.revisionId, ordinal: item.current.ordinal, digest: sha256Hex(item.current.content) });
   }
   requireAnalysis(knowledge.length > 0, 'SERIES_SCOPE_UNAVAILABLE', '这个书系还没有可供此任务参考的书系知识，或知识已被检索排除。');

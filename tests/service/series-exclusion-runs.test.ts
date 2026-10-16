@@ -23,7 +23,8 @@ import {
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { J13_PLACE, J13_SERIES_TITLE, makeJ13Series } from '../support/series-consistency.js';
-import { leaveSeries, takeInRevision } from '../support/series-consistency.js';
+import { leaveSeries, takeInNewItem, takeInRevision } from '../support/series-consistency.js';
+import { seriesScopeTooManyReason } from '../../src/service/review/series-consistency.js';
 import { withSeriesKnowledgeFor } from '../support/policy-rules.js';
 import { sheetProcedureOption, SHEET_PROCEDURE_NONE } from '../../src/renderer/captured-procedure-labels.js';
 
@@ -190,6 +191,53 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: itemOf(store, seriesId) } });
       expect(store.seriesScopeGuard(authorization.dispatchRunRecordId!)).toContain(ITEM_LABEL);
       expect(category.planEnvelopeDigest).toBeTruthy();
+    }, null, REVIEW_FIXTURE);
+  }, 300_000);
+
+  it('keeps 书系一致性 on its own pins beside a selected Series, names an authorized 初评 in both previews, and stops it for an exact source version', async () => {
+    await withSession(async ({ store, seriesId }, bookId) => {
+      const policy = withSeriesKnowledgeFor(withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage'), 'evaluation');
+      // An item taken in for consistency review only: 书系一致性 pins it, a Series-scoped Task never reads it.
+      const consistencyOnly = takeInNewItem(store, seriesId, { subject: '灯塔', knowledgeClass: 'canon', content: '合成正典说明，只供一致性审阅。', reuseScope: 'consistency-review' });
+      let review = store.createReviewRunPreparationWork(bookId, ['series-consistency', 'typos-and-usage'], WHOLE, policy, null, [], null, seriesId);
+      while (!review.done) review = store.advanceReviewRunPreparationWork(review.workId!);
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const pinned = (categoryId: string): string[] => {
+          const taskIntentId = review.projection!.run!.categories.find((category) => category.categoryId === categoryId)!.taskIntentId!;
+          const row = db.prepare("SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'run-source-scope'").get(taskIntentId) as { canonical_json: string };
+          return (JSON.parse(row.canonical_json) as { seriesScopes: Array<{ knowledge: Array<{ itemId: string }> }> }).seriesScopes[0]!.knowledge.map((pin) => pin.itemId).sort();
+        };
+        expect(pinned('series-consistency')).toEqual([consistencyOnly, itemOf(store, seriesId)].sort());
+        expect(pinned('typos-and-usage')).toEqual([store.inspectSeries(seriesId).knowledge.items.find((item) => item.itemId !== consistencyOnly)!.itemId]);
+      } finally { db.close(); }
+
+      let evaluation = store.createInitialEvaluationPreparationWork(bookId, policy, [], null, seriesId);
+      while (!evaluation.done) evaluation = store.advanceInitialEvaluationPreparationWork(evaluation.workId!);
+      const initial = evaluation.projection!;
+      const runRecordId = store.authorizeInitialEvaluation(bookId, initial.taskIntent!.taskIntentId, initial.planEnvelope!.digest).dispatchRunRecordId!;
+      // SER-006: the membership preview counts the authorized Run that froze the Series, and a finished one would not count.
+      const membership = store.previewSeriesMembershipChange({ seriesId, bookId, kind: 'remove' });
+      expect(membership.groups.find((group) => group.key === 'runs')!.unchanged[0]).toBe(`1 个使用书系「${J13_SERIES_TITLE}」范围的任务已授权或正在运行。`);
+      // The frozen member pin carries the Book's exact Source Version: excluding it reaches the 初评 (SER-022) and stops it (SER-023).
+      const source = store.inspectSeriesExclusionTargets({ seriesId, kind: 'source-version', after: null }).targets[0]!;
+      expect(initial.runSourceScope!.seriesScopes![0]!.members.map((member) => member.sourceVersionId)).toEqual([source.id]);
+      expect(store.seriesScopeGuard(runRecordId)).toBeNull();
+      const { preview } = exclude(store, seriesId, 'add', { target: { kind: 'source-version', id: source.id } });
+      expect(preview.groups.find((group) => group.key === 'runs')!.changes.join('')).toContain('《星河之三》AI7 初评');
+      expect(store.seriesScopeGuard(runRecordId)).toBe(source.label);
+      expect(store.inspectInitialEvaluation(bookId).runSourceScope!.seriesScopes).toEqual(initial.runSourceScope!.seriesScopes);
+    }, null, REVIEW_FIXTURE);
+  }, 300_000);
+
+  it('refuses a Series whose eligible knowledge passes what one Task may carry, before anything is prepared', async () => {
+    await withSession(async ({ store, seriesId }, bookId) => {
+      const policy = withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage');
+      for (const subject of ['甲', '乙', '丙', '丁', '戊', '己']) {
+        takeInNewItem(store, seriesId, { subject, knowledgeClass: 'canon', content: '合成书系知识说明。'.repeat(220), reuseScope: 'series-tasks' });
+      }
+      expect(refusal(() => store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, policy, null, [], null, seriesId)))
+        .toBe(`SERIES_SCOPE_UNAVAILABLE:${seriesScopeTooManyReason(J13_SERIES_TITLE)}`);
     }, null, REVIEW_FIXTURE);
   }, 300_000);
 

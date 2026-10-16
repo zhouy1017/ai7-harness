@@ -485,7 +485,7 @@ import {
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
 import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPlanFacts, type ReviewRunPreparationProgress } from './review/review-runs.js';
 import { OUTCOME_UNKNOWN_NOT_RESENT } from './analysis/outcome-unknown.js';
-import { newSeriesKnowledgeReadings, freezeSeriesScope, frozenSeriesScopes, liveSeriesContract, seriesScopeKindDefinition, seriesConsistencyKindDefinition, seriesKnowledgeAllowed, procedureOffersSeries, seriesScopeChanged, SERIES_POLICY_CLOSED } from './review/series-consistency.js';
+import { newSeriesKnowledgeReadings, freezeSeriesScope, frozenSeriesScopes, seriesScopeMaterials, liveSeriesContract, seriesScopeKindDefinition, seriesConsistencyKindDefinition, seriesKnowledgeAllowed, procedureOffersSeries, seriesScopeChanged, SERIES_POLICY_CLOSED } from './review/series-consistency.js';
 import type { FrozenSeriesScope } from '../shared/protocol.js';
 import { HISTORICALLY_AFFECTED_RESULT_MARKER } from '../shared/protocol.js';
 import { initializePublicationVersionSchema, PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
@@ -18004,8 +18004,8 @@ export class EditorialStore {
     const groups = seriesMembershipImpact(input.kind, {
       seriesTitle: series.title,
       bookTitle,
-      // No Task kind can name a Series in its scope before Series-scope pins (Issue #64, S29): none is authorized or running.
-      seriesScopedRuns: this.#series.tasks(series.seriesId).filter((task) => task.runRecordId !== null).length,
+      // Runs whose authorized plan froze this Series and have not ended (Issue #64, 7b; SER-006).
+      seriesScopedRuns: this.#series.liveTaskRuns(series.seriesId),
       learningMaterials,
       learningDecided,
       knowledgeFromBook: this.#seriesKnowledge.itemsFromBook(series.seriesId, input.bookId),
@@ -18026,6 +18026,7 @@ export class EditorialStore {
 
   #seriesProjection(series: StoredSeries): SeriesProjection {
     const members = this.#seriesMembersPage(series.seriesId, null);
+    const tasks = this.#series.tasks(series.seriesId);
     const history = this.#seriesHistoryPage({ seriesId: series.seriesId }, null);
     return {
       ...series,
@@ -18038,7 +18039,7 @@ export class EditorialStore {
       historyNext: history.nextCursor,
       knowledge: this.#seriesKnowledgeProjection(series.seriesId),
       exclusions: this.#seriesExclusionsProjection(series.seriesId),
-      ...(this.#series.tasks(series.seriesId).length === 0 ? {} : { tasks: this.#series.tasks(series.seriesId) }),
+      ...(tasks.length === 0 ? {} : { tasks }),
     };
   }
 
@@ -18314,6 +18315,30 @@ export class EditorialStore {
     }
   }
 
+  /**
+   * The Series-scoped Runs that are not a Review Run's (Issue #64, 7b; SER-022, SER-026): each whose frozen scope a target
+   * reaches, as authorized, waiting or running, or as completed. A Review Run's are read from its own snapshot; a Task not yet
+   * authorized is no Run, and its authorization re-reads the scope.
+   */
+  #seriesScopedTaskReach(seriesId: string, covers: (material: SeriesKnowledgeMaterial) => boolean): {
+    readonly active: ReadonlyArray<{ readonly taskIntentId: string; readonly route: string }>;
+    readonly completed: ReadonlyArray<{ readonly taskIntentId: string; readonly route: string }>;
+  } {
+    const active: Array<{ taskIntentId: string; route: string }> = [];
+    const completed: Array<{ taskIntentId: string; route: string }> = [];
+    for (const task of this.#series.tasks(seriesId)) {
+      if (task.runRecordId === null || isReviewCategoryKindId(task.kind)) continue;
+      const scopes = frozenSeriesScopes(this.#authority, task.taskIntentId);
+      if (scopes === undefined || !seriesScopeMaterials(this.#authority, scopes).some(covers)) continue;
+      const route = `《${task.bookTitle}》${task.kind === INITIAL_EVALUATION_KIND ? 'AI7 初评' : task.title}`;
+      const state = asString((this.#authority.prepare('SELECT state FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1')
+        .get(task.runRecordId) as SqlRow).state);
+      if (state === 'completed' || state === 'completed-with-gaps') completed.push({ taskIntentId: task.taskIntentId, route });
+      else if (!['failed', 'interrupted', 'cancelled', 'blocked-before-dispatch'].includes(state)) active.push({ taskIntentId: task.taskIntentId, route });
+    }
+    return { active, completed };
+  }
+
   #seriesExclusionPreview(input: PreviewSeriesExclusionInput): {
     preview: SeriesExclusionPreviewProjection;
     prior: StoredExclusion | null;
@@ -18373,8 +18398,11 @@ export class EditorialStore {
     // One entry per Review Run, even where two Books share a title (Issue #64 review).
     const routes = (runs: ReadonlyArray<{ readonly reviewRunId: string; readonly route: string }>): string[] =>
       [...new Map(runs.map((run) => [run.reviewRunId, run.route] as const)).values()];
-    const runRoutes = routes(reach.active);
-    const completedRoutes = routes(reach.completed);
+    // A Series-scoped Run outside 审阅 — an AI7 初评 that froze the Series — is named beside them (Issue #64, 7b; SER-022).
+    const tasks = input.action === 'add' ? this.#seriesScopedTaskReach(series.seriesId, covers) : { active: [], completed: [] };
+    if (tasks.active.length + tasks.completed.length > 0) governing.update(canonicalJson({ kind: 'task-runs', active: tasks.active, completed: tasks.completed }));
+    const runRoutes = [...routes(reach.active), ...tasks.active.map((task) => task.route)];
+    const completedRoutes = [...routes(reach.completed), ...tasks.completed.map((task) => task.route)];
     const groups = seriesExclusionImpact(input.action, {
       seriesTitle: series.title,
       target,

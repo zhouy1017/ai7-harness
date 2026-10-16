@@ -38,6 +38,8 @@ let sent: number;
 let failure: 'none' | 'unknown' | 'quota';
 let mismatchConclusion: boolean;
 let holdTurn: number | null;
+/** Run once after the store's Series guard answered, before the next transmission step can ask it again. */
+let afterSeriesGuard: (() => void) | null;
 let arrived: Promise<void>;
 let held: Promise<void>;
 let announce: () => void;
@@ -116,7 +118,13 @@ function liveOwner(policy: LaunchPolicyProjection, family: string): BaselineAnal
   activeFamily = family;
   const owner = new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
-    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
+    seriesScopeGuard: (runRecordId) => {
+      const answer = store.seriesScopeGuard(runRecordId);
+      const after = afterSeriesGuard;
+      afterSeriesGuard = null;
+      after?.();
+      return answer;
+    },
     secretResolver: { resolve: async () => 'placeholder-development-key' },
     developerLive: { launch: { runBudgetCeiling: ceiling, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: { family, case: 'sample1-whole-book', delta: null } }, nativeFetch },
   });
@@ -192,6 +200,7 @@ beforeEach(async () => {
   mismatchConclusion = false;
   recorded = null;
   holdTurn = null;
+  afterSeriesGuard = null;
   arrived = new Promise<void>((resolve) => { announce = resolve; });
   held = new Promise<void>((resolve) => { release = resolve; });
   const book = await importSample1Book(store, roots.codeRoot, 'L2 sample1 live evaluation');
@@ -241,6 +250,25 @@ describe('evaluation on the Go execution path (#429)', () => {
     expect(stopped.run!.transitions.at(-1)!.detail).toContain('书系检索范围已变化');
     expect(sent).toBe(units);
     expect(stopped.taskOutcome!.report!.usagePerStage['cross-unit-reduction'].requests).toBe(0);
+  });
+  it('refuses at the final gate a payload assembled after the range check admitted it, so the exclusion sends nothing', async () => {
+    const seriesId = makeJ13Series(store, bookId);
+    const policy = withSeriesKnowledgeFor(selected, 'evaluation');
+    bindLive(policy);
+    const itemId = store.inspectSeries(seriesId).knowledge.items[0]!.itemId;
+    // The first range's boundary check answers "nothing excluded"; the exclusion lands while that range's payload is assembled,
+    // so only the Egress Gate's own recheck stands between it and the synthetic transport.
+    afterSeriesGuard = () => {
+      const request = { seriesId, action: 'add' as const, exclusionId: null, target: { kind: 'knowledge-item' as const, id: itemId }, reason: '' };
+      store.recordSeriesExclusion({ ...request, previewDigest: store.previewSeriesExclusion(request).previewDigest });
+    };
+    await runInitial(policy, seriesId);
+    expect(afterSeriesGuard).toBeNull();
+    const stopped = store.inspectInitialEvaluation(bookId);
+    expect(sent).toBe(0);
+    expect(stopped.run!.state).toBe('interrupted');
+    expect(stopped.run!.transitions.at(-1)!.detail).toContain('书系检索范围已变化');
+    expect(stopped.runSourceScope!.seriesScopes![0]!.knowledge.map((pin) => pin.itemId)).toEqual([itemId]);
   });
   it('executes the Series-scoped evaluation through a synthetic transport and keeps completed history readable after exclusion', async () => {
     const seriesId = makeJ13Series(store, bookId);

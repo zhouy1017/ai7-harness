@@ -198,7 +198,7 @@ export interface StoredMembershipChange {
 export interface SeriesImpactFacts {
   readonly seriesTitle: string;
   readonly bookTitle: string;
-  /** Authorized, queued or running Runs whose frozen scope names this Series: none can yet (S29). */
+  /** Authorized, queued or running Runs whose frozen scope names this Series (Issue #64, 7b). */
   readonly seriesScopedRuns: number;
   readonly learningMaterials: number;
   readonly learningDecided: number;
@@ -301,6 +301,21 @@ export class SeriesLedger {
       taskIntentId: String(row.task_intent_id), bookId: String(row.book_id), bookTitle: String(row.book_title), kind: String(row.kind), title: String(row.goal),
       runRecordId: row.run_record_id === null ? null : String(row.run_record_id),
     }));
+  }
+
+  /**
+   * The Runs whose authorized plan froze this Series and that are still authorized, waiting or running (SER-006): a finished,
+   * failed, stopped or cancelled Run keeps its frozen scope as history and is not counted.
+   */
+  liveTaskRuns(seriesId: string): number {
+    const row = this.#db.prepare(`SELECT count(DISTINCT r.run_record_id) count FROM analysis_run_records r
+      JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
+      JOIN analysis_plan_versions v ON v.task_intent_id = r.task_intent_id AND v.plan_envelope_sha256 = a.plan_envelope_sha256
+      JOIN analysis_plan_records p ON p.task_intent_id = r.task_intent_id AND p.plan_version = v.ordinal AND p.component = 'run-source-scope'
+      JOIN json_each(p.canonical_json, '$.seriesScopes') s ON json_extract(s.value, '$.seriesId') = ?
+      WHERE (SELECT st.state FROM analysis_run_states st WHERE st.run_record_id = r.run_record_id ORDER BY st.sequence DESC LIMIT 1)
+        NOT IN ('completed', 'completed-with-gaps', 'failed', 'interrupted', 'cancelled', 'blocked-before-dispatch')`).get(seriesId) as SqlRow;
+    return Number(row.count);
   }
 
   /** Up to `limit` Series by name after the one named, each verified: a page of 书系, in the database's own order. */
