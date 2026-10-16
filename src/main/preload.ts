@@ -305,6 +305,16 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['previewCapturedProcedureStop']['output']>(IPC_CHANNELS.previewCapturedProcedureStop, input),
   stopCapturedProcedure: (input: Parameters<RendererApi['stopCapturedProcedure']>[0]) =>
     invoke<ServiceOperationMap['stopCapturedProcedure']['output']>(IPC_CHANNELS.stopCapturedProcedure, input),
+  inspectCustomAnalysisDimensions: (input: Parameters<RendererApi['inspectCustomAnalysisDimensions']>[0]) =>
+    invoke<ServiceOperationMap['inspectCustomAnalysisDimensions']['output']>(IPC_CHANNELS.inspectCustomAnalysisDimensions, input),
+  saveCustomAnalysisDimension: (input: Parameters<RendererApi['saveCustomAnalysisDimension']>[0]) =>
+    invoke<ServiceOperationMap['saveCustomAnalysisDimension']['output']>(IPC_CHANNELS.saveCustomAnalysisDimension, input),
+  enableCustomAnalysisDimension: (input: Parameters<RendererApi['enableCustomAnalysisDimension']>[0]) =>
+    invoke<ServiceOperationMap['enableCustomAnalysisDimension']['output']>(IPC_CHANNELS.enableCustomAnalysisDimension, input),
+  stopCustomAnalysisDimension: (input: Parameters<RendererApi['stopCustomAnalysisDimension']>[0]) =>
+    invoke<ServiceOperationMap['stopCustomAnalysisDimension']['output']>(IPC_CHANNELS.stopCustomAnalysisDimension, input),
+  prepareCustomAnalysis: (input: Parameters<RendererApi['prepareCustomAnalysis']>[0]) =>
+    invoke<ServiceOperationMap['prepareCustomAnalysis']['output']>(IPC_CHANNELS.prepareCustomAnalysis, input),
   inspectCapturedProcedureApplicability: (input?: Parameters<RendererApi['inspectCapturedProcedureApplicability']>[0]) =>
     invoke<ServiceOperationMap['inspectCapturedProcedureApplicability']['output']>(IPC_CHANNELS.inspectCapturedProcedureApplicability, input ?? {}),
   inspectCapturedProcedureRun: (input: Parameters<RendererApi['inspectCapturedProcedureRun']>[0]) =>
