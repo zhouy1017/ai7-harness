@@ -42,6 +42,20 @@ describe('Run-local pinned retrieval', () => {
     expect(results[0]!.score).toBe(1 / 61);
     expect(reciprocalRankFusion([['a', 'b'], ['b', 'a']]).get('a')).toBe(reciprocalRankFusion([['a', 'b'], ['b', 'a']]).get('b'));
   });
+  it('ranks by local vector similarity when wording has no lexical match', async () => {
+    const index = new RetrievalIndex([source('one', 'alpha'), source('two', 'beta')], embeddings([[1, 0], [0, 1], [1, 0]]));
+    expect((await index.retrieve('gamma')).map((candidate) => candidate.sourceId)).toEqual(['two']);
+  });
+  it('consumes only pinned material-vector hits and ignores a different build or unpinned source', async () => {
+    const material: RetrievalSource = { sourceKind: 'material', sourceId: 'one', digest: 'a'.repeat(64),
+      read: () => ({ digest: 'a'.repeat(64), segments: [{ segmentOrdinal: 1, text: 'alpha' }] }) };
+    let digest = 'a'.repeat(64);
+    const query = async () => [{ materialId: 'foreign', indexDigest: digest, ordinal: 1, score: 1 }, { materialId: 'one', indexDigest: digest, ordinal: 1, score: 0.9 }];
+    const index = new RetrievalIndex([material], embeddings([[1]]), query);
+    expect((await index.retrieve('gamma')).map((candidate) => candidate.sourceId)).toEqual(['one']);
+    digest = 'b'.repeat(64);
+    expect((await index.retrieve('gamma')).length).toBe(0);
+  });
   it('refuses withdrawn and moved pins, never substituting fresh text', async () => {
     let digest = 'a'.repeat(64); let withdrawn = false;
     const pinned: RetrievalSource = { ...source('one', 'alpha'), sourceKind: 'material', read: () => {
