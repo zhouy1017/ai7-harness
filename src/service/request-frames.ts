@@ -73,7 +73,7 @@ import {
   type TaskPlanKind,
 } from '../shared/protocol.js';
 import { SERIES_EXCLUSION_ACTIONS, SERIES_EXCLUSION_TARGET_KINDS, type SeriesExclusionAction, type SeriesExclusionTargetKind } from '../shared/protocol.js';
-import { BACKGROUND_ANALYSIS_CEILING_MAX } from '../shared/protocol.js';
+import { BACKGROUND_ANALYSIS_CEILING_MAX, FACTUAL_VERIFICATION_OUTCOMES, VERIFICATION_REVIEW_DISPOSITIONS } from '../shared/protocol.js';
 import { CONFLICT_RESOLUTIONS, type ConflictResolution } from '../shared/conflict-units.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -750,7 +750,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       // them still means what it meant. A ceiling is a whole count of tokens, or `null` for none.
       const shared = value.op === 'editTaskPlan';
       const input = requireInputWithOptional(value.input, ['bookId', ...(shared ? ['kind', 'ref'] : ['taskIntentId']), 'planEnvelopeDigest', 'removedSteps', 'disallowedAdaptations'],
-        ['askFirstAdaptations', 'runBudgetCeiling'], tentativeId);
+        ['askFirstAdaptations', 'runBudgetCeiling', ...(shared ? ['evidenceAssuranceLevel'] : [])], tentativeId);
       const ceiling = (candidate: unknown): boolean => isRecord(candidate) && hasExactKeys(candidate, ['kind', 'maxTotalTokens']) &&
         candidate.kind === 'tokens' && isSafeInteger(candidate.maxTotalTokens, 1) && candidate.maxTotalTokens <= 999_999_999_999;
       const identities = (list: unknown): boolean => Array.isArray(list) && list.length <= 8 &&
@@ -759,7 +759,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest) ||
           !identities(input.removedSteps) || !identities(input.disallowedAdaptations) ||
           (Object.hasOwn(input, 'askFirstAdaptations') && !identities(input.askFirstAdaptations)) ||
-          !optionalOrNull(input, 'runBudgetCeiling', ceiling)) {
+          !optionalOrNull(input, 'runBudgetCeiling', ceiling) ||
+          // The factual-review Task's Evidence Assurance Level (Issue #901): one of the three, or left out.
+          (Object.hasOwn(input, 'evidenceAssuranceLevel') && !['quick', 'standard', 'strict'].includes(input.evidenceAssuranceLevel as string))) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -907,6 +909,45 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !(input.taskIntentId === undefined || validUuid(input.taskIntentId)) ||
           !(input.reviewFindingId === undefined || (input.taskIntentId !== undefined && typeof input.reviewFindingId === 'string' && /^rvf_[0-9a-f]{24}$/u.test(input.reviewFindingId))) ||
           !(input.staleAfterDays === null || (isSafeInteger(input.staleAfterDays, 1) && Number(input.staleAfterDays) <= 3650))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // Factual verification (Issue #901): a lens page with its filters; a result and a source cursor; a decision on one result
+    // version; a draft; and a save with the chosen variant or the editor's own words and the included ranges.
+    case 'inspectFactualVerification': {
+      const input = requireInput(value.input, ['bookId', 'reviewRunId', 'after', 'chapterBlockId', 'outcome', 'severity', 'sourceCondition', 'actionNeed'], tentativeId);
+      if (!validUuid(input.bookId) || !(input.reviewRunId === null || validUuid(input.reviewRunId)) || !(input.after === null || isSafeInteger(input.after, 1)) ||
+          !(input.chapterBlockId === null || isBoundedString(input.chapterBlockId, 64)) ||
+          !(input.outcome === null || FACTUAL_VERIFICATION_OUTCOMES.includes(input.outcome as never)) ||
+          !(input.severity === null || ['A', 'B', 'C'].includes(input.severity as string)) ||
+          !(input.sourceCondition === null || ['no-source', 'candidates-only', 'checked', 'conflicting'].includes(input.sourceCondition as string)) ||
+          !(input.actionNeed === null || ['review', 'correction', 'none'].includes(input.actionNeed as string))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectEvidenceWorkspace': {
+      const input = requireInput(value.input, ['bookId', 'resultId', 'sourcesAfter'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.resultId) || !(input.sourcesAfter === null || isSafeInteger(input.sourcesAfter, 0))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'recordVerificationReviewDecision': {
+      const input = requireInput(value.input, ['bookId', 'resultId', 'resultVersion', 'disposition', 'ownWords', 'reason'], tentativeId);
+      const reason = input.reason;
+      if (!validUuid(input.bookId) || !validUuid(input.resultId) || !isSafeInteger(input.resultVersion, 1) ||
+          !VERIFICATION_REVIEW_DISPOSITIONS.includes(input.disposition as never) || !(input.ownWords === null || isBoundedString(input.ownWords, 2_000)) ||
+          !(reason === null || (isRecord(reason) && hasExactKeys(reason, ['state', 'text', 'suggestion']) && ['selected', 'corrected', 'replaced'].includes(reason.state as string) &&
+            isBoundedString(reason.text, 2_000) && (reason.suggestion === null || isBoundedString(reason.suggestion, 2_000))))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'prepareCorrectionProposal': {
+      const input = requireInput(value.input, ['bookId', 'resultId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.resultId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'saveCorrectionProposal': {
+      const input = requireInput(value.input, ['bookId', 'resultId', 'resultVersion', 'variantId', 'text', 'rationale', 'rangeIds'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.resultId) || !isSafeInteger(input.resultVersion, 1) ||
+          !(input.variantId === null || ['v1', 'v2', 'v3'].includes(input.variantId as string)) || !isBoundedString(input.text, 2_000) ||
+          !(typeof input.rationale === 'string' && input.rationale.length <= 2_000) || !Array.isArray(input.rangeIds) || input.rangeIds.length < 1 ||
+          input.rangeIds.length > 64 || !input.rangeIds.every((rangeId) => typeof rangeId === 'string' && /^rng_[0-9a-f]{24}$/u.test(rangeId))) throw new ProtocolError(tentativeId);
       break;
     }
     // 保存为来源材料 (Issue #425, S70): the Book, one retained source, and the title the editor gave it or none.

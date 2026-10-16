@@ -1,5 +1,8 @@
 import { kindResearchDeclaration } from './live-kind-admission.js';
-import { withFactualResearch } from './kind-definition.js';
+import { factualReviewDefinitionsByDigest, factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from './kind-definition.js';
+import { FACTUAL_REVIEW_KIND, type EvidenceAssuranceLevel } from '../../shared/protocol.js';
+import { FACTUAL_VERIFICATION_POLICY_VERSION } from './factual-review-contract.js';
+import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
@@ -83,6 +86,7 @@ import {
   PLAN_CEILING_LAUNCH_REASON,
   canonicalPlanEdits,
   planEditCeiling,
+  planEditAssuranceLevel,
   planEditDiff,
   planEditsAreEmpty,
   planEditsOf,
@@ -1027,6 +1031,17 @@ export type CarriedStages = Record<(typeof CARRIED_STAGES)[number], { requests: 
  * database serve the two kinds of Issue #53 without either seeing the other's Tasks, plans, Runs, or
  * revisions: every read is filtered by the definition's kind.
  */
+/** The provider-free v2 fixture identity whose lineage runs the factual levels on the deterministic route (Issue #901). */
+export const FACTUAL_VERIFIED_FIXTURE_IDENTITY = 'sample1-factual-verified';
+/** Why a level below the Factual Verification Policy's minimum is refused; the document names none today (EASSURE-008). */
+export const FACTUAL_POLICY_MINIMUM_REASON = '事实核查政策要求更高的证据保证级别；这个级别不能选。' as const;
+const LEVEL_ORDER: Readonly<Record<EvidenceAssuranceLevel, number>> = { quick: 0, standard: 1, strict: 2 };
+
+/** Whether a level is below the minimum the pinned Factual Verification Policy Document requires (EASSURE-008). */
+export function levelBelowPolicyMinimum(level: EvidenceAssuranceLevel, minimum: EvidenceAssuranceLevel | null = FACTUAL_VERIFICATION_POLICY_VERSION.minimumLevel): boolean {
+  return minimum !== null && LEVEL_ORDER[level] < LEVEL_ORDER[minimum];
+}
+
 export class BaselineAnalysisStore {
   readonly #db: DatabaseSync;
   readonly #checkpointOwner: CheckpointOwner;
@@ -1065,6 +1080,67 @@ export class BaselineAnalysisStore {
   get definition(): AnalysisKindDefinition {
     this.#refreshClarificationDefinition();
     return this.#definition;
+  }
+
+  /**
+   * Whether this launch runs the factual Evidence Assurance Levels (Issue #901): a live rule that hands the kind the research
+   * tools, or the deterministic route over the provider-free v2 fixture. Anywhere else no Run can research, and every level
+   * executes v1 exactly as before, its results 待核查.
+   */
+  #factualLevelsActive(rule: ReturnType<typeof liveKindRule>): boolean {
+    if (this.#launch.live !== null) return platformToolsFromProjection(rule) !== null;
+    const route = this.#route;
+    return route !== null && (route.fixtureIdentity === FACTUAL_VERIFIED_FIXTURE_IDENTITY ||
+      (route.fixtureLineage ?? []).some((link) => link.identity === FACTUAL_VERIFIED_FIXTURE_IDENTITY));
+  }
+
+  #factualUnwrapped(level: EvidenceAssuranceLevel, rule: ReturnType<typeof liveKindRule>): AnalysisKindDefinition {
+    if (this.#factualLevelsActive(rule)) return factualReviewLevelDefinition(level);
+    const v1 = factualReviewKindDefinition();
+    return platformToolsFromProjection(rule) === null ? v1 : withFactualResearch(v1);
+  }
+
+  /** The factual definition of one level as this launch executes it, the clarification instruction wrapped as for the kind. */
+  #factualDefinitionFor(level: EvidenceAssuranceLevel): AnalysisKindDefinition {
+    const rule = liveKindRule(this.#launch.policy, FACTUAL_REVIEW_KIND);
+    const unwrapped = this.#factualUnwrapped(level, rule);
+    return this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true || rule?.clarificationQuestionAllowed === true
+      ? withModelClarification(unwrapped) : unwrapped;
+  }
+
+  /** The definition one plan version executes: its level's for the factual kind (Issue #901), the ledger's own for every other. */
+  #planDefinition(edits: PlanEdits): AnalysisKindDefinition {
+    return this.definition.kind === FACTUAL_REVIEW_KIND ? this.#factualDefinitionFor(planEditAssuranceLevel(edits)) : this.#definition;
+  }
+
+  /**
+   * The definition a frozen plan executes under (Issue #901): for the factual kind the one — of its three levels as this launch
+   * runs them, or of the two definitions that predate the levels — whose prompt-contract digest the plan froze; for every other
+   * kind, and for a digest no factual definition has, the ledger's own. A plan therefore executes, and replays, under exactly
+   * the contract it froze.
+   */
+  definitionForDigest(promptContractDigest: string): AnalysisKindDefinition {
+    const current = this.definition;
+    if (current.kind !== FACTUAL_REVIEW_KIND) return current;
+    for (const level of ['standard', 'strict', 'quick'] as const) {
+      const candidate = this.#factualDefinitionFor(level);
+      if (candidate.promptContractDigest === promptContractDigest) return candidate;
+    }
+    for (const candidate of factualReviewDefinitionsByDigest().values()) {
+      if (candidate.promptContractDigest === promptContractDigest) return candidate;
+      const wrapped = withModelClarification(candidate);
+      if (wrapped.promptContractDigest === promptContractDigest) return wrapped;
+    }
+    return current;
+  }
+
+  /** A closed unit record read back by the contract that wrote it: a factual v2 record carries `corrections` (Issue #901). */
+  #unitResultOfRecord(record: Record<string, unknown>, unitOrdinal: number): unknown {
+    if (this.#definition.kind === FACTUAL_REVIEW_KIND) {
+      return Object.hasOwn(record, 'corrections') ? factualReviewUnitResultOfRecordV2(record, unitOrdinal)
+        : factualReviewKindDefinition().unitResultOfRecord(record, unitOrdinal);
+    }
+    return this.#unitResultOfRecord(record, unitOrdinal);
   }
 
   get kind(): AnalysisKindId {
@@ -1114,9 +1190,8 @@ export class BaselineAnalysisStore {
     const launch = this.#launch;
     const rule = liveKindRule(launch.policy, this.#definition.kind);
     const base = this.#definition.clarificationBase ?? this.#definition;
-    if (base.kind === 'factual-review') {
-      this.#definition = platformToolsFromProjection(rule) === null ? base.platformToolBase ?? base : withFactualResearch(base);
-    }
+    // The factual kind's own definition is its default level's (Issue #901): 标准核查 where the levels apply, else v1 as before.
+    if (base.kind === FACTUAL_REVIEW_KIND) this.#definition = this.#factualUnwrapped('standard', rule);
     // The one origin-qualified admitted rule owns eligibility; missing terms deny.
     if (this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ||
         rule?.clarificationQuestionAllowed === true) {
@@ -2183,6 +2258,7 @@ export class BaselineAnalysisStore {
       disallowedAdaptations: unknown;
       askFirstAdaptations?: unknown;
       runBudgetCeiling?: unknown;
+      evidenceAssuranceLevel?: unknown;
     },
   ): AnalysisProjection {
     const existing = this.inspect(bookId);
@@ -2195,8 +2271,12 @@ export class BaselineAnalysisStore {
     requireAnalysis(existing.planRevision === null, 'ANALYSIS_PLAN_REVISION_PENDING', '计划的关键内容已变化：先重新确认计划，你的改动会保留。');
     requireAnalysis(existing.planEnvelope !== null && existing.planEnvelope.digest === input.planEnvelopeDigest && existing.planVersion !== null,
       'ANALYSIS_PLAN_EDIT_STALE', '计划已经变了；请重新查看计划后再修改。');
-    const next = canonicalPlanEdits(input);
+    // The Evidence Assurance Level is a factual-review Task's term alone (Issue #901); left out, the version keeps its own.
+    requireAnalysis(input.evidenceAssuranceLevel === undefined || this.#definition.kind === FACTUAL_REVIEW_KIND,
+      'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
+    const next = canonicalPlanEdits({ ...input, evidenceAssuranceLevel: input.evidenceAssuranceLevel ?? existing.planVersion?.edits.evidenceAssuranceLevel });
     requireAnalysis(next !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '这项修改不在这份计划可以改的范围内。');
+    requireAnalysis(!levelBelowPolicyMinimum(planEditAssuranceLevel(next)), 'ANALYSIS_PLAN_EDIT_INVALID', FACTUAL_POLICY_MINIMUM_REASON);
     requireAnalysis(this.#definition.assurance !== null || next.removedSteps.length === 0,
       'ANALYSIS_PLAN_EDIT_INVALID', '这项任务没有核对与抽检步骤，不能修改该步骤。');
     requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || (next.askFirstAdaptations ?? []).length === 0,
@@ -2245,11 +2325,15 @@ export class BaselineAnalysisStore {
       });
       const before = this.#planDigests(intent.taskIntentId, current.ordinal);
       const after = this.#planDigests(intent.taskIntentId, current.ordinal + 1);
-      // A ceiling the editor moved moves the Provider Resolution Plan too — in that one field, and nothing else.
-      const providerMoved = ceilingMoved && !this.#providerPlansDifferOnlyInCeiling(intent.taskIntentId, current.ordinal);
+      // A ceiling the editor moved moves the Provider Resolution Plan too — in that one field, and nothing else. A factual
+      // Task's Evidence Assurance Level (Issue #901) moves its research declaration: the web tools backend the plan freezes and
+      // the provider plan's naming of it, and nothing else.
+      const levelMoved = planEditAssuranceLevel(prior) !== planEditAssuranceLevel(next);
+      const providerMoved = (ceilingMoved || levelMoved) && !this.#providerPlansDifferOnlyIn(intent.taskIntentId, current.ordinal, ceilingMoved, levelMoved);
       const moved = Object.keys({ ...before, ...after }).filter((component) =>
         component !== 'execution-plan' && component !== 'plan-envelope' && before[component] !== after[component] &&
-        (component !== 'provider-resolution-plan' || !ceilingMoved || providerMoved));
+        (component !== 'web-tools-backend' || !levelMoved) &&
+        (component !== 'provider-resolution-plan' || !(ceilingMoved || levelMoved) || providerMoved));
       requireAnalysis(moved.length === 0, 'ANALYSIS_PLAN_EDIT_STALE', '这份计划准备之后，执行它的路由或所用工序已经变了；请重新准备这项任务再修改。');
     });
     return this.inspect(bookId);
@@ -2390,7 +2474,7 @@ export class BaselineAnalysisStore {
   }
 
   /** Whether one version's Provider Resolution Plan and the next differ in the Run Budget Ceiling alone (Issue #51, S16a). */
-  #providerPlansDifferOnlyInCeiling(taskIntentId: string, priorOrdinal: number): boolean {
+  #providerPlansDifferOnlyIn(taskIntentId: string, priorOrdinal: number, ceiling: boolean, tools: boolean): boolean {
     const sansCeiling = (ordinal: number): string => {
       const row = this.#db.prepare(
         "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = ? AND component = 'provider-resolution-plan'",
@@ -2398,7 +2482,9 @@ export class BaselineAnalysisStore {
       requireAnalysis(row !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录图不完整。');
       const record = parseCanonicalJson(asString(row.canonical_json));
       requireAnalysis(isRecord(record), 'ANALYSIS_RECORD_INVALID', '任务计划记录图不完整。');
-      return canonicalJson({ ...record, runBudgetCeiling: null });
+      const { webToolsBackend: _backend, searchCredentialReference: _reference, ...rest } = record as Record<string, unknown>;
+      const kept = tools ? rest : record;
+      return canonicalJson(ceiling ? { ...kept, runBudgetCeiling: null } : kept);
     };
     return sansCeiling(priorOrdinal) === sansCeiling(priorOrdinal + 1);
   }
@@ -3330,7 +3416,7 @@ export class BaselineAnalysisStore {
     // imported anew since (Issue #427 review): its plan could never execute under this contract, so the preparation is a
     // new Task Intent under the contract that applies now.
     // So is one whose plan froze another assurance sampling contract (Issue #826): the composition does not pin it.
-    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#definition.promptContractDigest &&
+    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS).promptContractDigest &&
       (existing.executionPlan === null ||
         !assuranceContractMoved(this.#definition, frozenAssurancePromptContractDigest(existing.executionPlan as unknown as Record<string, unknown>))));
     // Nor is a Task whose frozen scope plan the chain no longer derives (#711 review P3-4): 重新准备 makes it anew.
@@ -3568,13 +3654,15 @@ export class BaselineAnalysisStore {
     // The editor's ceiling is the plan's own outside developer-live (Issue #51, S16a); under it the launch sets the
     // ceiling, so a redo that copies a ceiling the editor once set keeps the rest of the edit and not the ceiling.
     const edits = !launchSetsCeilingOf(live) ? input.edits : withoutCeiling(input.edits);
-    const promptContractDigest = this.#definition.promptContractDigest;
+    // The factual Task's level decides its contract and its research declaration (Issue #901); every other kind's is its own.
+    const definition = this.#planDefinition(edits);
+    const promptContractDigest = definition.promptContractDigest;
     const admittedToolRule = this.#definition.kind === BASELINE_ANALYSIS_KIND || intent.preparedByEnrollmentVersionId !== null ? null
       : liveKindRule(this.#launch.policy, this.#definition.kind);
     const toolsProjection: unknown = admittedToolRule !== null && 'platformTools' in admittedToolRule ? admittedToolRule.platformTools : null;
     // A Task a 后台分析登记 prepared declares no research, as before the declaration existed (#744 keeps #887's guard).
     const researchDeclaration = admittedToolRule === null ? { webSearch: false, searchEngine: null } as const
-      : kindResearchDeclaration(this.#launch.policy, this.#definition.kind, this.#definition.researchDeclaration);
+      : kindResearchDeclaration(this.#launch.policy, definition.kind, definition.researchDeclaration);
     const toolsDeclared = live !== null && researchDeclaration.webSearch;
     let webToolsBackend: FrozenWebToolsBackend | undefined;
     let searchCredentialReference: string | undefined;
@@ -3590,7 +3678,7 @@ export class BaselineAnalysisStore {
     const composition = live === null
       ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest)
       : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined, researchDeclaration,
-        localTools: intent.preparedByEnrollmentVersionId === null && kindLocalTools(this.#launch.policy, this.#definition.kind) !== null });
+        localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' && kindLocalTools(this.#launch.policy, this.#definition.kind) !== null });
     const providerPlan = {
       ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }),
       role: 'Main Editorial Role',
@@ -3645,9 +3733,9 @@ export class BaselineAnalysisStore {
     // An edited plan names what it leaves out; a plan AI7 proposed names nothing, so its record reads as before.
     const editorEdits = planEditsAreEmpty(edits) ? {} : { editorEdits: edits };
     const executionPlan = reusePlan === null
-      ? { steps: this.#definition.executionSteps, effects: [], unitCount: manifest.units.length, reducerStages: this.#definition.reducerStages, stopCondition, ...editorEdits }
+      ? { steps: definition.executionSteps, effects: [], unitCount: manifest.units.length, reducerStages: this.#definition.reducerStages, stopCondition, ...editorEdits }
       : {
-          steps: this.#definition.updateExecutionSteps,
+          steps: definition.updateExecutionSteps,
           effects: [],
           unitCount: manifest.units.length,
           recomputedUnitCount: reusePlan.counts.recomputed,
@@ -3662,8 +3750,8 @@ export class BaselineAnalysisStore {
     const samplingPin = assurance !== null && assurance.promptContractDigest !== ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST
       ? { assurancePromptContractDigest: assurance.promptContractDigest }
       : {};
-    const clarificationPin = this.#definition.clarificationBase === undefined ? {} : {
-      clarificationBasePromptContractDigest: this.#definition.clarificationBase.promptContractDigest,
+    const clarificationPin = definition.clarificationBase === undefined ? {} : {
+      clarificationBasePromptContractDigest: definition.clarificationBase.promptContractDigest,
     };
     const records: Record<string, { json: string; digest: string }> = {
       'manuscript-pin': canonicalRecord(manuscriptPin),
@@ -4023,7 +4111,7 @@ export class BaselineAnalysisStore {
         unit: record.unit,
         observation: record.observation,
         result: record.unit.closed.state === 'closed'
-          ? this.#definition.unitResultOfRecord(record.unit.closed.result as Record<string, unknown>, unitOrdinal)
+          ? this.#unitResultOfRecord(record.unit.closed.result as Record<string, unknown>, unitOrdinal)
           : null,
       };
     });
@@ -4758,7 +4846,7 @@ export class BaselineAnalysisStore {
         usage: record.usage as PredecessorUnitResult['usage'],
         // Which keys a closed unit record carries is the kind's to know: its definition wrote them
         // (`unitRecord`) and its definition reads them back.
-        result: this.#definition.unitResultOfRecord(record, unitOrdinal),
+        result: this.#unitResultOfRecord(record, unitOrdinal),
       });
     }
     return results;
@@ -4910,7 +4998,8 @@ export class BaselineAnalysisStore {
           revisionDigest: facts.checkpoint.revisionDigest,
         },
         coverageManifestDigest: facts.manifestDigest,
-        schemaDigest: this.#definition.schemaDigest,
+        // The contract the Run executed (Issue #901): a factual level's own; every other kind's, and an earlier plan's, as before.
+        schemaDigest: this.definitionForDigest(facts.promptContractDigest).schemaDigest,
         reducerDigest: this.#definition.reducerDigest,
         // The revision pins the route that produced it: the fixture on the deterministic route, the
         // live route's own identity when the Run actually transmitted.

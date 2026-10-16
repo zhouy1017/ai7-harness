@@ -1,4 +1,10 @@
-import type { PlanEditsProjection, PlanRevisionDiffEntryProjection, RunBudgetCeilingState } from '../../shared/protocol.js';
+import {
+  EVIDENCE_ASSURANCE_LEVEL_LABELS,
+  type EvidenceAssuranceLevel,
+  type PlanEditsProjection,
+  type PlanRevisionDiffEntryProjection,
+  type RunBudgetCeilingState,
+} from '../../shared/protocol.js';
 import { MATERIAL_PLAN_FIELD_LABELS } from './plan-boundary.js';
 
 /**
@@ -40,6 +46,14 @@ export const PLAN_EDIT_CEILING_MAX = 999_999_999_999;
 export const PLAN_CEILING_LAUNCH_REASON = '这次启动的预算上限由开发者实时启动参数决定，不能在计划里设置。' as const;
 export type PlanEditCeiling = Extract<RunBudgetCeilingState, { kind: 'tokens' }>;
 
+/**
+ * The Evidence Assurance Level an edit names (Issue #901; EASSURE-001), as the plan states it: 标准核查 when it names none.
+ * Only a factual-review Task's plan takes the edit; its ledger refuses it for every other kind.
+ */
+export function planEditAssuranceLevel(edits: PlanEdits): EvidenceAssuranceLevel {
+  return edits.evidenceAssuranceLevel ?? 'standard';
+}
+
 /** The ceiling an edit names, as the plan states it: `unset` when the editor set none. */
 export function planEditCeiling(edits: PlanEdits): RunBudgetCeilingState {
   return edits.runBudgetCeiling ?? 'unset';
@@ -75,8 +89,12 @@ export function canonicalPlanEdits(input: {
   disallowedAdaptations: unknown;
   askFirstAdaptations?: unknown;
   runBudgetCeiling?: unknown;
+  evidenceAssuranceLevel?: unknown;
 }): PlanEdits | null {
   const { removedSteps, disallowedAdaptations } = input;
+  // The level is named only when it is not the default (Issue #901), so a plan at 标准核查 reads back as it always did.
+  const level = input.evidenceAssuranceLevel;
+  if (level !== undefined && level !== 'quick' && level !== 'standard' && level !== 'strict') return null;
   const askFirst = input.askFirstAdaptations === undefined ? [] : input.askFirstAdaptations;
   const ceiling = input.runBudgetCeiling === undefined || input.runBudgetCeiling === null ? null : canonicalCeiling(input.runBudgetCeiling);
   if (ceiling === null && input.runBudgetCeiling !== undefined && input.runBudgetCeiling !== null) return null;
@@ -93,6 +111,7 @@ export function canonicalPlanEdits(input: {
     disallowedAdaptations: PLAN_EDITABLE_ADAPTATIONS.filter((adaptation) => disallowedAdaptations.includes(adaptation)),
     ...(asked.length === 0 ? {} : { askFirstAdaptations: asked }),
     ...(ceiling === null ? {} : { runBudgetCeiling: ceiling }),
+    ...(level === undefined || level === 'standard' ? {} : { evidenceAssuranceLevel: level }),
   };
 }
 
@@ -101,22 +120,23 @@ export function planEditsOf(executionPlan: unknown): PlanEdits {
   const record = executionPlan !== null && typeof executionPlan === 'object' ? (executionPlan as Record<string, unknown>).editorEdits : undefined;
   if (record === undefined) return NO_PLAN_EDITS;
   const edits = record !== null && typeof record === 'object'
-    ? canonicalPlanEdits(record as { removedSteps: unknown; disallowedAdaptations: unknown; askFirstAdaptations?: unknown; runBudgetCeiling?: unknown })
+    ? canonicalPlanEdits(record as { removedSteps: unknown; disallowedAdaptations: unknown; askFirstAdaptations?: unknown; runBudgetCeiling?: unknown; evidenceAssuranceLevel?: unknown })
     : null;
-  if (edits === null || planEditsAreEmpty(edits)) throw new Error('PLAN_EDITS_INVALID');
+  // A stored level is only ever the non-default one; a stored `standard` is not a record this ledger wrote.
+  if (edits === null || planEditsAreEmpty(edits) || (record as { evidenceAssuranceLevel?: unknown }).evidenceAssuranceLevel === 'standard') throw new Error('PLAN_EDITS_INVALID');
   return edits;
 }
 
 export function planEditsAreEmpty(edits: PlanEdits): boolean {
   return edits.removedSteps.length === 0 && edits.disallowedAdaptations.length === 0 && (edits.askFirstAdaptations ?? []).length === 0 &&
-    edits.runBudgetCeiling === undefined;
+    edits.runBudgetCeiling === undefined && edits.evidenceAssuranceLevel === undefined;
 }
 
 export function samePlanEdits(left: PlanEdits, right: PlanEdits): boolean {
   return JSON.stringify(left.removedSteps) === JSON.stringify(right.removedSteps) &&
     JSON.stringify(left.disallowedAdaptations) === JSON.stringify(right.disallowedAdaptations) &&
     JSON.stringify(left.askFirstAdaptations ?? []) === JSON.stringify(right.askFirstAdaptations ?? []) &&
-    sameCeiling(planEditCeiling(left), planEditCeiling(right));
+    sameCeiling(planEditCeiling(left), planEditCeiling(right)) && planEditAssuranceLevel(left) === planEditAssuranceLevel(right);
 }
 
 function sameCeiling(left: RunBudgetCeilingState, right: RunBudgetCeilingState): boolean {
@@ -130,6 +150,7 @@ export function withoutCeiling(edits: PlanEdits): PlanEdits {
     removedSteps: edits.removedSteps,
     disallowedAdaptations: edits.disallowedAdaptations,
     ...(edits.askFirstAdaptations === undefined ? {} : { askFirstAdaptations: edits.askFirstAdaptations }),
+    ...(edits.evidenceAssuranceLevel === undefined ? {} : { evidenceAssuranceLevel: edits.evidenceAssuranceLevel }),
   };
 }
 
@@ -181,6 +202,12 @@ export function planEditDiff(prior: PlanEdits, next: PlanEdits): PlanRevisionDif
   const after = planEditCeiling(next);
   if (!sameCeiling(before, after)) {
     entries.push({ field: 'runBudgetCeiling', label: MATERIAL_PLAN_FIELD_LABELS.runBudgetCeiling, prior: before, proposed: after, materiality: 'edited' });
+  }
+  const levelBefore = planEditAssuranceLevel(prior);
+  const levelAfter = planEditAssuranceLevel(next);
+  if (levelBefore !== levelAfter) {
+    entries.push({ field: 'evidenceAssuranceLevel', label: '证据保证级别', prior: EVIDENCE_ASSURANCE_LEVEL_LABELS[levelBefore],
+      proposed: EVIDENCE_ASSURANCE_LEVEL_LABELS[levelAfter], materiality: 'edited' });
   }
   return entries;
 }

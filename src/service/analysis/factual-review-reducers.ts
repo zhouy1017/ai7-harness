@@ -312,3 +312,8 @@ export function locatedUnitFindings(
 
 /** The research state a revision must carry while no egress is accepted; the suite pins it. */
 export const FACTUAL_REVIEW_RESEARCH_STATE = FACTUAL_RESEARCH_NOT_AUTHORIZED;
+
+/** The identity the finding reduction mints for a located assertion (Issue #901): its block and its folded quotation. */
+export function factualFindingId(blockId: string, quote: string): string {
+  return findingId({ kind: 'finding', blockId, quote: normalizedQuotation(quote) });
+}

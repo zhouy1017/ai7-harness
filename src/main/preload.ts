@@ -337,6 +337,16 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectResearchEvidence']['output']>(IPC_CHANNELS.inspectResearchEvidence, input),
   saveEvidenceAsMaterial: (input: { bookId: string; evidenceId: string; title?: string | null }) =>
     invoke<ServiceOperationMap['saveEvidenceAsMaterial']['output']>(IPC_CHANNELS.saveEvidenceAsMaterial, input),
+  inspectFactualVerification: (input: Parameters<RendererApi['inspectFactualVerification']>[0]) =>
+    invoke<ServiceOperationMap['inspectFactualVerification']['output']>(IPC_CHANNELS.inspectFactualVerification, input),
+  inspectEvidenceWorkspace: (input: Parameters<RendererApi['inspectEvidenceWorkspace']>[0]) =>
+    invoke<ServiceOperationMap['inspectEvidenceWorkspace']['output']>(IPC_CHANNELS.inspectEvidenceWorkspace, input),
+  recordVerificationReviewDecision: (input: Parameters<RendererApi['recordVerificationReviewDecision']>[0]) =>
+    invoke<ServiceOperationMap['recordVerificationReviewDecision']['output']>(IPC_CHANNELS.recordVerificationReviewDecision, input),
+  prepareCorrectionProposal: (input: Parameters<RendererApi['prepareCorrectionProposal']>[0]) =>
+    invoke<ServiceOperationMap['prepareCorrectionProposal']['output']>(IPC_CHANNELS.prepareCorrectionProposal, input),
+  saveCorrectionProposal: (input: Parameters<RendererApi['saveCorrectionProposal']>[0]) =>
+    invoke<ServiceOperationMap['saveCorrectionProposal']['output']>(IPC_CHANNELS.saveCorrectionProposal, input),
   decideLibraryMaterial: (input: ServiceOperationMap['decideLibraryMaterial']['input']) =>
     invoke<ServiceOperationMap['decideLibraryMaterial']['output']>(IPC_CHANNELS.decideLibraryMaterial, input),
   inspectEvaluationProfiles: (input?: { before: number | null }) => invoke<ServiceOperationMap['inspectEvaluationProfiles']['output']>(IPC_CHANNELS.inspectEvaluationProfiles, input ?? {}),

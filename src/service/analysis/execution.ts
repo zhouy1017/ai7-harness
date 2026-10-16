@@ -3,6 +3,7 @@ import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
 import { researchSnapshotDigest, retainUnitEvidence, retainedPageOf, searchHitsOf, type RetainedPage, type RetainedUnit } from './factual-review-evidence.js';
 import { locatedUnitFindings } from './factual-review-reducers.js';
 import { FACTUAL_REVIEW_KIND, type FactualReviewUnitResult } from './factual-review-contract.js';
+import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, markInBookExactFetch, type FactualReviewUnitResultV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
 import { admitTicketHost } from '../../shared/network-denial.js';
@@ -210,6 +211,11 @@ export interface ExecutionOwnerDependencies {
    * store's research evidence ledger. Absent, nothing is retained.
    */
   readonly researchEvidence?: ((input: { bookId: string; runRecordId: string; unitOrdinal: number; backendId: string | null; unit: RetainedUnit }) => void) | null;
+  /**
+   * The level a 事实核查 Run executes under, decided once as it starts (Issue #901; EASSURE-002): the store records the planned
+   * level and, when this device reads offline then, the effective 快速整理 with its disclosure. Absent, nothing is recorded.
+   */
+  readonly factualRunStart?: ((input: { bookId: string; runRecordId: string; taskIntentId: string }) => void) | null;
 }
 
 /**
@@ -890,16 +896,19 @@ export class BaselineAnalysisExecutionOwner {
     // describe it, never the one the plan froze: a harness a later release pins differently is seen here, before a
     // summary promises what the Run kept, and not first when the execution refuses it.
     const { route, model } = routeFactsOf(facts, live);
-    const composition = describeComposition(route, model, ledger.definition.promptContractDigest, {
+    // A factual plan executes under the level it froze (Issue #901): 快速整理 declares no local tool.
+    const definition = ledger.definitionForDigest(facts.promptContractDigest);
+    const composition = describeComposition(route, model, definition.promptContractDigest, {
       platformTools: facts.webToolsBackend !== undefined,
-      localTools: kindLocalTools(this.#policy(), ledger.definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground') !== null,
+      localTools: definition.evidenceAssuranceLevel !== 'quick' &&
+        kindLocalTools(this.#policy(), ledger.definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground') !== null,
       ...(facts.webToolsBackend === undefined ? {} : { researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } as const }),
     });
     const rebuilt = executionBindingRecordOf({
-      facts, definition: ledger.definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
+      facts, definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
       harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: composition.digest,
     });
-    return canonicalRecord(rebuilt).digest !== stored.bindingDigest || assuranceContractMoved(ledger.definition, facts.assurancePromptContractDigest);
+    return canonicalRecord(rebuilt).digest !== stored.bindingDigest || assuranceContractMoved(definition, facts.assurancePromptContractDigest);
   }
 
   /**
@@ -1212,8 +1221,10 @@ export class BaselineAnalysisExecutionOwner {
     // Everything kind-specific this Run needs: the frozen system section, the unit message builder and
     // its header, the unit result parser, the reducer, and whether the kind declares a cross-unit
     // suboperation at all. The owner itself is the same owner for every analysis kind.
-    const definition: AnalysisKindDefinition = ledger.definition;
+    // A factual Task's frozen level decides its contract (Issue #901); for every other kind this is the ledger's own definition.
+    const definition: AnalysisKindDefinition = ledger.definitionForDigest(facts.promptContractDigest);
     const promptContractDigest = definition.promptContractDigest;
+    if (definition.kind === FACTUAL_REVIEW_KIND) this.#deps.factualRunStart?.({ bookId: facts.bookId, runRecordId: facts.runRecordId, taskIntentId: facts.taskIntentId });
     const live = this.#live();
     // Ordinary production (Issue #811): the Run's route is its plan's, from the editor's configured binding when it froze.
     const production = isOrdinaryProductionRuntime(live) ? live : null;
@@ -1277,7 +1288,9 @@ export class BaselineAnalysisExecutionOwner {
       await cache.open();
     }
     const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
-    const localRule = live === null ? null : kindLocalTools(policy, definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
+    // 快速整理 registers no local tool (Issue #901; EASSURE-004): its Run lists and locates, and searches nothing.
+    const localRule = live === null || definition.evidenceAssuranceLevel === 'quick' ? null
+      : kindLocalTools(policy, definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
     const retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(facts.runRecordId, ledger) ?? new RetrievalIndex([{
       sourceKind: 'manuscript', sourceId: facts.checkpoint.manuscriptId, digest: facts.checkpoint.revisionDigest,
       read: () => ({ digest: facts.checkpoint.revisionDigest, segments: ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId).map((block) => ({ blockId: block.blockId, text: block.text })) }),
@@ -1841,14 +1854,19 @@ export class BaselineAnalysisExecutionOwner {
           const parsed = definition.parseUnitResult(validated.text, unit);
           if (parsed.ok) {
             markRetrievalResult(parsed.result, validated.rejected);
+            // Factual Review Contract v2 (Issue #901): each in-Book relation's excerpt is sought by Exact Fetch now, while the
+            // Run's retrieval index is open; one it does not find stays a candidate (EVID-004, EVID-005).
+            const result = definition.unitResultSchema === FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA
+              ? markInBookExactFetch(parsed.result as unknown as FactualReviewUnitResultV2, retrieval === null ? null : (candidateId) => retrieval.exactFetch(candidateId))
+              : parsed.result;
             unitObservations.set(unit.ordinal, observation);
             acceptedOutputDigests.add(candidate.digest);
-            outcomes.push({ unitOrdinal: unit.ordinal, state: 'closed', result: parsed.result });
+            outcomes.push({ unitOrdinal: unit.ordinal, state: 'closed', result });
             unitRecords.push({
               unitOrdinal: unit.ordinal,
               requestDigest,
               lineage: { kind: 'recomputed' },
-              closed: { state: 'closed', responseDigest: candidate.digest, usage: unitUsage, result: definition.unitRecord(parsed.result) },
+              closed: { state: 'closed', responseDigest: candidate.digest, usage: unitUsage, result: definition.unitRecord(result) },
             });
           } else {
             acceptedOutputDigests.add(candidate.digest);
