@@ -12,6 +12,18 @@ import type {
 import { sheetProcedureChosenStatus } from './captured-procedure-labels.js';
 
 type RecommendationIntent = Omit<ProcedureRecommendationInput, 'bookId'>;
+/** #66 rev 4 relay: the slot carries editorial outcome classes, not service executor names. */
+export function recommendationIntentFromSlot(taskKind: string | undefined, scopeKind: string | undefined, goalDigest: string | undefined): RecommendationIntent {
+  return {
+    goal: goalDigest ?? '',
+    taskKind: scopeKind === 'deliverable' ? 'unclassified'
+      : taskKind === 'review' || taskKind === 'factual' || taskKind === 'review-run' ? 'review-run'
+        : taskKind === 'analysis' || taskKind === 'baseline-analysis' ? 'baseline-analysis'
+          : taskKind === 'writing' ? 'writing' : 'unclassified',
+    scope: scopeKind === 'selection' ? 'selection' : 'whole',
+    categoryIds: taskKind === 'factual' ? ['factual-review'] : [],
+  };
+}
 function recommendationKey(input: RecommendationIntent): string {
   return JSON.stringify([input.goal.trim(), input.taskKind, input.scope, [...input.categoryIds].sort()]);
 }
@@ -112,15 +124,7 @@ export function mountProcedureRecommendationSlots(root: HTMLElement, api: Pick<R
     if (mounted.has(slot)) return;
     const surface = mountProcedureRecommendation({
       root: slot, api, state: new ProcedureRecommendationSelection(),
-      input: () => {
-        const kind = slot.dataset['taskKind'];
-        const scope = slot.dataset['scopeKind'];
-        return {
-          goal: slot.dataset['goalDigest'] ?? '',
-          taskKind: scope === 'deliverable' ? 'unclassified' : kind === 'review-run' || kind === 'baseline-analysis' || kind === 'writing' ? kind : 'unclassified',
-          scope: scope === 'selection' ? 'selection' : 'whole', categoryIds: [],
-        };
-      },
+      input: () => recommendationIntentFromSlot(slot.dataset['taskKind'], slot.dataset['scopeKind'], slot.dataset['goalDigest']),
       choose: (candidate) => { slot.dispatchEvent(new CustomEvent('procedure-recommendation-selected', {
         bubbles: true, detail: { procedureId: candidate.procedureId, versionId: candidate.versionId, title: candidate.purpose, matchRationale: candidate.rationale.join('；') },
       })); },

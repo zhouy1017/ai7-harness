@@ -4,7 +4,7 @@ import { capturedProcedureDocument } from '../../src/service/captured-procedures
 import { recommendProcedures, type RecommendationReading } from '../../src/service/procedure-recommendation.js';
 import { reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import type { ProcedureRecommendationInput } from '../../src/shared/protocol.js';
-import { ProcedureRecommendationSelection } from '../../src/renderer/procedure-choice.js';
+import { ProcedureRecommendationSelection, recommendationIntentFromSlot } from '../../src/renderer/procedure-choice.js';
 
 const input: ProcedureRecommendationInput = { bookId: 'b', goal: '体例审阅', taskKind: 'review-run', scope: 'whole', categoryIds: ['style-and-format'] };
 function reading(id: string, fit: 'all' | 'partial' | 'none' = 'all'): RecommendationReading {
@@ -15,6 +15,15 @@ function reading(id: string, fit: 'all' | 'partial' | 'none' = 'all'): Recommend
   } };
 }
 describe('deterministic recommendation under ADR 0090', () => {
+  it('reads the relayed 7a editorial outcome classes and preserves the exact goal digest and scope', () => {
+    const digest = 'a'.repeat(64);
+    expect(recommendationIntentFromSlot('review', 'whole-book', digest)).toEqual({ goal: digest, taskKind: 'review-run', scope: 'whole', categoryIds: [] });
+    expect(recommendationIntentFromSlot('factual', 'selection', digest)).toEqual({ goal: digest, taskKind: 'review-run', scope: 'selection', categoryIds: ['factual-review'] });
+    expect(recommendationIntentFromSlot('analysis', 'whole-book', digest).taskKind).toBe('baseline-analysis');
+    expect(recommendationIntentFromSlot('writing', 'whole-book', digest).taskKind).toBe('writing');
+    expect(recommendationIntentFromSlot('review', 'deliverable', digest).taskKind).toBe('unclassified');
+    expect(recommendationIntentFromSlot('', 'whole-book', digest).taskKind).toBe('unclassified');
+  });
   it('shows one exact newest eligible version for a clear fit without selecting or mutating it', () => {
     const source = [reading('one')];
     const before = canonicalJson(source);
