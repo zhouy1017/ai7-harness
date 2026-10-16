@@ -497,8 +497,8 @@ describe('来源译文 over the real store', () => {
 describe('revision 76', () => {
   it('migrates an exact revision-75 store by adding its two relations, moving nothing else, and refuses a 76 without them', async () => {
     expect(MATERIAL_INDEX_LAYER_SCHEMA_VERSION).toBe(76);
-    // Synchronized delta with Issue #901: revision 78 (factual verification) is the terminal version.
-    expect(LATEST_SCHEMA_VERSION).toBe(MATERIAL_INDEX_LAYER_SCHEMA_VERSION + 2);
+    // Synchronized delta with Issue #901: revision 79 (house review preference) is the terminal version.
+    expect(LATEST_SCHEMA_VERSION).toBe(MATERIAL_INDEX_LAYER_SCHEMA_VERSION + 3);
     const schemaRows = (): Array<{ name: string; sql: string }> => {
       const database = new DatabaseSync(storePath(), { readOnly: true });
       try {
@@ -536,7 +536,7 @@ describe('revision 76', () => {
     const migrated = new DatabaseSync(storePath());
     expect(['material_index_builds', 'material_index_segments'].map((table) =>
       migrated.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(earlierLayers);
-    expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(78);
+    expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(79);
     dropMaterialIndexLayerRelations(migrated);
     migrated.close();
     await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();

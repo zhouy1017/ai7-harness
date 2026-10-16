@@ -220,6 +220,7 @@ const READ_KNOWLEDGE = `(() => {
     tab: page.dataset.knowledgeTab ?? null,
     tabs: Array.from(page.querySelectorAll('[role="tab"]'), (tab) => [tab.textContent, tab.getAttribute('aria-selected')]),
     pending: page.querySelector('.knowledge-pending')?.textContent ?? null,
+    housePreference: page.querySelector('[data-house-review-preference]')?.textContent ?? null,
     guidelines: page.querySelector('.review-guidelines')?.dataset.guidelines ?? null,
     cards: Array.from(page.querySelectorAll('.guideline-card'), (card) => ({
       id: card.dataset.guidelineDocument,
@@ -463,6 +464,8 @@ async function constructPredecessorV12(dataRoot, bookId) {
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE review_run_preference_pins;
+      DROP TABLE house_review_preference_versions;
       DROP TABLE correction_proposals;
       DROP TABLE factual_review_decisions;
       DROP TABLE factual_verification_results;
@@ -947,8 +950,8 @@ async function main() {
     'knowledge-guidelines-cards', opened);
     // A class a later slice brings says what it will hold and that it is not there yet.
     await click(renderer, '社级编辑记忆', 'knowledge-memory-tab');
-    const memory = await readKnowledge(renderer, (page) => page.tab === 'memory', 'knowledge-memory-tab-open');
-    requireJourney(memory.pending === '尚未提供：社级编辑记忆还没有接通。' && memory.cards.length === 0, 'knowledge-pending', memory);
+    const memory = await readKnowledge(renderer, (page) => page.tab === 'memory' && page.housePreference !== null, 'knowledge-memory-tab-open');
+    requireJourney(memory.pending === null && memory.housePreference.includes('本社审阅偏好') && memory.housePreference.includes('更新本社审阅偏好') && memory.cards.length === 0, 'knowledge-pending', memory);
     await click(renderer, '审阅规范文件', 'knowledge-back-to-guidelines');
     await readKnowledge(renderer, (page) => page.tab === 'guidelines' && page.guidelines === 'ready', 'knowledge-guidelines-again');
 

@@ -1,3 +1,5 @@
+import { HouseReviewPreferenceLedger, housePreferenceLabel } from '../house-review-preference.js';
+import type { HouseReviewPreferenceUse } from '../../shared/protocol.js';
 import { randomUUID } from 'node:crypto';
 import { clarificationPlanBaseDigest } from '../provider/clarification-contract.js';
 import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSettled, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading, type MaterialGuardRefusal } from '../task-material-references.js';
@@ -584,7 +586,8 @@ function boundedTitle(title: string): string {
  * kind's, and the leads read the baseline's.
  */
 export interface ReviewRunLedgers {
-  ledgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string): BaselineAnalysisStore;
+  ledgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string, preference?: HouseReviewPreferenceUse | null): BaselineAnalysisStore;
+  housePreference?(bookId: string, policy: LaunchPolicyProjection): Readonly<Record<string, HouseReviewPreferenceUse>> | undefined;
   materialReadings?(boundary: TaskMaterialBoundary): ReadonlyArray<TaskMaterialReading>;
   materialOffers?(bookId: string): NonNullable<ReviewWorkspaceProjection['materials']>;
   baseline(): BaselineAnalysisStore;
@@ -613,6 +616,7 @@ interface SnapshotCategory {
 
 /** The canonical record of `review_runs`. */
 interface RunSnapshot {
+  readonly housePreferences?: Readonly<Record<string, HouseReviewPreferenceUse>> | undefined;
   readonly materialReferences?: TaskMaterialBoundary;
   readonly schema: typeof RUN_SCHEMA;
   readonly reviewRunId: string;
@@ -781,6 +785,7 @@ interface RunView {
  * approval — why that approval would now be refused, in the words the refusal itself uses (D8).
  */
 export interface ReviewRunPlanFacts {
+  readonly housePreferences?: ReadonlyArray<HouseReviewPreferenceUse>;
   readonly materials?: ReadonlyArray<Pick<TaskMaterialReading, 'source' | 'refusal'> & { readonly settledNote?: string }>;
   /** The Run lists 资料库 items and the launch now bound is developer-live, which sends none of them: the plan is refused. */
   readonly materialsRefusedLive?: boolean;
@@ -861,6 +866,7 @@ interface PlannedCategory {
 }
 
 interface PreparationWork {
+  readonly housePreferences?: Readonly<Record<string, HouseReviewPreferenceUse>> | undefined;
   readonly redoOf: string | null;
   readonly materialReferences?: TaskMaterialBoundary;
   readonly workId: string;
@@ -1015,6 +1021,7 @@ export class ReviewRunStore {
         return { position: position + 1, entry, plan };
       });
     const work: PreparationWork = {
+      housePreferences: this.#ledgers.housePreference?.(bookId, input.launchPolicy),
       redoOf: input.redoOf ?? null,
       workId: randomUUID(),
       bookId,
@@ -1097,7 +1104,7 @@ export class ReviewRunStore {
           work.index += 1;
           continue;
         }
-        const ledger = this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined);
+        const ledger = this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined, undefined, undefined, work.housePreferences?.[this.#ledgers.ledgerOf(planned.entry).definition.kind]);
         const request = this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger);
         const result = work.ledgerWorkId === null
           ? ledger.prepare({ ...request, reconfirm: false })
@@ -1137,7 +1144,7 @@ export class ReviewRunStore {
     this.#work.delete(work.workId);
     const planned = work.planned[work.index];
     if (work.ledgerWorkId !== null && planned !== undefined) {
-      this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined).prepare({ phase: 'cancel', workId: work.ledgerWorkId });
+      this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined, undefined, undefined, work.housePreferences?.[this.#ledgers.ledgerOf(planned.entry).definition.kind]).prepare({ phase: 'cancel', workId: work.ledgerWorkId });
     }
   }
 
@@ -1191,6 +1198,7 @@ export class ReviewRunStore {
       const ordinal = last.last === null ? 1 : integer(last.last) + 1;
       const snapshot: RunSnapshot = {
         ...(work.materialReferences === undefined ? {} : { materialReferences: work.materialReferences }),
+        ...(work.housePreferences === undefined ? {} : { housePreferences: work.housePreferences }),
         schema: RUN_SCHEMA,
         reviewRunId,
         bookId: work.bookId,
@@ -1222,6 +1230,12 @@ export class ReviewRunStore {
       ).run(reviewRunId, work.bookId, ordinal, head.manuscriptId, head.branchId, head.revisionId, head.journalSequence, head.workingDigest,
         work.scope.kind, work.scope.selectedRange?.startPosition ?? null, work.scope.selectedRange?.endPosition ?? null,
         snapshot.configuration.digest, createdAt, record.json, record.digest);
+      const preferences = new HouseReviewPreferenceLedger(this.#db);
+      for (const category of work.prepared) {
+        if (category.task === null) continue;
+        const preference = work.housePreferences?.[category.task.kind];
+        if (preference !== undefined) preferences.pin(reviewRunId, category.task.taskIntentId, category.task.planEnvelopeDigest, preference);
+      }
       // The exact Captured Procedure version the Run was prepared from, pinned with it (Issue #65, S30; ADR 0087 §4).
       if (work.procedure !== null) {
         // A version stopped while the preparation advanced is not pinned (Issue #66, S31 review P3-1): its 停用… preview could
@@ -1553,6 +1567,7 @@ export class ReviewRunStore {
     return {
       ...(this.#materialsRefusedLive(snapshot) ? { materialsRefusedLive: true } : {}),
       ...(snapshot.materialReferences === undefined ? {} : { materials: this.#materialReadings(snapshot).map((reading) => view.authorization === null ? reading : taskMaterialSettled(reading)) }),
+      ...(snapshot.housePreferences === undefined ? {} : { housePreferences: Object.values(snapshot.housePreferences).filter((preference, index, all) => all.findIndex((entry) => entry.versionId === preference.versionId) === index) }),
       reviewRunId: snapshot.reviewRunId,
       ordinal: snapshot.ordinal,
       label: `第 ${snapshot.ordinal} 次`,
@@ -1660,13 +1675,14 @@ export class ReviewRunStore {
     if (category.task === null || category.entry.executor !== 'review-category-contract') return this.#ledgers.ledgerOf(category.entry);
     const frozen = this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
     const execution = frozen.components['execution-plan'] as Record<string, unknown>;
-    if (execution.materialReferences === undefined) return this.#ledgers.ledgerOf(category.entry);
+    const preference = new HouseReviewPreferenceLedger(this.#db).pinned(category.task.taskIntentId, category.task.planEnvelopeDigest);
+    if (execution.materialReferences === undefined) return this.#ledgers.ledgerOf(category.entry, undefined, undefined, undefined, preference);
     const references = taskMaterialSources(execution.materialReferences);
     const envelope = frozen.components['plan-envelope'] as Record<string, unknown>;
     const intent = this.#db.prepare('SELECT book_id FROM analysis_task_intents WHERE task_intent_id = ?').get(category.task.taskIntentId) as SqlRow;
     const materialPromptDigest = clarificationPlanBaseDigest(execution, envelope);
     requireReview(materialPromptDigest !== null, 'REVIEW_RECORD_INVALID', '任务澄清指令的基础契约与计划不一致。');
-    return this.#ledgers.ledgerOf(category.entry, { bookId: text(intent.book_id), references }, materialPromptDigest);
+    return this.#ledgers.ledgerOf(category.entry, { bookId: text(intent.book_id), references }, materialPromptDigest, undefined, preference);
   }
 
   #materialReadings(snapshot: RunSnapshot): ReadonlyArray<TaskMaterialReading> {
@@ -2641,7 +2657,7 @@ export class ReviewRunStore {
             state: categoryView.state,
             stateLabel,
             stateLine: categoryView.detail === null ? stateLabel : `${stateLabel}：${categoryView.detail}`,
-            basisStatement: category.basisStatement,
+            basisStatement: category.basisStatement + (category.task === null || snapshot.housePreferences?.[category.task.kind] === undefined ? '' : `；参考${housePreferenceLabel(snapshot.housePreferences[category.task.kind]!)}`),
             excludedCount: typeof materialized?.record.excludedCount === 'number' ? materialized.record.excludedCount : 0,
             guidelineDocuments: category.entry.guidelineDocuments,
             procedure: category.entry.procedure,

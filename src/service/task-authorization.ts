@@ -472,7 +472,8 @@ export const PROPOSAL_REVIEW_SCHEMA_VERSION = 77;
  * terminal version.
  */
 export const FACTUAL_VERIFICATION_SCHEMA_VERSION = 78;
-export const LATEST_SCHEMA_VERSION = FACTUAL_VERIFICATION_SCHEMA_VERSION;
+export const HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION = 79;
+export const LATEST_SCHEMA_VERSION = HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -2262,10 +2263,11 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === WRITING_TASK_SCHEMA_VERSION || version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION || version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
       version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION,
+      version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === FACTUAL_VERIFICATION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === FACTUAL_VERIFICATION_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
   // Revision 78 (Issue #901) moves no task-authorization or analysis relation, so a revision-77 store carries the terminal ledger.
   if (version === PROPOSAL_REVIEW_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
   if (version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }

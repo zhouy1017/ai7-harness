@@ -344,3 +344,32 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     },
   };
 }
+
+/** Passive Apply-ledger metrics: the house or one selected Book, with auditable digests and no time tracking. */
+export async function mountEditQualitySignals(root: HTMLElement, api: Pick<import('../shared/protocol.js').RendererApi, 'inspectEditQualitySignals' | 'inspectFeedbackHistory'>): Promise<void> {
+  const section = document.createElement('section');
+  section.dataset['editQualitySignals'] = '';
+  const heading = document.createElement('h3');
+  heading.textContent = '编辑改动质量信号';
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', '改动质量信号的图书');
+  const all = document.createElement('option');
+  all.value = ''; all.textContent = '本社全部图书'; select.append(all);
+  const feedback = await api.inspectFeedbackHistory({});
+  for (const book of feedback.books) {
+    const option = document.createElement('option'); option.value = book.bookId; option.textContent = book.title; select.append(option);
+  }
+  const body = document.createElement('p');
+  body.setAttribute('role', 'status');
+  let generation = 0;
+  const load = async () => {
+    const current = ++generation;
+    const metric = await api.inspectEditQualitySignals({ bookId: select.value || null });
+    if (current !== generation) return;
+    body.textContent = `建议保留率：${metric.applied === 0 ? '暂无已应用的判定' : `${metric.surviving}/${metric.applied}（${Math.round(metric.surviving / metric.applied * 100)}%）`} · 按类别加权的改写量：${metric.editVolume} 字符单位`;
+    body.dataset['lineageDigest'] = metric.lineageDigest;
+  };
+  select.addEventListener('change', () => void load().catch(() => { body.textContent = '无法读取编辑改动质量信号。'; }));
+  section.append(heading, select, body); root.append(section);
+  await load();
+}

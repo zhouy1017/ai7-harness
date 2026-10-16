@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 144 as const;
+export const SERVICE_PROTOCOL_VERSION = 145 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -188,6 +188,9 @@ export const IPC_CHANNELS = {
   recordChangeSuggestionDecision: 'ai7:j05:record-change-suggestion-decision',
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
+  inspectHouseReviewPreference: 'ai7:j11:inspect-house-review-preference',
+  rebuildHouseReviewPreference: 'ai7:j11:rebuild-house-review-preference',
+  inspectEditQualitySignals: 'ai7:j11:inspect-edit-quality-signals',
   inspectLearningMaterials: 'ai7:j11:inspect-learning-materials',
   decideLearningMaterial: 'ai7:j11:decide-learning-material',
   inspectLearningMaterial: 'ai7:j11:inspect-learning-material',
@@ -6191,6 +6194,43 @@ export interface ReviewReportProjection {
   generatedAt: string;
   digest: string;
   record: ReviewReportRecord;
+}
+
+/** Local, versioned editorial preferences; attribution never enters the prompt block. */
+export interface HouseReviewPreferenceUse {
+  versionId: string;
+  ordinal: number;
+  materialSetDigest: string;
+  sourceCount: number;
+  lines: ReadonlyArray<string>;
+}
+export interface HouseReviewPreferenceVersion {
+  versionId: string;
+  ordinal: number;
+  supersedes: string | null;
+  operationalScope: TrustedOperationalScope;
+  materialSetDigest: string;
+  recordedAt: string;
+  sourceCount: number;
+  lines: ReadonlyArray<{
+    text: string; categoryId: string; bookId: string | null;
+    sources: ReadonlyArray<{ bookId: string; materialDigest: string; decisionId: string; eligibilityDecisionId: string;
+      attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> } }>;
+  }>;
+}
+export interface HouseReviewPreferenceProjection {
+  operationalScope: TrustedOperationalScope;
+  current: HouseReviewPreferenceVersion | null;
+  history: ReadonlyArray<{ versionId: string; ordinal: number; recordedAt: string; sourceCount: number }>;
+  basis: string;
+}
+export interface EditQualitySignalsProjection {
+  bookId: string | null;
+  applied: number;
+  surviving: number;
+  editVolume: number;
+  lineageDigest: string;
+  categories: ReadonlyArray<{ categoryId: string; applied: number; surviving: number; editVolume: number; lineageDigest: string }>;
 }
 
 export interface ReviewReportRecord {
@@ -12973,6 +13013,9 @@ export interface ServiceOperationMap {
   recordChangeSuggestionDecision: { input: RecordChangeSuggestionDecisionInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
+  inspectHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
+  rebuildHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
+  inspectEditQualitySignals: { input: { bookId: string | null }; output: EditQualitySignalsProjection };
   inspectLearningMaterials: { input: { bookId: string | null; after: LearningMaterialCursor | null }; output: LearningMaterialsProjection };
   /** One material as its Review Card reads it, by its Book and place. */
   inspectLearningMaterial: { input: { bookId: string; materialKey: string }; output: LearningMaterialProjection };
@@ -13506,6 +13549,9 @@ export interface RendererApi {
   recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): Promise<EditorialMarkCommandProjection>;
+  inspectHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
+  rebuildHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
+  inspectEditQualitySignals(input: { bookId: string | null }): Promise<EditQualitySignalsProjection>;
   inspectLearningMaterials(input: { bookId: string | null; after?: LearningMaterialCursor | null }): Promise<LearningMaterialsProjection>;
   inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;

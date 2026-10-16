@@ -1343,6 +1343,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
+    case 'inspectHouseReviewPreference':
+    case 'rebuildHouseReviewPreference': {
+      requireInput(value.input, [], tentativeId);
+      break;
+    }
+    case 'inspectEditQualitySignals': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!(input.bookId === null || validUuid(input.bookId))) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'inspectLearningMaterials': {
       const input = requireInput(value.input, ['bookId', 'after'], tentativeId);
       const after = input.after;

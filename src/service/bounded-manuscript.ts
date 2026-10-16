@@ -1,3 +1,4 @@
+import { HOUSE_REVIEW_PREFERENCE_FOREIGN_KEYS, HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from './house-review-preference.js';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
@@ -130,7 +131,7 @@ import {
   EVALUATION_PROFILE_SCHEMA_VERSION,
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
-  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION,
+  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
@@ -2024,6 +2025,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...RESEARCH_EVIDENCE_FOREIGN_KEYS,
   ...MATERIAL_INDEX_LAYER_FOREIGN_KEYS,
   ...FACTUAL_VERIFICATION_FOREIGN_KEYS,
+  ...HOUSE_REVIEW_PREFERENCE_FOREIGN_KEYS,
   ...EVALUATION_PROFILE_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
@@ -2726,6 +2728,7 @@ function requireManuscriptReimportTargetSchema(
   // Revision 76 (Issue #892): the Material Index's similarity vectors and 来源译文.
   const includeMaterialIndexLayerTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MATERIAL_INDEX_LAYER_SCHEMA_VERSION || committed(MATERIAL_INDEX_LAYER_SCHEMA_SQL);
   // Revision 77 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
+  const includeHousePreferenceTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || committed(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL);
   const includeFactualVerificationTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= FACTUAL_VERIFICATION_SCHEMA_VERSION || committed(FACTUAL_VERIFICATION_SCHEMA_SQL);
   requireExactSchema(
     db,
@@ -2887,6 +2890,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_SCHEMA_SQL : {}),
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_SCHEMA_SQL : {}),
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_SCHEMA_SQL : {}),
+      ...(includeHousePreferenceTables ? HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2949,6 +2953,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_TRIGGER_SQL : {}),
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_TRIGGER_SQL : {}),
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_TRIGGER_SQL : {}),
+      ...(includeHousePreferenceTables ? HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5867,7 +5872,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5918,7 +5923,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
