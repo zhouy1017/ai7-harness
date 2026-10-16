@@ -1263,7 +1263,8 @@ async function main() {
     requireJourney(firstFull?.stored === 'full' &&
       JSON.stringify(firstFull.steps) === JSON.stringify(['逐章读取 → 各章摘要', '汇总全书 → 梗概与人物、事件、关系、设定', '核对与抽检 → 可信程度说明']) &&
       firstFull.terms['提供方'] === 'DeepSeek 开放平台 · deepseek-v4-pro' &&
-      firstFull.terms['提供方状态'] === '远程模型服务被拒绝（development-ci · v1：0 次实时传输）；由 AI7 本地确定性模型适配器执行' &&
+      // Since #744 the decision line carries the research status; the deterministic route froze no search backend.
+      firstFull.terms['提供方状态'] === '远程模型服务被拒绝（development-ci · v1：0 次实时传输）；由 AI7 本地确定性模型适配器执行 · 未联网核查' &&
       firstFull.terms['用量上限'] === '不发送，没有模型用量' && firstFull.terms['预算上限'] === '未设置任务预算上限' && firstFull.terms['账户限额'] === '未知 · 提供方未返回' &&
       JSON.stringify(firstFull.columns) === JSON.stringify(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']) &&
       JSON.stringify(firstFull.adaptable) === JSON.stringify([SAFE_RETRY_ADAPTATION]) && JSON.stringify(firstFull.askFirst) === JSON.stringify(LOCKED_BOUNDARY) &&
