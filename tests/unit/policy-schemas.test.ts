@@ -530,7 +530,7 @@ describe('Provider Processing v18, v19 and active-set v13 schemas: local tools (
     expect(current.predecessorCanonicalPath).toBe(`docs/policies/provider-processing-policy.${before}.json`);
   });
 
-  it.each(['v18', 'v19'])('pins %s\'s local tools block on every rule as a const, retrieval not allowed for background analysis alone', (version) => {
+  it.each(['v18', 'v19'])('pins %s\'s local tools block on every rule as a const, retrieval not allowed for background analysis and material translation', (version) => {
     const { policyData, schemaData } = pair(version);
     const rules = (policyData as Rules).decision.providerAllowRules;
     expect(rules).toHaveLength(9);

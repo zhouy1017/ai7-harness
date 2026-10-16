@@ -585,7 +585,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(denied.providerProcessing.admittedRules).toEqual([]);
   });
 
-  it('reads N allow rules: the exact v18 bytes yield eight, and the immutable v16, v14, v12 and v11 bytes are no longer the pinned reading', async () => {
+  it('reads N allow rules: the exact v18 bytes yield nine, and the immutable v16, v14, v12 and v11 bytes are no longer the pinned reading', async () => {
     expect(verifyDeveloperLivePolicy(await readPolicy())).toEqual({
       crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true,
       admittedRules: V16_ADMITTED_RULES,
@@ -1080,7 +1080,7 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
     }
   });
 
-  it('reads the exact v19 bytes without a binding: eight rules, the policy\'s two bindings, nothing filled in', async () => {
+  it('reads the exact v19 bytes without a binding: nine rules, the policy\'s two bindings, nothing filled in', async () => {
     const reading = verifyOrdinaryProductionPolicy(await readPolicy(V19_PATH));
     expect(reading.rules.map((rule) => rule.ruleId)).toEqual(PRODUCTION_RULE_ID_ORDER);
     expect(reading.allowedBindings.map((binding) => binding.route)).toEqual(['opencode-go', 'deepseek-open-platform']);

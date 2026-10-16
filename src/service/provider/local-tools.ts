@@ -6,7 +6,7 @@ import { isRecord } from '../analysis/canonical.js';
  * say for the model to call targeted retrieval over the Run's authorized, pinned sources. The tool runs inside AI7's process
  * and sends nothing (`scope: 'no-egress'`); this module only reads the rule's `localTools` block. Executing the tool, its
  * candidates and Exact Fetch belong to the retrieval slice. A rule that names no block yields `null`, and every consumer
- * refuses on `null`; selected v18/v19 name the block on every rule, with `allowed: false` for enrolled background analysis.
+ * refuses on `null`; selected v18/v19 name the block on every rule, with `allowed: false` for enrolled background analysis and material translation.
  */
 
 /** The per-unit cap on retrieval calls and the candidates one call returns, as the v18 and v19 rules state them. */

@@ -64,7 +64,7 @@ export type CredentialSlot = ConfiguredCredentialSlot;
  * The trusted scope's Provider Processing pin: selected v18 admits baseline analysis, enrolled background analysis within a
  * mandatory ceiling, editorial dialogue, review (with cross-deliverable consistency), writing, evaluation, and 润色 and
  * conflict-regeneration Suggestions on V4.1, with the platform tools on review, writing and evaluation and the local
- * retrieval tool on every rule but background analysis. Historical v5, v9, v10, v11, v12, v14 and v16 and the superseded web
+ * retrieval tool on every rule but background analysis and material translation. Historical v5, v9, v10, v11, v12, v14 and v16 and the superseded web
  * reservation v8 are readable identities, not launch selections.
  */
 export type EgressPolicyPin =

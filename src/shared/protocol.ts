@@ -1919,7 +1919,7 @@ export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ord
  * consistency and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and
  * 润色 and conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules, and AI7's platform
  * tools (websearch through the user-selected backend, webfetch) on review, writing and evaluation, and AI7's local targeted-retrieval
- * tool on every rule but enrolled background analysis. A type member does not select or activate a policy.
+ * tool on every rule but enrolled background analysis and material translation. A type member does not select or activate a policy.
  */
 export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
@@ -2208,7 +2208,7 @@ export interface AdmittedProviderRule {
   readonly platformTools: AdmittedPlatformTools | null;
   /**
    * The rule's local tools as the launch verified them (Provider Processing v18 and v19): present on every admitted rule, with
-   * `targetedRetrieval.allowed` `false` for enrolled background analysis.
+   * `targetedRetrieval.allowed` `false` for enrolled background analysis and material translation.
    */
   readonly localTools: AdmittedLocalTools;
   /**
@@ -2255,7 +2255,7 @@ export interface AdmittedSearchBackend {
  */
 export interface AdmittedLocalTools {
   readonly targetedRetrieval: {
-    /** `false` exactly for enrolled background analysis: no model-initiated retrieval in a background Run. */
+    /** `false` exactly for enrolled background analysis and material translation: neither may initiate retrieval. */
     readonly allowed: boolean;
     /** The tool reads only what the Run was authorized to read: the manuscript revision, 允许参考 items at their frozen index version, retained sources. */
     readonly source: 'authorized-pinned-sources-only';

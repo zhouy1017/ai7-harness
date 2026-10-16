@@ -835,8 +835,8 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
 };
 
 /**
- * Provider Processing v16 (and v14, v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one
- * this launch can read and each bound exactly to the one Go route. All eight rules of v16 must be present, the three that may research
+ * Provider Processing v18 (and v16, v14, v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one
+ * this launch can read and each bound exactly to the one Go route. All nine rules of v18 must be present, the three that may research
  * (review, writing, evaluation) each with the platform tools block the search backend registry implies. The baseline analysis rule must be among them; its three
  * declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling default of ADR 0070, and the house-people
  * redaction rule of ADR 0079 §4.4 are read as v9 read them. Every other rule is read from its own entry of
@@ -1220,7 +1220,7 @@ const FOREGROUND_BLOCKS = {
 } as const;
 
 /**
- * The eight ordinary-production rules of Provider Processing v17, by rule id: the same kinds as developer-live v16, each
+ * The nine ordinary-production rules of Provider Processing v19, by rule id: the same kinds as developer-live v18, each
  * `eligible-only`, bound to the editor's own configured role binding rather than to one fixed route, and each read whole. Review,
  * writing and evaluation may research through the backend the editor configures with their own key.
  */
@@ -1291,7 +1291,7 @@ export interface OrdinaryProductionPolicyReading {
     readonly reading: OrdinaryProductionRuleReading;
     readonly allowedRoutes: readonly string[];
     readonly platformTools: AdmittedPlatformTools | null;
-    /** The rule's verified local tools (v19): retrieval allowed on every rule but enrolled background analysis. */
+    /** The rule's verified local tools (v19): retrieval allowed on every rule but enrolled background analysis and material translation. */
     readonly localTools: AdmittedLocalTools;
   }>;
 }
@@ -1309,7 +1309,7 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
 }
 
 /**
- * Provider Processing v17 (ordinary-production): default deny with eight eligible-only rules this launch can read, each bound to
+ * Provider Processing v19 (ordinary-production): default deny with nine eligible-only rules this launch can read, each bound to
  * a user-configured role binding, the three that may research each with the platform tools block the search backend registry implies. Everything is read whole and fails closed: a missing term, an unknown term, a rule id outside
  * `ORDINARY_PRODUCTION_RULES`, a repeated id, or any value that differs from the reading is a policy the launch cannot read.
  * The routing values themselves (route, endpoint, model, credential slot) are never source constants here: they are read from

@@ -8,7 +8,7 @@ Everything v16 allowed under `developer-live` it still allows, on the same Go ro
 
 ## What is newly allowed
 
-Every rule that admits a model task kind carries a `localTools` block beside `platformTools`, except enrolled background analysis (see below). The block says:
+Every rule that admits a model task kind carries a `localTools` block. Enrolled background analysis and material translation set `targetedRetrieval.allowed: false`; every other rule sets it to `true`. The block says:
 
 1. **What the tool may read.** Only what the Run was authorized to read (`source: "authorized-pinned-sources-only"`): the Book's pinned Manuscript Revision, the 允许参考 items at their frozen index version, and the sources the Run retained. It cannot reach any other manuscript, any other Book's material or anything the Run was not authorized to see. Whether the rule admits Material Reference or editorial-deliverable excerpts at all stays the rule's own `source` terms.
 2. **That it sends nothing.** The tool runs inside AI7's process (`scope: "no-egress"`): it makes no request to any host, takes no Egress Gate ticket and leaves the computer with nothing. What it returns enters the model's context under the outbound categories the rule already lists; the transmissions, role bindings and route of the rule are unchanged.
