@@ -1,4 +1,5 @@
 import { liveHouseReviewPreferenceContract } from '../house-review-preference.js';
+import { CUSTOM_ANALYSIS_KIND_FAMILY, EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY, taskKindListed } from '../launch-policy.js';
 import { FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import { FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST } from './factual-review-contract.js';
@@ -53,7 +54,7 @@ export interface LiveKindExpectation {
 /**
  * The selected rule that admits `kind` live, or `null` (Issue #429, generalising #809): the verified developer-live or
  * ordinary-production projection, and exactly one of its admitted rules listing the kind and naming every required category. A missing or
- * ambiguous rule fails closed. The enrolled-background rule (`backgroundOrigin`, Provider Processing v14 and v15) lists the baseline
+ * ambiguous rule fails closed. A rule lists a kind exactly or, for the custom analysis family only, by its `custom-analysis/*` entry (`taskKindListed`). The enrolled-background rule (`backgroundOrigin`, Provider Processing v14 and v15) lists the baseline
  * kind truthfully but is another origin's rule: a `foreground` lookup (the default) skips it and a `background` lookup selects only it.
  */
 export function liveKindRule(
@@ -69,7 +70,7 @@ export function liveKindRule(
       policy.providerProcessing.decision !== 'eligible-only' ||
       policy.providerProcessing.authorizedLiveTransmissionCount !== 'bounded-by-run') return null;
   const rules = (policy.providerProcessing.admittedRules ?? []).filter((rule) =>
-    rule.taskKinds.includes(kind) && (rule.backgroundOrigin === true) === (origin === 'background'));
+    taskKindListed(rule.taskKinds, kind) && (rule.backgroundOrigin === true) === (origin === 'background'));
   const rule = rules.length === 1 ? rules[0]! : null;
   return rule !== null && requiredCategories.every((category) => rule.outboundDataCategories.includes(category)) ? rule : null;
 }
@@ -129,8 +130,15 @@ export const EVALUATION_PAYLOAD_CATEGORIES: Readonly<Record<string, readonly Out
  */
 export const WRITING_PAYLOAD_CATEGORIES: readonly OutboundDataCategory[] = ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt'];
 
+/** Whether `kind` is a member of the custom analysis kind family (`custom-analysis/<dimension-id>`, Provider Processing v22 and v23). */
+function isCustomAnalysisKind(kind: string): boolean {
+  return taskKindListed([CUSTOM_ANALYSIS_KIND_FAMILY], kind);
+}
+
 /** Every outbound category a planned kind's payload carries; `undefined` for a kind with no row. */
 function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[] | undefined {
+  // The dimension's manuscript units and its editor-authored per-unit question template.
+  if (isCustomAnalysisKind(kind)) return ['public-or-synthetic', EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY];
   if (kind === reviewCategoryKindId('cross-deliverable-consistency')) return ['public-or-synthetic', 'editorial-deliverable-excerpt'];
   return kind === WRITING_KIND ? WRITING_PAYLOAD_CATEGORIES : EVALUATION_PAYLOAD_CATEGORIES[kind];
 }
@@ -154,6 +162,9 @@ function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectatio
     promptContractDigest: definition.livePromptContractDigest?.() ?? null,
     payloadCategories: plannedPayloadCategories(definition.kind)!,
   };
+  // A custom analysis dimension (slice 7f owns the kind definition): the definition must re-derive its own live contract digest from the
+  // dimension version's frozen template through `livePromptContractDigest`; without it the expectation is null and the kind is refused.
+  if (isCustomAnalysisKind(definition.kind)) return { promptContractDigest: definition.livePromptContractDigest?.() ?? null, payloadCategories: plannedPayloadCategories(definition.kind)! };
   const review = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => reviewCategoryKindId(category.categoryId) === definition.kind);
   if (review !== undefined) {
     if (review.executor !== 'review-category-contract' || review.seriesKnowledge !== undefined) return null;

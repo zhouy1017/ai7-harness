@@ -14,20 +14,20 @@ import { SEARCH_BACKENDS } from './provider/search-backends.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v14, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v15, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
- * Provider Processing v20; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v21, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * Provider Processing v22; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
+ * and binds v23, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v14' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v14.json';
-const ACTIVE_SET_SHA256 = '1e9f3c4736a0f7b0ac8066978637e3dc813aee6f51d1f98673fe1fba3564a6e9';
+export const ACTIVE_SET_VERSION = 'v15' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v15.json';
+const ACTIVE_SET_SHA256 = '99fd7156d98b12e7cad81d0ac6e81d3481380f5b25c096dafa9b1ec6ffdc8865';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -40,14 +40,14 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v21',
-    canonicalPath: 'docs/policies/provider-processing-policy.v21.json',
-    sha256: 'd1199f4c110d0c6598e6910c1784e5c612c18866387abdfe6e45b1c7593c6263',
+    version: 'v23',
+    canonicalPath: 'docs/policies/provider-processing-policy.v23.json',
+    sha256: '311f60232c6e3424e64e0a0f760402c2fe07f4bca71a0299b37d295a7baa6dcb',
   },
   'developer-live': {
-    version: 'v20',
-    canonicalPath: 'docs/policies/provider-processing-policy.v20.json',
-    sha256: 'd9cd34ed6e945760657345ed7e7bf4eae4489e5367ac7eb2400af413cc28f757',
+    version: 'v22',
+    canonicalPath: 'docs/policies/provider-processing-policy.v22.json',
+    sha256: 'dc78f4517ec8135edb4fdcc759d1c230fc4db5ef7f5c42f217c12aac4173c90b',
   },
 } as const;
 /**
@@ -557,7 +557,105 @@ function verifyHouseReviewPreference(rule: Record<string, unknown>, scope: 'deve
   }));
 }
 
-/** The rule id of the enrolled background analysis rule, the same in Provider Processing v14 to v21 (the one rule with a background origin). */
+/** The outbound data category of an editor-authored per-unit question template (Provider Processing v22 and v23, Issue #920): the custom analysis rule alone names it. */
+export const EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY = 'editor-authored-question-template' as const satisfies OutboundDataCategoryId;
+/** The most graphemes one editor-authored question template may carry. The bound is this build's constant. */
+export const EDITOR_AUTHORED_QUESTION_TEMPLATE_MAX_GRAPHEMES = 400;
+/** The outbound data category of Series Knowledge excerpts (Provider Processing v22 and v23, Issue #920): the review rule alone names it. */
+export const SERIES_KNOWLEDGE_EXCERPT_CATEGORY = 'series-knowledge-excerpt' as const satisfies OutboundDataCategoryId;
+/** The bounds of one request's Series Knowledge excerpts: the clause bounds 书系一致性 already keeps (`review/series-consistency.ts`). */
+export const SERIES_KNOWLEDGE_EXCERPT_MAX_CLAUSES = 40;
+export const SERIES_KNOWLEDGE_EXCERPT_MAX_GRAPHEMES_PER_CLAUSE = 300;
+/** The review kind of the Series consistency category (`reviewCategoryKindId('series-consistency')`), the last kind of the review rule since v22 and v23. */
+const SERIES_CONSISTENCY_REVIEW_KIND = 'editorial-review/series-consistency';
+/** The analysis kind family of a custom analysis dimension, and the one literal entry that lists all of it (Provider Processing v22 and v23). */
+export const CUSTOM_ANALYSIS_KIND_PREFIX = 'custom-analysis/';
+export const CUSTOM_ANALYSIS_KIND_FAMILY = `${CUSTOM_ANALYSIS_KIND_PREFIX}*` as const;
+
+/**
+ * Whether a rule's `allowedTaskKinds` list admits `kind`: an exact entry, or a family entry `<segment>/*` that covers the kind
+ * `<segment>/<id>` (one non-empty segment after the prefix). The prefix must be a whole path segment and the entry no other glob;
+ * a `*` in the kind itself is never admitted. Only the custom analysis rule lists a family entry.
+ */
+export function taskKindListed(taskKinds: readonly string[], kind: string): boolean {
+  if (kind.includes('*')) return false;
+  return taskKinds.some((entry) => {
+    if (entry === kind) return true;
+    const family = /^([a-z][a-z0-9-]*)\/\*$/u.exec(entry);
+    if (family === null) return false;
+    const prefix = `${family[1]}/`;
+    return kind.startsWith(prefix) && kind.length > prefix.length && !kind.slice(prefix.length).includes('/');
+  });
+}
+
+/** The Chinese-first statement of the question-template declaration, as the policy writes it (the same in both scopes). */
+const EDITOR_AUTHORED_QUESTION_TEMPLATE_DESCRIPTION_ZH =
+  `编辑自拟的单元提问模板：编辑在知识库「工序与规则」里为一个自定义分析维度写下的、对每个单元提出的问题模板，随该维度每个单元的请求一并发出。每个模板至多 ${EDITOR_AUTHORED_QUESTION_TEMPLATE_MAX_GRAPHEMES} 个字素；必须标明所依据的分析维度版本；绝不含稿件正文，绝不含作者或编辑姓名；它只是 AI7 固定的分析合同里一个有边界的数据参数，绝不改写或覆盖 AI7 的合同框架。`;
+
+/**
+ * A rule's `editorAuthoredQuestionTemplate` declaration (Provider Processing v22 and v23), read whole: the custom analysis rule alone
+ * states it, with the exact bound, attributed to the dimension version, from a 工序与规则 document, never manuscript text, never
+ * author or editor names and never an override of AI7's contract framing. Every other rule names neither the declaration nor the
+ * category. A missing, changed or unexpected term is a policy this launch cannot read.
+ */
+function verifyEditorAuthoredQuestionTemplate(rule: Record<string, unknown>, declared: boolean): void {
+  const categories = rule['allowedOutboundDataCategories'];
+  requirePolicy(Array.isArray(categories) && categories.includes(EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY) === declared);
+  if (!declared) {
+    requirePolicy(!Object.hasOwn(rule, 'editorAuthoredQuestionTemplate'));
+    return;
+  }
+  requirePolicy(sameValue(rule['editorAuthoredQuestionTemplate'], {
+    category: EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY,
+    descriptionZh: EDITOR_AUTHORED_QUESTION_TEMPLATE_DESCRIPTION_ZH,
+    sourceDocument: 'process-and-rules-document',
+    maxGraphemes: EDITOR_AUTHORED_QUESTION_TEMPLATE_MAX_GRAPHEMES,
+    attributedToDimensionVersion: true,
+    manuscriptTextAllowed: false,
+    housePeopleNamesAndRolesStripped: true,
+    authorOrEditorNamesAllowed: false,
+    contractFramingOverrideAllowed: false,
+  }));
+}
+
+/** The Chinese-first statement of the Series Knowledge declaration, with the exact bounds, as the policy writes it. */
+function seriesKnowledgeExcerptDescriptionZh(scope: 'developer-live' | 'ordinary-production'): string {
+  const source = scope === 'developer-live'
+    ? '开发直连下只取自已获准的公开或合成图书所在的书系（Owner 指定的公开样书）'
+    : '普通生产下只取自普通生产来源（编辑自己的书系）';
+  return `书系知识摘录：本次审阅冻结的书系范围所固定的书系知识条目版本，按书系一致性审阅已有的条款边界切成条款，随审阅请求一并发出。每次请求至多 ${SERIES_KNOWLEDGE_EXCERPT_MAX_CLAUSES} 条、每条至多 ${SERIES_KNOWLEDGE_EXCERPT_MAX_GRAPHEMES_PER_CLAUSE} 个字素；只取自本次审阅固定的那些书系的条目；已生效的书系检索排除一律遵守，被排除的条目不发出；必须标明所依据的条目版本；${source}。`;
+}
+
+/**
+ * A rule's Series Knowledge terms (Provider Processing v22 and v23), read whole: the review rule alone states
+ * `source.seriesKnowledgeAllowed: true`, names `series-knowledge-excerpt` and states its `seriesKnowledgeExcerpt` declaration with the
+ * exact bounds (at most 40 clauses of 300 graphemes, only items of the Run's pinned Series, every frozen Series Retrieval Exclusion
+ * honoured, attributed to the item revisions). Every other rule states `seriesKnowledgeAllowed: false` (or names no such term), names
+ * neither the category nor the declaration. A missing, changed or unexpected term is a policy this launch cannot read.
+ */
+function verifySeriesKnowledgeExcerpt(rule: Record<string, unknown>, scope: 'developer-live' | 'ordinary-production', declared: boolean): void {
+  const source = rule['source'];
+  requirePolicy(isRecord(source) && (declared ? source['seriesKnowledgeAllowed'] === true : source['seriesKnowledgeAllowed'] !== true));
+  const categories = rule['allowedOutboundDataCategories'];
+  requirePolicy(Array.isArray(categories) && categories.includes(SERIES_KNOWLEDGE_EXCERPT_CATEGORY) === declared);
+  if (!declared) {
+    requirePolicy(!Object.hasOwn(rule, 'seriesKnowledgeExcerpt'));
+    return;
+  }
+  requirePolicy(sameValue(rule['seriesKnowledgeExcerpt'], {
+    category: SERIES_KNOWLEDGE_EXCERPT_CATEGORY,
+    descriptionZh: seriesKnowledgeExcerptDescriptionZh(scope),
+    derivedFrom: 'series-knowledge-item-revisions-pinned-by-the-run-frozen-series-scope',
+    maxClauses: SERIES_KNOWLEDGE_EXCERPT_MAX_CLAUSES,
+    maxGraphemesPerClause: SERIES_KNOWLEDGE_EXCERPT_MAX_GRAPHEMES_PER_CLAUSE,
+    onlyPinnedSeriesItems: true,
+    retrievalExclusionsHonoured: true,
+    attributedToItemRevisions: true,
+    sourceScope: scope === 'developer-live' ? 'admitted-public-or-synthetic-books-only' : 'ordinary-production-sources-only',
+  }));
+}
+
+/** The rule id of the enrolled background analysis rule, the same in Provider Processing v14 to v23 (the one rule with a background origin). */
 export const BACKGROUND_ANALYSIS_RULE_ID = 'enrolled-background-manuscript-analysis-processing';
 /** A Run-based rule's model-initiated clarification (v14 to v17): one question per unit, the unit waits, an unanswered question times out at 24 hours. */
 const CLARIFICATION_ASKS = {
@@ -650,6 +748,12 @@ interface DeveloperLiveRuleReading {
   readonly sourceTranslation?: true;
   /** Whether the rule names `house-review-preference-excerpt` and its declaration (Provider Processing v20): the review rule alone. */
   readonly houseReviewPreference?: true;
+  /** Whether the rule states `source.seriesKnowledgeAllowed: true`, names `series-knowledge-excerpt` and its declaration (Provider Processing v22): the review rule alone. */
+  readonly seriesKnowledge?: true;
+  /** Whether the rule names `editor-authored-question-template` and its declaration (Provider Processing v22): the custom analysis rule alone. */
+  readonly questionTemplate?: true;
+  /** Whether the rule admits no model-initiated retrieval (the enrolled background rule, 来源译文 and, since v22, custom analysis). */
+  readonly noRetrieval?: true;
   readonly verify: (rule: Record<string, unknown>) => void;
 }
 
@@ -737,6 +841,24 @@ function verifyMaterialTranslationRule(rule: Record<string, unknown>): void {
   requirePolicy(!Object.hasOwn(rule, 'output'));
 }
 
+/** The rule id of the custom analysis rule of Provider Processing v22 (developer-live). */
+export const DEVELOPER_LIVE_CUSTOM_ANALYSIS_RULE_ID = 'developer-live-public-samplebook-custom-analysis';
+
+/**
+ * A custom analysis dimension (Provider Processing v22): planned like the baseline from a newly user-initiated Task with a plan envelope and a
+ * Run Authorization, one session per unit, no cross-unit reduction or synthesis, no web; `source` names no Material Reference, Series Knowledge
+ * or editorial deliverable, and the review-style assurance sample and Run Report reflection turn the planned bound already states.
+ */
+function verifyCustomAnalysisRule(rule: Record<string, unknown>): void {
+  verifyPlannedRunOrigin(rule);
+  const source = rule['source'] as Record<string, unknown>;
+  requirePolicy(source['materialReferencesAllowed'] === false && source['seriesKnowledgeAllowed'] === false && source['editorialDeliverablesAllowed'] === false);
+  const transmissions = rule['transmissions'] as Record<string, unknown>;
+  requirePolicy(transmissions['crossUnitReductionAllowed'] === false && transmissions['plusCrossUnitReductionTopicSections'] === undefined &&
+    transmissions['plusOneCrossUnitSynthesisTurn'] === undefined && transmissions['crossUnitSynthesisAllowed'] === undefined &&
+    transmissions['assuranceSamplingAllowed'] === true && transmissions['runReportReflectionAllowed'] === true);
+}
+
 const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> = {
   // Baseline manuscript analysis, unchanged since v9, including its three ADR 0066 suboperations.
   [DEVELOPER_LIVE_POLICY_BINDING.ruleId]: {
@@ -794,22 +916,24 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
   },
   // The review categories, cross-deliverable consistency included and, since v16, the two that research the web (事实核查,
   // 学术道德与引用; 出版政策与风险 stays out until #744): planned Runs like the baseline, without a cross-unit reduction, over frozen Material References
-  // and the Book's editorial deliverables, never Series Knowledge. The rule id keeps its v11 name (the policy's rule ids are stable
-  // across versions) though the rule is no longer reference-free.
+  // and the Book's editorial deliverables and, since v22, the Series consistency category over the Run's pinned Series Knowledge. The rule id keeps
+  // its v11 name (the policy's rule ids are stable across versions) though the rule is no longer reference-free.
   'developer-live-public-samplebook-reference-free-review': {
     modelRole: 'Main Editorial Role',
-    taskKinds: ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency', ...WEB_REVIEW_KINDS],
-    outboundDataCategories: ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt', HOUSE_REVIEW_PREFERENCE_CATEGORY, ...WEB_TOOL_CATEGORIES],
+    taskKinds: ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency', ...WEB_REVIEW_KINDS, SERIES_CONSISTENCY_REVIEW_KIND],
+    outboundDataCategories: ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt', HOUSE_REVIEW_PREFERENCE_CATEGORY, SERIES_KNOWLEDGE_EXCERPT_CATEGORY, ...WEB_TOOL_CATEGORIES],
     crossUnitSynthesisAllowed: false,
     clarification: true,
     platformTools: true,
     sourceTranslation: true,
     houseReviewPreference: true,
+    seriesKnowledge: true,
     verify: (rule) => {
       // Since v14 the review kind also admits its matching active Default Execution Rule (审阅 快速开始), as writing does.
       verifyPlannedRunOrigin(rule, true, true);
       const source = rule['source'] as Record<string, unknown>;
-      requirePolicy(source['materialReferencesAllowed'] === true && source['seriesKnowledgeAllowed'] === false &&
+      // Since v22 the review kind also admits Series Knowledge (the Series consistency category); `verifySeriesKnowledgeExcerpt` reads the term and its declaration.
+      requirePolicy(source['materialReferencesAllowed'] === true && source['seriesKnowledgeAllowed'] === true &&
         source['editorialDeliverablesAllowed'] === true);
       const transmissions = rule['transmissions'] as Record<string, unknown>;
       requirePolicy(transmissions['crossUnitReductionAllowed'] === false && transmissions['plusCrossUnitReductionTopicSections'] === undefined);
@@ -877,11 +1001,24 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     platformTools: false,
     verify: verifyMaterialTranslationRule,
   },
+  // Custom analysis dimensions (Provider Processing v22, Issue #920, ADR 0090 §4): the family `custom-analysis/*` planned like the baseline
+  // over an editor-authored per-unit question template; no tool, no cross-unit reduction, no Material Reference or Series Knowledge.
+  [DEVELOPER_LIVE_CUSTOM_ANALYSIS_RULE_ID]: {
+    modelRole: 'Main Editorial Role',
+    taskKinds: [CUSTOM_ANALYSIS_KIND_FAMILY],
+    outboundDataCategories: ['public-or-synthetic', EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY],
+    crossUnitSynthesisAllowed: false,
+    clarification: true,
+    platformTools: false,
+    questionTemplate: true,
+    noRetrieval: true,
+    verify: verifyCustomAnalysisRule,
+  },
 };
 
 /**
- * Provider Processing v18 (and v16, v14, v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one
- * this launch can read and each bound exactly to the one Go route. All nine rules of v18 must be present, the three that may research
+ * Provider Processing v22 (and v20, v18, v16, v14, v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one
+ * this launch can read and each bound exactly to the one Go route. All ten rules of v22 must be present, the three that may research
  * (review, writing, evaluation) each with the platform tools block the search backend registry implies. The baseline analysis rule must be among them; its three
  * declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling default of ADR 0070, and the house-people
  * redaction rule of ADR 0079 §4.4 are read as v9 read them. Every other rule is read from its own entry of
@@ -937,9 +1074,11 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
     reading.verify(rule);
     verifyClarification(rule, reading.clarification);
     const platformTools = verifyPlatformTools(rule, 'developer-live', reading.platformTools);
-    const localTools = verifyLocalTools(rule, reading.background === true || reading.taskKinds.includes(MATERIAL_TRANSLATION_KIND));
+    const localTools = verifyLocalTools(rule, reading.background === true || reading.noRetrieval === true || reading.taskKinds.includes(MATERIAL_TRANSLATION_KIND));
     const sourceTranslationAllowed = verifySourceTranslation(rule, reading.sourceTranslation === true);
     verifyHouseReviewPreference(rule, 'developer-live', reading.houseReviewPreference === true);
+    verifySeriesKnowledgeExcerpt(rule, 'developer-live', reading.seriesKnowledge === true);
+    verifyEditorAuthoredQuestionTemplate(rule, reading.questionTemplate === true);
     admittedRules.push({
       ruleId,
       taskKinds: [...reading.taskKinds],
@@ -1178,17 +1317,18 @@ function sameBlock(actual: unknown, expected: Readonly<Record<string, unknown>>)
     Array.isArray(value) ? exactStrings(actual[key], value as readonly string[]) : actual[key] === value);
 }
 
-/** The shape of a production `source` block: the user's own sources, never Series Knowledge, plus the kind's own term. */
+/** The shape of a production `source` block: the user's own sources, Series Knowledge only for the review rule (since v23), plus the kind's own term. */
 function productionSource(
   materialReferences: boolean,
   editorialDeliverables: boolean,
   kindTerm?: 'editorSelectedPassageOnly' | 'singleManuscriptConflictRegionOnly' | 'frozenMaterialExcerptOnly',
+  seriesKnowledge = false,
 ): Readonly<Record<string, unknown>> {
   return {
     admittedInputs: PRODUCTION_ADMITTED_INPUTS,
     privateManuscriptAllowed: true,
     materialReferencesAllowed: materialReferences,
-    seriesKnowledgeAllowed: false,
+    seriesKnowledgeAllowed: seriesKnowledge,
     editorialDeliverablesAllowed: editorialDeliverables,
     ...(kindTerm === undefined ? {} : { [kindTerm]: true }),
   };
@@ -1213,7 +1353,11 @@ interface OrdinaryProductionRuleReading {
   readonly sourceTranslation: boolean;
   /** Whether the rule names `house-review-preference-excerpt` and its declaration (v21): the review rule alone. */
   readonly houseReviewPreference: boolean;
-  /** Whether this rule admits no model-initiated retrieval (v19): enrolled background analysis and 来源译文. */
+  /** Whether the rule states `source.seriesKnowledgeAllowed: true`, names `series-knowledge-excerpt` and its declaration (v23): the review rule alone. */
+  readonly seriesKnowledge: boolean;
+  /** Whether the rule names `editor-authored-question-template` and its declaration (v23): the custom analysis rule alone. */
+  readonly questionTemplate: boolean;
+  /** Whether this rule admits no model-initiated retrieval (v19): enrolled background analysis and 来源译文; since v23 also custom analysis. */
   readonly noRetrieval: boolean;
   readonly blocks: {
     readonly authorityOrigin: Readonly<Record<string, unknown>>;
@@ -1238,7 +1382,7 @@ function productionReading(
 ): OrdinaryProductionRuleReading {
   const policyCategories = [...gateCategories, ...PRODUCTION_UNPUBLISHED_CLASSES];
   return { modelRole, taskKinds, policyCategories, outboundDataCategories: policyCategories, crossUnitSynthesisAllowed,
-    clarification: blocks.clarification === CLARIFICATION_ASKS, background, platformTools: false, sourceTranslation: false, houseReviewPreference: false, noRetrieval: background, blocks };
+    clarification: blocks.clarification === CLARIFICATION_ASKS, background, platformTools: false, sourceTranslation: false, houseReviewPreference: false, seriesKnowledge: false, questionTemplate: false, noRetrieval: background, blocks };
 }
 
 /**
@@ -1268,10 +1412,13 @@ const FOREGROUND_BLOCKS = {
 } as const;
 
 /**
- * The nine ordinary-production rules of Provider Processing v19, by rule id: the same kinds as developer-live v18, each
+ * The ten ordinary-production rules of Provider Processing v23, by rule id: the same kinds as developer-live v22, each
  * `eligible-only`, bound to the editor's own configured role binding rather than to one fixed route, and each read whole. Review,
  * writing and evaluation may research through the backend the editor configures with their own key.
  */
+/** The rule id of the custom analysis rule of Provider Processing v23 (ordinary-production). */
+export const PRODUCTION_CUSTOM_ANALYSIS_RULE_ID = 'ordinary-production-custom-analysis';
+
 const ORDINARY_PRODUCTION_RULES: Readonly<Record<string, OrdinaryProductionRuleReading>> = {
   'ordinary-production-baseline-analysis': productionReading('Main Editorial Role', ['baseline-manuscript-analysis'], ['public-or-synthetic'],
     { ...RUN_BLOCKS, source: productionSource(false, false), transmissions: PRODUCTION_BASELINE_TRANSMISSIONS }),
@@ -1279,8 +1426,9 @@ const ORDINARY_PRODUCTION_RULES: Readonly<Record<string, OrdinaryProductionRuleR
     { ...FOREGROUND_BLOCKS, authorityOrigin: PRODUCTION_DIALOGUE_ORIGIN, source: productionSource(false, false, 'editorSelectedPassageOnly'), transmissions: PRODUCTION_DIALOGUE_TRANSMISSIONS, output: null }),
   'ordinary-production-review': { ...researchReading(productionReading('Main Editorial Role',
     ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency'],
-    ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt', HOUSE_REVIEW_PREFERENCE_CATEGORY],
-    { ...RUN_BLOCKS, authorityOrigin: PRODUCTION_REVIEW_ORIGIN, source: productionSource(true, true), transmissions: PRODUCTION_REVIEW_TRANSMISSIONS }), WEB_REVIEW_KINDS), sourceTranslation: true, houseReviewPreference: true },
+    ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt', HOUSE_REVIEW_PREFERENCE_CATEGORY, SERIES_KNOWLEDGE_EXCERPT_CATEGORY],
+    { ...RUN_BLOCKS, authorityOrigin: PRODUCTION_REVIEW_ORIGIN, source: productionSource(true, true, undefined, true), transmissions: PRODUCTION_REVIEW_TRANSMISSIONS }),
+    [...WEB_REVIEW_KINDS, SERIES_CONSISTENCY_REVIEW_KIND]), sourceTranslation: true, houseReviewPreference: true, seriesKnowledge: true },
   'ordinary-production-writing': researchReading(productionReading('Main Editorial Role', ['writing'],
     ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
     { ...RUN_BLOCKS, source: productionSource(true, false), transmissions: PRODUCTION_SYNTHESIS_TRANSMISSIONS }, true)),
@@ -1298,6 +1446,10 @@ const ORDINARY_PRODUCTION_RULES: Readonly<Record<string, OrdinaryProductionRuleR
   // 来源译文 of 资料库 materials (v19, Issue #891): one foreground attempt on the Fast Interaction Role over one frozen excerpt.
   'ordinary-production-material-translation': { ...productionReading('Fast Interaction Role', [MATERIAL_TRANSLATION_KIND], ['frozen-material-reference-excerpt'],
     { ...FOREGROUND_BLOCKS, authorityOrigin: PRODUCTION_FOREGROUND_ORIGIN, source: productionSource(true, false, 'frozenMaterialExcerptOnly'), transmissions: PRODUCTION_TRANSLATION_TRANSMISSIONS, output: null }), noRetrieval: true },
+  // Custom analysis dimensions (v23, Issue #920, ADR 0090 §4): the family `custom-analysis/*` planned like the baseline over an editor-authored
+  // per-unit question template; no tool, no cross-unit reduction, no Material Reference or Series Knowledge.
+  [PRODUCTION_CUSTOM_ANALYSIS_RULE_ID]: { ...productionReading('Main Editorial Role', [CUSTOM_ANALYSIS_KIND_FAMILY], ['public-or-synthetic', EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY],
+    { ...RUN_BLOCKS, source: productionSource(false, false), transmissions: PRODUCTION_REVIEW_TRANSMISSIONS }), questionTemplate: true, noRetrieval: true },
 };
 /** The rule every ordinary-production policy must carry, whose reading the projection's suboperation flags come from. */
 const ORDINARY_PRODUCTION_BASELINE_RULE_ID = 'ordinary-production-baseline-analysis';
@@ -1308,11 +1460,12 @@ const PRODUCTION_POLICY_TERMS = [
   'predecessorCanonicalPath', 'canonicalPath', 'humanProjectionPath', 'operationalScope', 'authorityBasis', 'trustedSelection',
   'decision', 'roleBindings', 'outboundDataCategories', 'credentialBoundary', 'authoritySeparations',
 ] as const;
-/** The outbound data category vocabulary of Provider Processing v21 (v17's plus the house review-preference category): the Egress Gate's identifiers (the two web categories since v17) and the three unpublished classes. */
+/** The outbound data category vocabulary of Provider Processing v23 (v21's plus the question-template and Series Knowledge categories): the Egress Gate's identifiers (the two web categories since v17) and the three unpublished classes. */
 const PRODUCTION_CATEGORY_VOCABULARY = [
   'public-or-synthetic', 'unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content', 'editor-selected-manuscript-excerpt',
   'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'book-metadata-and-synopsis', 'manuscript-conflict-region-excerpt',
-  'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt', HOUSE_REVIEW_PREFERENCE_CATEGORY, ...WEB_TOOL_CATEGORIES,
+  'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt', HOUSE_REVIEW_PREFERENCE_CATEGORY, EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY,
+  SERIES_KNOWLEDGE_EXCERPT_CATEGORY, ...WEB_TOOL_CATEGORIES,
 ] as const;
 /** Every separation of authority Provider Processing v13 names; each is `false`, and a document naming fewer or more is unreadable. */
 const PRODUCTION_AUTHORITY_SEPARATIONS = [
@@ -1339,7 +1492,7 @@ export interface OrdinaryProductionPolicyReading {
     readonly reading: OrdinaryProductionRuleReading;
     readonly allowedRoutes: readonly string[];
     readonly platformTools: AdmittedPlatformTools | null;
-    /** The rule's verified local tools (v19): retrieval allowed on every rule but enrolled background analysis and material translation. */
+    /** The rule's verified local tools: retrieval allowed on every rule but enrolled background analysis, material translation and custom analysis. */
     readonly localTools: AdmittedLocalTools;
   }>;
 }
@@ -1357,7 +1510,7 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
 }
 
 /**
- * Provider Processing v19 (ordinary-production): default deny with nine eligible-only rules this launch can read, each bound to
+ * Provider Processing v23 (ordinary-production): default deny with ten eligible-only rules this launch can read, each bound to
  * a user-configured role binding, the three that may research each with the platform tools block the search backend registry implies. Everything is read whole and fails closed: a missing term, an unknown term, a rule id outside
  * `ORDINARY_PRODUCTION_RULES`, a repeated id, or any value that differs from the reading is a policy the launch cannot read.
  * The routing values themselves (route, endpoint, model, credential slot) are never source constants here: they are read from
@@ -1435,6 +1588,8 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
       'transmissions', 'clarification', 'authorizationPreconditions', 'providerAccountLimit', 'capture', 'additionalPrivacyPrompts', 'allowedTaskKinds', 'localTools',
       ...(reading.sourceTranslation ? ['sourceTranslationAllowed'] : []),
       ...(reading.houseReviewPreference ? ['houseReviewPreference'] : []),
+      ...(reading.seriesKnowledge ? ['seriesKnowledgeExcerpt'] : []),
+      ...(reading.questionTemplate ? ['editorAuthoredQuestionTemplate'] : []),
       ...(blocks.output === null ? [] : ['output']),
       ...(blocks.scopeLimits === null ? [] : ['scopeLimits']),
       ...(reading.platformTools ? ['platformTools'] : []),
@@ -1464,6 +1619,8 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
     const localTools = verifyLocalTools(rule, reading.noRetrieval);
     verifySourceTranslation(rule, reading.sourceTranslation);
     verifyHouseReviewPreference(rule, 'ordinary-production', reading.houseReviewPreference);
+    verifySeriesKnowledgeExcerpt(rule, 'ordinary-production', reading.seriesKnowledge);
+    verifyEditorAuthoredQuestionTemplate(rule, reading.questionTemplate);
     rules.push({ ruleId, reading, allowedRoutes: routes, platformTools, localTools });
   }
   requirePolicy(seen.has(ORDINARY_PRODUCTION_BASELINE_RULE_ID));

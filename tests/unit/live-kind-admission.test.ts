@@ -3,13 +3,13 @@ import { houseReviewPreferenceKindDefinition } from '../../src/service/house-rev
 import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { kindResearchDeclaration, liveKindAdmission, liveKindAdmitted, liveKindContractCategories, liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
+import { kindLocalTools, kindResearchDeclaration, liveKindAdmission, liveKindAdmitted, liveKindContractCategories, liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
 import { BASELINE_ANALYSIS_KIND } from '../../src/shared/protocol.js';
 import { initialEvaluationKindDefinition } from '../../src/service/evaluation/initial-evaluation-kind.js';
 import { readersReportKindDefinition } from '../../src/service/evaluation/readers-report-kind.js';
 import { evaluationRewriteKindDefinition } from '../../src/service/evaluation/evaluation-rewrite-kind.js';
 import { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from '../../src/service/evaluation-records.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { resolveSourceCheckoutLaunchPolicy, taskKindListed } from '../../src/service/launch-policy.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { liveReviewKindAdmitted } from '../../src/service/review/live-review-admission.js';
@@ -169,5 +169,85 @@ describe('house preference live admission (#911)', () => {
     expect(liveMaterialContract(combined)?.materials).toEqual(liveMaterialContract(materials)?.materials);
     const forgedBase = { ...base, promptContractDigest: 'b'.repeat(64) };
     expect(liveKindAdmission(admitted, houseReviewPreferenceKindDefinition(forgedBase, preference, true), binding)).toBeNull();
+  });
+});
+
+// #920: the custom analysis family is listed by one literal `custom-analysis/*` entry. Slice 7f owns the kind definition; this stub states only
+// what admission reads, so the expectation row is exercised without it.
+describe('custom analysis kind family live admission (#920)', () => {
+  const FAMILY_DIGEST = 'e'.repeat(64);
+  const stubDefinition = (kind = 'custom-analysis/synthetic-dimension') => ({ kind, promptContractDigest: FAMILY_DIGEST, livePromptContractDigest: () => FAMILY_DIGEST });
+  const customRuleId = 'developer-live-public-samplebook-custom-analysis';
+  const GO_PRODUCTION_BINDING = { route: 'opencode-go', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'deepseek-v4.1-flash', credentialSlot: 'opencode-go', credentialReference: 'credential-ref-go-0001' };
+
+  it('lists a kind by an exact entry or by a whole-segment family entry, and nothing wider', () => {
+    expect(taskKindListed(['custom-analysis/*'], 'custom-analysis/dimension-1')).toBe(true);
+    expect(taskKindListed(['custom-analysis/*'], 'custom-analysis/a1-b2')).toBe(true);
+    // The prefix is a whole path segment: no kind without an id, no other prefix, no nested path, no literal glob.
+    for (const kind of ['custom-analysis/', 'custom-analysis', 'custom-analysisx/foo', 'xcustom-analysis/foo', 'custom-analysis/a/b', 'custom-analysis/*', 'editorial-review/typos-and-usage', '']) {
+      expect(taskKindListed(['custom-analysis/*'], kind), kind).toBe(false);
+    }
+    // Exact entries behave as before, and an exact entry never widens into a family.
+    expect(taskKindListed(['editorial-review/typos-and-usage', 'writing'], 'writing')).toBe(true);
+    expect(taskKindListed(['editorial-review/typos-and-usage', 'writing'], 'editorial-review/style-and-format')).toBe(false);
+    expect(taskKindListed(['custom-analysis/typos'], 'custom-analysis/other')).toBe(false);
+    // Only a trailing `/*` after a lower-case segment is a family; any other glob shape is an exact string no kind equals.
+    for (const entry of ['custom-analysis*', 'custom-analysis/**', '*/*', '*', '/*', 'custom-analysis/*/x', 'Custom-Analysis/*', 'editorial-review/[a-z]*']) {
+      expect(taskKindListed([entry], 'custom-analysis/dimension-1'), entry).toBe(false);
+      expect(taskKindListed([entry], 'editorial-review/typos-and-usage'), entry).toBe(false);
+    }
+    expect(taskKindListed([], 'writing')).toBe(false);
+  });
+
+  it('selects the custom rule for every member of the family under developer-live, and for no other kind', () => {
+    const rule = liveKindRule(policy, 'custom-analysis/synthetic-dimension', ['editor-authored-question-template']);
+    expect(rule?.ruleId).toBe(customRuleId);
+    expect(liveKindRule(policy, 'custom-analysis/another-dimension')?.ruleId).toBe(customRuleId);
+    for (const kind of ['custom-analysis/', 'custom-analysisx/foo', 'custom-analysis/a/b', 'custom-analysis/*']) expect(liveKindRule(policy, kind), kind).toBeNull();
+    // The Series consistency category is a kind of the review rule since v22; the kind alone never makes it live (its expectation stays closed).
+    expect(liveKindRule(policy, 'editorial-review/series-consistency', ['series-knowledge-excerpt'])?.ruleId).toBe('developer-live-public-samplebook-reference-free-review');
+    expect(liveKindRule(policy, 'editorial-review/series-consistency', ['editor-authored-question-template'])).toBeNull();
+  });
+
+  it('admits a family member under its one rule on the exact binding, for the exact digest its definition re-derives', () => {
+    expect(liveKindAdmission(policy, stubDefinition(), binding)).toEqual({
+      ruleId: customRuleId,
+      modelRole: 'Main Editorial Role',
+      outboundDataCategories: ['public-or-synthetic', 'editor-authored-question-template'],
+      crossUnitSynthesisAllowed: false,
+    });
+    expect(liveKindContractCategories('custom-analysis/synthetic-dimension')).toEqual(['editor-authored-question-template']);
+    // A replaced digest, a definition that cannot re-derive its own, or a payload kind outside the family is refused.
+    expect(liveKindAdmission(policy, { ...stubDefinition(), promptContractDigest: 'f'.repeat(64) }, binding)).toBeNull();
+    const { livePromptContractDigest: _derive, ...withoutDerivation } = stubDefinition();
+    expect(liveKindAdmission(policy, withoutDerivation, binding)).toBeNull();
+    expect(liveKindAdmission(policy, stubDefinition('custom-analysis/'), binding)).toBeNull();
+    expect(liveKindAdmission(policy, stubDefinition('custom-analysis/a/b'), binding)).toBeNull();
+    expect(liveKindAdmission(policy, stubDefinition('custom-analysisx/foo'), binding)).toBeNull();
+    for (const field of ['route', 'endpoint', 'model', 'credentialSlot'] as const) {
+      expect(liveKindAdmission(policy, stubDefinition(), { ...binding, [field]: 'different' }), field).toBeNull();
+    }
+    // The rule must name the template category, be the one rule, and exist.
+    const closed = { ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: policy.providerProcessing.admittedRules.map((rule) =>
+      (rule.ruleId === customRuleId ? { ...rule, outboundDataCategories: rule.outboundDataCategories.filter((category) => category !== 'editor-authored-question-template') } : rule)) } };
+    expect(liveKindAdmission(closed, stubDefinition(), binding)).toBeNull();
+    expect(liveKindAdmission(withRepeatedRuleFor(policy, 'custom-analysis/synthetic-dimension'), stubDefinition(), binding)).toBeNull();
+    expect(liveKindAdmission(withoutRuleFor(policy, 'custom-analysis/synthetic-dimension'), stubDefinition(), binding)).toBeNull();
+    // development-ci (v1) admits no rule at all.
+    expect(liveKindAdmission(undefined, stubDefinition(), binding)).toBeNull();
+  });
+
+  it('registers no local tool and no research for a family member', () => {
+    expect(kindLocalTools(policy, 'custom-analysis/synthetic-dimension')).toBeNull();
+    expect(kindResearchDeclaration(policy, 'custom-analysis/synthetic-dimension')).toEqual({ webSearch: false, searchEngine: null });
+  });
+
+  it('selects the ordinary-production custom rule on the editor\'s configured binding', async () => {
+    const production = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'ordinary-production', GO_PRODUCTION_BINDING);
+    expect(production.providerProcessing.version).toBe('v23');
+    expect(liveKindRule(production, 'custom-analysis/synthetic-dimension', ['editor-authored-question-template'])?.ruleId).toBe('ordinary-production-custom-analysis');
+    const productionBinding = production.providerProcessing.admittedRules.find((rule) => rule.ruleId === 'ordinary-production-custom-analysis')!;
+    expect(liveKindAdmission(production, stubDefinition(), productionBinding)?.outboundDataCategories).toEqual(expect.arrayContaining(['public-or-synthetic', 'editor-authored-question-template']));
+    expect(liveKindRule(production, 'editorial-review/series-consistency', ['series-knowledge-excerpt'])?.ruleId).toBe('ordinary-production-review');
   });
 });

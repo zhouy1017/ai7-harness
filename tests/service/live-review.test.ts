@@ -372,7 +372,7 @@ describe('reference-free review on the Go execution path', () => {
     expect(closedPlan.scope.send).not.toContain('本社审阅偏好');
     expect(requests.some((request) => request.system.includes('本社审阅偏好') || request.last.includes('本社审阅偏好'))).toBe(false);
 
-    // The selected v20 review rule names it: every unit request of the category carries the framed block, and the egress gate
+    // The selected v22 review rule names it: every unit request of the category carries the framed block, and the egress gate
     // admitted it.
     expect(policy.providerProcessing.admittedRules!.find((rule) => rule.taskKinds.includes(kind))!.outboundDataCategories).toContain('house-review-preference-excerpt');
     store.baselineAnalysisLedger.bindLaunch(launch);

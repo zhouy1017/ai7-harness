@@ -1,5 +1,6 @@
 import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import type { LocalToolsRule } from '../../src/service/provider/local-tools.js';
+import { taskKindListed } from '../../src/service/launch-policy.js';
 
 /** The `localTools` terms Provider Processing v18/v19 state on every rule (#891), for bindings built without a launch projection. */
 export function localRetrievalRule(allowed = true): LocalToolsRule {
@@ -20,17 +21,17 @@ function withRules(policy: LaunchPolicyProjection, admittedRules: AdmittedProvid
 
 /** The selected rule that names `kind`. */
 export function ruleFor(policy: LaunchPolicyProjection, kind: string): AdmittedProviderRule {
-  return policy.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes(kind))!;
+  return policy.providerProcessing.admittedRules.find((rule) => taskKindListed(rule.taskKinds, kind))!;
 }
 
 /** The projection with the rule naming `kind` changed by `overrides`. */
 export function withRuleFor(policy: LaunchPolicyProjection, kind: string, overrides: Partial<AdmittedProviderRule>): LaunchPolicyProjection {
-  return withRules(policy, policy.providerProcessing.admittedRules.map((rule) => (rule.taskKinds.includes(kind) ? { ...rule, ...overrides } : rule)));
+  return withRules(policy, policy.providerProcessing.admittedRules.map((rule) => (taskKindListed(rule.taskKinds, kind) ? { ...rule, ...overrides } : rule)));
 }
 
 /** The projection without the rule naming `kind`, as a policy before it was admitted reads. */
 export function withoutRuleFor(policy: LaunchPolicyProjection, kind: string): LaunchPolicyProjection {
-  return withRules(policy, policy.providerProcessing.admittedRules.filter((rule) => !rule.taskKinds.includes(kind)));
+  return withRules(policy, policy.providerProcessing.admittedRules.filter((rule) => !taskKindListed(rule.taskKinds, kind)));
 }
 
 /** The projection with the rule naming `kind` listed twice: an ambiguous admission. */
@@ -46,7 +47,7 @@ export function withoutHouseReviewPreference(policy: LaunchPolicyProjection): La
 
 /**
  * A rule naming `house-review-preference-excerpt` for `kind` (#911): development-ci's v1 admits no rule, so fixture-route tests of the
- * consumer read this in-memory one; under developer-live, Provider Processing v20's review rule names the category itself.
+ * consumer read this in-memory one; under developer-live, Provider Processing v22's review rule names the category itself.
  */
 export function withHouseReviewPreferenceFor(policy: LaunchPolicyProjection, kind: string): LaunchPolicyProjection {
   const previous = ruleFor(policy, kind);
@@ -59,5 +60,5 @@ export function withHouseReviewPreferenceFor(policy: LaunchPolicyProjection, kin
     matchingActiveDefaultExecutionRuleAllowed: false, webSearchToolAllowed: false, platformTools: null,
     localTools: localRetrievalRule(), sourceTranslationAllowed: false,
   } : { ...previous, outboundDataCategories: [...previous.outboundDataCategories, category] };
-  return withRules(policy, [...policy.providerProcessing.admittedRules.filter((rule) => !rule.taskKinds.includes(kind)), stub]);
+  return withRules(policy, [...policy.providerProcessing.admittedRules.filter((rule) => !taskKindListed(rule.taskKinds, kind)), stub]);
 }
