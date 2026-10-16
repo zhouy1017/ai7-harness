@@ -1,6 +1,8 @@
 import { FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
 import { FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST } from './factual-review-contract.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
+import { modelProfileFor } from '../provider/model-profile.js';
+import type { RemoteExecutionRoute } from '../provider/egress-gate.js';
 import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { EVALUATION_REWRITE_KIND, INITIAL_EVALUATION_KIND, READERS_REPORT_KIND, WRITING_KIND, reviewCategoryKindId } from '../../shared/protocol.js';
 import type { OutboundDataCategory } from '../provider/egress-gate.js';
@@ -174,7 +176,7 @@ export function liveKindAdmission(
     (definition.kind === FACTUAL_REVIEW_KIND && entry.categoryId === 'factual-review'));
   if (category?.categoryId === 'publication-risk') return null;
   if (category !== undefined && category.searchEngine &&
-      platformToolsFromProjection(liveKindRule(policy, definition.kind)) === null) return null;
+      (platformToolsFromProjection(liveKindRule(policy, definition.kind)) === null || !modelAdmitsPlatformTools(binding.route, binding.model))) return null;
   const expectation = liveKindExpectation(definition);
   return expectation === null ? null : liveKindAdmitted(policy, definition.kind, definition, binding, expectation);
 }
@@ -183,6 +185,15 @@ export function liveKindAdmission(
 export function liveKindContractCategories(kind: string, definition?: LiveKindDefinition): readonly OutboundDataCategory[] {
   return [...(plannedPayloadCategories(kind) ?? []).filter((category) => category !== 'public-or-synthetic'),
     ...(definition === undefined || liveMaterialContract(definition) === null ? [] : ['frozen-material-reference-excerpt'] as const)];
+}
+
+/**
+ * Whether a Run's model may be handed the platform tools: its profile declares the client function loop on recorded evidence
+ * (ADR 0080 §2, §7.7). A rule naming the tools is not enough — a web-bearing category on any other model is not admitted, and
+ * writing and evaluation run on it without tools, as they did before the rule named them.
+ */
+export function modelAdmitsPlatformTools(route: string, model: string): boolean {
+  return modelProfileFor(route as RemoteExecutionRoute, model)?.capabilities.toolCalling === 'function';
 }
 
 /** Review categories use their current declaration; a policy allowance alone never turns non-web review into research. */

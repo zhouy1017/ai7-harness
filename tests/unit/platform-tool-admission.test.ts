@@ -1,7 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { liveKindAdmission, liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { liveKindAdmission, liveKindRule, modelAdmitsPlatformTools } from '../../src/service/analysis/live-kind-admission.js';
 import { factualReviewKindDefinition, withFactualResearch } from '../../src/service/analysis/kind-definition.js';
 import { reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import { liveReviewRule } from '../../src/service/review/live-review-admission.js';
@@ -28,6 +29,23 @@ describe('platform tool registration admission', () => {
     expect(liveReviewRule(policy, reviewCategoryEntry('academic-integrity')!)).not.toBeNull();
     expect(liveReviewRule(policy, reviewCategoryEntry('publication-risk')!)).toBeNull();
     expect(liveKindAdmission(policy, { ...research, promptContractDigest: '0'.repeat(64) }, binding)).toBeNull();
+  });
+
+  it('admits web-bearing review only on a model whose profile records the tool loop, under both production routes', async () => {
+    expect(modelAdmitsPlatformTools('opencode-go', 'deepseek-v4.1-flash')).toBe(true);
+    expect(modelAdmitsPlatformTools('deepseek-open-platform', 'deepseek-flash')).toBe(false);
+    expect(modelAdmitsPlatformTools('opencode-go', 'deepseek-v4-flash')).toBe(false);
+    for (const allowed of ORDINARY_PRODUCTION_ALLOWED_BINDINGS) {
+      const policy = await resolveSourceCheckoutLaunchPolicy(root, 'ordinary-production', { ...allowed, credentialReference: randomUUID() });
+      expect(policy.providerProcessing.version).toBe('v17');
+      const rule = liveKindRule(policy, 'factual-review')!;
+      // The rule names the tools on both routes; only the model with recorded evidence may be handed them.
+      expect(rule.platformTools).not.toBeNull();
+      const tools = modelAdmitsPlatformTools(allowed.route, allowed.model);
+      expect(tools).toBe(allowed.route === 'opencode-go');
+      for (const categoryId of ['factual-review', 'academic-integrity']) expect(liveReviewRule(policy, reviewCategoryEntry(categoryId)!) !== null).toBe(tools);
+      expect(liveKindAdmission(policy, withFactualResearch(factualReviewKindDefinition()), allowed) !== null).toBe(tools);
+    }
   });
 
   it('bootstraps only the exact named developer-live item and refuses once the capability is declared', () => {

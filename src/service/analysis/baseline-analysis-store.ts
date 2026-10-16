@@ -1,4 +1,4 @@
-import { taskDeclaresPlatformTools } from './live-kind-admission.js';
+import { modelAdmitsPlatformTools, taskDeclaresPlatformTools } from './live-kind-admission.js';
 import { withFactualResearch } from './kind-definition.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
@@ -3571,7 +3571,8 @@ export class BaselineAnalysisStore {
     const admittedToolRule = this.#definition.kind === BASELINE_ANALYSIS_KIND || intent.preparedByEnrollmentVersionId !== null ? null
       : liveKindRule(this.#launch.policy, this.#definition.kind);
     const toolsProjection: unknown = admittedToolRule !== null && 'platformTools' in admittedToolRule ? admittedToolRule.platformTools : null;
-    const toolsDeclared = live !== null && taskDeclaresPlatformTools(this.#definition.kind) && platformToolsFromProjection(admittedToolRule) !== null;
+    const toolsDeclared = live !== null && taskDeclaresPlatformTools(this.#definition.kind) && platformToolsFromProjection(admittedToolRule) !== null &&
+      modelAdmitsPlatformTools(live.route, live.model);
     let webToolsBackend: FrozenWebToolsBackend | undefined;
     let searchCredentialReference: string | undefined;
     if (toolsDeclared) {
