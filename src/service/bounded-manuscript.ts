@@ -2736,10 +2736,11 @@ function requireManuscriptReimportTargetSchema(
   // Revision 77 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
   const includeFactualVerificationTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= FACTUAL_VERIFICATION_SCHEMA_VERSION || committed(FACTUAL_VERIFICATION_SCHEMA_SQL);
   // Revision 79 (Issue #911): 本社审阅偏好 versions and each review category Task's pin of the version it read.
-  const includeImportedSkillTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= IMPORTED_SKILL_SCHEMA_VERSION || committed(IMPORTED_SKILL_SCHEMA_SQL);
   const includeHousePreferenceTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || committed(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL);
   // Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts, their versions and their one promotion each.
   const includeTaskIntentDraftTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= TASK_INTENT_DRAFT_SCHEMA_VERSION || committed(TASK_INTENT_DRAFT_SCHEMA_SQL);
+  // Revision 81 (Issue #66; ADR 0090): imported Skills, their source snapshots, working revisions and lifecycle states.
+  const includeImportedSkillTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= IMPORTED_SKILL_SCHEMA_VERSION || committed(IMPORTED_SKILL_SCHEMA_SQL);
   requireExactSchema(
     db,
     {

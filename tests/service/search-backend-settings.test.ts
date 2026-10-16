@@ -1,4 +1,3 @@
-import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { join } from 'node:path';
 import { restoreTaskIntentDraftPredecessor } from '../support/pre74-schema.js';
 import { DatabaseSync } from 'node:sqlite';
@@ -57,7 +56,7 @@ describe('the persisted search settings and schema 74', () => {
       expect(store.getSearchBackendConnections()).toHaveLength(5); store.close(); store = undefined;
       const terminal = new DatabaseSync(path);
       // Synchronized delta with #66: imported Skill sibling relations follow the house review preference revision.
-      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
+      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(81);
       expect(String(terminal.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_plan_records'").get()!.sql)).toContain('web-tools-backend');
       expect(() => terminal.prepare("INSERT INTO search_backend_connections VALUES ('search-kimi', NULL, 'missing', NULL, 'now')").run()).toThrow();
       terminal.exec('DROP TABLE search_backend_connections'); terminal.close();
