@@ -272,8 +272,8 @@ describe('cross-deliverable participants and revision lineage', () => {
       decision: { providerAllowRules: Array<{ ruleId: string; allowedTaskKinds: string[]; allowedOutboundDataCategories: string[] }> };
     };
     const v11: LaunchPolicyProjection = { ...selected, providerProcessing: { ...selected.providerProcessing, version: 'v11',
-      // The enrolled background rule is new in v14: v11 has no counterpart to emulate.
-      admittedRules: selected.providerProcessing.admittedRules!.filter((rule) => !rule.backgroundOrigin).map((rule) => {
+      // The enrolled background rule is new in v14 and the 来源译文 rule in v18: v11 has no counterpart to emulate.
+      admittedRules: selected.providerProcessing.admittedRules!.filter((rule) => !rule.backgroundOrigin && legacy.decision.providerAllowRules.some((candidate) => candidate.ruleId === rule.ruleId)).map((rule) => {
         const previous = legacy.decision.providerAllowRules.find((candidate) => candidate.ruleId === rule.ruleId)!;
         return { ...rule, taskKinds: previous.allowedTaskKinds, outboundDataCategories: rule.outboundDataCategories.filter((category) => previous.allowedOutboundDataCategories.includes(category)),
           editorialDeliverablesAllowed: false, materialReferencesAllowed: false };

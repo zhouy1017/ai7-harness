@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all twenty-nine current and historical pairs and validates every one at this base', () => {
+  it('discovers all thirty-two current and historical pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(29);
+    expect(pairs).toHaveLength(32);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(29);
+    expect(results).toHaveLength(32);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -507,5 +507,140 @@ describe('Provider Processing v16, v17 and active-set v12 schemas: platform tool
     moved.activePolicies['provider-processing-policy'].scopePins['developer-live']!.version = 'v16';
     expect(() => validatePolicyDocument(moved, v11.schemaData)).toThrowError();
     expect((policyData as { predecessorVersion: string }).predecessorVersion).toBe('v11');
+  });
+});
+
+describe('Provider Processing v18, v19 and active-set v13 schemas: local tools (Issue #891, slice 7d)', () => {
+  type Rules = { decision: { providerAllowRules: Array<Record<string, unknown>> } };
+  const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+  const BACKGROUND = 7;
+  const REVIEW = 2;
+  const TRANSLATION = 8;
+  const pair = (version: string) => readPair(`provider-processing-policy.${version}.json`, `provider-processing-policy.${version}.schema.json`);
+
+  it.each([['v18', 'v16'], ['v19', 'v17']] as const)('validates %s and keeps its predecessor\'s role, credential, separation, selection and category consts', (now, before) => {
+    const { policyData, schemaData } = pair(now);
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    const current = policyData as Record<string, unknown>;
+    const predecessor = pair(before).policyData as Record<string, unknown>;
+    for (const section of ['roleBindings', 'credentialBoundary', 'authoritySeparations', 'trustedSelection', 'outboundDataCategories']) {
+      expect(current[section], `${now} ${section}`).toEqual(predecessor[section]);
+    }
+    expect(current.predecessorVersion).toBe(before);
+    expect(current.predecessorCanonicalPath).toBe(`docs/policies/provider-processing-policy.${before}.json`);
+  });
+
+  it.each(['v18', 'v19'])('pins %s\'s local tools block on every rule as a const, retrieval not allowed for background analysis and material translation', (version) => {
+    const { policyData, schemaData } = pair(version);
+    const rules = (policyData as Rules).decision.providerAllowRules;
+    expect(rules).toHaveLength(9);
+    rules.forEach((rule, index) => {
+      expect(rule.localTools, `${index}`).toEqual({
+        targetedRetrieval: {
+          allowed: index !== BACKGROUND && index !== TRANSLATION, source: 'authorized-pinned-sources-only', callsPerUnit: 5, candidatesPerCall: 8,
+          exactFetchRequiredBeforeCitation: true, scope: 'no-egress',
+        },
+        breaker: { roundTrips: 128, end: '检索未完成' },
+      });
+    });
+    for (let index = 0; index < rules.length; index += 1) {
+      const variants: Array<[string, (rule: Record<string, unknown>) => void, RegExp]> = [
+        ['drop block', (rule) => { delete rule.localTools; }, /Required property "localTools" is missing/],
+        ['flip allowed', (rule) => { ((rule.localTools as Record<string, Record<string, unknown>>).targetedRetrieval!).allowed = index === BACKGROUND || index === TRANSLATION; }, /localTools does not equal the required const/],
+        ['call cap', (rule) => { ((rule.localTools as Record<string, Record<string, unknown>>).targetedRetrieval!).callsPerUnit = 6; }, /localTools does not equal the required const/],
+        ['candidate cap', (rule) => { ((rule.localTools as Record<string, Record<string, unknown>>).targetedRetrieval!).candidatesPerCall = 9; }, /localTools does not equal the required const/],
+        ['exact fetch', (rule) => { ((rule.localTools as Record<string, Record<string, unknown>>).targetedRetrieval!).exactFetchRequiredBeforeCitation = false; }, /localTools does not equal the required const/],
+        ['scope', (rule) => { ((rule.localTools as Record<string, Record<string, unknown>>).targetedRetrieval!).scope = 'egress'; }, /localTools does not equal the required const/],
+        ['source', (rule) => { ((rule.localTools as Record<string, Record<string, unknown>>).targetedRetrieval!).source = 'any-source'; }, /localTools does not equal the required const/],
+        ['breaker', (rule) => { ((rule.localTools as Record<string, Record<string, unknown>>).breaker!).roundTrips = 129; }, /localTools does not equal the required const/],
+        ['breaker end', (rule) => { ((rule.localTools as Record<string, Record<string, unknown>>).breaker!).end = '联网核查未完成'; }, /localTools does not equal the required const/],
+      ];
+      for (const [label, mutate, error] of variants) {
+        const mutated = clone(policyData) as Rules;
+        mutate(mutated.decision.providerAllowRules[index]!);
+        expect(() => validatePolicyDocument(mutated, schemaData), `${version} ${index} ${label}`).toThrowError(error);
+      }
+    }
+  });
+
+  it('rejects an active-set v13 whose ordinary-production or developer-live pin is not the exact v19 or v18 document', () => {
+    const { policyData, schemaData } = readPair('active-policy-set.v13.json', 'active-policy-set.v13.schema.json');
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    type Pins = { activePolicies: { 'provider-processing-policy': { scopePins: Record<string, Record<string, unknown>> } } };
+    for (const [scope, field, value] of [
+      ['ordinary-production', 'version', 'v17'],
+      ['ordinary-production', 'sha256', 'e5dba26a71704016b9af9864c56aa508aa2bcebe75225a8e4e7af1c1fa67236b'],
+      ['developer-live', 'version', 'v16'],
+      ['developer-live', 'sha256', 'c6c3b51c346d4ab4011f03835f8650c503dd87dfa02617bde4b3a0707cd8701d'],
+    ] as const) {
+      const mutated = clone(policyData) as Pins;
+      mutated.activePolicies['provider-processing-policy'].scopePins[scope]![field] = value;
+      expect(() => validatePolicyDocument(mutated, schemaData), `${scope} ${field}`).toThrowError(/does not equal the required const/);
+    }
+    // v12 keeps pinning the old pair, so a v12 whose pins moved to the successors is not v12.
+    const v12 = readPair('active-policy-set.v12.json', 'active-policy-set.v12.schema.json');
+    const moved = clone(v12.policyData) as Pins;
+    moved.activePolicies['provider-processing-policy'].scopePins['developer-live']!.version = 'v18';
+    expect(() => validatePolicyDocument(moved, v12.schemaData)).toThrowError();
+    expect((policyData as { predecessorVersion: string }).predecessorVersion).toBe('v12');
+  });
+});
+
+describe('Provider Processing v18 and v19 schemas: 来源译文 (Issue #891, revisions 2 and 3)', () => {
+  type Rules = { decision: { providerAllowRules: Array<Record<string, unknown>> } };
+  const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+  const REVIEW = 2;
+  const TRANSLATION = 8;
+  const pair = (version: string) => readPair(`provider-processing-policy.${version}.json`, `provider-processing-policy.${version}.schema.json`);
+
+  it.each([['v18', 'developer-live-public-samplebook-material-translation', ['public-or-synthetic']], ['v19', 'ordinary-production-material-translation',
+    ['frozen-material-reference-excerpt', 'unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content']]] as const)('pins %s\'s ninth rule: the Fast Interaction Role over one frozen excerpt, no web, no retrieval', (version, ruleId, categories) => {
+    const { policyData, schemaData } = pair(version);
+    const rule = (policyData as Rules).decision.providerAllowRules[TRANSLATION]!;
+    expect(rule.ruleId).toBe(ruleId);
+    expect(rule.allowedTaskKinds).toEqual(['material-translation']);
+    expect(rule.allowedOutboundDataCategories).toEqual(categories);
+    expect((rule.providerBinding as Record<string, unknown>).modelRole).toBe('Fast Interaction Role');
+    expect((rule.transmissions as Record<string, unknown>).webSearchToolAllowed).toBe(false);
+    expect(rule.platformTools).toBeUndefined();
+    const variants: Array<[string, (value: Record<string, unknown>) => void, RegExp]> = [
+      ['kind', (value) => { value.allowedTaskKinds = ['material-translation', 'editorial-dialogue']; }, /allowedTaskKinds does not equal the required const/],
+      ['category', (value) => { value.allowedOutboundDataCategories = ['editor-selected-manuscript-excerpt']; }, /allowedOutboundDataCategories does not equal the required const/],
+      ['role', (value) => { (value.providerBinding as Record<string, unknown>).modelRole = 'Main Editorial Role'; }, /providerBinding does not equal the required const/],
+      ['web on', (value) => { (value.transmissions as Record<string, unknown>).webSearchToolAllowed = true; }, /transmissions does not equal the required const/],
+      ['platform tools', (value) => { value.platformTools = {}; }, /additional properties|platformTools/i],
+      ['source', (value) => { (value.source as Record<string, unknown>).seriesKnowledgeAllowed = true; }, /source does not equal the required const/],
+      ['origin', (value) => { (value.authorityOrigin as Record<string, unknown>).backgroundAnalysisEnrollmentAllowed = true; }, /authorityOrigin does not equal the required const/],
+      ['ceiling', (value) => { (value.authorizationPreconditions as Record<string, unknown>).runBudgetCeilingApplies = true; }, /authorizationPreconditions does not equal the required const/],
+    ];
+    for (const [label, mutate, error] of variants) {
+      const mutated = clone(policyData) as Rules;
+      mutate(mutated.decision.providerAllowRules[TRANSLATION]!);
+      expect(() => validatePolicyDocument(mutated, schemaData), `${version} ${label}`).toThrowError(error);
+    }
+    // A tenth rule, or the ninth withdrawn, is not the document.
+    const extra = clone(policyData) as Rules;
+    extra.decision.providerAllowRules.push(clone(extra.decision.providerAllowRules[TRANSLATION]!));
+    expect(() => validatePolicyDocument(extra, schemaData)).toThrowError();
+    const missing = clone(policyData) as Rules;
+    missing.decision.providerAllowRules.pop();
+    expect(() => validatePolicyDocument(missing, schemaData)).toThrowError();
+  });
+
+  it.each(['v18', 'v19'])('pins %s\'s sourceTranslationAllowed on the research review rule alone', (version) => {
+    const { policyData, schemaData } = pair(version);
+    const rules = (policyData as Rules).decision.providerAllowRules;
+    rules.forEach((rule, index) => { expect(rule.sourceTranslationAllowed, `${index}`).toBe(index === REVIEW ? true : undefined); });
+    const dropped = clone(policyData) as Rules;
+    delete dropped.decision.providerAllowRules[REVIEW]!.sourceTranslationAllowed;
+    expect(() => validatePolicyDocument(dropped, schemaData)).toThrowError(/Required property "sourceTranslationAllowed" is missing/);
+    const off = clone(policyData) as Rules;
+    off.decision.providerAllowRules[REVIEW]!.sourceTranslationAllowed = false;
+    expect(() => validatePolicyDocument(off, schemaData)).toThrowError(/sourceTranslationAllowed does not equal the required const/);
+    for (const index of [0, 1, 3, 4, 5, 6, 7, TRANSLATION]) {
+      const added = clone(policyData) as Rules;
+      added.decision.providerAllowRules[index]!.sourceTranslationAllowed = true;
+      expect(() => validatePolicyDocument(added, schemaData), String(index)).toThrowError(/additional properties|sourceTranslationAllowed/i);
+    }
   });
 });

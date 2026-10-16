@@ -1914,24 +1914,24 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ordinary-production';
 /**
- * Historical v5, v9, v10, v11, v12, v14 and the superseded web reservation v8 remain readable identities; selected v16 admits
+ * Historical v5, v9, v10, v11, v12, v14, v16 and the superseded web reservation v8 remain readable identities; selected v18 admits
  * baseline analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable
  * consistency and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and
  * 润色 and conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules, and AI7's platform
- * tools (websearch through the user-selected backend, webfetch) on review, writing and evaluation. A type member does
- * not select or activate a policy.
+ * tools (websearch through the user-selected backend, webfetch) on review, writing and evaluation, and AI7's local targeted-retrieval
+ * tool on every rule but enrolled background analysis and material translation. A type member does not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17';
-/** Historical v5, v7, v8, v9, v10 and v11, the superseded web reservation v6, and selected v12. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19';
+/** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, and selected v13. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
- * Provider Processing v16 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
+ * Provider Processing v18 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
  * resolved once the manifest freezes and before the plan does.
  */
 export type DeveloperLiveCeiling =
@@ -2206,6 +2206,16 @@ export interface AdmittedProviderRule {
   readonly webSearchToolAllowed: boolean;
   /** The rule's platform tools as the launch verified them, or `null` exactly when `webSearchToolAllowed` is `false`. */
   readonly platformTools: AdmittedPlatformTools | null;
+  /**
+   * The rule's local tools as the launch verified them (Provider Processing v18 and v19): present on every admitted rule, with
+   * `targetedRetrieval.allowed` `false` for enrolled background analysis and material translation.
+   */
+  readonly localTools: AdmittedLocalTools;
+  /**
+   * Whether the rule lets a retained external source's passage be translated into Chinese by the Run's own model (来源译文;
+   * `sourceTranslationAllowed`, Provider Processing v18 and v19): `true` for the research review rule alone, `false` for every other rule.
+   */
+  readonly sourceTranslationAllowed: boolean;
 }
 
 /**
@@ -2237,6 +2247,31 @@ export interface AdmittedSearchBackend {
   readonly credentialSlot: string;
 }
 
+/**
+ * AI7's local tools one admitted rule names (Provider Processing v18 and v19, Issue #891; ADR 0026, ADR 0047), as the launch verified
+ * them against the bounds of this build: eligibility only. Targeted retrieval reads only the sources the Run's authorization pinned,
+ * returns ranked candidates with anchors, sends nothing outside the process and counts its calls and tokens into the Run ceiling; a
+ * citation needs an Exact Fetch of the pinned revision. Executing the tool belongs to the retrieval slice.
+ */
+export interface AdmittedLocalTools {
+  readonly targetedRetrieval: {
+    /** `false` exactly for enrolled background analysis and material translation: neither may initiate retrieval. */
+    readonly allowed: boolean;
+    /** The tool reads only what the Run was authorized to read: the manuscript revision, 允许参考 items at their frozen index version, retained sources. */
+    readonly source: 'authorized-pinned-sources-only';
+    /** At most this many retrieval calls per Run unit. */
+    readonly callsPerUnit: number;
+    /** Each call returns at most this many ranked candidates. */
+    readonly candidatesPerCall: number;
+    /** A citation without an Exact Fetch of the pinned revision is refused by the result validator. */
+    readonly exactFetchRequiredBeforeCitation: true;
+    /** Nothing leaves the process: no Egress Gate ticket, no host. */
+    readonly scope: 'no-egress';
+  };
+  /** The per-unit circuit breaker: after `roundTrips` consecutive tool round trips the unit ends, disclosed as `end` (检索未完成). */
+  readonly breaker: { readonly roundTrips: number; readonly end: string };
+}
+
 export interface LaunchPolicyProjection {
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
@@ -2250,20 +2285,20 @@ export interface LaunchPolicyProjection {
     liveTransmissionAllowed: boolean;
     /**
      * Whether the active Provider Processing policy names the cross-unit reduction's transmission
-     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v16 document it
+     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v18 document it
      * is `true`, and anything else — absent included — means the reduction does not dispatch.
      */
     crossUnitReductionAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the assurance sampling suboperation's
-     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v16
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v18
      * document it is `true`; anything else — absent included — means the suboperation does not
      * dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
-     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v16 document it is
+     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v18 document it is
      * `true`; anything else — absent included — means the turn does not dispatch and the report
      * records `policy-bounded` with its reason.
      */
@@ -2274,7 +2309,7 @@ export interface LaunchPolicyProjection {
      */
     readonly admittedRules: readonly AdmittedProviderRule[];
     /**
-     * Only under `ordinary-production` (Provider Processing v17): `setup-required` while the editor's own model service is not
+     * Only under `ordinary-production` (Provider Processing v19): `setup-required` while the editor's own model service is not
      * configured, so no rule is admitted; `configured` once the launch supplied a binding the policy allows, which fills every
      * admitted rule's route, endpoint, model and credential slot. Absent under every other scope.
      */

@@ -61,10 +61,11 @@ export type RemoteExecutionRoute = ConfiguredRouteId;
 export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
- * The trusted scope's Provider Processing pin: selected v16 admits baseline analysis, enrolled background analysis within a
+ * The trusted scope's Provider Processing pin: selected v18 admits baseline analysis, enrolled background analysis within a
  * mandatory ceiling, editorial dialogue, review (with cross-deliverable consistency), writing, evaluation, and 润色 and
- * conflict-regeneration Suggestions on V4.1, with the platform tools on review, writing and evaluation. Historical v5,
- * v9, v10, v11, v12 and v14 and the superseded web reservation v8 are readable identities, not launch selections.
+ * conflict-regeneration Suggestions on V4.1, with the platform tools on review, writing and evaluation and the local
+ * retrieval tool on every rule but background analysis and material translation. Historical v5, v9, v10, v11, v12, v14 and v16 and the superseded web
+ * reservation v8 are readable identities, not launch selections.
  */
 export type EgressPolicyPin =
   | {
@@ -75,7 +76,7 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16';
+      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18';
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     }
@@ -393,8 +394,8 @@ export function assistantToolCallDigest(content: ReadonlyArray<AssembledContentB
 }
 
 /**
- * Whether a binding carries a rule naming the platform tools under a scope that may name them: developer-live (v16) and, since
- * Provider Processing v17, ordinary-production. development-ci never names a tool.
+ * Whether a binding carries a rule naming the platform tools under a scope that may name them: developer-live (v16 and v18) and, since
+ * Provider Processing v17 and v19, ordinary-production. development-ci never names a tool.
  */
 function platformToolsOf(binding: EgressBindingFacts): PlatformToolsRule | null {
   const rule = binding.platformTools ?? null;

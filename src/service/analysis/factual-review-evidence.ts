@@ -373,7 +373,7 @@ export function needsSourceTranslation(text: string): boolean {
 
 /**
  * The rule a Run's 来源译文 answers to. A translation is a transmission of the source's words to the Run's own model, so it
- * is produced only under a rule that names it; no rule of Provider Processing v16 or v17 does, and the absent field refuses.
+ * is produced only under a rule that names it; of Provider Processing v18 and v19 only the research review rule does (`sourceTranslationAllowed`), and the absent field refuses.
  */
 export interface SourceTranslationRule {
   readonly operationalScope: string;

@@ -68,6 +68,11 @@ function dialogueRule(overrides: Record<string, unknown> = {}): Record<string, u
     matchingActiveDefaultExecutionRuleAllowed: false,
     webSearchToolAllowed: false,
     platformTools: null,
+    localTools: {
+      targetedRetrieval: { allowed: true, source: 'authorized-pinned-sources-only', callsPerUnit: 5, candidatesPerCall: 8, exactFetchRequiredBeforeCitation: true, scope: 'no-egress' },
+      breaker: { roundTrips: 128, end: '检索未完成' },
+    },
+    sourceTranslationAllowed: false,
     ...overrides,
   };
 }
