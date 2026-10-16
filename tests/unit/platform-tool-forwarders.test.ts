@@ -38,7 +38,7 @@ async function v7Rule(): Promise<PlatformToolsRule> {
   const document = JSON.parse(await readFile(resolve(REPO_ROOT, 'docs/policies/provider-processing-policy.v7.json'), 'utf8')) as {
     decision: { providerAllowRules: unknown[] };
   };
-  return readPlatformToolsRule(document.decision.providerAllowRules[0])!;
+  return readPlatformToolsRule(document.decision.providerAllowRules[0]) as PlatformToolsRule;
 }
 
 function binding(rule: PlatformToolsRule): EgressBindingFacts {
@@ -91,6 +91,9 @@ describe('the websearch forwarder', () => {
     expect(moved.url).toBe('https://search.example.net/mcp');
     expect(JSON.parse(moved.body).params.name).toBe('other_search');
     expect(() => searchServiceRequest({ ...rule, websearch: { ...rule.websearch, service: 'exa' } }, 'q')).toThrowError(/协议/u);
+    // A declared keyed backend still has no keyless interface for this forwarder (Issue #883).
+    expect(() => searchServiceRequest({ ...rule, websearch: { ...rule.websearch, service: 'brave' } }, 'q'))
+      .toThrowError(expect.objectContaining({ code: 'SEARCH_SERVICE_UNKNOWN' }));
   });
 
   it('reads the first text block of a JSON or event-stream answer, capped, and nothing from an error', () => {
@@ -230,7 +233,7 @@ describe('authorized calls', () => {
     const authorized = authorizeSearchCall({ ticket: search.ticket, book, arguments: websearch });
     await sendSearchCall(authorized, fetch);
     await expect(sendSearchCall(authorized, fetch)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
-    await expect(sendSearchCall({ request: authorized.request }, fetch)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    await expect(sendSearchCall({ request: authorized.request! }, fetch)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
     expect(calls).toHaveLength(1);
     const page = evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket };
     const fetchAuthorized = authorizePublicFetch({ ticket: page.ticket, book });

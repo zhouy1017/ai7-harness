@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -470,7 +471,7 @@ describe('资料索引 over the real store', () => {
       for (const table of [...Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse(), ...Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()]) plant.exec(`DROP TABLE ${table}`);
       plant.exec('PRAGMA foreign_keys = ON');
       downgradeAnalysisRunAuthorizationsToRevision65(plant);
-      plant.exec(`PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
+      execPre74Fixture(plant, `PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
       expect(analysisRunAuthorizationsShape(plant)).toBe('revision-65');
     } finally {
       plant.close();

@@ -1,3 +1,4 @@
+import { SEARCH_BACKENDS, defaultSearchBackend } from './provider/search-backends.js';
 import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
@@ -649,6 +650,8 @@ import {
 import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema } from './maintenance-cases.js';
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
 import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
+import { RESEARCH_EVIDENCE_INCOMPLETE, RESEARCH_EVIDENCE_READ_ONLY, ResearchEvidenceError, ResearchEvidenceLedger, initializeResearchEvidenceSchema } from './research-evidence.js';
+import { MAX_LIBRARY_MATERIAL_TITLE_GRAPHEMES, type ResearchEvidenceBookProjection, type ResearchEvidenceCaptureState } from '../shared/protocol.js';
 import { LIBRARY_OBJECT_DIRECTORY, LibraryMaterialError, LibraryMaterialLedger, initializeLibraryMaterialSchema, libraryMaterialTitle, type LibraryMaterialOriginal } from './library-materials.js';
 import {
   MaterialIndexAborted,
@@ -1001,6 +1004,7 @@ import {
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   MODEL_CLARIFICATION_SCHEMA_VERSION,
+  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -2291,7 +2295,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2355,7 +2359,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2733,7 +2737,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2786,7 +2790,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2931,7 +2935,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2983,7 +2987,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3359,6 +3363,26 @@ const MODEL_SERVICE_ROUTE_ROWS: Readonly<Record<ModelServiceRouteId, {
 const MODEL_SERVICE_ROW_COLUMNS = 'connection_id, role_id, connection_name, provider_id, model_id, adapter_revision, configuration_revision, ' +
   'approved_fallback_chain, credential_slot, credential_reference, credential_operation_state, created_at, updated_at, credential_updated_at';
 
+/** Revision 74 (Issue #473): one connection row per shipped search backend, the registry's top rank selected; an existing table is checked, never rebuilt. */
+function initializeSearchBackendSchema(db: DatabaseSync): void {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'search_backend_connections'").get() as SqlRow | undefined;
+  const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
+  if (row !== undefined) {
+    requireStore(fold(asString(row.sql)) === fold(SEARCH_BACKEND_CONNECTIONS_SQL), 'SCHEMA_INVALID', '联网检索连接表结构不兼容。');
+    requireStore(asNumber((db.prepare('SELECT count(*) total FROM search_backend_connections').get() as SqlRow).total) === 5 && db.prepare('SELECT 1 FROM search_backend_connections WHERE selected = 1').all().length === 1, 'SCHEMA_INVALID', '联网检索连接记录不完整。');
+    return;
+  }
+  requireStore(asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version) < SEARCH_BACKEND_SCHEMA_VERSION, 'SCHEMA_INVALID', '联网检索连接表缺失。');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(SEARCH_BACKEND_CONNECTIONS_SQL);
+    const insert = db.prepare("INSERT INTO search_backend_connections VALUES (?, NULL, 'missing', ?, ?)");
+    const instant = new Date().toISOString();
+    for (const entry of SEARCH_BACKENDS.filter((backend) => backend.shipped)) insert.run(entry.id, entry.id === defaultSearchBackend()!.id ? 1 : null, instant);
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+}
+
 /**
  * Revision 11 → 72 for `model_service_connections` (Issue #811): the relation is rebuilt from its current text and its one
  * official row copied byte for byte, rowid included — except that it now names the official route's current model id,
@@ -3460,7 +3484,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3512,7 +3536,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4479,6 +4503,8 @@ export class EditorialStore {
   readonly #libraryMaterials: LibraryMaterialLedger;
   /** 资料索引 (Issue #428, S80a; KB-009): each 资料库 item's Material Index, built here in the background, one at a time. */
   readonly #materialIndex: MaterialIndexLedger;
+  /** 来源与证据 (Issue #425, S70; SRC-013): the external sources research Runs retained, and the units' research outcomes. */
+  readonly #researchEvidence: ResearchEvidenceLedger;
   /** The items waiting for their index, in arrival order, and the one being built now. */
   readonly #indexQueue: string[] = [];
   #indexing: string | null = null;
@@ -4579,6 +4605,7 @@ export class EditorialStore {
     // 知识库 › 审阅规范文件 (Issue #427, S79a): a Review Run prepared now applies each guideline document at its latest version.
     this.#reviewGuidelines = new ReviewGuidelineLedger(authority);
     this.#materialIndex = new MaterialIndexLedger(authority);
+    this.#researchEvidence = new ResearchEvidenceLedger(authority);
     this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot, (material) =>
       this.#materialIndex.projection({ materialId: material.materialId, sha256: material.sha256, format: material.source.format },
         this.#indexing === material.materialId ? 'indexing' : 'queued'));
@@ -4917,6 +4944,9 @@ export class EditorialStore {
       initializeEvaluationProfileSchema(authority);
       // Revision 72 (Issue #811): the model-service connections widen for the two ordinary-production routes.
       initializeModelServiceRoutesSchema(authority);
+      initializeSearchBackendSchema(authority);
+      // Revision 75 (Issue #425, S70): the retained external evidence of research Runs.
+      initializeResearchEvidenceSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -9086,6 +9116,118 @@ export class EditorialStore {
     this.#scheduleMaterialIndex([materialId]);
     // The one item it made: the page it joins is read again by the renderer's own paging, never re-sent whole.
     return this.inspectLibraryMaterial(materialId);
+  }
+
+  // ---- 来源与证据 (Issue #425, plan slice S70; V2-UX-SRC-013, EGR-003, KB-008, ATTN-009) ---------------------------------
+
+  #evidenceCall<T>(operation: () => T): T {
+    return this.#libraryCall(() => {
+      try {
+        return operation();
+      } catch (error) {
+        if (error instanceof ResearchEvidenceError) throw new StoreError(error.code, error.message);
+        throw error;
+      }
+    });
+  }
+
+  /** Why 保存为来源材料 is not offered for a retained source now; `null` when it is (a full-text capture, not yet saved). */
+  #evidenceSaveRefusal(source: { captureState: ResearchEvidenceCaptureState; savedMaterialId: string | null }): string | null {
+    if (source.savedMaterialId !== null) return '已经保存为来源材料。';
+    if (this.replacementFrozen()) return RESEARCH_EVIDENCE_READ_ONLY;
+    if (source.captureState !== 'full-text') return RESEARCH_EVIDENCE_INCOMPLETE;
+    return null;
+  }
+
+  /**
+   * 来源与证据 (②; SRC-013, KB-008): a page of one Book's retained external sources, newest first, with each one's capture,
+   * alignment, 来源译文 and staleness as of now, and every researched unit's outcome. Read-only: nothing is fetched, sent or
+   * scheduled by it.
+   */
+  inspectResearchEvidence(input: ServiceOperationMap['inspectResearchEvidence']['input']): ResearchEvidenceBookProjection {
+    return this.#evidenceCall(() => {
+      requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.bookId) !== undefined, 'BOOK_NOT_FOUND', '所选图书不存在。');
+      requireStore(input.staleAfterDays === null || (Number.isSafeInteger(input.staleAfterDays) && input.staleAfterDays >= 1 && input.staleAfterDays <= 3650),
+        'RESEARCH_EVIDENCE_STALE_AFTER_INVALID', '过期天数无效。');
+      let runRecordId: string | undefined;
+      let findingId: string | undefined;
+      if (input.taskIntentId !== undefined) {
+        const run = this.#authority.prepare(`SELECT r.run_record_id FROM analysis_run_records r
+          JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE t.book_id = ? AND t.task_intent_id = ?`)
+          .get(input.bookId, input.taskIntentId) as SqlRow | undefined;
+        // An unstarted task has no evidence, never the Book's unrelated latest Run.
+        runRecordId = run === undefined ? '' : String(run.run_record_id);
+      }
+      if (input.reviewFindingId !== undefined) {
+        requireStore(input.taskIntentId !== undefined, 'RESEARCH_EVIDENCE_INVALID', '查看发现的来源需要指定任务。');
+        const finding = this.#authority.prepare(`SELECT f.kind_ref FROM review_findings f
+          JOIN review_runs r ON r.review_run_id = f.review_run_id WHERE r.book_id = ? AND f.finding_id = ? AND f.category_id = 'factual-review'`)
+          .get(input.bookId, input.reviewFindingId) as SqlRow | undefined;
+        findingId = finding === undefined ? '' : String(finding.kind_ref);
+      }
+      return this.#researchEvidence.projection({
+        bookId: input.bookId, after: input.after, now: new Date(),
+        ...(runRecordId === undefined ? {} : { runRecordId }), ...(findingId === undefined ? {} : { findingId }),
+        ...(input.staleAfterDays === null ? {} : { staleAfterDays: input.staleAfterDays }),
+        saveRefusal: (source) => this.#evidenceSaveRefusal(source),
+      });
+    });
+  }
+
+  /**
+   * One researched unit's retained evidence, kept for the execution owner the moment the unit settles (SRC-013: within the
+   * authorizing Task). The Run's own Book only; the unit once.
+   */
+  recordResearchEvidence(input: Parameters<ResearchEvidenceLedger['record']>[0]): string[] {
+    return this.#evidenceCall(() => this.#transaction(this.#authority, () => this.#researchEvidence.record(input)));
+  }
+
+  /**
+   * 保存为来源材料 (SRC-001's explicit retention; KB-007): the editor keeps one retained full-text source as a 资料库 item — its
+   * captured text, a 网页 titled as the editor names it — with its provenance, and the item is indexed on arrival. Its
+   * attribution and Learning Eligibility stay the editor's to decide, so no Task may list it yet. Refused while the house is
+   * read-only, for a source that is only an excerpt or was not retrieved, and for one already saved. Nothing is sent,
+   * published or exported, and no release authority is made.
+   */
+  async saveEvidenceAsMaterial(input: ServiceOperationMap['saveEvidenceAsMaterial']['input']): Promise<ServiceOperationMap['saveEvidenceAsMaterial']['output']> {
+    this.#assertAvailable();
+    const source = this.#evidenceCall(() => {
+      requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.bookId) !== undefined, 'BOOK_NOT_FOUND', '所选图书不存在。');
+      return this.#researchEvidence.source(input.bookId, input.evidenceId);
+    });
+    requireStore(!this.replacementFrozen(), 'RESEARCH_EVIDENCE_BOOK_READ_ONLY', RESEARCH_EVIDENCE_READ_ONLY);
+    requireStore(source.savedMaterialId === null, 'RESEARCH_EVIDENCE_ALREADY_SAVED', '这条外部来源已经保存为来源材料。');
+    requireStore(source.captureState === 'full-text' && source.content !== null && source.contentSha256 !== null,
+      'RESEARCH_EVIDENCE_INCOMPLETE', RESEARCH_EVIDENCE_INCOMPLETE);
+    let host = 'source';
+    try { host = new URL(source.url).hostname; } catch { /* the CHECK keeps every address https */ }
+    const title = input.title === null ? (source.sourceTitle ?? host) : input.title;
+    let kept: Awaited<ReturnType<LibraryMaterialLedger['keep']>>;
+    const staging = await ensureCanonicalDataDirectory(this.#dataRoot, 'research-evidence-staging');
+    const staged = await inspectCanonicalDataFile(this.#dataRoot, staging, `${host}-${randomUUID()}.md`);
+    try {
+      libraryMaterialTitle([...title].slice(0, MAX_LIBRARY_MATERIAL_TITLE_GRAPHEMES).join(''));
+      await writeFile(staged.path, source.content, { encoding: 'utf8', flag: 'wx' });
+      const preview = await this.#libraryMaterials.preview(staged.path);
+      kept = await this.#libraryMaterials.keep(preview.previewId);
+    } catch (error) {
+      if (error instanceof LibraryMaterialError) throw new StoreError(error.code, error.message);
+      throw error;
+    } finally {
+      await rm(staged.path, { force: true });
+    }
+    const materialId = this.#evidenceCall(() => this.#transaction(this.#authority, () => {
+      // The file preparation above yields; replacement may have frozen the Book in the meantime.
+      requireStore(!this.replacementFrozen(), 'RESEARCH_EVIDENCE_BOOK_READ_ONLY', RESEARCH_EVIDENCE_READ_ONLY);
+      const id = this.#libraryMaterials.record(kept, [...title].slice(0, MAX_LIBRARY_MATERIAL_TITLE_GRAPHEMES).join(''), 'web', {
+        kind: 'research-evidence', evidenceId: source.evidenceId, bookId: source.bookId, runRecordId: source.runRecordId, url: source.url,
+        capturedAt: source.capturedAt, contentSha256: source.contentSha256!, pageSha256: source.pageSha256, snapshotDigest: source.snapshotDigest,
+      });
+      this.#researchEvidence.linkMaterial(source.evidenceId, id);
+      return id;
+    }));
+    this.#scheduleMaterialIndex([materialId]);
+    return { evidenceId: source.evidenceId, material: this.inspectLibraryMaterial(materialId) };
   }
 
   // ---- 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) ---------------------------------
@@ -16178,6 +16320,56 @@ export class EditorialStore {
 
   getHistoricalRevision(revisionId: string, cursor: string | null): HistoricalRevisionProjection {
     return this.#boundedCall(() => this.#bounded.getHistoricalRevision(revisionId, cursor));
+  }
+
+  getSearchBackendSettings(): import('../shared/protocol.js').SearchBackendSettingsProjection {
+    const connections = this.getSearchBackendConnections();
+    return { selectedBackendId: connections.find((row) => row.selected)!.backendId,
+      backends: SEARCH_BACKENDS.filter((entry) => entry.shipped).map((entry) => ({
+        backendId: entry.id, name: entry.displayName, rank: entry.rank!, host: entry.host!,
+        reachable: entry.profile?.verdict === 'measured', p50Ms: entry.profile?.latencyMs.p50 ?? null,
+        // A plain price line: a token-billed backend shows its measured cost per call, never the vendor's English basis.
+        price: entry.price.amount === null
+          ? entry.profile?.costPerCallUsd === null || entry.profile?.costPerCallUsd === undefined ? '按 token 计费' : `按 token 计费，实测约 USD ${entry.profile.costPerCallUsd.toFixed(4)} / 次`
+          : entry.price.amount === 0 ? '免费' : `${entry.price.currency} ${entry.price.amount} / ${entry.price.per === 1 ? '' : `${entry.price.per} `}次`,
+        keyRequired: entry.keyRequired,
+        chineseHitRate: entry.profile === null || entry.profile.totals.chinese === 0 ? 0 : entry.profile.hits.chinese / entry.profile.totals.chinese,
+        internationalHitRate: entry.profile === null || entry.profile.totals.international === 0 ? 0 : entry.profile.hits.international / entry.profile.totals.international,
+        note: [entry.id === 'search-tinyfish' ? '提供方限速：30 次/分钟、500 次/小时；另一页面标示每日 12,000 次。' : entry.id === 'search-brave' ? '测量时出现间歇性连接失败。' : entry.profile?.note ?? null,
+          // #884: a price whose vendor source was not retained is shown only with that caveat.
+          entry.priceSource.verified ? null : '单价来源未经核实：这是评估时记录的历史标价，以服务商当前价格页为准。',
+        ].filter((line): line is string => line !== null).join(' ') || null,
+        connection: connections.find((row) => row.backendId === entry.id)!,
+      })),
+    };
+  }
+
+  getSearchBackendConnections(): import('../shared/protocol.js').SearchBackendConnectionProjection[] {
+    return (this.#authority.prepare('SELECT * FROM search_backend_connections').all() as SqlRow[]).map((row) => ({
+      backendId: asString(row.backend_id), credentialReference: row.credential_reference === null ? null : asString(row.credential_reference),
+      credentialOperationState: asString(row.credential_operation_state) as import('../shared/protocol.js').ModelCredentialOperationState,
+      selected: row.selected === 1, selectedAt: asString(row.selected_at),
+    }));
+  }
+
+  selectSearchBackend(backendId: string): void {
+    requireStore(SEARCH_BACKENDS.some((entry) => entry.shipped && entry.id === backendId), 'SEARCH_BACKEND_NOT_SHIPPED', '该联网检索后端未提供。');
+    this.#authority.exec('BEGIN IMMEDIATE');
+    try {
+      this.#authority.prepare('UPDATE search_backend_connections SET selected = NULL WHERE selected = 1').run();
+      this.#authority.prepare('UPDATE search_backend_connections SET selected = 1, selected_at = ? WHERE backend_id = ?').run(new Date().toISOString(), backendId);
+      this.#authority.exec('COMMIT');
+    } catch (error) { this.#authority.exec('ROLLBACK'); throw error; }
+  }
+
+  saveSearchBackendCredential(backendId: string, reference: string | null, state: import('../shared/protocol.js').ModelCredentialOperationState): import('../shared/protocol.js').SearchBackendConnectionProjection {
+    const current = this.getSearchBackendConnections().find((entry) => entry.backendId === backendId);
+    requireStore(current !== undefined, 'SEARCH_BACKEND_NOT_SHIPPED', '该联网检索后端未提供。');
+    requireStore(reference === null || reference === current.credentialReference, 'SEARCH_CREDENTIAL_REFERENCE_INVALID', '联网检索凭据引用不属于该连接。');
+    requireStore(['ready', 'missing', 'needs-attention'].includes(state), 'SEARCH_CREDENTIAL_STATE_INVALID', '联网检索凭据状态无效。');
+    const credentialReference = current.credentialReference ?? randomUUID();
+    this.#authority.prepare('UPDATE search_backend_connections SET credential_reference = ?, credential_operation_state = ? WHERE backend_id = ?').run(credentialReference, state, backendId);
+    return this.getSearchBackendConnections().find((entry) => entry.backendId === backendId)!;
   }
 
   getModelServiceProxy(): Promise<import('../shared/protocol.js').ModelServiceProxySetting> {

@@ -1,3 +1,4 @@
+import { execPre74Fixture, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -554,7 +555,7 @@ describe('⑥ 发稿: Milestone Versions and 设为发稿版本', () => {
     // Plant revision 24: its relations are exactly the current ones less the three revision 25 adds and
     // the three revision 26 adds.
     const truthBefore = withDatabase(false, (database) => {
-      database.exec(`BEGIN IMMEDIATE;
+      execPre74Fixture(database, `BEGIN IMMEDIATE;
         ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join('\n        ')}
         PRAGMA user_version = ${EDITORIAL_REVIEW_SCHEMA_VERSION};
         COMMIT;`);
@@ -575,10 +576,11 @@ describe('⑥ 发稿: Milestone Versions and 设为发稿版本', () => {
       const truthAfter = relationTruth(database);
       // Exactly the relations revisions 25 and 26 add appear, each empty; no relation the revision-24 store
       // held changed shape, and the only content that moved is the service lifetime every open appends.
-      expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
+      expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...RESEARCH_EVIDENCE_RELATIONS, ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
+      for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
       for (const relation of [...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
       // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual(['analysis_result_set_revisions', 'analysis_result_sets', 'analysis_task_intents']);
+      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_task_intents']);
       expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.content !== before.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       expect(database.prepare("SELECT count(*) total FROM sqlite_schema WHERE type = 'trigger' AND tbl_name IN ('publication_versions', 'public_release_permissions', 'publication_events')").get()).toEqual({ total: 6 });
       expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);

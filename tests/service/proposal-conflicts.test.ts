@@ -1,3 +1,4 @@
+import { execPre74Fixture, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -671,7 +672,7 @@ describe('稿件冲突 of a single 修改建议 (ADR 0085)', () => {
     }
     // Plant revision 25: its relations are exactly the current ones less the three revision 26 adds.
     const truthBefore = withDatabase(false, (database) => {
-      database.exec(`BEGIN IMMEDIATE;
+      execPre74Fixture(database, `BEGIN IMMEDIATE;
         ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join('\n        ')}
         ${PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n        ')}
         PRAGMA user_version = ${PUBLICATION_VERSION_SCHEMA_VERSION};
@@ -689,10 +690,11 @@ describe('稿件冲突 of a single 修改建议 (ADR 0085)', () => {
     withDatabase(true, (database) => {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       const truthAfter = relationTruth(database);
-      expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
+      expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...RESEARCH_EVIDENCE_RELATIONS, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
+      for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
       for (const relation of [...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
       // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual(['analysis_result_set_revisions', 'analysis_result_sets', 'analysis_task_intents']);
+      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_task_intents']);
       expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.content !== before.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       expect(database.prepare(`SELECT count(*) total FROM sqlite_schema WHERE type = 'trigger' AND tbl_name IN (${LEDGER.map((table) => `'${table}'`).join(', ')})`).get())
         .toEqual({ total: 6 });

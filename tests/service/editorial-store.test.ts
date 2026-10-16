@@ -1,3 +1,4 @@
+import { execPre74Fixture, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -168,7 +169,7 @@ function downgradeToRevision20(databasePath: string): void {
   const database = new DatabaseSync(databasePath);
   try {
     downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_23_SQL);
-    database.exec(`BEGIN IMMEDIATE;
+    execPre74Fixture(database, `BEGIN IMMEDIATE;
       ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
       ${PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
       ${PUBLICATION_VERSION_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
@@ -646,6 +647,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
       const truthAfter = relationTruth(after);
       // Exactly the relations revisions 21 to 28 add appear, and each appears empty.
       const added = [
+        ...RESEARCH_EVIDENCE_RELATIONS,
         'editorial_mark_replies', 'editorial_marks', 'manuscript_effect_approvals', 'manuscript_effect_dispatches',
         'manuscript_effect_intents', 'manuscript_effect_receipts', 'manuscript_effect_targets', 'manuscript_entry_positions',
         'proposal_change_items', 'proposal_decision_reasons', 'proposal_item_decisions',
@@ -666,7 +668,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
       // failure names the relation rather than printing the manuscript.
       const reshaped = [...truthBefore]
         .filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name);
-      expect(reshaped).toEqual([...KIND_COUPLED_ANALYSIS_RELATIONS].sort());
+      expect(reshaped).toEqual(['analysis_plan_records', ...KIND_COUPLED_ANALYSIS_RELATIONS].sort());
       const rewritten = [...truthBefore]
         .filter(([name, before]) => truthAfter.get(name)!.content !== before.content).map(([name]) => name);
       expect(rewritten).toEqual(['service_lifetimes']);
@@ -684,7 +686,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
     const storeDirectory = join(roots.dataRoot, 'store');
     await mkdir(storeDirectory, { recursive: true });
     const planted = new DatabaseSync(join(storeDirectory, 'ai7.sqlite'));
-    planted.exec('PRAGMA user_version = 9999');
+    execPre74Fixture(planted, 'PRAGMA user_version = 9999');
     planted.close();
 
     let refusal: unknown;

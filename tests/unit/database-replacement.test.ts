@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { open as openFile, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -65,7 +66,7 @@ async function otherPackage(): Promise<{ path: string; sha256: string }> {
   writeFileSync(join(other, 'objects', 'only-in-package.txt'), 'new');
   const database = new DatabaseSync(':memory:');
   try {
-    database.exec("CREATE TABLE marker (value TEXT) STRICT; INSERT INTO marker VALUES ('package'); PRAGMA user_version = 1;");
+    execPre74Fixture(database, "CREATE TABLE marker (value TEXT) STRICT; INSERT INTO marker VALUES ('package'); PRAGMA user_version = 1;");
     packages += 1;
     const path = join(root, `AI7 数据库 ${packages}.ai7db`);
     const written = await writeDatabasePackage(database, other, path, () => ({

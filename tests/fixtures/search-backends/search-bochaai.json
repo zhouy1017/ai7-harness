@@ -1,0 +1,19 @@
+{
+  "source": "Issue #883 reviewed evaluation capture; titles and URLs only",
+  "backendId": "search-bochaai",
+  "queryId": "zh-01",
+  "hits": [
+    {
+      "title": "中华人民共和国宪法修正案(2018年) - 道客巴巴",
+      "url": "https://www.doc88.com/p-6377801068638.html"
+    },
+    {
+      "title": "中华人民共和国宪法(2018年修正本) - 道客巴巴",
+      "url": "https://www.doc88.com/p-2062558126329.html"
+    },
+    {
+      "title": "中华人民共和国宪法修正案(附2018 年修正本)",
+      "url": "https://gh.jnu.edu.cn/_upload/article/files/da/4d/731f75ef4c6d822813ca0281554c/c0aec885-b518-4718-9cc6-7c20146abda7.pdf"
+    }
+  ]
+}

@@ -1692,3 +1692,14 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .evaluation-profile-fields { display: grid; gap: 12px; }
 .evaluation-profile-edit-item { display: grid; gap: 10px; padding: 12px; min-width: 0; }
 .evaluation-profile-form textarea { resize: vertical; }
+/* 来源与证据 (Issue #425, S70): retained sources, their passage, and a 来源译文 beside — never in place of — the original. */
+.research-evidence { display: grid; gap: 12px; }
+.research-evidence-card { display: grid; gap: 6px; min-width: 0; }
+.research-evidence-url { overflow-wrap: anywhere; }
+.research-evidence-stale, .review-finding-source + .review-finding-source { margin-top: 0; }
+.research-evidence-stale { font-weight: 600; }
+.research-evidence-passage, .research-evidence-translation blockquote { margin: 0; padding-left: 12px; border-left: 3px solid currentColor; overflow-wrap: anywhere; }
+.research-evidence-translation { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 12px; }
+.research-evidence-translation figure { margin: 0; display: grid; gap: 4px; min-width: 0; }
+.research-evidence-translation figcaption { font-weight: 600; }
+.research-evidence-units ul { margin: 0; padding-left: 1.25rem; }

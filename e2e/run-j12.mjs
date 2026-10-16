@@ -1276,6 +1276,20 @@ async function main() {
     await click(primary, '保护并保存', 'model-credential-save');
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'model-credential-ready');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.type==='password' && input.autocomplete==='off' && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-secret-not-redisplayed');
+    at('model-service-search-backends');
+    const searchSettings = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends)`);
+    requireJourney(searchSettings.selectedBackendId === 'search-tinyfish' && JSON.stringify(searchSettings.backends.map((entry)=>entry.backendId)) === JSON.stringify(['search-tinyfish','search-deepseek','search-brave','search-parallel','search-bochaai']), 'search-backend-ranking-default');
+    await assertRenderer(primary, `document.querySelector('[data-search-backends]')?.textContent.includes('联网检索') && document.querySelector('[data-search-backend="search-tinyfish"]')?.textContent.includes('30 次/分钟') && document.querySelector('[data-search-backend="search-brave"]')?.textContent.includes('间歇性')`, 'search-backend-measured-profile');
+    for (const id of ['search-tinyfish','search-deepseek','search-brave','search-parallel','search-bochaai']) {
+      await primary.evaluate(`Array.from(document.querySelector('[data-search-backend="${id}"]').querySelectorAll('button')).find((node)=>node.textContent==='测试检索').click()`);
+      await waitFor(primary, `document.querySelector('[data-search-probe="${id}"]')?.textContent.includes('结果数')`, 'search-probe-fixed-public-stub');
+      await assertRenderer(primary, `(() => { const probe=document.querySelector('[data-search-probe="${id}"]'); return probe.querySelectorAll('a').length<=3 && Array.from(probe.querySelectorAll('a')).every((node)=>node.href.startsWith('https://')&&node.textContent.length<=120); })()`, 'search-probe-output-bounds');
+    }
+    await primary.evaluate(`window.ai7.selectSearchBackend({backendId:'search-brave'})`);
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.selectedBackendId==='search-brave')`), 'search-backend-selection-saved');
+    const unknownSearchBackend = await primary.evaluate(`window.ai7.selectSearchBackend({backendId:'search-kimi'}).then(()=>false,(error)=>error.code==='SEARCH_BACKEND_NOT_SHIPPED')`);
+    requireJourney(unknownSearchBackend, 'unshipped-search-backend-refused');
+    at('model-service-first-save');
     const firstConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>({
       roles:settings.roles.length,
       roleIds:settings.roles.map((role)=>role.roleId),
@@ -1302,7 +1316,7 @@ async function main() {
         firstConnection.binding?.credentialSlot === 'deepseek-api-key' &&
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
-        firstConnection.policy?.activePolicySetVersion === 'v11' &&
+        firstConnection.policy?.activePolicySetVersion === 'v12' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&
@@ -1326,6 +1340,7 @@ async function main() {
     manager = await launch();
     [primary] = await waitForRendererCount(manager, 1, 'model-restart-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-restart-landing');
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.selectedBackendId==='search-brave')`), 'search-backend-selection-survives-restart');
     const restartedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial'))`);
     requireJourney(
       restartedConnection?.status === 'available' &&

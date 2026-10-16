@@ -17,6 +17,7 @@ import {
   type PlatformToolName,
 } from '../provider/platform-tools.js';
 import { HarnessSessionLogBackend } from './session-log.js';
+import type { ResearchDeclaration } from '../analysis/kind-definition.js';
 
 /**
  * `PrimaryAgentHarness`: the AI7-owned composition of the pinned DSH subset for one execution
@@ -37,10 +38,14 @@ export const HARNESS_PACKAGE_PINS = {
   '@deepseek-ai/dsh-tools': '0.1.0-rc.6',
 } as const;
 
+/** The progress label of one model request that asked for platform tools: a step of the turn's loop, counted as its own request. */
+export const PLATFORM_TOOL_CALL_PROGRESS = '平台工具调用';
+
 export const HARNESS_SERVICE_SET = ['agents', 'sessions', 'llm', 'systemPrompt', 'tools', 'agentLoop'] as const;
 export const PROMPT_SECTION_NAME = 'ai7:baseline-analysis-contract' as const;
 
 export interface HarnessCompositionDescriptor {
+  readonly researchDeclaration?: ResearchDeclaration;
   readonly packages: typeof HARNESS_PACKAGE_PINS;
   readonly services: typeof HARNESS_SERVICE_SET;
   readonly systemPrompt: { readonly includeHarnessIdentity: false; readonly includeRuntimeContext: false; readonly persona: ''; readonly completeSection: typeof PROMPT_SECTION_NAME };
@@ -71,6 +76,7 @@ export interface HarnessCompositionDescriptor {
 export const SESSION_LOG_PACKAGE_PIN = '0.1.0-rc.6' as const;
 
 export interface CompositionOptions {
+  readonly researchDeclaration?: ResearchDeclaration;
   /** The composition persists its Session log under the Agent Data Root. */
   readonly sessionLog?: boolean;
   /** The composition registers the two platform tools (Issue #473); only for a Run whose rule names them and whose plan declares web search. */
@@ -79,6 +85,10 @@ export interface CompositionOptions {
 
 export function describeComposition(route: ExecutionRoute, model: string, promptContractDigest: string, options: CompositionOptions = {}): HarnessCompositionDescriptor {
   const withTools = options.platformTools === true;
+  if (options.researchDeclaration !== undefined && (options.researchDeclaration.webSearch !== withTools ||
+      options.researchDeclaration.searchEngine !== (withTools ? 'user-selected-backend' : null))) {
+    throw new Error('RESEARCH_DECLARATION_COMPOSITION_MISMATCH');
+  }
   const body = {
     packages: HARNESS_PACKAGE_PINS,
     services: HARNESS_SERVICE_SET,
@@ -89,6 +99,7 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
     route,
     model,
     promptContractDigest,
+    ...(withTools ? { researchDeclaration: options.researchDeclaration ?? { webSearch: true, searchEngine: 'user-selected-backend' as const } } : {}),
     ...(options.sessionLog === true
       ? { sessionLog: { package: { '@deepseek-ai/dsh-session-persistence': SESSION_LOG_PACKAGE_PIN }, storage: 'agent-data-root-jsonl' as const } }
       : {}),
@@ -330,6 +341,16 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
   const projectTurn = (events: ReadonlyArray<SessionEvent>): Omit<HarnessTurnOutcome, 'span'> => {
     const signals: HarnessSignal[] = [];
     let terminal: HarnessTurnOutcome['terminal'] | undefined;
+    const recordUsage = (usage: TokenUsage): void => {
+      const prior = signals.find((signal) => signal.kind === 'usage');
+      if (prior?.kind === 'usage') {
+        const total: TokenUsage = { inputTokens: prior.usage.inputTokens + usage.inputTokens, outputTokens: prior.usage.outputTokens + usage.outputTokens };
+        for (const key of ['cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const) {
+          if (prior.usage[key] !== undefined || usage[key] !== undefined) total[key] = (prior.usage[key] ?? 0) + (usage[key] ?? 0);
+        }
+        signals[signals.indexOf(prior)] = { kind: 'usage', usage: total };
+      } else signals.push({ kind: 'usage', usage: { ...usage } });
+    };
     for (const event of events) {
       switch (event.type) {
         case 'turn/start':
@@ -338,8 +359,8 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
         case 'assistant/message': {
           // A tool-call message is a step of the loop, not an answer: it counts its usage and is never a content candidate.
           if (assistantToolCalls(event.data.message) !== null) {
-            signals.push({ kind: 'progress', label: '平台工具调用' });
-            if (event.data.usage !== undefined) signals.push({ kind: 'usage', usage: { ...event.data.usage } });
+            signals.push({ kind: 'progress', label: PLATFORM_TOOL_CALL_PROGRESS });
+            if (event.data.usage !== undefined) recordUsage(event.data.usage);
             break;
           }
           const text = event.data.message.content
@@ -347,7 +368,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
             .map((block) => block.text)
             .join('');
           signals.push({ kind: 'contentCandidate', text, digest: sha256Hex(text) });
-          if (event.data.usage !== undefined) signals.push({ kind: 'usage', usage: { ...event.data.usage } });
+          if (event.data.usage !== undefined) recordUsage(event.data.usage);
           break;
         }
         case 'turn/end': {

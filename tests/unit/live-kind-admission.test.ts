@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { liveKindAdmission, liveKindAdmitted, liveKindContractCategories, liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
+import { kindResearchDeclaration, liveKindAdmission, liveKindAdmitted, liveKindContractCategories, liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
 import { BASELINE_ANALYSIS_KIND } from '../../src/shared/protocol.js';
 import { initialEvaluationKindDefinition } from '../../src/service/evaluation/initial-evaluation-kind.js';
 import { readersReportKindDefinition } from '../../src/service/evaluation/readers-report-kind.js';
@@ -28,6 +28,27 @@ const rewrite = evaluationRewriteKindDefinition({ profile: { title: '合成方�
   strengths: [], weaknesses: [], verdict: null, conclusions: ['修改后再议'] });
 
 describe('live kind admission (#429)', () => {
+  it('declares research only for the selected tool rule and exact-model live evidence (#744)', () => {
+    const enabled = { webSearch: true, searchEngine: 'user-selected-backend' };
+    const disabled = { webSearch: false, searchEngine: null };
+    for (const kind of ['evaluation', 'writing', 'factual-review', 'editorial-review/factual-review', 'editorial-review/academic-integrity']) {
+      expect(kindResearchDeclaration(policy, kind)).toEqual(enabled);
+      expect(kindResearchDeclaration(withoutRuleFor(policy, kind), kind)).toEqual(disabled);
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { webSearchToolAllowed: false }), kind)).toEqual(disabled);
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { platformTools: null }), kind)).toEqual(disabled);
+      // A historical model and the same id on a different route never inherit the V4.1 observation.
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { model: 'deepseek-v4-flash' }), kind)).toEqual(disabled);
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform' }), kind)).toEqual(disabled);
+      // Production DeepSeek declares the function loop from the vendor guide only, never a live-test item: no research.
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform', model: 'deepseek-flash' }), kind)).toEqual(disabled);
+      expect(kindResearchDeclaration(policy, kind, disabled)).toEqual(disabled);
+    }
+    // 审稿意见 (row 16) and the score rewrite (row 14) carry no web even under a rule that names the tools.
+    for (const kind of [BASELINE_ANALYSIS_KIND, 'readers-report', 'evaluation-rewrite', 'editorial-dialogue', 'editorial-review/publication-risk', 'editorial-review/typos-and-usage']) {
+      expect(kindResearchDeclaration(policy, kind)).toEqual(disabled);
+    }
+    expect(kindResearchDeclaration(undefined, 'writing')).toEqual(disabled);
+  });
   it.each([initial, report, rewrite])('re-derives $kind admission from its frozen contract instead of trusting a replaced digest', (definition) => {
     expect(liveKindAdmission(policy, definition, binding)).not.toBeNull();
     expect(liveKindAdmission(policy, { ...definition, promptContractDigest: 'a'.repeat(64) }, binding)).toBeNull();
@@ -43,7 +64,7 @@ describe('live kind admission (#429)', () => {
     expect(liveKindAdmission(policy, initial, binding)).toEqual({
       ruleId: 'developer-live-public-samplebook-evaluation',
       modelRole: 'Main Editorial Role',
-      outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
+      outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt', 'web-search-query', 'public-source-fetch'],
       crossUnitSynthesisAllowed: true,
     });
     expect(liveKindAdmission(policy, report, binding)?.ruleId).toBe('developer-live-public-samplebook-evaluation');

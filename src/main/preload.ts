@@ -325,6 +325,10 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['previewLibraryMaterial']['output'] | null>(IPC_CHANNELS.previewLibraryMaterial),
   addLibraryMaterial: (input: ServiceOperationMap['addLibraryMaterial']['input']) =>
     invoke<ServiceOperationMap['addLibraryMaterial']['output']>(IPC_CHANNELS.addLibraryMaterial, input),
+  inspectResearchEvidence: (input: Parameters<RendererApi['inspectResearchEvidence']>[0]) =>
+    invoke<ServiceOperationMap['inspectResearchEvidence']['output']>(IPC_CHANNELS.inspectResearchEvidence, input),
+  saveEvidenceAsMaterial: (input: { bookId: string; evidenceId: string; title?: string | null }) =>
+    invoke<ServiceOperationMap['saveEvidenceAsMaterial']['output']>(IPC_CHANNELS.saveEvidenceAsMaterial, input),
   decideLibraryMaterial: (input: ServiceOperationMap['decideLibraryMaterial']['input']) =>
     invoke<ServiceOperationMap['decideLibraryMaterial']['output']>(IPC_CHANNELS.decideLibraryMaterial, input),
   inspectEvaluationProfiles: (input?: { before: number | null }) => invoke<ServiceOperationMap['inspectEvaluationProfiles']['output']>(IPC_CHANNELS.inspectEvaluationProfiles, input ?? {}),
@@ -644,6 +648,10 @@ const api: RendererApi = Object.freeze({
     invoke<Awaited<ReturnType<RendererApi['getProductDataLocation']>>>(IPC_CHANNELS.getProductDataLocation),
   revealProductDataLocation: () =>
     invoke<Awaited<ReturnType<RendererApi['revealProductDataLocation']>>>(IPC_CHANNELS.revealProductDataLocation),
+  selectSearchBackend: (input: Parameters<RendererApi['selectSearchBackend']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectSearchBackend']>>>(IPC_CHANNELS.selectSearchBackend, input),
+  probeSearchBackend: (input: Parameters<RendererApi['probeSearchBackend']>[0]) => invoke<Awaited<ReturnType<RendererApi['probeSearchBackend']>>>(IPC_CHANNELS.probeSearchBackend, input),
+  saveSearchBackendCredential: (input: Parameters<RendererApi['saveSearchBackendCredential']>[0]) => invoke<Awaited<ReturnType<RendererApi['saveSearchBackendCredential']>>>(IPC_CHANNELS.saveSearchBackendCredential, input),
+  removeSearchBackendCredential: (input: Parameters<RendererApi['removeSearchBackendCredential']>[0]) => invoke<Awaited<ReturnType<RendererApi['removeSearchBackendCredential']>>>(IPC_CHANNELS.removeSearchBackendCredential, input),
   getModelServiceSettings: () =>
     invoke<Awaited<ReturnType<RendererApi['getModelServiceSettings']>>>(IPC_CHANNELS.getModelServiceSettings),
   saveModelServiceProxy: (input: Parameters<RendererApi['saveModelServiceProxy']>[0]) =>

@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -147,7 +148,7 @@ function plantRevisionBefore62(plant: DatabaseSync, version: (typeof REVISIONS_B
     ...(version < SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ? Object.keys(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL).reverse() : []),
     ...(version < DIALOGUE_SCHEMA_VERSION ? Object.keys(DIALOGUE_SCHEMA_SQL).reverse() : []),
   ];
-  plant.exec(`${later.map((table) => `DROP TABLE ${table};`).join(' ')} PRAGMA user_version = ${version};`);
+  execPre74Fixture(plant, `${later.map((table) => `DROP TABLE ${table};`).join(' ')} PRAGMA user_version = ${version};`);
   downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_59_SQL);
 }
 

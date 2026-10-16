@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,7 +41,7 @@ function plantStore(dataRoot: string, version: number, state: string | null): vo
       connection_id TEXT, role_id TEXT, connection_name TEXT, provider_id TEXT, model_id TEXT, adapter_revision INTEGER,
       configuration_revision INTEGER, approved_fallback_chain TEXT, credential_slot TEXT, credential_reference TEXT,
       credential_operation_state TEXT)`);
-    database.exec(`PRAGMA user_version = ${version}`);
+    execPre74Fixture(database, `PRAGMA user_version = ${version}`);
     if (state !== null) {
       database.prepare('INSERT INTO model_service_connections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
         'main-editorial-deepseek-v4-pro', 'main-editorial', '主编辑模型', 'deepseek-open-platform', 'deepseek-flash', 1, 1,

@@ -619,6 +619,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'existing-book-source-commit-preflight',
     'restart-and-data-location',
     'model-service-first-save',
+    'model-service-search-backends',
     'model-service-restart-and-replace',
     // Issue #434 (S86a): 导出数据库 with a credential protected.
     'database-export',
@@ -818,6 +819,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-report',
     'review-report-export',
     'review-coverage-moves',
+    // Issue #425 (S70): 资料与记录 › 来源与证据 reads this Book's provider-free answer — nothing retained, nothing to save.
+    'research-evidence-source-view',
     'review-return-to-analysis',
     'zero-activity',
   ]),

@@ -1,3 +1,4 @@
+import { execPre74Fixture, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -163,7 +164,7 @@ describe('schema revision 33 over the real store', () => {
     }
     const before = withDatabase(false, (database) => {
       plantRevision32Relations(database);
-      database.exec('PRAGMA user_version = 32');
+      execPre74Fixture(database, 'PRAGMA user_version = 32');
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
       expect(runStatesShapeAt32(database)).toBe('revision-32');
       return { states: database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all() as Row[], truth: relationTruth(database) };
@@ -180,10 +181,11 @@ describe('schema revision 33 over the real store', () => {
       expect(runStatesShapeAt32(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys(), ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER].sort());
+      expect([...after.keys()]).toEqual([...before.truth.keys(), ...RESEARCH_EVIDENCE_RELATIONS, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER].sort());
+      for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(after.get(relation)?.content).toMatch(/^0:/);
       for (const relation of [...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER]) expect(after.get(relation)?.content).toMatch(/^0:/);
       // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_states', 'analysis_task_intents']);
+      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_states', 'analysis_task_intents']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       // The checkpoints are a ledger too: nothing rewrites or removes one.
       expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_unit_checkpoints' ORDER BY name").all())

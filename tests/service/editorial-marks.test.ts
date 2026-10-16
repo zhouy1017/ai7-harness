@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -540,7 +541,7 @@ describe('Editorial Marks on a manuscript', () => {
       // A revision-21 store carried the three kind-coupled analysis relations as revision 20 left them;
       // revision 24 (Issue #417) validates exactly that before it rebuilds them.
       downgradeKindCoupledRelations(downgrade, ANALYSIS_LEDGER_REVISION_23_SQL);
-      downgrade.exec(`BEGIN IMMEDIATE;
+      execPre74Fixture(downgrade, `BEGIN IMMEDIATE;
         ${MARK_RELATIONS.map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION};
         COMMIT;`);

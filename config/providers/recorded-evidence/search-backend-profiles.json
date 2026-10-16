@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 1,
+  "evaluation": {
+    "measuredOn": "2026-10-15",
+    "report": "docs/development/search-backend-evaluation.md",
+    "querySet": {
+      "path": "tools/search-backend-evaluation/queries.json",
+      "sha256": "8116d34a2c3b7ef208097e49310a229250dc2c307857656bc9c3943f4cf92676",
+      "queries": 30,
+      "chinese": 15,
+      "english": 15,
+      "international": 15
+    },
+    "network": {
+      "condition": "The Owner's developer host in mainland China, with the proxy off for the measuring process only: the proxy environment variables removed from the process, every request through an explicit direct undici Agent, the host's own proxy settings left as they were.",
+      "proxyEnvironment": "cleared-in-process",
+      "nodeEnvironmentProxy": "off",
+      "systemProxy": "enabled-not-used"
+    },
+    "cnyPerUsd": {
+      "rate": 6.7313,
+      "source": "CFETS central parity of the renminbi against the US dollar as published by Xinhua (news.cn), 2026-10-12",
+      "readOn": "2026-10-16"
+    },
+    "tierWidth": 0.1
+  },
+  "profiles": [
+    {
+      "backendId": "search-bochaai",
+      "verdict": "measured",
+      "queries": 30,
+      "answered": 30,
+      "transportErrors": 0,
+      "transportRetries": 0,
+      "statusClasses": {
+        "2xx": 30,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "none": 0
+      },
+      "hits": {
+        "overall": 16,
+        "chinese": 9,
+        "international": 7
+      },
+      "totals": {
+        "overall": 30,
+        "chinese": 15,
+        "international": 15
+      },
+      "sourceQuality": {
+        "primaryHits": 11,
+        "primaryEligible": 29,
+        "listedResults": 26,
+        "results": 150
+      },
+      "latencyMs": {
+        "p50": 100,
+        "p95": 328
+      },
+      "costPerCallUsd": null,
+      "note": null
+    },
+    {
+      "backendId": "search-brave",
+      "verdict": "measured",
+      "queries": 30,
+      "answered": 30,
+      "transportErrors": 0,
+      "transportRetries": 0,
+      "statusClasses": {
+        "2xx": 30,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "none": 0
+      },
+      "hits": {
+        "overall": 30,
+        "chinese": 15,
+        "international": 15
+      },
+      "totals": {
+        "overall": 30,
+        "chinese": 15,
+        "international": 15
+      },
+      "sourceQuality": {
+        "primaryHits": 24,
+        "primaryEligible": 29,
+        "listedResults": 86,
+        "results": 150
+      },
+      "latencyMs": {
+        "p50": 808,
+        "p95": 1283
+      },
+      "costPerCallUsd": null,
+      "note": null
+    },
+    {
+      "backendId": "search-deepseek",
+      "verdict": "measured",
+      "queries": 30,
+      "answered": 30,
+      "transportErrors": 0,
+      "transportRetries": 0,
+      "statusClasses": {
+        "2xx": 30,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "none": 0
+      },
+      "hits": {
+        "overall": 29,
+        "chinese": 15,
+        "international": 14
+      },
+      "totals": {
+        "overall": 30,
+        "chinese": 15,
+        "international": 15
+      },
+      "sourceQuality": {
+        "primaryHits": 28,
+        "primaryEligible": 29,
+        "listedResults": 85,
+        "results": 150
+      },
+      "latencyMs": {
+        "p50": 1741,
+        "p95": 2376
+      },
+      "costPerCallUsd": 0.001845,
+      "note": null
+    },
+    {
+      "backendId": "search-parallel",
+      "verdict": "measured",
+      "queries": 30,
+      "answered": 30,
+      "transportErrors": 0,
+      "transportRetries": 0,
+      "statusClasses": {
+        "2xx": 30,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "none": 0
+      },
+      "hits": {
+        "overall": 30,
+        "chinese": 15,
+        "international": 15
+      },
+      "totals": {
+        "overall": 30,
+        "chinese": 15,
+        "international": 15
+      },
+      "sourceQuality": {
+        "primaryHits": 27,
+        "primaryEligible": 29,
+        "listedResults": 114,
+        "results": 150
+      },
+      "latencyMs": {
+        "p50": 3347,
+        "p95": 6220
+      },
+      "costPerCallUsd": null,
+      "note": null
+    },
+    {
+      "backendId": "search-tinyfish",
+      "verdict": "measured",
+      "queries": 30,
+      "answered": 30,
+      "transportErrors": 0,
+      "transportRetries": 0,
+      "statusClasses": {
+        "2xx": 30,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "none": 0
+      },
+      "hits": {
+        "overall": 30,
+        "chinese": 15,
+        "international": 15
+      },
+      "totals": {
+        "overall": 30,
+        "chinese": 15,
+        "international": 15
+      },
+      "sourceQuality": {
+        "primaryHits": 26,
+        "primaryEligible": 29,
+        "listedResults": 89,
+        "results": 150
+      },
+      "latencyMs": {
+        "p50": 1581,
+        "p95": 2663
+      },
+      "costPerCallUsd": null,
+      "note": null
+    }
+  ],
+  "outcome": {
+    "excluded": [],
+    "ranking": [
+      {
+        "backendId": "search-tinyfish",
+        "tier": 1
+      },
+      {
+        "backendId": "search-deepseek",
+        "tier": 1
+      },
+      {
+        "backendId": "search-brave",
+        "tier": 1
+      },
+      {
+        "backendId": "search-parallel",
+        "tier": 1
+      },
+      {
+        "backendId": "search-bochaai",
+        "tier": 2
+      }
+    ],
+    "default": "search-tinyfish"
+  }
+}

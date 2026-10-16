@@ -76,7 +76,7 @@ export interface AuthorizedPublicFetch {
   readonly ticketId: string;
   readonly url: string;
   readonly host: string;
-  readonly rule: PlatformToolsRule;
+  readonly rule: Pick<PlatformToolsRule, 'webfetch'>;
 }
 
 const authorizedFetches = new WeakSet<AuthorizedPublicFetch>();

@@ -181,11 +181,11 @@ describe('reference-free review on the Go execution path', () => {
     expect(captures.every((line) => line.model === DEVELOPER_LIVE_POLICY_BINDING.model)).toBe(true);
   });
 
-  it('refuses web categories before preparing a model Task or sending anything', async () => {
+  it('refuses publication-risk before preparing a model Task or sending anything', async () => {
     const book = await importSample1Book(store, roots.codeRoot, 'L2 sample1 unavailable review');
     await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
     recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
-    for (const category of ['factual-review', 'academic-integrity', 'publication-risk']) {
+    for (const category of ['publication-risk']) {
       expect(() => store.createReviewRunPreparationWork(book.bookId, [category], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy)).toThrowError(/涉及联网核查/u);
     }
     expect(sent).toBe(0);
@@ -196,9 +196,9 @@ describe('reference-free review on the Go execution path', () => {
     await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
     recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
     const categories = store.inspectReviewWorkspace(book.bookId, null).categories;
-    expect(categories.filter((category) => category.available).map((category) => category.categoryId)).toEqual(['typos-and-usage', 'style-and-format', 'literary-expression']);
+    expect(categories.filter((category) => category.available).map((category) => category.categoryId)).toEqual(['typos-and-usage', 'style-and-format', 'factual-review', 'academic-integrity', 'literary-expression']);
     const reason = (id: string) => categories.find((category) => category.categoryId === id)!.unavailableReason;
-    for (const id of ['factual-review', 'academic-integrity', 'publication-risk']) expect(reason(id)).toMatch(/涉及联网核查/u);
+    expect(reason('publication-risk')).toMatch(/涉及联网核查/u);
     // The model-free leads stay on their baseline path (here: no baseline yet), never behind the live rule;
     // 书系一致性 and 跨交付物一致性 keep their own configured reasons.
     expect(reason('plot-consistency')).toBe(LEADS_ABSENT_REASON);
@@ -221,7 +221,7 @@ describe('reference-free review on the Go execution path', () => {
     const runtime = { credentialReadiness: async () => 'present' as const, connectivity: ALWAYS_ONLINE };
     const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
     const ledger = store.reviewCategoryLedger(definition);
-    // The selected developer-live policy (v14 under active set v11) admits the default-rule origin for review.
+    // The selected developer-live policy (v16 under active set v12) admits the default-rule origin for review.
     expect(ledger.launch.policy?.providerProcessing.admittedRules?.find((rule) => rule.taskKinds.includes(definition.kind))
       ?.matchingActiveDefaultExecutionRuleAllowed).toBe(true);
     const first = prepare();

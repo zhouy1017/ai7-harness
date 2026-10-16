@@ -1,0 +1,19 @@
+{
+  "source": "Issue #883 reviewed evaluation capture; titles and URLs only",
+  "backendId": "search-tinyfish",
+  "queryId": "zh-01",
+  "hits": [
+    {
+      "title": "中华人民共和国宪法修正案(2018年) - 维基百科",
+      "url": "https://zh.wikipedia.org/zh-hans/%E4%B8%AD%E5%8D%8E%E4%BA%BA%E6%B0%91%E5%85%B1%E5%92%8C%E5%9B%BD%E5%AE%AA%E6%B3%95%E4%BF%AE%E6%AD%A3%E6%A1%88_(2018%E5%B9%B4)"
+    },
+    {
+      "title": "中华人民共和国宪法修正案（2018 年3 月11 日第十三届全国 ...",
+      "url": "https://faolex.fao.org/docs/pdf/chn180555C.pdf"
+    },
+    {
+      "title": "中华人民共和国宪法（2018年修正文本）",
+      "url": "https://www.gjxfj.gov.cn/2018-03/11/c_139957579.htm"
+    }
+  ]
+}

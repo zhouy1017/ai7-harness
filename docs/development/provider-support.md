@@ -8,7 +8,9 @@ Generated from the provider documents under [`config/providers/`](../../config/p
 
 - **Declared** — a document declares the route and the model. A declared model whose `answerChannel` is `none` is inert: it can read no response. A declared format is a claim about the request shape and nothing else (ADR 0073 §3).
 - **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.
-- **Bindable** — a route a Provider Resolution Plan may bind. No document makes a route bindable: that is a Provider Processing policy rule naming the exact binding, the Owner's decision per provider, and its first transmission is a named test item under ADR 0067. Today the bindable routes are the developer-live route of Provider Processing v14, `opencode-go` · `deepseek-v4.1-flash`, and the two bindings Provider Processing v15 lets an editor configure under ordinary-production (Issue #811): OpenCode Go `opencode-go` · `deepseek-v4.1-flash`, the default, and DeepSeek 开放平台（官方） `deepseek-open-platform` · `deepseek-flash` (`ExecutionRoute`, `src/service/provider/egress-gate.ts`).
+- **Bindable** — a route a Provider Resolution Plan may bind. No document makes a route bindable: that is a Provider Processing policy rule naming the exact binding, the Owner's decision per provider, and its first transmission is a named test item under ADR 0067. Today the bindable routes are the developer-live route of Provider Processing v16, `opencode-go` · `deepseek-v4.1-flash`, and the two bindings Provider Processing v17 lets an editor configure under ordinary-production (Issue #811): OpenCode Go `opencode-go` · `deepseek-v4.1-flash`, the default, and DeepSeek 开放平台（官方） `deepseek-open-platform` · `deepseek-flash` (`ExecutionRoute`, `src/service/provider/egress-gate.ts`).
+
+Task research declarations (Issue #744, ADR 0080 rows 15/17) resolve to `webSearch: true`, `searchEngine: user-selected-backend` only when the selected v16/v17 rule admits AI7 platform tools and the exact route/model has recorded live tool-loop evidence. The two review categories are 事实核查 and 学术道德与引用; 出版政策与风险 (row 10) remains false this wave. Every other kind stays false. The composition pins the effective declaration; the Run freezes the backend. Reports disclose 未联网核查, 联网核查未完成 with the refusal/breaker reason, or 联网核查已完成; completed tool execution alone establishes no supported factual conclusion.
 
 A capability a document does not declare is absent with `unverified` evidence. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page's "1M" is read as 1,000,000), and `none` where no page read states one.
 
@@ -184,7 +186,7 @@ Inert: 0 of 2 (no declared answer channel). Established:
 - `deepseek-flash` · `answerChannel: message-content-string` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15
 - `deepseek-flash` · `reasoningChannel: message-reasoning-content` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15
 - `deepseek-v4-pro`: The production model. Its request side is exactly what adapter revision 1 has always sent; its response side has never been observed, so every other read-side capability is absent. By the vendor's notice, from 12:00 Beijing time on 2026-09-14 requests for this id are routed to V4.1 Flash (ADR 0080 §3); the id is not moved here (ADR 0080 §5.3).
-- `deepseek-flash`: The vendor's current id for V4.1 Flash, named by Provider Processing v15's ordinary-production binding for the DeepSeek 开放平台（官方） route (Issue #811). Answer and reasoning channels are the vendor's documented response contract, which the #811 ordinary-production observation of 2026-10-15 (one baseline Task, recorded on the Issue, no ledger line by design) agreed with; it sends no unverified format, reasoning-control or tool parameters.
+- `deepseek-flash`: The vendor's current id for V4.1 Flash, named by Provider Processing v17's ordinary-production binding for the DeepSeek 开放平台（官方） route (Issue #811). Answer and reasoning channels are the vendor's documented response contract, which the #811 ordinary-production observation of 2026-10-15 (one baseline Task, recorded on the Issue, no ledger line by design) agreed with; it sends no unverified format, reasoning-control or tool parameters.
 
 Readings:
 
@@ -396,12 +398,12 @@ Open:
 | OpenCode session header | sent — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08 |
 | Per-turn output cap | none |
 
-The developer-live route of Provider Processing v14 (ADR 0065, ADR 0067), selected by active-policy-set v11; also one of the two routes the editor may choose under ordinary-production v15. On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run or dialogue attempt. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.
+The developer-live route of Provider Processing v16 (ADR 0065, ADR 0067), selected by active-policy-set v12; also one of the two routes the editor may choose under ordinary-production v17. On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run or dialogue attempt. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.
 
 | Model id | Display name | Context | Tool calling | Web search tool |
 | --- | --- | --- | --- | --- |
 | `deepseek-v4-flash` | DeepSeek V4 Flash | none | `none` | `none` |
-| `deepseek-v4.1-flash` | DeepSeek V4.1 Flash | none | `none` | `none` |
+| `deepseek-v4.1-flash` | DeepSeek V4.1 Flash | none | `function` | `none` |
 | `deepseek-v4-pro` | DeepSeek V4 Pro（OpenCode Go） | none | `none` | `none` |
 | `glm-5.3-flash` | GLM-5.3-Flash（OpenCode Go） | none | `none` | `none` |
 | `glm-5.3` | GLM-5.3（OpenCode Go） | none | `none` | `none` |
@@ -423,10 +425,11 @@ Inert: 9 of 11 (no declared answer channel). Established:
 - `deepseek-v4.1-flash` · `requestShape: openai-chat-completions` — `vendor-documentation`, OpenCode Go endpoint table https://github.com/anomalyco/opencode/blob/a34961825be13a31daa76f33a8b47efcd198cfef/packages/web/src/content/docs/go.mdx; @ai-sdk/openai-compatible response contract https://github.com/vercel/ai/blob/2c6996ec621b677e902038b1b834d8ffaa0b307d/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts, read 2026-10-12
 - `deepseek-v4.1-flash` · `answerChannel: message-content-string` — `live-test-item` `S40/first-baseline/9`, `S40/first-baseline/10`, `S40/first-baseline/11`, `S40/first-baseline/12`, `S40/first-baseline/13`, `S40/first-baseline/14`, `S40/first-baseline/15`, `S40/first-baseline/16`, `S40/first-baseline/17`, `S40/first-baseline/18`, `S40/first-baseline/19`, `S40/first-baseline/20`, observed 2026-10-12
 - `deepseek-v4.1-flash` · `reasoningChannel: message-reasoning-content` — `live-test-item` `S40/first-baseline/9`, `S40/first-baseline/10`, `S40/first-baseline/11`, `S40/first-baseline/12`, `S40/first-baseline/13`, `S40/first-baseline/14`, `S40/first-baseline/15`, `S40/first-baseline/16`, `S40/first-baseline/17`, `S40/first-baseline/18`, `S40/first-baseline/19`, `S40/first-baseline/20`, observed 2026-10-12
+- `deepseek-v4.1-flash` · `toolCalling: function` — `live-test-item` `S40/whole-manuscript/1`, `S40/whole-manuscript/2`, observed 2026-10-15
 - `deepseek-v4.1-flash` · `streaming: chat-completions-sse` — `live-test-item` `S17c/editorial-dialogue/1`, `S17c/editorial-dialogue/3`, observed 2026-10-14
 - `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp` · `requestShape: openai-chat-completions` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08
 - `deepseek-v4-flash`: Historical V4 profile, retained with its original evidence; no current product binding selects it. It sends no DeepSeek-specific parameter. Its toolCalling stays none: the Owner's own session observed a client tool call through this gateway (ADR 0080 §5.3), which is not yet a recorded live-test item.
-- `deepseek-v4.1-flash`: The developer-live product binding of Provider Processing v14 for baseline analysis, editorial dialogue, non-web review (cross-deliverable consistency included), writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility. Request shape is a declared vendor wire contract; answer and reasoning channels have their own named V4.1 product observations. Sends no unverified format, reasoning-control or tool parameters. Old V4 items establish none of this model's capabilities.
+- `deepseek-v4.1-flash`: The developer-live product binding of Provider Processing v16 for baseline analysis, editorial dialogue, review (cross-deliverable consistency, 事实核查 and 学术道德与引用 included), writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility; review, writing and evaluation may also name AI7's platform tools under v16. Request shape is a declared vendor wire contract; answer, reasoning channels and the client function-tool loop have their own named V4.1 product observations. Sends no unverified format or reasoning-control parameters. Old V4 items establish none of this model's capabilities.
 - `deepseek-v4-pro`: The same model id as the production route's, behind a different route: a different profile, and no capability carries across.
 
 ### `opencode-go-messages`
@@ -491,6 +494,7 @@ Readings:
 - `v41-go-wire-contract` — `vendor-documentation`, OpenCode Go endpoint table https://github.com/anomalyco/opencode/blob/a34961825be13a31daa76f33a8b47efcd198cfef/packages/web/src/content/docs/go.mdx; @ai-sdk/openai-compatible response contract https://github.com/vercel/ai/blob/2c6996ec621b677e902038b1b834d8ffaa0b307d/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts, read 2026-10-12. The pinned pre-move Go table and SDK choices[0].message.content contract establish declared wire compatibility only. On 2026-10-12 OpenCode moved its docs; current https://github.com/anomalyco/opencode/blob/bcf23b6775c79a429b1511b255d6d88ab0248d4a/services/www/src/docs/content/console/go.mdx publishes /inference/go instead. This binding retains explicitly selected /zen/go, whose named V4.1 product captures observe compatibility; no inference/go equivalence or validation is claimed. No V4.1 live capability is inferred from V4 evidence. JSON-object format, reasoning channel, usage attribution, tools and context remain unverified until named actual product evidence.
 - `v41-product-channels` — `live-test-item` `S40/first-baseline/9`, `S40/first-baseline/10`, `S40/first-baseline/11`, `S40/first-baseline/12`, `S40/first-baseline/13`, `S40/first-baseline/14`, `S40/first-baseline/15`, `S40/first-baseline/16`, `S40/first-baseline/17`, `S40/first-baseline/18`, `S40/first-baseline/19`, `S40/first-baseline/20`, observed 2026-10-12. Actual built AI7 baseline analysis under v9/v7 on exact Public sample1, code head 39c5ac4113d5b5c09e96e23585ddca8f7b4959c0 (#807). All 12 responses name deepseek-v4.1-flash and contain message.content and reasoning_content strings. Seven of eight unit contracts closed; unit 1 retained a schema-invalid gap. Cross-unit reduction, assurance sampling and reflection closed. This observes response channels only, not a format guarantee, usage attribution, tools, context or universal editorial quality. Protected captures and durable business result remain in the original external cache root.
 - `v41-dialogue-sse` — `live-test-item` `S17c/editorial-dialogue/1`, `S17c/editorial-dialogue/3`, observed 2026-10-14. Issue #833: one minimal frozen-dialogue-contract probe on exact sample1 through the repository gate, broker and durable pre-send claim returned HTTP 200 text/event-stream with deepseek-v4.1-flash, 69 events, finish_reason stop and DONE. The completed live continuation after a mid-stream stop also observed SSE; the aborted ask /2 remains outcome-unknown and is not mirrored as a transmitted result. This establishes SSE transport capability only. External protected capture root: 833-stream/probe-cache.
+- `v41-platform-tools-loop` — `live-test-item` `S40/whole-manuscript/1`, `S40/whole-manuscript/2`, observed 2026-10-15. Issue #473, ADR 0080 §7.7: one exact-sample1 factual-review unit at 65d361aa74e3fd9e495c490d1aefe2ba4cdceb42 under developer-live v16, policy-selection/wave6-tool-evidence-bootstrap. Exact Go deepseek-v4.1-flash emitted an AI7 websearch call, received one TinyFish result and closed the unit; reasoning was present. A different second query was refused; no webfetch was sent. The remaining seven units were deliberately cancelled. Query class only: public background fact derived from exact sample1. Two model calls cost 6802 input and 7442 output tokens; Go subscription monetary amount was not returned; TinyFish search cost USD 0. Ledger SHA-256: S40/whole-manuscript/1 7c03d9ba993f7dd82ce437f7aad6d327ce95ef5cb96ff893e20803523257fa34; S87/whole-manuscript/1 cff7dad7496618a7a38e1067d6b6808dce2deeb3a3867ec16c9fc3ea2b340d72; S40/whole-manuscript/2 df205304ea856bf12f847c8cf5012badbb04d41da09674615d099b8a20eb5e5c. Protected responses and Research Snapshots remain in the external development cache. This observes the client function-tool loop only, not server-side search, structured-output guarantees or editorial quality.
 
 Open:
 
@@ -809,6 +813,98 @@ Open:
 
 A credential slot is a logical slot of the Main Editorial Role, one per configured provider; the Credential Broker's closed set and `tools/enroll-dev-credential.mjs`'s slot list are generated from the documents, so a slot cannot exist without a reviewed document. Enrolment, where a record authorizes it, is the one way ADR 0067 established for `opencode-go`: from an untracked key file the enrollment helper alone reads, into the Protected Secret Store under the slot's development Credential Reference. A Credential Reference names a store entry and is not a secret. See [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) for the live-once ledger and the Provider Result Cache.
 
+## Search backends
+
+Generated from the search backend documents under [`config/providers/search-backends/`](../../config/providers/search-backends/), validated by [`search-backend.v1.schema.json`](../../config/providers/search-backends/search-backend.v1.schema.json) (Issue #883; Owner decisions 24⁵). Each declares one vendor's web search interface, its per-call price, whether a key is required and its credential slot. The generator contributes the slot to the Credential Broker's closed set and the enrollment helper's list and nothing else: no route id, provider label or model profile, so no search backend is a Model Role binding. A document authorizes no transmission and admits no host in the Egress Gate; the measured profile, the exclusions and the ranking are the [search backend evaluation](search-backend-evaluation.md)'s.
+
+| Backend | Support | Endpoint | Key | Price | Slot | Development Credential Reference |
+| --- | --- | --- | --- | --- | --- | --- |
+| 博查 Bocha Web Search | supported | `POST https://api.bochaai.com/v1/web-search` (`bocha-web-search`) | required, `authorization: Bearer` | 0.036 CNY per 1 call — historical list-price input retained from the evaluation; source unverified, re-verify before display in 设置 (source unverified: Vendor PDF attachment read by the Worker on 2026-10-16, exact URL not retained; portal pricing page unreachable at review time (redirects to Feishu); re-verify before the price is shown in 设置.) | `search-bochaai` | `6e655b12-b3b0-430e-811c-911b5d0f2ccd` |
+| Brave Search API | supported | `GET https://api.search.brave.com/res/v1/web/search` (`brave-web-search`) | required, `x-subscription-token` | 5 USD per 1,000 calls — the Search plan's price per 1,000 requests, with $5 of free credit every month and 50 queries per second; the Answers plan ($4 per 1,000 plus tokens) is not this interface | `search-brave` | `3f0f367d-f343-4123-b86d-31d0bfac556e` |
+| DeepSeek 服务端搜索（官方） | supported | `POST https://api.deepseek.com/anthropic/v1/messages` (`anthropic-messages-web-search`) | required, `x-api-key` with `anthropic-version: 2023-06-01` | no per-call price — billed by tokens alone, with no per-search fee: deepseek-flash input $0.15 off-peak / $0.30 peak and output $0.60 / $1.20 per million tokens (cache hits $0.003 / $0.006); the search's own extra model requests are billed as tokens too, so the evaluation records the measured token cost per call | `search-deepseek` | `5d835534-e000-4b72-91c8-1dd986a6fcc7` |
+| Parallel Search | supported | `POST https://api.parallel.ai/v1/search` (`parallel-search`) | required, `x-api-key` | 5 USD per 1,000 calls — the default `advanced` mode with 10 results per request, which is what the evaluation sends; `basic` is also $5, `fast` and `turbo` $1 per 1,000, extra results $1 per 1,000; 5,000 requests a month are free | `search-parallel` | `983793e7-f281-4767-b5e6-9342a2d00202` |
+| TinyFish Search | supported | `GET https://api.search.tinyfish.ai/` (`tinyfish-search`) | required, `x-api-key` | 0 USD per 1 call — Search is free: the pricing page prints $0.00 per request at 30 requests per minute and 500 per hour, while the Search API page says free up to 12,000 requests per day with a positive wallet balance beyond; Search never draws on the wallet | `search-tinyfish` | `59d3a3a4-d852-4b15-bbea-f1eefe4e63dd` |
+
+### `search-bochaai`
+
+- Document: [`config/providers/search-backends/search-bochaai.json`](../../config/providers/search-backends/search-bochaai.json); service name `bochaai`.
+- Reachability as the vendor states it: The public portal states no regional availability; reachability is the recorded host measurement, not a vendor promise.
+
+Readings:
+
+- `bocha-open-platform` — `vendor-documentation`, Bocha open-platform interface documentation, https://open.bochaai.com/, read 2026-10-16. The public example uses POST https://api.bochaai.com/v1/web-search, Authorization Bearer authentication, query/freshness/summary/count fields and webPages.value results with name and url. The linked pricing page https://bocha-ai.feishu.cn/wiki/JYSbwzdPIiFnz4kDYPXcHSDrnZb and documentation page https://bocha-ai.feishu.cn/wiki/HmtOw1z6vik14Fkdu5uc9VaInBb were inaccessible at review time.
+
+Open:
+
+- The public portal shows an unwrapped webPages object; the measured response used data.webPages.value, which the evaluation also reads.
+- Re-verify the historical ¥0.036 per-call price against a retrievable vendor pricing source before it is displayed in 设置.
+
+### `search-brave`
+
+- Document: [`config/providers/search-backends/search-brave.json`](../../config/providers/search-backends/search-brave.json); service name `brave`.
+- Reachability as the vendor states it: The vendor's pages state no regional availability for mainland China; its list of unavailable jurisdictions could not be read (HTTP 403).
+
+Readings:
+
+- `brave-web-search-reference` — `vendor-documentation`, Brave Web Search API reference, https://api-dashboard.search.brave.com/api-reference/web/search/get; overview, https://api-dashboard.search.brave.com/app/documentation/web-search/get-started, read 2026-10-16. GET https://api.search.brave.com/res/v1/web/search with the `X-Subscription-Token` header as the only required header; `q`, `count` (1–20, default 20), `offset`, `country` (includes CN), `search_lang` (includes zh-hans, zh-hant), `ui_lang`, `freshness`, `safesearch`; results at `web.results[]` with `title` and `url`.
+- `brave-search-api-pricing` — `vendor-documentation`, Brave Search API product and pricing page, https://brave.com/search/api/, read 2026-10-16. Search: "$5 per 1,000 requests", "Includes $5 in free credits every month", "50 queries per second". The page says nothing about availability in China.
+
+Open:
+
+- Whether the API is reachable from mainland China without a proxy is the evaluation's measurement, not a vendor statement.
+
+### `search-deepseek`
+
+- Document: [`config/providers/search-backends/search-deepseek.json`](../../config/providers/search-backends/search-deepseek.json); service name `deepseek`.
+- Reachability as the vendor states it: DeepSeek's official API is a mainland-China service; its pages state no regional restriction.
+- DeepSeek server-side web_search reading (Issue #883): listed — the Anthropic-compatible endpoint documents the server-tool result blocks as Supported and its Claude Code guide says web search runs through DeepSeek's API, but no page names the tool type or states the feature for a generic Anthropic client.
+- Searching here costs model tokens on the same DeepSeek key the production route uses, and the query reaches a model before any search; the evaluation sends only the public query.
+
+Readings:
+
+- `deepseek-anthropic-api` — `vendor-documentation`, DeepSeek official Anthropic API guide, https://api-docs.deepseek.com/guides/anthropic_api, read 2026-10-16. Base URL https://api.deepseek.com/anthropic; `x-api-key` Fully Supported and `anthropic-version` Ignored. The field-compatibility table lists the content blocks `server_tool_use` Supported and `web_search_tool_result` Supported (`search_result`, `mcp_tool_use`, `mcp_tool_result` Not Supported, `mcp_servers` Ignored); its `tools` rows cover `name`, `input_schema`, `description` (Fully Supported) and `cache_control` (Ignored) and name no tool `type`, so no server tool type string is stated on this page.
+- `deepseek-claude-code-web-search` — `vendor-documentation`, DeepSeek official Claude Code integration guide, https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code, read 2026-10-16. The guide states that Claude Code can invoke server-side Web Search through the DeepSeek API; model requests used to summarize retrieved results incur additional token charges. It does not name the server tool type.
+- `deepseek-pricing` — `vendor-documentation`, DeepSeek official models and pricing page, https://api-docs.deepseek.com/quick_start/pricing, read 2026-10-16. Token prices per million for deepseek-flash: cache-hit input $0.003 / $0.006, cache-miss input $0.15 / $0.30, output $0.60 / $1.20 (off-peak / peak); no per-search charge is listed.
+
+Open:
+
+- The server tool type is not named by DeepSeek. The evaluation sends Anthropic's `web_search_20250305` server tool on `deepseek-flash`; whether the endpoint runs it for a client other than Claude Code is what the measurement settles, and its outcome is this backend's verdict.
+
+### `search-parallel`
+
+- Document: [`config/providers/search-backends/search-parallel.json`](../../config/providers/search-backends/search-parallel.json); service name `parallel`.
+- Keyless interface: `https://search.parallel.ai/mcp` (`mcp-tools-call`, tool `web_search`).
+- Reachability as the vendor states it: The vendor's pages state no regional availability.
+
+Readings:
+
+- `parallel-search-reference` — `vendor-documentation`, Parallel documentation: Search quickstart (https://docs.parallel.ai/search/search-quickstart) and Search API reference (https://docs.parallel.ai/api-reference/search/search), read 2026-10-16. POST https://api.parallel.ai/v1/search (generally available; no beta header on /v1) with the `x-api-key` header; `search_queries` (required), `objective`, `mode` (turbo, fast, basic, advanced; default advanced), `max_chars_total`, `advanced_settings` (max_results default 10, excerpt settings, source policy, fetch policy, location); unknown fields are rejected. The response is `{search_id, results[], warnings, usage, session_id}`, each result `url`, `title` (nullable), `publish_date`, `excerpts[]`.
+- `parallel-pricing` — `vendor-documentation`, Parallel pricing page (https://parallel.ai/pricing) and rate limits page (https://docs.parallel.ai/resources/rate-limits), read 2026-10-16. Search per 1,000 requests with 10 results: Turbo $1 (~200 ms), Fast $1 (~700 ms), Basic $5 (~1 s), Advanced $5 (~3 s); extra results $1 per 1,000; up to 5,000 requests a month free; 600 requests per minute. No regional statement.
+- `parallel-search-mcp` — `vendor-documentation`, Parallel Search MCP page, https://docs.parallel.ai/integrations/mcp/search-mcp, read 2026-10-16. https://search.parallel.ai/mcp, tools `web_search` and `web_fetch`, "no API key required" and free to use anonymously at lower rate limits in `fast` mode; with a key, `Authorization: Bearer`. This is the keyless service ADR 0080 §7 names and the existing search forwarder speaks.
+
+Open:
+
+- The anonymous MCP's rate limit is not published; the evaluation measures the keyed /v1/search interface, not the MCP.
+
+### `search-tinyfish`
+
+- Document: [`config/providers/search-backends/search-tinyfish.json`](../../config/providers/search-backends/search-tinyfish.json); service name `tinyfish`.
+- Reachability as the vendor states it: The vendor's pages state no regional availability.
+- TinyFish's interface reading (Issue #883): TinyFish is primarily a web-agent platform, but it documents a plain keyed search endpoint beside the agent, so the evaluation measures that endpoint and never the per-step Agent API.
+
+Readings:
+
+- `tinyfish-search-api` — `vendor-documentation`, TinyFish documentation, Search API page, https://docs.tinyfish.ai/search-api, read 2026-10-16. A synchronous web search: GET https://api.search.tinyfish.ai?query=… with optional `location`, `language`, `recency_minutes` or `after_date`/`before_date`, `domain_type` (web, news, research_paper) and `purpose`; JSON `{query, results[], total_results, page}`, each result `position`, `site_name`, `title`, `snippet`, `url`; the example returns 10 results. "Search is free up to 12,000 requests per day."
+- `tinyfish-authentication` — `vendor-documentation`, TinyFish documentation, Authentication page, https://docs.tinyfish.ai/authentication, read 2026-10-16. "All REST API requests require an API key passed in the `X-API-Key` header."
+- `tinyfish-pricing` — `vendor-documentation`, TinyFish pricing page, https://www.tinyfish.ai/pricing, with the Agent API and runs pages (https://docs.tinyfish.ai/agent-api, https://docs.tinyfish.ai/key-concepts/runs), read 2026-10-16. Search "$0.00 per request", "30 requests / min · 500 requests / hour"; Fetch (POST https://api.fetch.tinyfish.ai) free; the Agent API (POST https://agent.tinyfish.ai/v1/automation/run, run-async, run-sse; `url` + `goal`; 150 steps by default, 500 at most) $0.016 per step with 2 concurrent runs; Browser $0.002 per minute; new accounts receive $8 of wallet funds. No regional statement.
+
+Open:
+
+- The two pages state different free limits for Search (12,000 per day against 500 per hour); the evaluation stays far below both.
+- The accepted values of `language` and `location` are not listed; the evaluation sends the query alone.
+
+**The five search slots are enrolled for the development evaluation alone**, under the ADR 0067 amendment clause of Issue #883 (Owner authorization of 2026-10-13): the enrollment helper enrols each from its root key file by path only, no agent reads a key file, the evaluation tool reads a value only in-process on a developer host, the slots of excluded backends are cleared at wave end, and the Owner revokes unused keys at each vendor. Guests and CI hold no search key.
+
 ## Recorded evidence
 
 The evidence no page can supply — the live test items the ADR 0067 Provider Test Ledger holds and the production route's frozen request baseline — is recorded row by row in [`config/providers/recorded-evidence/recorded-evidence.json`](../../config/providers/recorded-evidence/recorded-evidence.json), validated by [`recorded-evidence.v1.schema.json`](../../config/providers/recorded-evidence/recorded-evidence.v1.schema.json) (its own subdirectory, because the record is not a provider document and everything that reads `config/providers/*.json` reads one). A document cites an item or a baseline only from the row it was observed on: a route for its route-wide facts only when every item was sent on that route, a model only when every item was sent to that model on that route. The ledger itself lives outside every checkout and CI has none, so the record is its reviewed mirror: the pull request that records a new live item adds it here and runs `node tools/generate-provider-configuration.mjs --ledger <cache root>` on the developer host, which compares the record with the ledger's transmitted, non-stale model-call lines by item, model and UTC day and prints every difference. CI never runs it. A ledger line is never withdrawn, but a model row can leave the documents: its items then stay in the record marked `withdrawn` with the Issue that took the row out, are listed below as a row no longer declared, and keep `--ledger` comparing every transmitted line; an undeclared row without the marker is refused.
@@ -838,6 +934,8 @@ The evidence no page can supply — the live test items the ADR 0067 Provider Te
 | `S40/first-baseline/20` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-12 | #807 |
 | `S17c/editorial-dialogue/1` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-14 | #833 |
 | `S17c/editorial-dialogue/3` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-14 | #833 |
+| `S40/whole-manuscript/1` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-15 | #473 |
+| `S40/whole-manuscript/2` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-15 | #473 |
 
 | Baseline | Route | Models | Stated on |
 | --- | --- | --- | --- |

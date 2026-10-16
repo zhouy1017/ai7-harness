@@ -77,6 +77,12 @@
       "observedOn": "2026-10-14",
       "note": "Issue #833: one minimal frozen-dialogue-contract probe on exact sample1 through the repository gate, broker and durable pre-send claim returned HTTP 200 text/event-stream with deepseek-v4.1-flash, 69 events, finish_reason stop and DONE. The completed live continuation after a mid-stream stop also observed SSE; the aborted ask /2 remains outcome-unknown and is not mirrored as a transmitted result. This establishes SSE transport capability only. External protected capture root: 833-stream/probe-cache."
     },
+    "v41-platform-tools-loop": {
+      "kind": "live-test-item",
+      "itemIds": ["S40/whole-manuscript/1", "S40/whole-manuscript/2"],
+      "observedOn": "2026-10-15",
+      "note": "Issue #473, ADR 0080 §7.7: one exact-sample1 factual-review unit at 65d361aa74e3fd9e495c490d1aefe2ba4cdceb42 under developer-live v16, policy-selection/wave6-tool-evidence-bootstrap. Exact Go deepseek-v4.1-flash emitted an AI7 websearch call, received one TinyFish result and closed the unit; reasoning was present. A different second query was refused; no webfetch was sent. The remaining seven units were deliberately cancelled. Query class only: public background fact derived from exact sample1. Two model calls cost 6802 input and 7442 output tokens; Go subscription monetary amount was not returned; TinyFish search cost USD 0. Ledger SHA-256: S40/whole-manuscript/1 7c03d9ba993f7dd82ce437f7aad6d327ce95ef5cb96ff893e20803523257fa34; S87/whole-manuscript/1 cff7dad7496618a7a38e1067d6b6808dce2deeb3a3867ec16c9fc3ea2b340d72; S40/whole-manuscript/2 df205304ea856bf12f847c8cf5012badbb04d41da09674615d099b8a20eb5e5c. Protected responses and Research Snapshots remain in the external development cache. This observes the client function-tool loop only, not server-side search, structured-output guarantees or editorial quality."
+    },
     "unverified": { "kind": "unverified" }
   },
   "routes": [
@@ -96,7 +102,7 @@
       "routeCapabilities": {
         "webSearchTool": { "value": "none", "evidence": "gateway-no-search-tool" }
       },
-      "note": "The developer-live route of Provider Processing v14 (ADR 0065, ADR 0067), selected by active-policy-set v11; also one of the two routes the editor may choose under ordinary-production v15. On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run or dialogue attempt. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.",
+      "note": "The developer-live route of Provider Processing v16 (ADR 0065, ADR 0067), selected by active-policy-set v12; also one of the two routes the editor may choose under ordinary-production v17. On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run or dialogue attempt. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.",
       "models": [
         {
           "modelId": "deepseek-v4-flash",
@@ -115,6 +121,7 @@
           "modelId": "deepseek-v4.1-flash",
           "displayName": "DeepSeek V4.1 Flash",
           "capabilities": {
+            "toolCalling": { "value": "function", "evidence": "v41-platform-tools-loop" },
             "streaming": { "value": "chat-completions-sse", "evidence": "v41-dialogue-sse" },
             "requestShape": {
               "value": "openai-chat-completions",
@@ -133,7 +140,7 @@
             "tokens": null,
             "evidence": "unverified"
           },
-          "note": "The developer-live product binding of Provider Processing v14 for baseline analysis, editorial dialogue, non-web review (cross-deliverable consistency included), writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility. Request shape is a declared vendor wire contract; answer and reasoning channels have their own named V4.1 product observations. Sends no unverified format, reasoning-control or tool parameters. Old V4 items establish none of this model's capabilities."
+          "note": "The developer-live product binding of Provider Processing v16 for baseline analysis, editorial dialogue, review (cross-deliverable consistency, 事实核查 and 学术道德与引用 included), writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility; review, writing and evaluation may also name AI7's platform tools under v16. Request shape is a declared vendor wire contract; answer, reasoning channels and the client function-tool loop have their own named V4.1 product observations. Sends no unverified format or reasoning-control parameters. Old V4 items establish none of this model's capabilities."
         },
         {
           "modelId": "deepseek-v4-pro",

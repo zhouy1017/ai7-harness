@@ -49,6 +49,14 @@ export const SCHEMA_FILE = 'provider-configuration.v1.schema.json';
 export const RECORDED_EVIDENCE_DIRECTORY = 'recorded-evidence';
 export const RECORDED_EVIDENCE_FILE = 'recorded-evidence.json';
 export const RECORDED_EVIDENCE_SCHEMA_FILE = 'recorded-evidence.v1.schema.json';
+/**
+ * The web search backends (Issue #883; Owner decisions 24⁵): one document per vendor under their own subdirectory, validated
+ * against their own schema, because everything that reads `config/providers/*.json` reads a model provider document. A
+ * search backend contributes exactly one credential slot (ADR 0073 §4) and a section of the support page, and nothing else:
+ * no route id, no provider label, no model profile, so the Model Role's closed unions and the 尚未支持 list are unchanged.
+ */
+export const SEARCH_BACKENDS_DIRECTORY = 'search-backends';
+export const SEARCH_BACKEND_SCHEMA_FILE = 'search-backend.v1.schema.json';
 export const OUTPUT_PATHS = Object.freeze({
   shared: 'src/shared/provider-configuration.generated.ts',
   profiles: 'src/service/provider/provider-profiles.generated.ts',
@@ -182,7 +190,115 @@ export function readProviderDocuments(directory = resolve(ROOT, PROVIDERS_DIRECT
     refuse(existsSync(path), `PROVIDER_CONFIGURATION/recorded-evidence-absent: ${RECORDED_EVIDENCE_DIRECTORY}/${name}`);
     recordedEvidence[key] = JSON.parse(readFileSync(path, 'utf8'));
   }
-  return { schema: read(SCHEMA_FILE), documents, recordedEvidence };
+  return { schema: read(SCHEMA_FILE), documents, recordedEvidence, searchBackends: readSearchBackendDocuments(resolve(directory, SEARCH_BACKENDS_DIRECTORY)) };
+}
+
+/** Every search backend document beside its schema in the `search-backends/` subdirectory, sorted by file name, parsed. */
+export function readSearchBackendDocuments(directory) {
+  refuse(existsSync(resolve(directory, SEARCH_BACKEND_SCHEMA_FILE)), `PROVIDER_CONFIGURATION/search-backend-schema-absent: ${SEARCH_BACKENDS_DIRECTORY}/${SEARCH_BACKEND_SCHEMA_FILE}`);
+  const read = (name) => JSON.parse(readFileSync(resolve(directory, name), 'utf8'));
+  const documents = readdirSync(directory)
+    .filter((name) => name.endsWith('.json') && name !== SEARCH_BACKEND_SCHEMA_FILE)
+    .sort()
+    .map((file) => {
+      refuse(!file.endsWith('.schema.json'), `PROVIDER_CONFIGURATION/unknown-schema: ${SEARCH_BACKENDS_DIRECTORY}/${file}`);
+      return { file, data: read(file) };
+    });
+  return { schema: read(SEARCH_BACKEND_SCHEMA_FILE), documents };
+}
+
+/**
+ * Validate every search backend document and resolve it, against the slots and Credential References the provider documents
+ * already took. A backend's id is `search-<service>`, its file name and its credential slot; a supported backend names a
+ * documented endpoint, method and protocol, a `not-supported` one (尚未支持) names none and cites the reading that found none.
+ */
+function resolveSearchBackends({ schema, documents }, slots, references) {
+  const services = new Set();
+  return documents.map(({ file, data }) => {
+    const where = `${SEARCH_BACKENDS_DIRECTORY}/${file}`;
+    try {
+      validatePolicyDocument(data, schema);
+    } catch (error) {
+      throw new ProviderConfigurationError(`PROVIDER_CONFIGURATION/search-backend-schema: ${where}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    refuse(file === `${data.backendId}.json` && data.backendId === `search-${data.service}`,
+      `PROVIDER_CONFIGURATION/search-backend-id: ${where} declares ${data.backendId} for service ${data.service} (the id is search-<service> and the file name)`);
+    refuse(!services.has(data.service), `PROVIDER_CONFIGURATION/search-backend-duplicate: ${where} ${data.service}`);
+    services.add(data.service);
+    const evidence = {};
+    for (const [key, record] of Object.entries(data.evidence)) {
+      evidence[key] = evidenceRecord(record, `${where} evidence ${key}`);
+      if (record.readOn !== undefined) refuse(isCalendarDay(record.readOn), `PROVIDER_CONFIGURATION/evidence-day: ${where} evidence ${key} (${record.readOn} is not a calendar day)`);
+    }
+    const cited = new Set();
+    const cite = (key, at) => {
+      refuse(Object.hasOwn(evidence, key), `PROVIDER_CONFIGURATION/evidence-unknown: ${where} ${at} cites ${key}`);
+      cited.add(key);
+      return evidence[key];
+    };
+    const documented = (key, at) => refuse(cite(key, at).kind === 'vendor-documentation', `PROVIDER_CONFIGURATION/search-backend-unverified: ${where} ${at} (a search backend fact names the vendor page that states it)`);
+    const credential = data.credential;
+    refuse(credential.slot === data.backendId, `PROVIDER_CONFIGURATION/search-backend-slot: ${where} (the slot is the backend id)`);
+    refuse(!slots.has(credential.slot), `PROVIDER_CONFIGURATION/slot-duplicate: ${where} ${credential.slot}`);
+    slots.add(credential.slot);
+    refuse(!references.has(credential.developmentCredentialReference), `PROVIDER_CONFIGURATION/reference-duplicate: ${where}`);
+    references.add(credential.developmentCredentialReference);
+    documented(data.supportEvidence, 'supportEvidence');
+    documented(credential.evidence, 'credential.evidence');
+    const priceEvidence = cite(data.price.evidence, 'price.evidence');
+    // #883 review ruling: keep the historical price input if its source was lost, with an explicit consumer caveat.
+    refuse(priceEvidence.kind === 'vendor-documentation' || typeof data.evidence[data.price.evidence].note === 'string',
+      `PROVIDER_CONFIGURATION/search-backend-unverified: ${where} price.evidence (an unverified price needs its source limitation)`);
+    documented(data.reachability.evidence, 'reachability.evidence');
+    const request = data.request;
+    const declared = [request.endpoint, request.method, request.protocol];
+    if (data.support === 'supported') {
+      refuse(declared.every((value) => value !== null), `PROVIDER_CONFIGURATION/search-backend-request: ${where} (a supported backend names its endpoint, method and protocol)`);
+      documented(request.evidence, 'request.evidence');
+    } else {
+      refuse(declared.every((value) => value === null), `PROVIDER_CONFIGURATION/search-backend-request: ${where} (a not-supported backend names no endpoint, method or protocol)`);
+      cite(request.evidence, 'request.evidence');
+    }
+    refuse((request.protocol === 'anthropic-messages-web-search') === (typeof credential.anthropicVersion === 'string'),
+      `PROVIDER_CONFIGURATION/anthropic-version: ${where} (an anthropic-messages-web-search request and only it carries anthropicVersion)`);
+    if (typeof credential.anthropicVersion === 'string') {
+      refuse(isCalendarDay(credential.anthropicVersion), `PROVIDER_CONFIGURATION/anthropic-version: ${where} (${credential.anthropicVersion} is not a calendar day)`);
+      refuse(credential.headerForm === 'x-api-key', `PROVIDER_CONFIGURATION/header-form: ${where} (anthropic-messages-web-search is spoken with x-api-key)`);
+    }
+    const endpoints = [request.endpoint, data.anonymousRequest?.endpoint].filter((endpoint) => typeof endpoint === 'string');
+    for (const endpoint of endpoints) {
+      const url = new URL(endpoint);
+      refuse(!LOCAL_HOST.test(url.hostname) && !IPV4_HOST.test(url.hostname) && url.hostname.includes('.'),
+        `PROVIDER_CONFIGURATION/endpoint-host: ${where} (${url.hostname} is a local, internal, reserved or literal address)`);
+      refuse(url.href === endpoint, `PROVIDER_CONFIGURATION/endpoint-path: ${where} (${endpoint} is requested as ${url.href}; write the endpoint as it is sent, with no . or .. segment)`);
+    }
+    if (data.anonymousRequest !== undefined) documented(data.anonymousRequest.evidence, 'anonymousRequest.evidence');
+    const uncited = Object.keys(evidence).filter((key) => !cited.has(key));
+    refuse(uncited.length === 0, `PROVIDER_CONFIGURATION/evidence-uncited: ${where} ${uncited.join(', ')}`);
+    return {
+      backendId: data.backendId,
+      service: data.service,
+      displayName: data.displayName,
+      support: data.support,
+      request: { endpoint: request.endpoint, method: request.method, protocol: request.protocol },
+      anonymousRequest: data.anonymousRequest === undefined ? null : { endpoint: data.anonymousRequest.endpoint, protocol: data.anonymousRequest.protocol, tool: data.anonymousRequest.tool },
+      credential: {
+        slot: credential.slot,
+        developmentCredentialReference: credential.developmentCredentialReference,
+        headerForm: credential.headerForm,
+        anthropicVersion: credential.anthropicVersion,
+        keyRequired: credential.keyRequired,
+      },
+      price: { amount: data.price.amount, currency: data.price.currency, per: data.price.per, basis: data.price.basis,
+        sourceVerified: priceEvidence.kind === 'vendor-documentation', sourceNote: data.evidence[data.price.evidence].note ?? null },
+      reachability: data.reachability.note,
+      readings: Object.entries(data.evidence)
+        .filter(([, entry]) => entry.kind !== 'unverified')
+        .map(([key, entry]) => ({ key, record: evidence[key], note: entry.note ?? null })),
+      openQuestions: [...data.openQuestions],
+      notes: [...(data.notes ?? [])],
+    };
+  });
 }
 
 /**
@@ -234,7 +350,7 @@ function evidenceRecord(record, where) {
  * in route order, every capability present with its evidence, every evidence key resolved. Throws a
  * `ProviderConfigurationError` naming the first rule a document breaks.
  */
-export function resolveProviderConfiguration({ schema, documents, recordedEvidence }) {
+export function resolveProviderConfiguration({ schema, documents, recordedEvidence, searchBackends }) {
   const recorded = resolveRecordedEvidence(recordedEvidence);
   const routeIds = new Set();
   const declaredRows = new Set();
@@ -445,6 +561,8 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
     });
   }
   refuse(providers.length > 0, 'PROVIDER_CONFIGURATION/no-documents');
+  // After every provider has taken its slot and reference, so a backend that reused one is the backend's refusal.
+  const resolvedSearchBackends = searchBackends === undefined ? [] : resolveSearchBackends(searchBackends, slots, references);
   // Every recorded row is a declared row, except a live item marked withdrawn: the record names what the documents
   // declare, never a model nobody configures, and keeps a withdrawn row's items only because the ledger keeps them.
   const recordedRows = [
@@ -458,6 +576,7 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
   refuse(withdrawnDeclared.length === 0, `PROVIDER_CONFIGURATION/recorded-evidence-withdrawn-declared: ${RECORDED_EVIDENCE_FILE} marks ${withdrawnDeclared.join(', ')} withdrawn, but a document still declares its row`);
   return {
     providers,
+    searchBackends: resolvedSearchBackends,
     recordedEvidence: {
       liveTestItems: [...recorded.items].map(([itemId, item]) => ({ itemId, ...item })),
       frozenRequestBaselines: [...recorded.baselines].map(([since, baseline]) => ({ since, ...baseline })),
@@ -542,9 +661,10 @@ function renderValue(value, indent, named = new Map()) {
   return `{\n${entries.map(([entry, item]) => `${pad}${key(entry)}: ${renderValue(item, indent + 1, named)},`).join('\n')}\n${close}}`;
 }
 
-function renderShared({ providers }) {
+function renderShared({ providers, searchBackends = [] }) {
   const routes = providers.flatMap((provider) => provider.routes.map((route) => ({ id: route.profile.route, label: provider.displayName })));
-  const slots = providers.map((provider) => provider.credential);
+  // A search backend's slot follows the providers' (Issue #883): a slot, never a route or a label.
+  const slots = [...providers.map((provider) => provider.credential), ...searchBackends.map((backend) => backend.credential)];
   const developmentSlots = slots.filter((slot) => slot.developmentCredentialReference !== null);
   return [
     ...HEADER('Shared by the protocol, the service and the renderer: identifiers and labels only.'),
@@ -622,7 +742,7 @@ function renderProfiles({ providers }) {
   ].join('\n');
 }
 
-function renderSlots({ providers }) {
+function renderSlots({ providers, searchBackends = [] }) {
   return [
     ...HEADER('The enrollment helper is plain ESM run before any build, so it reads this list rather than the TypeScript module.'),
     '',
@@ -635,6 +755,7 @@ function renderSlots({ providers }) {
     ...providers
       .filter((provider) => provider.credential.developmentCredentialReference !== null)
       .map((provider) => `  Object.freeze([${literal(provider.credential.slot)}, ${literal(provider.credential.developmentCredentialReference)}]),`),
+    ...searchBackends.map((backend) => `  Object.freeze([${literal(backend.credential.slot)}, ${literal(backend.credential.developmentCredentialReference)}]),`),
     ']);',
     '',
   ].join('\n');
@@ -664,7 +785,59 @@ function cell(text) {
   return String(text).replaceAll('|', '\\|');
 }
 
-function renderSupport({ providers, recordedEvidence }) {
+const SEARCH_HEADER_FORM_TEXT = Object.freeze({
+  'authorization-bearer': '`authorization: Bearer`',
+  'x-api-key': '`x-api-key`',
+  'x-subscription-token': '`x-subscription-token`',
+});
+
+/** A price as the vendor page states it: an amount per a number of calls, or what the vendor bills instead. */
+function searchPriceText(price) {
+  const amount = price.amount === null ? `no per-call price — ${price.basis}` : `${price.amount} ${price.currency} per ${grouped(price.per)} ${price.per === 1 ? 'call' : 'calls'} — ${price.basis}`;
+  return price.sourceVerified ? amount : `${amount} (source unverified: ${price.sourceNote})`;
+}
+
+/** The support page's search backend section (Issue #883): the documents, their slots, and what a slot does not authorize. */
+function renderSearchBackendSupport(searchBackends) {
+  const lines = [
+    '## Search backends',
+    '',
+    `Generated from the search backend documents under [\`config/providers/${SEARCH_BACKENDS_DIRECTORY}/\`](../../config/providers/${SEARCH_BACKENDS_DIRECTORY}/), validated by [\`${SEARCH_BACKEND_SCHEMA_FILE}\`](../../config/providers/${SEARCH_BACKENDS_DIRECTORY}/${SEARCH_BACKEND_SCHEMA_FILE}) (Issue #883; Owner decisions 24⁵). Each declares one vendor's web search interface, its per-call price, whether a key is required and its credential slot. The generator contributes the slot to the Credential Broker's closed set and the enrollment helper's list and nothing else: no route id, provider label or model profile, so no search backend is a Model Role binding. A document authorizes no transmission and admits no host in the Egress Gate; the measured profile, the exclusions and the ranking are the [search backend evaluation](search-backend-evaluation.md)'s.`,
+    '',
+    '| Backend | Support | Endpoint | Key | Price | Slot | Development Credential Reference |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
+  ];
+  for (const backend of searchBackends) {
+    const endpoint = backend.request.endpoint === null ? 'none' : `\`${backend.request.method} ${backend.request.endpoint}\` (\`${backend.request.protocol}\`)`;
+    const key = backend.credential.keyRequired ? `required, ${SEARCH_HEADER_FORM_TEXT[backend.credential.headerForm]}${backend.credential.anthropicVersion === null ? '' : ` with \`anthropic-version: ${backend.credential.anthropicVersion}\``}` : 'not required';
+    const support = backend.support === 'supported' ? 'supported' : '尚未支持';
+    lines.push(`| ${cell(backend.displayName)} | ${support} | ${endpoint} | ${key} | ${cell(searchPriceText(backend.price))} | \`${backend.credential.slot}\` | \`${backend.credential.developmentCredentialReference}\` |`);
+  }
+  lines.push('');
+  for (const backend of searchBackends) {
+    lines.push(`### \`${backend.backendId}\``, '');
+    lines.push(`- Document: [\`config/providers/${SEARCH_BACKENDS_DIRECTORY}/${backend.backendId}.json\`](../../config/providers/${SEARCH_BACKENDS_DIRECTORY}/${backend.backendId}.json); service name \`${backend.service}\`.`);
+    if (backend.anonymousRequest !== null) lines.push(`- Keyless interface: \`${backend.anonymousRequest.endpoint}\` (\`${backend.anonymousRequest.protocol}\`, tool \`${backend.anonymousRequest.tool}\`).`);
+    lines.push(`- Reachability as the vendor states it: ${backend.reachability}`);
+    for (const note of backend.notes) lines.push(`- ${note}`);
+    lines.push('');
+    lines.push('Readings:', '');
+    for (const reading of backend.readings) {
+      lines.push(`- \`${reading.key}\` — ${describeEvidence(reading.record)}${reading.note === null ? '' : `. ${reading.note}`}`);
+    }
+    lines.push('');
+    if (backend.openQuestions.length > 0) {
+      lines.push('Open:', '');
+      for (const question of backend.openQuestions) lines.push(`- ${question}`);
+      lines.push('');
+    }
+  }
+  lines.push('**The five search slots are enrolled for the development evaluation alone**, under the ADR 0067 amendment clause of Issue #883 (Owner authorization of 2026-10-13): the enrollment helper enrols each from its root key file by path only, no agent reads a key file, the evaluation tool reads a value only in-process on a developer host, the slots of excluded backends are cleared at wave end, and the Owner revokes unused keys at each vendor. Guests and CI hold no search key.');
+  lines.push('');
+  return lines;
+}
+
+function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
   const lines = [
     '# Provider support',
     '',
@@ -676,7 +849,9 @@ function renderSupport({ providers, recordedEvidence }) {
     '',
     '- **Declared** — a document declares the route and the model. A declared model whose `answerChannel` is `none` is inert: it can read no response. A declared format is a claim about the request shape and nothing else (ADR 0073 §3).',
     '- **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.',
-    '- **Bindable** — a route a Provider Resolution Plan may bind. No document makes a route bindable: that is a Provider Processing policy rule naming the exact binding, the Owner\'s decision per provider, and its first transmission is a named test item under ADR 0067. Today the bindable routes are the developer-live route of Provider Processing v14, `opencode-go` · `deepseek-v4.1-flash`, and the two bindings Provider Processing v15 lets an editor configure under ordinary-production (Issue #811): OpenCode Go `opencode-go` · `deepseek-v4.1-flash`, the default, and DeepSeek 开放平台（官方） `deepseek-open-platform` · `deepseek-flash` (`ExecutionRoute`, `src/service/provider/egress-gate.ts`).',
+    '- **Bindable** — a route a Provider Resolution Plan may bind. No document makes a route bindable: that is a Provider Processing policy rule naming the exact binding, the Owner\'s decision per provider, and its first transmission is a named test item under ADR 0067. Today the bindable routes are the developer-live route of Provider Processing v16, `opencode-go` · `deepseek-v4.1-flash`, and the two bindings Provider Processing v17 lets an editor configure under ordinary-production (Issue #811): OpenCode Go `opencode-go` · `deepseek-v4.1-flash`, the default, and DeepSeek 开放平台（官方） `deepseek-open-platform` · `deepseek-flash` (`ExecutionRoute`, `src/service/provider/egress-gate.ts`).',
+    '',
+    'Task research declarations (Issue #744, ADR 0080 rows 15/17) resolve to `webSearch: true`, `searchEngine: user-selected-backend` only when the selected v16/v17 rule admits AI7 platform tools and the exact route/model has recorded live tool-loop evidence. The two review categories are 事实核查 and 学术道德与引用; 出版政策与风险 (row 10) remains false this wave. Every other kind stays false. The composition pins the effective declaration; the Run freezes the backend. Reports disclose 未联网核查, 联网核查未完成 with the refusal/breaker reason, or 联网核查已完成; completed tool execution alone establishes no supported factual conclusion.',
     '',
     'A capability a document does not declare is absent with `unverified` evidence. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page\'s "1M" is read as 1,000,000), and `none` where no page read states one.',
     '',
@@ -762,6 +937,7 @@ function renderSupport({ providers, recordedEvidence }) {
   lines.push('');
   lines.push('A credential slot is a logical slot of the Main Editorial Role, one per configured provider; the Credential Broker\'s closed set and `tools/enroll-dev-credential.mjs`\'s slot list are generated from the documents, so a slot cannot exist without a reviewed document. Enrolment, where a record authorizes it, is the one way ADR 0067 established for `opencode-go`: from an untracked key file the enrollment helper alone reads, into the Protected Secret Store under the slot\'s development Credential Reference. A Credential Reference names a store entry and is not a secret. See [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) for the live-once ledger and the Provider Result Cache.');
   lines.push('');
+  if (searchBackends.length > 0) lines.push(...renderSearchBackendSupport(searchBackends));
   lines.push('## Recorded evidence', '');
   lines.push(`The evidence no page can supply — the live test items the ADR 0067 Provider Test Ledger holds and the production route's frozen request baseline — is recorded row by row in [\`config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_FILE}), validated by [\`${RECORDED_EVIDENCE_SCHEMA_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_SCHEMA_FILE}) (its own subdirectory, because the record is not a provider document and everything that reads \`config/providers/*.json\` reads one). A document cites an item or a baseline only from the row it was observed on: a route for its route-wide facts only when every item was sent on that route, a model only when every item was sent to that model on that route. The ledger itself lives outside every checkout and CI has none, so the record is its reviewed mirror: the pull request that records a new live item adds it here and runs \`node tools/generate-provider-configuration.mjs --ledger <cache root>\` on the developer host, which compares the record with the ledger's transmitted, non-stale model-call lines by item, model and UTC day and prints every difference. CI never runs it. A ledger line is never withdrawn, but a model row can leave the documents: its items then stay in the record marked \`withdrawn\` with the Issue that took the row out, are listed below as a row no longer declared, and keep \`--ledger\` comparing every transmitted line; an undeclared row without the marker is refused.`);
   lines.push('');

@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 137 as const;
+export const SERVICE_PROTOCOL_VERSION = 139 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -115,6 +115,8 @@ export const IPC_CHANNELS = {
   addLibraryMaterial: 'ai7:j15:add-library-material',
   decideLibraryMaterial: 'ai7:j15:decide-library-material',
   inspectLibraryMaterial: 'ai7:j15:inspect-library-material',
+  inspectResearchEvidence: 'ai7:j04:inspect-research-evidence',
+  saveEvidenceAsMaterial: 'ai7:j04:save-evidence-as-material',
   inspectEvaluationProfiles: 'ai7:j11:inspect-evaluation-profiles',
   saveEvaluationProfile: 'ai7:kb:save-evaluation-profile',
   inspectEvaluation: 'ai7:j11:inspect-evaluation',
@@ -279,6 +281,10 @@ export const IPC_CHANNELS = {
   getProductDataLocation: 'ai7:j12:get-product-data-location',
   revealProductDataLocation: 'ai7:j12:reveal-product-data-location',
   getModelServiceSettings: 'ai7:j12:get-model-service-settings',
+  selectSearchBackend: 'ai7:j12:select-search-backend',
+  probeSearchBackend: 'ai7:j12:probe-search-backend',
+  saveSearchBackendCredential: 'ai7:j12:save-search-backend-credential',
+  removeSearchBackendCredential: 'ai7:j12:remove-search-backend-credential',
   saveModelServiceProxy: 'ai7:j12:save-model-service-proxy',
   saveModelServiceCredential: 'ai7:j12:save-model-service-credential',
   removeModelServiceCredential: 'ai7:j12:remove-model-service-credential',
@@ -1908,23 +1914,24 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ordinary-production';
 /**
- * Historical v5, v9, v10, v11, v12 and the superseded web reservation v8 remain readable identities; selected v14 admits baseline
- * analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable consistency
- * and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and 润色 and
- * conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules. A type member does not
- * select or activate a policy.
+ * Historical v5, v9, v10, v11, v12, v14 and the superseded web reservation v8 remain readable identities; selected v16 admits
+ * baseline analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable
+ * consistency and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and
+ * 润色 and conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules, and AI7's platform
+ * tools (websearch through the user-selected backend, webfetch) on review, writing and evaluation. A type member does
+ * not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15';
-/** Historical v5, v7, v8, v9 and v10, the superseded web reservation v6, and selected v11. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17';
+/** Historical v5, v7, v8, v9, v10 and v11, the superseded web reservation v6, and selected v12. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
- * Provider Processing v14 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
+ * Provider Processing v16 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
  * resolved once the manifest freezes and before the plan does.
  */
 export type DeveloperLiveCeiling =
@@ -2117,6 +2124,9 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
  * `frozen-material-reference-excerpt` and `editorial-deliverable-excerpt`, arrive with v12 for Material-Reference-bearing
  * review, writing and evaluation and for cross-deliverable consistency. A declaration only: the gate's logic is the consuming
  * slices' to change. Ordinary production v13 also carries the three unpublished classes from its policy rules.
+ * `web-search-query` (the model's own search query, sent to the selected search backend's host) and `public-source-fetch` (a
+ * public page address the model cited, fetched by AI7's webfetch) arrive with Provider Processing v16 and v17 on the rules that may
+ * research.
  */
 export type OutboundDataCategoryId =
   | 'public-or-synthetic'
@@ -2129,7 +2139,9 @@ export type OutboundDataCategoryId =
   | 'editorial-deliverable-excerpt'
   | 'unpublished-metadata'
   | 'unpublished-excerpts'
-  | 'unpublished-full-content';
+  | 'unpublished-full-content'
+  | 'web-search-query'
+  | 'public-source-fetch';
 
 /**
  * One allow rule of the selected Provider Processing policy, as the launch verified it from the pinned bytes: the task kinds it
@@ -2186,6 +2198,43 @@ export interface AdmittedProviderRule {
    * and writing in developer-live only; `false` for every other rule. A newly user-initiated Task is still required, so a default rule never starts work alone.
    */
   readonly matchingActiveDefaultExecutionRuleAllowed: boolean;
+  /**
+   * The rule's web switch (`transmissions.webSearchToolAllowed`, Provider Processing v16 and v17): `true` exactly for the rules that may
+   * research — review (事实核查 and 学术道德与引用 among its kinds), writing, the three evaluation contracts — and `false` for editorial
+   * dialogue, baseline analysis, 润色, conflict regeneration and enrolled background analysis.
+   */
+  readonly webSearchToolAllowed: boolean;
+  /** The rule's platform tools as the launch verified them, or `null` exactly when `webSearchToolAllowed` is `false`. */
+  readonly platformTools: AdmittedPlatformTools | null;
+}
+
+/**
+ * AI7's platform tools one admitted rule names (Provider Processing v16 and v17), as the launch verified them against the search
+ * backend registry: eligibility only. Which backend a Run uses, its freeze, the tickets and the host allowance belong to the
+ * consuming slice; a backend listed here is selectable, never selected.
+ */
+export interface AdmittedPlatformTools {
+  readonly websearch: {
+    readonly selection: 'user-configured';
+    /** The shipped backends in the recorded ranking order; the first is the default selection. */
+    readonly backends: ReadonlyArray<AdmittedSearchBackend>;
+    /** `true` under ordinary-production: a backend without the editor's own configured key cannot be selected for a Run. */
+    readonly selectionRequiresCredential: boolean;
+  };
+  /** AI7's webfetch: at most `maxBytes` and `timeoutSeconds` per page, only for addresses the model cited. */
+  readonly webfetch: { readonly maxBytes: number; readonly timeoutSeconds: number; readonly boundedByCitations: true };
+  /** The per-unit circuit breaker: after `roundTrips` consecutive tool round trips the unit ends, disclosed as `end` (联网核查未完成). */
+  readonly breaker: { readonly roundTrips: number; readonly end: string };
+  readonly oneQueryPerRunUnit: true;
+  /** The category tool results return to the model as. */
+  readonly toolResultCategory: 'public-or-synthetic';
+}
+
+/** One selectable search backend of an admitted rule: its id, the one host its search calls may address, and its broker slot. */
+export interface AdmittedSearchBackend {
+  readonly id: string;
+  readonly host: string;
+  readonly credentialSlot: string;
 }
 
 export interface LaunchPolicyProjection {
@@ -2201,20 +2250,20 @@ export interface LaunchPolicyProjection {
     liveTransmissionAllowed: boolean;
     /**
      * Whether the active Provider Processing policy names the cross-unit reduction's transmission
-     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v14 document it
+     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v16 document it
      * is `true`, and anything else — absent included — means the reduction does not dispatch.
      */
     crossUnitReductionAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the assurance sampling suboperation's
-     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v14
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v16
      * document it is `true`; anything else — absent included — means the suboperation does not
      * dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
-     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v14 document it is
+     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v16 document it is
      * `true`; anything else — absent included — means the turn does not dispatch and the report
      * records `policy-bounded` with its reason.
      */
@@ -2225,7 +2274,7 @@ export interface LaunchPolicyProjection {
      */
     readonly admittedRules: readonly AdmittedProviderRule[];
     /**
-     * Only under `ordinary-production` (Provider Processing v15): `setup-required` while the editor's own model service is not
+     * Only under `ordinary-production` (Provider Processing v17): `setup-required` while the editor's own model service is not
      * configured, so no rule is admitted; `configured` once the launch supplied a binding the policy allows, which fills every
      * admitted rule's route, endpoint, model and credential slot. Absent under every other scope.
      */
@@ -2320,6 +2369,7 @@ export interface ModelRoleCardProjection {
 export type ModelServiceProxySetting = { mode: 'direct' } | { mode: 'proxy'; protocol: 'http' | 'https'; hostPort: string };
 
 export interface ModelServiceSettingsProjection {
+  searchBackends: SearchBackendSettingsProjection;
   proxy: ModelServiceProxySetting;
   roles: readonly ModelRoleCardProjection[];
   /** The two routes and the providers not yet supported (Issue #811). */
@@ -2335,6 +2385,49 @@ export interface ModelServiceSettingsProjection {
   };
   launchPolicy: LaunchPolicyProjection;
   authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。';
+}
+
+export interface SearchBackendConnectionProjection {
+  backendId: string;
+  credentialReference: string | null;
+  credentialOperationState: ModelCredentialOperationState;
+  selected: boolean;
+  selectedAt: string;
+}
+
+export interface SearchBackendSettingsProjection {
+  selectedBackendId: string;
+  backends: ReadonlyArray<{
+    backendId: string;
+    name: string;
+    rank: number;
+    host: string;
+    reachable: boolean;
+    p50Ms: number | null;
+    price: string;
+    keyRequired: boolean;
+    chineseHitRate: number;
+    internationalHitRate: number;
+    note: string | null;
+    connection: SearchBackendConnectionProjection;
+  }>;
+}
+
+export interface SearchBackendProbeProjection {
+  backendId: string;
+  reachable: boolean;
+  latencyMs: number;
+  resultCount: number;
+  results: ReadonlyArray<{ title: string; url: string }>;
+  failure: string | null;
+}
+
+/** A Run's exact web backend, part of its Plan Envelope digest. */
+export interface FrozenWebToolsBackend {
+  backendId: string;
+  host: string;
+  configurationDigest: string;
+  selectedAt: string;
 }
 
 /** What the renderer sends to save or choose a route (Issue #811); the value of `secret` never comes back. */
@@ -2643,10 +2736,14 @@ export type RunReportStageId = (typeof RUN_REPORT_STAGES)[number];
  * it has usage and no stage row. The first three therefore sum to the revision's own recorded usage
  * field by field, which is the reconciliation the Run Report promises.
  */
-export const RUN_REPORT_USAGE_STAGES = ['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection'] as const;
+export const RUN_REPORT_USAGE_STAGES = ['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection', 'platform-tools'] as const;
 export type RunReportUsageStageId = (typeof RUN_REPORT_USAGE_STAGES)[number];
 
 export interface RunReportUsageProjection {
+  searchCalls?: Readonly<Record<string, number>>;
+  refusedSearchCalls?: number;
+  fetchCount?: number;
+  fetchBytes?: number;
   requests: number;
   inputTokens: number;
   outputTokens: number;
@@ -2739,6 +2836,7 @@ export type RunReportIfRedoneProjection =
 
 /** The Run Report as it is recorded inside the Task Outcome, before its own digest is taken. */
 export interface RunReportRecordProjection {
+  webToolsBackend?: FrozenWebToolsBackend;
   /** Editorial choices only; no question or answer content enters the Run Report. */
   modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'timed-out' | 'unanswered'; line: string }>;
   schema: 'ai7.analysis.run-report/1';
@@ -3809,6 +3907,8 @@ export interface BaselineAnalysisProjection {
   runSourceScope: null | TaskAuthorizationProjection['runSourceScope'];
   coverageManifest: null | CoverageManifestProjection;
   providerResolutionPlan: null | {
+    webToolsBackend?: FrozenWebToolsBackend;
+    searchCredentialReference?: string;
     role: 'Main Editorial Role';
     capabilities: readonly [];
     remoteBinding: {
@@ -4117,6 +4217,136 @@ export interface FactualReviewAssertionCountsProjection {
 export interface FactualReviewResearchProjection {
   state: FactualResearchState;
   fetched: 0;
+  statement: string;
+}
+
+// ---- External Evidence Retention (Issue #425, plan slice S70; V2-UX-SRC-013, EGR-003, KB-008/009, FACT-009) -------------
+
+/** How a retained source was captured: AI7's own fetch of the page, the excerpt the search returned, or nothing (EGR-003). */
+export type ResearchEvidenceCaptureState = 'full-text' | 'snippet-only' | 'failed';
+export const RESEARCH_EVIDENCE_CAPTURE_STATES: readonly ResearchEvidenceCaptureState[] = ['full-text', 'snippet-only', 'failed'];
+export const RESEARCH_EVIDENCE_CAPTURE_LABELS: Readonly<Record<ResearchEvidenceCaptureState, string>> = {
+  'full-text': '来源全文',
+  'snippet-only': '来源仅片段',
+  failed: '未能取回',
+};
+/** Whether the words a citation names are in the captured text: all of them, some of them, or none (sentence alignment). */
+export type ResearchEvidenceAlignment = 'aligned' | 'partial' | 'unaligned';
+export const RESEARCH_EVIDENCE_ALIGNMENTS: readonly ResearchEvidenceAlignment[] = ['aligned', 'partial', 'unaligned'];
+export const RESEARCH_EVIDENCE_ALIGNMENT_LABELS: Readonly<Record<ResearchEvidenceAlignment, string>> = {
+  aligned: '对应',
+  partial: '部分对应',
+  unaligned: '未能对应',
+};
+/** The age after which a retained source reads 可能已过期 unless the caller names another. */
+export const RESEARCH_EVIDENCE_STALE_AFTER_DAYS = 90;
+export const RESEARCH_EVIDENCE_STALE_LABEL = '可能已过期';
+/** The label every model-produced translation of a retained passage carries; it never replaces the original. */
+export const SOURCE_TRANSLATION_LABEL = '来源译文';
+/** Query class: the assertion category of the finding a source was retained for, or `uncited` for a page no finding named. */
+export type ResearchEvidenceQueryClass = FactualAssertionCategory | 'uncited';
+/** How a unit's search ended (ADR 0080 §7.4): its one search answered, cut short (联网核查未完成), or never made. */
+export type ResearchEvidenceUnitState = 'completed' | 'incomplete' | 'not-searched';
+export const RESEARCH_EVIDENCE_UNIT_LABELS: Readonly<Record<ResearchEvidenceUnitState, string>> = {
+  completed: '联网核查已完成',
+  incomplete: '联网核查未完成',
+  'not-searched': '本单元未联网检索',
+};
+/** A finding's research outcome: a retained source names it, its unit's search ended without one, or the search was cut short. */
+export type ResearchEvidenceFindingState = 'sourced' | 'unsupported' | 'incomplete';
+export const RESEARCH_EVIDENCE_FINDING_LABELS: Readonly<Record<ResearchEvidenceFindingState, string>> = {
+  sourced: '已留存外部来源',
+  unsupported: '没有找到可留存的外部来源',
+  incomplete: '联网核查未完成',
+};
+export const MAX_RESEARCH_EVIDENCE_PAGE = 32;
+
+/** One range of the captured text the citation's words occupy (UTF-16 offsets), and the 1-based sentence it starts in. */
+export interface ResearchEvidenceAnchor {
+  from: number;
+  to: number;
+  sentence: number;
+}
+
+/** 来源译文: produced only under a rule that admits it, labelled as machine translation and attributed to the original. */
+export type ResearchEvidenceTranslation =
+  | {
+    state: 'translated';
+    label: typeof SOURCE_TRANSLATION_LABEL;
+    machine: true;
+    targetLanguage: 'zh-Hans';
+    text: string;
+    route: string;
+    model: string;
+    attribution: { url: string; contentSha256: string; from: number; to: number };
+  }
+  | { state: 'refused'; reason: string };
+
+export interface ResearchEvidenceProjection {
+  evidenceId: string;
+  bookId: string;
+  runRecordId: string;
+  unitOrdinal: number;
+  /** The finding the source was retained for; `null` for a page the model fetched that no finding named. */
+  findingId: string | null;
+  backendId: string | null;
+  queryClass: ResearchEvidenceQueryClass;
+  url: string;
+  sourceTitle: string | null;
+  capturedAt: string;
+  captureState: ResearchEvidenceCaptureState;
+  captureLabel: string;
+  contentSha256: string | null;
+  pageSha256: string | null;
+  /** The Research Snapshot the capture was read from: the fetched page's, or the search answer's for an excerpt. */
+  snapshotDigest: string | null;
+  /** The words the alignment looked for: the model's quotation in its basis, else the finding's own quotation. */
+  claim: { text: string; origin: 'basis-quotation' | 'finding-quote' } | null;
+  alignment: ResearchEvidenceAlignment;
+  alignmentLabel: string;
+  anchors: ReadonlyArray<ResearchEvidenceAnchor>;
+  /** Bounded captured passage; when unaligned, the source's beginning. A translation shows its exact attributed original. */
+  passage: string | null;
+  translation: ResearchEvidenceTranslation | null;
+  staleness: { state: 'current' | 'possibly-stale'; reasons: ReadonlyArray<'age' | 'hash-changed'>; label: string | null };
+  savedMaterialId: string | null;
+  /** Why 保存为来源材料 is not offered; `null` when it is. */
+  saveRefusal: string | null;
+}
+
+export interface ResearchEvidenceUnitProjection {
+  retentionFailure?: 'capture-processing' | 'storage';
+  runRecordId: string;
+  unitOrdinal: number;
+  backendId: string | null;
+  state: ResearchEvidenceUnitState;
+  label: string;
+  searchCalls: number;
+  retentionFetches: number;
+  failedRetrievals: number;
+  unsupportedFindings: number;
+}
+
+export interface ResearchEvidenceFindingProjection {
+  findingId: string;
+  runRecordId: string;
+  unitOrdinal: number;
+  blockId: string;
+  quote: string;
+  state: ResearchEvidenceFindingState;
+  label: string;
+  sources: number;
+}
+
+/** 来源与证据 (②): a Book's retained external sources, newest first, a page at a time, with each research unit's outcome. */
+export interface ResearchEvidenceBookProjection {
+  bookId: string;
+  staleAfterDays: number;
+  records: ReadonlyArray<ResearchEvidenceProjection>;
+  /** The rowid cursor of the next page, or `null` when this page is the last. */
+  next: number | null;
+  units: ReadonlyArray<ResearchEvidenceUnitProjection>;
+  findings: ReadonlyArray<ResearchEvidenceFindingProjection>;
   statement: string;
 }
 
@@ -7107,6 +7337,21 @@ export interface LibraryMaterialProjection {
   readonly decisions: ReadonlyArray<LibraryMaterialDecisionProjection>;
   /** Its Material Index, layer by layer, as it stands on this machine (Issue #428, S80a; KB-009). */
   readonly index: MaterialIndexProjection;
+  /** Where it came from when 保存为来源材料 made it of a retained external source (Issue #425, S70); absent otherwise. */
+  readonly provenance?: LibraryMaterialProvenance;
+}
+
+/** A 来源材料's provenance: the retained source, the Run that retained it and the capture's identities (Issue #425, S70). */
+export interface LibraryMaterialProvenance {
+  readonly kind: 'research-evidence';
+  readonly evidenceId: string;
+  readonly bookId: string;
+  readonly runRecordId: string;
+  readonly url: string;
+  readonly capturedAt: string;
+  readonly contentSha256: string;
+  readonly pageSha256: string | null;
+  readonly snapshotDigest: string | null;
 }
 
 // ---- ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) -------------------
@@ -11368,6 +11613,14 @@ export interface ServiceReadiness {
 }
 
 export interface ServiceOperationMap {
+  getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
+  selectSearchBackend: { input: { backendId: string }; output: SearchBackendSettingsProjection };
+  probeSearchBackend: { input: { backendId: string }; output: SearchBackendProbeProjection };
+  saveSearchBackendCredential: {
+    input: { backendId: string; credentialReference: string | null; credentialOperationState: ModelCredentialOperationState };
+    output: SearchBackendConnectionProjection;
+  };
+  removeSearchBackendCredential: { input: { backendId: string }; output: SearchBackendConnectionProjection };
   ready: { input: Record<string, never>; output: ServiceReadiness };
   getStartup: { input: Record<string, never>; output: StartupProjection };
   getRecoveryComparison: {
@@ -11716,6 +11969,16 @@ export interface ServiceOperationMap {
   inspectLibraryMaterial: {
     input: { materialId: string };
     output: LibraryMaterialProjection;
+  };
+  /** 来源与证据 (Issue #425, S70): a page of a Book's retained external sources and its research units' outcomes; read-only. */
+  inspectResearchEvidence: {
+    input: { bookId: string; after: number | null; staleAfterDays: number | null; taskIntentId?: string; reviewFindingId?: string };
+    output: ResearchEvidenceBookProjection;
+  };
+  /** 保存为来源材料 (Issue #425, S70): one retained full-text source made a 资料库 item with its provenance; nothing is sent. */
+  saveEvidenceAsMaterial: {
+    input: { bookId: string; evidenceId: string; title: string | null };
+    output: { evidenceId: string; material: LibraryMaterialProjection };
   };
   readLibraryDecisionReason: {
     input: { materialId: string; ordinal: number; offset: number };
@@ -12264,6 +12527,10 @@ export type PickerReselectResult =
   | { status: 'reselected'; continuation: ContinueImportProjection };
 
 export interface RendererApi {
+  selectSearchBackend(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
+  probeSearchBackend(input: { backendId: string }): Promise<SearchBackendProbeProjection>;
+  saveSearchBackendCredential(input: { backendId: string; secret: string }): Promise<ModelServiceSettingsProjection>;
+  removeSearchBackendCredential(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
   readonly platform: 'win32' | 'darwin';
   getStartup(): Promise<StartupProjection>;
   getRecoveryComparison(input: ServiceOperationMap['getRecoveryComparison']['input']): Promise<RecoveryComparisonProjection>;
@@ -12386,6 +12653,10 @@ export interface RendererApi {
   inspectLibraryMaterials(input?: { after: LibraryMaterialCursor | null }): Promise<LibraryMaterialsProjection>;
   /** One 资料库 item, by its identity. */
   inspectLibraryMaterial(input: { materialId: string }): Promise<LibraryMaterialProjection>;
+  /** 来源与证据: a page of the Book's retained external sources, newest first; read-only. */
+  inspectResearchEvidence(input: { bookId: string; after?: number | null; staleAfterDays?: number | null; taskIntentId?: string; reviewFindingId?: string }): Promise<ResearchEvidenceBookProjection>;
+  /** 保存为来源材料: the editor's explicit keep of one retained source as a 资料库 item; publishes and exports nothing. */
+  saveEvidenceAsMaterial(input: { bookId: string; evidenceId: string; title?: string | null }): Promise<ServiceOperationMap['saveEvidenceAsMaterial']['output']>;
   readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;
   /** 查看分段: one page of the item's segments, read-only. */
   inspectLibraryMaterialSegments(input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']): Promise<MaterialSegmentsPageProjection>;

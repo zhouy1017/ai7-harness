@@ -678,7 +678,7 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.harnessSessionId === attempt.executionBinding.harnessSessionId &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v11', liveTransmissions: 0 }) &&
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v12', liveTransmissions: 0 }) &&
     revision?.provenance?.taskIntentId === prepared.taskIntent.taskIntentId && revision?.provenance?.attemptId === attempt.attemptId &&
     // Synchronized delta (#274, #275): eight unit turns, the reduction's, and the sample's.
     revision?.usage?.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
@@ -773,7 +773,7 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     revision?.adapterPin?.fixtureIdentity === FIXTURE_IDENTITY && revision?.adapterPin?.fixtureSha256 === fixtureDigest &&
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v11', liveTransmissions: 0 }) &&
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v12', liveTransmissions: 0 }) &&
     revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
     sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
     sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
@@ -1263,7 +1263,8 @@ async function main() {
     requireJourney(firstFull?.stored === 'full' &&
       JSON.stringify(firstFull.steps) === JSON.stringify(['逐章读取 → 各章摘要', '汇总全书 → 梗概与人物、事件、关系、设定', '核对与抽检 → 可信程度说明']) &&
       firstFull.terms['提供方'] === 'DeepSeek 开放平台 · deepseek-v4-pro' &&
-      firstFull.terms['提供方状态'] === '远程模型服务被拒绝（development-ci · v1：0 次实时传输）；由 AI7 本地确定性模型适配器执行' &&
+      // Since #744 the decision line carries the research status; the deterministic route froze no search backend.
+      firstFull.terms['提供方状态'] === '远程模型服务被拒绝（development-ci · v1：0 次实时传输）；由 AI7 本地确定性模型适配器执行 · 未联网核查' &&
       firstFull.terms['用量上限'] === '不发送，没有模型用量' && firstFull.terms['预算上限'] === '未设置任务预算上限' && firstFull.terms['账户限额'] === '未知 · 提供方未返回' &&
       JSON.stringify(firstFull.columns) === JSON.stringify(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']) &&
       JSON.stringify(firstFull.adaptable) === JSON.stringify([SAFE_RETRY_ADAPTATION]) && JSON.stringify(firstFull.askFirst) === JSON.stringify(LOCKED_BOUNDARY) &&
@@ -3059,6 +3060,28 @@ async function main() {
     // The batch wrote the manuscript, so what those two categories read is no longer the current text and
     // both need review; the row offers only what changed (V2-UX-REV-007).
     await assertRenderer(renderer, `(() => { const row=(id)=>document.querySelector('table.review-coverage tbody tr[data-review-category="'+id+'"]'); return row('typos-and-usage')?.dataset.coverage==='needs-review' && row('style-and-format')?.dataset.coverage==='needs-review' && row('typos-and-usage').querySelector('[data-review-action="rereview-changed"]')?.textContent==='只审改动过的章'; })()`, 'review-coverage-needs-review');
+
+    // ---- 来源与证据 (Issue #425, plan slice S70; V2-UX-SRC-013, IA-012) ----
+    // Synchronized delta with Issue #425: 资料与记录 gains 来源与证据 between 分析 and 工作概览. This Book's Runs read on the
+    // deterministic route, which has no research path, so nothing was retained: the source view and the service's reading
+    // both say so, list no source and no researched range, and offer nothing to save. Retention itself — a citation 对应,
+    // 部分对应 or 未能对应, 来源仅片段, 可能已过期 and 保存为来源材料 — is proven over the real store, owner, harness and gate on a
+    // socket-free transport by tests/service/research-evidence-run.test.ts.
+    at('research-evidence-source-view');
+    await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll('[data-screen="book-review"] .workbench-actions button')).find((item)=>item.textContent==='打开稿件'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'sources-open-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'sources-manuscript');
+    await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-records-group'); const order=Array.from(group?.querySelectorAll('button') ?? []).map((item)=>item.textContent); const open=group?.querySelector('button[data-records-destination="sources"]'); if(JSON.stringify(order)!==JSON.stringify(['分析','来源与证据','返回图书工作概览'])||!(open instanceof HTMLButtonElement)||open.disabled)return false; open.click(); return true; })()`, 'sources-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-sources"] .research-evidence')?.dataset.evidenceCount==='0'`, 'sources-view');
+    const sources = await renderer.evaluate(`window.ai7.inspectResearchEvidence({ bookId: ${JSON.stringify(imported.bookId)} })`);
+    requireJourney(sources?.bookId === imported.bookId && sources.staleAfterDays === 90 && sources.records.length === 0 && sources.next === null &&
+      sources.units.length === 0 && sources.findings.length === 0 && sources.statement === '这本书还没有留存的外部来源：外部来源只在联网核查的运行中留存。',
+    'sources-provider-free-reading', sources);
+    await assertRenderer(renderer, `(() => { const view=document.querySelector('[data-screen="book-sources"]'); return view?.querySelector('.research-evidence-statement')?.textContent===${JSON.stringify(sources.statement)} && view.querySelectorAll('.research-evidence-card, [data-evidence-action="save-as-material"]').length===0 && JSON.stringify(Array.from(view.querySelectorAll('.workbench-actions button')).map((item)=>item.textContent))===JSON.stringify(['打开稿件','工作概览']); })()`, 'sources-nothing-to-save');
+    await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll('[data-screen="book-sources"] .workbench-actions button')).find((item)=>item.textContent==='打开稿件'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'sources-back-to-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'sources-back-manuscript');
+    await openReviewDestination(renderer, 'sources-back-to-review');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'sources-back-to-review-settled');
+    cancellation.throwIfRequested();
 
     at('review-return-to-analysis');
     await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll('[data-screen="book-review"] .workbench-actions button')).find((item)=>item.textContent==='打开稿件'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'review-open-manuscript');

@@ -2012,6 +2012,42 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 来源与证据: a Book’s page by rowid cursor and staleness days, and 保存为来源材料 of one source (Issue #425, S70)', () => {
+    const bookId = randomUUID();
+    const evidenceId = randomUUID();
+    const inputs: ReadonlyArray<AcceptedInput> = [
+      { op: 'inspectResearchEvidence', input: { bookId, after: null, staleAfterDays: null } },
+      { op: 'inspectResearchEvidence', input: { bookId, after: 33, staleAfterDays: 90 } },
+      { op: 'inspectResearchEvidence', input: { bookId, after: null, staleAfterDays: 3650 } },
+      { op: 'inspectResearchEvidence', input: { bookId, after: null, staleAfterDays: null, taskIntentId: randomUUID(), reviewFindingId: `rvf_${'a'.repeat(24)}` } },
+      { op: 'saveEvidenceAsMaterial', input: { bookId, evidenceId, title: null } },
+      { op: 'saveEvidenceAsMaterial', input: { bookId, evidenceId, title: '馆藏页' } },
+    ];
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['inspectResearchEvidence', { bookId }],
+      ['inspectResearchEvidence', { bookId: 'book', after: null, staleAfterDays: null }],
+      ['inspectResearchEvidence', { bookId, after: 0, staleAfterDays: null }],
+      ['inspectResearchEvidence', { bookId, after: 1.5, staleAfterDays: null }],
+      ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: 0 }],
+      ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: 3651 }],
+      ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: null, url: 'https://example.org' }],
+      ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: null, taskIntentId: 'latest' }],
+      ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: null, reviewFindingId: `rvf_${'a'.repeat(24)}` }],
+      ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: null, taskIntentId: randomUUID(), reviewFindingId: 'latest' }],
+      ['saveEvidenceAsMaterial', { bookId, evidenceId }],
+      ['saveEvidenceAsMaterial', { bookId, evidenceId: 'latest', title: null }],
+      ['saveEvidenceAsMaterial', { bookId: 'book', evidenceId, title: null }],
+      ['saveEvidenceAsMaterial', { bookId, evidenceId, title: 7 }],
+      ['saveEvidenceAsMaterial', { bookId, evidenceId, title: null, publish: true }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('rejects a 待我处理 read that names a Book, a group, a filter or anything else', () => {
     const id = randomUUID();
     const refused: ReadonlyArray<unknown> = [
@@ -2059,5 +2095,31 @@ describe('evaluation profile version commands (KB-002)', () => {
     for (const forged of [{ ...input, total: 200 }, { ...input, risks: [] }, { ...input, items: [{ ...input.items[0], fullMarks: 100 }] }, { ...input, expectedSha256: 'bad' }, { ...input, items: Array(11).fill(input.items[0]) }]) {
       expect(() => decodeRequest(frameOf({ id: randomUUID(), op: 'saveEvaluationProfile', input: forged }))).toThrow(ProtocolError);
     }
+  });
+});
+
+
+describe('search backend settings frames', () => {
+  it('decodes exactly the five settings operations, with opaque references and no secret field', () => {
+    const frames: ServiceRequest[] = [
+      { id: randomUUID(), op: 'getSearchBackendSettings', input: {} },
+      { id: randomUUID(), op: 'selectSearchBackend', input: { backendId: 'search-tinyfish' } },
+      { id: randomUUID(), op: 'probeSearchBackend', input: { backendId: 'search-brave' } },
+      { id: randomUUID(), op: 'removeSearchBackendCredential', input: { backendId: 'search-brave' } },
+      { id: randomUUID(), op: 'saveSearchBackendCredential', input: { backendId: 'search-brave', credentialReference: null, credentialOperationState: 'needs-attention' } },
+      { id: randomUUID(), op: 'saveSearchBackendCredential', input: { backendId: 'search-brave', credentialReference: randomUUID(), credentialOperationState: 'ready' } },
+    ];
+    for (const frame of frames) expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+  });
+
+  it('refuses malformed references, states, backend shapes and additional fields', () => {
+    for (const frame of [
+      { op: 'getSearchBackendSettings', input: { backendId: 'search-tinyfish' } },
+      { op: 'selectSearchBackend', input: { backendId: '' } },
+      { op: 'probeSearchBackend', input: { backendId: 'search-tinyfish', query: 'untrusted query' } },
+      { op: 'saveSearchBackendCredential', input: { backendId: 'search-tinyfish', credentialReference: 'not-a-reference', credentialOperationState: 'ready' } },
+      { op: 'saveSearchBackendCredential', input: { backendId: 'search-tinyfish', credentialReference: null, credentialOperationState: 'other' } },
+      { op: 'saveSearchBackendCredential', input: { backendId: 'search-tinyfish', credentialReference: null, credentialOperationState: 'ready', secret: 'synthetic-placeholder' } },
+    ]) expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), ...frame })))).toThrow(ProtocolError);
   });
 });

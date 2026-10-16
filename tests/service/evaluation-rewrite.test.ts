@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -744,7 +745,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     let before: string;
     try {
       // Revision 63 exactly: the three relations as revision 62 left them, and no relation of revision 65.
-      plant.exec(`DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; PRAGMA user_version = ${CAPTURED_PROCEDURE_SCHEMA_VERSION};`);
+      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; PRAGMA user_version = ${CAPTURED_PROCEDURE_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_62_SQL);
       before = rows(plant);
       expect(() => plant.exec(`INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256)
@@ -776,7 +777,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const plant = new DatabaseSync(path);
     try {
-      plant.exec(`DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; PRAGMA user_version = ${CAPTURED_PROCEDURE_SCHEMA_VERSION};`);
+      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; PRAGMA user_version = ${CAPTURED_PROCEDURE_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }

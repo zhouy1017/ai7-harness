@@ -1,25 +1,30 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
+import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/provider-configuration.generated.js';
+import {
+  PLATFORM_TOOL_BREAKER_END, PLATFORM_TOOL_ROUND_TRIP_BREAKER, WEBFETCH_MAX_BYTES, WEBFETCH_TIMEOUT_SECONDS, isConfiguredPlatformTools, readPlatformToolsRule,
+} from './provider/platform-tools.js';
+import { SEARCH_BACKENDS } from './provider/search-backends.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v11, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v12, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
- * Provider Processing v14; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v15, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * Provider Processing v16; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
+ * and binds v17, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v11' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v11.json';
-const ACTIVE_SET_SHA256 = 'fba12d9b8da7b826b620ac33c0b34eadd92da86d6da88f610e480af9aee5328c';
+export const ACTIVE_SET_VERSION = 'v12' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v12.json';
+const ACTIVE_SET_SHA256 = 'e841b438da109d866d990cc788ffd7c45edcb38a5121d8b18c41a0345e75693e';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -32,14 +37,14 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v15',
-    canonicalPath: 'docs/policies/provider-processing-policy.v15.json',
-    sha256: '1f398f923d57a442fe6c410b5831c25f45c6983973ccfcf619472db8a8666b46',
+    version: 'v17',
+    canonicalPath: 'docs/policies/provider-processing-policy.v17.json',
+    sha256: 'e5dba26a71704016b9af9864c56aa508aa2bcebe75225a8e4e7af1c1fa67236b',
   },
   'developer-live': {
-    version: 'v14',
-    canonicalPath: 'docs/policies/provider-processing-policy.v14.json',
-    sha256: '98ec1f93f26e896d1a6a37b3829eacffb7deb9b52f8966252aa3f7115717bb6d',
+    version: 'v16',
+    canonicalPath: 'docs/policies/provider-processing-policy.v16.json',
+    sha256: 'c6c3b51c346d4ab4011f03835f8650c503dd87dfa02617bde4b3a0707cd8701d',
   },
 } as const;
 /**
@@ -56,7 +61,7 @@ const EXTERNAL_PIN = {
 } as const;
 
 /**
- * The exact developer-live binding every rule of Provider Processing v14 declares, and the one rule v9 declared; the resolver
+ * The exact developer-live binding every rule of Provider Processing v16 declares, and the one rule v9 declared; the resolver
  * verifies the policy bytes say the same. `ruleId` is the baseline analysis rule, whose reading the projection's suboperation
  * flags come from.
  */
@@ -299,9 +304,9 @@ function exactStrings(value: unknown, expected: readonly string[]): value is str
 
 /**
  * What every developer-live allow rule shares, whatever it admits: eligibility only, the developer host and no hosted, CI,
- * scheduled or background execution, admitted sample sources only, the house-people redaction rule of ADR 0079 §4.4, no web
- * tool, the protected local capture, and no extra privacy prompt. Only the enrolled-background rule (`background`) is scheduled and
- * background; every other rule states both `false`.
+ * scheduled or background execution, admitted sample sources only, the house-people redaction rule of ADR 0079 §4.4, the
+ * protected local capture, and no extra privacy prompt. The web switch is the rule's own (`verifyPlatformTools`). Only the
+ * enrolled-background rule (`background`) is scheduled and background; every other rule states both `false`.
  */
 function verifyRuleCommon(rule: Record<string, unknown>, background = false): void {
   requirePolicy(rule['policyResult'] === 'eligible-only');
@@ -320,9 +325,8 @@ function verifyRuleCommon(rule: Record<string, unknown>, background = false): vo
   );
   const source = rule['source'];
   requirePolicy(isRecord(source) && source['privateManuscriptAllowed'] === false && source['otherBookRefusedBeforeDispatch'] === true);
-  // No web-search allowance (ADR 0079 §4.2, §6): a document that enabled it would be one this launch cannot read.
   const transmissions = rule['transmissions'];
-  requirePolicy(isRecord(transmissions) && transmissions['webSearchToolAllowed'] === false &&
+  requirePolicy(isRecord(transmissions) &&
     transmissions['identicalRequestReplaysFromProviderResultCache'] === true && transmissions['repeatedTestItemIdentifierAllowed'] === false);
   const capture = rule['capture'];
   requirePolicy(isRecord(capture) && capture['fixtureEmissionAllowed'] === false && capture['uploadAllowed'] === false && capture['providerResultCacheAllowed'] === true);
@@ -374,9 +378,91 @@ function verifyPlannedBound(rule: Record<string, unknown>, assuranceAnchors: boo
   );
 }
 
-/** The rule id of the enrolled background analysis rule, the same in Provider Processing v14 and v15 (the one rule with a background origin). */
+/** The outbound categories a research rule adds (Provider Processing v16 and v17): the model's own query and a cited public page. */
+const WEB_TOOL_CATEGORIES = ['web-search-query', 'public-source-fetch'] as const satisfies readonly OutboundDataCategoryId[];
+/** The review categories that research the web (事实核查, 学术道德与引用), admitted kinds of the review rule since v16;
+ * `factual-review` is the factual category's executor id. 出版政策与风险 stays outside every rule until its web declaration (#744). */
+const WEB_REVIEW_KINDS = ['editorial-review/factual-review', 'editorial-review/academic-integrity', 'factual-review'] as const;
+
+/** Whether `actual` is exactly `expected`, recursively: the same keys at every level, the same primitives, lists in the same order. */
+function sameValue(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(expected)) {
+    return Array.isArray(actual) && actual.length === expected.length && expected.every((item, index) => sameValue(actual[index], item));
+  }
+  if (isRecord(expected)) {
+    return isRecord(actual) && exactKeys(actual, Object.keys(expected)) && Object.entries(expected).every(([key, value]) => sameValue(actual[key], value));
+  }
+  return actual === expected;
+}
+
+/**
+ * The `platformTools` block a research rule of Provider Processing v16 (developer-live) or v17 (ordinary-production) must state,
+ * built at verification time from the search backend registry (Issue #883): every shipped backend, in the recorded ranking order,
+ * with the host and endpoint its provider document declares and its broker slot — under developer-live with the development
+ * Credential Reference its document fixes, under production with the editor's own key required to select it; the webfetch bounds
+ * and the breaker are this build's constants. A registry with no shipped backend, a keyless one or one without an endpoint makes
+ * every research rule unreadable: the launch denies rather than guess.
+ */
+function expectedPlatformTools(scope: 'developer-live' | 'ordinary-production'): Record<string, unknown> {
+  const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped);
+  requirePolicy(shipped.length > 0 && shipped.every((entry) => entry.keyRequired && entry.endpoint !== null && entry.host !== null));
+  return {
+    websearch: {
+      selection: 'user-configured',
+      backends: shipped.map((entry) => ({
+        id: entry.id,
+        host: entry.host,
+        endpoint: entry.endpoint,
+        credentialSlot: entry.credentialSlot,
+        anonymous: false,
+        ...(scope === 'developer-live' ? { developmentCredentialReference: CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[entry.credentialSlot] } : {}),
+      })),
+      ...(scope === 'ordinary-production' ? { selectionRequiresCredential: true, userConfiguredBackendAuthorizesTransmission: false } : {}),
+    },
+    webfetch: { maxBytes: WEBFETCH_MAX_BYTES, timeoutSeconds: WEBFETCH_TIMEOUT_SECONDS, boundedByCitations: true },
+    breaker: { roundTrips: PLATFORM_TOOL_ROUND_TRIP_BREAKER, end: PLATFORM_TOOL_BREAKER_END },
+    oneQueryPerRunUnit: true,
+    toolResultCategory: 'public-or-synthetic',
+  };
+}
+
+/**
+ * A rule's web switch and platform tools (Provider Processing v16 and v17), read whole: a rule that may research states
+ * `webSearchToolAllowed: true` and exactly the expected block; every other rule states `false` and names no block. A missing,
+ * malformed or tampered term, a backend outside the registry's shipped set, or the switch on without the block is a policy this
+ * launch cannot read. Returns the projection of the verified block, or `null` for a rule without web.
+ */
+function verifyPlatformTools(rule: Record<string, unknown>, scope: 'developer-live' | 'ordinary-production', research: boolean): AdmittedPlatformTools | null {
+  const transmissions = rule['transmissions'];
+  requirePolicy(isRecord(transmissions));
+  if (!research) {
+    requirePolicy(transmissions['webSearchToolAllowed'] === false && !Object.hasOwn(rule, 'platformTools'));
+    return null;
+  }
+  requirePolicy(transmissions['webSearchToolAllowed'] === true && sameValue(rule['platformTools'], expectedPlatformTools(scope)));
+  let reading: ReturnType<typeof readPlatformToolsRule>;
+  try {
+    reading = readPlatformToolsRule(rule);
+  } catch {
+    reading = null;
+  }
+  requirePolicy(reading !== null && isConfiguredPlatformTools(reading));
+  return {
+    websearch: {
+      selection: reading.websearch.selection,
+      backends: reading.websearch.backends.map((backend) => ({ id: backend.id, host: backend.host, credentialSlot: backend.credentialSlot })),
+      selectionRequiresCredential: reading.websearch.selectionRequiresCredential,
+    },
+    webfetch: { ...reading.webfetch },
+    breaker: { ...reading.breaker },
+    oneQueryPerRunUnit: reading.oneQueryPerRunUnit,
+    toolResultCategory: reading.toolResultCategory,
+  };
+}
+
+/** The rule id of the enrolled background analysis rule, the same in Provider Processing v14 to v17 (the one rule with a background origin). */
 export const BACKGROUND_ANALYSIS_RULE_ID = 'enrolled-background-manuscript-analysis-processing';
-/** A Run-based rule's model-initiated clarification (v14 and v15): one question per unit, the unit waits, an unanswered question times out at 24 hours. */
+/** A Run-based rule's model-initiated clarification (v14 to v17): one question per unit, the unit waits, an unanswered question times out at 24 hours. */
 const CLARIFICATION_ASKS = {
   modelQuestionAllowed: true,
   maxQuestionsPerUnit: 1,
@@ -461,6 +547,8 @@ interface DeveloperLiveRuleReading {
   readonly clarification: boolean;
   /** Whether this is the enrolled-background rule, the only one scheduled and background. */
   readonly background?: true;
+  /** Whether the rule may research (Provider Processing v16): its web switch is on and it names the platform tools block. */
+  readonly platformTools: boolean;
   readonly verify: (rule: Record<string, unknown>) => void;
 }
 
@@ -524,6 +612,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     outboundDataCategories: ['public-or-synthetic'],
     crossUnitSynthesisAllowed: false,
     clarification: true,
+    platformTools: false,
     verify: (rule) => {
       verifyPlannedRunOrigin(rule);
       const transmissions = rule['transmissions'] as Record<string, unknown>;
@@ -545,6 +634,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     outboundDataCategories: ['editor-selected-manuscript-excerpt'],
     crossUnitSynthesisAllowed: false,
     clarification: false,
+    platformTools: false,
     verify: (rule) => {
       const origin = rule['authorityOrigin'];
       requirePolicy(isRecord(origin) && origin['foregroundEditorSelectionAndQuestionRequired'] === true &&
@@ -569,15 +659,17 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
       requirePolicy(limit['endsAttemptAsProviderAccountLimit'] === true);
     },
   },
-  // The non-web review categories, cross-deliverable consistency included: planned Runs like the baseline, without a
-  // cross-unit reduction, over frozen Material References and the Book's editorial deliverables, never Series Knowledge. The rule
-  // id keeps its v11 name (the policy's rule ids are stable across versions) though the rule is no longer reference-free.
+  // The review categories, cross-deliverable consistency included and, since v16, the two that research the web (事实核查,
+  // 学术道德与引用; 出版政策与风险 stays out until #744): planned Runs like the baseline, without a cross-unit reduction, over frozen Material References
+  // and the Book's editorial deliverables, never Series Knowledge. The rule id keeps its v11 name (the policy's rule ids are stable
+  // across versions) though the rule is no longer reference-free.
   'developer-live-public-samplebook-reference-free-review': {
     modelRole: 'Main Editorial Role',
-    taskKinds: ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency'],
-    outboundDataCategories: ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt'],
+    taskKinds: ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency', ...WEB_REVIEW_KINDS],
+    outboundDataCategories: ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt', ...WEB_TOOL_CATEGORIES],
     crossUnitSynthesisAllowed: false,
     clarification: true,
+    platformTools: true,
     verify: (rule) => {
       // Since v14 the review kind also admits its matching active Default Execution Rule (审阅 快速开始), as writing does.
       verifyPlannedRunOrigin(rule, true, true);
@@ -593,19 +685,21 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
   'developer-live-public-samplebook-writing': {
     modelRole: 'Main Editorial Role',
     taskKinds: ['writing'],
-    outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
+    outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt', ...WEB_TOOL_CATEGORIES],
     crossUnitSynthesisAllowed: true,
     clarification: true,
+    platformTools: true,
     verify: (rule) => verifySynthesisRule(rule, true),
   },
-  // The three implemented evaluation contracts (S81): AI7 初评 scores, 审稿意见 and 按我的评分重写评语, non-web, with frozen
-  // Material Reference excerpts since v12.
+  // The three implemented evaluation contracts (S81): AI7 初评 scores, 审稿意见 and 按我的评分重写评语, with frozen Material
+  // Reference excerpts since v12 and the platform tools since v16 (评估 · 市场 needs the web).
   'developer-live-public-samplebook-evaluation': {
     modelRole: 'Main Editorial Role',
     taskKinds: ['evaluation', 'readers-report', 'evaluation-rewrite'],
-    outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
+    outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt', ...WEB_TOOL_CATEGORIES],
     crossUnitSynthesisAllowed: true,
     clarification: true,
+    platformTools: true,
     verify: verifySynthesisRule,
   },
   // Each Fast kind has its own rule and excerpt category (Issue #841 revision 5); outputs remain Suggestions only.
@@ -615,6 +709,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     outboundDataCategories: ['editor-selected-manuscript-excerpt'],
     crossUnitSynthesisAllowed: false,
     clarification: false,
+    platformTools: false,
     verify: (rule) => verifySuggestionRule(rule, 'editorSelectedPassageOnly'),
   },
   'developer-live-public-samplebook-conflict-regenerate': {
@@ -623,6 +718,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     outboundDataCategories: ['manuscript-conflict-region-excerpt'],
     crossUnitSynthesisAllowed: false,
     clarification: false,
+    platformTools: false,
     verify: (rule) => verifySuggestionRule(rule, 'singleManuscriptConflictRegionOnly'),
   },
   // Enrolled background analysis (v14): the only scheduled and background rule, within the enrollment's mandatory ceiling.
@@ -633,13 +729,15 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     crossUnitSynthesisAllowed: false,
     clarification: true,
     background: true,
+    platformTools: false,
     verify: verifyBackgroundRule,
   },
 };
 
 /**
- * Provider Processing v14 (and v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one this
- * launch can read and each bound exactly to the one Go route. All eight rules of v14 must be present. The baseline analysis rule must be among them; its three
+ * Provider Processing v16 (and v14, v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one
+ * this launch can read and each bound exactly to the one Go route. All eight rules of v16 must be present, the three that may research
+ * (review, writing, evaluation) each with the platform tools block the search backend registry implies. The baseline analysis rule must be among them; its three
  * declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling default of ADR 0070, and the house-people
  * redaction rule of ADR 0079 §4.4 are read as v9 read them. Every other rule is read from its own entry of
  * `DEVELOPER_LIVE_RULES`; a rule id outside it, a repeated id, or any field that does not match is a policy the launch
@@ -693,6 +791,7 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
     }
     reading.verify(rule);
     verifyClarification(rule, reading.clarification);
+    const platformTools = verifyPlatformTools(rule, 'developer-live', reading.platformTools);
     admittedRules.push({
       ruleId,
       taskKinds: [...reading.taskKinds],
@@ -709,6 +808,8 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
       clarificationTimeoutHours: reading.clarification ? CLARIFICATION_ASKS.timeoutHours : null,
       backgroundOrigin: reading.background === true,
       matchingActiveDefaultExecutionRuleAllowed: (rule['authorityOrigin'] as Record<string, unknown>)['matchingActiveDefaultExecutionRuleAllowed'] === true,
+      webSearchToolAllowed: platformTools !== null,
+      platformTools,
     });
   }
   requirePolicy(seen.has(DEVELOPER_LIVE_POLICY_BINDING.ruleId) && seen.size === Object.keys(DEVELOPER_LIVE_RULES).length);
@@ -721,7 +822,7 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
 }
 
 /**
- * The editor's own model-service binding a launch supplies to `ordinary-production` (Provider Processing v15): one route,
+ * The editor's own model-service binding a launch supplies to `ordinary-production` (Provider Processing v17): one route,
  * endpoint, model and credential slot, with the opaque Credential Broker reference of the editor's own credential. One binding
  * per instance serves both bound roles (the Main Editorial and the Fast Interaction Role). The resolver only checks it against
  * the policy's allowed bindings and copies the four routing facts into every admitted rule; the credential reference never
@@ -735,7 +836,7 @@ export interface ConfiguredProviderBinding {
   readonly credentialReference: string;
 }
 
-/** One binding Provider Processing v15 (and v13) allows a user-configurable role: the routing facts, read from the pinned bytes. */
+/** One binding Provider Processing v17 (and v15, v13) allows a user-configurable role: the routing facts, read from the pinned bytes. */
 interface AllowedRoleBinding {
   readonly route: string;
   readonly endpoint: string;
@@ -944,6 +1045,8 @@ interface OrdinaryProductionRuleReading {
   readonly clarification: boolean;
   /** Whether this is the enrolled-background rule, the only one scheduled and background. */
   readonly background: boolean;
+  /** Whether the rule may research (v17): its web switch is on and it names the platform tools block, compared whole. */
+  readonly platformTools: boolean;
   readonly blocks: {
     readonly authorityOrigin: Readonly<Record<string, unknown>>;
     readonly executionMode: Readonly<Record<string, unknown>>;
@@ -967,7 +1070,24 @@ function productionReading(
 ): OrdinaryProductionRuleReading {
   const policyCategories = [...gateCategories, ...PRODUCTION_UNPUBLISHED_CLASSES];
   return { modelRole, taskKinds, policyCategories, outboundDataCategories: policyCategories, crossUnitSynthesisAllowed,
-    clarification: blocks.clarification === CLARIFICATION_ASKS, background, blocks };
+    clarification: blocks.clarification === CLARIFICATION_ASKS, background, platformTools: false, blocks };
+}
+
+/**
+ * A production rule that may research (v17): its kinds and gate categories plus the two web categories (before the unpublished
+ * classes), its transmission constants with the web switch on, and the platform tools block.
+ */
+function researchReading(reading: OrdinaryProductionRuleReading, extraKinds: readonly string[] = []): OrdinaryProductionRuleReading {
+  const gate = reading.policyCategories.filter((category) => !(PRODUCTION_UNPUBLISHED_CLASSES as readonly string[]).includes(category));
+  const policyCategories = [...gate, ...WEB_TOOL_CATEGORIES, ...PRODUCTION_UNPUBLISHED_CLASSES] as OutboundDataCategoryId[];
+  return {
+    ...reading,
+    taskKinds: [...reading.taskKinds, ...extraKinds],
+    policyCategories,
+    outboundDataCategories: policyCategories,
+    platformTools: true,
+    blocks: { ...reading.blocks, transmissions: { ...reading.blocks.transmissions, webSearchToolAllowed: true } },
+  };
 }
 
 const RUN_BLOCKS = {
@@ -980,29 +1100,30 @@ const FOREGROUND_BLOCKS = {
 } as const;
 
 /**
- * The eight ordinary-production rules of Provider Processing v15, by rule id: the same kinds as developer-live v14, each
- * `eligible-only`, bound to the editor's own configured role binding rather than to one fixed route, and each read whole.
+ * The eight ordinary-production rules of Provider Processing v17, by rule id: the same kinds as developer-live v16, each
+ * `eligible-only`, bound to the editor's own configured role binding rather than to one fixed route, and each read whole. Review,
+ * writing and evaluation may research through the backend the editor configures with their own key.
  */
 const ORDINARY_PRODUCTION_RULES: Readonly<Record<string, OrdinaryProductionRuleReading>> = {
   'ordinary-production-baseline-analysis': productionReading('Main Editorial Role', ['baseline-manuscript-analysis'], ['public-or-synthetic'],
     { ...RUN_BLOCKS, source: productionSource(false, false), transmissions: PRODUCTION_BASELINE_TRANSMISSIONS }),
   'ordinary-production-editorial-dialogue': productionReading('Fast Interaction Role', ['editorial-dialogue'], ['editor-selected-manuscript-excerpt'],
     { ...FOREGROUND_BLOCKS, authorityOrigin: PRODUCTION_DIALOGUE_ORIGIN, source: productionSource(false, false, 'editorSelectedPassageOnly'), transmissions: PRODUCTION_DIALOGUE_TRANSMISSIONS, output: null }),
-  'ordinary-production-review': productionReading('Main Editorial Role',
+  'ordinary-production-review': researchReading(productionReading('Main Editorial Role',
     ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency'],
     ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt'],
-    { ...RUN_BLOCKS, authorityOrigin: PRODUCTION_REVIEW_ORIGIN, source: productionSource(true, true), transmissions: PRODUCTION_REVIEW_TRANSMISSIONS }),
-  'ordinary-production-writing': productionReading('Main Editorial Role', ['writing'],
+    { ...RUN_BLOCKS, authorityOrigin: PRODUCTION_REVIEW_ORIGIN, source: productionSource(true, true), transmissions: PRODUCTION_REVIEW_TRANSMISSIONS }), WEB_REVIEW_KINDS),
+  'ordinary-production-writing': researchReading(productionReading('Main Editorial Role', ['writing'],
     ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
-    { ...RUN_BLOCKS, source: productionSource(true, false), transmissions: PRODUCTION_SYNTHESIS_TRANSMISSIONS }, true),
-  'ordinary-production-evaluation': productionReading('Main Editorial Role', ['evaluation', 'readers-report', 'evaluation-rewrite'],
+    { ...RUN_BLOCKS, source: productionSource(true, false), transmissions: PRODUCTION_SYNTHESIS_TRANSMISSIONS }, true)),
+  'ordinary-production-evaluation': researchReading(productionReading('Main Editorial Role', ['evaluation', 'readers-report', 'evaluation-rewrite'],
     ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
-    { ...RUN_BLOCKS, source: productionSource(true, false), transmissions: PRODUCTION_SYNTHESIS_TRANSMISSIONS }, true),
+    { ...RUN_BLOCKS, source: productionSource(true, false), transmissions: PRODUCTION_SYNTHESIS_TRANSMISSIONS }, true)),
   'ordinary-production-editorial-polish': productionReading('Fast Interaction Role', ['editorial-polish'], ['editor-selected-manuscript-excerpt'],
     { ...FOREGROUND_BLOCKS, authorityOrigin: PRODUCTION_FOREGROUND_ORIGIN, source: productionSource(false, false, 'editorSelectedPassageOnly'), transmissions: PRODUCTION_SUGGESTION_TRANSMISSIONS, output: PRODUCTION_SUGGESTION_OUTPUT }),
   'ordinary-production-conflict-regenerate': productionReading('Fast Interaction Role', ['conflict-regenerate'], ['manuscript-conflict-region-excerpt'],
     { ...FOREGROUND_BLOCKS, authorityOrigin: PRODUCTION_FOREGROUND_ORIGIN, source: productionSource(false, false, 'singleManuscriptConflictRegionOnly'), transmissions: PRODUCTION_SUGGESTION_TRANSMISSIONS, output: PRODUCTION_SUGGESTION_OUTPUT }),
-  // Enrolled background analysis (v15): baseline analysis dispatched by an active matching enrollment, within its mandatory ceiling.
+  // Enrolled background analysis (v15, unchanged in v17, no web): baseline analysis dispatched by an active matching enrollment, within its mandatory ceiling.
   [BACKGROUND_ANALYSIS_RULE_ID]: productionReading('Main Editorial Role', ['baseline-manuscript-analysis'], ['public-or-synthetic'],
     { ...RUN_BLOCKS, authorityOrigin: BACKGROUND_ORIGIN, executionMode: PRODUCTION_BACKGROUND_EXECUTION_MODE, scopeLimits: BACKGROUND_SCOPE_LIMITS,
       authorizationPreconditions: BACKGROUND_PRECONDITIONS, source: productionSource(false, false), transmissions: PRODUCTION_BASELINE_TRANSMISSIONS }, false, true),
@@ -1010,17 +1131,17 @@ const ORDINARY_PRODUCTION_RULES: Readonly<Record<string, OrdinaryProductionRuleR
 /** The rule every ordinary-production policy must carry, whose reading the projection's suboperation flags come from. */
 const ORDINARY_PRODUCTION_BASELINE_RULE_ID = 'ordinary-production-baseline-analysis';
 
-/** The terms of a Provider Processing v13 or v15 document, root level: a document with any other root term is one this launch cannot read. */
+/** The terms of a Provider Processing v13, v15 or v17 document, root level: a document with any other root term is one this launch cannot read. */
 const PRODUCTION_POLICY_TERMS = [
   'schemaDialect', 'schemaPath', 'documentType', 'policyId', 'policyType', 'version', 'lifecycleStatus', 'predecessorVersion',
   'predecessorCanonicalPath', 'canonicalPath', 'humanProjectionPath', 'operationalScope', 'authorityBasis', 'trustedSelection',
   'decision', 'roleBindings', 'outboundDataCategories', 'credentialBoundary', 'authoritySeparations',
 ] as const;
-/** The outbound data category vocabulary of Provider Processing v13: the Egress Gate's identifiers and the three unpublished classes. */
+/** The outbound data category vocabulary of Provider Processing v17: the Egress Gate's identifiers (the two web categories since v17) and the three unpublished classes. */
 const PRODUCTION_CATEGORY_VOCABULARY = [
   'public-or-synthetic', 'unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content', 'editor-selected-manuscript-excerpt',
   'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'book-metadata-and-synopsis', 'manuscript-conflict-region-excerpt',
-  'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt',
+  'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt', ...WEB_TOOL_CATEGORIES,
 ] as const;
 /** Every separation of authority Provider Processing v13 names; each is `false`, and a document naming fewer or more is unreadable. */
 const PRODUCTION_AUTHORITY_SEPARATIONS = [
@@ -1041,11 +1162,12 @@ export interface OrdinaryProductionPolicyReading {
   readonly runReportReflectionAllowed: boolean;
   /** The bindings the user-configurable Main Editorial and Fast Interaction Roles may be configured with, as the bytes state them. */
   readonly allowedBindings: readonly AllowedRoleBinding[];
-  /** The rules in policy order, each with the routes the policy lets its role bind. */
+  /** The rules in policy order, each with the routes the policy lets its role bind and its verified platform tools (`null` without web). */
   readonly rules: ReadonlyArray<{
     readonly ruleId: string;
     readonly reading: OrdinaryProductionRuleReading;
     readonly allowedRoutes: readonly string[];
+    readonly platformTools: AdmittedPlatformTools | null;
   }>;
 }
 
@@ -1062,8 +1184,8 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
 }
 
 /**
- * Provider Processing v15 (ordinary-production): default deny with eight eligible-only rules this launch can read, each bound to
- * a user-configured role binding. Everything is read whole and fails closed: a missing term, an unknown term, a rule id outside
+ * Provider Processing v17 (ordinary-production): default deny with eight eligible-only rules this launch can read, each bound to
+ * a user-configured role binding, the three that may research each with the platform tools block the search backend registry implies. Everything is read whole and fails closed: a missing term, an unknown term, a rule id outside
  * `ORDINARY_PRODUCTION_RULES`, a repeated id, or any value that differs from the reading is a policy the launch cannot read.
  * The routing values themselves (route, endpoint, model, credential slot) are never source constants here: they are read from
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
@@ -1128,7 +1250,7 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
   requirePolicy(isRecord(decision) && exactKeys(decision, ['default', 'providerAllowRules']) && decision['default'] === 'deny' &&
     Array.isArray(decision['providerAllowRules']) && decision['providerAllowRules'].length === Object.keys(ORDINARY_PRODUCTION_RULES).length);
   const seen = new Set<string>();
-  const rules: Array<{ ruleId: string; reading: OrdinaryProductionRuleReading; allowedRoutes: readonly string[] }> = [];
+  const rules: Array<{ ruleId: string; reading: OrdinaryProductionRuleReading; allowedRoutes: readonly string[]; platformTools: AdmittedPlatformTools | null }> = [];
   for (const rule of decision['providerAllowRules'] as unknown[]) {
     requirePolicy(isRecord(rule) && typeof rule['ruleId'] === 'string' && !seen.has(rule['ruleId']) && Object.hasOwn(ORDINARY_PRODUCTION_RULES, rule['ruleId']));
     const ruleId = rule['ruleId'] as string;
@@ -1140,6 +1262,7 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
       'transmissions', 'clarification', 'authorizationPreconditions', 'providerAccountLimit', 'capture', 'additionalPrivacyPrompts', 'allowedTaskKinds',
       ...(blocks.output === null ? [] : ['output']),
       ...(blocks.scopeLimits === null ? [] : ['scopeLimits']),
+      ...(reading.platformTools ? ['platformTools'] : []),
     ]));
     requirePolicy(rule['policyResult'] === 'eligible-only' && rule['purpose'] === 'ordinary-production-model-processing');
     requirePolicy(exactStrings(rule['allowedTaskKinds'], reading.taskKinds) && exactStrings(rule['allowedOutboundDataCategories'], reading.policyCategories));
@@ -1162,7 +1285,8 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
       secondModelAllowed: false,
       productionDefaultsChanged: false,
     }));
-    rules.push({ ruleId, reading, allowedRoutes: routes });
+    const platformTools = verifyPlatformTools(rule, 'ordinary-production', reading.platformTools);
+    rules.push({ ruleId, reading, allowedRoutes: routes, platformTools });
   }
   requirePolicy(seen.has(ORDINARY_PRODUCTION_BASELINE_RULE_ID));
   return { crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true, allowedBindings: mainBindings, rules };
@@ -1182,7 +1306,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
     candidate.route === binding.route && candidate.endpoint === binding.endpoint && candidate.model === binding.model && candidate.credentialSlot === binding.credentialSlot);
   if (allowed === undefined) return null;
   const admitted: AdmittedProviderRule[] = [];
-  for (const { ruleId, reading: kind, allowedRoutes } of reading.rules) {
+  for (const { ruleId, reading: kind, allowedRoutes, platformTools } of reading.rules) {
     if (!allowedRoutes.includes(allowed.route)) return null;
     admitted.push({
       ruleId,
@@ -1200,6 +1324,8 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
       clarificationTimeoutHours: kind.clarification ? CLARIFICATION_ASKS.timeoutHours : null,
       backgroundOrigin: kind.background,
       matchingActiveDefaultExecutionRuleAllowed: kind.blocks.authorityOrigin['matchingActiveDefaultExecutionRuleAllowed'] === true,
+      webSearchToolAllowed: platformTools !== null,
+      platformTools,
     });
   }
   return admitted;
@@ -1209,7 +1335,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
  * Resolve the build-embedded source-checkout selection for the requested scope. Only the launch-selectable scopes can
  * verify; every invalid state, including an unselectable or unknown scope, remains the zero-transmission denial.
  *
- * `configuredBinding` is read only under `ordinary-production` (Provider Processing v15) and is ignored under every other
+ * `configuredBinding` is read only under `ordinary-production` (Provider Processing v17) and is ignored under every other
  * scope. With `null` the policy still verifies but no rule is admitted: the projection reports `bindingState: 'setup-required'`.
  * With a binding that is exactly one the policy allows, every admitted rule's route, endpoint, model and credential slot are
  * filled from it; any other binding is the denial `binding-not-allowed`.

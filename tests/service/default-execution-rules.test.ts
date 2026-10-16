@@ -1,3 +1,4 @@
+import { execPre74Fixture, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -162,7 +163,7 @@ describe('schema revision 31 over the real store', () => {
     }
     const before = withDatabase(false, (database) => {
       plantRevision30Relations(database);
-      database.exec(`PRAGMA user_version = ${CONNECTIVITY_WAIT_SCHEMA_VERSION}`);
+      execPre74Fixture(database, `PRAGMA user_version = ${CONNECTIVITY_WAIT_SCHEMA_VERSION}`);
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
       expect(analysisRunAuthorizationsShape(database)).toBe('revision-30');
       return {
@@ -184,10 +185,11 @@ describe('schema revision 31 over the real store', () => {
       expect(analysisRunAuthorizationsShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(before.authorizations);
       const after = relationTruth(database);
-      expect([...after.keys()]).toEqual([...before.truth.keys(), ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
+      expect([...after.keys()]).toEqual([...before.truth.keys(), ...RESEARCH_EVIDENCE_RELATIONS, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
+      for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(after.get(relation)?.content).toMatch(/^0:/);
       for (const relation of [...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(after.get(relation)?.content).toMatch(/^0:/);
       // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_task_intents']);
+      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_task_intents']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_run_authorizations' ORDER BY name").all())
         .toEqual([{ name: 'analysis_run_authorizations_no_delete' }, { name: 'analysis_run_authorizations_no_update' }]);
@@ -205,7 +207,7 @@ describe('schema revision 31 over the real store', () => {
     withDatabase(false, (database) => {
       plantRevision30Relations(database);
       // A hand-altered relation: a column no revision ever wrote.
-      database.exec(`PRAGMA foreign_keys = OFF;
+      execPre74Fixture(database, `PRAGMA foreign_keys = OFF;
         BEGIN IMMEDIATE;
         DROP TRIGGER analysis_run_authorizations_no_update;
         DROP TRIGGER analysis_run_authorizations_no_delete;

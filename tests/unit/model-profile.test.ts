@@ -3,6 +3,7 @@ import { OPENCODE_GO_ROUTE } from '../../src/service/provider/egress-gate.js';
 import {
   DEEPSEEK_V4_PRO_PROFILE,
   OPENCODE_GO_V4_FLASH_PROFILE,
+  OPENCODE_GO_V41_FLASH_PROFILE,
   PROVIDER_MODEL_PROFILES,
   modelProfileFor,
 } from '../../src/service/provider/model-profile.js';
@@ -27,7 +28,7 @@ describe('model capability profiles: toolCalling and webSearchTool (ADR 0080 §2
     });
   });
 
-  it('declares the developer-live gateway model unable to call functions until an item establishes it, and carrying no search tool', () => {
+  it('keeps the historical V4 gateway model without tool evidence and without a provider search tool', () => {
     // ADR 0080 §2: the Owner's own session observed a client tool call through this gateway, but an
     // informal observation is not yet a recorded live-test item, so this stays `none`.
     expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities.toolCalling).toBe('none');
@@ -37,6 +38,14 @@ describe('model capability profiles: toolCalling and webSearchTool (ADR 0080 §2
       kind: 'vendor-documentation',
       readOn: '2026-09-11',
     });
+  });
+
+  it('declares only the exact V4.1 client function loop observed by the §7.7 item', () => {
+    expect(OPENCODE_GO_V41_FLASH_PROFILE.capabilities.toolCalling).toBe('function');
+    expect(OPENCODE_GO_V41_FLASH_PROFILE.evidence.toolCalling).toEqual({
+      kind: 'live-test-item', itemIds: ['S40/whole-manuscript/1', 'S40/whole-manuscript/2'], observedOn: '2026-10-15',
+    });
+    expect(OPENCODE_GO_V41_FLASH_PROFILE.capabilities.webSearchTool).toBe('none');
   });
 
   it('declares an inert non-DeepSeek profile the same way as every other undemonstrated model on the gateway', () => {

@@ -1,7 +1,7 @@
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
-import { CONFIGURED_CREDENTIAL_SLOTS } from '../../shared/provider-configuration.generated.js';
+import { CONFIGURED_CREDENTIAL_SLOTS, CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
 import { DIGEST_PATTERN } from '../analysis/canonical.js';
-import type { CredentialSlot, TransmitTicket } from './egress-gate.js';
+import { consumeSearchCredentialRelease, type CredentialSlot, type TransmitTicket, type SearchServiceTicket } from './egress-gate.js';
 
 /**
  * The Credential Broker maps (Execution Binding, Model Role, logical slot) to the opaque Credential
@@ -97,10 +97,18 @@ export class CredentialBroker {
    * must be the gate's `transmit-remote` decision for this exact binding; anything else refuses
    * before the store is touched.
    */
-  async releaseTo<T>(binding: CredentialSlotBinding, ticket: TransmitTicket | null, consume: (value: string) => Promise<T>): Promise<T> {
+  async releaseTo<T>(binding: CredentialSlotBinding, ticket: TransmitTicket | SearchServiceTicket | null, consume: (value: string) => Promise<T>): Promise<T> {
     requireBinding(binding);
     this.#requireAdmittedReference(binding.credentialReference);
-    if (ticket === null || ticket.decision !== 'transmit-remote' || ticket.bindingDigest !== binding.bindingDigest) {
+    // A search ticket releases only its frozen backend's own slot: a development reference must be that slot's own, so no
+    // search host is ever handed the model's key or another backend's.
+    const developmentReference = DEVELOPMENT_CREDENTIAL_REFERENCES.has(binding.credentialReference.toLowerCase());
+    const searchRelease = ticket?.decision === 'call-search-service' && ticket.backend !== undefined && binding.slot.startsWith('search-') &&
+      ticket.backend.credentialSlot === binding.slot && ticket.backend.credentialReference === binding.credentialReference &&
+      (!developmentReference || CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[binding.slot as keyof typeof CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES]?.toLowerCase() === binding.credentialReference.toLowerCase()) &&
+      ticket.backend.host === ticket.host && ticket.bindingDigest === binding.bindingDigest && consumeSearchCredentialRelease(ticket);
+    if (ticket === null || ticket.bindingDigest !== binding.bindingDigest || (ticket.decision !== 'transmit-remote' && !searchRelease) ||
+        (ticket.decision === 'transmit-remote' && binding.slot.startsWith('search-'))) {
       throw new CredentialBrokerError('CREDENTIAL_RELEASE_REFUSED', '没有本次绑定的 transmit-remote 决定；凭据未释放。');
     }
     const value = await this.#resolver.resolve(binding.credentialReference);

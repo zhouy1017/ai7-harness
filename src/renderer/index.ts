@@ -1,4 +1,5 @@
 import { renderEvaluationProfiles } from './evaluation-profiles.js';
+import { researchPlanLine, researchStatusLine, researchUnavailableLine } from '../shared/research-status.js';
 import { exemplarImportButton, exemplarEligibility } from './imported-exemplars.js';
 import { consumeReturnPlace, preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type {
@@ -83,6 +84,8 @@ import { mountBookPeople } from './book-people.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountEvaluation } from './evaluation.js';
+import { mountResearchEvidence } from './research-evidence.js';
+import { SOURCES_ENTRY_LABEL, SOURCES_LEDE, SOURCES_STATUS, SOURCES_TITLE } from './research-evidence-labels.js';
 import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
 import type { LearningMaterialTarget } from '../shared/protocol.js';
@@ -803,7 +806,8 @@ function hasErrorCode(error: unknown, code: string): boolean {
 }
 
 function rendererErrorMessage(error: unknown, fallback: string): string {
-  return rendererErrorData(error)?.message ?? (error instanceof Error ? error.message : fallback);
+  const data = rendererErrorData(error);
+  return researchUnavailableLine(data?.code, data?.message ?? (error instanceof Error ? error.message : fallback));
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -2617,6 +2621,57 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
   );
 }
 
+/**
+ * ② 资料与记录 › 来源与证据 (Issue #425, S70; IA-012, SRC-013): the Book's retained external sources, with the way back to the
+ * manuscript and to 工作概览 that every destination of the Book keeps. Read-only but for 保存为来源材料.
+ */
+function renderBookSources(bookId: string, bookTitle: string): void {
+  const content = panel();
+  content.classList.add('book-sources');
+  content.dataset['bookId'] = bookId;
+  const host = element('div', 'research-evidence-host');
+  content.append(
+    element('p', 'section-label', `资料与记录 · ${SOURCES_TITLE} · 《${bookTitle}》`),
+    element('h2', undefined, SOURCES_TITLE),
+    element('p', 'field-note', SOURCES_LEDE),
+    host,
+  );
+  const surface = mountResearchEvidence({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
+  const actions = element('div', 'button-row workbench-actions');
+  const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
+    openManuscript.disabled = true;
+    setStatus('正在打开稿件…', 'busy');
+    try {
+      await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
+    } catch (error) {
+      openManuscript.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
+    }
+  });
+  const openOverview = button(DELIVERABLES_DESTINATION_ACTIONS[1], 'secondary', async () => {
+    openOverview.disabled = true;
+    setStatus('正在打开图书工作概览…', 'busy');
+    try {
+      renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
+    } catch (error) {
+      openOverview.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开图书工作概览。'), 'error');
+    }
+  });
+  actions.append(openManuscript, openOverview);
+  content.append(actions);
+  replaceScreen('book-sources', content);
+  setStatus(SOURCES_STATUS.loading, 'busy');
+  void surface.load().then(
+    () => {
+      if (content.isConnected) setStatus(SOURCES_STATUS.opened);
+    },
+    (error: unknown) => {
+      if (content.isConnected) setStatus(rendererErrorMessage(error, SOURCES_STATUS.unavailable), 'error');
+    },
+  );
+}
+
 function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }, focusPackageVersionId?: string): void {
   const content = panel();
   content.classList.add('book-deliverables');
@@ -3263,6 +3318,7 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
   disclosure.dataset['runReportRun'] = report.runRecordId;
   disclosure.dataset['runReportClassification'] = report.classification;
   disclosure.append(element('summary', undefined, `查看运行报告 · ${RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
+  disclosure.append(element('p', 'research-status', researchStatusLine(report)));
   const stages = element('ul', 'analysis-list analysis-run-report-stages');
   for (const stage of report.stages) {
     const item = element('li', undefined, `${RUN_REPORT_STAGE_LABELS[stage.stage]}：${RUN_REPORT_STAGE_STATE_LABELS[stage.state]}${stage.wallMs === null ? '' : ` · 用时 ${durationLabel(stage.wallMs)}`}`);
@@ -3302,6 +3358,8 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
     : `这次运行共记录 ${report.findingCounts.reduce((total, entry) => total + entry.count, 0)} 条发现，分 ${report.findingCounts.length} 类。`;
   const usageRows = (Object.keys(report.usagePerStage) as Array<keyof typeof report.usagePerStage>).flatMap((stage) => {
     const usage = report.usagePerStage[stage];
+    if (stage === 'platform-tools') return [element('dt', undefined, '用量 · 联网检索'), element('dd', undefined,
+      `${Object.entries(usage.searchCalls ?? {}).map(([id, calls]) => `${id}：${calls} 次检索`).join(' · ') || '0 次检索'} · 已拒绝检索 ${usage.refusedSearchCalls ?? 0} 次 · 网页取回 ${usage.fetchCount ?? 0} 次 / ${usage.fetchBytes ?? 0} 字节 · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}`)];
     return [element('dt', undefined, `用量 · ${stage}`), element('dd', 'technical-identity', `${usage.requests} 次模型请求 · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}`)];
   });
   disclosure.append(
@@ -4010,6 +4068,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   card.append(heading, element('p', 'field-note', analysisKindSubtitle(
     projection.providerResolutionPlan?.remoteBinding.providerProcessing ?? projection.resultSetRevision?.policyPin ?? null,
   )));
+  card.append(element('p', 'research-status', researchPlanLine(projection.providerResolutionPlan?.webToolsBackend)));
 
   // One follow-up read per card at a time, of the revision the editor is looking at: a newer draw replaces the
   // pending one rather than adding another loop, and an answer that changed nothing draws nothing, so the editor's
@@ -5518,6 +5577,64 @@ function renderModelRouteOption(option: ModelServiceRouteOptionProjection): HTML
   return section;
 }
 
+function renderSearchBackendSettings(projection: ModelServiceSettingsProjection): HTMLElement {
+  const section = element('section', 'review-section');
+  section.setAttribute('aria-label', '联网检索');
+  section.dataset['searchBackends'] = 'true';
+  section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', '新任务使用所选后端；已开始的运行继续使用计划里冻结的后端。'));
+  for (const backend of projection.searchBackends.backends) {
+    const card = element('article', 'model-role-card');
+    card.dataset['searchBackend'] = backend.backendId;
+    card.dataset['selected'] = String(backend.backendId === projection.searchBackends.selectedBackendId);
+    card.append(element('h4', undefined, `${backend.rank}. ${backend.name}${backend.backendId === projection.searchBackends.selectedBackendId ? ' · 已选择' : ''}`),
+      element('p', 'field-note', `${backend.reachable ? '可达' : '不可达'} · 延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · ${backend.keyRequired ? '需要密钥' : '无需密钥'}`),
+      element('p', 'field-note', `中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`));
+    if (backend.note !== null) card.append(element('p', 'field-note', backend.note));
+    const actions = element('div', 'button-row');
+    const choose = button('选择后端', 'quiet', () => void (async () => {
+      try { renderModelServiceSettingsProjection(await window.ai7.selectSearchBackend({ backendId: backend.backendId })); setStatus('联网检索后端已保存'); }
+      catch (error) { setStatus(rendererErrorMessage(error, '无法保存联网检索后端。'), 'error'); }
+    })());
+    choose.disabled = backend.backendId === projection.searchBackends.selectedBackendId;
+    const output = element('div');
+    output.dataset['searchProbe'] = backend.backendId;
+    const probe = button('测试检索', 'quiet', () => void (async () => {
+      probe.disabled = true;
+      try {
+        const result = await window.ai7.probeSearchBackend({ backendId: backend.backendId });
+        output.replaceChildren(element('p', undefined, `${result.reachable ? '可达' : '不可达'} · 延迟 ${result.latencyMs} ms · 结果数 ${result.resultCount}${result.failure === null ? '' : ` · ${result.failure}`}`));
+        const list = element('ul');
+        for (const hit of result.results.slice(0, 3)) {
+          const item = element('li');
+          const link = element('a', undefined, hit.title);
+          link.href = hit.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          item.append(link, element('span', 'field-note', ` ${hit.url}`)); list.append(item);
+        }
+        output.append(list);
+      } catch (error) { output.replaceChildren(element('p', 'attention-note', rendererErrorMessage(error, '测试检索未完成。'))); }
+      finally { probe.disabled = false; }
+    })());
+    actions.append(choose, probe);
+    if (projection.launchPolicy.operationalScope === 'ordinary-production') {
+      const secret = element('input'); secret.type = 'password'; secret.autocomplete = 'off';
+      secret.setAttribute('aria-label', `${backend.name} 密钥`);
+      const save = button('保存密钥', 'quiet', () => void (async () => {
+        const value = secret.value; secret.value = '';
+        try { renderModelServiceSettingsProjection(await window.ai7.saveSearchBackendCredential({ backendId: backend.backendId, secret: value })); }
+        catch (error) { setStatus(rendererErrorMessage(error, '无法保存联网检索密钥。'), 'error'); }
+      })());
+      const remove = button('移除密钥', 'quiet', () => void (async () => {
+        try { renderModelServiceSettingsProjection(await window.ai7.removeSearchBackendCredential({ backendId: backend.backendId })); }
+        catch (error) { setStatus(rendererErrorMessage(error, '无法移除联网检索密钥。'), 'error'); }
+      })());
+      card.append(element('p', 'field-note', backend.connection.credentialOperationState === 'ready' ? '密钥已保存' : '密钥需设置'), secret);
+      actions.append(save, remove);
+    }
+    card.append(actions, output); section.append(card);
+  }
+  return section;
+}
+
 function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
   const content = panel();
   content.classList.add('model-service-settings');
@@ -5605,7 +5722,7 @@ function renderModelServiceSettingsProjection(projection: ModelServiceSettingsPr
   );
   const actions = element('div', 'button-row');
   actions.append(button('返回', 'quiet', () => void initializeStartup()));
-  content.append(roles, unsupported, renderModelServiceProxyBlock(projection), policy, protectedStore, actions);
+  content.append(roles, renderSearchBackendSettings(projection), unsupported, renderModelServiceProxyBlock(projection), policy, protectedStore, actions);
   replaceScreen('model-service', content);
 }
 
@@ -7480,6 +7597,23 @@ function renderEditorWindow(
     }
   });
   openAnalysis.dataset['recordsDestination'] = 'analysis';
+  // 来源与证据 (Issue #425, S70; IA-012) leaves the manuscript as 分析 does: local edits settled and the position taken first.
+  const openSources = button(SOURCES_ENTRY_LABEL, 'secondary', async () => {
+    openSources.disabled = true;
+    setStatus(SOURCES_STATUS.leaving, 'busy');
+    try {
+      if (!(await settleLocalEdit())) {
+        openSources.disabled = false;
+        return;
+      }
+      await rememberEntryPosition();
+      renderBookSources(currentWindow.bookId, bookTitle);
+    } catch (error) {
+      openSources.disabled = false;
+      setStatus(rendererErrorMessage(error, SOURCES_STATUS.openFailed), 'error');
+    }
+  });
+  openSources.dataset['recordsDestination'] = 'sources';
   // Leaving for 审阅 is leaving the manuscript too: local edits are settled and the position is taken
   // first, exactly as for 分析. A Mark Card's 查看任务 leaves the same way, for its Review Run and finding.
   const leaveForReview = async (focus: ReviewFocus | null): Promise<boolean> => {
@@ -7563,7 +7697,7 @@ function renderEditorWindow(
   // the group names where it leads without renaming what it does.
   const recordsGroup = element('nav', 'book-records-group');
   recordsGroup.setAttribute('aria-label', '资料与记录');
-  recordsGroup.append(element('span', 'section-label', '资料与记录'), ...(isDocument ? [] : [openAnalysis]), backToOverview);
+  recordsGroup.append(element('span', 'section-label', '资料与记录'), ...(isDocument ? [] : [openAnalysis, openSources]), backToOverview);
   // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物): 审阅 (editor-surfaces §4), 评估 (§5) and 交付物 (§9) — a document has
   // only its way back. They are destinations of the Book beside 资料与记录, never entries on the right edge, whose three
   // entries are 导航 / 分析 / 任务.

@@ -305,7 +305,7 @@ describe('model capability profiles', () => {
     expect(OPENCODE_GO_V41_FLASH_PROFILE.model).toBe('deepseek-v4.1-flash');
     expect(OPENCODE_GO_V41_FLASH_PROFILE.capabilities).toMatchObject({
       requestShape: 'openai-chat-completions', answerChannel: 'message-content-string',
-      structuredOutput: 'none', reasoningChannel: 'message-reasoning-content', usageAttribution: 'unknown', toolCalling: 'none',
+      structuredOutput: 'none', reasoningChannel: 'message-reasoning-content', usageAttribution: 'unknown', toolCalling: 'function',
     });
     expect(OPENCODE_GO_V41_FLASH_PROFILE.evidence.requestShape.kind).toBe('vendor-documentation');
     expect(OPENCODE_GO_V41_FLASH_PROFILE.evidence.answerChannel).toMatchObject({ kind: 'live-test-item', observedOn: '2026-10-12' });

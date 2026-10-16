@@ -1,19 +1,20 @@
+import { SEARCH_BACKENDS } from './search-backends.js';
 import { randomUUID } from 'node:crypto';
 import type { OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
 import type { OutboundDataCategoryId } from '../../shared/protocol.js';
 import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES } from '../../shared/protocol.js';
 import { graphemeLength, writingMaterialDigest } from '../writing-tasks.js';
-import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { DIGEST_PATTERN, canonicalJson, sha256Hex, isRecord } from '../analysis/canonical.js';
 import { assistantToolCalls, messageText, toolResultOf, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
 import {
   PLATFORM_TOOL_NAMES,
   canonicalPublicUrl,
   toolArgumentsDigest,
-  toolSetEqualsRule,
+  toolSetEqualsPlatformSchemas,
   type PlatformToolArguments,
   type PlatformToolName,
-  type PlatformToolsRule,
+  type PlatformToolsRule as LegacyPlatformToolsRule,
 } from './platform-tools.js';
 
 /**
@@ -60,10 +61,10 @@ export type RemoteExecutionRoute = ConfiguredRouteId;
 export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
- * The trusted scope's Provider Processing pin: selected v14 admits baseline analysis, enrolled background analysis within a
+ * The trusted scope's Provider Processing pin: selected v16 admits baseline analysis, enrolled background analysis within a
  * mandatory ceiling, editorial dialogue, review (with cross-deliverable consistency), writing, evaluation, and 润色 and
- * conflict-regeneration Suggestions on V4.1. Historical v5, v9, v10, v11 and v12 and the superseded web reservation v8 are
- * readable identities, not launch selections.
+ * conflict-regeneration Suggestions on V4.1, with the platform tools on review, writing and evaluation. Historical v5,
+ * v9, v10, v11, v12 and v14 and the superseded web reservation v8 are readable identities, not launch selections.
  */
 export type EgressPolicyPin =
   | {
@@ -74,7 +75,7 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14';
+      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16';
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     }
@@ -111,7 +112,28 @@ export type OutboundDataCategory = OutboundDataCategoryId;
 const MANUSCRIPT_EXCERPT_CATEGORIES: ReadonlySet<OutboundDataCategory> = new Set(['editor-selected-manuscript-excerpt', 'manuscript-conflict-region-excerpt']);
 
 /** The binding facts the gate compares against; a frozen subset of the persisted Execution Binding. */
+export type RuntimePlatformToolsRule = Omit<LegacyPlatformToolsRule, 'websearch'> & {
+  readonly websearch: LegacyPlatformToolsRule['websearch'] | {
+    readonly selection: 'user-configured';
+    readonly backends: ReadonlyArray<{ readonly id: string; readonly host: string; readonly credentialSlot: string }>;
+  };
+};
+type PlatformToolsRule = RuntimePlatformToolsRule;
+
+function legacySearchHost(rule: PlatformToolsRule): string {
+  return 'host' in rule.websearch ? rule.websearch.host : '';
+}
+
+export interface SearchBackendBinding {
+  readonly backendId: string;
+  readonly host: string;
+  readonly endpoint: string;
+  readonly credentialSlot: CredentialSlot;
+  readonly credentialReference: string;
+}
+
 export interface EgressBindingFacts {
+  readonly searchBackend?: SearchBackendBinding;
   readonly bindingDigest: string;
   readonly route: ExecutionRoute;
   readonly model: string;
@@ -152,6 +174,10 @@ export interface EgressBindingFacts {
  * live in the Research Snapshot Cache and are never logged.
  */
 export interface AdmittedToolResult {
+  readonly sourceKind?: 'tool';
+  readonly backendId?: string;
+  readonly host?: string;
+  readonly capturedAt?: string;
   readonly callId: string;
   readonly tool: PlatformToolName;
   readonly sourceUrl: string | null;
@@ -206,6 +232,7 @@ export interface TransmitTicket {
  * digest of the one query it may carry. Single-use: `EgressTicketBook.redeem` admits it once.
  */
 export interface SearchServiceTicket {
+  readonly backend?: SearchBackendBinding;
   readonly decision: 'call-search-service';
   readonly ticketId: string;
   readonly bindingDigest: string;
@@ -241,6 +268,7 @@ export type PlatformToolEgressDecision = SearchServiceDecision | PublicSourceDec
 interface TicketBookState {
   readonly bindingDigest: string;
   readonly rule: PlatformToolsRule;
+  readonly backend?: SearchBackendBinding;
   readonly currentBindingDigest: () => string | null;
   /** Each unredeemed ticket by id, as the exact frozen object the gate issued. */
   readonly outstanding: Map<string, PlatformToolTicket>;
@@ -275,6 +303,7 @@ export class EgressTicketBook {
     return new EgressTicketBook(TICKET_BOOK_KEY, {
       bindingDigest: binding.bindingDigest,
       rule,
+      ...(binding.searchBackend === undefined ? {} : { backend: binding.searchBackend }),
       currentBindingDigest: scope.currentBindingDigest,
       outstanding: new Map(),
     });
@@ -311,7 +340,24 @@ export function redeemEgressTicket(book: EgressTicketBook, ticket: PlatformToolT
   if (state.outstanding.get(ticket.ticketId) !== ticket) return null;
   state.outstanding.delete(ticket.ticketId);
   if (ticket.bindingDigest !== state.bindingDigest || state.currentBindingDigest() !== state.bindingDigest) return null;
+  if (ticket.decision === 'call-search-service' && ticket.backend !== undefined) searchCredentialReleases.add(ticket);
   return state.rule;
+}
+
+const searchCredentialReleases = new WeakSet<SearchServiceTicket>();
+/** A redeemed genuine search ticket authorizes one broker release, never a transmit-remote release. */
+export function consumeSearchCredentialRelease(ticket: SearchServiceTicket): boolean {
+  return searchCredentialReleases.delete(ticket);
+}
+
+function searchBackendAdmitted(binding: EgressBindingFacts, rule: PlatformToolsRule): boolean {
+  const backend = binding.searchBackend;
+  if (backend === undefined) return !('backends' in rule.websearch);
+  const declared = SEARCH_BACKENDS.find((entry) => entry.id === backend.backendId && entry.shipped);
+  const search: unknown = rule.websearch;
+  if (!isRecord(search) || !Array.isArray(search['backends']) || declared === undefined) return false;
+  return declared.host === backend.host && declared.endpoint === backend.endpoint && declared.credentialSlot === backend.credentialSlot &&
+    search['backends'].some((entry: unknown) => isRecord(entry) && entry['id'] === backend.backendId && entry['host'] === backend.host && entry['credentialSlot'] === backend.credentialSlot);
 }
 
 export type EgressDecision =
@@ -346,10 +392,14 @@ export function assistantToolCallDigest(content: ReadonlyArray<AssembledContentB
     : { type: block.type, text: block.text ?? null })));
 }
 
-/** Whether a binding carries a rule naming the platform tools under the one scope that may name them. */
+/**
+ * Whether a binding carries a rule naming the platform tools under a scope that may name them: developer-live (v16) and, since
+ * Provider Processing v17, ordinary-production. development-ci never names a tool.
+ */
 function platformToolsOf(binding: EgressBindingFacts): PlatformToolsRule | null {
   const rule = binding.platformTools ?? null;
-  return rule !== null && binding.policy.operationalScope === 'developer-live' ? rule : null;
+  const scope = binding.policy.operationalScope;
+  return rule !== null && (scope === 'developer-live' || scope === 'ordinary-production') ? rule : null;
 }
 
 /**
@@ -385,7 +435,7 @@ function evaluateToolMessage(
   const admitted = result === null || tool === undefined ? undefined : scope.admittedToolResults?.get(toolResultKey(result.callId, tool));
   if (result === null || tool === undefined || admitted === undefined || admitted.callId !== result.callId || admitted.tool !== tool ||
       sha256Hex(result.text) !== admitted.sha256 || Buffer.byteLength(result.text, 'utf8') !== admitted.byteCount ||
-      !toolResultSourceAdmitted(admitted, rule, scope)) {
+      !toolResultSourceAdmitted(admitted, rule, scope, binding)) {
     return refuse('payload-out-of-scope', `第 ${index + 1} 条工具结果不是本次尝试已取得的结果；未发送任何内容。`);
   }
   // One result per call: a second message answering the same call is not a result AI7 produced.
@@ -399,12 +449,12 @@ export function toolResultKey(callId: string, tool: PlatformToolName): string {
 }
 
 /** Whether a tool result's URL is one its tool may have read: the rule's search host, or a cited public page. */
-function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformToolsRule, scope: EgressAttemptScope): boolean {
+function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformToolsRule, scope: EgressAttemptScope, binding: EgressBindingFacts): boolean {
   if (admitted.sourceUrl === null) return true;
   if (admitted.tool === 'websearch') {
     try {
       const url = new URL(admitted.sourceUrl);
-      return url.protocol === 'https:' && url.hostname === rule.websearch.host;
+      return url.protocol === 'https:' && url.hostname === (binding.searchBackend?.host ?? legacySearchHost(rule));
     } catch {
       return false;
     }
@@ -459,7 +509,7 @@ export function evaluateEgress(
   // ADR 0080 §7.2: a payload may expose tools only when its tool set equals exactly the platform tools the binding's rule
   // names. A rule that names none — Provider Processing v9's — matches no tool set, so every tool is refused as before.
   const rule = platformToolsOf(binding);
-  if (payload.tools !== undefined && payload.tools.length > 0 && !toolSetEqualsRule(payload.tools, rule)) {
+  if (payload.tools !== undefined && payload.tools.length > 0 && !(rule !== null && toolSetEqualsPlatformSchemas(payload.tools))) {
     return refuse('tools-present', '组合运行时向模型暴露了规则未命名的工具；未发送任何内容。');
   }
   if ((payload.system ?? '') !== binding.systemPrompt) {
@@ -544,24 +594,24 @@ function platformToolPreconditions(binding: EgressBindingFacts, scope: EgressAtt
     return refuseTool('remote-route-denied-under-v1', 'development-ci · Provider Processing v1 允许 0 次实时传输；未发送任何内容。');
   }
   const rule = platformToolsOf(binding);
-  if (rule === null) {
+  if (rule === null || !binding.policy.liveTransmissionAllowed || binding.policy.authorizedLiveTransmissionCount !== 'bounded-by-run') {
     return refuseTool('platform-tools-not-named', '执行绑定的处理规则未命名平台工具；未发送任何内容。');
   }
   // A ticket goes only into a book the gate opened for exactly this binding and its rule: the rule a forwarder builds from
   // at redemption is the book's, so a decision over any other rule would name a host the request never goes to.
   const state = ticketBooks.get(book);
-  if (state === undefined || state.bindingDigest !== binding.bindingDigest || canonicalJson(state.rule) !== canonicalJson(rule)) {
+  if (state === undefined || state.bindingDigest !== binding.bindingDigest || canonicalJson(state.rule) !== canonicalJson(rule) || canonicalJson(state.backend ?? null) !== canonicalJson(binding.searchBackend ?? null)) {
     return refuseTool('ticket-book-foreign', '票据簿不是出口闸门为本执行绑定开立的；未发送任何内容。');
   }
   // Derived from the binding, never passed in by the call: the query's category is the binding's (ADR 0080 §7.2).
-  if (binding.outboundDataCategory !== PLATFORM_TOOL_OUTBOUND_CATEGORY) {
+  if (binding.outboundDataCategory !== PLATFORM_TOOL_OUTBOUND_CATEGORY && !(binding.policy.operationalScope === 'ordinary-production' && binding.searchBackend !== undefined)) {
     return refuseTool('outbound-category-mismatch', '平台工具只承载公开或合成材料，执行绑定的外发数据类别不是；未发送任何内容。');
   }
   if ((scope.breakerState?.() ?? 'intact') === 'tripped') {
     return refuseTool('circuit-breaker-tripped', '本单元的工具往返已触发熔断；未发送任何内容。');
   }
   const ceiling = scope.ceilingState?.() ?? 'unset';
-  if (ceiling === 'unset' || ceiling === 'not-applicable') {
+  if ((ceiling === 'unset' && binding.policy.operationalScope !== 'ordinary-production') || ceiling === 'not-applicable') {
     return refuseTool('run-budget-ceiling-unset', '平台工具要求非 unset 的任务运行预算上限；未发送任何内容。');
   }
   if (ceiling === 'reached') return refuseTool('run-budget-ceiling-reached', '任务运行预算上限已达到；未发送任何内容。');
@@ -585,10 +635,12 @@ export function evaluateSearchServiceCall(
 ): SearchServiceDecision {
   const admitted = platformToolPreconditions(binding, scope, book);
   if ('decision' in admitted) return admitted;
+  if (!searchBackendAdmitted(binding, admitted.rule)) return refuseTool('platform-tools-not-named', '冻结的联网检索后端不在本规则中；未发送任何内容。');
   const ticket = issueTicket<SearchServiceTicket>(admitted.state, {
+    ...(binding.searchBackend === undefined ? {} : { backend: binding.searchBackend }),
     decision: 'call-search-service',
     bindingDigest: binding.bindingDigest,
-    host: admitted.rule.websearch.host,
+    host: binding.searchBackend?.host ?? legacySearchHost(admitted.rule),
     argumentsDigest: toolArgumentsDigest(request.arguments),
   });
   return { decision: 'call-search-service', ticket };

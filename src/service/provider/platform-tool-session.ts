@@ -1,3 +1,8 @@
+import type { ProviderModelProfile } from './model-profile.js';
+import type { DevelopmentValidationIntent } from '../../shared/protocol.js';
+import type { CredentialBroker } from './credential-broker.js';
+import type { PlatformToolCallItem, PlatformToolCallResult } from './live-transmission.js';
+import type { ResearchSnapshot } from './research-snapshot-cache.js';
 import { sha256Hex } from '../analysis/canonical.js';
 import type { HarnessTurnOutcome, PlatformToolExecution, PlatformToolOwner } from '../harness/primary-agent-harness.js';
 import { AI7_FAILURE_CODES } from './classification.js';
@@ -34,14 +39,36 @@ import { authorizeSearchCall, sendSearchCall } from './search-service.js';
  * It cannot be constructed for a binding whose rule names no platform tools — every binding under the selected Provider
  * Processing v5 — so nothing in this module is reachable until a policy revision naming them is selected (S87-f3b).
  */
+/** The sole evidence bootstrap; ordinary registration always requires declared exact-model evidence. */
+export function platformToolModelProfile(profile: ProviderModelProfile, scope: string, validation: DevelopmentValidationIntent | null): ProviderModelProfile {
+  const bootstrap = scope === 'developer-live' && validation?.family === 'policy-selection' && validation.case === 'wave6-tool-evidence-bootstrap';
+  if (bootstrap && profile.capabilities.toolCalling === 'function') throw Object.assign(new Error('该模型已具备工具证据；不重复引导验证。'), { code: 'PLATFORM_TOOL_EVIDENCE_ALREADY_ESTABLISHED' });
+  if (bootstrap && profile.route === 'opencode-go' && profile.model === 'deepseek-v4.1-flash') return { ...profile, capabilities: { ...profile.capabilities, toolCalling: 'function' } };
+  if (profile.capabilities.toolCalling !== 'function') throw Object.assign(new Error('当前模型尚无工具调用证据；未注册联网工具。'), { code: 'PLATFORM_TOOL_MODEL_NOT_ADMITTED' });
+  return profile;
+}
+
 export class PlatformToolSession implements PlatformToolOwner {
   readonly #binding: EgressBindingFacts;
   readonly #base: Pick<EgressAttemptScope, 'currentBindingDigest' | 'acceptedOutputDigests' | 'ceilingState'>;
   readonly #fetch: PlatformToolFetch;
   readonly #admitHost: TicketHostAdmission;
-  readonly #cache: ProviderResultCache;
-  readonly #snapshots: ResearchSnapshotCache;
+  readonly #cache: ProviderResultCache | null;
+  readonly #snapshots: ResearchSnapshotCache | null;
   readonly #purpose: string;
+  readonly #broker: CredentialBroker | undefined;
+  readonly #onUsage: ((usage: { inputTokens: number; outputTokens: number }) => void) | undefined;
+  readonly #runResults = new Map<string, { readonly text: string; readonly sourceUrl: string | null }>();
+  #inFlight = false;
+  #refusedRoundTrips = 0;
+  readonly #oneQueryPerUnit: boolean;
+  #unitSearchQuery: string | null = null;
+  #unitSearchHasResult = false;
+  #unitSearchRefused = false;
+  readonly #evidenceOnly: boolean;
+  evidenceNeedsCommander = false;
+  readonly usage = { requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: {} as Record<string, number>, refusedSearchCalls: 0, fetchCount: 0, fetchBytes: 0 };
+  readonly provenance: Array<{ sourceKind: 'tool'; backendId: string | null; host: string; capturedAt: string; argumentsDigest: string; responseDigest: string }> = [];
   /** Where a search goes, as the rule names it: the Research Snapshot Cache never answers one service's query with another's. */
   readonly #searchOrigin: string;
   readonly #breaker: PlatformToolBreaker;
@@ -50,6 +77,13 @@ export class PlatformToolSession implements PlatformToolOwner {
   readonly #admittedToolResults = new Map<string, AdmittedToolResult>();
   readonly #citations = new Set<string>();
   readonly #executedCallIds = new Set<string>();
+  /** What the unit in flight's tools brought back, kept for the External Evidence Retention Procedure (Issue #425, S70). */
+  #unitCaptures: Array<{ readonly tool: PlatformToolName; readonly snapshot: ResearchSnapshot }> = [];
+  #unitSearches = 0;
+  /** Each search answer of this attempt by its digest, so a unit that reuses one keeps the snapshot it read. */
+  readonly #searchSnapshots = new Map<string, ResearchSnapshot>();
+  /** Share both successful pages and failures with retention: a failed model fetch is never retried by the procedure. */
+  readonly #fetchedPages = new Map<string, ResearchSnapshot | { readonly failed: string }>();
 
   constructor(deps: {
     readonly binding: EgressBindingFacts;
@@ -57,22 +91,29 @@ export class PlatformToolSession implements PlatformToolOwner {
     readonly fetch: PlatformToolFetch;
     /** Per-ticket host admission: the network denial's `admitTicketHost`, keyed by each fetch ticket's id. */
     readonly admitHost: TicketHostAdmission;
-    readonly cache: ProviderResultCache;
-    readonly snapshots: ResearchSnapshotCache;
+    readonly cache?: ProviderResultCache | null;
+    readonly snapshots?: ResearchSnapshotCache | null;
     /** The test item purpose every call of this attempt is recorded under. */
     readonly purpose: string;
     readonly breaker?: PlatformToolBreaker;
+    readonly broker?: CredentialBroker;
+    readonly evidenceSearchRoundTripOnly?: boolean;
+    readonly onUsage?: (usage: { inputTokens: number; outputTokens: number }) => void;
   }) {
     const rule = deps.binding.platformTools ?? null;
-    if (rule === null || deps.binding.policy.operationalScope !== 'developer-live') throw new Error('PLATFORM_TOOLS_NOT_NAMED');
+    if (rule === null || !['developer-live', 'ordinary-production'].includes(deps.binding.policy.operationalScope)) throw new Error('PLATFORM_TOOLS_NOT_NAMED');
     this.#binding = deps.binding;
+    this.#oneQueryPerUnit = 'backends' in rule.websearch;
     this.#base = deps.scope;
     this.#fetch = deps.fetch;
     this.#admitHost = deps.admitHost;
-    this.#cache = deps.cache;
-    this.#snapshots = deps.snapshots;
+    this.#cache = deps.cache ?? null;
+    this.#snapshots = deps.snapshots ?? null;
     this.#purpose = deps.purpose;
-    this.#searchOrigin = `${rule.websearch.service}@${rule.websearch.host}`;
+    this.#evidenceOnly = deps.evidenceSearchRoundTripOnly === true;
+    this.#broker = deps.broker;
+    this.#onUsage = deps.onUsage;
+    this.#searchOrigin = `${deps.binding.searchBackend?.backendId ?? ('service' in rule.websearch ? rule.websearch.service : '')}@${deps.binding.searchBackend?.host ?? ('host' in rule.websearch ? rule.websearch.host : '')}`;
     this.#breaker = deps.breaker ?? new PlatformToolBreaker();
     // The gate opens this attempt's book for this binding; every redemption re-reads the attempt's current binding (#676).
     this.#book = EgressTicketBook.open(deps.binding, { currentBindingDigest: () => this.#base.currentBindingDigest() });
@@ -99,8 +140,10 @@ export class PlatformToolSession implements PlatformToolOwner {
    * refuses the unit's next model call (`circuit-breaker-tripped`), so its turn ends `failed` with the distinct
    * `AI7_PLATFORM_TOOL_BREAKER_TRIPPED`, and the execution owner settles the unit through `unitEnd` instead of retrying.
    */
-  get unitDisclosure(): '联网核查未完成' | null {
-    return this.#breaker.state === 'tripped' ? '联网核查未完成' : null;
+  get unitDisclosure(): '联网核查已完成' | '联网核查未完成' | null {
+    if (this.#breaker.state === 'tripped') return '联网核查未完成';
+    return this.#unitSearchQuery !== null || this.#unitSearchRefused
+      ? this.#unitSearchHasResult ? '联网核查已完成' : '联网核查未完成' : null;
   }
 
   /**
@@ -120,7 +163,60 @@ export class PlatformToolSession implements PlatformToolOwner {
 
   /** Start a unit: its breaker is intact and no call is a duplicate yet. Citations persist across the attempt. */
   startUnit(): void {
+    this.#unitCaptures = [];
+    this.#unitSearches = 0;
     this.#breaker.startUnit();
+    this.#unitSearchQuery = null;
+    this.#unitSearchHasResult = false;
+    this.#unitSearchRefused = false;
+  }
+
+  /**
+   * What the unit in flight's tools brought back (Issue #425, S70): every search answer and fetched page it read, in order, as the
+   * Research Snapshots they were answered from, and how many of its searches answered. Read when the unit settles, before
+   * `startUnit` begins the next one.
+   */
+  get unitCaptures(): { readonly searches: ReadonlyArray<ResearchSnapshot>; readonly fetches: ReadonlyArray<ResearchSnapshot>; readonly searchCalls: number } {
+    return {
+      searches: this.#unitCaptures.filter((entry) => entry.tool === 'websearch').map((entry) => entry.snapshot),
+      fetches: this.#unitCaptures.filter((entry) => entry.tool === 'webfetch').map((entry) => entry.snapshot),
+      searchCalls: this.#unitSearches,
+    };
+  }
+
+  /**
+   * One retention fetch (ADR 0079 §3; SRC-013, EGR-003): AI7 fetching a page the model cited, after the unit's turn and outside
+   * the model's tool loop, so the source is retained whole. It is the model's `webfetch` in every other respect — cited first,
+   * decided by the same gate under the attempt's current binding, a single-use ticket, the host open only for it, answered
+   * from the Research Snapshot Cache or sent once under the same test item purpose — but it is not one of the model's round
+   * trips and never enters the model's context. Bounded by the citations: the caller asks once per cited page. A refusal or a
+   * failure is returned, never retried.
+   */
+  async retain(url: string, signal?: AbortSignal): Promise<ResearchSnapshot | { readonly failed: string }> {
+    if (this.#evidenceOnly) return { failed: '此证据项不取回网页。' };
+    const canonical = canonicalPublicUrl(url);
+    if (canonical === null) return { failed: '不是规范的公开 https 地址；未取回。' };
+    const prior = this.#fetchedPages.get(canonical);
+    if (prior !== undefined) return prior;
+    this.#fetchedPages.set(canonical, { failed: '本次运行已尝试此来源；未能取回，不重试。' });
+    this.cite(canonical);
+    const decision = evaluatePublicSourceFetch({ arguments: { tool: 'webfetch', url: canonical } }, this.#binding, this.egressScope, this.#book);
+    if (decision.decision !== 'fetch-public-source') return { failed: decision.detail };
+    try {
+      const settled = await this.#settle(
+        { kind: 'fetch', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: 'webfetch' },
+        {
+          authorize: () => authorizePublicFetch({ ticket: decision.ticket, book: this.#book }),
+          send: (authorized) => sendPublicFetch(authorized, { fetch: this.#fetch, admitHost: this.#admitHost, ...(signal === undefined ? {} : { signal }) }),
+        });
+      if (settled.replayed) this.#book.revoke(decision.ticket);
+      const result = settled.snapshot ?? { failed: `未能取回该来源（状态 ${settled.status}）；不重试。` };
+      this.#fetchedPages.set(canonical, result);
+      return result;
+    } catch (error) {
+      const code = error !== null && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'PLATFORM_TOOL_FAILED';
+      return { failed: `取回失败（${code}）；不重试。` };
+    }
   }
 
   /** Record a URL the model cited; only a cited or search-returned URL may be fetched (ADR 0079 §4.3). */
@@ -139,6 +235,9 @@ export class PlatformToolSession implements PlatformToolOwner {
     if ([...this.#admittedToolResults.values()].some((admitted) => admitted.callId === result.callId)) return;
     this.#admittedToolResults.set(toolResultKey(result.callId, result.tool), {
       callId: result.callId,
+      sourceKind: 'tool',
+      ...(result.tool === 'websearch' && this.#binding.searchBackend !== undefined ? { backendId: this.#binding.searchBackend.backendId } : {}),
+      ...(result.sourceUrl === null ? {} : { host: new URL(result.sourceUrl).hostname, capturedAt: new Date().toISOString() }),
       tool: result.tool,
       sourceUrl: result.sourceUrl,
       sha256: sha256Hex(result.text),
@@ -147,33 +246,122 @@ export class PlatformToolSession implements PlatformToolOwner {
   }
 
   async execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
-    if (this.#executedCallIds.has(call.callId)) return refusal('调用标识已在本次尝试中使用过；不执行。');
+    if (this.#inFlight) return this.#refuseCounted('平台工具必须顺序调用。');
+    this.#inFlight = true;
+    try { return await this.#execute(call); }
+    finally { this.#inFlight = false; }
+  }
+
+  /**
+   * A refused call is still one of the unit's tool round trips (ADR 0080 §7.4): it counts toward the breaker, so a model that
+   * keeps asking — a different query after the unit's one, a malformed or repeated call — ends at 128 with 联网核查未完成
+   * instead of looping; the refusal itself never trips the breaker earlier.
+   */
+  #refuseCounted(text: string): { readonly text: string; readonly sourceUrl: null } {
+    this.#refusedRoundTrips += 1;
+    return this.#breaker.observe(`refused:${this.#refusedRoundTrips}`) === 'tripped' ? refusal('联网核查未完成：本单元的工具往返已达到熔断上限。') : refusal(text);
+  }
+
+  async #settle<Authorized>(item: PlatformToolCallItem, call: { authorize(): Authorized; send(authorized: Authorized): Promise<PlatformToolCallResult> }): Promise<{ snapshot: ResearchSnapshot | null; status: number; replayed: boolean }> {
+    const measured = { authorize: call.authorize, send: async (authorized: Authorized): Promise<PlatformToolCallResult> => {
+      if (this.#evidenceOnly && item.kind === 'search-call' && Object.values(this.usage.searchCalls).some((count) => count > 0)) {
+        this.evidenceNeedsCommander = true;
+        throw Object.assign(new Error('本证据项需要第二次新检索；等待 Commander。'), { code: 'PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED' });
+      }
+      this.usage.requests += 1;
+      if (item.kind === 'search-call') {
+        const id = this.#binding.searchBackend?.backendId ?? this.#searchOrigin;
+        this.usage.searchCalls[id] = (this.usage.searchCalls[id] ?? 0) + 1;
+      } else this.usage.fetchCount += 1;
+      const result = await call.send(authorized);
+      if (item.kind === 'fetch') this.usage.fetchBytes += result.bytes.byteLength;
+      if (this.#binding.searchBackend?.backendId === 'search-deepseek' && item.kind === 'search-call') {
+        try {
+          const body = JSON.parse(new TextDecoder().decode(result.bytes)) as { usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number } };
+          const inputTokens = (body.usage?.input_tokens ?? 0) + (body.usage?.cache_read_input_tokens ?? 0);
+          const outputTokens = body.usage?.output_tokens ?? 0;
+          if (Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isSafeInteger(outputTokens) && outputTokens >= 0) {
+            this.usage.inputTokens += inputTokens; this.usage.outputTokens += outputTokens; this.#onUsage?.({ inputTokens, outputTokens });
+          }
+        } catch { /* No vendor payload leaves this boundary. */ }
+      }
+      this.provenance.push({ sourceKind: 'tool', backendId: item.kind === 'fetch' ? null : this.#binding.searchBackend?.backendId ?? null,
+        host: item.host, capturedAt: new Date().toISOString(), argumentsDigest: item.argumentsDigest, responseDigest: sha256Hex(result.bytes) });
+      return result;
+    } };
+    if (this.#cache !== null && this.#snapshots !== null) return platformToolCallOnce(this.#cache, this.#snapshots, item, measured);
+    const result = await measured.send(measured.authorize());
+    return { status: result.status, replayed: false, snapshot: result.status !== 200 || result.text === null ? null : {
+      kind: item.kind, origin: item.origin, argumentsDigest: item.argumentsDigest, url: result.url, retrievedAt: new Date().toISOString(), status: result.status,
+      contentType: result.contentType, responseDigest: sha256Hex(result.bytes), responseBytes: result.bytes.byteLength, bodyBase64: Buffer.from(result.bytes).toString('base64'), text: result.text,
+    } };
+  }
+
+  async #execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
+    if (this.#executedCallIds.has(call.callId)) return this.#refuseCounted('调用标识已在本次尝试中使用过；不执行。');
     this.#executedCallIds.add(call.callId);
     const args = canonicalToolArguments(call.tool, call.arguments);
-    if (args === null) return refusal('参数不是这个工具接受的形式。');
+    if (args === null) return this.#refuseCounted('参数不是这个工具接受的形式。');
+    if (this.#evidenceOnly && args.tool === 'webfetch') return this.#refuseCounted('此最小证据项只执行一次检索往返；不取回网页。');
+    const digest = toolArgumentsDigest(args);
+    if (args.tool === 'websearch' && this.#oneQueryPerUnit) {
+      if (this.#unitSearchQuery !== null && this.#unitSearchQuery !== digest) {
+        this.usage.refusedSearchCalls += 1;
+        this.#unitSearchRefused = true;
+        // The model is told only that the unit's one search is spent, never that anything was verified.
+        return this.#refuseCounted(`本单元的检索次数已用完；请使用已有结果。${this.unitDisclosure === '联网核查未完成' ? '联网核查未完成。' : ''}`);
+      }
+      this.#unitSearchQuery = digest;
+      const reused = this.#runResults.get(digest);
+      if (reused !== undefined) {
+        if (this.#breaker.observe(digest) === 'tripped') return refusal('联网核查未完成：本单元的工具往返已达到熔断上限。');
+        this.#unitSearchHasResult = reused.sourceUrl !== null && reused.text !== '[]';
+        const kept = this.#searchSnapshots.get(digest);
+        if (kept !== undefined) { this.#unitCaptures.push({ tool: 'websearch', snapshot: kept }); this.#unitSearches = 1; }
+        return reused;
+      }
+    }
     const verdict = this.#breaker.observe(toolArgumentsDigest(args));
     if (verdict === 'duplicate') return refusal('同一工具调用已在本单元内执行过；不再重复。请使用已有结果。');
     if (verdict === 'tripped') return refusal('联网核查未完成：本单元的工具往返已达到熔断上限。');
+    if (args.tool === 'webfetch') {
+      const fetched = this.#fetchedPages.get(args.url);
+      if (fetched !== undefined) {
+        if ('failed' in fetched) return refusal(fetched.failed);
+        this.#unitCaptures.push({ tool: 'webfetch', snapshot: fetched });
+        return { text: fetched.text, sourceUrl: fetched.url };
+      }
+      this.#fetchedPages.set(args.url, { failed: '本次运行已尝试此来源；未能取回，不重试。' });
+    }
+    const prior = this.#runResults.get(digest);
+    if (prior !== undefined && !(this.#cache !== null && this.#snapshots !== null && prior.sourceUrl !== null)) return prior;
     const scope = this.egressScope;
+    this.#runResults.set(digest, refusal('本次运行已尝试此请求；不重试。'));
     try {
       if (args.tool === 'websearch') {
         // The call brings only its arguments: the gate derives the host and the category from the rule and the binding.
         const decision = evaluateSearchServiceCall({ arguments: args }, this.#binding, scope, this.#book);
         if (decision.decision !== 'call-search-service') return refusal(decision.detail);
-        const settled = await platformToolCallOnce(this.#cache, this.#snapshots,
+        const settled = await this.#settle(
           { kind: 'search-call', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: this.#searchOrigin },
           {
             authorize: () => authorizeSearchCall({ ticket: decision.ticket, book: this.#book, arguments: args }),
-            send: (authorized) => sendSearchCall(authorized, this.#fetch, call.signal),
+            send: (authorized) => sendSearchCall(authorized, this.#fetch, call.signal, this.#broker === undefined ? undefined : { broker: this.#broker, admitHost: this.#admitHost, modelRole: 'Main Editorial Role' }),
           });
         if (settled.replayed) this.#book.revoke(decision.ticket);
         if (settled.snapshot === null) return refusal(`搜索服务没有返回可用结果（状态 ${settled.status}）。`);
         for (const url of urlsIn(settled.snapshot.text)) this.cite(url);
-        return { text: settled.snapshot.text, sourceUrl: settled.snapshot.url };
+        const result = { text: settled.snapshot.text, sourceUrl: settled.snapshot.url };
+        this.#unitSearchHasResult = result.text !== '[]';
+        this.#runResults.set(digest, result);
+        this.#searchSnapshots.set(digest, settled.snapshot);
+        this.#unitCaptures.push({ tool: 'websearch', snapshot: settled.snapshot });
+        this.#unitSearches += 1;
+        return result;
       }
       const decision = evaluatePublicSourceFetch({ arguments: args }, this.#binding, scope, this.#book);
       if (decision.decision !== 'fetch-public-source') return refusal(`${decision.detail}请改用下一条引用。`);
-      const settled = await platformToolCallOnce(this.#cache, this.#snapshots,
+      const settled = await this.#settle(
         { kind: 'fetch', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: 'webfetch' },
         {
           authorize: () => authorizePublicFetch({ ticket: decision.ticket, book: this.#book }),
@@ -181,7 +369,11 @@ export class PlatformToolSession implements PlatformToolOwner {
         });
       if (settled.replayed) this.#book.revoke(decision.ticket);
       if (settled.snapshot === null) return refusal(`未能取回该来源（状态 ${settled.status}）；请改用下一条引用。`);
-      return { text: settled.snapshot.text, sourceUrl: settled.snapshot.url };
+      const result = { text: settled.snapshot.text, sourceUrl: settled.snapshot.url };
+      this.#runResults.set(digest, result);
+      this.#fetchedPages.set(args.url, settled.snapshot);
+      this.#unitCaptures.push({ tool: 'webfetch', snapshot: settled.snapshot });
+      return result;
     } catch (error) {
       const code = error !== null && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'PLATFORM_TOOL_FAILED';
       return refusal(`工具调用失败（${code}）；不重试。`);

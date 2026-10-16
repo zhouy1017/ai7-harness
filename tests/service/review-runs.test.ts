@@ -1502,12 +1502,14 @@ describe('a Review Run over the real store on exact sample1', () => {
       const before = workspace(session, book).categories.find((category) => category.categoryId === FACTUAL)!;
       expect(before.available).toBe(true);
       expect(before.scopes).toMatchObject({ whole: { available: true }, chapters: { available: false, unavailableReason: FACTUAL_CHAPTERS_REASON } });
-      expect(before.basisStatement).toContain('会使用搜索引擎');
+      expect(before.basisStatement).toContain('使用用户所选的联网检索后端');
 
       const prepared = prepare(session, book, [FACTUAL], WHOLE);
       expect(prepared.categories[0]!.modeLabel).toBe('全书事实核查');
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.reviewRunId }).service.decision).toContain('事实核查 · 未联网核查');
       const run = await authorizeAndDrive(session, book, prepared);
       expect(run.state).toBe('settled');
+      expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }).service.decision).toContain('事实核查 · 未联网核查');
       const revision = session.store.inspectFactualReview(book.bookId).resultSetRevision!;
       expect(run.findings).toHaveLength(revision.findings.length);
       const tiers = new Map(revision.findings.map((finding) => [finding.quote, finding.severity] as const));

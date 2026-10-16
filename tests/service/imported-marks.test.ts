@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -979,7 +980,7 @@ describe('schema revision 28 over the real store', () => {
       for (const relation of [...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER]) database.exec(`DROP TABLE ${relation}`);
       for (const relation of IMPORTED_MARK_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
       downgradeProposalChangeItemsToRevision27(database);
-      database.exec(`PRAGMA user_version = ${IMPORT_RETENTION_SCHEMA_VERSION}`);
+      execPre74Fixture(database, `PRAGMA user_version = ${IMPORT_RETENTION_SCHEMA_VERSION}`);
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
       expect(proposalChangeItemsShape(database)).toBe('revision-27');
       return {

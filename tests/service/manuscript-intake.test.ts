@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
@@ -126,7 +127,7 @@ function downgradeToRevision17(databasePath: string): void {
   const database = new DatabaseSync(databasePath);
   try {
     database.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;');
-    database.exec(`BEGIN IMMEDIATE;
+    execPre74Fixture(database, `BEGIN IMMEDIATE;
       DROP TRIGGER abandonment_cleanup_block_source_insert;
       DROP TRIGGER abandonment_cleanup_block_source_update;
       DROP TRIGGER abandonment_cleanup_block_source_update_v5;
@@ -1219,7 +1220,7 @@ describe('schema revision 18 over the real store', () => {
 function downgradeToRevision18(databasePath: string): void {
   const database = new DatabaseSync(databasePath);
   try {
-    database.exec(`BEGIN IMMEDIATE;
+    execPre74Fixture(database, `BEGIN IMMEDIATE;
       ALTER TABLE source_versions DROP COLUMN working_object_digest;
       ALTER TABLE source_versions DROP COLUMN converter_identity;
       ALTER TABLE import_drafts DROP COLUMN working_object_digest;

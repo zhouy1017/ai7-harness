@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -89,12 +90,12 @@ describe('one model question per Run unit', () => {
     store!.close(); store = undefined;
     const db = new DatabaseSync(resolve(roots.dataRoot, 'store', 'ai7.sqlite'));
     const before = db.prepare('SELECT request_id, canonical_json, sha256 FROM analysis_clarification_requests').all();
-    db.exec('ALTER TABLE analysis_clarification_requests DROP COLUMN model_question_json; PRAGMA user_version = 72');
+    execPre74Fixture(db, 'ALTER TABLE analysis_clarification_requests DROP COLUMN model_question_json; PRAGMA user_version = 72');
     db.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const read = new DatabaseSync(resolve(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
-      expect(read.prepare('PRAGMA user_version').get()!.user_version).toBe(73);
+      expect(read.prepare('PRAGMA user_version').get()!.user_version).toBe(75);
       expect(read.prepare('SELECT request_id, canonical_json, sha256 FROM analysis_clarification_requests').all()).toEqual(before);
       expect(read.prepare('SELECT model_question_json FROM analysis_clarification_requests').get()!.model_question_json).toBeNull();
     } finally { read.close(); }

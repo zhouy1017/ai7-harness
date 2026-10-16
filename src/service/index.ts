@@ -26,7 +26,7 @@ import {
   type ServiceSuccessResponse,
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
-import { armHostAllowanceSet, armSingleHostAllowance, installNodeNetworkDenial } from '../shared/network-denial.js';
+import { armHostAllowanceSet, armSingleHostAllowance, armPerTicketHostAdmission, admitTicketHost, installNodeNetworkDenial } from '../shared/network-denial.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
 import {
   DEVELOPER_LIVE_POLICY_BINDING,
@@ -205,6 +205,7 @@ async function dispatch(
    * results: under ordinary-production the route new Tasks use; under every other scope the launch's own, unchanged.
    */
   modelServiceChanged: () => Promise<LaunchPolicyProjection> = async () => launchPolicy,
+  probeBackend: (id: string) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
@@ -231,6 +232,17 @@ async function dispatch(
         op: request.op,
         result: store.getHistoricalRevision(request.input.revisionId, request.input.cursor),
       };
+    case 'getSearchBackendSettings':
+      return { id: request.id, ok: true, op: request.op, result: store.getSearchBackendSettings() };
+    case 'selectSearchBackend':
+      store.selectSearchBackend(request.input.backendId);
+      return { id: request.id, ok: true, op: request.op, result: store.getSearchBackendSettings() };
+    case 'saveSearchBackendCredential':
+      return { id: request.id, ok: true, op: request.op, result: store.saveSearchBackendCredential(request.input.backendId, request.input.credentialReference, request.input.credentialOperationState) };
+    case 'removeSearchBackendCredential':
+      return { id: request.id, ok: true, op: request.op, result: store.saveSearchBackendCredential(request.input.backendId, null, 'missing') };
+    case 'probeSearchBackend':
+      return { id: request.id, ok: true, op: request.op, result: await probeBackend(request.input.backendId) };
     case 'getModelServiceStoredState':
       return {
         id: request.id,
@@ -740,6 +752,10 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
     case 'addLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: await store.addLibraryMaterial(request.input) };
+    case 'inspectResearchEvidence':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectResearchEvidence(request.input) };
+    case 'saveEvidenceAsMaterial':
+      return { id: request.id, ok: true, op: request.op, result: await store.saveEvidenceAsMaterial(request.input) };
     case 'decideLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
     case 'inspectLearningMaterials':
@@ -1722,6 +1738,7 @@ async function run(): Promise<void> {
       return { host: url.hostname, port: url.port === '' ? 443 : Number(url.port) };
     }));
   }
+  if (launchForm.trustedOperationalScope === 'developer-live' || launchForm.trustedOperationalScope === 'ordinary-production') armPerTicketHostAdmission();
   installNodeNetworkDenial();
   reachServiceStartup('process');
   const [
@@ -1877,6 +1894,34 @@ async function run(): Promise<void> {
     store.initialEvaluationLedger.bindLaunch(launch);
     harness = await mountDormantHarness();
     jobs = new CooperativeJobOwner(store);
+    const [{ searchBackend }, { probeSearchBackend, SEARCH_BACKEND_PROBE_QUERY, platformToolsFromProjection }, { CredentialBroker }, { readPlatformToolsRule }, { canonicalJson, sha256Hex }, { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES }] = await Promise.all([
+      import('./provider/search-backends/index.js'), import('./provider/search-service.js'), import('./provider/credential-broker.js'), import('./provider/platform-tools.js'), import('./analysis/canonical.js'), import('../shared/provider-configuration.generated.js'),
+    ]);
+    const probeBroker = new CredentialBroker(createKeyringSecretResolver(), { developmentReferences: production === null ? 'admitted' : 'refused' });
+    const probeBackend = async (id: string): Promise<import('../shared/protocol.js').SearchBackendProbeProjection> => {
+      const adapter = searchBackend(id);
+      if (launchForm.trustedOperationalScope === 'development-ci') {
+        // Provider-free settings probe: the same adapter reads a synthetic public title and URL; no credential, host or native fetch.
+        const hit = { title: 'World Book and Copyright Day', name: 'World Book and Copyright Day', url: 'https://www.unesco.org/en/days/world-book-and-copyright' };
+        const hits = adapter.readResults(200, 'application/json', JSON.stringify({ results: [hit], web: { results: [hit] }, webPages: { value: [hit] }, content: [{ type: 'web_search_tool_result', content: [{ ...hit, type: 'web_search_result' }] }] }));
+        return { backendId: id, reachable: true, latencyMs: 0, resultCount: hits?.length ?? 0, results: (hits ?? []).slice(0, 3).map((hit) => ({ title: hit.title, url: hit.url })), failure: null };
+      }
+      if (launchForm.trustedOperationalScope !== 'developer-live' && launchForm.trustedOperationalScope !== 'ordinary-production') throw new StoreError('SEARCH_PROBE_NOT_ADMITTED', '当前环境不允许测试检索。');
+      const rule = launchPolicy.providerProcessing.admittedRules.find((entry) => 'platformTools' in entry && entry.platformTools !== null);
+      const tools = platformToolsFromProjection(rule);
+      if (tools === null || rule === undefined) throw new StoreError('SEARCH_PROBE_NOT_ADMITTED', '当前策略未准许测试检索。');
+      const connection = store!.getSearchBackendConnections().find((entry) => entry.backendId === id)!;
+      // A removed production key keeps its row's reference with state `missing`: only a `ready` key is probed.
+      const reference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot]
+        : connection.credentialOperationState === 'ready' ? connection.credentialReference : null;
+      if (reference === null) throw new StoreError('SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
+      return probeSearchBackend({ broker: probeBroker, fetch: modelServiceFetch, admitHost: admitTicketHost, binding: {
+        bindingDigest: sha256Hex(canonicalJson({ backendId: id, reference, query: SEARCH_BACKEND_PROBE_QUERY, policy: launchPolicy.providerProcessing.version })),
+        route: rule.route as import('./provider/egress-gate.js').ExecutionRoute, model: rule.model, systemPrompt: '', admittedUserMessages: new Set(), outboundDataCategory: 'public-or-synthetic',
+        policy: { operationalScope: launchForm.trustedOperationalScope, providerProcessingVersion: launchPolicy.providerProcessing.version, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' } as import('./provider/egress-gate.js').EgressPolicyPin,
+        platformTools: tools, searchBackend: { backendId: id, host: adapter.declaration.host!, endpoint: adapter.declaration.endpoint!, credentialSlot: adapter.declaration.credentialSlot, credentialReference: reference },
+      } });
+    };
     const guardedStore = store;
     analysisExecution = new BaselineAnalysisExecutionOwner({
       ledger: store.baselineAnalysisLedger,
@@ -1891,6 +1936,8 @@ async function run(): Promise<void> {
       // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
       readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
       materialGuard: (runRecordId, ledger) => guardedStore.materialGuard(runRecordId, ledger),
+      // External Evidence Retention (Issue #425, S70): each research unit's retained sources, kept as the unit settles.
+      researchEvidence: (input) => { guardedStore.recordResearchEvidence(input); },
     });
     // Startup reconciliation (Issue #422, S76b; CONT-014): a baseline Run this service's predecessor left under way has
     // nothing running it now. It settles 已暂停 or 任务已中断 · 可续行 before any request is read; one left cancelling is
@@ -2064,7 +2111,7 @@ async function run(): Promise<void> {
       let response: ServiceResponse;
       try {
         response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, request, importControl, launchPolicy, connectivity,
-          background, modelServiceChanged);
+          background, modelServiceChanged, probeBackend);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();
