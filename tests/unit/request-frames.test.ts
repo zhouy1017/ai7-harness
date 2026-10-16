@@ -1375,7 +1375,7 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '', channel: '', requirements: '一千字以内' } },
       { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: [randomUUID(), randomUUID()] } },
       { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: [] } },
-      { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: Array.from({ length: 16 }, () => randomUUID()) } },
+      { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: Array.from({ length: 4 }, () => randomUUID()) } },
       { op: 'authorizeWritingTask', input: { bookId, taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(64) } },
       { op: 'createWritingDraft', input: { bookId, revisionId: recordId } },
       // 快速开始 of a writing Task (S84b): the Task just prepared, its exact plan, and the rule version.
@@ -1420,6 +1420,8 @@ describe('decodeRequest rejects malformed frames', () => {
       ['prepareWritingTask', { bookId, typeId: 'promotion-article', audience: '读者', channel: '公'.repeat(1_001), requirements: null }],
       ['prepareWritingTask', { bookId, typeId: 'promotion-article', audience: '读者', channel: '公众号', requirements: '' }],
       ['prepareWritingTask', { bookId: 'book', typeId: 'promotion-article', audience: '读者', channel: '公众号', requirements: null }],
+      // At most what the service takes (Issue #759): four are admitted, a fifth is refused at the frame.
+      ['prepareWritingTask', { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: Array.from({ length: 5 }, () => randomUUID()) }],
       ['prepareWritingTask', { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: Array.from({ length: 17 }, () => randomUUID()) }],
       ['prepareWritingTask', { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: ['not-a-uuid'] }],
       ['prepareWritingTask', { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: randomUUID() }],
