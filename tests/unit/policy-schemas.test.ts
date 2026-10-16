@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all thirty-five current and historical pairs and validates every one at this base', () => {
+  it('discovers all thirty-eight current and historical pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(35);
+    expect(pairs).toHaveLength(38);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(35);
+    expect(results).toHaveLength(38);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -688,5 +688,104 @@ describe('Provider Processing v20, v21 and active-set v14 schemas: the house rev
     const unpinned = structuredClone(policyData) as any;
     unpinned.activePolicies['provider-processing-policy'].scopePins['developer-live'].sha256 = '0'.repeat(64);
     expect(() => validatePolicyDocument(unpinned, schemaData)).toThrow();
+  });
+});
+
+describe('Provider Processing v22, v23 and active-set v15 schemas: custom analysis and Series Knowledge excerpts (Issue #920, slice 7p)', () => {
+  const TEMPLATE = 'editor-authored-question-template';
+  const SERIES = 'series-knowledge-excerpt';
+  const ruleOf = (policy: any, ruleId: string) => policy.decision.providerAllowRules.find((rule: any) => rule.ruleId === ruleId);
+  const scopes = [
+    ['v22', 'developer-live-public-samplebook-reference-free-review', 'developer-live-public-samplebook-custom-analysis', 'developer-live-public-samplebook-writing'],
+    ['v23', 'ordinary-production-review', 'ordinary-production-custom-analysis', 'ordinary-production-writing'],
+  ] as const;
+
+  it.each(scopes)('validates %s with ten rules, and rejects a missing custom rule, a dropped category or declaration, a moved bound or a widened kind entry', (now, reviewId, customId) => {
+    const { policyData, schemaData } = readPair(`provider-processing-policy.${now}.json`, `provider-processing-policy.${now}.schema.json`);
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    expect(policyData.decision.providerAllowRules).toHaveLength(10);
+    const missing = structuredClone(policyData) as any;
+    missing.decision.providerAllowRules.pop();
+    expect(() => validatePolicyDocument(missing, schemaData)).toThrow();
+    const templateDropped = structuredClone(policyData) as any;
+    ruleOf(templateDropped, customId).allowedOutboundDataCategories = ['public-or-synthetic'];
+    expect(() => validatePolicyDocument(templateDropped, schemaData)).toThrow();
+    const undeclared = structuredClone(policyData) as any;
+    delete ruleOf(undeclared, customId).editorAuthoredQuestionTemplate;
+    expect(() => validatePolicyDocument(undeclared, schemaData)).toThrow();
+    for (const [key, value] of [['maxGraphemes', 401], ['authorOrEditorNamesAllowed', true], ['manuscriptTextAllowed', true], ['contractFramingOverrideAllowed', true]] as const) {
+      const moved = structuredClone(policyData) as any;
+      ruleOf(moved, customId).editorAuthoredQuestionTemplate[key] = value;
+      expect(() => validatePolicyDocument(moved, schemaData), key).toThrow();
+    }
+    const widened = structuredClone(policyData) as any;
+    ruleOf(widened, customId).allowedTaskKinds = ['custom-analysis/*', 'editorial-review/*'];
+    expect(() => validatePolicyDocument(widened, schemaData)).toThrow();
+    const retrieval = structuredClone(policyData) as any;
+    ruleOf(retrieval, customId).localTools.targetedRetrieval.allowed = true;
+    expect(() => validatePolicyDocument(retrieval, schemaData)).toThrow();
+    const seriesDropped = structuredClone(policyData) as any;
+    ruleOf(seriesDropped, reviewId).source.seriesKnowledgeAllowed = false;
+    expect(() => validatePolicyDocument(seriesDropped, schemaData)).toThrow();
+    const categoryDropped = structuredClone(policyData) as any;
+    const review = ruleOf(categoryDropped, reviewId);
+    review.allowedOutboundDataCategories = review.allowedOutboundDataCategories.filter((category: string) => category !== SERIES);
+    expect(() => validatePolicyDocument(categoryDropped, schemaData)).toThrow();
+    const seriesUndeclared = structuredClone(policyData) as any;
+    delete ruleOf(seriesUndeclared, reviewId).seriesKnowledgeExcerpt;
+    expect(() => validatePolicyDocument(seriesUndeclared, schemaData)).toThrow();
+    for (const [key, value] of [['maxClauses', 41], ['maxGraphemesPerClause', 301], ['onlyPinnedSeriesItems', false], ['retrievalExclusionsHonoured', false]] as const) {
+      const moved = structuredClone(policyData) as any;
+      ruleOf(moved, reviewId).seriesKnowledgeExcerpt[key] = value;
+      expect(() => validatePolicyDocument(moved, schemaData), key).toThrow();
+    }
+    const kindDropped = structuredClone(policyData) as any;
+    ruleOf(kindDropped, reviewId).allowedTaskKinds.pop();
+    expect(() => validatePolicyDocument(kindDropped, schemaData)).toThrow();
+  });
+
+  it.each(scopes)('rejects %s with either category, either declaration or Series Knowledge on a rule other than the one that declares it', (now, reviewId, _customId, writingId) => {
+    const { policyData, schemaData } = readPair(`provider-processing-policy.${now}.json`, `provider-processing-policy.${now}.schema.json`);
+    for (const category of [TEMPLATE, SERIES]) {
+      const moved = structuredClone(policyData) as any;
+      const other = ruleOf(moved, writingId);
+      other.allowedOutboundDataCategories = [...other.allowedOutboundDataCategories, category];
+      expect(() => validatePolicyDocument(moved, schemaData), category).toThrow();
+    }
+    const flagged = structuredClone(policyData) as any;
+    ruleOf(flagged, writingId).source.seriesKnowledgeAllowed = true;
+    expect(() => validatePolicyDocument(flagged, schemaData)).toThrow();
+    const onReview = structuredClone(policyData) as any;
+    onReview.decision.providerAllowRules.find((rule: any) => rule.ruleId === reviewId).editorAuthoredQuestionTemplate = {};
+    expect(() => validatePolicyDocument(onReview, schemaData)).toThrow();
+  });
+
+  it.each(scopes)('keeps %s on the unchanged role, credential, authority-separation and selection consts of its predecessor', (now) => {
+    const before = now === 'v22' ? 'v20' : 'v21';
+    const successor = readPair(`provider-processing-policy.${now}.json`, `provider-processing-policy.${now}.schema.json`);
+    const predecessor = readPair(`provider-processing-policy.${before}.json`, `provider-processing-policy.${before}.schema.json`);
+    for (const key of ['roleBindings', 'credentialBoundary', 'authoritySeparations', 'trustedSelection', 'operationalScope'] as const) {
+      expect(successor.schemaData.properties[key], key).toEqual(predecessor.schemaData.properties[key]);
+    }
+  });
+
+  it('validates active-set v15 and rejects a pin that is not the exact v23 or v22 document', () => {
+    const { policyData, schemaData } = readPair('active-policy-set.v15.json', 'active-policy-set.v15.schema.json');
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    expect(policyData.predecessorVersion).toBe('v14');
+    for (const [scope, version] of [['ordinary-production', 'v21'], ['developer-live', 'v20']] as const) {
+      const moved = structuredClone(policyData) as any;
+      moved.activePolicies['provider-processing-policy'].scopePins[scope].version = version;
+      expect(() => validatePolicyDocument(moved, schemaData), scope).toThrow();
+    }
+    const unpinned = structuredClone(policyData) as any;
+    unpinned.activePolicies['provider-processing-policy'].scopePins['developer-live'].sha256 = '0'.repeat(64);
+    expect(() => validatePolicyDocument(unpinned, schemaData)).toThrow();
+    // v1/v2 and External Export v2 carry over unchanged.
+    const v14 = readPair('active-policy-set.v14.json', 'active-policy-set.v14.schema.json').policyData;
+    for (const scope of ['development-ci', 'fixture-recording']) {
+      expect(policyData.activePolicies['provider-processing-policy'].scopePins[scope]).toEqual(v14.activePolicies['provider-processing-policy'].scopePins[scope]);
+    }
+    expect(policyData.activePolicies['external-export-policy']).toEqual(v14.activePolicies['external-export-policy']);
   });
 });
