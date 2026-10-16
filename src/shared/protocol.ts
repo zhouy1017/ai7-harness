@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 141 as const;
+export const SERVICE_PROTOCOL_VERSION = 142 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -6740,6 +6740,11 @@ export interface ExemplarBookProjection {
    */
   readonly withdrawn: boolean;
   readonly exemplars: ReadonlyArray<ExemplarProjection>;
+  /**
+   * The (imported) 范例 of this Book whose records no longer read, each named by Book and document type as 写作任务 names them
+   * (Issue #799, #800): they are skipped while the rest of the Book stays listed. Absent when nothing was skipped.
+   */
+  readonly skipped?: ReadonlyArray<string>;
   /** The Book's 审稿意见 as 范例 offers them (Issue #429; KB-006): one per template with a draft, the version 图书交付包 pins. */
   readonly readersReports: ReadonlyArray<ReadersReportExemplarProjection>;
 }
