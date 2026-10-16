@@ -23,8 +23,9 @@ import {
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { J13_PLACE, J13_SERIES_TITLE, makeJ13Series } from '../support/series-consistency.js';
-import { leaveSeries } from '../support/series-consistency.js';
+import { leaveSeries, takeInRevision } from '../support/series-consistency.js';
 import { withSeriesKnowledgeFor } from '../support/policy-rules.js';
+import { sheetProcedureOption, SHEET_PROCEDURE_NONE } from '../../src/renderer/captured-procedure-labels.js';
 
 // Service-integration suite (L2) for the Series Retrieval Exclusion's reach into Review Runs (Issue #64, plan slice S29b;
 // V2-UX-SER-022 to SER-027): a prepared Run's approval refused, an approved Run stopped as the exclusion is recorded, one
@@ -148,6 +149,23 @@ function outcomeSummary(runRecordId: string): string {
 }
 
 describe('a Series Retrieval Exclusion over Review Runs', () => {
+  it('keeps an enabled /1 consistency procedure offered with fit=all after knowledge moves beyond the earlier Run pins', async () => {
+    await withSession(async ({ store, driver, seriesId }, bookId) => {
+      const prepared = prepare(store, bookId);
+      approve(store, bookId, prepared);
+      await driver.drive(prepared.reviewRunId);
+      expect(run(store, bookId, prepared.reviewRunId).state).toBe('settled');
+      const saved = store.saveCapturedProcedure({ bookId, reviewRunId: prepared.reviewRunId, categoryIds: ['series-consistency'], scopeSlot: 'whole', title: '书系复核', procedureId: null });
+      const versionId = saved.versions[0]!.versionId;
+      store.enableCapturedProcedure(versionId, store.previewCapturedProcedureValidation(versionId).previewDigest);
+      // J-13's knowledge-pagination stage advances this item after the authored Run, before the saved procedure is chosen.
+      takeInRevision(store, seriesId, itemOf(store, seriesId), '更新后的合成知识，用于后续任务。', 'series-tasks');
+      const offered = store.inspectCapturedProcedureApplicability(bookId).procedures;
+      expect([[ '', SHEET_PROCEDURE_NONE, null ], ...offered.map((entry) => [entry.procedureId, sheetProcedureOption(entry), entry.fit])])
+        .toEqual([[ '', '不按工序（自己选类别）', null ], [saved.procedureId, '《书系复核》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选', 'all']]);
+      expect(store.inspectCapturedProcedureRun(bookId, saved.procedureId).resolved?.runSourceScope).toBeUndefined();
+    });
+  }, 300_000);
   it('pins an opt-in category and an evaluation in the existing plan records, retaining membership pins after removal', async () => {
     await withSession(async ({ store, seriesId }, bookId) => {
       const policy = withSeriesKnowledgeFor(withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage'), 'evaluation');
