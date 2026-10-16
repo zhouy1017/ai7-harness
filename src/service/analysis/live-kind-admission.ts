@@ -141,9 +141,11 @@ function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[]
 function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectation | null {
   if (definition.kind === FACTUAL_REVIEW_KIND) {
     // The research contract (#744) and each Evidence Assurance Level's own (Issue #901): 快速整理 is v1 with no tool declared.
-    const admitted = [withFactualResearch(factualReviewKindDefinition()), factualReviewLevelDefinition('quick'), factualReviewLevelDefinition('standard'),
-      factualReviewLevelDefinition('strict')].map((entry) => entry.promptContractDigest);
-    return { promptContractDigest: admitted.includes(definition.promptContractDigest) ? definition.promptContractDigest : null, payloadCategories: ['public-or-synthetic'] };
+    const admitted = [withFactualResearch(factualReviewKindDefinition()), factualReviewLevelDefinition('standard'), factualReviewLevelDefinition('strict')]
+      .map((entry) => entry.promptContractDigest);
+    // v1's bytes are admitted only as the 快速整理 level a plan chose, never as v1 on a launch whose rule hands it no tool.
+    const quick = definition.evidenceAssuranceLevel === 'quick' && definition.promptContractDigest === factualReviewLevelDefinition('quick').promptContractDigest;
+    return { promptContractDigest: admitted.includes(definition.promptContractDigest) || quick ? definition.promptContractDigest : null, payloadCategories: ['public-or-synthetic'] };
   }
   if (definition.kind === reviewCategoryKindId('cross-deliverable-consistency')) return {
     promptContractDigest: definition.livePromptContractDigest?.() ?? null,

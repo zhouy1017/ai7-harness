@@ -50,9 +50,9 @@ describe('platform tool registration admission', () => {
     const research = withFactualResearch(base);
     const binding = { route: template.route, model: template.model, endpoint: template.endpoint, credentialSlot: template.credentialSlot };
     expect(liveKindRule(policy, 'factual-review')).toBe(researchRule);
-    // Synchronized delta with Issue #901: v1 alone is now 快速整理's exact contract, admitted with no tool declared; the levels'
-    // own v2 contracts are admitted beside the research wrap, and any other digest is still refused.
-    expect(liveKindAdmission(policy, base, binding)?.ruleId).toBe(template.ruleId);
+    // Synchronized delta with Issue #901: v1's bytes are admitted only as the 快速整理 level a plan chose, with no tool declared;
+    // the levels' own v2 contracts are admitted beside the research wrap, and v1 alone or any other digest is still refused.
+    expect(liveKindAdmission(policy, base, binding)).toBeNull();
     expect(liveKindAdmission(policy, factualReviewLevelDefinition('quick'), binding)?.ruleId).toBe(template.ruleId);
     expect(liveKindAdmission(policy, factualReviewLevelDefinition('standard'), binding)?.ruleId).toBe(template.ruleId);
     expect(liveKindAdmission(policy, factualReviewLevelDefinition('strict'), binding)?.ruleId).toBe(template.ruleId);

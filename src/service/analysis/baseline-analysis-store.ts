@@ -1140,7 +1140,7 @@ export class BaselineAnalysisStore {
       return Object.hasOwn(record, 'corrections') ? factualReviewUnitResultOfRecordV2(record, unitOrdinal)
         : factualReviewKindDefinition().unitResultOfRecord(record, unitOrdinal);
     }
-    return this.#unitResultOfRecord(record, unitOrdinal);
+    return this.#definition.unitResultOfRecord(record, unitOrdinal);
   }
 
   get kind(): AnalysisKindId {
