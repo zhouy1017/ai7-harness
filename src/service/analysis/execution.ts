@@ -1,8 +1,9 @@
 import { PlatformToolSession, platformToolModelProfile } from '../provider/platform-tool-session.js';
 import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
 import { researchSnapshotDigest, retainUnitEvidence, retainedPageOf, searchHitsOf, type RetainedPage, type RetainedUnit } from './factual-review-evidence.js';
-import { locatedUnitFindings } from './factual-review-reducers.js';
+import { factualFindingId, locatedUnitFindings } from './factual-review-reducers.js';
 import { FACTUAL_REVIEW_KIND, type FactualReviewUnitResult } from './factual-review-contract.js';
+import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, markInBookExactFetch, type FactualReviewUnitResultV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
 import { admitTicketHost } from '../../shared/network-denial.js';
@@ -210,6 +211,11 @@ export interface ExecutionOwnerDependencies {
    * store's research evidence ledger. Absent, nothing is retained.
    */
   readonly researchEvidence?: ((input: { bookId: string; runRecordId: string; unitOrdinal: number; backendId: string | null; unit: RetainedUnit }) => void) | null;
+  /**
+   * The level a 事实核查 Run executes under, decided once as it starts (Issue #901; EASSURE-002): the store records the planned
+   * level and, when this device reads offline then, the effective 快速整理 with its disclosure. Absent, nothing is recorded.
+   */
+  readonly factualRunStart?: ((input: { bookId: string; runRecordId: string; taskIntentId: string }) => void) | null;
 }
 
 /**
@@ -890,16 +896,21 @@ export class BaselineAnalysisExecutionOwner {
     // describe it, never the one the plan froze: a harness a later release pins differently is seen here, before a
     // summary promises what the Run kept, and not first when the execution refuses it.
     const { route, model } = routeFactsOf(facts, live);
-    const composition = describeComposition(route, model, ledger.definition.promptContractDigest, {
-      platformTools: facts.webToolsBackend !== undefined,
-      localTools: kindLocalTools(this.#policy(), ledger.definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground') !== null,
-      ...(facts.webToolsBackend === undefined ? {} : { researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } as const }),
+    // A factual plan executes under the level it froze (Issue #901): 快速整理 declares no local tool.
+    const definition = ledger.definitionForRun(facts.runRecordId, facts.promptContractDigest);
+    const webTools = definition.evidenceAssuranceLevel !== 'quick' && facts.webToolsBackend !== undefined;
+    const composition = describeComposition(route, model, definition.promptContractDigest, {
+      platformTools: webTools,
+      localTools: definition.evidenceAssuranceLevel !== 'quick' &&
+        kindLocalTools(this.#policy(), ledger.definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground') !== null,
+      ...(definition.evidenceAssuranceLevel === 'quick' ? { researchDeclaration: definition.researchDeclaration } :
+        webTools ? { researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } as const } : {}),
     });
     const rebuilt = executionBindingRecordOf({
-      facts, definition: ledger.definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
+      facts, definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
       harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: composition.digest,
     });
-    return canonicalRecord(rebuilt).digest !== stored.bindingDigest || assuranceContractMoved(ledger.definition, facts.assurancePromptContractDigest);
+    return canonicalRecord(rebuilt).digest !== stored.bindingDigest || assuranceContractMoved(definition, facts.assurancePromptContractDigest);
   }
 
   /**
@@ -1212,8 +1223,12 @@ export class BaselineAnalysisExecutionOwner {
     // Everything kind-specific this Run needs: the frozen system section, the unit message builder and
     // its header, the unit result parser, the reducer, and whether the kind declares a cross-unit
     // suboperation at all. The owner itself is the same owner for every analysis kind.
-    const definition: AnalysisKindDefinition = ledger.definition;
+    // A factual Task's frozen level decides its contract (Issue #901); for every other kind this is the ledger's own definition.
+    if (ledger.kind === FACTUAL_REVIEW_KIND) this.#deps.factualRunStart?.({ bookId: facts.bookId, runRecordId: facts.runRecordId, taskIntentId: facts.taskIntentId });
+    const definition: AnalysisKindDefinition = ledger.definitionForRun(facts.runRecordId, facts.promptContractDigest);
     const promptContractDigest = definition.promptContractDigest;
+    const factualAssurance = ledger.factualRunAssurance(facts.runRecordId);
+    const webTools = definition.evidenceAssuranceLevel !== 'quick' && facts.webToolsBackend !== undefined;
     const live = this.#live();
     // Ordinary production (Issue #811): the Run's route is its plan's, from the editor's configured binding when it froze.
     const production = isOrdinaryProductionRuntime(live) ? live : null;
@@ -1270,14 +1285,16 @@ export class BaselineAnalysisExecutionOwner {
       return promptContractDigest;
     };
     const bootstrap = production === null && validation?.family === 'policy-selection' && validation.case === 'wave6-tool-evidence-bootstrap';
-    if (facts.webToolsBackend !== undefined) liveModelProfile = platformToolModelProfile(liveModelProfile, production === null ? 'developer-live' : 'ordinary-production', validation);
+    if (webTools) liveModelProfile = platformToolModelProfile(liveModelProfile, production === null ? 'developer-live' : 'ordinary-production', validation);
     let cache: ProviderResultCache | null = null;
     if (live !== null && production === null && validation !== null) {
       cache = new ProviderResultCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
       await cache.open();
     }
     const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
-    const localRule = live === null ? null : kindLocalTools(policy, definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
+    // 快速整理 registers no local tool (Issue #901; EASSURE-004): its Run lists and locates, and searches nothing.
+    const localRule = live === null || definition.evidenceAssuranceLevel === 'quick' ? null
+      : kindLocalTools(policy, definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
     const retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(facts.runRecordId, ledger) ?? new RetrievalIndex([{
       sourceKind: 'manuscript', sourceId: facts.checkpoint.manuscriptId, digest: facts.checkpoint.revisionDigest,
       read: () => ({ digest: facts.checkpoint.revisionDigest, segments: ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId).map((block) => ({ blockId: block.blockId, text: block.text })) }),
@@ -1350,7 +1367,7 @@ export class BaselineAnalysisExecutionOwner {
         admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
         acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
       } }),
-      ...(facts.webToolsBackend === undefined ? {} : { platformTools: {
+      ...(!webTools ? {} : { platformTools: {
         execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
         admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
         acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
@@ -1433,7 +1450,12 @@ export class BaselineAnalysisExecutionOwner {
       readonly refused?: { readonly attempts: number; readonly wallMs: number; readonly usage: { inputTokens: number; outputTokens: number } | null };
     } | null = null;
     try {
-      requireCompositionMatch(harness.composition.digest, facts.behaviorCompositionDigest);
+      // The plan remains immutable. An offline-at-start row authorizes exactly the quick composition recorded for this Run.
+      const expectedComposition = factualAssurance?.disclosure != null
+        ? describeComposition(route, model, definition.promptContractDigest, live === null ? {} : {
+          platformTools: false, localTools: false, researchDeclaration: { webSearch: false, searchEngine: null },
+        }).digest : facts.behaviorCompositionDigest;
+      requireCompositionMatch(harness.composition.digest, expectedComposition);
       requireAssuranceContractMatch(definition, facts.assurancePromptContractDigest);
       const bindingRecord: ExecutionBindingRecord = executionBindingRecordOf({
         facts, definition, live, fixture, attemptId, harnessSessionId, boundAt, compositionDigest: harness.composition.digest,
@@ -1490,7 +1512,7 @@ export class BaselineAnalysisExecutionOwner {
         admittedUserMessages,
         ...(localRule === null ? {} : { localTools: localRule }),
       };
-      if (facts.webToolsBackend !== undefined && live !== null) {
+      if (webTools && facts.webToolsBackend !== undefined && live !== null) {
         const selectedRule = liveKindRule(policy, definition.kind);
         const tools = platformToolsFromProjection(selectedRule);
         if (tools === null) throw new ExecutionAdmissionError('PLATFORM_TOOLS_NOT_NAMED', '本任务的规则未声明联网工具。');
@@ -1841,14 +1863,19 @@ export class BaselineAnalysisExecutionOwner {
           const parsed = definition.parseUnitResult(validated.text, unit);
           if (parsed.ok) {
             markRetrievalResult(parsed.result, validated.rejected);
+            // Factual Review Contract v2 (Issue #901): each in-Book relation's excerpt is sought by Exact Fetch now, while the
+            // Run's retrieval index is open; one it does not find stays a candidate (EVID-004, EVID-005).
+            const result = definition.unitResultSchema === FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA
+              ? markInBookExactFetch(parsed.result as unknown as FactualReviewUnitResultV2, retrieval === null ? null : (candidateId) => retrieval.exactFetch(candidateId))
+              : parsed.result;
             unitObservations.set(unit.ordinal, observation);
             acceptedOutputDigests.add(candidate.digest);
-            outcomes.push({ unitOrdinal: unit.ordinal, state: 'closed', result: parsed.result });
+            outcomes.push({ unitOrdinal: unit.ordinal, state: 'closed', result });
             unitRecords.push({
               unitOrdinal: unit.ordinal,
               requestDigest,
               lineage: { kind: 'recomputed' },
-              closed: { state: 'closed', responseDigest: candidate.digest, usage: unitUsage, result: definition.unitRecord(parsed.result) },
+              closed: { state: 'closed', responseDigest: candidate.digest, usage: unitUsage, result: definition.unitRecord(result) },
             });
           } else {
             acceptedOutputDigests.add(candidate.digest);
@@ -1924,7 +1951,11 @@ export class BaselineAnalysisExecutionOwner {
         const outcome = outcomes.find((entry) => entry.unitOrdinal === unit.ordinal);
         if (outcome === undefined) return;
         let retentionFailure: 'capture-processing' | 'storage' = 'capture-processing';
-        const findings = outcome.state === 'closed' ? locatedUnitFindings(unit, outcome.result as FactualReviewUnitResult, blocksById) : [];
+        const located = outcome.state === 'closed' ? locatedUnitFindings(unit, outcome.result as FactualReviewUnitResult, blocksById) : [];
+        // Factual Review Contract v2 (Issue #901): every https source a finding's relations name is a citation of that finding,
+        // retained as its basis's addresses are — so a relation can later be checked against what AI7 captured of it.
+        const findings = outcome.state === 'closed' && (outcome.result as { schema?: unknown }).schema === FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA
+          ? withRelationCitations(located, unit, outcome.result as unknown as FactualReviewUnitResultV2) : located;
         try {
           const captures = session.unitCaptures;
           const pages = new Map<string, RetainedPage>();
@@ -2690,13 +2721,13 @@ export class BaselineAnalysisExecutionOwner {
               },
             }
           : {}),
-        report: buildRunReport(reportFacts, await this.#reflect({
+        report: { ...buildRunReport(reportFacts, await this.#reflect({
           active, harness, runRecordId: facts.runRecordId, accounting: runReportAccounting(reportFacts),
           admittedUserMessages, acceptedOutputDigests, liveAdapter, accumulated, ceilingState, live, policy,
           // An exclusion recorded since the revision was persisted keeps the reflection back too (Issue #64, S29b).
           stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
             (!active.cancelRequested && this.#deps.readGuard?.(facts.runRecordId) != null),
-        })),
+        })), ...(factualAssurance === null ? {} : { factualAssurance }) },
       });
     } finally {
       currentBindingDigest = null;
@@ -3195,4 +3226,26 @@ function productionModelProfile(route: ExecutionRouteId, model: string): Provide
   const profile = route === LOCAL_DETERMINISTIC_ROUTE ? null : modelProfileFor(route, model);
   if (profile === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '冻结计划的模型没有声明。');
   return profile;
+}
+
+/** A v2 unit's located findings with the https sources their assertions' relations name appended to their basis (Issue #901). */
+function withRelationCitations<T extends { findingId: string; basis: string }>(
+  findings: ReadonlyArray<T>,
+  unit: Pick<CoverageManifestUnitProjection, 'overlapBlockIds' | 'blockIds'>,
+  result: FactualReviewUnitResultV2,
+): T[] {
+  const messageBlockIds = [...unit.overlapBlockIds, ...unit.blockIds];
+  const sources = new Map<string, Set<string>>();
+  for (const assertion of result.assertions) {
+    const blockId = messageBlockIds[assertion.blockOrdinal - 1];
+    if (blockId === undefined) continue;
+    const id = factualFindingId(blockId, assertion.quote);
+    const named = sources.get(id) ?? new Set<string>();
+    for (const relation of assertion.evidenceRelations) if (relation.sourceRef.startsWith('https://')) named.add(relation.sourceRef);
+    sources.set(id, named);
+  }
+  return findings.map((finding) => {
+    const named = [...(sources.get(finding.findingId) ?? [])].filter((url) => !finding.basis.includes(url));
+    return named.length === 0 ? finding : { ...finding, basis: `${finding.basis} ${named.join(' ')}` };
+  });
 }

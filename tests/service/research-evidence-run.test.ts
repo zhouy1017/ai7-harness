@@ -108,7 +108,10 @@ async function setup(options: { failedModelFetch?: boolean; failRetentionOnce?: 
         { quote: cited.quote, blockOrdinal: cited.blockOrdinal, assertionClass: 'real-world-fact', category: '机构', severity: 'A', question: '该器物现藏何处？',
           basis: `馆藏页 ${MUSEUM}、维基百科 与 ${ENGLISH} 记载「现藏湖北省博物馆」。` },
       ];
-      return answer({ content: JSON.stringify({ schema: 'ai7.factual-review.unit-result/1', unitOrdinal: header.ordinal, assertions }) });
+      // Synchronized delta with Issue #901: a new 事实核查 Task runs at 标准核查, whose contract is the additive /2 — each
+      // assertion states its evidence relations (none here: this suite proves retention, which reads the basis as before).
+      return answer({ content: JSON.stringify({ schema: 'ai7.factual-review.unit-result/2', unitOrdinal: header.ordinal,
+        assertions: assertions.map((assertion) => ({ ...assertion, evidenceRelations: [] })) }) });
     }
     const last = body.messages.at(-1)!.content ?? '';
     const result = last.startsWith('保证抽样 ')

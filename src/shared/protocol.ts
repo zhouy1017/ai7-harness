@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 142 as const;
+export const SERVICE_PROTOCOL_VERSION = 144 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -128,6 +128,11 @@ export const IPC_CHANNELS = {
   inspectLibraryMaterial: 'ai7:j15:inspect-library-material',
   inspectResearchEvidence: 'ai7:j04:inspect-research-evidence',
   saveEvidenceAsMaterial: 'ai7:j04:save-evidence-as-material',
+  inspectFactualVerification: 'ai7:j04:inspect-factual-verification',
+  inspectEvidenceWorkspace: 'ai7:j04:inspect-evidence-workspace',
+  recordVerificationReviewDecision: 'ai7:j04:record-verification-review-decision',
+  prepareCorrectionProposal: 'ai7:j04:prepare-correction-proposal',
+  saveCorrectionProposal: 'ai7:j04:save-correction-proposal',
   inspectEvaluationProfiles: 'ai7:j11:inspect-evaluation-profiles',
   saveEvaluationProfile: 'ai7:kb:save-evaluation-profile',
   inspectEvaluation: 'ai7:j11:inspect-evaluation',
@@ -234,6 +239,12 @@ export const IPC_CHANNELS = {
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
   getManuscriptApplyOutcome: 'ai7:j05:get-manuscript-apply-outcome',
+  inspectProposalWorkspace: 'ai7:j05:inspect-proposal-workspace',
+  saveProposalDecisionDraft: 'ai7:j05:save-proposal-decision-draft',
+  batchProposalDecisionDraft: 'ai7:j05:batch-proposal-decision-draft',
+  recordProposalDecision: 'ai7:j05:record-proposal-decision',
+  inspectApplyReceipt: 'ai7:j05:inspect-apply-receipt',
+  prepareReverseApply: 'ai7:j05:prepare-reverse-apply',
   inspectProposalConflict: 'ai7:j06:inspect-proposal-conflict',
   saveProposalConflictDraft: 'ai7:j06:save-proposal-conflict-draft',
   resolveProposalConflict: 'ai7:j06:resolve-proposal-conflict',
@@ -1323,7 +1334,7 @@ export type EditorialMarkKind = 'change-suggestion' | 'annotation' | 'editor-not
 export type PersonalHighlightColor = 1 | 2 | 3;
 /** `applied`: a Change Suggestion whose replacement an AI7 Apply wrote; the mark now stands on the applied text. */
 export type EditorialMarkStatus = 'open' | 'resolved' | 'applied';
-export type ProposalItemDisposition = 'accepted' | 'rejected' | 'accepted-with-edit';
+export type ProposalItemDisposition = 'accepted' | 'rejected' | 'accepted-with-edit' | 'deferred';
 /** A Proposal Change Item's kind (V2-UX-PROP-014): `insert` since schema revision 28 (Issue #411). */
 export type ProposalChangeType = 'replace' | 'delete' | 'insert';
 
@@ -1451,6 +1462,8 @@ export interface EditorialMarkCardProjection {
   updatedAt: string;
   /** The pin itself, for the Technical Identity Layer. */
   pin: { revisionId: string; revisionLabel: string; journalSequence: number; blockDigest: string };
+  /** A Correction Proposal's factual lineage (Issue #901), shown in 依据与核查; absent on every other mark. */
+  factualCorrection?: FactualCorrectionLineageProjection;
 }
 
 /** Binds a mark command to the manuscript state the editor saw, and asks for the window's marks back. */
@@ -1608,6 +1621,159 @@ export interface ManuscriptApplyCommandProjection extends EditorialMarkCommandPr
 export interface ManuscriptApplyOutcomeProjection {
   state: 'committed' | 'not-committed';
   application: ManuscriptApplyProjection | null;
+}
+
+/** Issue #902: settled legacy outcomes retain their exact wire shape. */
+export interface ApplyReceiptProjection {
+  state: 'applied' | 'not-applied' | 'confirming' | 'unresolved';
+  application: ManuscriptApplyProjection | null;
+  clientEffectId: string;
+  manuscriptId: string;
+  branchId: string;
+  bookId: string;
+  actor: 'editor';
+  approvedAt: string | null;
+  replayPolicy: 'idempotency-keyed';
+  safeRetry: boolean;
+  reason: string;
+  decisionIds: ReadonlyArray<string>;
+}
+
+/** Rev 2 compatibility: transient recovery states can never masquerade as settled evidence. */
+export function applyReceiptState(outcome: ManuscriptApplyOutcomeProjection): 'applied' | 'not-applied' {
+  return outcome.state === 'committed' ? 'applied' : 'not-applied';
+}
+export function legacyApplyOutcome(receipt: Pick<ApplyReceiptProjection, 'state' | 'application'>): ManuscriptApplyOutcomeProjection | null {
+  if (receipt.state === 'confirming' || receipt.state === 'unresolved') return null;
+  return { state: receipt.state === 'applied' ? 'committed' : 'not-committed', application: receipt.application };
+}
+
+export type ProposalDraftDisposition = 'accepted' | 'rejected' | 'deferred';
+export interface ProposalWorkspaceInput {
+  /** Bounded metadata page; scope digests always bind the full result. */
+  offset?: number;
+  manuscriptId: string;
+  branchId: string;
+  /** Exact Review Run or producing Task; null is the editor's branch-local proposals. */
+  resultId: string | null;
+  returnPosition?: ProposalReviewReturnPosition | null;
+}
+export interface ProposalReviewReturnPosition {
+  blockId: string | null;
+  activeMarkId: string | null;
+  comparison: 'inline' | 'side-by-side';
+  review: 'all' | 'unreviewed' | 'reviewed' | 'stale' | 'conflicting';
+  chapterBlockId: string | null;
+  changeType: ProposalChangeType | null;
+  expanded: boolean;
+}
+export interface ProposalNavigatorItem {
+  markId: string;
+  itemId: string;
+  blockId: string;
+  position: number;
+  fromGrapheme: number;
+  toGrapheme: number;
+  chapterBlockId: string | null;
+  chapter: string;
+  changeType: ProposalChangeType;
+  baseRevisionId: string;
+  stale: boolean;
+  /** `drifted` is a classified Three-way Proposal Conflict (原文已变, ADR 0085); `detached` is not yet classified. */
+  anchorState: 'exact' | 'drifted' | 'detached';
+  conflict: boolean;
+  loaded: boolean;
+  otherVersion: boolean;
+  atomicGroupId: string | null;
+  atomicReason: string | null;
+  draft: ProposalDraftDisposition | null;
+  draftOrdinal: number;
+  decisionId: string | null;
+  disposition: ProposalItemDisposition | null;
+  appliedRevisionId: string | null;
+}
+export interface ProposalDecisionProjection {
+  decisionId: string;
+  supersedes: string | null;
+  baseRevisionIds: ReadonlyArray<string>;
+  currentRevisionId: string;
+  journalSequence: number;
+  actor: 'editor';
+  recordedAt: string;
+  items: ReadonlyArray<{ markId: string; itemId: string; disposition: ProposalDraftDisposition; decisionId: string }>;
+  unresolved: ReadonlyArray<string>;
+}
+export interface ProposalWorkspaceProjection {
+  totalItems: number;
+  nextOffset: number | null;
+  bookId: string;
+  manuscriptId: string;
+  branchId: string;
+  resultId: string | null;
+  revisionId: string;
+  journalSequence: number;
+  items: ReadonlyArray<ProposalNavigatorItem>;
+  offerWorkspace: boolean;
+  truncated: boolean;
+  scopeDigest: string;
+  decision: ProposalDecisionProjection | null;
+  returnPosition: ProposalReviewReturnPosition | null;
+}
+export interface SaveProposalDecisionDraftInput extends ProposalWorkspaceInput {
+  markIds: ReadonlyArray<string>;
+  disposition: ProposalDraftDisposition | null;
+  atomicGroupId: string | null;
+  expectedScopeDigest: string;
+}
+export interface BatchProposalDecisionDraftInput extends ProposalWorkspaceInput {
+  scope: 'selection' | 'chapter' | 'change-type' | 'filter';
+  markIds: ReadonlyArray<string>;
+  chapterBlockId: string | null;
+  changeType: ProposalChangeType | null;
+  review: ProposalReviewReturnPosition['review'];
+  disposition: ProposalDraftDisposition;
+  /** null previews the exact frozen scope and every exclusion, without recording anything. */
+  confirmDigest: string | null;
+}
+export interface ProposalDraftBatchProjection {
+  nextOffset: number | null;
+  scopeDigest: string;
+  included: ReadonlyArray<string>;
+  excluded: ReadonlyArray<{ markId: string; reason: 'conflict' | 'unclassified-stale' | 'unloaded' | 'other-version' | 'atomic-group' | 'applied' }>;
+  saved: boolean;
+  workspace: ProposalWorkspaceProjection;
+}
+export interface RecordProposalDecisionInput extends ProposalWorkspaceInput {
+  expectedScopeDigest: string;
+  clientDecisionId: string;
+}
+export interface InspectApplyReceiptInput {
+  manuscriptId: string;
+  branchId: string;
+  clientEffectId: string;
+  /**
+   * `settled` reads; `confirming` and `unresolved` are what a surface that lost its acknowledgement, or its recovery
+   * read too, reports; `recheck` is the editor's explicit re-check of a 结果待确认 against the authoritative records.
+   * None of them dispatches.
+   */
+  recovery: 'settled' | 'confirming' | 'unresolved' | 'recheck';
+}
+export interface PrepareReverseApplyInput {
+  manuscriptId: string;
+  branchId: string;
+  markId: string;
+}
+export interface ReverseApplyPreparationProjection {
+  ranges: ReadonlyArray<{ markId: string; position: number; fromGrapheme: number; toGrapheme: number }>;
+  originalEffectId: string;
+  bookId: string;
+  branchId: string;
+  revisionId: string;
+  journalSequence: number;
+  markId: string;
+  blockId: string;
+  ready: boolean;
+  reason: string;
 }
 
 /**
@@ -2889,6 +3055,8 @@ export type RunReportIfRedoneProjection =
 
 /** The Run Report as it is recorded inside the Task Outcome, before its own digest is taken. */
 export interface RunReportRecordProjection {
+  /** The factual Run's frozen level and its disclosed offline-at-start downgrade, absent on predecessor reports. */
+  factualAssurance?: FactualRunAssuranceProjection;
   webToolsBackend?: FrozenWebToolsBackend;
   /** Editorial choices only; no question or answer content enters the Run Report. */
   modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'timed-out' | 'unanswered'; line: string }>;
@@ -3613,10 +3781,15 @@ export interface PlanEditsProjection {
    * freezes into its Provider Resolution Plan. Named only when set; a plan without it states `未设置任务预算上限`.
    */
   runBudgetCeiling?: Extract<RunBudgetCeilingState, { kind: 'tokens' }>;
+  /**
+   * The Evidence Assurance Level of a factual-review Task (Issue #901; EASSURE-001): named only when it is not the default
+   * 标准核查, so every plan written before it and every plan left at the default reads back byte for byte.
+   */
+  evidenceAssuranceLevel?: Exclude<EvidenceAssuranceLevel, 'standard'>;
 }
 
 /** The field a Plan Revision diff names for one edited item. */
-export type PlanEditField = 'steps.assurance-sampling' | 'adaptations.safe-retry';
+export type PlanEditField = 'steps.assurance-sampling' | 'adaptations.safe-retry' | 'evidenceAssuranceLevel';
 
 /** The Plan Boundary Split inside the canonical envelope: declared in-envelope adaptations, material fields, and expected editor participation. */
 export interface PlanBoundarySplitProjection {
@@ -4272,6 +4445,383 @@ export interface FactualReviewResearchProjection {
   fetched: 0;
   statement: string;
 }
+
+// ---- Evidence Assurance, verification review and Correction Proposals (Issue #901; FACT/EVID/EASSURE/FREV/CORR) ------------
+
+/**
+ * The three Evidence Assurance Levels of a factual-review Task (ui-ux-v2 ADR 0004; V2-UX-EASSURE-001 to 013). A level is a
+ * term of the Task's Plan Envelope, not a model role, a provider choice or an authority: it decides how much assurance work the
+ * Run does and the formal outcome it may record. `standard` is the default and is never named in a plan edit.
+ */
+export type EvidenceAssuranceLevel = 'quick' | 'standard' | 'strict';
+export const EVIDENCE_ASSURANCE_LEVELS: readonly EvidenceAssuranceLevel[] = ['quick', 'standard', 'strict'];
+export const EVIDENCE_ASSURANCE_DEFAULT_LEVEL = 'standard' as const;
+export const EVIDENCE_ASSURANCE_LEVEL_LABELS: Readonly<Record<EvidenceAssuranceLevel, string>> = {
+  quick: '快速整理',
+  standard: '标准核查',
+  strict: '严格核查',
+};
+/** The one-line consequence each level states beside the selector (EASSURE-001); never `更正确` or a quality ladder. */
+export const EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES: Readonly<Record<EvidenceAssuranceLevel, string>> = {
+  quick: '只列出断言与候选方向，不联网、不检索；结果一律为待核查，不能记录支持或反驳的正式结论。',
+  standard: '联网检索并在书内精确取文；只有精确取文的来源计入，结论按证据关系确定。',
+  strict: '在标准核查之上，支持或反驳须有两个以上相互独立的已核对来源，否则为证据不足；复用已留存的有效证据。',
+};
+/** The disclosure a Run carries when an offline verdict at its start lowered its effective level (EASSURE-002; D9). */
+export const EVIDENCE_ASSURANCE_OFFLINE_DEGRADE = '已自动降为快速整理：未联网' as const;
+
+/** The user-facing Factual Verification sub-states (V2-UX-FACT-006), mapped from evidence relations, never from a score. */
+export type FactualVerificationOutcome = '待核查' | '证据支持' | '疑似错误' | '证据不足' | '证据冲突' | '无法核实';
+export const FACTUAL_VERIFICATION_OUTCOMES: readonly FactualVerificationOutcome[] = ['待核查', '证据支持', '疑似错误', '证据不足', '证据冲突', '无法核实'];
+/** Each sub-state's policy outcome (Factual Verification Policy §Outcomes and conflicts). */
+export const FACTUAL_VERIFICATION_POLICY_OUTCOMES: Readonly<Record<FactualVerificationOutcome, 'supported' | 'contradicted' | 'conflicting' | 'unresolved'>> = {
+  待核查: 'unresolved',
+  证据支持: 'supported',
+  疑似错误: 'contradicted',
+  证据不足: 'unresolved',
+  证据冲突: 'conflicting',
+  无法核实: 'unresolved',
+};
+
+/** How one source relates to one assertion (V2-UX-EVID-007); relations are never counted into a verdict. */
+export type EvidenceRelation = '支持' | '部分支持' | '反驳' | '仅提供背景' | '关系待判断';
+export const EVIDENCE_RELATIONS: readonly EvidenceRelation[] = ['支持', '部分支持', '反驳', '仅提供背景', '关系待判断'];
+/** Evidence Source Lineage (V2-UX-EVID-008): only `original` material can count as independent corroboration. */
+export type EvidenceLineageClass = 'original' | 'quoted' | 'syndicated' | 'translated' | 'summarized';
+export const EVIDENCE_LINEAGE_CLASSES: readonly EvidenceLineageClass[] = ['original', 'quoted', 'syndicated', 'translated', 'summarized'];
+export const EVIDENCE_LINEAGE_LABELS: Readonly<Record<EvidenceLineageClass, string>> = {
+  original: '原始来源', quoted: '转引', syndicated: '转载', translated: '译介', summarized: '摘述',
+};
+/** Whether a source's exact excerpt was obtained (EVID-004, EVID-005). */
+export type EvidenceCheckState = 'candidate' | 'exact';
+export const EVIDENCE_CHECK_LABELS: Readonly<Record<EvidenceCheckState, string>> = {
+  candidate: '候选来源 · 尚未核对',
+  exact: '已精确取文',
+};
+
+/** What the Fact-check Lens filters a result by besides chapter, status and risk (V2-UX-FACT-005). */
+export type FactualSourceCondition = 'no-source' | 'candidates-only' | 'checked' | 'conflicting';
+export const FACTUAL_SOURCE_CONDITION_LABELS: Readonly<Record<FactualSourceCondition, string>> = {
+  'no-source': '没有来源',
+  'candidates-only': '只有候选来源',
+  checked: '有已核对来源',
+  conflicting: '来源相互冲突',
+};
+export type FactualActionNeed = 'review' | 'correction' | 'none';
+export const FACTUAL_ACTION_NEED_LABELS: Readonly<Record<FactualActionNeed, string>> = {
+  review: '待你审阅',
+  correction: '可准备更正',
+  none: '无需处理',
+};
+
+/** The Verification Review Dispositions of the Factual Review Decision Card (V2-UX-FREV-005), never preselected. */
+export type VerificationReviewDisposition = 'accept' | 'request-evidence' | 'keep-pending' | 'decline' | 'own-words';
+export const VERIFICATION_REVIEW_DISPOSITIONS: readonly VerificationReviewDisposition[] = ['accept', 'request-evidence', 'keep-pending', 'decline', 'own-words'];
+export const VERIFICATION_REVIEW_DISPOSITION_LABELS: Readonly<Record<VerificationReviewDisposition, string>> = {
+  accept: '接受当前核查结论',
+  'request-evidence': '要求补充证据',
+  'keep-pending': '维持未决',
+  decline: '不采纳该核查判断',
+  'own-words': '自行输入',
+};
+/** How the editor treated an optional reason suggestion (FREV-009): picked it as is, corrected it, or wrote their own. */
+export type VerificationReasonState = 'selected' | 'corrected' | 'replaced';
+export const MAX_VERIFICATION_REASON_CHARACTERS = 500;
+export const MAX_VERIFICATION_OWN_WORDS_CHARACTERS = 500;
+export const MAX_CORRECTION_TEXT_GRAPHEMES = 200;
+export const MAX_CORRECTION_RATIONALE_GRAPHEMES = 120;
+/** One Fact-check Lens page and one source page of the workspace, bounded so a read always fits a frame. */
+export const MAX_FACTUAL_VERIFICATION_PAGE = 50;
+export const MAX_EVIDENCE_SOURCE_PAGE = 12;
+/** The Evidence Comparison Matrix holds two to four pinned cards (V2-UX-EVID-006). */
+export const EVIDENCE_MATRIX_MIN_PINNED = 2;
+export const EVIDENCE_MATRIX_MAX_PINNED = 4;
+
+/** The exact Factual Verification Policy Document version a result binds (V2-UX-FACT-002): its path and the digest of its bytes. */
+export interface FactualVerificationPolicyPinProjection {
+  document: string;
+  sha256: string;
+  /** The minimum Evidence Assurance Level the document requires; `null` while it names none (EASSURE-008). */
+  minimumLevel: EvidenceAssuranceLevel | null;
+}
+
+/** The level a Run executed under, decided once at its start (EASSURE-002). */
+export interface FactualRunAssuranceProjection {
+  runRecordId: string;
+  plannedLevel: EvidenceAssuranceLevel;
+  effectiveLevel: EvidenceAssuranceLevel;
+  /** `EVIDENCE_ASSURANCE_OFFLINE_DEGRADE` when an offline verdict at Run start lowered it; `null` otherwise. */
+  disclosure: string | null;
+  recordedAt: string;
+}
+
+/** One Evidence Source Card (V2-UX-EVID-003): every check a discrete state, a candidate never quoted (EVID-004). */
+export interface EvidenceSourceCardProjection {
+  /** The relation's own identity within the result: stable across pages and pinning. */
+  cardId: string;
+  sourceRef: string;
+  sourceKind: 'web' | 'in-book';
+  title: string | null;
+  checkState: EvidenceCheckState;
+  checkLabel: string;
+  relation: EvidenceRelation;
+  /** The exact excerpt, only when `exact`; a candidate is never quoted or summarized as checked evidence. */
+  excerpt: string | null;
+  /** The retained Source Version: the content digest of what AI7 captured; `null` when nothing was captured. */
+  sourceVersion: string | null;
+  publisher: string | null;
+  registrableDomain: string | null;
+  capturedAt: string | null;
+  freshness: 'current' | 'possibly-stale' | 'unknown';
+  freshnessLabel: string;
+  /** 引文完整性: whether the excerpt stands verbatim in the captured text. */
+  integrity: 'located' | 'not-located' | 'not-captured';
+  integrityLabel: string;
+  lineage: EvidenceLineageClass | null;
+  lineageLabel: string;
+  /** The independence group the source counts in under strict assurance; dependent material shares no group. */
+  independenceGroup: string | null;
+  /** The retained evidence row the 来源与证据 view opens on; `null` for an in-Book or uncaptured source. */
+  evidenceId: string | null;
+  /** Reused from an earlier Run's retained evidence rather than captured by this Run (EASSURE-009). */
+  reused: boolean;
+}
+
+/** The AI7 Evidence Comparison Summary (V2-UX-EVID-010): non-evidentiary, every statement linked to cards. */
+export interface EvidenceComparisonSummaryProjection {
+  label: '非证据';
+  statements: ReadonlyArray<{ text: string; cardIds: ReadonlyArray<string> }>;
+}
+
+/** One Factual Review Decision (V2-UX-FREV-006): immutable, bound to one result version. */
+export interface FactualReviewDecisionProjection {
+  decisionId: string;
+  resultId: string;
+  boundVersion: number;
+  disposition: VerificationReviewDisposition;
+  dispositionLabel: string;
+  ownWords: string | null;
+  reason: null | { state: VerificationReasonState; text: string; suggestion: string | null };
+  /** A later result version exists, so this decision binds an older version (FREV-007). */
+  superseded: boolean;
+  /** The level 要求补充证据 asked the supplementary range Task to run at: the same or higher than this result's (FREV-008). */
+  requestedLevel: EvidenceAssuranceLevel | null;
+  recordedAt: string;
+}
+
+/** One Versioned Verification Result (V2-UX-FREV-001) as the Fact-check Lens and the workspace read it. */
+export interface FactualVerificationResultProjection {
+  resultId: string;
+  version: number;
+  assertionKey: string;
+  reviewRunId: string;
+  reviewFindingId: string;
+  findingId: string;
+  runRecordId: string;
+  taskIntentId: string;
+  markId: string | null;
+  blockId: string;
+  fromGrapheme: number;
+  toGrapheme: number;
+  /** The exact manuscript wording, the Textual Source of Record (EVID-002). */
+  quote: string;
+  /** AI7's normalized statement of what is checked, kept apart from the wording. */
+  normalizedStatement: string;
+  heading: string | null;
+  category: FactualAssertionCategory;
+  severity: FactualSeverityTier;
+  plannedLevel: EvidenceAssuranceLevel;
+  level: EvidenceAssuranceLevel;
+  levelLabel: string;
+  disclosure: string | null;
+  states: {
+    referenceIntegrity: FactualReferenceIntegrityState;
+    claimSupport: FactualEvidenceState;
+    factualVerification: FactualVerificationOutcome;
+  };
+  sourceCondition: FactualSourceCondition;
+  actionNeed: FactualActionNeed;
+  sourceCounts: { checked: number; candidates: number; independent: number; reused: number };
+  limitations: ReadonlyArray<string>;
+  policyPin: FactualVerificationPolicyPinProjection;
+  producer: string;
+  recordedAt: string;
+  /** 锚点已失效 when the manuscript changed inside the range since (FACT-010); the result stays historical. */
+  anchor: { state: 'current' | 'stale'; label: string | null };
+  decision: FactualReviewDecisionProjection | null;
+  /** No decision binds this version yet. */
+  pendingReview: boolean;
+  /** `准备更正提案` is offered (FREV-008, EASSURE-004). */
+  correctionAvailable: boolean;
+}
+
+export interface FactualChapterOptionProjection {
+  blockId: string;
+  heading: string;
+}
+
+/** The Fact-check Lens (V2-UX-FACT-004/005/007): one bounded page of the latest results with the three states apart. */
+export interface FactualVerificationLensProjection {
+  bookId: string;
+  reviewRunId: string | null;
+  results: ReadonlyArray<FactualVerificationResultProjection>;
+  /** The cursor of the next page; `null` at the end. */
+  nextCursor: number | null;
+  total: number;
+  counts: ReadonlyArray<{ outcome: FactualVerificationOutcome; count: number }>;
+  chapters: ReadonlyArray<FactualChapterOptionProjection>;
+  run: FactualRunAssuranceProjection | null;
+  policyPin: FactualVerificationPolicyPinProjection;
+  statement: string;
+}
+
+export interface FactualVerificationLensFilters {
+  chapterBlockId: string | null;
+  outcome: FactualVerificationOutcome | null;
+  severity: FactualSeverityTier | null;
+  sourceCondition: FactualSourceCondition | null;
+  actionNeed: FactualActionNeed | null;
+}
+
+/** The decision card's offer (FREV-004/005/011): five unselected choices, or why recording is refused now. */
+export interface FactualDecisionCardProjection {
+  choices: ReadonlyArray<{ disposition: VerificationReviewDisposition; label: string }>;
+  /** AI7 may recommend one with a rationale, never preselect it. */
+  recommendation: null | { disposition: VerificationReviewDisposition; rationale: string };
+  reasonSuggestions: ReadonlyArray<string>;
+  /** Why 记录核查审阅决定 cannot record now: the exact changed dependency (FREV-011); `null` when it can. */
+  drift: string | null;
+}
+
+/** The Assertion-centered Evidence Workspace (V2-UX-EVID-001 to 013): a read, it mutates nothing (EVID-012). */
+export interface EvidenceWorkspaceProjection {
+  bookId: string;
+  result: FactualVerificationResultProjection;
+  sources: ReadonlyArray<EvidenceSourceCardProjection>;
+  /** The cursor of the next source page; `null` at the end. */
+  nextSourceCursor: number | null;
+  totalSources: number;
+  conflicts: ReadonlyArray<{ supportingCardId: string; refutingCardId: string; point: string }>;
+  summary: EvidenceComparisonSummaryProjection;
+  history: ReadonlyArray<{ resultId: string; version: number; outcome: FactualVerificationOutcome; level: EvidenceAssuranceLevel; recordedAt: string }>;
+  decisions: ReadonlyArray<FactualReviewDecisionProjection>;
+  decisionCard: FactualDecisionCardProjection;
+  matrix: { minPinned: number; maxPinned: number };
+}
+
+/** One occurrence in a Linked Correction Range Set (V2-UX-CORR-007): exact-equal text only, each include/exclude visible. */
+export interface CorrectionRangeProjection {
+  rangeId: string;
+  blockId: string;
+  fromGrapheme: number;
+  toGrapheme: number;
+  text: string;
+  heading: string | null;
+  /** The finding's own range: included by default. */
+  primary: boolean;
+  /** The current manuscript still holds these words here, so a mark can stand on them. */
+  current: boolean;
+}
+
+/** One Correction Variant (V2-UX-CORR-002/003): resulting text, rationale, evidence links, unresolved evidence, limitations. */
+export interface CorrectionVariantProjection {
+  variantId: string;
+  text: string;
+  rationale: string;
+  evidenceCardIds: ReadonlyArray<string>;
+  unresolved: ReadonlyArray<string>;
+  limitations: ReadonlyArray<string>;
+}
+
+/** 准备更正提案 (V2-UX-CORR-001): the Correction Proposal Draft offer; a read, nothing is written. */
+export interface CorrectionProposalDraftProjection {
+  bookId: string;
+  result: FactualVerificationResultProjection;
+  decisionId: string | null;
+  variants: ReadonlyArray<CorrectionVariantProjection>;
+  ownEditAllowed: true;
+  scope: 'minimal';
+  scopeStatement: string;
+  ranges: ReadonlyArray<CorrectionRangeProjection>;
+  assuranceIncomplete: boolean;
+  missingChecks: ReadonlyArray<string>;
+  label: string | null;
+}
+
+/** 保存为更正提案 (V2-UX-CORR-011): what one save created. */
+export interface CorrectionProposalSavedProjection {
+  proposalId: string;
+  markIds: ReadonlyArray<string>;
+  assuranceIncomplete: boolean;
+  label: string | null;
+  completionLabel: string;
+}
+
+/** The lineage the 依据与核查 region of a Correction Proposal's 修改建议 card shows (V2-UX-CORR-012, EASSURE-012). */
+export interface FactualCorrectionLineageProjection {
+  proposalId: string;
+  resultId: string;
+  resultVersion: number;
+  decisionId: string | null;
+  level: EvidenceAssuranceLevel;
+  levelLabel: string;
+  states: FactualVerificationResultProjection['states'];
+  checkedSources: number;
+  candidateSources: number;
+  policyPin: FactualVerificationPolicyPinProjection;
+  /** `证据核查未完成` while the level was quick or the gate was not met; kept through review, Apply and reversal. */
+  assuranceLabel: string | null;
+  missingChecks: ReadonlyArray<string>;
+}
+/** The inputs of the five factual-verification operations (Issue #901). The Book is the route's, as for 来源与证据. */
+export interface InspectFactualVerificationInput extends FactualVerificationLensFilters {
+  bookId: string;
+  /** The Review Run whose results to read; `null` reads the Book's latest result of every assertion. */
+  reviewRunId: string | null;
+  after: number | null;
+}
+export interface InspectEvidenceWorkspaceInput {
+  bookId: string;
+  resultId: string;
+  sourcesAfter: number | null;
+}
+export interface RecordVerificationReviewDecisionInput {
+  bookId: string;
+  resultId: string;
+  /** The result version the editor read; a later version refuses the decision (FREV-011). */
+  resultVersion: number;
+  disposition: VerificationReviewDisposition;
+  ownWords: string | null;
+  reason: null | { state: VerificationReasonState; text: string; suggestion: string | null };
+}
+/**
+ * What 记录核查审阅决定 answers: the workspace as it now reads, and — for 要求补充证据 — the supplementary check it recorded: the
+ * result's own block and the level, the same or higher, it must run at (FREV-008). A Book holds one 事实核查 Run until the
+ * factual update modes land (#905), so no Task is prepared now and the statement says so.
+ */
+export interface VerificationReviewDecisionRecordedProjection {
+  workspace: EvidenceWorkspaceProjection;
+  supplementary: null | { blockId: string; level: EvidenceAssuranceLevel; statement: string };
+}
+/** Why 要求补充证据 prepares no Task yet (Issue #901 rev 4; follow-up #905). */
+export const SUPPLEMENTARY_CHECK_DEFERRED = '已记录补充核查的要求（同一段文字、同级或更高级别）。这本书的事实核查目前只能运行一次；补充核查任务将在事实核查的更新方式接入后开放（#905）。' as const;
+export interface PrepareCorrectionProposalInput {
+  bookId: string;
+  resultId: string;
+}
+export interface SaveCorrectionProposalInput {
+  bookId: string;
+  resultId: string;
+  resultVersion: number;
+  /** The Run's variant chosen, or `null` for 自行编辑. */
+  variantId: string | null;
+  text: string;
+  rationale: string;
+  rangeIds: ReadonlyArray<string>;
+}
+
+export const CORRECTION_ASSURANCE_INCOMPLETE_LABEL = '证据核查未完成' as const;
+export const STALE_VERIFICATION_ANCHOR_LABEL = '锚点已失效' as const;
 
 // ---- External Evidence Retention (Issue #425, plan slice S70; V2-UX-SRC-013, EGR-003, KB-008/009, FACT-009) -------------
 
@@ -5983,6 +6533,8 @@ export interface EditTaskPlanInput {
   disallowedAdaptations: ReadonlyArray<string>;
   askFirstAdaptations?: ReadonlyArray<string>;
   runBudgetCeiling?: { kind: 'tokens'; maxTotalTokens: number } | null;
+  /** The factual-review Task's Evidence Assurance Level (Issue #901); left out keeps the version's own. */
+  evidenceAssuranceLevel?: EvidenceAssuranceLevel;
 }
 
 /**
@@ -6169,6 +6721,17 @@ export interface TaskPlanEditProjection {
    * `null` for a kind whose plan takes no ceiling.
    */
   budget: null | { ceiling: RunBudgetCeilingState; settable: boolean; reason: string | null };
+  /**
+   * The Evidence Assurance Level selector of a factual-review Task (Issue #901; EASSURE-001, EASSURE-008): the level this
+   * version freezes, each option with its consequence and, below a policy minimum, disabled with the concrete requirement.
+   * Absent for every other kind.
+   */
+  assurance?: {
+    level: EvidenceAssuranceLevel;
+    settable: boolean;
+    reason: string | null;
+    options: ReadonlyArray<{ level: EvidenceAssuranceLevel; label: string; consequence: string; disabled: boolean; requirement: string | null }>;
+  };
 }
 
 /**
@@ -10867,6 +11430,7 @@ export const GLOBAL_ATTENTION_GROUP_LIMIT = 50;
  * - a completion of the last days: a baseline Task Outcome or a Review Run that reached the manuscript.
  */
 export type GlobalAttentionStateKey =
+  | 'apply-outcome-unresolved'
   | 'import-outcome-uncertain'
   | 'import-cleanup-pending'
   | 'recovery-pending'
@@ -10940,6 +11504,7 @@ export type GlobalAttentionStateKey =
  * words the product already uses there. An item whose record offers none of them is not listed at all.
  */
 export type GlobalAttentionNextStep =
+  | 'view-apply-receipt'
   | 'view-run'
   | 'view-review'
   | 'reconfirm-plan'
@@ -10977,7 +11542,7 @@ export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
   'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue', 'view-material-index',
-  'view-unconfirmed',
+  'view-unconfirmed', 'view-apply-receipt',
 ];
 
 /**
@@ -10985,6 +11550,7 @@ export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
  * Opening grants nothing; every decision is still made at the record.
  */
 export type GlobalAttentionTarget =
+  | { kind: 'apply-receipt'; bookId: string; manuscriptId: string; branchId: string; clientEffectId: string }
   | { kind: 'import-recovery'; draftId: string }
   | { kind: 'manuscript-recovery'; attentionId: string }
   | { kind: 'manuscript-conflict'; bookId: string; manuscriptId: string; branchId: string; markId: string }
@@ -11008,6 +11574,7 @@ export type GlobalAttentionTarget =
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
+  | { kind: 'apply-receipt' }
   | { kind: 'import'; sourceDisplayName: string; relationship: 'first-manuscript' | 'source-only' | 'reimport' | null }
   | { kind: 'recovery'; branchName: string }
   | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
@@ -12111,6 +12678,31 @@ export interface ServiceOperationMap {
     input: { bookId: string; evidenceId: string; title: string | null };
     output: { evidenceId: string; material: LibraryMaterialProjection };
   };
+  /** The Fact-check Lens (Issue #901; FACT-004/005/007): one page of a Book's latest Versioned Verification Results; read-only. */
+  inspectFactualVerification: {
+    input: InspectFactualVerificationInput;
+    output: FactualVerificationLensProjection;
+  };
+  /** The Evidence Workspace of one result (Issue #901; EVID-001 to 013): source cards, conflicts, summary, decision card; read-only. */
+  inspectEvidenceWorkspace: {
+    input: InspectEvidenceWorkspaceInput;
+    output: EvidenceWorkspaceProjection;
+  };
+  /** 记录核查审阅决定 (Issue #901; FREV-006): one immutable Review Decision bound to one result version. */
+  recordVerificationReviewDecision: {
+    input: RecordVerificationReviewDecisionInput;
+    output: VerificationReviewDecisionRecordedProjection;
+  };
+  /** 准备更正提案 (Issue #901; CORR-001): the Correction Proposal Draft offer; read-only. */
+  prepareCorrectionProposal: {
+    input: PrepareCorrectionProposalInput;
+    output: CorrectionProposalDraftProjection;
+  };
+  /** 保存为更正提案 (Issue #901; CORR-011): ordinary 修改建议 marks with their factual lineage; no decision, no Apply. */
+  saveCorrectionProposal: {
+    input: SaveCorrectionProposalInput;
+    output: CorrectionProposalSavedProjection;
+  };
   readLibraryDecisionReason: {
     input: { materialId: string; ordinal: number; offset: number };
     output: LibraryDecisionReasonPage;
@@ -12454,6 +13046,16 @@ export interface ServiceOperationMap {
     input: { manuscriptId: string; branchId: string; clientEffectId: string };
     output: ManuscriptApplyOutcomeProjection;
   };
+  /**
+   * The dedicated Proposal review workspace (Issue #902): metadata pages, durable decision drafts, frozen batch drafts
+   * and 记录提案决定 write no manuscript text; the four-state receipt and the reverse preparation dispatch nothing.
+   */
+  inspectProposalWorkspace: { input: ProposalWorkspaceInput; output: ProposalWorkspaceProjection };
+  saveProposalDecisionDraft: { input: SaveProposalDecisionDraftInput; output: ProposalWorkspaceProjection };
+  batchProposalDecisionDraft: { input: BatchProposalDecisionDraftInput; output: ProposalDraftBatchProjection };
+  recordProposalDecision: { input: RecordProposalDecisionInput; output: ProposalWorkspaceProjection };
+  inspectApplyReceipt: { input: InspectApplyReceiptInput; output: ApplyReceiptProjection };
+  prepareReverseApply: { input: PrepareReverseApplyInput; output: ReverseApplyPreparationProjection };
   /**
    * 稿件冲突 of one 修改建议 (Issue #57, plan slice S22; ADR 0085). The read compares the three texts; the
    * Resolution Draft is saved on exactly the basis the editor saw; the conflict is left by 保留当前稿件,
@@ -12807,6 +13409,11 @@ export interface RendererApi {
   inspectResearchEvidence(input: { bookId: string; after?: number | null; staleAfterDays?: number | null; taskIntentId?: string; reviewFindingId?: string }): Promise<ResearchEvidenceBookProjection>;
   /** 保存为来源材料: the editor's explicit keep of one retained source as a 资料库 item; publishes and exports nothing. */
   saveEvidenceAsMaterial(input: { bookId: string; evidenceId: string; title?: string | null }): Promise<ServiceOperationMap['saveEvidenceAsMaterial']['output']>;
+  inspectFactualVerification(input: InspectFactualVerificationInput): Promise<FactualVerificationLensProjection>;
+  inspectEvidenceWorkspace(input: InspectEvidenceWorkspaceInput): Promise<EvidenceWorkspaceProjection>;
+  recordVerificationReviewDecision(input: RecordVerificationReviewDecisionInput): Promise<VerificationReviewDecisionRecordedProjection>;
+  prepareCorrectionProposal(input: PrepareCorrectionProposalInput): Promise<CorrectionProposalDraftProjection>;
+  saveCorrectionProposal(input: SaveCorrectionProposalInput): Promise<CorrectionProposalSavedProjection>;
   readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;
   /** 查看分段: one page of the item's segments, read-only. */
   inspectLibraryMaterialSegments(input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']): Promise<MaterialSegmentsPageProjection>;
@@ -12953,6 +13560,12 @@ export interface RendererApi {
   quitApplication(): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
   cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
+  inspectProposalWorkspace(input: ProposalWorkspaceInput): Promise<ProposalWorkspaceProjection>;
+  saveProposalDecisionDraft(input: SaveProposalDecisionDraftInput): Promise<ProposalWorkspaceProjection>;
+  batchProposalDecisionDraft(input: BatchProposalDecisionDraftInput): Promise<ProposalDraftBatchProjection>;
+  recordProposalDecision(input: RecordProposalDecisionInput): Promise<ProposalWorkspaceProjection>;
+  inspectApplyReceipt(input: InspectApplyReceiptInput): Promise<ApplyReceiptProjection>;
+  prepareReverseApply(input: PrepareReverseApplyInput): Promise<ReverseApplyPreparationProjection>;
   /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;
   reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;

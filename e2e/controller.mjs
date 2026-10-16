@@ -825,6 +825,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'research-evidence-source-view',
     'review-return-to-analysis',
     'zero-activity',
+    // Issue #901: 事实核查 at its levels on a fresh sample1 Book — the selector, the Evidence Workspace, a review decision, a
+    // Correction Proposal that keeps 证据核查未完成.
+    'factual-level-plan',
+    'factual-evidence-workspace',
+    'factual-review-decision',
+    'factual-correction-proposal',
   ]),
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
@@ -880,6 +886,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'marks-settled-before-restart',
     'marks-survive-restart',
     'apply-lost-acknowledgement',
+    'apply-receipt-four-states',
+    'proposal-workspace-offer',
+    'proposal-decision-draft-batch',
+    'proposal-decision-record',
     'completion-browser-close',
     'completion-cleanup',
   ]),

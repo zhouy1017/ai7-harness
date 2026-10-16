@@ -337,6 +337,16 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectResearchEvidence']['output']>(IPC_CHANNELS.inspectResearchEvidence, input),
   saveEvidenceAsMaterial: (input: { bookId: string; evidenceId: string; title?: string | null }) =>
     invoke<ServiceOperationMap['saveEvidenceAsMaterial']['output']>(IPC_CHANNELS.saveEvidenceAsMaterial, input),
+  inspectFactualVerification: (input: Parameters<RendererApi['inspectFactualVerification']>[0]) =>
+    invoke<ServiceOperationMap['inspectFactualVerification']['output']>(IPC_CHANNELS.inspectFactualVerification, input),
+  inspectEvidenceWorkspace: (input: Parameters<RendererApi['inspectEvidenceWorkspace']>[0]) =>
+    invoke<ServiceOperationMap['inspectEvidenceWorkspace']['output']>(IPC_CHANNELS.inspectEvidenceWorkspace, input),
+  recordVerificationReviewDecision: (input: Parameters<RendererApi['recordVerificationReviewDecision']>[0]) =>
+    invoke<ServiceOperationMap['recordVerificationReviewDecision']['output']>(IPC_CHANNELS.recordVerificationReviewDecision, input),
+  prepareCorrectionProposal: (input: Parameters<RendererApi['prepareCorrectionProposal']>[0]) =>
+    invoke<ServiceOperationMap['prepareCorrectionProposal']['output']>(IPC_CHANNELS.prepareCorrectionProposal, input),
+  saveCorrectionProposal: (input: Parameters<RendererApi['saveCorrectionProposal']>[0]) =>
+    invoke<ServiceOperationMap['saveCorrectionProposal']['output']>(IPC_CHANNELS.saveCorrectionProposal, input),
   decideLibraryMaterial: (input: ServiceOperationMap['decideLibraryMaterial']['input']) =>
     invoke<ServiceOperationMap['decideLibraryMaterial']['output']>(IPC_CHANNELS.decideLibraryMaterial, input),
   inspectEvaluationProfiles: (input?: { before: number | null }) => invoke<ServiceOperationMap['inspectEvaluationProfiles']['output']>(IPC_CHANNELS.inspectEvaluationProfiles, input ?? {}),
@@ -531,6 +541,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['applyChangeSuggestionBatch']['output']>(IPC_CHANNELS.applyChangeSuggestionBatch, input),
   reverseAppliedChangeSuggestion: (input: ServiceOperationMap['reverseAppliedChangeSuggestion']['input']) =>
     invoke<ServiceOperationMap['reverseAppliedChangeSuggestion']['output']>(IPC_CHANNELS.reverseAppliedChangeSuggestion, input),
+  inspectProposalWorkspace: (input: ServiceOperationMap['inspectProposalWorkspace']['input']) => invoke<ServiceOperationMap['inspectProposalWorkspace']['output']>(IPC_CHANNELS.inspectProposalWorkspace, input),
+  saveProposalDecisionDraft: (input: ServiceOperationMap['saveProposalDecisionDraft']['input']) => invoke<ServiceOperationMap['saveProposalDecisionDraft']['output']>(IPC_CHANNELS.saveProposalDecisionDraft, input),
+  batchProposalDecisionDraft: (input: ServiceOperationMap['batchProposalDecisionDraft']['input']) => invoke<ServiceOperationMap['batchProposalDecisionDraft']['output']>(IPC_CHANNELS.batchProposalDecisionDraft, input),
+  recordProposalDecision: (input: ServiceOperationMap['recordProposalDecision']['input']) => invoke<ServiceOperationMap['recordProposalDecision']['output']>(IPC_CHANNELS.recordProposalDecision, input),
+  inspectApplyReceipt: (input: ServiceOperationMap['inspectApplyReceipt']['input']) => invoke<ServiceOperationMap['inspectApplyReceipt']['output']>(IPC_CHANNELS.inspectApplyReceipt, input),
+  prepareReverseApply: (input: ServiceOperationMap['prepareReverseApply']['input']) => invoke<ServiceOperationMap['prepareReverseApply']['output']>(IPC_CHANNELS.prepareReverseApply, input),
   getManuscriptApplyOutcome: (input: ServiceOperationMap['getManuscriptApplyOutcome']['input']) =>
     invoke<ServiceOperationMap['getManuscriptApplyOutcome']['output']>(IPC_CHANNELS.getManuscriptApplyOutcome, input),
   inspectProposalConflict: (input: ServiceOperationMap['inspectProposalConflict']['input']) =>

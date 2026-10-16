@@ -25,6 +25,35 @@ import {
   type WritingTaskMaterialProjection,
 } from '../shared/protocol.js';
 import { findingResearchLines, readFindingResearch } from './research-evidence-labels.js';
+import { mountEvidenceWorkspace, type EvidenceWorkspaceSurface } from './evidence-workspace.js';
+import {
+  FACT_CLOSE_WORKSPACE,
+  FACT_LENS_EMPTY_FILTERED,
+  FACT_LENS_FILTER_ALL,
+  FACT_LENS_FILTER_LABELS,
+  FACT_LENS_HEADING,
+  FACT_LENS_MORE,
+  FACT_LENS_NOTE,
+  FACT_OPEN_WORKSPACE,
+  FACT_SEVERITY_LABELS,
+  factActionLine,
+  factDecisionLine,
+  factLensCountsLine,
+  factLevelLine,
+  factLocationLine,
+  factStateLines,
+  outcomeTone,
+} from './evidence-workspace-labels.js';
+import {
+  FACTUAL_ACTION_NEED_LABELS,
+  FACTUAL_SOURCE_CONDITION_LABELS,
+  FACTUAL_VERIFICATION_OUTCOMES,
+  type FactualActionNeed,
+  type FactualSourceCondition,
+  type FactualVerificationLensFilters,
+  type FactualVerificationLensProjection,
+  type FactualVerificationResultProjection,
+} from '../shared/protocol.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
 import { openProcedureCapture } from './procedure-capture.js';
@@ -196,13 +225,15 @@ type ReviewApi = Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' |
   'inspectTaskPlan' | 'quickStartReviewRun' | 'searchReferableMaterials' |
-  'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' |
+  'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
   'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' |
   // 事实核查's retained sources on its finding cards (Issue #425, S70).
-  'inspectResearchEvidence'
+  'inspectProposalWorkspace' | 'inspectResearchEvidence' |
+  // The Fact-check Lens and the Evidence Workspace (Issue #901).
+  'inspectFactualVerification' | 'inspectEvidenceWorkspace' | 'recordVerificationReviewDecision' | 'prepareCorrectionProposal' | 'saveCorrectionProposal'
 >;
 
 export interface MountReviewWorkspaceOptions {
@@ -224,9 +255,12 @@ export interface MountReviewWorkspaceOptions {
   /** 回到原文: the manuscript at the finding's block, with the mark's card open when the mark still stands. */
   goToText(target: { manuscriptId: string; branchId: string; blockId: string; markId: string | null }): Promise<void>;
   /** 查看计划并开始 (S72 D4, S74a A5): a Review Run's plan opens in the Task Drawer, whose bar approves it. */
+  openProposalWorkspace?(input: { manuscriptId: string; branchId: string; resultId: string | null }): void;
   openPlan(reviewRunId: string): void;
   /** The Run on show changed state: the drawer reads its plan again if it shows it. */
   planChanged(): void;
+  /** 在来源与证据中查看 (Issue #901): the Book's 来源与证据 view, brought to one retained source. */
+  openSource?(evidenceId: string): void;
 }
 
 type Filters = Omit<ReviewFindingPageRequest, 'findingsAfterOrdinal'>;
@@ -264,6 +298,7 @@ interface BatchStrip {
   /** The Effect was refused or its outcome is unknown: only 重新准备应用 is offered, never the same 确认应用 again. */
   refused: boolean;
   capability: boolean;
+  unknown: boolean;
 }
 
 /** The paragraphs a 当前选区 Run named (Issue #423 review, P2-4): 返回修改 asks for the same ones again. */
@@ -424,6 +459,35 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    * lists the sources retained for it, or why there is none. A read that fails leaves the cards as they were.
    */
   let research = new Map<string, ResearchEvidenceBookProjection>();
+  /**
+   * The Fact-check Lens (Issue #901; FACT-004/005/007): the 事实核查 category's Versioned Verification Results, a bounded page at a
+   * time over the service's cursor, with its own filters; and the Evidence Workspace each open row holds, kept across repaints.
+   */
+  const NO_FACT_FILTERS: FactualVerificationLensFilters = { chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null };
+  const fact: { lens: FactualVerificationLensProjection | null; results: FactualVerificationResultProjection[]; next: number | null; pages: number;
+    filters: FactualVerificationLensFilters; open: Map<string, EvidenceWorkspaceSurface> } = { lens: null, results: [], next: null, pages: 1, filters: { ...NO_FACT_FILTERS }, open: new Map() };
+  const loadFactual = async (run: ReviewWorkspaceProjection['run']): Promise<void> => {
+    const factual = run?.categories.find((category) => category.categoryId === 'factual-review');
+    if (run === null || factual === undefined || factual.state !== 'settled') {
+      fact.lens = null;
+      fact.results = [];
+      fact.next = null;
+      return;
+    }
+    try {
+      let page = await api.inspectFactualVerification({ bookId, reviewRunId: run.reviewRunId, after: null, ...fact.filters });
+      const results = [...page.results];
+      for (let count = 1; count < fact.pages && page.nextCursor !== null; count += 1) {
+        page = await api.inspectFactualVerification({ bookId, reviewRunId: run.reviewRunId, after: page.nextCursor, ...fact.filters });
+        results.push(...page.results);
+      }
+      fact.lens = page;
+      fact.results = results;
+      fact.next = page.nextCursor;
+    } catch {
+      // A read that fails leaves the lens as it was; the findings are still listed.
+    }
+  };
   const loadResearch = async (run: ReviewWorkspaceProjection['run']): Promise<void> => {
     const next = new Map<string, ResearchEvidenceBookProjection>();
     const task = run?.categories.find((category) => category.categoryId === 'factual-review')?.taskIntentId;
@@ -439,7 +503,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   const load = async (): Promise<ReviewWorkspaceProjection> => {
     const first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput() });
     const run = first.run;
-    if (run === null || query.pages <= 1 || !run.findingsTruncated) { await loadResearch(run); return first; }
+    if (run === null || query.pages <= 1 || !run.findingsTruncated) { await loadResearch(run); await loadFactual(run); return first; }
     const findings = [...run.findings];
     let truncated: boolean = run.findingsTruncated;
     for (let page = 2; page <= query.pages && truncated && findings.length > 0; page += 1) {
@@ -450,6 +514,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     const result = { ...first, run: { ...run, findings, findingsTruncated: truncated } };
     await loadResearch(result.run);
+    await loadFactual(result.run);
     return result;
   };
 
@@ -780,6 +845,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const title = el('h4', undefined, reviewRunHeading(run.label));
     title.tabIndex = -1;
     heading.append(title, pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
+    appendProposalOffer(heading, run);
     const meta = el('p', 'field-note review-run-meta', `${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(localInstantLabel(run.createdAt))}`);
     meta.append(el('span', 'technical-identity', run.createdAt));
     if (run.authorization !== null) {
@@ -1010,6 +1076,125 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     return section;
   }
 
+  // ---- the Fact-check Lens (Issue #901; V2-UX-FACT-004, FACT-005, FACT-007, FACT-008) ------------------------------------
+
+  /** A lens control: its own action key beside the review's, so a repaint finds it again. */
+  function factButton(action: 'fact-more' | 'fact-workspace' | 'fact-go-to-text', tone: 'secondary' | 'quiet', run: () => void): HTMLButtonElement {
+    const control = el('button', tone);
+    control.type = 'button';
+    control.dataset['factAction'] = action;
+    control.addEventListener('click', run);
+    return control;
+  }
+
+  function renderFactLens(run: ReviewRunProjection): HTMLElement {
+    const lens = fact.lens!;
+    const section = el('section', 'fact-lens');
+    section.dataset['factLensTotal'] = String(lens.total);
+    const headingId = uid('fact-lens');
+    const heading = el('h6', undefined, FACT_LENS_HEADING);
+    heading.id = headingId;
+    section.setAttribute('aria-labelledby', headingId);
+    section.append(heading, el('p', 'field-note', FACT_LENS_NOTE), el('p', 'fact-lens-counts', factLensCountsLine(lens)));
+    if (lens.run?.disclosure != null) section.append(el('p', 'fact-lens-disclosure', lens.run.disclosure));
+    const filters = el('div', 'review-filters fact-lens-filters');
+    filters.setAttribute('role', 'group');
+    filters.setAttribute('aria-label', '筛选核查结果');
+    const select = (name: keyof FactualVerificationLensFilters, choices: ReadonlyArray<readonly [string, string]>): HTMLElement => {
+      const label = el('label', 'review-filter');
+      label.append(el('span', undefined, FACT_LENS_FILTER_LABELS[name === 'chapterBlockId' ? 'chapter' : name]));
+      const control = el('select');
+      control.dataset['factFilter'] = name;
+      control.append(new Option(FACT_LENS_FILTER_ALL, ''));
+      for (const [value, text] of choices) control.append(new Option(text, value));
+      control.value = fact.filters[name] ?? '';
+      control.disabled = working;
+      control.addEventListener('change', () => {
+        fact.filters = { ...fact.filters, [name]: control.value === '' ? null : control.value } as FactualVerificationLensFilters;
+        fact.pages = 1;
+        refresh(true);
+      });
+      label.append(control);
+      return label;
+    };
+    filters.append(
+      select('chapterBlockId', lens.chapters.map((chapter) => [chapter.blockId, chapter.heading] as const)),
+      select('outcome', FACTUAL_VERIFICATION_OUTCOMES.map((outcome) => [outcome, outcome] as const)),
+      select('severity', (['A', 'B', 'C'] as const).map((severity) => [severity, FACT_SEVERITY_LABELS[severity]] as const)),
+      select('sourceCondition', (Object.keys(FACTUAL_SOURCE_CONDITION_LABELS) as FactualSourceCondition[]).map((value) => [value, FACTUAL_SOURCE_CONDITION_LABELS[value]] as const)),
+      select('actionNeed', (Object.keys(FACTUAL_ACTION_NEED_LABELS) as FactualActionNeed[]).map((value) => [value, FACTUAL_ACTION_NEED_LABELS[value]] as const)),
+    );
+    section.append(filters);
+    if (fact.results.length === 0) section.append(el('p', 'field-note', FACT_LENS_EMPTY_FILTERED));
+    const list = el('ol', 'fact-lens-rows');
+    for (const result of fact.results) list.append(renderFactRow(run, result));
+    section.append(list);
+    if (fact.next !== null) {
+      const more = factButton('fact-more', 'secondary', () => {
+        fact.pages += 1;
+        refresh(true);
+      });
+      more.textContent = FACT_LENS_MORE;
+      more.disabled = working;
+      section.append(more);
+    }
+    return section;
+  }
+
+  function renderFactRow(run: ReviewRunProjection, result: FactualVerificationResultProjection): HTMLElement {
+    const row = el('li', 'fact-lens-row');
+    row.dataset['factResultId'] = result.resultId;
+    row.dataset['outcome'] = result.states.factualVerification;
+    row.dataset['anchor'] = result.anchor.state;
+    row.dataset['version'] = String(result.version);
+    const head = el('div', 'fact-lens-row-heading');
+    head.append(el('span', 'review-finding-location', factLocationLine(result)), el('blockquote', 'review-finding-quote', reviewQuote(result.quote)));
+    row.append(head);
+    // The three states in their own columns: never one traffic light (FACT-007).
+    const states = el('div', 'fact-lens-states');
+    for (const [term, value] of factStateLines(result)) {
+      const cell = el('span', 'fact-lens-state');
+      cell.dataset['stateTerm'] = term;
+      cell.append(el('span', 'evidence-term', term), el('span', `status-pill evidence-pill evidence-pill-${term === '事实核查' ? outcomeTone(result.states.factualVerification) : 'neutral'}`, value));
+      states.append(cell);
+    }
+    row.append(states, el('p', 'fact-lens-level', factLevelLine(result)), el('p', 'fact-lens-decision', `${factDecisionLine(result.decision)} · ${factActionLine(result)}`));
+    if (result.anchor.label !== null) row.append(el('p', 'fact-lens-anchor', result.anchor.label));
+    const actions = el('div', 'button-row');
+    const open = fact.open.get(result.resultId);
+    const toggle = factButton('fact-workspace', 'quiet', () => {
+      const current = fact.open.get(result.resultId);
+      if (current !== undefined) {
+        current.destroy();
+        fact.open.delete(result.resultId);
+        refresh(true);
+        return;
+      }
+      const surface = mountEvidenceWorkspace({
+        bookId, resultId: result.resultId, api, setStatus: options.setStatus, errorMessage: options.errorMessage, instant: localInstantLabel,
+        openSource: (evidenceId) => options.openSource?.(evidenceId),
+        goToText: (target) => options.goToText({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, blockId: target.blockId, markId: target.markId }),
+        changed: () => refresh(true),
+      });
+      fact.open.set(result.resultId, surface);
+      void surface.load().then(() => refresh(true), (error: unknown) => options.setStatus(options.errorMessage(error, '无法读取证据工作区。'), 'error'));
+    });
+    toggle.textContent = open === undefined ? FACT_OPEN_WORKSPACE : FACT_CLOSE_WORKSPACE;
+    toggle.setAttribute('aria-expanded', open === undefined ? 'false' : 'true');
+    toggle.disabled = working;
+    actions.append(toggle);
+    const locate = factButton('fact-go-to-text', 'quiet', () => void options.goToText({
+      manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, blockId: result.blockId, markId: result.markId,
+    }));
+    locate.textContent = '在稿件中查看';
+    locate.disabled = working || result.anchor.state === 'stale';
+    actions.append(locate);
+    row.append(actions);
+    // The open workspace is the same element across repaints, so what the editor pinned, chose or typed stays.
+    if (open !== undefined) row.append(open.element);
+    return row;
+  }
+
   function renderGroup(run: ReviewRunProjection, category: ReviewRunCategoryProjection, findings: ReadonlyArray<ReviewFindingProjection>): HTMLElement {
     const group = el('section', 'review-group');
     group.dataset['reviewCategory'] = category.categoryId;
@@ -1024,6 +1209,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       heading.append(batch);
     }
     group.append(heading);
+    if (category.categoryId === 'factual-review' && fact.lens !== null) group.append(renderFactLens(run));
     if (ui.batch?.categoryId === category.categoryId) group.append(renderBatchStrip(run, ui.batch));
     for (const finding of findings) group.append(renderFinding(run, category, finding));
     return group;
@@ -1195,12 +1381,23 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     return wrap;
   }
 
+  function appendProposalOffer(host: HTMLElement, run: ReviewRunProjection): void {
+    if (!options.openProposalWorkspace) return;
+    const input = { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, resultId: run.reviewRunId };
+    void api.inspectProposalWorkspace(input).then((answer) => {
+      if (!host.isConnected || !answer.offerWorkspace) return;
+      const offer = el('button', 'secondary', '在专用工作区审阅'); offer.type = 'button'; offer.dataset['proposalWorkspaceOffer'] = 'true';
+      offer.addEventListener('click', () => options.openProposalWorkspace?.(input)); host.append(offer);
+    }).catch(() => {});
+  }
+
   function renderBatchStrip(run: ReviewRunProjection, strip: BatchStrip): HTMLElement {
     const node = el('section', 'review-batch-strip');
     node.dataset['reviewCategory'] = strip.categoryId;
     node.dataset['reviewBatchCount'] = String(strip.items.length);
     node.dataset['reviewBatchState'] = strip.refused ? 'refused' : strip.items.length === 0 ? 'empty' : 'ready';
     node.setAttribute('role', 'group');
+    appendProposalOffer(node, run);
     const scopeId = uid('batch-scope');
     node.setAttribute('aria-labelledby', scopeId);
     const row = el('div', 'button-row');
@@ -1223,7 +1420,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (strip.excluded > 0) node.append(el('p', 'field-note', reviewBatchExcludedLine(strip.excluded)));
       if (strip.capped) node.append(el('p', 'field-note', reviewBatchCappedLine(MAX_BATCH_APPLY_SUGGESTIONS)));
       node.append(el('p', 'field-note', REVIEW_BATCH_ALL_OR_NONE));
-      if (strip.refused || strip.capability) {
+      if (strip.unknown) {
+        node.append(el('p', 'review-problem', '结果待确认；确认权威记录之前不能再次应用。'));
+        row.append(actionButton('open-manuscript', 'secondary', () => void options.openManuscript()));
+      } else if (strip.refused || strip.capability) {
         const category = run.categories.find((candidate) => candidate.categoryId === strip.categoryId);
         row.append(actionButton('batch-reprepare', 'primary', () => {
           if (category !== undefined) void prepareBatch(run, category);
@@ -1453,6 +1653,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           ...binding(run, finding), markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null,
         }),
         (input) => api.getManuscriptApplyOutcome(input),
+        undefined,
+        async (clientEffectId, recovery) => { options.setStatus(recovery === 'confirming' ? '正在确认应用结果' : '结果待确认', 'busy'); await api.inspectApplyReceipt({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, clientEffectId, recovery }); },
       );
       if (applied.acknowledged) {
         options.setStatus(REVIEW_STATUS_LINES.applied, 'success');
@@ -1580,6 +1782,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         problem: null,
         refused: false,
         capability: false,
+        unknown: false,
       };
       options.setStatus(listed.length === 0 ? REVIEW_BATCH_NOTHING : reviewBatchReadyLine(listed.length));
       pendingFocus = { findingId: null, field: 'batch' };
@@ -1594,6 +1797,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         run.manuscript,
         (clientEffectId) => api.applyChangeSuggestionBatch({ ...binding(run, first), markIds: strip.items.map((item) => item.markId), clientEffectId }),
         (input) => api.getManuscriptApplyOutcome(input),
+        undefined,
+        async (clientEffectId, recovery) => { options.setStatus(recovery === 'confirming' ? '正在确认应用结果' : '结果待确认', 'busy'); await api.inspectApplyReceipt({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, clientEffectId, recovery }); },
       );
       if (applied.acknowledged || applied.outcome?.state === 'committed') {
         ui.batch = null;
@@ -1603,6 +1808,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       // Refused — a suggestion drifted, or was decided meanwhile — or its outcome is unknown: the same
       // 确认应用 is never offered again; 重新准备应用 reads what stands now (V2-UX-EAPP-008).
       strip.refused = true;
+      strip.unknown = applied.outcome === null;
       if (!applied.acknowledged && isCapabilityRefusal(applied.failure)) {
         strip.capability = true;
         strip.problem = REVIEW_CAPABILITY_REASON;

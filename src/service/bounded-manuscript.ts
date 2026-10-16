@@ -130,7 +130,7 @@ import {
   EVALUATION_PROFILE_SCHEMA_VERSION,
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
-  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION,
+  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
@@ -143,6 +143,7 @@ import {
   EDITORIAL_MARK_FOREIGN_KEYS,
   EDITORIAL_MARK_REVISION_22_SQL,
   EDITORIAL_MARK_SCHEMA_SQL,
+  PROPOSAL_ITEM_DECISIONS_PRE77_SQL, PROPOSAL_REVIEW_SCHEMA_SQL, PROPOSAL_REVIEW_TRIGGER_SQL, PROPOSAL_REVIEW_FOREIGN_KEYS,
   EDITORIAL_MARK_TRIGGER_SQL,
   PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL,
   followBlockTextChangeForMarks,
@@ -233,6 +234,7 @@ import {
 import { EVALUATION_PROFILE_SCHEMA_SQL, EVALUATION_PROFILE_TRIGGER_SQL, EVALUATION_PROFILE_FOREIGN_KEYS } from './evaluation-profiles.js';
 import { IMPORTED_EXEMPLAR_SCHEMA_SQL, IMPORTED_EXEMPLAR_TRIGGER_SQL, IMPORTED_EXEMPLAR_FOREIGN_KEYS } from './imported-exemplars.js';
 import { RESEARCH_EVIDENCE_FOREIGN_KEYS, RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from './research-evidence-schema.js';
+import { FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from './factual-verification-schema.js';
 import { OUTCOME_RESOLUTION_FOREIGN_KEYS, OUTCOME_RESOLUTION_SCHEMA_SQL, OUTCOME_RESOLUTION_TRIGGER_SQL } from './analysis/outcome-resolutions.js';
 import {
   BACKGROUND_ANALYSIS_ENROLLMENT_FOREIGN_KEYS,
@@ -1963,6 +1965,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   // Revision 22 (Issue #407): Editorial Marks and the Proposal Change Item ledgers, owned and spelled
   // by `editorial-marks.ts`.
   ...EDITORIAL_MARK_FOREIGN_KEYS,
+  ...PROPOSAL_REVIEW_FOREIGN_KEYS,
   // Revision 23 (Issue #408): the Effect ledger of AI7 Apply, owned and spelled by `manuscript-apply.ts`.
   ...MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   // Revision 24 (Issue #417): the Review Run relations, owned and spelled by `review/review-runs.ts`.
@@ -2020,6 +2023,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...IMPORTED_EXEMPLAR_FOREIGN_KEYS,
   ...RESEARCH_EVIDENCE_FOREIGN_KEYS,
   ...MATERIAL_INDEX_LAYER_FOREIGN_KEYS,
+  ...FACTUAL_VERIFICATION_FOREIGN_KEYS,
   ...EVALUATION_PROFILE_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
@@ -2721,6 +2725,8 @@ function requireManuscriptReimportTargetSchema(
   const includeResearchEvidenceTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= RESEARCH_EVIDENCE_SCHEMA_VERSION || committed(RESEARCH_EVIDENCE_SCHEMA_SQL);
   // Revision 76 (Issue #892): the Material Index's similarity vectors and 来源译文.
   const includeMaterialIndexLayerTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MATERIAL_INDEX_LAYER_SCHEMA_VERSION || committed(MATERIAL_INDEX_LAYER_SCHEMA_SQL);
+  // Revision 77 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
+  const includeFactualVerificationTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= FACTUAL_VERIFICATION_SCHEMA_VERSION || committed(FACTUAL_VERIFICATION_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
@@ -2758,11 +2764,13 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEditorialMarkTables
         ? {
             ...EDITORIAL_MARK_SCHEMA_SQL,
+            proposal_item_decisions: committed(PROPOSAL_REVIEW_SCHEMA_SQL) ? [EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions] : [PROPOSAL_ITEM_DECISIONS_PRE77_SQL, EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions],
             ...(includeManuscriptEffectTables
               ? {}
               : { editorial_marks: [EDITORIAL_MARK_REVISION_22_SQL.editorial_marks, EDITORIAL_MARK_SCHEMA_SQL.editorial_marks] }),
           }
         : {}),
+      ...(committed(PROPOSAL_REVIEW_SCHEMA_SQL) ? PROPOSAL_REVIEW_SCHEMA_SQL : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_SCHEMA_SQL : {}),
       // Revision 24 (Issue #417) adds the Review Run relations beside the three analysis relations it
       // rebuilds; they join this exact table set, the trigger set and `SCHEMA_FOREIGN_KEYS` behind a
@@ -2878,6 +2886,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEvaluationProfileTables ? EVALUATION_PROFILE_SCHEMA_SQL : {}),
       ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_SCHEMA_SQL : {}),
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_SCHEMA_SQL : {}),
+      ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2892,6 +2901,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeAuthoritySidecarTables ? EDITORIAL_WORKSPACE_PROFILE_SIDECAR_TRIGGER_SQL : {}),
       ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_TRIGGER_SQL : {}),
       ...(includeAnalysisLedgerTables ? analysisTriggers : {}),
+      ...(committed(PROPOSAL_REVIEW_SCHEMA_SQL) ? PROPOSAL_REVIEW_TRIGGER_SQL : {}),
       ...(includeEditorialMarkTables ? EDITORIAL_MARK_TRIGGER_SQL : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_TRIGGER_SQL : {}),
       ...(includeReviewRunTables ? REVIEW_RUN_TRIGGER_SQL : {}),
@@ -2938,6 +2948,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEvaluationProfileTables ? EVALUATION_PROFILE_TRIGGER_SQL : {}),
       ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_TRIGGER_SQL : {}),
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_TRIGGER_SQL : {}),
+      ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5856,7 +5867,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5907,7 +5918,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(

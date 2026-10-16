@@ -2125,6 +2125,90 @@ function registerRendererHandlers(
         });
       }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectProposalWorkspace, (event, input: ServiceOperationMap['inspectProposalWorkspace']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const capability = requireManuscriptCapability(owned, input);
+        const result = await service.call('inspectProposalWorkspace', input);
+        const resource = result;
+        if ('manuscriptId' in resource) requireResourceIdentity(capability, resource as { manuscriptId: string; branchId: string });
+        if ('bookId' in resource && resource.bookId !== capability.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '提案记录不属于当前图书。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveProposalDecisionDraft, (event, input: ServiceOperationMap['saveProposalDecisionDraft']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const capability = requireManuscriptCapability(owned, input);
+        const result = await service.call('saveProposalDecisionDraft', input);
+        const resource = result;
+        if ('manuscriptId' in resource) requireResourceIdentity(capability, resource as { manuscriptId: string; branchId: string });
+        if ('bookId' in resource && resource.bookId !== capability.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '提案记录不属于当前图书。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.batchProposalDecisionDraft, (event, input: ServiceOperationMap['batchProposalDecisionDraft']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const capability = requireManuscriptCapability(owned, input);
+        const result = await service.call('batchProposalDecisionDraft', input);
+        const resource = result.workspace;
+        if ('manuscriptId' in resource) requireResourceIdentity(capability, resource as { manuscriptId: string; branchId: string });
+        if ('bookId' in resource && resource.bookId !== capability.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '提案记录不属于当前图书。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.recordProposalDecision, (event, input: ServiceOperationMap['recordProposalDecision']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const capability = requireManuscriptCapability(owned, input);
+        const result = await service.call('recordProposalDecision', input);
+        const resource = result;
+        if ('manuscriptId' in resource) requireResourceIdentity(capability, resource as { manuscriptId: string; branchId: string });
+        if ('bookId' in resource && resource.bookId !== capability.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '提案记录不属于当前图书。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectApplyReceipt, (event, input: ServiceOperationMap['inspectApplyReceipt']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const capability = requireManuscriptCapability(owned, input);
+        const result = await service.call('inspectApplyReceipt', input);
+        const resource = result;
+        if ('manuscriptId' in resource) requireResourceIdentity(capability, resource as { manuscriptId: string; branchId: string });
+        if ('bookId' in resource && resource.bookId !== capability.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '提案记录不属于当前图书。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.prepareReverseApply, (event, input: ServiceOperationMap['prepareReverseApply']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const capability = requireManuscriptCapability(owned, input);
+        const result = await service.call('prepareReverseApply', input);
+        const resource = result;
+        if ('manuscriptId' in resource) requireResourceIdentity(capability, resource as { manuscriptId: string; branchId: string });
+        if ('bookId' in resource && resource.bookId !== capability.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '提案记录不属于当前图书。');
+        return result;
+      });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.getManuscriptApplyOutcome, (event, input: ServiceOperationMap['getManuscriptApplyOutcome']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -3663,6 +3747,60 @@ function registerRendererHandlers(
           return service.call('saveEvidenceAsMaterial', { bookId: input.bookId, evidenceId: input.evidenceId, title: input.title ?? null });
         });
       }),
+  );
+  // Factual verification (Issue #901): reads go straight to the service; the decision and the save are serialized effects.
+  ipcMain.handle(IPC_CHANNELS.inspectFactualVerification, (event, input: ServiceOperationMap['inspectFactualVerification']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectFactualVerification', {
+        bookId: input.bookId, reviewRunId: input.reviewRunId ?? null, after: input.after ?? null, chapterBlockId: input.chapterBlockId ?? null,
+        outcome: input.outcome ?? null, severity: input.severity ?? null, sourceCondition: input.sourceCondition ?? null, actionNeed: input.actionNeed ?? null,
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectEvidenceWorkspace, (event, input: ServiceOperationMap['inspectEvidenceWorkspace']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectEvidenceWorkspace', { bookId: input.bookId, resultId: input.resultId, sourcesAfter: input.sourcesAfter ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.recordVerificationReviewDecision, (event, input: ServiceOperationMap['recordVerificationReviewDecision']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('recordVerificationReviewDecision', {
+          bookId: input.bookId, resultId: input.resultId, resultVersion: input.resultVersion, disposition: input.disposition,
+          ownWords: input.ownWords ?? null, reason: input.reason ?? null,
+        });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.prepareCorrectionProposal, (event, input: ServiceOperationMap['prepareCorrectionProposal']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('prepareCorrectionProposal', { bookId: input.bookId, resultId: input.resultId });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveCorrectionProposal, (event, input: ServiceOperationMap['saveCorrectionProposal']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('saveCorrectionProposal', {
+          bookId: input.bookId, resultId: input.resultId, resultVersion: input.resultVersion, variantId: input.variantId ?? null,
+          text: input.text, rationale: input.rationale, rangeIds: input.rangeIds,
+        });
+      });
+    }),
   );
   ipcMain.handle(IPC_CHANNELS.readLibraryDecisionReason, (event, input: ServiceOperationMap['readLibraryDecisionReason']['input']) =>
     envelope(async () => {

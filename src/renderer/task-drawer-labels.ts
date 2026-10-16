@@ -249,6 +249,15 @@ export const TASK_PLAN_EDIT_ADAPTATION_ASK_FIRST = '先问你';
 export function taskPlanEditAskFirst(label: string): string {
   return `改成先问你：${label}`;
 }
+// ---- 证据保证级别 (Issue #901; EASSURE-001, EASSURE-008, EASSURE-013) --------------------------------------------------------
+
+/** The selector's words: what a level is and is not, said beside the three options of a 事实核查 Task's plan. */
+export const TASK_PLAN_ASSURANCE_HEADING = '证据保证级别';
+export const TASK_PLAN_ASSURANCE_NOTE = '级别决定这次核查做多少证据工作、能记录什么结论；它不是模型、服务或权限的选择。开始任务时如果本机未联网，会自动降为快速整理并在结果里说明。';
+export function taskPlanAssuranceEdited(label: string): string {
+  return `改成${label}`;
+}
+
 // ---- 设置上限… (Issue #51, plan slice S16a; §6 ⑤, V2-UX-MODEL-013, MODEL-015) ----------------------------------------
 
 /** MODEL-013: what the ceiling — set or not — leaves to the model service's own account. */

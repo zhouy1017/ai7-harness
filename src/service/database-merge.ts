@@ -155,6 +155,11 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   editorial_mark_replies: 'owned',
   proposal_change_items: 'owned',
   proposal_item_decisions: 'owned',
+  proposal_atomic_groups: 'owned',
+  proposal_decision_drafts: 'owned',
+  proposal_decisions: 'owned',
+  proposal_review_positions: 'owned',
+  manuscript_outcome_recovery: 'owned',
   proposal_decision_reasons: 'owned',
   proposal_decision_feedback: 'owned',
   proposal_conflict_drafts: 'owned',
@@ -346,6 +351,11 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   // item's are made again here on request, from the build made here.
   material_index_vectors: 'derived',
   material_index_translations: 'derived',
+  // Factual verification (Issue #901): a Book's results, decisions and Correction Proposal lineage travel with it.
+  factual_run_assurance: 'owned',
+  factual_verification_results: 'owned',
+  factual_review_decisions: 'owned',
+  correction_proposals: 'owned',
 };
 
 /** What stays behind when a Book merges, said to the editor. */
