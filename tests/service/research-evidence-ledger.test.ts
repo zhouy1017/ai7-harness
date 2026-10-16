@@ -140,6 +140,14 @@ describe('the research evidence ledger, schema 75', () => {
       store.recordResearchEvidence({ bookId: book.bookId, runRecordId: randomUUID(), unitOrdinal: 1, backendId: 'search-brave', unit: unit([evidence('公开事实已更新。', now)]) });
       expect(store.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: 365 }).records.filter((record) => record.staleness.state === 'current')).toHaveLength(2);
       expect(() => store!.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: 0 })).toThrow(expect.objectContaining({ code: 'RESEARCH_EVIDENCE_STALE_AFTER_INVALID' }));
+      // One read stays within one frame however much the Book researched: the latest 64 units and at most 400 of their findings.
+      const many = (index: number): RetainedUnit => ({ ...unit([]), findings: Array.from({ length: 7 }, (_, at) => ({
+        findingId: `fnd_${(index * 7 + at).toString(16).padStart(24, '0')}`, blockId: `blk_${'f'.repeat(24)}`, quote: '合成引文', category: '史实' as const, sources: 0 })) });
+      for (let index = 0; index < 70; index += 1) store.recordResearchEvidence({ bookId: book.bookId, runRecordId: randomUUID(), unitOrdinal: 1, backendId: null, unit: many(index) });
+      const bounded = store.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null });
+      expect(bounded.units).toHaveLength(64);
+      expect(bounded.findings).toHaveLength(400);
+      expect(bounded.findings.every((entry) => entry.state === 'unsupported')).toBe(true);
       // Another Book reads none of it.
       const other = await importSample1Book(store, roots.codeRoot, '另一本');
       expect(store.inspectResearchEvidence({ bookId: other.bookId, after: null, staleAfterDays: null })).toMatchObject({ records: [], units: [], findings: [] });

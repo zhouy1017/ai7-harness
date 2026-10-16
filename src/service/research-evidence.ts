@@ -48,6 +48,10 @@ function requireEvidence(condition: unknown, code: string, message: string): ass
 
 type SqlRow = Record<string, SQLOutputValue>;
 
+/** How many researched units, and how many of their findings, one 来源与证据 read carries: the latest first. */
+export const MAX_RESEARCH_EVIDENCE_UNITS = 64;
+export const MAX_RESEARCH_EVIDENCE_FINDINGS = 400;
+
 const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
 
 /**
@@ -291,8 +295,9 @@ export class ResearchEvidenceLedger {
         savedMaterialId, saveRefusal: input.saveRefusal({ captureState: stored.captureState, savedMaterialId }),
       };
     });
-    const unitRows = this.#db.prepare('SELECT * FROM research_evidence_units WHERE book_id = ? ORDER BY recorded_at DESC, run_record_id, unit_ordinal LIMIT 256')
-      .all(input.bookId) as SqlRow[];
+    // The latest researched units and their findings, bounded so one read always fits one frame.
+    const unitRows = this.#db.prepare('SELECT * FROM research_evidence_units WHERE book_id = ? ORDER BY rowid DESC LIMIT ?')
+      .all(input.bookId, MAX_RESEARCH_EVIDENCE_UNITS) as SqlRow[];
     const units: ResearchEvidenceUnitProjection[] = [];
     const findings: ResearchEvidenceFindingProjection[] = [];
     for (const row of unitRows) {
@@ -307,6 +312,7 @@ export class ResearchEvidenceLedger {
         failedRetrievals: Number(row.failed_retrievals), unsupportedFindings: Number(row.unsupported_findings),
       });
       for (const finding of record.findings as Array<{ findingId: string; blockId: string; quote: string; sources: number }>) {
+        if (findings.length >= MAX_RESEARCH_EVIDENCE_FINDINGS) break;
         const findingState = finding.sources > 0 ? 'sourced' as const : state === 'incomplete' ? 'incomplete' as const : 'unsupported' as const;
         findings.push({ findingId: finding.findingId, runRecordId: String(row.run_record_id), unitOrdinal: Number(row.unit_ordinal),
           blockId: finding.blockId, quote: finding.quote, state: findingState, label: RESEARCH_EVIDENCE_FINDING_LABELS[findingState], sources: finding.sources });
