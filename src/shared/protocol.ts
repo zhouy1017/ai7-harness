@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 137 as const;
+export const SERVICE_PROTOCOL_VERSION = 138 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -279,6 +279,10 @@ export const IPC_CHANNELS = {
   getProductDataLocation: 'ai7:j12:get-product-data-location',
   revealProductDataLocation: 'ai7:j12:reveal-product-data-location',
   getModelServiceSettings: 'ai7:j12:get-model-service-settings',
+  selectSearchBackend: 'ai7:j12:select-search-backend',
+  probeSearchBackend: 'ai7:j12:probe-search-backend',
+  saveSearchBackendCredential: 'ai7:j12:save-search-backend-credential',
+  removeSearchBackendCredential: 'ai7:j12:remove-search-backend-credential',
   saveModelServiceProxy: 'ai7:j12:save-model-service-proxy',
   saveModelServiceCredential: 'ai7:j12:save-model-service-credential',
   removeModelServiceCredential: 'ai7:j12:remove-model-service-credential',
@@ -2363,6 +2367,7 @@ export interface ModelRoleCardProjection {
 export type ModelServiceProxySetting = { mode: 'direct' } | { mode: 'proxy'; protocol: 'http' | 'https'; hostPort: string };
 
 export interface ModelServiceSettingsProjection {
+  searchBackends: SearchBackendSettingsProjection;
   proxy: ModelServiceProxySetting;
   roles: readonly ModelRoleCardProjection[];
   /** The two routes and the providers not yet supported (Issue #811). */
@@ -2378,6 +2383,49 @@ export interface ModelServiceSettingsProjection {
   };
   launchPolicy: LaunchPolicyProjection;
   authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。';
+}
+
+export interface SearchBackendConnectionProjection {
+  backendId: string;
+  credentialReference: string | null;
+  credentialOperationState: ModelCredentialOperationState;
+  selected: boolean;
+  selectedAt: string;
+}
+
+export interface SearchBackendSettingsProjection {
+  selectedBackendId: string;
+  backends: ReadonlyArray<{
+    backendId: string;
+    name: string;
+    rank: number;
+    host: string;
+    reachable: boolean;
+    p50Ms: number | null;
+    price: string;
+    keyRequired: boolean;
+    chineseHitRate: number;
+    internationalHitRate: number;
+    note: string | null;
+    connection: SearchBackendConnectionProjection;
+  }>;
+}
+
+export interface SearchBackendProbeProjection {
+  backendId: string;
+  reachable: boolean;
+  latencyMs: number;
+  resultCount: number;
+  results: ReadonlyArray<{ title: string; url: string }>;
+  failure: string | null;
+}
+
+/** A Run's exact web backend, part of its Plan Envelope digest. */
+export interface FrozenWebToolsBackend {
+  backendId: string;
+  host: string;
+  configurationDigest: string;
+  selectedAt: string;
 }
 
 /** What the renderer sends to save or choose a route (Issue #811); the value of `secret` never comes back. */
@@ -2686,10 +2734,14 @@ export type RunReportStageId = (typeof RUN_REPORT_STAGES)[number];
  * it has usage and no stage row. The first three therefore sum to the revision's own recorded usage
  * field by field, which is the reconciliation the Run Report promises.
  */
-export const RUN_REPORT_USAGE_STAGES = ['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection'] as const;
+export const RUN_REPORT_USAGE_STAGES = ['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection', 'platform-tools'] as const;
 export type RunReportUsageStageId = (typeof RUN_REPORT_USAGE_STAGES)[number];
 
 export interface RunReportUsageProjection {
+  searchCalls?: Readonly<Record<string, number>>;
+  refusedSearchCalls?: number;
+  fetchCount?: number;
+  fetchBytes?: number;
   requests: number;
   inputTokens: number;
   outputTokens: number;
@@ -2782,6 +2834,7 @@ export type RunReportIfRedoneProjection =
 
 /** The Run Report as it is recorded inside the Task Outcome, before its own digest is taken. */
 export interface RunReportRecordProjection {
+  webToolsBackend?: FrozenWebToolsBackend;
   /** Editorial choices only; no question or answer content enters the Run Report. */
   modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'timed-out' | 'unanswered'; line: string }>;
   schema: 'ai7.analysis.run-report/1';
@@ -3852,6 +3905,8 @@ export interface BaselineAnalysisProjection {
   runSourceScope: null | TaskAuthorizationProjection['runSourceScope'];
   coverageManifest: null | CoverageManifestProjection;
   providerResolutionPlan: null | {
+    webToolsBackend?: FrozenWebToolsBackend;
+    searchCredentialReference?: string;
     role: 'Main Editorial Role';
     capabilities: readonly [];
     remoteBinding: {
@@ -11411,6 +11466,14 @@ export interface ServiceReadiness {
 }
 
 export interface ServiceOperationMap {
+  getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
+  selectSearchBackend: { input: { backendId: string }; output: SearchBackendSettingsProjection };
+  probeSearchBackend: { input: { backendId: string }; output: SearchBackendProbeProjection };
+  saveSearchBackendCredential: {
+    input: { backendId: string; credentialReference: string | null; credentialOperationState: ModelCredentialOperationState };
+    output: SearchBackendConnectionProjection;
+  };
+  removeSearchBackendCredential: { input: { backendId: string }; output: SearchBackendConnectionProjection };
   ready: { input: Record<string, never>; output: ServiceReadiness };
   getStartup: { input: Record<string, never>; output: StartupProjection };
   getRecoveryComparison: {
@@ -12307,6 +12370,10 @@ export type PickerReselectResult =
   | { status: 'reselected'; continuation: ContinueImportProjection };
 
 export interface RendererApi {
+  selectSearchBackend(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
+  probeSearchBackend(input: { backendId: string }): Promise<SearchBackendProbeProjection>;
+  saveSearchBackendCredential(input: { backendId: string; secret: string }): Promise<ModelServiceSettingsProjection>;
+  removeSearchBackendCredential(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
   readonly platform: 'win32' | 'darwin';
   getStartup(): Promise<StartupProjection>;
   getRecoveryComparison(input: ServiceOperationMap['getRecoveryComparison']['input']): Promise<RecoveryComparisonProjection>;

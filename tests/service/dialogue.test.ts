@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mergeBooks } from '../../src/service/database-merge.js';
@@ -450,7 +451,7 @@ describe('就这段提问… over the real store and harness', () => {
       for (const table of Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
       for (const table of Object.keys(READERS_REPORT_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
       for (const table of Object.keys(DIALOGUE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      database.exec(`PRAGMA user_version = ${INITIAL_EVALUATION_SCHEMA_VERSION}`);
+      execPre74Fixture(database, `PRAGMA user_version = ${INITIAL_EVALUATION_SCHEMA_VERSION}`);
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_59_SQL);
     } finally {
       database.close();

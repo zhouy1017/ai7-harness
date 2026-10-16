@@ -233,7 +233,7 @@ describe('authorized calls', () => {
     const authorized = authorizeSearchCall({ ticket: search.ticket, book, arguments: websearch });
     await sendSearchCall(authorized, fetch);
     await expect(sendSearchCall(authorized, fetch)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
-    await expect(sendSearchCall({ request: authorized.request }, fetch)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    await expect(sendSearchCall({ request: authorized.request! }, fetch)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
     expect(calls).toHaveLength(1);
     const page = evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket };
     const fetchAuthorized = authorizePublicFetch({ ticket: page.ticket, book });

@@ -1,3 +1,4 @@
+import { execPre74Fixture, expectedSchema74 } from '../support/pre74-schema.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync } from 'node:fs';
@@ -522,7 +523,7 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
     let before: Array<{ name: string; sql: string }>;
     let books: unknown[];
     try {
-      plant.exec(`DROP TABLE analysis_outcome_resolutions; PRAGMA user_version = ${MATERIAL_INDEX_SCHEMA_VERSION};`);
+      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; PRAGMA user_version = ${MATERIAL_INDEX_SCHEMA_VERSION};`);
       before = schemaOf(plant);
       books = plant.prepare('SELECT * FROM books ORDER BY rowid').all();
     } finally {
@@ -539,7 +540,7 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(OUTCOME_RESOLUTION_SCHEMA_VERSION).toBe(MATERIAL_INDEX_SCHEMA_VERSION + 1);
       const after = schemaOf(database);
-      expect(after.filter((entry) => !entry.name.startsWith('analysis_outcome_resolutions'))).toEqual(before!);
+      expect(after.filter((entry) => !entry.name.startsWith('analysis_outcome_resolutions'))).toEqual(expectedSchema74(before!));
       expect(after.filter((entry) => entry.name.startsWith('analysis_outcome_resolutions')).map((entry) => entry.name))
         .toEqual(['analysis_outcome_resolutions', 'analysis_outcome_resolutions_no_delete', 'analysis_outcome_resolutions_no_update']);
       expect(database.prepare('SELECT * FROM books ORDER BY rowid').all()).toEqual(books!);

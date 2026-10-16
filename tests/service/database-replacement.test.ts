@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -104,7 +105,7 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
   const database = new DatabaseSync(schemaRevision >= 55 ? join(other, 'store', 'ai7.sqlite') : ':memory:');
   try {
     if (schemaRevision < 55) database.exec('CREATE TABLE marker (value TEXT) STRICT;');
-    database.exec(`PRAGMA user_version = ${schemaRevision};`);
+    execPre74Fixture(database, `PRAGMA user_version = ${schemaRevision};`);
     const path = join(roots.inputRoot, name);
     await writeDatabasePackage(database, other, path, () => ({
       dataVersion, softwareVersion: '0.1.0', schemaRevision, createdAt: T.toISOString(), origin: 'database-export', contents,
@@ -195,7 +196,7 @@ describe('导入数据库 over the real store', () => {
         await writeFile(restamped, entries[member.path]!);
         const database = new DatabaseSync(restamped);
         try {
-          database.exec(`PRAGMA user_version = ${manifest.schemaRevision - 1}`);
+          execPre74Fixture(database, `PRAGMA user_version = ${manifest.schemaRevision - 1}`);
         } finally { database.close(); }
         entries[member.path] = await readFile(restamped);
       } else {
@@ -502,7 +503,7 @@ describe('导入数据库 over the real store', () => {
     // A revision-56 store gains the empty ledger, and nothing else moves.
     database = new DatabaseSync(path);
     try {
-      database.exec(`DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; PRAGMA user_version = ${SCHEDULED_BACKUP_SCHEMA_VERSION};`);
+      execPre74Fixture(database, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; PRAGMA user_version = ${SCHEDULED_BACKUP_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
     } finally {
       database.close();

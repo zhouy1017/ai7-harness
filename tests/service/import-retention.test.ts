@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -90,7 +91,7 @@ function plantRevision26(): Row[] {
         '"schema":"ai7.import-degradation-decision/1","scope":"this-import-only","state":"accepted-complete-set"}',
         new Date().toISOString());
     database.prepare('UPDATE manuscript_import_records SET degradation_decision_id = ?').run(decisionId);
-    database.exec(`PRAGMA user_version = ${PROPOSAL_CONFLICT_SCHEMA_VERSION}; COMMIT; PRAGMA foreign_keys = ON;`);
+    execPre74Fixture(database, `PRAGMA user_version = ${PROPOSAL_CONFLICT_SCHEMA_VERSION}; COMMIT; PRAGMA foreign_keys = ON;`);
     downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
     expect(importFidelityCategoriesShape(database)).toBe('revision-26');
     return database.prepare('SELECT rowid, * FROM import_fidelity_categories ORDER BY rowid').all() as Row[];

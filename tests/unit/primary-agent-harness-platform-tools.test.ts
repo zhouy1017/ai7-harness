@@ -89,7 +89,7 @@ class SearchingModel implements LlmAdapter {
       yield { type: 'block-start', index: 0, blockType: 'text' };
       yield { type: 'text-delta', index: 0, text: ANSWER };
       yield { type: 'block-end', index: 0, block: { type: 'text', text: ANSWER } };
-      yield { type: 'usage', usage: { inputTokens: 20, outputTokens: 5 } };
+      yield { type: 'usage', usage: { inputTokens: 20, outputTokens: 5, cacheReadTokens: 4 } };
       yield { type: 'finish', reason: { kind: 'stop' } };
       return;
     }
@@ -99,7 +99,7 @@ class SearchingModel implements LlmAdapter {
     yield { type: 'block-start', index: 0, blockType: 'tool-call' };
     yield { type: 'tool-call-delta', index: 0, id, name: 'websearch', argumentsDelta: args };
     yield { type: 'block-end', index: 0, block: { type: 'tool-call', id, name: 'websearch', arguments: args } };
-    yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 3 } };
+    yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 3, cacheReadTokens: 2 } };
     yield { type: 'finish', reason: { kind: 'tool-calls' } };
   }
 }
@@ -182,6 +182,7 @@ describe('the platform tools inside the composition', () => {
       handle.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: handle.composition.digest, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST });
       session.startUnit();
       const outcome = await handle.submitUnit(UNIT);
+      expect(outcome.signals.find((signal) => signal.kind === 'usage')).toMatchObject({ usage: { inputTokens: 30, outputTokens: 8, cacheReadTokens: 6 } });
       expect(outcome.terminal).toBe('completed');
       expect(decisions).toEqual(['transmit-local', 'transmit-local']);
       expect(outcome.signals.filter((signal) => signal.kind === 'contentCandidate')).toEqual([expect.objectContaining({ text: ANSWER })]);

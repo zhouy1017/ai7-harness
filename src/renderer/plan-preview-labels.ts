@@ -256,11 +256,12 @@ export function durationLabel(wallMs: number | null): string {
  * stage and its current object, never `分析单元进度`. The reflection turn runs last, after the revision is
  * already kept, which is what its label says so that an editor never reads it as the analysis still open.
  */
-export const RUN_LIVENESS_STAGE_LABELS: Record<'units' | 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection', string> = {
+export const RUN_LIVENESS_STAGE_LABELS: Record<'units' | 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection' | 'platform-tools', string> = {
   units: '正在逐个阅读范围分析',
   'cross-unit-reduction': '正在跨范围比对',
   'assurance-sampling': '正在抽样复核',
   'run-report-reflection': '分析已保存，正在写运行报告',
+  'platform-tools': '联网检索',
 };
 
 /** The report's unit accounting as one sentence; every figure is the record's own count. */

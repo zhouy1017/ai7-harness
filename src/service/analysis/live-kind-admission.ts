@@ -1,3 +1,8 @@
+import { FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
+import { FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST } from './factual-review-contract.js';
+import { platformToolsFromProjection } from '../provider/search-service.js';
+import { modelProfileFor } from '../provider/model-profile.js';
+import type { RemoteExecutionRoute } from '../provider/egress-gate.js';
 import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { EVALUATION_REWRITE_KIND, INITIAL_EVALUATION_KIND, READERS_REPORT_KIND, WRITING_KIND, reviewCategoryKindId } from '../../shared/protocol.js';
 import type { OutboundDataCategory } from '../provider/egress-gate.js';
@@ -5,7 +10,7 @@ import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } fr
 import { reviewCategoryKindDefinition } from '../review/review-category-kind.js';
 import { liveMaterialContract } from '../task-material-references.js';
 import { withModelClarification } from '../provider/clarification-contract.js';
-import type { AnalysisKindDefinition } from './kind-definition.js';
+import { factualReviewKindDefinition, withFactualResearch, type AnalysisKindDefinition } from './kind-definition.js';
 
 /** The rule facts a live step reads from the one selected rule that admitted its kind. */
 export interface LiveKindRule {
@@ -133,13 +138,14 @@ function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[]
  * kind has no row and is not admitted.
  */
 function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectation | null {
+  if (definition.kind === FACTUAL_REVIEW_KIND) return { promptContractDigest: withFactualResearch(factualReviewKindDefinition()).promptContractDigest, payloadCategories: ['public-or-synthetic'] };
   if (definition.kind === reviewCategoryKindId('cross-deliverable-consistency')) return {
     promptContractDigest: definition.livePromptContractDigest?.() ?? null,
     payloadCategories: plannedPayloadCategories(definition.kind)!,
   };
   const review = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => reviewCategoryKindId(category.categoryId) === definition.kind);
   if (review !== undefined) {
-    if (review.executor !== 'review-category-contract' || review.searchEngine || review.seriesKnowledge !== undefined) return null;
+    if (review.executor !== 'review-category-contract' || review.seriesKnowledge !== undefined) return null;
     return {
       promptContractDigest: reviewCategoryKindDefinition(reviewCategoryContractInput(review)).promptContractDigest,
       payloadCategories: ['public-or-synthetic'],
@@ -166,6 +172,11 @@ export function liveKindAdmission(
         expected.promptContractDigest !== definition.promptContractDigest || expected.systemPrompt !== definition.systemPrompt) return null;
     return liveKindAdmission(policy, wrapped.clarificationBase, binding);
   }
+  const category = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => reviewCategoryKindId(entry.categoryId) === definition.kind ||
+    (definition.kind === FACTUAL_REVIEW_KIND && entry.categoryId === 'factual-review'));
+  if (category?.categoryId === 'publication-risk') return null;
+  if (category !== undefined && category.searchEngine &&
+      (platformToolsFromProjection(liveKindRule(policy, definition.kind)) === null || !modelAdmitsPlatformTools(binding.route, binding.model))) return null;
   const expectation = liveKindExpectation(definition);
   return expectation === null ? null : liveKindAdmitted(policy, definition.kind, definition, binding, expectation);
 }
@@ -174,4 +185,21 @@ export function liveKindAdmission(
 export function liveKindContractCategories(kind: string, definition?: LiveKindDefinition): readonly OutboundDataCategory[] {
   return [...(plannedPayloadCategories(kind) ?? []).filter((category) => category !== 'public-or-synthetic'),
     ...(definition === undefined || liveMaterialContract(definition) === null ? [] : ['frozen-material-reference-excerpt'] as const)];
+}
+
+/**
+ * Whether a Run's model may be handed the platform tools: its profile declares the client function loop on recorded evidence
+ * (ADR 0080 §2, §7.7). A rule naming the tools is not enough — a web-bearing category on any other model is not admitted, and
+ * writing and evaluation run on it without tools, as they did before the rule named them.
+ */
+export function modelAdmitsPlatformTools(route: string, model: string): boolean {
+  return modelProfileFor(route as RemoteExecutionRoute, model)?.capabilities.toolCalling === 'function';
+}
+
+/** Review categories use their current declaration; a policy allowance alone never turns non-web review into research. */
+export function taskDeclaresPlatformTools(kind: string): boolean {
+  if (kind === FACTUAL_REVIEW_KIND) return true;
+  const review = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => reviewCategoryKindId(entry.categoryId) === kind);
+  if (review !== undefined) return review.searchEngine && review.categoryId !== 'publication-risk';
+  return [WRITING_KIND, INITIAL_EVALUATION_KIND, EVALUATION_REWRITE_KIND, READERS_REPORT_KIND].some((candidate) => candidate === kind);
 }

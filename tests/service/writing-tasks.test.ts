@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -710,7 +711,7 @@ describe('写作任务 over the real store on exact sample1', () => {
     let before: string;
     try {
       // Revision 64 exactly: the three relations as revision 64 left them, and no relation of revision 65.
-      plant.exec(`DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; PRAGMA user_version = ${EVALUATION_REWRITE_SCHEMA_VERSION};`);
+      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; PRAGMA user_version = ${EVALUATION_REWRITE_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_64_SQL);
       before = rows(plant);
       expect(() => plant.exec(`INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256)
@@ -743,7 +744,7 @@ describe('写作任务 over the real store on exact sample1', () => {
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const plant = new DatabaseSync(path);
     try {
-      plant.exec(`DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; PRAGMA user_version = ${EVALUATION_REWRITE_SCHEMA_VERSION};`);
+      execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; PRAGMA user_version = ${EVALUATION_REWRITE_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }

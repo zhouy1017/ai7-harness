@@ -619,6 +619,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'existing-book-source-commit-preflight',
     'restart-and-data-location',
     'model-service-first-save',
+    'model-service-search-backends',
     'model-service-restart-and-replace',
     // Issue #434 (S86a): 导出数据库 with a credential protected.
     'database-export',

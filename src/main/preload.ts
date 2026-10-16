@@ -644,6 +644,10 @@ const api: RendererApi = Object.freeze({
     invoke<Awaited<ReturnType<RendererApi['getProductDataLocation']>>>(IPC_CHANNELS.getProductDataLocation),
   revealProductDataLocation: () =>
     invoke<Awaited<ReturnType<RendererApi['revealProductDataLocation']>>>(IPC_CHANNELS.revealProductDataLocation),
+  selectSearchBackend: (input: Parameters<RendererApi['selectSearchBackend']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectSearchBackend']>>>(IPC_CHANNELS.selectSearchBackend, input),
+  probeSearchBackend: (input: Parameters<RendererApi['probeSearchBackend']>[0]) => invoke<Awaited<ReturnType<RendererApi['probeSearchBackend']>>>(IPC_CHANNELS.probeSearchBackend, input),
+  saveSearchBackendCredential: (input: Parameters<RendererApi['saveSearchBackendCredential']>[0]) => invoke<Awaited<ReturnType<RendererApi['saveSearchBackendCredential']>>>(IPC_CHANNELS.saveSearchBackendCredential, input),
+  removeSearchBackendCredential: (input: Parameters<RendererApi['removeSearchBackendCredential']>[0]) => invoke<Awaited<ReturnType<RendererApi['removeSearchBackendCredential']>>>(IPC_CHANNELS.removeSearchBackendCredential, input),
   getModelServiceSettings: () =>
     invoke<Awaited<ReturnType<RendererApi['getModelServiceSettings']>>>(IPC_CHANNELS.getModelServiceSettings),
   saveModelServiceProxy: (input: Parameters<RendererApi['saveModelServiceProxy']>[0]) =>

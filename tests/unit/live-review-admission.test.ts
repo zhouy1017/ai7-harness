@@ -14,19 +14,21 @@ const policy = selected;
 const entries = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories;
 
 describe('reference-free live review admission (#809)', () => {
-  it('requires an exact implemented non-web kind in the selected rule', () => {
+  it('requires an exact implemented kind in the selected rule', () => {
     expect(entries.filter((entry) => liveReviewRule(policy, entry) !== null).map((entry) => entry.categoryId)).toEqual([
-      'typos-and-usage', 'style-and-format', 'literary-expression',
+      'typos-and-usage', 'style-and-format', 'factual-review', 'academic-integrity', 'literary-expression',
     ]);
     expect(liveReviewRule(policy, entries[0]!)).toBe(rule);
   });
 
-  it('lists 事实核查 and 学术道德与引用 only under the platform-tools-carrying review rule, which this owner does not yet run (#473)', () => {
+  it('admits 事实核查 and 学术道德与引用 only under the platform-tools-carrying review rule (#473)', () => {
     // Provider Processing v16 names the two web-bearing categories as kinds of the review rule, with the web switch and the platform
-    // tools; executing them belongs to the platform-tools slice, so the non-web owner still admits neither. 出版政策与风险 is in no rule.
+    // tools. Removing the tool declaration refuses both; 出版政策与风险 remains in no rule.
     for (const categoryId of ['factual-review', 'academic-integrity']) {
       expect(rule.taskKinds).toContain(reviewCategoryKindId(categoryId));
-      expect(liveReviewRule(policy, entries.find((entry) => entry.categoryId === categoryId)!)).toBeNull();
+      const entry = entries.find((entry) => entry.categoryId === categoryId)!;
+      expect(liveReviewRule(policy, entry)).toBe(rule);
+      expect(liveReviewRule({ ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: [{ ...rule, platformTools: null }] } }, entry)).toBeNull();
     }
     expect(rule.webSearchToolAllowed).toBe(true);
     expect(rule.platformTools).not.toBeNull();
@@ -53,9 +55,9 @@ describe('reference-free live review admission (#809)', () => {
     expect(liveReviewRule({ ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: [{ ...rule, outboundDataCategories: [] }] } }, category)).toBeNull();
   });
 
-  it('keeps leads, web, unavailable and Series Knowledge executors outside model admission', () => {
+  it('keeps leads, undeclared web, unavailable and Series Knowledge executors outside model admission', () => {
     const wide = { ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: [{ ...rule, taskKinds: entries.map((entry) => reviewCategoryKindId(entry.categoryId)) }] } };
-    for (const entry of entries.filter((entry) => entry.executor !== 'review-category-contract' || entry.searchEngine)) {
+    for (const entry of entries.filter((entry) => !['factual-review', 'academic-integrity'].includes(entry.categoryId) && (entry.executor !== 'review-category-contract' || entry.searchEngine))) {
       expect(liveReviewRule(wide, entry)).toBeNull();
     }
     expect(liveReviewRule(policy, { ...entries[0]!, seriesKnowledge: { series: [], revisions: [] } })).toBeNull();

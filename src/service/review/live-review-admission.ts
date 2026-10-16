@@ -1,6 +1,7 @@
+import { platformToolsFromProjection } from '../provider/search-service.js';
 import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { reviewCategoryKindId } from '../../shared/protocol.js';
-import { liveKindAdmission, liveKindRule } from '../analysis/live-kind-admission.js';
+import { liveKindAdmission, liveKindRule, modelAdmitsPlatformTools } from '../analysis/live-kind-admission.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, type ReviewCategoryConfigurationEntry } from './category-configuration.js';
 
 /** The verified policy projection supplied by the policy-selection owner (#831). */
@@ -25,7 +26,14 @@ export function liveReviewRule(
   policy: LaunchPolicyProjection,
   entry: ReviewCategoryConfigurationEntry,
 ): ReviewProviderRule | null {
-  if (entry.executor !== 'review-category-contract' || entry.searchEngine || entry.seriesKnowledge !== undefined) return null;
+  if (entry.seriesKnowledge !== undefined || entry.categoryId === 'publication-risk') return null;
+  if (entry.searchEngine) {
+    if (!['factual-review', 'academic-integrity'].includes(entry.categoryId)) return null;
+    const rule = liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic']);
+    return rule !== null && (entry.executor === 'review-category-contract' || entry.executor === 'factual-review-kind') && platformToolsFromProjection(rule) !== null &&
+      modelAdmitsPlatformTools(rule.route, rule.model) ? rule : null;
+  }
+  if (entry.executor !== 'review-category-contract') return null;
   if (entry.categoryId === 'cross-deliverable-consistency') {
     if (entry.deliverables?.unavailableReason !== null || entry.deliverables.participants.length === 0) return null;
     const rule = liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic', 'editorial-deliverable-excerpt']);

@@ -570,6 +570,7 @@ function registerRendererHandlers(
   saveModelServiceProxy: (input: ServiceOperationMap['saveModelServiceProxy']['input']) => Promise<ModelServiceSettingsProjection>,
   saveModelServiceCredential: (input: ModelServiceCredentialInput) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: (input?: { route: ModelServiceRouteId }) => Promise<ModelServiceSettingsProjection>,
+  searchOps: Pick<RendererApi, 'selectSearchBackend' | 'probeSearchBackend' | 'saveSearchBackendCredential' | 'removeSearchBackendCredential'>,
   consumeLostApplyAcknowledgement: () => boolean,
   consumeInjectedSavePath: () => string | undefined,
   printExportPage: (pagePath: string, pdfPath: string) => Promise<void>,
@@ -2326,6 +2327,13 @@ function registerRendererHandlers(
       return serializeEffect(() => removeModelServiceCredential(input));
     }),
   );
+  for (const op of ['selectSearchBackend', 'probeSearchBackend', 'saveSearchBackendCredential', 'removeSearchBackendCredential'] as const) {
+    ipcMain.handle(IPC_CHANNELS[op], (event, input: { backendId: string; secret: string }) => envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return serializeEffect<unknown>(() => searchOps[op](input));
+    }));
+  }
   ipcMain.handle(IPC_CHANNELS.commitBookCreation, (event, input: ServiceOperationMap['commitBookCreation']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -5789,6 +5797,7 @@ export async function runApplication(): Promise<void> {
         unsupportedProviders.push({ providerId: route, providerLabel, statusLabel: '尚未支持' });
       }
       return {
+        searchBackends: await service!.call('getSearchBackendSettings', {}),
         proxy: state.proxy,
         roles: [
           fastInteraction,
@@ -5914,6 +5923,33 @@ export async function runApplication(): Promise<void> {
       });
       return settingsProjection();
     };
+    const searchOps: Pick<RendererApi, 'selectSearchBackend' | 'probeSearchBackend' | 'saveSearchBackendCredential' | 'removeSearchBackendCredential'> = {
+      async selectSearchBackend(input) { await service!.call('selectSearchBackend', input); return settingsProjection(); },
+      probeSearchBackend: (input) => service!.call('probeSearchBackend', input),
+      async saveSearchBackendCredential(input) {
+        if (input === null || typeof input !== 'object' || Object.keys(input).sort().join(',') !== 'backendId,secret' || typeof input.secret !== 'string' ||
+            !input.secret.isWellFormed() || input.secret.length < 1 || input.secret.length > 16_384) throw new ServiceCallError('SEARCH_CREDENTIAL_INVALID', '联网检索凭据输入无效。');
+        if (protectedSecretStore === undefined) throw new ServiceCallError('PROTECTED_SECRET_STORE_UNAVAILABLE', '操作系统安全凭据库当前不可用。');
+        const pending = await service!.call('saveSearchBackendCredential', { backendId: input.backendId, credentialReference: null, credentialOperationState: 'needs-attention' });
+        try { await protectedSecretStore.set(pending.credentialReference!, input.secret); }
+        catch { throw new ServiceCallError('PROTECTED_SECRET_WRITE_FAILED', '联网检索凭据未能写入操作系统安全凭据库。'); }
+        await service!.call('saveSearchBackendCredential', { backendId: input.backendId, credentialReference: pending.credentialReference, credentialOperationState: 'ready' });
+        return settingsProjection();
+      },
+      async removeSearchBackendCredential(input) {
+        if (protectedSecretStore === undefined) throw new ServiceCallError('PROTECTED_SECRET_STORE_UNAVAILABLE', '操作系统安全凭据库当前不可用。');
+        const settings = await service!.call('getSearchBackendSettings', {});
+        const connection = settings.backends.find((entry) => entry.backendId === input.backendId)?.connection;
+        if (connection === undefined) throw new ServiceCallError('SEARCH_BACKEND_NOT_SHIPPED', '该联网检索后端未提供。');
+        if (connection.credentialReference !== null) {
+          await service!.call('saveSearchBackendCredential', { backendId: input.backendId, credentialReference: connection.credentialReference, credentialOperationState: 'needs-attention' });
+          try { await protectedSecretStore.remove(connection.credentialReference); }
+          catch { throw new ServiceCallError('PROTECTED_SECRET_REMOVE_FAILED', '联网检索凭据未能移除。'); }
+        }
+        await service!.call('removeSearchBackendCredential', input);
+        return settingsProjection();
+      },
+    };
     unregisterHandlers = registerRendererHandlers(
       service,
       getOwnedWindow,
@@ -5930,6 +5966,7 @@ export async function runApplication(): Promise<void> {
       async (input) => { await service!.call('saveModelServiceProxy', input); return settingsProjection(); },
       saveModelServiceCredential,
       removeModelServiceCredential,
+      searchOps,
       (() => {
         let pending = launch.applyControl === 'lose-first-acknowledgement';
         return (): boolean => {

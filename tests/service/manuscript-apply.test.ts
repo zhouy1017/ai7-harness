@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -487,7 +488,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
       // A revision-22 store also carried the three kind-coupled analysis relations as revision 20 left
       // them, and none of revision 24's Review Run relations (Issue #417).
       downgradeKindCoupledRelations(downgrade, ANALYSIS_LEDGER_REVISION_23_SQL);
-      downgrade.exec(`BEGIN IMMEDIATE;
+      execPre74Fixture(downgrade, `BEGIN IMMEDIATE;
         ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...REVIEW_RUN_RELATIONS_DROP_ORDER, ...EFFECT_RELATIONS].map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};
         COMMIT;`);
@@ -591,7 +592,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
       // revision 24 (Issue #417) validates exactly that before it rebuilds them, and adds its Review Run
       // relations, which a store that old never held.
       downgradeKindCoupledRelations(downgrade, ANALYSIS_LEDGER_REVISION_23_SQL);
-      downgrade.exec(`BEGIN IMMEDIATE;
+      execPre74Fixture(downgrade, `BEGIN IMMEDIATE;
         ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...REVIEW_RUN_RELATIONS_DROP_ORDER, ...EFFECT_RELATIONS].map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};
         COMMIT;`);

@@ -2061,3 +2061,29 @@ describe('evaluation profile version commands (KB-002)', () => {
     }
   });
 });
+
+
+describe('search backend settings frames', () => {
+  it('decodes exactly the five settings operations, with opaque references and no secret field', () => {
+    const frames: ServiceRequest[] = [
+      { id: randomUUID(), op: 'getSearchBackendSettings', input: {} },
+      { id: randomUUID(), op: 'selectSearchBackend', input: { backendId: 'search-tinyfish' } },
+      { id: randomUUID(), op: 'probeSearchBackend', input: { backendId: 'search-brave' } },
+      { id: randomUUID(), op: 'removeSearchBackendCredential', input: { backendId: 'search-brave' } },
+      { id: randomUUID(), op: 'saveSearchBackendCredential', input: { backendId: 'search-brave', credentialReference: null, credentialOperationState: 'needs-attention' } },
+      { id: randomUUID(), op: 'saveSearchBackendCredential', input: { backendId: 'search-brave', credentialReference: randomUUID(), credentialOperationState: 'ready' } },
+    ];
+    for (const frame of frames) expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+  });
+
+  it('refuses malformed references, states, backend shapes and additional fields', () => {
+    for (const frame of [
+      { op: 'getSearchBackendSettings', input: { backendId: 'search-tinyfish' } },
+      { op: 'selectSearchBackend', input: { backendId: '' } },
+      { op: 'probeSearchBackend', input: { backendId: 'search-tinyfish', query: 'untrusted query' } },
+      { op: 'saveSearchBackendCredential', input: { backendId: 'search-tinyfish', credentialReference: 'not-a-reference', credentialOperationState: 'ready' } },
+      { op: 'saveSearchBackendCredential', input: { backendId: 'search-tinyfish', credentialReference: null, credentialOperationState: 'other' } },
+      { op: 'saveSearchBackendCredential', input: { backendId: 'search-tinyfish', credentialReference: null, credentialOperationState: 'ready', secret: 'synthetic-placeholder' } },
+    ]) expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), ...frame })))).toThrow(ProtocolError);
+  });
+});

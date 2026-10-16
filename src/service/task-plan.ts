@@ -1,3 +1,4 @@
+import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import { taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
 
 import type {
@@ -791,7 +792,7 @@ export function baselineAnalysisPlan(input: {
     participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: null },
     service: {
       role: roleLabel(provider.role),
-      provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
+      provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
       decision: live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
@@ -1038,7 +1039,7 @@ export function initialEvaluationPlan(input: {
     participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: '在「评估」中从 AI7 初评开始新的一版，再按你的判断定分' },
     service: {
       role: roleLabel(provider.role),
-      provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
+      provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
       decision: live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
@@ -1193,7 +1194,7 @@ export function readersReportPlan(input: {
     participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: '在「评估」中打开草稿，在稿件编辑面上修改，保存为版本后可导出为 DOCX' },
     service: {
       role: roleLabel(provider.role),
-      provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
+      provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
       decision: live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
@@ -1478,7 +1479,7 @@ export function writingPlan(input: {
     },
     service: {
       role: roleLabel(provider.role),
-      provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
+      provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
       decision: live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
@@ -1641,7 +1642,7 @@ export function evaluationRewritePlan(input: {
     participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: '在「评估」中对照重写前后的评语，决定采用还是放弃' },
     service: {
       role: roleLabel(provider.role),
-      provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
+      provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
       decision: live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
@@ -2294,6 +2295,10 @@ export function reviewRunPlan(input: {
   // route, so a plan that moved is only ever `changed`; the leads alone need nothing and start as they are.
   const routes = tasks.map((category) => frozenRoute(category.task!.components).kind);
   const needsModelConnection = routes.some((kind) => MODEL_SERVICE_ROUTES.some((remote) => remote === kind));
+  const webSearchLabels = [...new Set(tasks.flatMap((category) => {
+    const frozen = category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined;
+    return frozen === undefined ? [] : [SEARCH_BACKENDS.find((entry) => entry.id === frozen.backendId)?.displayName ?? frozen.backendId];
+  }))];
   const start: TaskPlanStartProjection = facts.state !== 'prepared' || facts.authorizedAt !== null
     ? startedBar(needsModelConnection)
     : facts.staleReasons.length > 0
@@ -2350,7 +2355,7 @@ export function reviewRunPlan(input: {
     },
     service: {
       role: roleLabel('Main Editorial Role'),
-      provider: route === null ? '不调用模型' : live ? `${route.kind} · ${route.model}` : 'AI7 本地确定性模型适配器',
+      provider: (route === null ? '不调用模型' : live ? `${route.kind} · ${route.model}` : 'AI7 本地确定性模型适配器') + (webSearchLabels.length === 0 ? '' : ` · 联网检索 · ${webSearchLabels.join('、')}`),
       decision: route === null
         ? '只读基线分析的线索，不调用模型'
         : live ? `${production ? '本地正式生产' : '开发者实时'}：实时传输受运行边界约束`

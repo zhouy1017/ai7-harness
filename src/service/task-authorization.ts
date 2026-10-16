@@ -448,7 +448,15 @@ export const DIALOGUE_LIVE_BINDING_SCHEMA_VERSION = 71;
  */
 export const MODEL_SERVICE_ROUTES_SCHEMA_VERSION = 72;
 export const MODEL_CLARIFICATION_SCHEMA_VERSION = 73;
-export const LATEST_SCHEMA_VERSION = MODEL_CLARIFICATION_SCHEMA_VERSION;
+export const SEARCH_BACKEND_CONNECTIONS_SQL = `CREATE TABLE search_backend_connections (
+  backend_id TEXT PRIMARY KEY CHECK(backend_id IN ('search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai')),
+  credential_reference TEXT UNIQUE CHECK(credential_reference IS NULL OR length(credential_reference) = 36),
+  credential_operation_state TEXT NOT NULL CHECK(credential_operation_state IN ('ready', 'missing', 'needs-attention')) CHECK(credential_reference IS NOT NULL OR credential_operation_state = 'missing'),
+  selected INTEGER UNIQUE CHECK(selected IS NULL OR selected = 1),
+  selected_at TEXT NOT NULL
+) STRICT`;
+export const SEARCH_BACKEND_SCHEMA_VERSION = 74;
+export const LATEST_SCHEMA_VERSION = SEARCH_BACKEND_SCHEMA_VERSION;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -1723,8 +1731,27 @@ function validateJ03TaskAuthorizationSchema(db: DatabaseSync): void {
  * Structural and digest validation of the analysis relations. Every stored canonical row must
  * still digest to its recorded SHA-256; the analysis owners revalidate the record graphs they read.
  */
+export const WEB_TOOLS_PLAN_RECORDS_SQL = ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records.replace("'plan-envelope', 'reuse-plan'", "'plan-envelope', 'reuse-plan', 'web-tools-backend'");
+
+/** Revision 74 widens exactly one component CHECK and preserves every canonical byte. Caller holds the migration transaction. */
+function widenWebToolsPlanRecords(db: DatabaseSync): void {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_plan_records'").get() as SqlRow | undefined;
+  if (row === undefined) return;
+  const shape = normalizeSql(asString(row.sql));
+  if (shape === normalizeSql(WEB_TOOLS_PLAN_RECORDS_SQL)) return;
+  requireTask(shape === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records), 'SCHEMA_INVALID', '联网检索计划记录前驱结构不兼容。');
+  validateCanonicalRowDigests(db, ['analysis_plan_records']);
+  db.exec('CREATE TEMP TABLE migrate_web_tools_plan AS SELECT rowid AS prior_rowid, * FROM analysis_plan_records');
+  db.exec('DROP TABLE analysis_plan_records');
+  db.exec(WEB_TOOLS_PLAN_RECORDS_SQL);
+  db.exec('INSERT INTO analysis_plan_records(rowid, task_intent_id, plan_version, component, canonical_json, sha256, created_at) SELECT prior_rowid, task_intent_id, plan_version, component, canonical_json, sha256, created_at FROM temp.migrate_web_tools_plan ORDER BY prior_rowid');
+  db.exec('DROP TABLE temp.migrate_web_tools_plan');
+  db.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_update']!);
+  db.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_delete']!);
+}
+
 export function validateAnalysisLedgerSchema(db: DatabaseSync): void {
-  requireExactObjects(db, 'table', ANALYSIS_LEDGER_SCHEMA_SQL, '分析任务账本表');
+  requireExactObjects(db, 'table', asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version) >= SEARCH_BACKEND_SCHEMA_VERSION ? { ...ANALYSIS_LEDGER_SCHEMA_SQL, analysis_plan_records: WEB_TOOLS_PLAN_RECORDS_SQL } : ANALYSIS_LEDGER_SCHEMA_SQL, '分析任务账本表');
   requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器');
   validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
   requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
@@ -1856,6 +1883,7 @@ function migrateInTransaction(db: DatabaseSync, statements: string, label: strin
   try {
     db.exec(`BEGIN IMMEDIATE;
       ${statements}`);
+    widenWebToolsPlanRecords(db);
     validateTaskAuthorizationSchema(db);
     db.exec('COMMIT');
   } catch (error) {
@@ -2025,6 +2053,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
+      widenWebToolsPlanRecords(db);
       db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
@@ -2150,6 +2179,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
+      widenWebToolsPlanRecords(db);
       db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
@@ -2215,10 +2245,11 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === READERS_REPORT_SCHEMA_VERSION || version === CAPTURED_PROCEDURE_SCHEMA_VERSION || version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION || version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION || version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
-      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION,
+      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === MODEL_CLARIFICATION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === SEARCH_BACKEND_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === MODEL_CLARIFICATION_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
   // Revision 72 (Issue #811) moves no task-authorization or analysis relation, so a revision-71 store carries the terminal ledger.
   if (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
       version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION) {
