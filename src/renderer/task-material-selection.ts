@@ -65,7 +65,13 @@ export function similarMaterialsField(api: Pick<RendererApi, 'searchReferableMat
         choice.type = 'button';
         choice.textContent = `${item?.title ?? '资料'} · 第 ${candidate.anchor.segmentOrdinal ?? 1} 段 · ${candidate.anchor.start}–${candidate.anchor.end}`;
         choice.disabled = item === undefined || selected.has(candidate.sourceId) || taskMaterialSelectionReason(item, items, selected) !== null;
-        choice.addEventListener('click', () => { if (!choice.disabled) choose(candidate.sourceId); });
+        choice.addEventListener('click', () => {
+          if (choice.disabled || item === undefined) return;
+          const reason = taskMaterialSelectionReason(item, items, selected);
+          if (reason !== null) { status.textContent = reason; choice.disabled = true; return; }
+          choice.disabled = true;
+          if (!selected.has(candidate.sourceId)) choose(candidate.sourceId);
+        });
         const preview = document.createElement('p'); preview.textContent = candidate.preview;
         row.append(choice, preview); results.append(row);
       }

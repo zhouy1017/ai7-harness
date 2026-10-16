@@ -289,6 +289,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     this.#inFlight = true;
     try {
       const value = args.tool === 'retrieve' ? await this.#retrieval.retrieve(args.query, args.k, args.sourceKinds) : this.#retrieval.exactFetch(args.candidateId);
+      if (call.signal.aborted || this.#base.currentBindingDigest() !== this.#binding.bindingDigest) return refuse('检索未完成');
       return { text: JSON.stringify(value), sourceUrl: null };
     } catch (error) {
       return refuse(error instanceof RetrievalError ? error.code : '检索未完成');

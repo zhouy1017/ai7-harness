@@ -64,7 +64,12 @@ export function chunkRanges(length: number): Array<{ start: number; end: number 
   return ranges;
 }
 
-interface Chunk { readonly candidate: RetrievalCandidate; readonly text: string; readonly tokens: readonly string[] }
+interface Chunk { readonly candidate: RetrievalCandidate; readonly text: string; readonly tokenCount: number; readonly terms: ReadonlyMap<string, number> }
+function termFrequencies(tokens: readonly string[]): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const token of tokens) result.set(token, (result.get(token) ?? 0) + 1);
+  return result;
+}
 /** Material vectors are read at the same frozen builds by #892's queryMaterialVectors seam. */
 export type RetrievalMaterialVectorQuery = (query: string, k: number) => Promise<readonly { readonly materialId: string; readonly indexDigest: string; readonly ordinal: number; readonly score: number }[]>;
 function boundaryEnd(text: string, end: number): number {
@@ -137,7 +142,8 @@ export class RetrievalIndex {
             start: range.start + (segment.startOffset ?? 0), end: range.end + (segment.startOffset ?? 0) };
           const identity = { sourceKind: source.sourceKind, sourceId: source.sourceId, revisionOrIndexDigest: source.digest, anchor };
           const text = segment.text.slice(range.start, range.end);
-          return { text, tokens: retrievalTokens(text), candidate: { ...identity, candidateId: sha256Hex(canonicalJson(identity)), score: 0, preview: text.slice(0, boundaryEnd(text, Math.min(text.length, RETRIEVAL_PREVIEW_SIZE))) } };
+          const tokens = retrievalTokens(text);
+          return { text, tokenCount: tokens.length, terms: termFrequencies(tokens), candidate: { ...identity, candidateId: sha256Hex(canonicalJson(identity)), score: 0, preview: text.slice(0, boundaryEnd(text, Math.min(text.length, RETRIEVAL_PREVIEW_SIZE))) } };
         }));
         this.#chunks.set(key, cached);
       }
@@ -145,13 +151,14 @@ export class RetrievalIndex {
     }
     if (chunks.length === 0) return [];
     const terms = [...new Set(retrievalTokens(query))];
-    const average = chunks.reduce((sum, chunk) => sum + chunk.tokens.length, 0) / chunks.length || 1;
-    const frequencies = new Map(terms.map((term) => [term, chunks.filter((chunk) => chunk.tokens.includes(term)).length]));
+    const average = chunks.reduce((sum, chunk) => sum + chunk.tokenCount, 0) / chunks.length || 1;
+    const frequencies = new Map(terms.map((term) => [term, chunks.filter((chunk) => chunk.terms.has(term)).length]));
     const lexical = chunks.map((chunk) => {
       const score = terms.reduce((sum, term) => {
-        const tf = chunk.tokens.filter((token) => token === term).length;
+        const tf = chunk.terms.get(term) ?? 0;
+        if (tf === 0) return sum;
         const df = frequencies.get(term)!;
-        return sum + Math.log(1 + (chunks.length - df + 0.5) / (df + 0.5)) * (tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * chunk.tokens.length / average));
+        return sum + Math.log(1 + (chunks.length - df + 0.5) / (df + 0.5)) * (tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * chunk.tokenCount / average));
       }, 0);
       return { id: chunk.candidate.candidateId, score };
     }).filter((entry) => entry.score > 0).sort(rank);
@@ -161,6 +168,7 @@ export class RetrievalIndex {
         const embeddedChunks = this.#materialVectors === null ? chunks : chunks.filter((chunk) => chunk.candidate.sourceKind !== 'material');
         const missing = embeddedChunks.filter((chunk) => !this.#vectors.has(chunk.candidate.candidateId));
         const vectors = await this.#embedding.embed([query, ...missing.map((chunk) => chunk.text)]);
+        if (this.#disposed) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
         if (vectors.length === missing.length + 1 && vectors.every((vector) => vector.length === this.#embedding!.dimensions)) {
           missing.forEach((chunk, index) => this.#vectors.set(chunk.candidate.candidateId, vectors[index + 1]!));
           const vector = embeddedChunks.map((chunk) => ({ id: chunk.candidate.candidateId, score: cosine(vectors[0]!, this.#vectors.get(chunk.candidate.candidateId)!) }));
@@ -175,6 +183,7 @@ export class RetrievalIndex {
         }
       } catch { /* The always-available lexical ranker remains usable when local embeddings are unavailable. */ }
     }
+    if (this.#disposed) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
     // Verify again after an asynchronous embed: withdrawal during ranking cannot leak a cached preview.
     const available = new Set<string>();
     for (const [key, source] of this.#sources) { try { this.#read(source); available.add(key); } catch { this.#chunks.delete(key); } }

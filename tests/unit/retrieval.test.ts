@@ -82,6 +82,16 @@ describe('Run-local pinned retrieval', () => {
     expect(await index.retrieve('alpha')).toEqual([]);
     expect(() => index.exactFetch('foreign')).toThrowError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
   });
+  it('does not revive a disposed Run when an in-flight embedding completes', async () => {
+    let finish!: () => void;
+    const index = new RetrievalIndex([source('one', 'alpha')], { ...embeddings([[1], [1]]), embed: () => new Promise((resolve) => {
+      finish = () => resolve([Float32Array.from([1]), Float32Array.from([1])]);
+    }) });
+    const pending = index.retrieve('alpha');
+    index.dispose(); finish();
+    await expect(pending).rejects.toMatchObject({ code: 'RETRIEVAL_SOURCE_NOT_AUTHORIZED' });
+    await expect(index.retrieve('alpha')).rejects.toMatchObject({ code: 'RETRIEVAL_SOURCE_NOT_AUTHORIZED' });
+  });
   it('certifies an anchored quotation only after Exact Fetch, preserving ordinary fixture bytes', async () => {
     const index = new RetrievalIndex([source('one', 'alpha')]);
     const [candidate] = await index.retrieve('alpha');
