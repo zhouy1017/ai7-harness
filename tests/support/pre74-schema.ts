@@ -5,6 +5,7 @@ import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../
 /** Plant an actual predecessor, including revision 74's newly widened component CHECK and house settings. */
 export function execPre74Fixture(db: DatabaseSync, sql: string): void {
   const version = /PRAGMA user_version\s*=\s*(\d+)/iu.exec(sql)?.[1];
+  if (version !== undefined && Number(version) < 75) dropResearchEvidenceRelations(db);
   if (version !== undefined && Number(version) < 74) {
     const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_plan_records'").get();
     if (typeof row?.sql === 'string' && row.sql.includes("'web-tools-backend'")) {

@@ -325,7 +325,7 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['previewLibraryMaterial']['output'] | null>(IPC_CHANNELS.previewLibraryMaterial),
   addLibraryMaterial: (input: ServiceOperationMap['addLibraryMaterial']['input']) =>
     invoke<ServiceOperationMap['addLibraryMaterial']['output']>(IPC_CHANNELS.addLibraryMaterial, input),
-  inspectResearchEvidence: (input: { bookId: string; after?: number | null; staleAfterDays?: number | null }) =>
+  inspectResearchEvidence: (input: Parameters<RendererApi['inspectResearchEvidence']>[0]) =>
     invoke<ServiceOperationMap['inspectResearchEvidence']['output']>(IPC_CHANNELS.inspectResearchEvidence, input),
   saveEvidenceAsMaterial: (input: { bookId: string; evidenceId: string; title?: string | null }) =>
     invoke<ServiceOperationMap['saveEvidenceAsMaterial']['output']>(IPC_CHANNELS.saveEvidenceAsMaterial, input),

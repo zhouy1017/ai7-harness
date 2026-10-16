@@ -1895,6 +1895,8 @@ export class BaselineAnalysisExecutionOwner {
         if (session === null || sink === undefined || sink === null || (definition.platformToolBase ?? definition).kind !== FACTUAL_REVIEW_KIND) return;
         const outcome = outcomes.find((entry) => entry.unitOrdinal === unit.ordinal);
         if (outcome === undefined) return;
+        let retentionFailure: 'capture-processing' | 'storage' = 'capture-processing';
+        const findings = outcome.state === 'closed' ? locatedUnitFindings(unit, outcome.result as FactualReviewUnitResult, blocksById) : [];
         try {
           const captures = session.unitCaptures;
           const pages = new Map<string, RetainedPage>();
@@ -1904,13 +1906,13 @@ export class BaselineAnalysisExecutionOwner {
           }
           const lastSearch = captures.searches.at(-1);
           const retained = await retainUnitEvidence({
-            findings: outcome.state === 'closed' ? locatedUnitFindings(unit, outcome.result as FactualReviewUnitResult, blocksById) : [],
+            findings,
             sources: [...captures.searches.flatMap(searchHitsOf), ...captures.fetches.map((snapshot) => ({ url: snapshot.url, title: null, snippet: null, via: 'fetch' as const }))],
             pages,
             searchSnapshotDigest: lastSearch === undefined ? null : researchSnapshotDigest(lastSearch),
             searchState: session.breakerState === 'tripped' || session.unitDisclosure === '联网核查未完成' ? 'incomplete' : captures.searchCalls > 0 ? 'completed' : 'not-searched',
             searchCalls: captures.searchCalls,
-            fetchAllowed: !active.cancelRequested && !active.interrupted && !active.pauseRequested && liveInterruption === null && ceilingState() !== 'reached',
+            fetchAllowed: () => !active.cancelRequested && !active.interrupted && !active.pauseRequested && liveInterruption === null && ceilingState() !== 'reached',
             fetch: async (url) => {
               const got = await session.retain(url);
               return 'failed' in got ? got : retainedPageOf(got) ?? { failed: '取回的页面没有可读的正文。' };
@@ -1920,9 +1922,15 @@ export class BaselineAnalysisExecutionOwner {
             translator: null,
             now: () => new Date(),
           });
+          retentionFailure = 'storage';
           sink({ bookId: facts.manifest.manuscript.bookId, runRecordId: facts.runRecordId, unitOrdinal: unit.ordinal, backendId: facts.webToolsBackend?.backendId ?? null, unit: retained });
         } catch {
-          // Nothing retained for this unit; its findings read 未外部复核 exactly as they would without the research path.
+          // Keep a payload-free failure class, never the exception or a page body. This remains a partial Run result.
+          sink({ bookId: facts.manifest.manuscript.bookId, runRecordId: facts.runRecordId, unitOrdinal: unit.ordinal,
+            backendId: facts.webToolsBackend?.backendId ?? null, unit: {
+              state: 'incomplete', searchCalls: session.unitCaptures.searchCalls, retentionFetches: 0, failedRetrievals: 0,
+              findings: findings.map(({ findingId, blockId, quote, category }) => ({ findingId, blockId, quote, category, sources: 0 })), evidence: [], retentionFailure,
+            } });
         }
       };
       const settleAndRetain = async (input: Parameters<typeof settleFromTurn>[0]): Promise<ReturnType<typeof settleFromTurn>> => {

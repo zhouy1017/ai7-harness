@@ -4305,7 +4305,7 @@ export interface ResearchEvidenceProjection {
   alignment: ResearchEvidenceAlignment;
   alignmentLabel: string;
   anchors: ReadonlyArray<ResearchEvidenceAnchor>;
-  /** The captured sentences the anchors fall in, bounded; `null` when nothing aligned. */
+  /** Bounded captured passage; when unaligned, the source's beginning. A translation shows its exact attributed original. */
   passage: string | null;
   translation: ResearchEvidenceTranslation | null;
   staleness: { state: 'current' | 'possibly-stale'; reasons: ReadonlyArray<'age' | 'hash-changed'>; label: string | null };
@@ -4315,6 +4315,7 @@ export interface ResearchEvidenceProjection {
 }
 
 export interface ResearchEvidenceUnitProjection {
+  retentionFailure?: 'capture-processing' | 'storage';
   runRecordId: string;
   unitOrdinal: number;
   backendId: string | null;
@@ -11971,7 +11972,7 @@ export interface ServiceOperationMap {
   };
   /** 来源与证据 (Issue #425, S70): a page of a Book's retained external sources and its research units' outcomes; read-only. */
   inspectResearchEvidence: {
-    input: { bookId: string; after: number | null; staleAfterDays: number | null };
+    input: { bookId: string; after: number | null; staleAfterDays: number | null; taskIntentId?: string; reviewFindingId?: string };
     output: ResearchEvidenceBookProjection;
   };
   /** 保存为来源材料 (Issue #425, S70): one retained full-text source made a 资料库 item with its provenance; nothing is sent. */
@@ -12653,7 +12654,7 @@ export interface RendererApi {
   /** One 资料库 item, by its identity. */
   inspectLibraryMaterial(input: { materialId: string }): Promise<LibraryMaterialProjection>;
   /** 来源与证据: a page of the Book's retained external sources, newest first; read-only. */
-  inspectResearchEvidence(input: { bookId: string; after?: number | null; staleAfterDays?: number | null }): Promise<ResearchEvidenceBookProjection>;
+  inspectResearchEvidence(input: { bookId: string; after?: number | null; staleAfterDays?: number | null; taskIntentId?: string; reviewFindingId?: string }): Promise<ResearchEvidenceBookProjection>;
   /** 保存为来源材料: the editor's explicit keep of one retained source as a 资料库 item; publishes and exports nothing. */
   saveEvidenceAsMaterial(input: { bookId: string; evidenceId: string; title?: string | null }): Promise<ServiceOperationMap['saveEvidenceAsMaterial']['output']>;
   readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;

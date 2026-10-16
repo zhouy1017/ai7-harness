@@ -82,6 +82,8 @@ export class PlatformToolSession implements PlatformToolOwner {
   #unitSearches = 0;
   /** Each search answer of this attempt by its digest, so a unit that reuses one keeps the snapshot it read. */
   readonly #searchSnapshots = new Map<string, ResearchSnapshot>();
+  /** Share both successful pages and failures with retention: a failed model fetch is never retried by the procedure. */
+  readonly #fetchedPages = new Map<string, ResearchSnapshot | { readonly failed: string }>();
 
   constructor(deps: {
     readonly binding: EgressBindingFacts;
@@ -140,7 +142,8 @@ export class PlatformToolSession implements PlatformToolOwner {
    */
   get unitDisclosure(): '联网核查已完成' | '联网核查未完成' | null {
     if (this.#breaker.state === 'tripped') return '联网核查未完成';
-    return this.#unitSearchRefused ? this.#unitSearchHasResult ? '联网核查已完成' : '联网核查未完成' : null;
+    return this.#unitSearchQuery !== null || this.#unitSearchRefused
+      ? this.#unitSearchHasResult ? '联网核查已完成' : '联网核查未完成' : null;
   }
 
   /**
@@ -193,6 +196,9 @@ export class PlatformToolSession implements PlatformToolOwner {
     if (this.#evidenceOnly) return { failed: '此证据项不取回网页。' };
     const canonical = canonicalPublicUrl(url);
     if (canonical === null) return { failed: '不是规范的公开 https 地址；未取回。' };
+    const prior = this.#fetchedPages.get(canonical);
+    if (prior !== undefined) return prior;
+    this.#fetchedPages.set(canonical, { failed: '本次运行已尝试此来源；未能取回，不重试。' });
     this.cite(canonical);
     const decision = evaluatePublicSourceFetch({ arguments: { tool: 'webfetch', url: canonical } }, this.#binding, this.egressScope, this.#book);
     if (decision.decision !== 'fetch-public-source') return { failed: decision.detail };
@@ -204,7 +210,9 @@ export class PlatformToolSession implements PlatformToolOwner {
           send: (authorized) => sendPublicFetch(authorized, { fetch: this.#fetch, admitHost: this.#admitHost, ...(signal === undefined ? {} : { signal }) }),
         });
       if (settled.replayed) this.#book.revoke(decision.ticket);
-      return settled.snapshot ?? { failed: `未能取回该来源（状态 ${settled.status}）；不重试。` };
+      const result = settled.snapshot ?? { failed: `未能取回该来源（状态 ${settled.status}）；不重试。` };
+      this.#fetchedPages.set(canonical, result);
+      return result;
     } catch (error) {
       const code = error !== null && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'PLATFORM_TOOL_FAILED';
       return { failed: `取回失败（${code}）；不重试。` };
@@ -309,13 +317,22 @@ export class PlatformToolSession implements PlatformToolOwner {
         if (this.#breaker.observe(digest) === 'tripped') return refusal('联网核查未完成：本单元的工具往返已达到熔断上限。');
         this.#unitSearchHasResult = reused.sourceUrl !== null && reused.text !== '[]';
         const kept = this.#searchSnapshots.get(digest);
-        if (kept !== undefined) { this.#unitCaptures.push({ tool: 'websearch', snapshot: kept }); this.#unitSearches += 1; }
+        if (kept !== undefined) { this.#unitCaptures.push({ tool: 'websearch', snapshot: kept }); this.#unitSearches = 1; }
         return reused;
       }
     }
     const verdict = this.#breaker.observe(toolArgumentsDigest(args));
     if (verdict === 'duplicate') return refusal('同一工具调用已在本单元内执行过；不再重复。请使用已有结果。');
     if (verdict === 'tripped') return refusal('联网核查未完成：本单元的工具往返已达到熔断上限。');
+    if (args.tool === 'webfetch') {
+      const fetched = this.#fetchedPages.get(args.url);
+      if (fetched !== undefined) {
+        if ('failed' in fetched) return refusal(fetched.failed);
+        this.#unitCaptures.push({ tool: 'webfetch', snapshot: fetched });
+        return { text: fetched.text, sourceUrl: fetched.url };
+      }
+      this.#fetchedPages.set(args.url, { failed: '本次运行已尝试此来源；未能取回，不重试。' });
+    }
     const prior = this.#runResults.get(digest);
     if (prior !== undefined && !(this.#cache !== null && this.#snapshots !== null && prior.sourceUrl !== null)) return prior;
     const scope = this.egressScope;
@@ -354,6 +371,7 @@ export class PlatformToolSession implements PlatformToolOwner {
       if (settled.snapshot === null) return refusal(`未能取回该来源（状态 ${settled.status}）；请改用下一条引用。`);
       const result = { text: settled.snapshot.text, sourceUrl: settled.snapshot.url };
       this.#runResults.set(digest, result);
+      this.#fetchedPages.set(args.url, settled.snapshot);
       this.#unitCaptures.push({ tool: 'webfetch', snapshot: settled.snapshot });
       return result;
     } catch (error) {

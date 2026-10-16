@@ -27,7 +27,7 @@ export const RESEARCH_EVIDENCE_SCHEMA_SQL = {
   snapshot_digest TEXT CHECK(snapshot_digest IS NULL OR length(snapshot_digest) = 64),
   alignment TEXT NOT NULL CHECK(alignment IN ('aligned', 'partial', 'unaligned')),
   anchors_json TEXT NOT NULL CHECK(json_valid(anchors_json) AND json_type(anchors_json) = 'array'),
-  translation_json TEXT CHECK(translation_json IS NULL OR (json_valid(translation_json) AND json_extract(translation_json, '$.state') IN ('translated', 'refused'))),
+  translation_json TEXT CHECK(translation_json IS NULL OR (json_valid(translation_json) AND coalesce(json_extract(translation_json, '$.state') IN ('translated', 'refused'), 0))),
   staleness_state TEXT NOT NULL CHECK(staleness_state IN ('current', 'hash-changed')),
   recorded_at TEXT NOT NULL,
   canonical_json TEXT NOT NULL,

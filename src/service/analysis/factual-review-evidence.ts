@@ -30,9 +30,6 @@ export const RESEARCH_EVIDENCE_UNIT_SCHEMA = 'ai7.research-evidence-unit/1' as c
 export const MIN_ANCHOR_CHARACTERS = 4;
 /** The bound on the captured sentences a record carries for display and translation. */
 export const MAX_PASSAGE_CHARACTERS = 600;
-/** The bound on a retained source's text: a page past it is kept to it, marked, and aligned within it. */
-export const MAX_RETAINED_CHARACTERS = 1_000_000;
-export const RETAINED_TRUNCATION_MARKER = '\n\n（留存全文到此为止：正文超过留存上限。）';
 const DAY_MS = 86_400_000;
 
 // ---- Folding ----------------------------------------------------------------------------------------------------------
@@ -64,8 +61,11 @@ function fold(text: string): FoldedText {
     for (const folded of character.normalize('NFKC').toLowerCase()) {
       if (IGNORED.test(folded)) continue;
       out.push(folded);
-      from.push(start);
-      to.push(index);
+      // String matching indexes UTF-16 code units, including both halves of an astral character.
+      for (let unit = 0; unit < folded.length; unit += 1) {
+        from.push(start);
+        to.push(index);
+      }
     }
   }
   return { text: out.join(''), from, to };
@@ -125,19 +125,49 @@ export interface EvidenceAlignment {
 const PIECE_BREAK = /[，,、。；;：:！!？?…—–\-\/|·•]+/u;
 const UNALIGNED: EvidenceAlignment = Object.freeze({ alignment: 'unaligned', anchors: Object.freeze([]), coverage: 0 });
 
-/** The longest common substring of two folded strings, by a rolling row: its start in `text` and its length. */
+/** A suffix automaton of the short claim scans the whole bounded page once, without a page-length × claim-length loop. */
 function longestCommon(claim: string, text: string): { start: number; length: number } {
-  let best = { start: 0, length: 0 };
-  let previous = new Uint32Array(claim.length + 1);
-  let current = new Uint32Array(claim.length + 1);
-  for (let row = 1; row <= text.length; row += 1) {
-    for (let column = 1; column <= claim.length; column += 1) {
-      const value = text[row - 1] === claim[column - 1] ? previous[column - 1]! + 1 : 0;
-      current[column] = value;
-      if (value > best.length) best = { start: row - value, length: value };
+  const states: Array<{ length: number; link: number; next: Map<string, number> }> = [{ length: 0, link: -1, next: new Map() }];
+  let last = 0;
+  for (let index = 0; index < claim.length; index += 1) {
+    const character = claim[index]!;
+    const current = states.length;
+    states.push({ length: states[last]!.length + 1, link: 0, next: new Map() });
+    let previous = last;
+    while (previous !== -1 && !states[previous]!.next.has(character)) {
+      states[previous]!.next.set(character, current);
+      previous = states[previous]!.link;
     }
-    [previous, current] = [current, previous];
-    current.fill(0);
+    if (previous !== -1) {
+      const target = states[previous]!.next.get(character)!;
+      if (states[previous]!.length + 1 === states[target]!.length) states[current]!.link = target;
+      else {
+        const clone = states.length;
+        states.push({ length: states[previous]!.length + 1, link: states[target]!.link, next: new Map(states[target]!.next) });
+        while (previous !== -1 && states[previous]!.next.get(character) === target) {
+          states[previous]!.next.set(character, clone);
+          previous = states[previous]!.link;
+        }
+        states[target]!.link = clone;
+        states[current]!.link = clone;
+      }
+    }
+    last = current;
+  }
+  let best = { start: 0, length: 0 };
+  let state = 0;
+  let length = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    while (state !== 0 && !states[state]!.next.has(character)) {
+      state = states[state]!.link;
+      length = states[state]!.length;
+    }
+    const next = states[state]!.next.get(character);
+    if (next === undefined) { state = 0; length = 0; continue; }
+    state = next;
+    length += 1;
+    if (length > best.length) best = { start: index - length + 1, length };
   }
   return best;
 }
@@ -192,9 +222,9 @@ export function alignCitation(claims: ReadonlyArray<string>, captured: string): 
   return { alignment: whole ? 'aligned' : 'partial', anchors, coverage: Math.min(1, covered / total) };
 }
 
-/** The captured sentences the anchors fall in, joined in order and bounded; `null` when nothing aligned. */
+/** The captured sentences the anchors fall in, or the beginning when unaligned; the original stays visible in either case. */
 export function evidencePassage(captured: string, anchors: ReadonlyArray<ResearchEvidenceAnchor>): string | null {
-  if (anchors.length === 0) return null;
+  if (anchors.length === 0) return captured.slice(0, MAX_PASSAGE_CHARACTERS) || null;
   const sentences = evidenceSentences(captured);
   const ordinals = [...new Set(anchors.map((entry) => entry.sentence))].sort((left, right) => left - right);
   const text = ordinals.map((ordinal) => sentences[ordinal - 1]).filter((sentence) => sentence !== undefined)
@@ -211,6 +241,8 @@ export interface UnitResearchSource {
   /** The excerpt the search returned with it, when the backend returned one. */
   readonly snippet: string | null;
   readonly via: 'search' | 'fetch';
+  readonly capturedAt?: string;
+  readonly snapshotDigest?: string;
 }
 
 /** A located finding of the unit, as the reducer will record it. */
@@ -275,11 +307,20 @@ export function evidenceCitations(findings: ReadonlyArray<UnitResearchFinding>, 
     const basis = finding.basis;
     const urls = new Set<string>();
     for (const address of httpsAddresses(basis)) urls.add(addressKey(address));
+    // A precise URL must not also cite every other result from its host. A site name alone can identify a page only when
+    // that site contributed exactly one result; otherwise no exact source has been named.
+    const namedText = basis.replace(/https:\/\/[^\s<>"'()[\]{}，。；、）》」”]+/gu, '');
     for (const source of sources) {
       let host: string | null = null;
       try { host = new URL(source.url).hostname; } catch { host = null; }
       const label = titleSiteLabel(source.title);
-      if ((host !== null && basis.includes(host)) || (label !== null && basis.includes(label))) urls.add(addressKey(source.url));
+      const peers = sources.filter((other) => {
+        try { return (host !== null && new URL(other.url).hostname === host) || (label !== null && titleSiteLabel(other.title) === label); }
+        catch { return false; }
+      });
+      if (source.title !== null && source.title.length >= 4 && namedText.includes(source.title)) urls.add(addressKey(source.url));
+      else if (new Set(peers.map((other) => addressKey(other.url))).size === 1 &&
+        ((host !== null && namedText.includes(host)) || (label !== null && namedText.includes(label)))) urls.add(addressKey(source.url));
     }
     if (urls.size === 0) continue;
     const quoted = [...basis.matchAll(QUOTED)].map((match) => match[1]!.trim()).filter((text) => text.length > 0);
@@ -414,6 +455,7 @@ export interface RetainedEvidence {
 }
 
 export interface RetainedUnit {
+  readonly retentionFailure?: 'capture-processing' | 'storage';
   readonly state: ResearchEvidenceUnitState;
   readonly searchCalls: number;
   readonly retentionFetches: number;
@@ -453,19 +495,12 @@ export function searchHitsOf(snapshot: ResearchSnapshot): UnitResearchSource[] {
       if (hit === null || typeof hit !== 'object' || typeof (hit as { url?: unknown }).url !== 'string') return [];
       const entry = hit as { url: string; title?: unknown; snippet?: unknown };
       if (!entry.url.startsWith('https://')) return [];
-      return [{ url: entry.url, title: typeof entry.title === 'string' ? entry.title : null, snippet: typeof entry.snippet === 'string' ? entry.snippet : null, via: 'search' }];
+      return [{ url: entry.url, title: typeof entry.title === 'string' ? entry.title : null, snippet: typeof entry.snippet === 'string' ? entry.snippet : null, via: 'search',
+        capturedAt: snapshot.retrievedAt, snapshotDigest: researchSnapshotDigest(snapshot) }];
     });
   }
   // A cut answer no longer parses: its addresses are still the ones the model read.
   return httpsAddresses(snapshot.text).map((url) => ({ url, title: null, snippet: null, via: 'search' as const }));
-}
-
-/** Cap a retained text at the retention bound, with an explicit marker when it is cut. */
-export function retainedText(text: string): string {
-  if (text.length <= MAX_RETAINED_CHARACTERS) return text;
-  let end = MAX_RETAINED_CHARACTERS;
-  if (/[\uDC00-\uDFFF]/u.test(text.charAt(end))) end -= 1;
-  return `${text.slice(0, end)}${RETAINED_TRUNCATION_MARKER}`;
 }
 
 /**
@@ -481,19 +516,20 @@ export async function retainUnitEvidence(input: {
   readonly searchSnapshotDigest: string | null;
   readonly searchState: ResearchEvidenceUnitState;
   readonly searchCalls: number;
-  readonly fetchAllowed: boolean;
+  readonly fetchAllowed: boolean | (() => boolean);
   readonly fetch: RetentionFetch | null;
   readonly rule: SourceTranslationRule | null;
   readonly translator: SourceTranslator | null;
   readonly now: () => Date;
 }): Promise<RetainedUnit> {
   const citations = evidenceCitations(input.findings, input.sources);
+  const mayFetch = (): boolean => typeof input.fetchAllowed === 'function' ? input.fetchAllowed() : input.fetchAllowed;
   const captures = new Map<string, RetainedPage | { failed: string }>();
   for (const [url, page] of input.pages) captures.set(addressKey(url), page);
   let retentionFetches = 0;
   for (const url of new Set(citations.map((citation) => citation.url))) {
     if (captures.has(url)) continue;
-    if (!input.fetchAllowed || input.fetch === null) continue;
+    if (!mayFetch() || input.fetch === null) continue;
     retentionFetches += 1;
     try {
       captures.set(url, await input.fetch(url));
@@ -515,17 +551,19 @@ export async function retainUnitEvidence(input: {
     let failure: string | null = null;
     if (capture !== undefined && 'text' in capture) {
       captureState = 'full-text';
-      content = retainedText(capture.text);
+      // The shared webfetch owner already enforces the byte bound; never label a second, truncated copy as full text.
+      content = capture.text;
       pageSha256 = capture.pageSha256;
       snapshotDigest = capture.snapshotDigest;
       capturedAt = capture.capturedAt;
     } else {
-      failure = capture === undefined ? input.fetchAllowed ? '没有取回这个来源。' : '运行已停止发送；没有取回这个来源。' : capture.failed;
+      failure = capture === undefined ? mayFetch() ? '没有取回这个来源。' : '运行已停止发送；没有取回这个来源。' : capture.failed;
       const excerpt = hit?.snippet ?? null;
       if (excerpt !== null && excerpt.trim().length > 0) {
         captureState = 'snippet-only';
         content = excerpt;
-        snapshotDigest = input.searchSnapshotDigest;
+        snapshotDigest = hit?.snapshotDigest ?? input.searchSnapshotDigest;
+        capturedAt = hit?.capturedAt ?? capturedAt;
       } else {
         captureState = 'failed';
       }
@@ -544,7 +582,7 @@ export async function retainUnitEvidence(input: {
   }
   const findings = input.findings.map((finding) => ({
     findingId: finding.findingId, blockId: finding.blockId, quote: finding.quote, category: finding.category,
-    sources: evidence.filter((entry) => entry.findingId === finding.findingId).length,
+    sources: evidence.filter((entry) => entry.findingId === finding.findingId && entry.captureState !== 'failed').length,
   }));
   return { state: input.searchState, searchCalls: input.searchCalls, retentionFetches, failedRetrievals, findings, evidence };
 }

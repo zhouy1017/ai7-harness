@@ -51,6 +51,7 @@ type SqlRow = Record<string, SQLOutputValue>;
 /** How many researched units, and how many of their findings, one 来源与证据 read carries: the latest first. */
 export const MAX_RESEARCH_EVIDENCE_UNITS = 64;
 export const MAX_RESEARCH_EVIDENCE_FINDINGS = 400;
+const PROJECTION_SECTION_BYTES = 192 * 1024;
 
 const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
 
@@ -160,7 +161,7 @@ export class ResearchEvidenceLedger {
     const recordedAt = new Date().toISOString();
     const insertContent = this.#db.prepare('INSERT INTO research_evidence_contents(content_sha256, content_text, recorded_at) VALUES (?, ?, ?)');
     const readContent = this.#db.prepare('SELECT content_text FROM research_evidence_contents WHERE content_sha256 = ?');
-    const priorFull = this.#db.prepare("SELECT content_sha256 FROM research_evidence WHERE url = ? AND capture_state = 'full-text' ORDER BY rowid DESC LIMIT 1");
+    const priorFull = this.#db.prepare("SELECT content_sha256, page_sha256 FROM research_evidence WHERE url = ? AND captured_at < ? AND capture_state = 'full-text' ORDER BY captured_at DESC LIMIT 1");
     const insertEvidence = this.#db.prepare(`INSERT INTO research_evidence(
       evidence_id, book_id, run_record_id, unit_ordinal, finding_id, backend_id, query_class, url, captured_at, capture_state,
       content_sha256, page_sha256, snapshot_digest, alignment, anchors_json, translation_json, staleness_state, recorded_at, canonical_json, sha256
@@ -173,8 +174,8 @@ export class ResearchEvidenceLedger {
         if (existing === undefined) insertContent.run(evidence.contentSha256, evidence.content, recordedAt);
         else requireEvidence(existing.content_text === evidence.content, 'RESEARCH_EVIDENCE_DIGEST_MISMATCH', '留存来源的摘要与正文不一致。');
       }
-      const prior = evidence.captureState === 'full-text' ? priorFull.get(evidence.url) as SqlRow | undefined : undefined;
-      const stalenessState = prior !== undefined && prior.content_sha256 !== evidence.contentSha256 ? 'hash-changed' as const : 'current' as const;
+      const prior = evidence.captureState === 'full-text' ? priorFull.get(evidence.url, evidence.capturedAt) as SqlRow | undefined : undefined;
+      const stalenessState = prior !== undefined && (prior.content_sha256 !== evidence.contentSha256 || prior.page_sha256 !== evidence.pageSha256) ? 'hash-changed' as const : 'current' as const;
       const evidenceId = randomUUID();
       const record = canonicalRecord(researchEvidenceRecord({
         evidenceId, bookId: input.bookId, runRecordId: input.runRecordId, unitOrdinal: input.unitOrdinal,
@@ -191,6 +192,7 @@ export class ResearchEvidenceLedger {
       schema: RESEARCH_EVIDENCE_UNIT_SCHEMA, runRecordId: input.runRecordId, unitOrdinal: input.unitOrdinal, bookId: input.bookId,
       backendId: input.backendId, state: input.unit.state, searchCalls: input.unit.searchCalls, retentionFetches: input.unit.retentionFetches,
       failedRetrievals: input.unit.failedRetrievals, findings: input.unit.findings, evidenceIds: ids, recordedAt,
+      ...(input.unit.retentionFailure === undefined ? {} : { retentionFailure: input.unit.retentionFailure }),
     });
     this.#db.prepare(`INSERT INTO research_evidence_units(run_record_id, unit_ordinal, book_id, backend_id, search_state, search_calls,
       retention_fetches, failed_retrievals, unsupported_findings, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -269,58 +271,84 @@ export class ResearchEvidenceLedger {
     readonly after: number | null;
     readonly now: Date;
     readonly staleAfterDays?: number;
+    readonly runRecordId?: string;
+    readonly findingId?: string;
     readonly saveRefusal: (source: { captureState: ResearchEvidenceCaptureState; savedMaterialId: string | null }) => string | null;
   }): ResearchEvidenceBookProjection {
     const staleAfterDays = input.staleAfterDays ?? RESEARCH_EVIDENCE_STALE_AFTER_DAYS;
     const empty: ResearchEvidenceBookProjection = { bookId: input.bookId, staleAfterDays, records: [], next: null, units: [], findings: [],
       statement: '这本书还没有留存的外部来源：外部来源只在联网核查的运行中留存。' };
     if (!this.#present()) return empty;
-    const rows = this.#db.prepare(`SELECT rowid, * FROM research_evidence WHERE book_id = ? ${input.after === null ? '' : 'AND rowid < ?'}
-      ORDER BY rowid DESC LIMIT ?`).all(...(input.after === null ? [input.bookId] : [input.bookId, input.after]), MAX_RESEARCH_EVIDENCE_PAGE + 1) as SqlRow[];
+    const scope = `book_id = ?${input.runRecordId === undefined ? '' : ' AND run_record_id = ?'}`;
+    const scopeArgs = [input.bookId, ...(input.runRecordId === undefined ? [] : [input.runRecordId])];
+    const rows = this.#db.prepare(`SELECT rowid, * FROM research_evidence WHERE ${scope}
+      ${input.findingId === undefined ? '' : 'AND finding_id = ?'} ${input.after === null ? '' : 'AND rowid < ?'} ORDER BY rowid DESC LIMIT ?`)
+      .all(...scopeArgs, ...(input.findingId === undefined ? [] : [input.findingId]), ...(input.after === null ? [] : [input.after]), MAX_RESEARCH_EVIDENCE_PAGE + 1) as SqlRow[];
     const page = rows.slice(0, MAX_RESEARCH_EVIDENCE_PAGE).map((row) => this.#evidence(row));
-    const later = this.#db.prepare("SELECT 1 FROM research_evidence WHERE url = ? AND rowid > ? AND capture_state = 'full-text' AND staleness_state = 'hash-changed' LIMIT 1");
-    const records = page.map((stored): ResearchEvidenceProjection => {
+    const later = this.#db.prepare("SELECT 1 FROM research_evidence WHERE url = ? AND captured_at > ? AND capture_state = 'full-text' AND (content_sha256 <> ? OR page_sha256 <> ?) LIMIT 1");
+    const projected = page.map((stored): ResearchEvidenceProjection => {
       const staleness = evidenceStaleness({ capturedAt: stored.capturedAt, now: input.now, staleAfterDays,
-        laterDifferentHash: stored.captureState === 'full-text' && later.get(stored.url, stored.rowid) !== undefined });
+        laterDifferentHash: stored.captureState === 'full-text' && later.get(stored.url, stored.capturedAt, stored.contentSha256, stored.pageSha256) !== undefined });
       const content = this.#content(stored.contentSha256);
       const savedMaterialId = this.#savedMaterial(stored.evidenceId);
       return {
         evidenceId: stored.evidenceId, bookId: stored.bookId, runRecordId: stored.runRecordId, unitOrdinal: stored.unitOrdinal,
-        findingId: stored.findingId, backendId: stored.backendId, queryClass: stored.queryClass, url: stored.url, sourceTitle: stored.sourceTitle,
+        findingId: stored.findingId, backendId: stored.backendId, queryClass: stored.queryClass, url: stored.url, sourceTitle: stored.sourceTitle?.slice(0, 2_000) ?? null,
         capturedAt: stored.capturedAt, captureState: stored.captureState, captureLabel: RESEARCH_EVIDENCE_CAPTURE_LABELS[stored.captureState],
         contentSha256: stored.contentSha256, pageSha256: stored.pageSha256, snapshotDigest: stored.snapshotDigest, claim: stored.claim,
         alignment: stored.alignment, alignmentLabel: RESEARCH_EVIDENCE_ALIGNMENT_LABELS[stored.alignment], anchors: stored.anchors,
-        passage: content === null ? null : evidencePassage(content, stored.anchors), translation: stored.translation,
+        passage: content === null ? null : stored.translation?.state === 'translated'
+          ? content.slice(stored.translation.attribution.from, stored.translation.attribution.to) : evidencePassage(content, stored.anchors), translation: stored.translation,
         staleness: { ...staleness, label: staleness.state === 'possibly-stale' ? RESEARCH_EVIDENCE_STALE_LABEL : null },
         savedMaterialId, saveRefusal: input.saveRefusal({ captureState: stored.captureState, savedMaterialId }),
       };
     });
+    // Count actual UTF-8 bytes, not just rows: long public titles and translations otherwise overflow the 512 KiB frame.
+    const records: ResearchEvidenceProjection[] = [];
+    let recordBytes = 0;
+    for (const record of projected) {
+      const bytes = Buffer.byteLength(JSON.stringify(record), 'utf8') + 1;
+      if (recordBytes + bytes > PROJECTION_SECTION_BYTES) break;
+      recordBytes += bytes;
+      records.push(record);
+    }
     // The latest researched units and their findings, bounded so one read always fits one frame.
-    const unitRows = this.#db.prepare('SELECT * FROM research_evidence_units WHERE book_id = ? ORDER BY rowid DESC LIMIT ?')
-      .all(input.bookId, MAX_RESEARCH_EVIDENCE_UNITS) as SqlRow[];
+    const unitRows = this.#db.prepare(`SELECT * FROM research_evidence_units WHERE ${scope}
+      ${input.findingId === undefined ? '' : "AND EXISTS (SELECT 1 FROM json_each(canonical_json, '$.findings') f WHERE json_extract(f.value, '$.findingId') = ?)"}
+      ORDER BY rowid DESC LIMIT ?`)
+      .all(...scopeArgs, ...(input.findingId === undefined ? [] : [input.findingId]), MAX_RESEARCH_EVIDENCE_UNITS) as SqlRow[];
     const units: ResearchEvidenceUnitProjection[] = [];
     const findings: ResearchEvidenceFindingProjection[] = [];
+    let findingBytes = 0;
     for (const row of unitRows) {
       const json = String(row.canonical_json);
       requireEvidence(sha256Hex(json) === String(row.sha256), 'RESEARCH_EVIDENCE_RECORD_INVALID', '外部来源留存记录已损坏。');
-      const record = JSON.parse(json) as { schema?: unknown; findings?: unknown };
+      const record = JSON.parse(json) as { schema?: unknown; findings?: unknown; retentionFailure?: 'capture-processing' | 'storage' };
       requireEvidence(record.schema === RESEARCH_EVIDENCE_UNIT_SCHEMA && Array.isArray(record.findings), 'RESEARCH_EVIDENCE_RECORD_INVALID', '外部来源留存记录已损坏。');
       const state = String(row.search_state) as ResearchEvidenceUnitState;
       units.push({
+        ...(record.retentionFailure === undefined ? {} : { retentionFailure: record.retentionFailure }),
         runRecordId: String(row.run_record_id), unitOrdinal: Number(row.unit_ordinal), backendId: row.backend_id === null ? null : String(row.backend_id),
         state, label: RESEARCH_EVIDENCE_UNIT_LABELS[state], searchCalls: Number(row.search_calls), retentionFetches: Number(row.retention_fetches),
         failedRetrievals: Number(row.failed_retrievals), unsupportedFindings: Number(row.unsupported_findings),
       });
       for (const finding of record.findings as Array<{ findingId: string; blockId: string; quote: string; sources: number }>) {
+        if (input.findingId !== undefined && finding.findingId !== input.findingId) continue;
         if (findings.length >= MAX_RESEARCH_EVIDENCE_FINDINGS) break;
         const findingState = finding.sources > 0 ? 'sourced' as const : state === 'incomplete' ? 'incomplete' as const : 'unsupported' as const;
-        findings.push({ findingId: finding.findingId, runRecordId: String(row.run_record_id), unitOrdinal: Number(row.unit_ordinal),
-          blockId: finding.blockId, quote: finding.quote, state: findingState, label: RESEARCH_EVIDENCE_FINDING_LABELS[findingState], sources: finding.sources });
+        const projectedFinding: ResearchEvidenceFindingProjection = { findingId: finding.findingId, runRecordId: String(row.run_record_id), unitOrdinal: Number(row.unit_ordinal),
+          blockId: finding.blockId, quote: finding.quote, state: findingState,
+          label: record.retentionFailure === undefined ? RESEARCH_EVIDENCE_FINDING_LABELS[findingState]
+            : `来源留存失败（${record.retentionFailure === 'storage' ? '保存失败' : '处理失败'}）；没有可查看的留存来源。`, sources: finding.sources };
+        const bytes = Buffer.byteLength(JSON.stringify(projectedFinding), 'utf8') + 1;
+        if (findingBytes + bytes > PROJECTION_SECTION_BYTES) break;
+        findingBytes += bytes;
+        findings.push(projectedFinding);
       }
     }
     return {
       bookId: input.bookId, staleAfterDays, records,
-      next: rows.length > MAX_RESEARCH_EVIDENCE_PAGE ? page[page.length - 1]!.rowid : null,
+      next: rows.length > records.length && records.length > 0 ? page[records.length - 1]!.rowid : null,
       units, findings,
       statement: records.length === 0 && units.length === 0 ? empty.statement
         : '外部来源由联网核查的运行留存：AI7 自己取回的页面全文或检索返回的片段，以及与引文词句的对应；它不是事实结论，也不发布、不导出。',

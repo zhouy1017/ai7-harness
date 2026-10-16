@@ -880,8 +880,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 来源与证据 (Issue #425, S70): the Book, the rowid cursor of the page, and the staleness threshold in days.
     case 'inspectResearchEvidence': {
-      const input = requireInput(value.input, ['bookId', 'after', 'staleAfterDays'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'after', 'staleAfterDays'], ['taskIntentId', 'reviewFindingId'], tentativeId);
       if (!validUuid(input.bookId) || !(input.after === null || isSafeInteger(input.after, 1)) ||
+          !(input.taskIntentId === undefined || validUuid(input.taskIntentId)) ||
+          !(input.reviewFindingId === undefined || (input.taskIntentId !== undefined && typeof input.reviewFindingId === 'string' && /^rvf_[0-9a-f]{24}$/u.test(input.reviewFindingId))) ||
           !(input.staleAfterDays === null || (isSafeInteger(input.staleAfterDays, 1) && Number(input.staleAfterDays) <= 3650))) throw new ProtocolError(tentativeId);
       break;
     }

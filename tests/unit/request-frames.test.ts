@@ -2019,6 +2019,7 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'inspectResearchEvidence', input: { bookId, after: null, staleAfterDays: null } },
       { op: 'inspectResearchEvidence', input: { bookId, after: 33, staleAfterDays: 90 } },
       { op: 'inspectResearchEvidence', input: { bookId, after: null, staleAfterDays: 3650 } },
+      { op: 'inspectResearchEvidence', input: { bookId, after: null, staleAfterDays: null, taskIntentId: randomUUID(), reviewFindingId: `rvf_${'a'.repeat(24)}` } },
       { op: 'saveEvidenceAsMaterial', input: { bookId, evidenceId, title: null } },
       { op: 'saveEvidenceAsMaterial', input: { bookId, evidenceId, title: '馆藏页' } },
     ];
@@ -2034,6 +2035,9 @@ describe('decodeRequest rejects malformed frames', () => {
       ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: 0 }],
       ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: 3651 }],
       ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: null, url: 'https://example.org' }],
+      ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: null, taskIntentId: 'latest' }],
+      ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: null, reviewFindingId: `rvf_${'a'.repeat(24)}` }],
+      ['inspectResearchEvidence', { bookId, after: null, staleAfterDays: null, taskIntentId: randomUUID(), reviewFindingId: 'latest' }],
       ['saveEvidenceAsMaterial', { bookId, evidenceId }],
       ['saveEvidenceAsMaterial', { bookId, evidenceId: 'latest', title: null }],
       ['saveEvidenceAsMaterial', { bookId: 'book', evidenceId, title: null }],

@@ -4,6 +4,7 @@ import {
   type ResearchEvidenceBookProjection,
   type ResearchEvidenceFindingProjection,
   type ResearchEvidenceProjection,
+  type RendererApi,
 } from '../shared/protocol.js';
 
 /**
@@ -85,16 +86,28 @@ export function findingSourceLine(record: ResearchEvidenceProjection, staleAfter
 export function findingResearchLines(projection: ResearchEvidenceBookProjection, finding: { blockId: string; quote: string }, instant: InstantLabel): string[] | null {
   const research: ResearchEvidenceFindingProjection | undefined = projection.findings.find((entry) => entry.blockId === finding.blockId && entry.quote === finding.quote);
   if (research === undefined) return null;
-  const records = projection.records.filter((record) => record.findingId === research.findingId);
+  const records = projection.records.filter((record) => record.findingId === research.findingId && record.runRecordId === research.runRecordId);
   if (records.length === 0) return [research.label];
   return records.map((record) => findingSourceLine(record, projection.staleAfterDays, instant));
 }
 
 /** 「单元 2 · 联网核查已完成 · 检索 1 次 · 留存取回 1 次 · 1 个来源未能取回 · 1 条发现没有外部来源」. */
 export function researchUnitLine(unit: ResearchEvidenceBookProjection['units'][number]): string {
+  if (unit.retentionFailure !== undefined) return `阅读范围 ${unit.unitOrdinal} · 来源留存失败（${unit.retentionFailure === 'storage' ? '保存失败' : '处理失败'}）；没有可查看的留存来源。`;
   return [
     `阅读范围 ${unit.unitOrdinal}`, unit.label, `检索 ${unit.searchCalls} 次`, `留存取回 ${unit.retentionFetches} 次`,
     unit.failedRetrievals > 0 ? `${unit.failedRetrievals} 个来源未能取回全文` : null,
     unit.unsupportedFindings > 0 ? `${unit.unsupportedFindings} 条发现没有可留存的外部来源` : null,
   ].filter((part): part is string => part !== null).join(' · ');
+}
+
+/** Read all source pages for this exact Task and review finding; every individual response remains bounded. */
+export async function readFindingResearch(api: Pick<RendererApi, 'inspectResearchEvidence'>, bookId: string, taskIntentId: string, reviewFindingId: string): Promise<ResearchEvidenceBookProjection> {
+  let answer = await api.inspectResearchEvidence({ bookId, taskIntentId, reviewFindingId });
+  const records = [...answer.records];
+  while (answer.next !== null) {
+    answer = await api.inspectResearchEvidence({ bookId, taskIntentId, reviewFindingId, after: answer.next });
+    records.push(...answer.records);
+  }
+  return { ...answer, records };
 }

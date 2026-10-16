@@ -22,6 +22,7 @@ import {
 import type { ResearchSnapshot } from '../../src/service/provider/research-snapshot-cache.js';
 import {
   findingResearchLines,
+  readFindingResearch,
   findingSourceLine,
   researchUnitLine,
   sourceAlignmentLine,
@@ -59,6 +60,15 @@ describe('sentence alignment against the captured text', () => {
     const aligned = alignCitation(['「出土于１９７８年」'], CAPTURE);
     expect(aligned.alignment).toBe('aligned');
     expect(CAPTURE.slice(aligned.anchors[0]!.from, aligned.anchors[0]!.to)).toBe('出土于1978年');
+  });
+
+  it('keeps UTF-16 anchors exact after supplementary characters and reports a broken citation as 未能对应', () => {
+    const captured = '😀𠀀。A public source records a blue vessel.';
+    const aligned = alignCitation(['blue vessel'], captured);
+    expect(captured.slice(aligned.anchors[0]!.from, aligned.anchors[0]!.to)).toBe('blue vessel');
+    expect(aligned.anchors[0]!.sentence).toBe(2);
+    expect(alignCitation(['unrelated quotation'], captured).alignment).toBe('unaligned');
+    expect(alignCitation(['𠀀𠀁'], '😀𠀀𠀁。').anchors).toEqual([{ from: 2, to: 6, sentence: 1 }]);
   });
 
   it('marks a citation 部分对应 when only some of its pieces are in the capture', () => {
@@ -119,6 +129,13 @@ describe('citations from the model’s basis', () => {
       claim: { text: FINDING.quote, origin: 'finding-quote' }, claimPieces: [FINDING.quote],
     }]);
     expect(evidenceCitations([{ ...FINDING, basis: '模型自己的知识。' }], sources.slice(0, 3))).toEqual([]);
+  });
+
+  it('does not turn one precise citation or an ambiguous site name into every result from that site', () => {
+    const sameSite = [sources[0]!, { ...sources[0]!, url: 'https://zh.wikipedia.org/wiki/another', title: '另一页 - 维基百科' }];
+    expect(evidenceCitations([{ ...FINDING, basis: 'https://zh.wikipedia.org/wiki/zun' }], sameSite).map((entry) => entry.url))
+      .toEqual(['https://zh.wikipedia.org/wiki/zun']);
+    expect(evidenceCitations([{ ...FINDING, basis: '维基百科' }], sameSite)).toEqual([]);
   });
 });
 
@@ -183,7 +200,7 @@ describe('reading the Research Snapshot Cache', () => {
 
   it('reads a search answer’s results with their excerpts, and the addresses of one that no longer parses', () => {
     const answer = { ...fetchSnapshot('https://s', ''), kind: 'search-call' as const, text: JSON.stringify([{ title: 'A', url: 'https://a.example/x', snippet: '片段' }, { title: 'B', url: 'http://b.example' }]) };
-    expect(searchHitsOf(answer)).toEqual([{ url: 'https://a.example/x', title: 'A', snippet: '片段', via: 'search' }]);
+    expect(searchHitsOf(answer)).toEqual([{ url: 'https://a.example/x', title: 'A', snippet: '片段', via: 'search', capturedAt: answer.retrievedAt, snapshotDigest: researchSnapshotDigest(answer) }]);
     expect(searchHitsOf({ ...answer, text: '[{"title":"A","url":"https://a.example/x"' })).toEqual([{ url: 'https://a.example/x', title: null, snippet: null, via: 'search' }]);
   });
 });
@@ -214,7 +231,7 @@ describe('retaining one research unit', () => {
     expect(wiki).toMatchObject({ captureState: 'failed', content: null, contentSha256: null, alignment: 'unaligned', anchors: [], failure: '未能取回该来源（状态 403）；不重试。' });
     expect(unit.failedRetrievals).toBe(1);
     expect(unit.findings).toEqual([
-      { findingId: FINDING.findingId, blockId: FINDING.blockId, quote: FINDING.quote, category: '机构', sources: 2 },
+      { findingId: FINDING.findingId, blockId: FINDING.blockId, quote: FINDING.quote, category: '机构', sources: 1 },
       { findingId: other.findingId, blockId: other.blockId, quote: other.quote, category: '史实', sources: 0 },
     ]);
   });
@@ -229,6 +246,28 @@ describe('retaining one research unit', () => {
     expect(museum).toMatchObject({ captureState: 'snippet-only', content: '现藏湖北省博物馆的器物。', snapshotDigest: digest('search'), pageSha256: null, alignment: 'aligned' });
     expect(museum.failure).toBe('运行已停止发送；没有取回这个来源。');
     expect(unit.evidence.find((entry) => entry.url.includes('wikipedia'))).toMatchObject({ captureState: 'full-text', alignment: 'aligned' });
+  });
+
+  it('rechecks sending permission between citations and preserves the search capture time and digest on excerpt reuse', async () => {
+    let allowed = true;
+    let calls = 0;
+    const old = '2026-01-01T00:00:00.000Z';
+    const result = await retainUnitEvidence({ ...input,
+      sources: sources.map((source) => ({ ...source, capturedAt: old, snapshotDigest: digest('original search') })),
+      fetchAllowed: () => allowed, fetch: async () => { calls += 1; allowed = false; return { failed: 'refused' }; } });
+    expect(calls).toBe(1);
+    expect(result.evidence[0]).toMatchObject({ capturedAt: old, snapshotDigest: digest('original search'), captureState: 'snippet-only' });
+    expect(evidenceStaleness({ capturedAt: result.evidence[0]!.capturedAt, now: input.now(), laterDifferentHash: false }).state).toBe('possibly-stale');
+  });
+
+  it('retains the whole admitted page past one million characters instead of making an incomplete full-text material', async () => {
+    const text = '公开'.repeat(500_001) + CAPTURE;
+    const result = await retainUnitEvidence({ ...input, findings: [{ ...FINDING, basis: 'https://museum.example.org/zun 「现藏湖北省博物馆」' }],
+      pages: new Map([['https://museum.example.org/zun', page('https://museum.example.org/zun', text)]]), fetchAllowed: false, fetch: null });
+    expect(result.evidence[0]!.content?.length).toBe(text.length);
+    expect(result.evidence[0]!.contentSha256).toBe(digest(text));
+    expect(result.evidence[0]!.alignment).toBe('aligned');
+    expect(alignCitation(['公开事实尚待核对'], text).alignment).toBe('unaligned');
   });
 });
 
@@ -270,5 +309,20 @@ describe('the words the editor reads', () => {
     expect(findingResearchLines(projection, { blockId: FINDING.blockId, quote: '别处' }, instant)).toEqual(['联网核查未完成']);
     expect(findingResearchLines(projection, { blockId: FINDING.blockId, quote: '没有研究的发现' }, instant)).toBeNull();
     expect(researchUnitLine(projection.units[0]!)).toBe('阅读范围 2 · 联网核查未完成 · 检索 1 次 · 留存取回 1 次 · 1 个来源未能取回全文 · 1 条发现没有可留存的外部来源');
+    expect(findingResearchLines({ ...projection, records: [{ ...record, runRecordId: '00000000-0000-4000-8000-000000000099' }, record] }, FINDING, instant))
+      .toEqual([findingSourceLine(record, 90, instant)]);
+  });
+
+  it('pages a finding beyond the first 32 sources while preserving its task and finding filters', async () => {
+    const taskIntentId = '00000000-0000-4000-8000-000000000004';
+    const reviewFindingId = `rvf_${'a'.repeat(24)}`;
+    const calls: unknown[] = [];
+    const answer = await readFindingResearch({ inspectResearchEvidence: async (input) => {
+      calls.push(input);
+      return { bookId: record.bookId, staleAfterDays: 90, records: input.after === undefined ? Array.from({ length: 32 }, () => record) : [record],
+        next: input.after === undefined ? 33 : null, findings: [], units: [], statement: '' };
+    } }, record.bookId, taskIntentId, reviewFindingId);
+    expect(answer.records).toHaveLength(33);
+    expect(calls).toEqual([{ bookId: record.bookId, taskIntentId, reviewFindingId }, { bookId: record.bookId, taskIntentId, reviewFindingId, after: 33 }]);
   });
 });

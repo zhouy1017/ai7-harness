@@ -9149,8 +9149,25 @@ export class EditorialStore {
       requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.bookId) !== undefined, 'BOOK_NOT_FOUND', '所选图书不存在。');
       requireStore(input.staleAfterDays === null || (Number.isSafeInteger(input.staleAfterDays) && input.staleAfterDays >= 1 && input.staleAfterDays <= 3650),
         'RESEARCH_EVIDENCE_STALE_AFTER_INVALID', '过期天数无效。');
+      let runRecordId: string | undefined;
+      let findingId: string | undefined;
+      if (input.taskIntentId !== undefined) {
+        const run = this.#authority.prepare(`SELECT r.run_record_id FROM analysis_run_records r
+          JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE t.book_id = ? AND t.task_intent_id = ?`)
+          .get(input.bookId, input.taskIntentId) as SqlRow | undefined;
+        // An unstarted task has no evidence, never the Book's unrelated latest Run.
+        runRecordId = run === undefined ? '' : String(run.run_record_id);
+      }
+      if (input.reviewFindingId !== undefined) {
+        requireStore(input.taskIntentId !== undefined, 'RESEARCH_EVIDENCE_INVALID', '查看发现的来源需要指定任务。');
+        const finding = this.#authority.prepare(`SELECT f.kind_ref FROM review_findings f
+          JOIN review_runs r ON r.review_run_id = f.review_run_id WHERE r.book_id = ? AND f.finding_id = ? AND f.category_id = 'factual-review'`)
+          .get(input.bookId, input.reviewFindingId) as SqlRow | undefined;
+        findingId = finding === undefined ? '' : String(finding.kind_ref);
+      }
       return this.#researchEvidence.projection({
         bookId: input.bookId, after: input.after, now: new Date(),
+        ...(runRecordId === undefined ? {} : { runRecordId }), ...(findingId === undefined ? {} : { findingId }),
         ...(input.staleAfterDays === null ? {} : { staleAfterDays: input.staleAfterDays }),
         saveRefusal: (source) => this.#evidenceSaveRefusal(source),
       });
@@ -9200,6 +9217,8 @@ export class EditorialStore {
       await rm(staged.path, { force: true });
     }
     const materialId = this.#evidenceCall(() => this.#transaction(this.#authority, () => {
+      // The file preparation above yields; replacement may have frozen the Book in the meantime.
+      requireStore(!this.replacementFrozen(), 'RESEARCH_EVIDENCE_BOOK_READ_ONLY', RESEARCH_EVIDENCE_READ_ONLY);
       const id = this.#libraryMaterials.record(kept, [...title].slice(0, MAX_LIBRARY_MATERIAL_TITLE_GRAPHEMES).join(''), 'web', {
         kind: 'research-evidence', evidenceId: source.evidenceId, bookId: source.bookId, runRecordId: source.runRecordId, url: source.url,
         capturedAt: source.capturedAt, contentSha256: source.contentSha256!, pageSha256: source.pageSha256, snapshotDigest: source.snapshotDigest,

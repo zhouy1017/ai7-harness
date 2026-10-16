@@ -9,6 +9,8 @@ import type { RetainedEvidence, RetainedUnit } from '../../src/service/analysis/
 import { dropResearchEvidenceRelations } from '../support/pre74-schema.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book } from '../support/sample1-baseline.js';
+import { ResearchEvidenceLedger } from '../../src/service/research-evidence.js';
+import { MAX_FRAME_BYTES } from '../../src/shared/protocol.js';
 
 // Issue #425 (S70): schema revision 75's research evidence ledger over the real store — the migration from a planted revision
 // 74, the CHECK pins and immutability, and staleness by age and by a later capture under another hash. Every text here is
@@ -38,6 +40,34 @@ function schemaRows(path: string): Array<{ type: string; name: string; sql: stri
 }
 
 describe('the research evidence ledger, schema 75', () => {
+  it('bounds actual response bytes, pages all records and scopes identical finding identities to their Run', async () => {
+    const roots = await createServiceTestRoots('ai7-research-evidence-frame-');
+    let store: EditorialStore | undefined;
+    try {
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      const book = await importSample1Book(store, roots.codeRoot, '分帧回归');
+      const runRecordId = randomUUID();
+      store.recordResearchEvidence({ bookId: book.bookId, runRecordId, unitOrdinal: 1, backendId: 'search-tinyfish',
+        unit: unit(Array.from({ length: 40 }, () => ({ ...evidence('公开事实一则。', new Date().toISOString()), sourceTitle: '公开标题'.repeat(6000) }))) });
+      store.recordResearchEvidence({ bookId: book.bookId, runRecordId: randomUUID(), unitOrdinal: 1, backendId: 'search-tinyfish', unit: unit([evidence('另一运行来源。', new Date().toISOString())]) });
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const ledger = new ResearchEvidenceLedger(db);
+        let after: number | null = null;
+        let seen = 0;
+        do {
+          const result = ledger.projection({ bookId: book.bookId, runRecordId, findingId: FINDING, after, now: new Date(), saveRefusal: () => null });
+          expect(Buffer.byteLength(JSON.stringify(result), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
+          expect(result.records.every((record) => record.runRecordId === runRecordId)).toBe(true);
+          expect(result.findings.every((finding) => finding.runRecordId === runRecordId)).toBe(true);
+          seen += result.records.length;
+          after = result.next;
+        } while (after !== null);
+        expect(seen).toBe(40);
+      } finally { db.close(); }
+    } finally { store?.close(); await roots.dispose(); }
+  });
+
   it('migrates an exact revision-74 store by adding its four relations, moving nothing else, and refuses a 75 without them', async () => {
     const roots = await createServiceTestRoots('ai7-research-evidence-migration-');
     let store: EditorialStore | undefined;
@@ -103,6 +133,7 @@ describe('the research evidence ledger, schema 75', () => {
         expect(() => insert({ alignment: '已验证' })).toThrow(/CHECK/u);
         expect(() => insert({ anchors_json: '{}' })).toThrow(/CHECK/u);
         expect(() => insert({ translation_json: '{"state":"guessed"}' })).toThrow(/CHECK/u);
+        expect(() => insert({ translation_json: '{}' })).toThrow(/CHECK/u);
         expect(() => insert({ finding_id: null })).toThrow(/CHECK/u);
         expect(() => insert({ staleness_state: 'stale' })).toThrow(/CHECK/u);
         expect(() => insert({ content_sha256: digest('absent') })).toThrow(/FOREIGN KEY/u);
@@ -139,6 +170,9 @@ describe('the research evidence ledger, schema 75', () => {
       // The same text captured again changes nothing: it is kept once, and nothing is marked.
       store.recordResearchEvidence({ bookId: book.bookId, runRecordId: randomUUID(), unitOrdinal: 1, backendId: 'search-brave', unit: unit([evidence('公开事实已更新。', now)]) });
       expect(store.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: 365 }).records.filter((record) => record.staleness.state === 'current')).toHaveLength(2);
+      // Replaying an older capture later does not make the genuinely newer page stale.
+      store.recordResearchEvidence({ bookId: book.bookId, runRecordId: randomUUID(), unitOrdinal: 1, backendId: 'search-brave', unit: unit([evidence('公开事实一则。', old)]) });
+      expect(store.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: 365 }).records.filter((record) => record.capturedAt === now).every((record) => record.staleness.state === 'current')).toBe(true);
       expect(() => store!.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: 0 })).toThrow(expect.objectContaining({ code: 'RESEARCH_EVIDENCE_STALE_AFTER_INVALID' }));
       // One read stays within one frame however much the Book researched: the latest 64 units and at most 400 of their findings.
       const many = (index: number): RetainedUnit => ({ ...unit([]), findings: Array.from({ length: 7 }, (_, at) => ({
