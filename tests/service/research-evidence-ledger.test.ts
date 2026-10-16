@@ -75,7 +75,7 @@ describe('the research evidence ledger, schema 75', () => {
     try {
       expect(RESEARCH_EVIDENCE_SCHEMA_VERSION).toBe(75);
       // Revision 76 (Issue #892) follows it; a revision-74 store is migrated through both.
-      expect(LATEST_SCHEMA_VERSION).toBe(RESEARCH_EVIDENCE_SCHEMA_VERSION + 1);
+      expect(LATEST_SCHEMA_VERSION).toBe(78);
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       await importSample1Book(store, roots.codeRoot, '迁移回归');
       store.close(); store = undefined;

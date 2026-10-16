@@ -1,3 +1,4 @@
+import { applyReceiptState, type InspectApplyReceiptInput, type ApplyReceiptProjection, type PrepareReverseApplyInput, type ReverseApplyPreparationProjection } from '../shared/protocol.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { BoundedManuscriptStore, ExactReplacementCommit, ExactReplacementTarget } from './bounded-manuscript.js';
@@ -230,6 +231,7 @@ export class ManuscriptApplyStore {
     const replayed = this.#replay(input, input.clientEffectId, input.markId);
     if (replayed) return replayed;
     const target = this.#marks.suggestionTarget(input);
+    this.#requireAtomicScope(input.branchId, [target.itemId]);
     requireApply(target.status !== 'applied', 'APPLY_ALREADY_COMMITTED', '这条修改建议已经应用。');
     requireApply(target.anchorState === 'exact', 'APPLY_TARGET_DRIFTED', '原文已变，本次应用没有写入稿件。');
     let insertText: string;
@@ -276,14 +278,15 @@ export class ManuscriptApplyStore {
     if (replayed) return replayed;
     const planned = input.markIds.map((markId): PlannedTarget => {
       const target = this.#marks.suggestionTarget({ ...input, markId });
-      requireApply(target.status !== 'applied' && target.decision === null, 'APPLY_INVALID', '其中有修改建议已经处理过；请重新准备这次应用。');
+      requireApply(target.status !== 'applied' && (target.decision === null || target.decision.disposition === 'accepted' || target.decision.disposition === 'accepted-with-edit'), 'APPLY_INVALID', '其中有修改建议已经处理过；请重新准备这次应用。');
       requireApply(target.anchorState === 'exact', 'APPLY_TARGET_DRIFTED', '其中有修改建议的原文已变；本次应用没有写入稿件。');
       return {
         markId, itemId: target.itemId, blockId: target.blockId, fromGrapheme: target.fromGrapheme, toGrapheme: target.toGrapheme,
-        expectedText: target.currentText, insertText: target.proposedText,
-        decision: { disposition: 'accepted', editedText: null, reason: null }, standsAs: 'applied',
+        expectedText: target.currentText, insertText: target.decision?.editedText ?? target.proposedText,
+        decision: target.decision === null ? { disposition: 'accepted', editedText: null, reason: null } : { existingDecisionId: target.decision.decisionId }, standsAs: 'applied',
       };
     });
+    this.#requireAtomicScope(input.branchId, planned.map((item) => item.itemId));
     return this.#commit(input, 'apply', 'confirm-batch-apply', input.clientEffectId, null, planned, input.markIds[0]!);
   }
 
@@ -318,6 +321,52 @@ export class ManuscriptApplyStore {
       toGrapheme: target.toGrapheme, expectedText: target.standingText, insertText: target.currentText,
       decision: { disposition: 'withdrawn', editedText: null, reason: null }, standsAs: 'open',
     }], input.markId);
+  }
+
+  #requireAtomicScope(branchId: string, itemIds: ReadonlyArray<string>): void {
+    for (const itemId of itemIds) {
+      const item = this.#db.prepare('SELECT atomic_group_id FROM proposal_change_items WHERE item_id = ?').get(itemId);
+      if (item?.atomic_group_id === null || item?.atomic_group_id === undefined) continue;
+      const members = this.#db.prepare('SELECT i.item_id FROM proposal_change_items i JOIN editorial_marks m ON m.mark_id = i.mark_id WHERE i.atomic_group_id = ? AND m.branch_id = ?').all(item.atomic_group_id, branchId);
+      requireApply(members.length > 1 && members.every((member) => itemIds.includes(String(member.item_id))), 'PROPOSAL_ATOMIC_SCOPE', '原子组只能作为全部精确成员一起应用。');
+    }
+  }
+
+  inspectApplyReceipt(input: InspectApplyReceiptInput): ApplyReceiptProjection {
+    const identity = this.#db.prepare('SELECT idempotency_key FROM manuscript_effect_intents WHERE effect_id = ? AND manuscript_id = ? AND branch_id = ?').get(input.clientEffectId, input.manuscriptId, input.branchId);
+    if (identity !== undefined) input = { ...input, clientEffectId: String(identity.idempotency_key) };
+    const outcome = this.outcome(input.manuscriptId, input.branchId, input.clientEffectId);
+    const branch = this.#db.prepare('SELECT book_id FROM manuscripts WHERE manuscript_id = ?').get(input.manuscriptId);
+    requireApply(branch !== undefined && this.#db.prepare('SELECT 1 FROM manuscript_branches WHERE branch_id = ? AND manuscript_id = ?').get(input.branchId, input.manuscriptId), 'APPLY_INVALID', '稿件分支无效。');
+    const application = outcome.application;
+    const intent = this.#db.prepare('SELECT effect_id FROM manuscript_effect_intents WHERE idempotency_key = ?').get(input.clientEffectId);
+    const recovery = this.#db.prepare('SELECT state FROM manuscript_outcome_recovery WHERE client_effect_id = ? AND manuscript_id = ? AND branch_id = ?').get(input.clientEffectId, input.manuscriptId, input.branchId);
+    const state: ApplyReceiptProjection['state'] = application !== null ? 'applied'
+      : input.recovery === 'unresolved' || intent !== undefined || recovery?.state === 'unresolved' ? 'unresolved'
+        : input.recovery === 'confirming' ? 'confirming' : applyReceiptState(outcome);
+    if (state === 'confirming' || state === 'unresolved') this.#db.prepare(`INSERT INTO manuscript_outcome_recovery(client_effect_id, manuscript_id, branch_id, state, updated_at) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(client_effect_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`).run(input.clientEffectId, input.manuscriptId, input.branchId, state, new Date().toISOString());
+    const approval = application === null ? undefined : this.#db.prepare('SELECT approved_at FROM manuscript_effect_approvals WHERE effect_id = ?').get(application.effectId);
+    const decisions = application === null ? [] : this.#db.prepare('SELECT decision_id FROM manuscript_effect_targets WHERE effect_id = ? ORDER BY ordinal').all(application.effectId);
+    return { state, application, clientEffectId: input.clientEffectId, manuscriptId: input.manuscriptId, branchId: input.branchId,
+      bookId: String(branch.book_id), actor: 'editor', approvedAt: approval ? String(approval.approved_at) : null, replayPolicy: 'idempotency-keyed', safeRetry: state === 'not-applied',
+      reason: state === 'applied' ? '权威稿件与应用凭据已确认。' : state === 'not-applied' ? '本地原子事务与凭据记录证明此次未提交；重新准备后需新的明确批准。'
+        : state === 'confirming' ? '正在按同一应用标识核对本地权威记录，不会再次派发。' : '权威记录尚不能证明结果；禁止重试或重复应用。',
+      decisionIds: decisions.map((row) => String(row.decision_id)) };
+  }
+
+  prepareReverseApply(input: PrepareReverseApplyInput): ReverseApplyPreparationProjection {
+    const target = this.#marks.suggestionTarget(input);
+    requireApply(target.status === 'applied', 'APPLY_INVALID', '没有可撤销的已应用记录。');
+    const original = this.#db.prepare(`SELECT i.effect_id FROM manuscript_effect_targets t JOIN manuscript_effect_intents i ON i.effect_id = t.effect_id AND i.kind = 'apply'
+      JOIN manuscript_effect_receipts r ON r.effect_id = i.effect_id WHERE t.item_id = ? ORDER BY r.resulting_journal_sequence DESC LIMIT 1`).get(target.itemId);
+    requireApply(original !== undefined, 'APPLY_INVALID', '找不到原应用凭据。');
+    const book = this.#db.prepare('SELECT book_id FROM manuscripts WHERE manuscript_id = ?').get(input.manuscriptId)!;
+    const window = this.#manuscript.getWindow(input.manuscriptId, input.branchId, { kind: 'window-start', blockId: target.blockId });
+    const reversed = this.#db.prepare('SELECT 1 FROM manuscript_effect_intents WHERE reverses_effect_id = ?').get(original.effect_id!);
+    return { originalEffectId: String(original.effect_id), bookId: String(book.book_id), branchId: input.branchId, revisionId: window.revisionId,
+      journalSequence: window.journalSequence, markId: input.markId, blockId: target.blockId, ready: target.anchorState === 'exact' && reversed === undefined,
+      reason: target.anchorState !== 'exact' ? '应用后的文字又改过，请解决稿件冲突。' : reversed !== undefined ? '本次应用已经撤销。' : '将创建一次新的受控应用；原应用凭据保持原样。' };
   }
 
   /** Apply Outcome Recovery: what the store holds for one Effect identity, and nothing else. */

@@ -70,7 +70,11 @@ const BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；接受修改�
 // Synchronized delta with Issue #417: the batch confirmation strip of 审阅's results gives the batch
 // Apply its renderer member, `applyChangeSuggestionBatch` — 确认应用 over exactly the suggestions the
 // strip listed, one Effect, all or none. It is the same Apply surface, so it joins this allow-list.
-const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSuggestionBatch', 'getManuscriptApplyOutcome'];
+const CHANGE_SUGGESTION_APPLY_MEMBERS = [
+  // Synchronized delta with Issue #902: four-state receipt and reverse preflight.
+  'inspectApplyReceipt', 'prepareReverseApply',
+  // Synchronized delta with Issue #902: receipt inspection and reverse preparation only.
+  'inspectApplyReceipt', 'prepareReverseApply','applyChangeSuggestion', 'applyChangeSuggestionBatch', 'getManuscriptApplyOutcome'];
 // Synchronized delta with Issue #413: 交付物's four 导出 members, the only ones named like an export. They reach
 // no Provider, session or scheduler: a local file the system dialog chose, approved per file.
 // Synchronized delta with Issue #416 (S67b): a 图书交付包 version's export adds three — the same ledger's files in a folder

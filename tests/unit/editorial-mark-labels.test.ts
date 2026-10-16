@@ -148,7 +148,7 @@ describe('the wording of the Mark surface', () => {
   });
 
   it('asks why once after each kind of decision, with the editor’s own words beside the chips and 不说明 to end it (Issue #61, S26a)', () => {
-    expect(DECISION_REASON_PROMPTS).toEqual({ accepted: '为什么接受？（可选）', rejected: '为什么拒绝？（可选）', 'accepted-with-edit': '为什么这样改？（可选）' });
+    expect(DECISION_REASON_PROMPTS).toEqual({ accepted: '为什么接受？（可选）', rejected: '为什么拒绝？（可选）', 'accepted-with-edit': '为什么这样改？（可选）', deferred: '为什么暂不决定？（可选）' });
     for (const chips of Object.values(DECISION_REASON_CHIPS)) {
       expect(chips.length).toBeGreaterThanOrEqual(2);
       expect(chips.length).toBeLessThanOrEqual(3);

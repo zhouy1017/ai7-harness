@@ -53,6 +53,7 @@ const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts
 const AT = '2026-09-23T04:05:06.000Z';
 
 const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
+  'apply-outcome-unresolved',
   'import-outcome-uncertain', 'import-cleanup-pending', 'recovery-pending', 'recovery-deferred',
   'manuscript-conflict', 'manuscript-conflict-deferred', 'analysis-failed',
   'analysis-interrupted', 'analysis-budget-reached', 'analysis-account-limit', 'analysis-outcome-unknown', 'analysis-outcome-unconfirmed', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
@@ -148,6 +149,7 @@ describe('each item', () => {
   it('names every state in its record\'s own words, with a shape as well as a tone', () => {
     expect(Object.keys(GLOBAL_ATTENTION_STATE_LABELS).sort()).toEqual([...STATES].sort());
     expect(GLOBAL_ATTENTION_STATE_LABELS).toEqual({
+      'apply-outcome-unresolved': '应用结果待确认',
       'import-outcome-uncertain': '导入提交结果待确认',
       'import-cleanup-pending': '放弃清理尚未完成',
       'recovery-pending': '恢复待确认状态',
@@ -225,6 +227,7 @@ describe('each item', () => {
   it('states a safe next step from a closed map of words each record already uses', () => {
     expect(Object.keys(GLOBAL_ATTENTION_NEXT_STEP_LABELS).sort()).toEqual([...GLOBAL_ATTENTION_NEXT_STEPS].sort());
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS).toEqual({
+      'view-apply-receipt': '查看应用凭据',
       'view-run': '查看运行',
       'view-review': '查看审阅',
       'reconfirm-plan': '重新确认计划',
@@ -331,6 +334,7 @@ describe('each item', () => {
     const categories = (entries: ReadonlyArray<[string, 'failed' | 'refused' | 'interrupted' | 'running' | 'waiting' | 'settled', string | null]>): GlobalAttentionItemProjection['facts']['categories'] =>
       entries.map(([label, state, detail]) => ({ label, state, stateLabel: REVIEW_RUN_CATEGORY_STATE_LABELS[state], detail }));
     const reasons: Record<GlobalAttentionStateKey, string> = {
+      'apply-outcome-unresolved': globalAttentionReason(item('apply-outcome-unresolved')),
       'import-outcome-uncertain': globalAttentionReason(item('import-outcome-uncertain')),
       'import-cleanup-pending': globalAttentionReason(item('import-cleanup-pending')),
       'recovery-pending': globalAttentionReason(item('recovery-pending')),
@@ -398,6 +402,7 @@ describe('each item', () => {
         Record<'dialogue-answering' | 'dialogue-answered' | 'dialogue-stopped' | 'dialogue-interrupted' | 'dialogue-failed', string>,
     };
     expect(reasons).toEqual({
+      'apply-outcome-unresolved': '本地权威记录尚不能证明本次应用结果；禁止自动重试、重做或重复应用。',
       'import-outcome-uncertain': '本地证据目前无法证明这次原子提交已经完成或确定未提交；已阻止重试、放弃和清理。',
       'import-cleanup-pending': '放弃意图已经持久化，安全清理尚未完成；已阻止继续导入和新权威引用。',
       'recovery-pending': '中断后的稿件状态需要你确认；系统不会替你选择恢复来源。',

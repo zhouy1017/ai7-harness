@@ -1712,3 +1712,16 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .research-evidence-translation figure { margin: 0; display: grid; gap: 4px; min-width: 0; }
 .research-evidence-translation figcaption { font-weight: 600; }
 .research-evidence-units ul { margin: 0; padding-left: 1.25rem; }
+
+/* Issue #902: bounded Proposal navigator and exact active-range comparison. */
+.proposal-layout { display: grid; grid-template-columns: minmax(240px, 32%) minmax(0, 1fr); gap: 24px; }
+.proposal-navigator { position: relative; min-width: 0; }
+.proposal-navigator-row { box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; overflow: hidden; border-bottom: 1px solid var(--border); cursor: pointer; }
+.proposal-navigator-row[aria-selected="true"] { outline: 2px solid #2f5d8a; outline-offset: -2px; }
+.proposal-navigator-row small { display: block; }
+.proposal-toolbar, .proposal-controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 16px 0; }
+.proposal-controls > h3, .proposal-controls > p, .proposal-controls > ul, .proposal-controls > details { flex-basis: 100%; }
+.proposal-side-by-side { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.proposal-region { margin-block: 16px; overflow-wrap: anywhere; }
+.proposal-receipt { padding: 16px; border: 1px solid #2f5d8a; flex-basis: 100%; }
+@media (max-width: 760px) { .proposal-layout, .proposal-side-by-side { grid-template-columns: 1fr; } }

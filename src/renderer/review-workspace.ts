@@ -202,7 +202,7 @@ type ReviewApi = Pick<
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
   'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' |
   // 事实核查's retained sources on its finding cards (Issue #425, S70).
-  'inspectResearchEvidence'
+  'inspectProposalWorkspace' | 'inspectResearchEvidence'
 >;
 
 export interface MountReviewWorkspaceOptions {
@@ -224,6 +224,7 @@ export interface MountReviewWorkspaceOptions {
   /** 回到原文: the manuscript at the finding's block, with the mark's card open when the mark still stands. */
   goToText(target: { manuscriptId: string; branchId: string; blockId: string; markId: string | null }): Promise<void>;
   /** 查看计划并开始 (S72 D4, S74a A5): a Review Run's plan opens in the Task Drawer, whose bar approves it. */
+  openProposalWorkspace?(input: { manuscriptId: string; branchId: string; resultId: string | null }): void;
   openPlan(reviewRunId: string): void;
   /** The Run on show changed state: the drawer reads its plan again if it shows it. */
   planChanged(): void;
@@ -780,6 +781,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const title = el('h4', undefined, reviewRunHeading(run.label));
     title.tabIndex = -1;
     heading.append(title, pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
+    appendProposalOffer(heading, run);
     const meta = el('p', 'field-note review-run-meta', `${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(localInstantLabel(run.createdAt))}`);
     meta.append(el('span', 'technical-identity', run.createdAt));
     if (run.authorization !== null) {
@@ -1195,12 +1197,23 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     return wrap;
   }
 
+  function appendProposalOffer(host: HTMLElement, run: ReviewRunProjection): void {
+    if (!options.openProposalWorkspace) return;
+    const input = { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, resultId: run.reviewRunId };
+    void api.inspectProposalWorkspace(input).then((answer) => {
+      if (!host.isConnected || !answer.offerWorkspace) return;
+      const offer = el('button', 'secondary', '在专用工作区审阅'); offer.type = 'button'; offer.dataset['proposalWorkspaceOffer'] = 'true';
+      offer.addEventListener('click', () => options.openProposalWorkspace?.(input)); host.append(offer);
+    }).catch(() => {});
+  }
+
   function renderBatchStrip(run: ReviewRunProjection, strip: BatchStrip): HTMLElement {
     const node = el('section', 'review-batch-strip');
     node.dataset['reviewCategory'] = strip.categoryId;
     node.dataset['reviewBatchCount'] = String(strip.items.length);
     node.dataset['reviewBatchState'] = strip.refused ? 'refused' : strip.items.length === 0 ? 'empty' : 'ready';
     node.setAttribute('role', 'group');
+    appendProposalOffer(node, run);
     const scopeId = uid('batch-scope');
     node.setAttribute('aria-labelledby', scopeId);
     const row = el('div', 'button-row');

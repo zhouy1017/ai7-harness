@@ -285,6 +285,7 @@ export interface MaterialIndexAttentionReading {
 }
 
 export interface GlobalAttentionReadings {
+  readonly applyOutcomes?: ReadonlyArray<GlobalAttentionItemProjection>;
   readonly imports: ReadonlyArray<ImportAttentionReading>;
   readonly recoveries: ReadonlyArray<RecoveryAttentionReading>;
   readonly conflicts: ReadonlyArray<ConflictAttentionReading>;
@@ -898,9 +899,24 @@ export function orderGlobalAttentionItems(
  * `GLOBAL_ATTENTION_RECENT_LIMIT`, every other group to `GLOBAL_ATTENTION_GROUP_LIMIT` — while each group's
  * `total` and the count keep every item, listed or not. The count is the first two groups' and nothing else.
  */
+/** The unresolved Apply owner contributes one high-priority item; a proven receipt removes it. */
+export function readApplyOutcomeAttention(db: DatabaseSync, limit: number): ReadonlyArray<GlobalAttentionItemProjection> {
+  const rows = db.prepare(`SELECT o.*, m.book_id, b.title FROM manuscript_outcome_recovery o
+    JOIN manuscripts m ON m.manuscript_id = o.manuscript_id JOIN books b ON b.book_id = m.book_id
+    WHERE o.state = 'unresolved' AND NOT EXISTS(SELECT 1 FROM manuscript_effect_intents i JOIN manuscript_effect_receipts r ON r.effect_id = i.effect_id WHERE i.idempotency_key = o.client_effect_id)
+    ORDER BY o.updated_at DESC LIMIT ?`).all(limit) as SqlRow[];
+  return rows.map((row) => item('exceptions', 'apply-outcome-unresolved', {
+    itemId: `apply:${String(row.client_effect_id)}`, blocked: true, at: String(row.updated_at),
+    book: { bookId: String(row.book_id), title: String(row.title) }, object: { kind: 'apply-receipt' }, nextStep: 'view-apply-receipt',
+    target: { kind: 'apply-receipt', bookId: String(row.book_id), manuscriptId: String(row.manuscript_id), branchId: String(row.branch_id), clientEffectId: String(row.client_effect_id) },
+    technical: [{ key: 'application', label: '应用标识', value: String(row.client_effect_id) }],
+  }));
+}
+
 export function composeGlobalAttention(readings: GlobalAttentionReadings, now: Date): GlobalAttentionProjection {
   const since = recentWindowStart(now);
   const all: GlobalAttentionItemProjection[] = [
+    ...(readings.applyOutcomes ?? []),
     ...readings.imports.map(importItem),
     ...readings.recoveries.map(recoveryItem),
     ...readings.conflicts.map(conflictItem),

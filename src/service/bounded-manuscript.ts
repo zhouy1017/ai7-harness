@@ -130,7 +130,7 @@ import {
   EVALUATION_PROFILE_SCHEMA_VERSION,
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
-  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION,
+  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
@@ -143,6 +143,7 @@ import {
   EDITORIAL_MARK_FOREIGN_KEYS,
   EDITORIAL_MARK_REVISION_22_SQL,
   EDITORIAL_MARK_SCHEMA_SQL,
+  PROPOSAL_ITEM_DECISIONS_PRE78_SQL, PROPOSAL_REVIEW_SCHEMA_SQL, PROPOSAL_REVIEW_TRIGGER_SQL, PROPOSAL_REVIEW_FOREIGN_KEYS,
   EDITORIAL_MARK_TRIGGER_SQL,
   PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL,
   followBlockTextChangeForMarks,
@@ -1963,6 +1964,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   // Revision 22 (Issue #407): Editorial Marks and the Proposal Change Item ledgers, owned and spelled
   // by `editorial-marks.ts`.
   ...EDITORIAL_MARK_FOREIGN_KEYS,
+  ...PROPOSAL_REVIEW_FOREIGN_KEYS,
   // Revision 23 (Issue #408): the Effect ledger of AI7 Apply, owned and spelled by `manuscript-apply.ts`.
   ...MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   // Revision 24 (Issue #417): the Review Run relations, owned and spelled by `review/review-runs.ts`.
@@ -2758,11 +2760,13 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEditorialMarkTables
         ? {
             ...EDITORIAL_MARK_SCHEMA_SQL,
+            proposal_item_decisions: [PROPOSAL_ITEM_DECISIONS_PRE78_SQL, EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions],
             ...(includeManuscriptEffectTables
               ? {}
               : { editorial_marks: [EDITORIAL_MARK_REVISION_22_SQL.editorial_marks, EDITORIAL_MARK_SCHEMA_SQL.editorial_marks] }),
           }
         : {}),
+      ...(committed(PROPOSAL_REVIEW_SCHEMA_SQL) ? PROPOSAL_REVIEW_SCHEMA_SQL : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_SCHEMA_SQL : {}),
       // Revision 24 (Issue #417) adds the Review Run relations beside the three analysis relations it
       // rebuilds; they join this exact table set, the trigger set and `SCHEMA_FOREIGN_KEYS` behind a
@@ -2892,6 +2896,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeAuthoritySidecarTables ? EDITORIAL_WORKSPACE_PROFILE_SIDECAR_TRIGGER_SQL : {}),
       ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_TRIGGER_SQL : {}),
       ...(includeAnalysisLedgerTables ? analysisTriggers : {}),
+      ...(committed(PROPOSAL_REVIEW_SCHEMA_SQL) ? PROPOSAL_REVIEW_TRIGGER_SQL : {}),
       ...(includeEditorialMarkTables ? EDITORIAL_MARK_TRIGGER_SQL : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_TRIGGER_SQL : {}),
       ...(includeReviewRunTables ? REVIEW_RUN_TRIGGER_SQL : {}),
@@ -5856,7 +5861,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || (version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION)),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5907,7 +5912,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || (version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION))) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(

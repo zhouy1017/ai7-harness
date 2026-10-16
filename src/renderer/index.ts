@@ -1,3 +1,4 @@
+import { mountProposalWorkspace } from './proposal-workspace.js';
 import { renderEvaluationProfiles } from './evaluation-profiles.js';
 import { researchPlanLine, researchStatusLine, researchUnavailableLine } from '../shared/research-status.js';
 import { exemplarImportButton, exemplarEligibility } from './imported-exemplars.js';
@@ -729,6 +730,7 @@ let reviewWorkspace: ReviewWorkspaceSurface | undefined;
 /** ⑥ 交付物 while it is on screen: nothing still in flight paints once the screen is replaced. */
 let deliverablesSurface: DeliverablesSurface | undefined;
 /** 稿件冲突 while it is on screen: a draft save still in flight never paints once the screen is replaced. */
+let proposalWorkspaceSurface: ReturnType<typeof mountProposalWorkspace> | undefined;
 let proposalConflictSurface: ProposalConflictSurface | undefined;
 /** 待我处理 while it is on screen: it stops painting once the screen is replaced. */
 let globalAttentionSurface: GlobalAttentionSurface | undefined;
@@ -909,6 +911,8 @@ function replaceScreen(state: string, content: HTMLElement): void {
   reviewWorkspace = undefined;
   deliverablesSurface?.destroy();
   deliverablesSurface = undefined;
+  proposalWorkspaceSurface?.destroy();
+  proposalWorkspaceSurface = undefined;
   proposalConflictSurface?.destroy();
   proposalConflictSurface = undefined;
   globalAttentionSurface?.destroy();
@@ -993,6 +997,15 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
 /** One record, opened in this window — 待我处理's items and the 任务 panel's cards (Issue #423, S77a) alike. */
 async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysisRevisionId?: string): Promise<void> {
   switch (target.kind) {
+    case 'apply-receipt':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async () => {
+        await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
+        const receipt = await window.ai7.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'settled' });
+        const content = panel(); content.append(element('h2', undefined, receipt.state === 'applied' ? '已应用' : receipt.state === 'not-applied' ? '未应用' : '结果待确认'), element('p', undefined, receipt.reason));
+        const details = element('details'); details.append(element('summary', undefined, '查看完整凭据'), element('pre', undefined, JSON.stringify(receipt, null, 2))); content.append(details);
+        replaceScreen('apply-receipt', content);
+      });
+      return;
     case 'manuscript-recovery':
       await returnToRecoveryComparison(target.attentionId);
       return;
@@ -2463,6 +2476,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
       if (screen.firstElementChild !== origin) return;
       await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined);
     },
+    openProposalWorkspace: (input) => renderProposalWorkspace(input, bookId, bookTitle),
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
     planChanged: () => taskDrawer.refresh('review-run'),
   });
@@ -2508,6 +2522,17 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
  * and back: 返回稿件 — and every way the conflict is left — opens the manuscript at the conflict's paragraph
  * with the card it came from, or the new version's, open again.
  */
+function renderProposalWorkspace(input: { manuscriptId: string; branchId: string; resultId: string | null }, bookId: string, bookTitle: string): void {
+  const content = panel(); content.dataset['bookId'] = bookId; content.classList.add('proposal-workspace');
+  const surface = mountProposalWorkspace({ root: content, api: window.ai7, input, bookTitle, setStatus,
+    returnToManuscript: async (blockId, markId) => {
+      const opened = blockId === null ? await window.ai7.getManuscriptWindow({ ...input, cursor: null }) : await window.ai7.getManuscriptWindowAt({ ...input, target: { kind: 'block', blockId } });
+      await openEditorWindow(opened, bookTitle, undefined, undefined, markId ?? undefined);
+    }, openConflict: (markId) => renderProposalConflict({ ...input, bookId, markId }, bookTitle),
+  });
+  replaceScreen('proposal-workspace', content); proposalWorkspaceSurface = surface; leaveGuard = () => surface.settle(); surface.start();
+}
+
 function renderProposalConflict(target: { bookId: string; manuscriptId: string; branchId: string; markId: string }, bookTitle: string): void {
   const content = panel();
   content.classList.add('proposal-conflict-workspace');

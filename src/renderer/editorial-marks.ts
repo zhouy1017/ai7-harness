@@ -1,3 +1,4 @@
+import type { ApplyReceiptProjection } from '../shared/protocol.js';
 import { MAX_DIALOGUE_QUESTION_CHARACTERS, SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS } from '../shared/protocol.js';
 import type { AskAboutSelectionInput, DialogueProjection, EditorialPolishProjection, FastInteractionRoutesProjection, PolishSelectionInput } from '../shared/protocol.js';
 import {
@@ -117,7 +118,7 @@ interface MountOptions {
     RendererApi,
     'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
     'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
-    'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark'
+    'inspectProposalWorkspace' | 'saveProposalDecisionDraft' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark'
   >;
   /**
    * 查看任务 on a mark a Review Run produced (V2-UX-MARK-008): leave for 审阅 with that Run open and the
@@ -380,6 +381,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    */
   let promptFor: { readonly markId: string; readonly decisionId: string; readonly mode: 'prompt' | 'add' | 'revise' } | null = null;
   let collapsedBeforeContextClick = true;
+  const recoveryCards = new Map<string, ApplyReceiptProjection>();
   let working = false;
   /** The Series the Book is in (Issue #63, S28b): each selection menu reads them again and is drawn again when they moved (#642). */
   const seriesOf = options.seriesOf;
@@ -989,11 +991,45 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         region('basis', '依据与核查', basisList(card)),
       );
       const yours = region('disposition', '你的处理');
-      if (applied !== null) {
+      const pendingReceipt = recoveryCards.get(card.markId);
+      if (pendingReceipt) {
+        const state = el('p', 'editorial-mark-recorded', pendingReceipt.state === 'confirming' ? '正在确认应用结果' : pendingReceipt.state === 'unresolved' ? '结果待确认' : pendingReceipt.state === 'applied' ? '已应用' : '未应用');
+        state.dataset['applyReceiptState'] = pendingReceipt.state; yours.append(state, el('p', 'muted', pendingReceipt.reason));
+      }
+      if (applied === null && pendingReceipt?.state !== 'unresolved' && pendingReceipt?.state !== 'confirming') {
+        const drafts = el('div', 'button-row'); yours.append(drafts);
+        void api.inspectProposalWorkspace({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, resultId: null }).then((workspace) => {
+          if (!drafts.isConnected) return;
+          const item = workspace.items.find((entry) => entry.markId === card.markId); if (!item) return;
+          const members = item.atomicGroupId === null ? [item] : workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId);
+          const reading = el('p', 'muted', item.draft === null ? '尚无处理草稿。' : item.draft === 'accepted' ? '拟采纳 · 草稿已保存' : item.draft === 'rejected' ? '拟拒绝 · 草稿已保存' : '暂不决定 · 草稿已保存'); drafts.append(reading);
+          if (item.atomicGroupId !== null) {
+            drafts.append(el('p', 'muted', `原子组：${item.atomicReason ?? '依赖说明缺失'}；部分采纳会造成上述不一致。拆分需要新的提案版本。`));
+            for (const member of members) drafts.append(el('p', 'muted', `${member.chapter} · 第 ${member.position} 段 ${member.fromGrapheme}–${member.toGrapheme}`));
+          }
+          const save = async (disposition: 'accepted' | 'rejected' | 'deferred' | null): Promise<void> => {
+            const next = await api.saveProposalDecisionDraft({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, resultId: null, markIds: members.map((member) => member.markId), disposition, atomicGroupId: item.atomicGroupId, expectedScopeDigest: workspace.scopeDigest });
+            workspace = next; reading.textContent = disposition === null ? '已撤销草稿处理。' : disposition === 'accepted' ? '拟采纳 · 草稿已保存，尚未记录决定。' : disposition === 'rejected' ? '拟拒绝 · 草稿已保存，尚未记录决定。' : '暂不决定 · 草稿已保存，尚未记录决定。';
+          };
+          for (const [disposition, label] of [['accepted', '拟采纳'], ['rejected', '拟拒绝'], ['deferred', '暂不决定']] as const) {
+            const control = actionButton(`draft-${disposition}`, label, 'secondary', () => void save(disposition).catch((error) => options.setStatus(options.errorMessage(error, '草稿未能保存。'), 'error')));
+            control.disabled = disposition === 'accepted' && members.some((member) => member.conflict); drafts.append(control);
+          }
+          drafts.append(actionButton('draft-undo', '撤销草稿处理', 'quiet', () => void save(item.draft).catch(() => {})));
+        }).catch(() => {});
+      }
+
+      if (pendingReceipt?.state === 'confirming' || pendingReceipt?.state === 'unresolved') {
+        yours.append(el('p', 'muted', '应用结果确认前不能再次应用。'));
+      } else if (suggestion.atomicGroupId !== null && applied === null) {
+        yours.append(el('p', 'muted', '本组只能记录一个整体处理；在专用提案工作区记录决定和准备应用。'));
+      } else if (applied !== null) {
         // 已应用 is said only of a verified Effect Receipt (V2-UX-EAPP-011, EREC-002); what it binds is one step away.
         const receipt = el('p', 'editorial-mark-recorded', `已应用 · 已写入稿件 · ${markTimeLabel(applied.committedAt)} · 你`);
         receipt.dataset['markApplication'] = applied.effectId;
         yours.append(receipt);
+        void api.inspectApplyReceipt({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, clientEffectId: applied.effectId, recovery: 'settled' }).then((value) => { if (receipt.isConnected) receipt.dataset['applyReceiptState'] = value.state; }).catch(() => {});
+        yours.append(actionButton('receipt-manuscript', '在稿件中查看', 'quiet', () => { closeFloating(); editor.focus(); }), actionButton('receipt-proposal', '返回提案', 'quiet', reopen));
         if (decision) {
           yours.dataset['markReasonState'] = decision.reasonState;
           yours.append(...reasonNodes(card, decision));
@@ -1019,16 +1055,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         if (form) {
           yours.append(buildForm(form(reopen)));
         } else if (exact) {
-          disposition.append(actionButton('prepare-reverse', '准备撤销本次应用', 'secondary', () => showCard(card, (cancel) => ({
+          disposition.append(actionButton('prepare-reverse', '准备撤销本次应用', 'secondary', () => void api.prepareReverseApply({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, markId: card.markId }).then((preparation) => { if (!preparation.ready) { options.setStatus(preparation.reason, 'error'); return; } showCard(card, (cancel) => ({
             id: 'reverse-apply',
             title: '撤销本次应用',
             quote: null,
             fields: [],
             submitLabel: '确认撤销本次应用',
-            note: reverseApplyNote(shown, suggestion.currentText),
+            note: `${reverseApplyNote(shown, suggestion.currentText)} 将创建一次新的受控应用；原应用凭据保持原样。当前修订 ${preparation.revisionId}`,
             submit: () => writeManuscript(card.markId, (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId: card.markId, clientEffectId }), '已撤销本次应用；原文已写回稿件。'),
             cancel,
-          }))));
+          })); }).catch((error) => options.setStatus(options.errorMessage(error, '无法准备撤销。'), 'error'))));
           yours.append(disposition);
         } else {
           yours.append(disabledAction('prepare-reverse', '准备撤销本次应用', '应用后的文字又改过，不能直接撤销这次应用。'), ...resolveConflict());
@@ -1074,7 +1110,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       } else {
         const recorded = el('p', 'editorial-mark-recorded', decision.disposition === 'rejected'
           ? card.conflict?.outcome === 'keep-current' ? '已拒绝 · 保留当前稿件' : '已拒绝 · 原文保留'
-          : '已记录 · 修改后接受（尚未写入稿件）');
+          : decision.disposition === 'deferred' ? '已记录 · 暂不决定' : '已采纳 · 尚未应用');
         recorded.dataset['markDecision'] = decision.disposition;
         if (decision.disposition === 'accepted-with-edit') {
           disposition.append(exact
@@ -1321,13 +1357,21 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         editor.currentWindow(),
         (clientEffectId) => options.writeManuscript(() => run(clientEffectId), done),
         (input) => api.getManuscriptApplyOutcome(input),
+        undefined,
+        (clientEffectId, state) => {
+          void api.inspectApplyReceipt({ manuscriptId: editor.currentWindow().manuscriptId, branchId: editor.currentWindow().branchId, clientEffectId, recovery: state }).then((receipt) => {
+            recoveryCards.set(markId, receipt); options.setStatus(state === 'confirming' ? '正在确认应用结果' : '结果待确认', 'busy');
+          }).catch(() => {});
+        },
       );
       if (applied.acknowledged) {
+        recoveryCards.delete(markId);
         if (decidedBefore !== undefined) notePrompt(decidedBefore, applied.result.card);
         if (applied.result.card !== null) showCard(applied.result.card);
         return;
       }
       if (applied.outcome === null) throw applied.outcomeFailure;
+      recoveryCards.delete(markId);
       if (applied.outcome.state === 'committed') options.setStatus(`${done}写入结果已从记录确认。`, 'success');
       await openCard(markId);
     } catch (error) {

@@ -28,6 +28,7 @@ export async function applyOnce<T>(
   send: (clientEffectId: string) => Promise<T | undefined>,
   readOutcome: (input: { manuscriptId: string; branchId: string; clientEffectId: string }) => Promise<ManuscriptApplyOutcomeProjection>,
   newEffectId: () => string = () => crypto.randomUUID(),
+  recoveryState?: (clientEffectId: string, state: 'confirming' | 'unresolved') => void,
 ): Promise<ApplyOnceResult<T>> {
   const clientEffectId = newEffectId();
   const { manuscriptId, branchId } = target;
@@ -38,10 +39,12 @@ export async function applyOnce<T>(
   } catch (error) {
     failure = error;
   }
+  recoveryState?.(clientEffectId, 'confirming');
   try {
     const outcome = await readOutcome({ manuscriptId, branchId, clientEffectId });
     return { acknowledged: false, failure, outcome, outcomeFailure: undefined };
   } catch (error) {
+    recoveryState?.(clientEffectId, 'unresolved');
     return { acknowledged: false, failure, outcome: null, outcomeFailure: error };
   }
 }
