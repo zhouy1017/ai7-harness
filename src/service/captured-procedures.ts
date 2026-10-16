@@ -297,7 +297,9 @@ export function isCapturedProcedureDocument(value: unknown): value is CapturedPr
       !(ceiling.runSourceScope === 'current-book' || (value.schema === CAPTURED_PROCEDURE_SCHEMA_V2 && ceiling.runSourceScope === 'series')) || !Array.isArray(ceiling.steps) || !Array.isArray(ceiling.outputs) ||
       typeof ceiling.model !== 'boolean' || typeof ceiling.searchEngine !== 'boolean') return false;
   const typed = steps as CapturedProcedureStepDocument[];
-  if (ceiling.runSourceScope === 'series' && !ceiling.steps.some((entry: unknown) => isRecord(entry) && entry.executor === 'series-knowledge')) return false;
+  // /2's run-source scope is its steps' sum like the rest of its ceiling (ADR 0090 §5); /1 keeps `current-book` whatever it holds.
+  const seriesStep = (ceiling.steps as unknown[]).some((entry) => isRecord(entry) && entry.executor === 'series-knowledge');
+  if (ceiling.runSourceScope === 'series' ? !seriesStep : value.schema === CAPTURED_PROCEDURE_SCHEMA_V2 && seriesStep) return false;
   if (ceiling.steps.length !== typed.length) return false;
   for (const [index, entry] of (ceiling.steps as unknown[]).entries()) {
     if (!isRecord(entry) || !hasExactKeys(entry, ['categoryId', 'executor']) || entry.categoryId !== typed[index]!.categoryId ||

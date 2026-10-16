@@ -50,6 +50,9 @@
       "allOf": [{
         "if": { "properties": { "runSourceScope": { "const": "series" } } },
         "then": { "properties": { "steps": { "contains": { "properties": { "executor": { "const": "series-knowledge" } }, "required": ["executor"] } } } }
+      }, {
+        "if": { "properties": { "steps": { "contains": { "properties": { "executor": { "const": "series-knowledge" } }, "required": ["executor"] } } } },
+        "then": { "properties": { "runSourceScope": { "const": "series" } } }
       }]
     }
   },
