@@ -1,6 +1,6 @@
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
-import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, parseDialogueMessage } from '../dialogue/contract.js';
+import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage } from '../dialogue/contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import type { CredentialBroker, CredentialSlotBinding } from './credential-broker.js';
 import {
@@ -17,6 +17,7 @@ import {
 } from './model-profile.js';
 import { assistantToolCalls, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
 import { GENERATED_ROUTE_PROFILES } from './provider-profiles.generated.js';
+import { LOCAL_TOOL_NAMES, LOCAL_TOOL_SCHEMAS, toolSetEqualsPlatformSchemas } from './platform-tools.js';
 import { normalizeModelResponse, type CanonicalModelResult, type NormalizeOptions } from './response-normalization.js';
 
 /**
@@ -391,6 +392,31 @@ function providerRequestUrl(profile: ProviderRouteProfile, model: ProviderModelP
   return `${profile.endpoint}/${model.model}${GOOGLE_GENERATE_CONTENT_METHOD}`;
 }
 
+/** A /2 dialogue carries its one admitted question followed only by complete local function-call rounds. */
+function isRetrievalDialogue(payload: AssembledModelPayload): boolean {
+  const first = payload.messages[0];
+  if (payload.system !== DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt ||
+    !toolSetEqualsPlatformSchemas(payload.tools ?? [], LOCAL_TOOL_SCHEMAS) || first?.role !== 'user' ||
+    parseDialogueMessage(messageText(first) ?? '') === null) return false;
+  const issued = new Set<string>();
+  const pending = new Set<string>();
+  for (const message of payload.messages.slice(1)) {
+    const calls = assistantToolCalls(message);
+    if (calls !== null) {
+      if (pending.size > 0 || calls.calls.length === 0) return false;
+      for (const call of calls.calls) {
+        if (!LOCAL_TOOL_NAMES.some((name) => name === call.name) || issued.has(call.id)) return false;
+        issued.add(call.id);
+        pending.add(call.id);
+      }
+    } else {
+      const result = toolResultOf(message);
+      if (result === null || !pending.delete(result.callId)) return false;
+    }
+  }
+  return pending.size === 0;
+}
+
 /**
  * Assemble one request. The header set comes from the route profile, the body from the model
  * profile's declared capabilities, and nothing is read from anywhere else — which is what makes a
@@ -409,11 +435,13 @@ export function assembleProviderRequest(
   const dialogueStream = context.requestShape === 'editorial-dialogue-sse';
   if (dialogueStream) {
     const message = payload.messages[0];
+    const predecessor = context.promptContractDigest === DIALOGUE_PROMPT_CONTRACT_DIGEST &&
+      payload.system === DIALOGUE_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 &&
+      message?.role === 'user' && parseDialogueMessage(messageText(message) ?? '') !== null && (payload.tools ?? []).length === 0;
+    const retrieval = context.promptContractDigest === DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST && isRetrievalDialogue(payload);
     if (profile.route !== OPENCODE_GO_ROUTE || model.capabilities.requestShape !== 'openai-chat-completions' ||
       model.capabilities.streaming !== 'chat-completions-sse' ||
-      context.promptContractDigest !== DIALOGUE_PROMPT_CONTRACT_DIGEST || payload.system !== DIALOGUE_PROMPT_CONTRACT.systemPrompt ||
-      payload.messages.length !== 1 || message?.role !== 'user' || parseDialogueMessage(messageText(message) ?? '') === null ||
-      (payload.tools ?? []).length > 0) throw new Error('PROVIDER_DIALOGUE_STREAM_SHAPE_INVALID');
+      (!predecessor && !retrieval)) throw new Error('PROVIDER_DIALOGUE_STREAM_SHAPE_INVALID');
     body = canonicalJson({ ...JSON.parse(body), stream: true, stream_options: { include_usage: true } });
   }
   if (profile.sessionHeader && (context.sessionId === undefined || context.sessionId.length === 0)) {
@@ -571,14 +599,21 @@ export async function* dialogueSseEvents(response: DeepSeekTransportResponse, mo
   let finish: string | null = null;
   let usage: unknown = null;
   let done = false;
+  const calls = new Map<number, { id: string; type: string; name: string; arguments: string }>();
+  let callBytes = 0;
   const readEvent = (event: string): DialogueStreamEvent | null => {
     const data = event.split(/\r?\n/u).filter((line) => line.startsWith('data:'))
       .map((line) => line.slice(5).replace(/^ /u, '')).join('\n');
     if (data.length === 0) return null;
     if (data === '[DONE]') {
       if (finish === null) throw new Error('AI7_OUTCOME_UNKNOWN');
+      const toolCalls = [...calls.entries()].sort(([a], [b]) => a - b).map(([index, call], ordinal) => {
+        if (index !== ordinal || call.id.length === 0 || call.type !== 'function' || call.name.length === 0) throw new Error('AI7_OUTCOME_UNKNOWN');
+        return { id: call.id, type: call.type, function: { name: call.name, arguments: call.arguments } };
+      });
+      if ((toolCalls.length > 0) !== (finish === 'tool_calls') || new Set(toolCalls.map((call) => call.id)).size !== toolCalls.length) throw new Error('AI7_OUTCOME_UNKNOWN');
       done = true;
-      return { kind: 'complete', response: { model, choices: [{ message: { content }, finish_reason: finish }], usage } };
+      return { kind: 'complete', response: { model, choices: [{ message: { content, ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }) }, finish_reason: finish }], usage } };
     }
     const value: unknown = JSON.parse(data);
     if (!isRecord(value) || (value.model !== undefined && value.model !== model) || !Array.isArray(value.choices)) {
@@ -595,6 +630,32 @@ export async function* dialogueSseEvents(response: DeepSeekTransportResponse, mo
       finish = choice.finish_reason;
     }
     if (!isRecord(choice.delta)) throw new Error('AI7_OUTCOME_UNKNOWN');
+    if (choice.delta.tool_calls !== undefined) {
+      if (alreadyFinished || !Array.isArray(choice.delta.tool_calls)) throw new Error('AI7_OUTCOME_UNKNOWN');
+      for (const delta of choice.delta.tool_calls) {
+        if (!isRecord(delta) || typeof delta.index !== 'number' || !Number.isSafeInteger(delta.index) || delta.index < 0 || delta.index >= 128) throw new Error('AI7_OUTCOME_UNKNOWN');
+        const index = delta.index;
+        const call = calls.get(index) ?? { id: '', type: '', name: '', arguments: '' };
+        for (const key of ['id', 'type'] as const) {
+          if (delta[key] === undefined) continue;
+          if (typeof delta[key] !== 'string' || call[key].length > 0) throw new Error('AI7_OUTCOME_UNKNOWN');
+          call[key] = delta[key];
+          callBytes += delta[key].length;
+        }
+        if (delta.function !== undefined) {
+          if (!isRecord(delta.function)) throw new Error('AI7_OUTCOME_UNKNOWN');
+          for (const key of ['name', 'arguments'] as const) {
+            const fragment = delta.function[key];
+            if (fragment === undefined) continue;
+            if (typeof fragment !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
+            call[key] += fragment;
+            callBytes += fragment.length;
+          }
+        }
+        if (callBytes > 1024 * 1024) throw new Error('AI7_OUTCOME_UNKNOWN');
+        calls.set(index, call);
+      }
+    }
     const text = choice.delta.content;
     if (text === undefined || text === null || text === '') return null;
     if (typeof text !== 'string' || alreadyFinished) throw new Error('AI7_OUTCOME_UNKNOWN');

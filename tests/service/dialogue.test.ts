@@ -21,6 +21,7 @@ import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { DialogueProjection, DialogueSelectionInput } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
+import { DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from '../../src/service/dialogue/contract.js';
 
 // Service-integration suite (L2) for 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016) over the
 // real store, the real PrimaryAgentHarness composition and the AI7 local deterministic adapter: an answer streamed by
@@ -129,6 +130,36 @@ function storeBytes(): Buffer {
 }
 
 describe('就这段提问… over the real store and harness', () => {
+  it('retrieves and exact-fetches the pinned revision locally and recovers jump anchors from its Session log (#893)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const retrievalFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-dialogue-retrieval');
+    const dialogues = new DialogueExecutionOwner({ records: store, fixture: retrievalFixture, live: null,
+      sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '本机检索回归');
+      const selection = selectionOf(store, book);
+      const turn = store.askAboutSelection(book.bookId, { selection, question: '找到书中哪里有相近的文字？' });
+      dialogues.begin(turn);
+      let completed = false;
+      for (let i = 0; i < 1_000; i += 1) {
+        const page = store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id));
+        if (page.attempts[0]?.state !== 'answering') { completed = page.attempts[0]?.state === 'completed'; break; }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(completed).toBe(true);
+      const page = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
+      expect(page.anchors?.length).toBe(1);
+      expect(page.anchors?.[0]?.anchor.blockId === selection.blockId).toBe(true);
+      expect(page.retrievalWarning).toBeNull();
+      expect(DIALOGUE_PROMPT_CONTRACT_DIGEST).toBe('81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee');
+      expect(DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST).toBe('7875521807a89016a04f73d5392c997547f85c9af00693e457844875c655c8f6');
+      const logs = readdirSync(join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
+      const bytes = readFileSync(join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY, logs[0]!), 'utf8');
+      const events = bytes.trim().split('\n').slice(1).map((line) => JSON.parse(line) as { type: string; data?: { name?: string } });
+      expect(events.filter((event) => event.type === 'tool/call').map((event) => event.data?.name)).toEqual(['retrieve', 'exact_fetch']);
+      store.markCleanShutdown();
+    } finally { await dialogues.dispose(); store.close(); }
+  });
   it('cancels a queued attempt without a request or interrupting the answer in flight', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const stepped = steppedHold();

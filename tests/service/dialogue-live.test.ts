@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
+import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
 import { DialogueExecutionOwner, dialogueLiveRoute, dialogueRouteRefusal, productionDialogueRoute, type DialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import {
   DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL,
@@ -35,6 +35,7 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/p
 import type { DevelopmentValidationIntent, DialogueProjection, DialogueSelectionInput, LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, requireExactSample1, sample1Path } from '../support/sample1-baseline.js';
+import { withLocalRetrievalFor } from '../support/policy-rules.js';
 
 // Service-integration suite (L2) for the live editorial dialogue (Issue #52, plan slice S17c; ADR 0088; ADR 0089) over the
 // real store, the real PrimaryAgentHarness composition, Egress Gate, Credential Broker, Provider Test Ledger and Result Cache,
@@ -239,6 +240,61 @@ function refusalCode(operation: () => unknown): string {
 }
 
 describe('the admitted dialogue route, read from the selected policy', () => {
+  it('carries retrieve and exact_fetch through the real /2 SSE adapter and live-once ledger without a socket', async () => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '对话检索');
+    const selection = selectionOf(store, book);
+    const calls: StubCall[] = [];
+    let candidateId = '';
+    const nativeFetch = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      calls.push({ url, headers: init.headers, body: init.body });
+      const request = JSON.parse(init.body) as { stream: boolean; tools: Array<{ function: { name: string } }>; messages: Array<{ role: string; content: string }> };
+      expect(request.stream).toBe(true);
+      expect(request.tools.map((tool) => tool.function.name)).toEqual(['exact_fetch', 'retrieve']);
+      // The selected v18 dialogue rule admits the local tools, so the digest-pinned /2 contract is the system message.
+      expect(request.messages[0]).toEqual({ role: 'system', content: DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt });
+      const turn = calls.length;
+      if (turn === 2) {
+        const result = JSON.parse(request.messages.at(-1)!.content) as Array<{ candidateId: string }>;
+        candidateId = result[0]!.candidateId;
+      }
+      const name = turn === 1 ? 'retrieve' : 'exact_fetch';
+      const args = JSON.stringify(turn === 1 ? { query: selection.selectedText, k: 1, sourceKinds: ['manuscript'] } : { candidateId });
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+        const event = (delta: unknown, finish_reason: string | null = null): void => {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta, finish_reason }] })}\n\n`));
+        };
+        if (turn < 3) {
+          event({ tool_calls: [{ index: 0, id: `retrieval-${turn}`, type: 'function', function: { name, arguments: '' } }] });
+          for (const fragment of [...args]) event({ tool_calls: [{ index: 0, function: { arguments: fragment } }] });
+          event({}, 'tool_calls');
+        } else {
+          event({ content: `已找到相关段落。[retrieval:${candidateId}]` });
+          event({}, 'stop');
+        }
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [], usage: { prompt_tokens: 210, completion_tokens: 48 } })}\n\ndata: [DONE]\n\n`));
+        controller.close();
+      } }), { headers: { 'content-type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    const dialogues = new DialogueExecutionOwner({ records: store, fixture: null,
+      sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
+      live: liveRoute(nativeFetch),
+      retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
+    try {
+      dialogues.requireReady(store.dialogueSourceDigest(book.bookId, selection));
+      const turn = store.askAboutSelection(book.bookId, { selection, question: '找到书中哪里有相似的描写？' });
+      dialogues.begin(turn);
+      const projection = await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)), settled, 'retrieval SSE settled');
+      expect(projection.attempts.at(-1)!.state).toBe('completed');
+      expect(calls).toHaveLength(3);
+      expect(projection.anchors).toHaveLength(1);
+      expect(projection.anchors![0]!.candidateId).toBe(candidateId);
+      const lines = await ledgerLines();
+      expect(lines.filter((line) => line.outcome === 'transmitted')).toHaveLength(3);
+      expect(lines.every((line) => line.requestShape === 'editorial-dialogue-sse')).toBe(true);
+    } finally { await dialogues.dispose(); }
+  });
+
   it('checks the frozen dialogue source after reimport, never a later admitted source in the same Book', async () => {
     const store = await openStore();
     const path = join(roots.inputRoot, 'composed-dialogue.docx');
@@ -451,7 +507,9 @@ describe('就这段提问… on the live route (provider-free)', () => {
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '实时提问');
     const selection = selectionOf(store, book);
-    const dialogues = liveOwner(store, liveRoute(stubTransport(calls, () => ANSWER)));
+    // #893: the predecessor /1 contract on a live route whose rule admits no local tools stays byte-identical; selected v18
+    // admits them, so this case states a rule without targeted retrieval (the /2 case below uses the selected rule).
+    const dialogues = liveOwner(store, liveRoute(stubTransport(calls, () => ANSWER), { policy: withLocalRetrievalFor(livePolicy, 'editorial-dialogue', false) }));
     try {
       const { dialogueId, projection } = await ask(store, dialogues, book.bookId, selection);
       expect(projection.attempts[0]!.state).toBe('completed');

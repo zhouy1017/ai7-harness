@@ -1,4 +1,5 @@
 import { FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
+import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import { FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST } from './factual-review-contract.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { modelProfileFor } from '../provider/model-profile.js';
@@ -196,6 +197,13 @@ export function modelAdmitsPlatformTools(route: string, model: string): boolean 
   const profile = modelProfileFor(route as RemoteExecutionRoute, model);
   return profile?.capabilities.toolCalling === 'function' && profile.evidence.toolCalling.kind === 'live-test-item' &&
     profile.evidence.toolCalling.itemIds.length > 0;
+}
+
+/** Local retrieval never changes web declarations. Baseline and enrolled background remain outside targeted retrieval. */
+export function kindLocalTools(policy: LaunchPolicyProjection | undefined, kind: string, origin: 'foreground' | 'background' = 'foreground'): LocalToolsRule | null {
+  if (kind === 'baseline-manuscript-analysis' || origin === 'background') return null;
+  const rule = liveKindRule(policy, kind);
+  return rule === null || !modelAdmitsPlatformTools(rule.route, rule.model) ? null : localToolsFromProjection(rule);
 }
 
 /** ADR 0080 rows 15/17 and the two admitted review categories; row 10 remains excluded this wave. */

@@ -1,6 +1,6 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strToU8, zipSync, type Zippable } from 'fflate';
@@ -18,6 +18,8 @@ import { analysisRunAuthorizationsShape, downgradeAnalysisRunAuthorizationsToRev
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
+import { RetrievalIndex } from '../../src/service/retrieval/index.js';
+import { materialRetrievalSources } from '../../src/service/retrieval/source-readers.js';
 
 // Service-integration suite (L2) for ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009,
 // ATTN-009) over the real store on a temporary Agent Data Root. The collected book is exact `sample1` — an admitted Public
@@ -79,9 +81,63 @@ function watcher(): { changed(): boolean; close(): void } {
   return { changed: () => version() !== before, close: () => database.close() };
 }
 
+/** Every file under the data root with its size, and its modification time where SQLite's shared-memory index cannot move it. */
+function dataRootFiles(): string[] {
+  const files: string[] = [];
+  const walk = (directory: string, prefix: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) { walk(path, `${prefix}${entry.name}/`); continue; }
+      const stat = statSync(path);
+      files.push(`${prefix}${entry.name}:${stat.size}${/-shm$/u.test(entry.name) ? '' : `:${stat.mtimeMs}`}`);
+    }
+  };
+  walk(roots.dataRoot, '');
+  return files.sort();
+}
+
 const CHINESE = '第一章 春\n\n她推开窗。风从河上吹来，带着潮湿的气味！他问：“你还记得吗？”\n\n第二段只有一句话\n\n圆周率约等于3.14。最后一句……';
 
 describe('资料索引 over the real store', () => {
+  it('searches only referable materials without writes, bounds previews, and refuses withdrawal mid-Run (#893)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const bookId = emptyBook(store, '检索边界回归');
+      const item = await put(store, file('retrieval.md', '# Public synthetic vocabulary\n\nalpha beta gamma\n\nalpha delta'), '检索词表');
+      store.startMaterialIndexing(); await store.settleMaterialIndexing();
+      expect((await store.searchReferableMaterials({ bookId, query: 'alpha', k: 8 })).candidates.length).toBe(0);
+      store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+      store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      const pin = store.pinMaterialReference(bookId, item.materialId);
+      const boundary = { bookId, references: [pin] };
+      const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => store.readMaterialIndexForTask(scope, id, from)));
+      const watching = watcher();
+      const files = dataRootFiles();
+      try {
+        const page = await store.searchReferableMaterials({ bookId, query: 'alpha', k: 1 });
+        expect(page.candidates.length).toBe(1);
+        expect(page.candidates.every((candidate) => candidate.sourceId === item.materialId && candidate.preview.length <= 200 && candidate.anchor.segmentOrdinal !== undefined)).toBe(true);
+        const candidates = await index.retrieve('alpha');
+        expect(index.exactFetch(candidates[0]!.candidateId).text.length > 0).toBe(true);
+        expect(watching.changed()).toBe(false);
+        // Nothing persisted: no index, embedding or projection file is written anywhere under the data root.
+        expect(dataRootFiles()).toEqual(files);
+        await expect(store.searchReferableMaterials({ bookId, query: 'alpha', k: 9 })).rejects.toMatchObject({ code: 'RETRIEVAL_ARGUMENTS_INVALID' });
+        // Hybrid ranking (#892 seam): without the item's vectors only the lexical rank counts; once the editor builds them, the
+        // pinned build's own vectors rank the same paragraph too and reciprocal-rank fusion lifts it above a single rank.
+        expect(Math.max(...(await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 })).candidates.map((candidate) => candidate.score))).toBeLessThanOrEqual(1 / 61);
+        store.buildMaterialVectors(item.materialId);
+        await store.settleMaterialLayers();
+        const hybrid = await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 });
+        expect(hybrid.candidates[0]!.score).toBeGreaterThan(1 / 61);
+        expect(hybrid.candidates.every((candidate) => candidate.sourceId === item.materialId && candidate.revisionOrIndexDigest === pin.indexDigest)).toBe(true);
+        store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+        expect((await index.retrieve('alpha')).length).toBe(0);
+        expect(() => index.exactFetch(candidates[0]!.candidateId)).toThrowError('MATERIAL_REFERENCE_UNAVAILABLE');
+      } finally { watching.close(); index.dispose(); }
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
   it('builds the four layers of a collected book on this machine, pages its sentence anchors, and says 索引完成', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

@@ -1,4 +1,4 @@
-import { taskMaterialSelection, taskMaterialSelectionReason } from './task-material-selection.js';
+import { taskMaterialSelection, taskMaterialSelectionReason, similarMaterialsField } from './task-material-selection.js';
 import {
   MAX_BATCH_APPLY_SUGGESTIONS,
   REVIEW_FINDING_SEVERITIES,
@@ -195,7 +195,7 @@ export interface ReviewWorkspaceSurface {
 type ReviewApi = Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' |
-  'inspectTaskPlan' | 'quickStartReviewRun' |
+  'inspectTaskPlan' | 'quickStartReviewRun' | 'searchReferableMaterials' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' |
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
@@ -1867,6 +1867,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     scopes.append(range);
 
     const { field: materialField, inputs: materialInputs, items: materialItems } = reviewMaterialsField(workspace.materials, state, updateSheet);
+    materialField.append(similarMaterialsField(api, workspace.bookId, materialItems, state.materialIds, (materialId) => {
+      state.materialIds.add(materialId); state.problem = null; updateSheet();
+    }));
 
     const consequences = el('dl', 'review-consequences');
     const consequenceValues = REVIEW_CONSEQUENCE_TERMS.map((term) => {

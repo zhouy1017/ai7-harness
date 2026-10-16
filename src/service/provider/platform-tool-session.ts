@@ -1,4 +1,6 @@
 import type { ProviderModelProfile } from './model-profile.js';
+import { RetrievalError, type RetrievalIndex } from '../retrieval/index.js';
+import { LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_ROUND_TRIP_BREAKER } from './local-tools.js';
 import type { DevelopmentValidationIntent } from '../../shared/protocol.js';
 import type { CredentialBroker } from './credential-broker.js';
 import type { PlatformToolCallItem, PlatformToolCallResult } from './live-transmission.js';
@@ -67,12 +69,19 @@ export class PlatformToolSession implements PlatformToolOwner {
   #unitSearchRefused = false;
   readonly #evidenceOnly: boolean;
   evidenceNeedsCommander = false;
-  readonly usage = { requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: {} as Record<string, number>, refusedSearchCalls: 0, fetchCount: 0, fetchBytes: 0 };
+  readonly usage: { requests: number; inputTokens: number; outputTokens: number; searchCalls: Record<string, number>; refusedSearchCalls: number;
+    fetchCount: number; fetchBytes: number; retrievalCalls?: number; exactFetchCalls?: number; refusedRetrievalCalls?: number } = {
+    requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: {}, refusedSearchCalls: 0, fetchCount: 0, fetchBytes: 0,
+  };
   readonly provenance: Array<{ sourceKind: 'tool'; backendId: string | null; host: string; capturedAt: string; argumentsDigest: string; responseDigest: string }> = [];
   /** Where a search goes, as the rule names it: the Research Snapshot Cache never answers one service's query with another's. */
   readonly #searchOrigin: string;
   readonly #breaker: PlatformToolBreaker;
-  readonly #book: EgressTicketBook;
+  readonly #book: EgressTicketBook | null;
+  readonly #retrieval: RetrievalIndex | null;
+  readonly #localBreaker: PlatformToolBreaker;
+  #unitLocalCalls = 0;
+  #localRoundTrips = 0;
   readonly #acceptedToolCallDigests = new Set<string>();
   readonly #admittedToolResults = new Map<string, AdmittedToolResult>();
   readonly #citations = new Set<string>();
@@ -88,9 +97,10 @@ export class PlatformToolSession implements PlatformToolOwner {
   constructor(deps: {
     readonly binding: EgressBindingFacts;
     readonly scope: Pick<EgressAttemptScope, 'currentBindingDigest' | 'acceptedOutputDigests' | 'ceilingState'>;
-    readonly fetch: PlatformToolFetch;
+    readonly fetch?: PlatformToolFetch;
     /** Per-ticket host admission: the network denial's `admitTicketHost`, keyed by each fetch ticket's id. */
-    readonly admitHost: TicketHostAdmission;
+    readonly admitHost?: TicketHostAdmission;
+    readonly retrieval?: RetrievalIndex;
     readonly cache?: ProviderResultCache | null;
     readonly snapshots?: ResearchSnapshotCache | null;
     /** The test item purpose every call of this attempt is recorded under. */
@@ -101,22 +111,27 @@ export class PlatformToolSession implements PlatformToolOwner {
     readonly onUsage?: (usage: { inputTokens: number; outputTokens: number }) => void;
   }) {
     const rule = deps.binding.platformTools ?? null;
-    if (rule === null || !['developer-live', 'ordinary-production'].includes(deps.binding.policy.operationalScope)) throw new Error('PLATFORM_TOOLS_NOT_NAMED');
+    const local = deps.binding.localTools?.targetedRetrieval.allowed === true;
+    if (local) { this.usage.retrievalCalls = 0; this.usage.exactFetchCalls = 0; this.usage.refusedRetrievalCalls = 0; }
+    if ((rule === null && !local) || (!local && !['developer-live', 'ordinary-production'].includes(deps.binding.policy.operationalScope))) throw new Error('PLATFORM_TOOLS_NOT_NAMED');
+    if (rule !== null && (deps.fetch === undefined || deps.admitHost === undefined)) throw new Error('PLATFORM_TOOL_TRANSPORT_REQUIRED');
     this.#binding = deps.binding;
-    this.#oneQueryPerUnit = 'backends' in rule.websearch;
+    this.#retrieval = deps.retrieval ?? null;
+    this.#localBreaker = new PlatformToolBreaker(deps.binding.localTools?.breaker.roundTrips ?? LOCAL_TOOL_ROUND_TRIP_BREAKER);
+    this.#oneQueryPerUnit = rule !== null && 'backends' in rule.websearch;
     this.#base = deps.scope;
-    this.#fetch = deps.fetch;
-    this.#admitHost = deps.admitHost;
+    this.#fetch = deps.fetch ?? (() => { throw new Error('LOCAL_TOOL_HAS_NO_TRANSPORT'); });
+    this.#admitHost = deps.admitHost ?? (() => { throw new Error('LOCAL_TOOL_HAS_NO_HOST'); });
     this.#cache = deps.cache ?? null;
     this.#snapshots = deps.snapshots ?? null;
     this.#purpose = deps.purpose;
     this.#evidenceOnly = deps.evidenceSearchRoundTripOnly === true;
     this.#broker = deps.broker;
     this.#onUsage = deps.onUsage;
-    this.#searchOrigin = `${deps.binding.searchBackend?.backendId ?? ('service' in rule.websearch ? rule.websearch.service : '')}@${deps.binding.searchBackend?.host ?? ('host' in rule.websearch ? rule.websearch.host : '')}`;
+    this.#searchOrigin = rule === null ? '' : `${deps.binding.searchBackend?.backendId ?? ('service' in rule.websearch ? rule.websearch.service : '')}@${deps.binding.searchBackend?.host ?? ('host' in rule.websearch ? rule.websearch.host : '')}`;
     this.#breaker = deps.breaker ?? new PlatformToolBreaker();
     // The gate opens this attempt's book for this binding; every redemption re-reads the attempt's current binding (#676).
-    this.#book = EgressTicketBook.open(deps.binding, { currentBindingDigest: () => this.#base.currentBindingDigest() });
+    this.#book = rule === null ? null : EgressTicketBook.open(deps.binding, { currentBindingDigest: () => this.#base.currentBindingDigest() });
   }
 
   /** The scope the gate evaluates every model call and every tool decision of this attempt against. */
@@ -126,6 +141,7 @@ export class PlatformToolSession implements PlatformToolOwner {
       acceptedToolCallDigests: this.#acceptedToolCallDigests,
       admittedToolResults: this.#admittedToolResults,
       breakerState: () => this.#breaker.state,
+      localBreakerState: () => this.#localBreaker.state,
       citationAdmits: (url) => this.#citations.has(url),
     };
   }
@@ -155,10 +171,10 @@ export class PlatformToolSession implements PlatformToolOwner {
    * settles exactly as a turn without platform tools does. Read it before `startUnit`, which resets the breaker.
    */
   unitEnd(turn: Pick<HarnessTurnOutcome, 'terminal' | 'signals'>): PlatformToolUnitEnd | null {
-    if (turn.terminal !== 'failed' || this.#breaker.state !== 'tripped') return null;
+    if (turn.terminal !== 'failed' || (this.#breaker.state !== 'tripped' && this.#localBreaker.state !== 'tripped')) return null;
     const failed = turn.signals.find((signal) => signal.kind === 'failed');
     if (failed?.kind !== 'failed' || failed.failure.code !== AI7_FAILURE_CODES.PLATFORM_TOOL_BREAKER_TRIPPED) return null;
-    return BREAKER_UNIT_END;
+    return this.#localBreaker.state === 'tripped' ? LOCAL_BREAKER_UNIT_END : BREAKER_UNIT_END;
   }
 
   /** Start a unit: its breaker is intact and no call is a duplicate yet. Citations persist across the attempt. */
@@ -166,6 +182,8 @@ export class PlatformToolSession implements PlatformToolOwner {
     this.#unitCaptures = [];
     this.#unitSearches = 0;
     this.#breaker.startUnit();
+    this.#localBreaker.startUnit();
+    this.#unitLocalCalls = 0;
     this.#unitSearchQuery = null;
     this.#unitSearchHasResult = false;
     this.#unitSearchRefused = false;
@@ -193,6 +211,7 @@ export class PlatformToolSession implements PlatformToolOwner {
    * failure is returned, never retried.
    */
   async retain(url: string, signal?: AbortSignal): Promise<ResearchSnapshot | { readonly failed: string }> {
+    if (this.#book === null) return { failed: '本次尝试未准许联网工具。' };
     if (this.#evidenceOnly) return { failed: '此证据项不取回网页。' };
     const canonical = canonicalPublicUrl(url);
     if (canonical === null) return { failed: '不是规范的公开 https 地址；未取回。' };
@@ -206,7 +225,7 @@ export class PlatformToolSession implements PlatformToolOwner {
       const settled = await this.#settle(
         { kind: 'fetch', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: 'webfetch' },
         {
-          authorize: () => authorizePublicFetch({ ticket: decision.ticket, book: this.#book }),
+          authorize: () => authorizePublicFetch({ ticket: decision.ticket, book: this.#book! }),
           send: (authorized) => sendPublicFetch(authorized, { fetch: this.#fetch, admitHost: this.#admitHost, ...(signal === undefined ? {} : { signal }) }),
         });
       if (settled.replayed) this.#book.revoke(decision.ticket);
@@ -246,10 +265,36 @@ export class PlatformToolSession implements PlatformToolOwner {
   }
 
   async execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
+    if (call.tool === 'retrieve' || call.tool === 'exact_fetch') return this.#executeLocal(call);
     if (this.#inFlight) return this.#refuseCounted('平台工具必须顺序调用。');
     this.#inFlight = true;
     try { return await this.#execute(call); }
     finally { this.#inFlight = false; }
+  }
+
+  async #executeLocal(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: null }> {
+    if (call.tool === 'retrieve') this.usage.retrievalCalls = (this.usage.retrievalCalls ?? 0) + 1;
+    else this.usage.exactFetchCalls = (this.usage.exactFetchCalls ?? 0) + 1;
+    this.#unitLocalCalls += 1;
+    const refuse = (text: string): { text: string; sourceUrl: null } => { this.usage.refusedRetrievalCalls = (this.usage.refusedRetrievalCalls ?? 0) + 1; return refusal(text); };
+    // Every local request counts, including malformed, concurrent, duplicate and over-cap refusals.
+    if (this.#localBreaker.observe(`local:${++this.#localRoundTrips}`) === 'tripped') return refuse('检索未完成：本单元的工具往返已达到熔断上限。');
+    const rule = this.#binding.localTools;
+    if (rule?.targetedRetrieval.allowed !== true || this.#retrieval === null) return refuse('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
+    if (this.#base.currentBindingDigest() !== this.#binding.bindingDigest || call.signal.aborted) return refuse('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
+    if (this.#unitLocalCalls > rule.targetedRetrieval.callsPerUnit) return refuse('检索未完成：本单元的检索调用次数已用完，请使用已有结果。');
+    if (this.#inFlight || this.#executedCallIds.has(call.callId)) return refuse('检索工具必须顺序调用，且不能重复使用调用标识。');
+    this.#executedCallIds.add(call.callId);
+    const args = canonicalToolArguments(call.tool, call.arguments);
+    if (args === null || (args.tool !== 'retrieve' && args.tool !== 'exact_fetch')) return refuse('检索参数无效。');
+    this.#inFlight = true;
+    try {
+      const value = args.tool === 'retrieve' ? await this.#retrieval.retrieve(args.query, args.k, args.sourceKinds) : this.#retrieval.exactFetch(args.candidateId);
+      if (call.signal.aborted || this.#base.currentBindingDigest() !== this.#binding.bindingDigest) return refuse('检索未完成');
+      return { text: JSON.stringify(value), sourceUrl: null };
+    } catch (error) {
+      return refuse(error instanceof RetrievalError ? error.code : '检索未完成');
+    } finally { this.#inFlight = false; }
   }
 
   /**
@@ -302,6 +347,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     this.#executedCallIds.add(call.callId);
     const args = canonicalToolArguments(call.tool, call.arguments);
     if (args === null) return this.#refuseCounted('参数不是这个工具接受的形式。');
+    if (args.tool === 'retrieve' || args.tool === 'exact_fetch' || this.#book === null) return this.#refuseCounted('本次尝试未准许该工具。');
     if (this.#evidenceOnly && args.tool === 'webfetch') return this.#refuseCounted('此最小证据项只执行一次检索往返；不取回网页。');
     const digest = toolArgumentsDigest(args);
     if (args.tool === 'websearch' && this.#oneQueryPerUnit) {
@@ -345,7 +391,7 @@ export class PlatformToolSession implements PlatformToolOwner {
         const settled = await this.#settle(
           { kind: 'search-call', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: this.#searchOrigin },
           {
-            authorize: () => authorizeSearchCall({ ticket: decision.ticket, book: this.#book, arguments: args }),
+            authorize: () => authorizeSearchCall({ ticket: decision.ticket, book: this.#book!, arguments: args }),
             send: (authorized) => sendSearchCall(authorized, this.#fetch, call.signal, this.#broker === undefined ? undefined : { broker: this.#broker, admitHost: this.#admitHost, modelRole: 'Main Editorial Role' }),
           });
         if (settled.replayed) this.#book.revoke(decision.ticket);
@@ -364,7 +410,7 @@ export class PlatformToolSession implements PlatformToolOwner {
       const settled = await this.#settle(
         { kind: 'fetch', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: 'webfetch' },
         {
-          authorize: () => authorizePublicFetch({ ticket: decision.ticket, book: this.#book }),
+          authorize: () => authorizePublicFetch({ ticket: decision.ticket, book: this.#book! }),
           send: (authorized) => sendPublicFetch(authorized, { fetch: this.#fetch, admitHost: this.#admitHost, signal: call.signal }),
         });
       if (settled.replayed) this.#book.revoke(decision.ticket);
@@ -387,7 +433,7 @@ export class PlatformToolSession implements PlatformToolOwner {
  */
 export interface PlatformToolUnitEnd {
   readonly reason: 'circuit-breaker-tripped';
-  readonly disclosure: '联网核查未完成';
+  readonly disclosure: '联网核查未完成' | '检索未完成';
   readonly retry: 'never';
   readonly settles: 'unit-only';
 }
@@ -398,6 +444,7 @@ const BREAKER_UNIT_END: PlatformToolUnitEnd = Object.freeze({
   retry: 'never',
   settles: 'unit-only',
 });
+const LOCAL_BREAKER_UNIT_END: PlatformToolUnitEnd = Object.freeze({ reason: 'circuit-breaker-tripped', disclosure: LOCAL_TOOL_BREAKER_END, retry: 'never', settles: 'unit-only' });
 
 function refusal(text: string): { readonly text: string; readonly sourceUrl: null } {
   return { text, sourceUrl: null };

@@ -4,6 +4,7 @@ import { deriveCoverageManifest, type ManifestBlockInput } from '../../src/servi
 import { OUT_OF_SCOPE_GAP_REASON } from '../../src/service/analysis/reuse-plan.js';
 import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
 import { reduceReviewCategory, type ReviewUnitOutcome } from '../../src/service/review/review-category-reducers.js';
+import { markRetrievalResult } from '../../src/service/retrieval/result-validator.js';
 
 // A review category's reduction over a synthetic manifest (Issue #417): Reference Integrity anchors
 // every finding in the block it named or excludes it with the reason, duplicates merge, identities are
@@ -60,6 +61,14 @@ function reduce(categoryId = 'typos-and-usage', second: ReviewUnitOutcome = { un
 }
 
 describe('a review category reduction', () => {
+  it('keeps a retrieval quotation without Exact Fetch in the existing excluded appendix (#893)', () => {
+    const result = { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1, findings: [{ ...located }] };
+    markRetrievalResult(result, [{ collection: 'findings', ordinal: 0 }]);
+    const reduction = reduceReviewCategory({ categoryId: 'typos-and-usage', manifest, blocks: byId, outcomes: [{ unitOrdinal: 1, state: 'closed', result }] });
+    expect(reduction.findings.length).toBe(0);
+    expect(reduction.excluded.map((item) => [item.reason, item.reasonLabel])).toEqual([['not-exact-fetched', '未经精确取文']]);
+    expect(reduction.excluded[0]).not.toHaveProperty('sourceRange');
+  });
   it('reads two units over the two synthetic sections', () => {
     expect(manifest.units).toHaveLength(2);
     expect(manifest.units[0]!.overlapBlockIds).toEqual([]);

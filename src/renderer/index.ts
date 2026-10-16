@@ -3358,8 +3358,15 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
     : `这次运行共记录 ${report.findingCounts.reduce((total, entry) => total + entry.count, 0)} 条发现，分 ${report.findingCounts.length} 类。`;
   const usageRows = (Object.keys(report.usagePerStage) as Array<keyof typeof report.usagePerStage>).flatMap((stage) => {
     const usage = report.usagePerStage[stage];
-    if (stage === 'platform-tools') return [element('dt', undefined, '用量 · 联网检索'), element('dd', undefined,
-      `${Object.entries(usage.searchCalls ?? {}).map(([id, calls]) => `${id}：${calls} 次检索`).join(' · ') || '0 次检索'} · 已拒绝检索 ${usage.refusedSearchCalls ?? 0} 次 · 网页取回 ${usage.fetchCount ?? 0} 次 / ${usage.fetchBytes ?? 0} 字节 · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}`)];
+    if (stage === 'platform-tools') {
+      // Local retrieval sends nothing: a Run whose tools reached no network reads 本机检索, never 联网检索 (#893).
+      const local = (usage.retrievalCalls ?? 0) + (usage.exactFetchCalls ?? 0) > 0
+        ? `本机检索 ${usage.retrievalCalls ?? 0} 次 · 精确取文 ${usage.exactFetchCalls ?? 0} 次 · 被拒 ${usage.refusedRetrievalCalls ?? 0} 次` : null;
+      const web = local === null || Object.keys(usage.searchCalls ?? {}).length > 0 || (usage.refusedSearchCalls ?? 0) > 0 || (usage.fetchCount ?? 0) > 0
+        ? `${Object.entries(usage.searchCalls ?? {}).map(([id, calls]) => `${id}：${calls} 次检索`).join(' · ') || '0 次检索'} · 已拒绝检索 ${usage.refusedSearchCalls ?? 0} 次 · 网页取回 ${usage.fetchCount ?? 0} 次 / ${usage.fetchBytes ?? 0} 字节` : null;
+      return [element('dt', undefined, web === null ? '用量 · 本机检索' : '用量 · 联网检索'), element('dd', undefined,
+        `${[web, local].filter((part) => part !== null).join(' · ')} · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}`)];
+    }
     return [element('dt', undefined, `用量 · ${stage}`), element('dd', 'technical-identity', `${usage.requests} 次模型请求 · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}`)];
   });
   disclosure.append(

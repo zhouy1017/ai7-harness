@@ -861,6 +861,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     // 查看分段 (Issue #428, S80a): one item, and the paragraph its page starts at.
+    case 'searchReferableMaterials': {
+      const input = requireInput(value.input, ['bookId', 'query', 'k'], tentativeId);
+      if (!validUuid(input.bookId) || typeof input.query !== 'string' || !input.query.isWellFormed() || input.query.trim().length < 1 || input.query.length > 1_000 ||
+          !isSafeInteger(input.k, 1) || input.k > 8) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'inspectLibraryMaterialSegments': {
       const input = requireInput(value.input, ['materialId', 'from'], tentativeId);
       if (!validUuid(input.materialId) || !isSafeInteger(input.from, 1)) throw new ProtocolError(tentativeId);

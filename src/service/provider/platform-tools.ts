@@ -11,7 +11,8 @@ import { isPublicHostName } from '../../shared/network-denial.js';
 
 /** The two tool names, sorted: the exact set a payload's tools must equal (ADR 0080 §7.2). */
 export const PLATFORM_TOOL_NAMES = ['webfetch', 'websearch'] as const;
-export type PlatformToolName = (typeof PLATFORM_TOOL_NAMES)[number];
+export const LOCAL_TOOL_NAMES = ['exact_fetch', 'retrieve'] as const;
+export type PlatformToolName = (typeof PLATFORM_TOOL_NAMES)[number] | (typeof LOCAL_TOOL_NAMES)[number];
 
 /**
  * The `platformTools` block of one Provider Processing rule naming one anonymous search service, exactly as ADR 0080 §7.5
@@ -242,6 +243,20 @@ export const PLATFORM_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.f
 /** SHA-256 over the canonical schema set; the composition descriptor pins it. */
 export const PLATFORM_TOOL_SCHEMA_DIGEST: string = sha256Hex(canonicalJson(PLATFORM_TOOL_SCHEMAS));
 
+export const LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.freeze([
+  Object.freeze({ name: 'exact_fetch' as const, description: '精确取回检索候选在已固定来源版本中的原文。引用前必须调用。',
+    parameters: { type: 'object', properties: { candidateId: { type: 'string' } }, required: ['candidateId'], additionalProperties: false } }),
+  Object.freeze({ name: 'retrieve' as const, description: '在这次任务已授权并固定的本机来源中检索候选；候选预览不是引文，引用前必须精确取文。',
+    parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 }, k: { type: 'integer', minimum: 1, maximum: 8 },
+      sourceKinds: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['manuscript', 'material', 'retained-source'] } } }, required: ['query'], additionalProperties: false } }),
+]);
+export const LOCAL_TOOL_SCHEMA_DIGEST = sha256Hex(canonicalJson(LOCAL_TOOL_SCHEMAS));
+
+/** Preserve the exact web schemas, adding only the subset the selected rule names. */
+export function ruleNamedToolSchemas(web: boolean, local: boolean): ReadonlyArray<PlatformToolSchema> {
+  return [...(web ? PLATFORM_TOOL_SCHEMAS : []), ...(local ? LOCAL_TOOL_SCHEMAS : [])].sort((a, b) => a.name.localeCompare(b.name, 'en'));
+}
+
 /**
  * Whether a payload's tools are exactly the platform tools a rule names (ADR 0080 §7.2's narrowing of `tools-present`):
  * the same names, the same descriptions, the same parameters, nothing more and nothing less. A rule that names none
@@ -252,21 +267,23 @@ export function toolSetEqualsRule(tools: ReadonlyArray<unknown>, rule: PlatformT
 }
 
 /** Whether a tool set is exactly the two platform tool schemas, byte for byte in canonical form. */
-export function toolSetEqualsPlatformSchemas(tools: ReadonlyArray<unknown>): boolean {
-  if (tools.length !== PLATFORM_TOOL_SCHEMAS.length) return false;
+export function toolSetEqualsPlatformSchemas(tools: ReadonlyArray<unknown>, schemas: ReadonlyArray<PlatformToolSchema> = PLATFORM_TOOL_SCHEMAS): boolean {
+  if (tools.length !== schemas.length) return false;
   const projected: unknown[] = [];
   for (const tool of tools) {
     if (!isRecord(tool) || !exactKeys(tool, ['name', 'description', 'parameters'])) return false;
     projected.push({ name: tool['name'], description: tool['description'], parameters: tool['parameters'] });
   }
   projected.sort((left, right) => String((left as { name: unknown }).name).localeCompare(String((right as { name: unknown }).name), 'en'));
-  return canonicalJson(projected) === canonicalJson(PLATFORM_TOOL_SCHEMAS);
+  return canonicalJson(projected) === canonicalJson(schemas);
 }
 
 /** The canonical arguments of one call: the deduplication key within a unit and the cache key across Runs (§7.4). */
 export type PlatformToolArguments =
   | { readonly tool: 'websearch'; readonly query: string }
-  | { readonly tool: 'webfetch'; readonly url: string };
+  | { readonly tool: 'webfetch'; readonly url: string }
+  | { readonly tool: 'retrieve'; readonly query: string; readonly k: number; readonly sourceKinds?: ReadonlyArray<'manuscript' | 'material' | 'retained-source'> }
+  | { readonly tool: 'exact_fetch'; readonly candidateId: string };
 
 /** The longest query AI7 forwards; a longer one is a refusal returned to the model, never a truncation. */
 export const WEBSEARCH_QUERY_MAX_CHARACTERS = 1_000;
@@ -278,6 +295,18 @@ export const WEBSEARCH_QUERY_MAX_CHARACTERS = 1_000;
  */
 export function canonicalToolArguments(name: string, args: unknown): PlatformToolArguments | null {
   if (!isRecord(args)) return null;
+  if (name === 'exact_fetch') return exactKeys(args, ['candidateId']) && typeof args.candidateId === 'string' && /^[0-9a-f]{64}$/u.test(args.candidateId)
+    ? { tool: 'exact_fetch', candidateId: args.candidateId } : null;
+  if (name === 'retrieve') {
+    if (Object.keys(args).some((key) => !['query', 'k', 'sourceKinds'].includes(key)) || typeof args.query !== 'string') return null;
+    const query = args.query.normalize('NFC').trim();
+    const k = args.k ?? 8;
+    if (!query.isWellFormed() || query.length === 0 || query.length > 1000 || typeof k !== 'number' || !Number.isSafeInteger(k) || k < 1 || k > 8) return null;
+    const kinds = args.sourceKinds;
+    if (kinds !== undefined && (!Array.isArray(kinds) || kinds.length < 1 || kinds.length > 3 || new Set(kinds).size !== kinds.length ||
+        !kinds.every((kind) => ['manuscript', 'material', 'retained-source'].includes(String(kind))))) return null;
+    return { tool: 'retrieve', query, k, ...(kinds === undefined ? {} : { sourceKinds: [...kinds].sort() as Array<'manuscript' | 'material' | 'retained-source'> }) };
+  }
   if (name === 'websearch') {
     if (!exactKeys(args, ['query']) || typeof args['query'] !== 'string') return null;
     const query = args['query'].normalize('NFC').trim();

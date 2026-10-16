@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { liveKindAdmission, liveKindRule, modelAdmitsPlatformTools } from '../../src/service/analysis/live-kind-admission.js';
+import { liveKindAdmission, liveKindRule, modelAdmitsPlatformTools, kindLocalTools } from '../../src/service/analysis/live-kind-admission.js';
+import { localRetrievalRule, withLocalRetrievalFor } from '../support/policy-rules.js';
+import { admittedFastRoleRoute } from '../../src/service/dialogue/dialogue-route.js';
 import { factualReviewKindDefinition, withFactualResearch } from '../../src/service/analysis/kind-definition.js';
 import { reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import { liveReviewRule } from '../../src/service/review/live-review-admission.js';
@@ -12,6 +14,33 @@ import { OPENCODE_GO_V41_FLASH_PROFILE } from '../../src/service/provider/model-
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
 describe('platform tool registration admission', () => {
+  it('admits local retrieval from the selected v18 rule for every foreground model kind, never for covered baseline or background (#893)', async () => {
+    const policy = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live');
+    expect(policy.providerProcessing.version).toBe('v18');
+    const rules = policy.providerProcessing.admittedRules;
+    for (const rule of rules) {
+      // The test helper states exactly the terms the launch verified; only background and material translation refuse retrieval.
+      expect(rule.localTools).toEqual(localRetrievalRule(rule.localTools.targetedRetrieval.allowed));
+      expect(rule.localTools.targetedRetrieval.allowed).toBe(!rule.backgroundOrigin && !rule.taskKinds.includes('material-translation'));
+      for (const kind of rule.taskKinds) {
+        expect(kindLocalTools(policy, kind, 'background')).toBeNull();
+        expect(kindLocalTools(withLocalRetrievalFor(policy, kind, false), kind)).toBeNull();
+      }
+    }
+    // Covered baseline analysis registers none although its foreground rule allows targeted retrieval (ADR 0047; rev 5).
+    expect(rules.find((rule) => !rule.backgroundOrigin && rule.taskKinds.includes('baseline-manuscript-analysis'))!.localTools.targetedRetrieval.allowed).toBe(true);
+    expect(kindLocalTools(policy, 'baseline-manuscript-analysis')).toBeNull();
+    expect(kindLocalTools(policy, 'material-translation')).toBeNull();
+    const runKinds = rules.filter((rule) => !rule.backgroundOrigin).flatMap((rule) => rule.taskKinds)
+      .filter((kind) => !['baseline-manuscript-analysis', 'editorial-dialogue', 'editorial-polish', 'conflict-regenerate', 'material-translation'].includes(kind));
+    expect(runKinds).toEqual(expect.arrayContaining(['editorial-review/typos-and-usage', 'writing', 'evaluation', 'readers-report', 'evaluation-rewrite']));
+    for (const kind of runKinds) expect(kindLocalTools(policy, kind)).toEqual(localRetrievalRule());
+    // The fast interaction routes read the admission; only the dialogue has a contract that registers the tools (rev 8).
+    for (const kind of ['editorial-dialogue', 'editorial-polish', 'conflict-regenerate']) {
+      const rule = rules.find((entry) => entry.taskKinds.includes(kind))!;
+      expect(admittedFastRoleRoute(policy, kind, rule.outboundDataCategories[0]!)?.localTools).toEqual(localRetrievalRule());
+    }
+  });
   it('requires a declaring research rule and the exact factual research contract', async () => {
     const policy = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live');
     expect(policy.providerProcessing.version).toBe('v18');

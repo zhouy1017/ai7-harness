@@ -1,4 +1,6 @@
 import { SEARCH_BACKENDS, defaultSearchBackend } from './provider/search-backends.js';
+import { RetrievalIndex, RetrievalError, type RetrievalMaterialVectorQuery, type RetrievalSource } from './retrieval/index.js';
+import { materialRetrievalSources } from './retrieval/source-readers.js';
 import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
@@ -9601,6 +9603,68 @@ export class EditorialStore {
     } catch (error) {
       this.#translationFailures.set(materialId, error instanceof StoreError ? error.message : '来源译文没有完成；已记录的译文保留。');
     }
+  }
+
+  /** Pinned revision authority, shared by Run and foreground attempt retrieval; no working-head substitution. */
+  manuscriptRetrievalSource(bookId: string, manuscriptId: string, revisionId: string): RetrievalSource {
+    const revision = this.#authority.prepare('SELECT mr.revision_digest FROM manuscript_revisions mr JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id WHERE m.book_id = ? AND mr.manuscript_id = ? AND mr.revision_id = ?')
+      .get(bookId, manuscriptId, revisionId) as SqlRow | undefined;
+    if (revision === undefined) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
+    const digest = asString(revision.revision_digest);
+    return { sourceKind: 'manuscript', sourceId: manuscriptId, digest, read: () => {
+      const current = this.#authority.prepare('SELECT revision_digest FROM manuscript_revisions WHERE manuscript_id = ? AND revision_id = ?').get(manuscriptId, revisionId) as SqlRow | undefined;
+      if (current === undefined || current.revision_digest !== digest) throw new RetrievalError('RETRIEVAL_SOURCE_MOVED');
+      const blocks = this.#baselineAnalysis.readRevisionBlocks(manuscriptId, revisionId);
+      if (blocks.length === 0 || blocks.some((block) => sha256(canonicalJson({ kind: block.kind, level: block.level, text: block.text })) !== block.digest)) throw new RetrievalError('RETRIEVAL_SOURCE_MOVED');
+      return { digest, segments: blocks.map((block) => ({ blockId: block.blockId, text: block.text })) };
+    } };
+  }
+
+  retrievalSourcesForRun(runRecordId: string, ledger: BaselineAnalysisStore): RetrievalSource[] {
+    return this.#runRetrieval(runRecordId, ledger).sources;
+  }
+
+  /** A Run's disposable index over exactly its pinned sources, ranked lexically and by this store's local vectors (#892). */
+  retrievalIndexForRun(runRecordId: string, ledger: BaselineAnalysisStore): RetrievalIndex {
+    const { boundary, sources } = this.#runRetrieval(runRecordId, ledger);
+    return new RetrievalIndex(sources, this.#embedding, this.#materialVectorQuery(boundary));
+  }
+
+  #runRetrieval(runRecordId: string, ledger: BaselineAnalysisStore): { boundary: MaterialReferenceBoundary; sources: RetrievalSource[] } {
+    const facts = ledger.loadExecutionPlan(runRecordId);
+    const boundary = ledger.definition.kind === 'writing' ? this.#writingTasks.materialBoundary(facts.taskIntentId, ledger.definition.promptContractDigest)
+      : { bookId: facts.bookId, references: ledger.definition.materialReferences?.sources ?? [] };
+    return { boundary, sources: [this.manuscriptRetrievalSource(facts.bookId, facts.checkpoint.manuscriptId, facts.checkpoint.revisionId),
+      ...materialRetrievalSources(boundary, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from))] };
+  }
+
+  /** The pinned builds' own vectors through the Task seam; an item without them is ranked lexically only. */
+  #materialVectorQuery(boundary: MaterialReferenceBoundary): RetrievalMaterialVectorQuery {
+    return async (query, k) => (await this.queryMaterialVectors(boundary, query, k)).candidates
+      .map(({ materialId, indexDigest, ordinal, score }) => ({ materialId, indexDigest, ordinal, score }));
+  }
+
+  dialogueRetrievalSources(dialogueId: string): RetrievalSource[] {
+    const task = this.#dialogues.task(dialogueId);
+    if (task === null) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
+    return [this.manuscriptRetrievalSource(task.bookId, task.manuscriptId, task.revisionId)];
+  }
+
+  dialogueRetrievalIndex(dialogueId: string): RetrievalIndex {
+    return new RetrievalIndex(this.dialogueRetrievalSources(dialogueId), this.#embedding);
+  }
+
+  /** Editor-side discovery: no Run, no model, no persisted projection or implicit reference selection. */
+  async searchReferableMaterials(input: ServiceOperationMap['searchReferableMaterials']['input']): Promise<ServiceOperationMap['searchReferableMaterials']['output']> {
+    requireStore(UUID_PATTERN.test(input.bookId) && input.query.trim().length > 0 && input.query.length <= 1_000 && Number.isSafeInteger(input.k) && input.k >= 1 && input.k <= 8,
+      'RETRIEVAL_ARGUMENTS_INVALID', '检索文字须在 1 至 1,000 字符之间，最多显示 8 项。');
+    const references = this.#libraryMaterials.referable(input.bookId).flatMap((item) => {
+      try { return [this.pinMaterialReference(input.bookId, item.materialId)]; } catch { return []; }
+    });
+    const boundary = { bookId: input.bookId, references };
+    const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from)),
+      this.#embedding, this.#materialVectorQuery(boundary));
+    try { return { candidates: await index.retrieve(input.query, input.k, ['material']) }; } finally { index.dispose(); }
   }
 
   /** 定归属 or 定学习准入 (KB-007, LEARN-007): one decision appended to the item's chain, and the item as it now reads. */

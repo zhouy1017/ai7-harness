@@ -1,4 +1,15 @@
 import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import type { LocalToolsRule } from '../../src/service/provider/local-tools.js';
+
+/** The `localTools` terms Provider Processing v18/v19 state on every rule (#891), for bindings built without a launch projection. */
+export function localRetrievalRule(allowed = true): LocalToolsRule {
+  return { targetedRetrieval: { allowed, source: 'authorized-pinned-sources-only', callsPerUnit: 5, candidatesPerCall: 8,
+    exactFetchRequiredBeforeCitation: true, scope: 'no-egress' }, breaker: { roundTrips: 128, end: '检索未完成' } };
+}
+/** One kind's rule with its targeted retrieval set as given; `false` reads like a rule that admits no local tools. */
+export function withLocalRetrievalFor(policy: LaunchPolicyProjection, kind: string, allowed = true): LaunchPolicyProjection {
+  return withRuleFor(policy, kind, { ...ruleFor(policy, kind), localTools: localRetrievalRule(allowed) } as Partial<AdmittedProviderRule>);
+}
 
 // Variants of the selected developer-live projection for refusal paths: one kind's rule changed, repeated or removed. The
 // policy bytes are never touched; only the in-memory projection a test hands the owners.

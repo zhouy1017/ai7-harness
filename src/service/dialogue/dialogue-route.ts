@@ -1,4 +1,5 @@
 import type { LaunchPolicyProjection, ProviderProcessingVersion } from '../../shared/protocol.js';
+import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import type { CredentialSlotBinding } from '../provider/credential-broker.js';
 import { PROVIDER_ROUTE_PROFILES, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
 import { DEEPSEEK_ROUTE, OPENCODE_GO_ROUTE, type OutboundDataCategory, type RemoteExecutionRoute } from '../provider/egress-gate.js';
@@ -19,6 +20,7 @@ export const DIALOGUE_OUTBOUND_CATEGORY = 'editor-selected-manuscript-excerpt' a
 
 /** The live route one admitted rule binds, resolved against the declared route and model profiles. */
 export interface AdmittedFastRoleRoute {
+  readonly localTools?: LocalToolsRule | null;
   readonly ruleId: string;
   /** The live scope whose policy admitted it: developer-live, or ordinary production on the editor's route (Issue #811). */
   readonly operationalScope: 'developer-live' | 'ordinary-production';
@@ -97,6 +99,8 @@ export function admittedFastRoleRoute(policy: LaunchPolicyProjection, kindId: st
     modelRole: modelRole as CredentialSlotBinding['modelRole'],
     profile,
     modelProfile,
+    localTools: modelProfile.capabilities.toolCalling === 'function' && modelProfile.evidence.toolCalling.kind === 'live-test-item' &&
+      modelProfile.evidence.toolCalling.itemIds.length > 0 ? localToolsFromProjection(rule) : null,
     outboundDataCategories: new Set(OUTBOUND_CATEGORIES.filter((category) => strings(rule['outboundDataCategories'])!.includes(category))),
   };
 }
