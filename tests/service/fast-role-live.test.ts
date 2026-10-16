@@ -142,6 +142,8 @@ describe('润色这段 on the live route (provider-free)', () => {
     expect(calls[0]!.url).toBe(OPENCODE_GO_ROUTE_PROFILE.endpoint);
     const body = JSON.parse(calls[0]!.body) as { model: string; tools?: unknown; messages: Array<{ role: string; content: string }> };
     expect(body.model).toBe(OPENCODE_GO_MODEL);
+    // #893 rev 8: the selected v18 rule admits targeted retrieval, yet 润色's frozen contract says 不调用任何工具, so no tool is registered.
+    expect(livePolicy.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes('editorial-polish'))!.localTools.targetedRetrieval.allowed).toBe(true);
     expect(body.tools).toBeUndefined();
     // Exactly the frozen contract and the one message: the selection and its paragraph's bounded window, nothing else of the Book.
     const words = polishWordsOf(typoBlock(store, book).block.text, selection.fromGrapheme, selection.toGrapheme);
@@ -248,7 +250,10 @@ describe('基于当前稿件重新生成建议 on the live route (provider-free)
     const read = await settled(fast, started.requestId);
     expect(read.kind === 'conflict-regenerate' && read.regeneration.outcome).toBe('drafted');
     expect(calls).toHaveLength(1);
-    const body = JSON.parse(calls[0]!.body) as { messages: Array<{ role: string; content: string }> };
+    const body = JSON.parse(calls[0]!.body) as { tools?: unknown; messages: Array<{ role: string; content: string }> };
+    // #893 rev 8: as for 润色, the admitted retrieval registers no tool under the frozen no-tool contract.
+    expect(livePolicy.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes('conflict-regenerate'))!.localTools.targetedRetrieval.allowed).toBe(true);
+    expect(body.tools).toBeUndefined();
     expect(sha256Hex(canonicalJson(body.messages))).toBe(sha256Hex(canonicalJson([
       { role: 'system', content: CONFLICT_REGENERATE_PROMPT_CONTRACT.systemPrompt },
       { role: 'user', content: buildConflictRegenerateMessage(regenerationRegionOf(conflict, unitIndex)) },

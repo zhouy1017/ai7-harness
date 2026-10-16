@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { RetrievalError, type RetrievalSource } from '../retrieval/index.js';
 import { UUID_PATTERN } from '../analysis/canonical.js';
 import type { ProducedEditorialMarkInput } from '../editorial-marks.js';
 import { PROPOSAL_CONFLICT_REGENERATION_SCHEMA, type ProposalConflictRegenerationLineage } from '../proposal-conflicts.js';
@@ -61,22 +60,6 @@ function require(condition: unknown, code: string, message: string): asserts con
   if (!condition) throw new FastRoleError(code, message);
 }
 
-/** The foreground attempt pins only the already-verified bounded words, never another block or the whole manuscript. */
-function fastRoleRetrievalSource(store: FastRoleStore, bookId: string, manuscriptId: string, branchId: string, blockId: string, words: string): RetrievalSource {
-  const readWindow = () => store.getManuscriptWindowAt(manuscriptId, branchId, { kind: 'block', blockId });
-  const pinned = readWindow();
-  if (pinned.bookId !== bookId) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
-  return { sourceKind: 'manuscript', sourceId: manuscriptId, digest: pinned.workingDigest, read: () => {
-    const window = readWindow();
-    const block = window.blocks.find((entry) => entry.blockId === blockId);
-    if (window.bookId !== bookId || block === undefined) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
-    const start = block.text.indexOf(words);
-    // An empty or ambiguous bounded region yields no candidates, rather than widening its authority.
-    return { digest: window.workingDigest, segments: words.length === 0 || start < 0 || block.text.indexOf(words, start + 1) !== -1 ? []
-      : [{ blockId, startOffset: start, text: block.text.slice(start, start + words.length) }] };
-  } };
-}
-
 /**
  * Whether 润色这段 and 基于当前稿件重新生成建议 can be asked for this Book under this launch, and why not: the launch's route for
  * each kind. Whether the exact words may be sent — an admitted Public SampleBook's under developer-live — is decided again
@@ -123,7 +106,6 @@ export function polishWordsOf(blockText: string, fromGrapheme: number, toGraphem
 
 /** A polish request checked and ready to send. */
 interface PreparedPolish {
-  readonly retrievalSources: readonly RetrievalSource[];
   readonly bookId: string;
   readonly taskId: string;
   readonly selection: DialogueSelectionInput;
@@ -139,8 +121,7 @@ function preparePolish(owner: FastRoleExecutionOwner, store: FastRoleStore, book
   const words = verifiedSelection(store, bookId, selection);
   require(!holdsEditorialPolishMarks(words.before) && !holdsEditorialPolishMarks(words.text) && !holdsEditorialPolishMarks(words.after),
     'POLISH_SELECTION_INVALID', '所选文字或它前后的文字含有「【所选文字】」这类标记，不能润色。');
-  const retrievalSources = [fastRoleRetrievalSource(store, bookId, selection.manuscriptId, selection.branchId, selection.blockId, words.before + words.text + words.after)];
-  return { bookId, taskId: randomUUID(), selection, words, retrievalSources };
+  return { bookId, taskId: randomUUID(), selection, words };
 }
 
 function polishProjection(prepared: Pick<PreparedPolish, 'bookId' | 'taskId'>, state: EditorialPolishProjection['state'], label: string,
@@ -155,7 +136,7 @@ function polishProjection(prepared: Pick<PreparedPolish, 'bookId' | 'taskId'>, s
  */
 async function finishPolish(owner: FastRoleExecutionOwner, store: FastRoleStore, prepared: PreparedPolish): Promise<EditorialPolishProjection> {
   const { selection, words, taskId } = prepared;
-  const answer = await owner.ask(EDITORIAL_POLISH_KIND, buildEditorialPolishMessage({ before: words.before, selection: words.text, after: words.after }), 'ask', prepared.retrievalSources);
+  const answer = await owner.ask(EDITORIAL_POLISH_KIND, buildEditorialPolishMessage({ before: words.before, selection: words.text, after: words.after }), 'ask');
   if (answer.kind === 'failed') return polishProjection(prepared, 'failed', answer.message, { outcomeUnknown: answer.outcomeUnknown });
   const reading = readEditorialPolishAnswer(answer.text, words.text);
   if (reading.kind === 'withheld') return polishProjection(prepared, 'withheld', `${reading.reason}；没有新建修改建议。`);
@@ -214,7 +195,6 @@ export function regenerationRegionOf(conflict: ProposalConflictProjection, unitI
 
 /** A regeneration checked and ready to send: the conflict it reads, its one unit's words, and the projection it starts as. */
 interface PreparedRegeneration {
-  readonly retrievalSources: readonly RetrievalSource[];
   readonly conflict: ProposalConflictProjection;
   readonly unitIndex: number;
   readonly region: ConflictRegenerateMessageInput;
@@ -238,7 +218,6 @@ function prepareRegeneration(owner: FastRoleExecutionOwner, store: FastRoleStore
   require(!Object.values(region).some(holdsConflictRegenerateMarks), 'PROPOSAL_CONFLICT_UNIT_INVALID', '这处冲突的文字含有「【当前稿件】」这类标记，不能重新生成。');
   return {
     conflict,
-    retrievalSources: [fastRoleRetrievalSource(store, conflict.bookId, conflict.manuscriptId, conflict.branchId, conflict.blockId, region.before + region.current + region.after)],
     unitIndex: input.unitIndex,
     region,
     pending: {
@@ -260,7 +239,7 @@ async function finishRegeneration(owner: FastRoleExecutionOwner, store: FastRole
   const unit = conflict.units[unitIndex]!;
   const settled = (outcome: ProposalConflictRegenerationProjection['outcome'], label: string, outcomeUnknown = false): ProposalConflictRegenerationProjection =>
     ({ ...prepared.pending, outcome, outcomeUnknown, label });
-  const answer = await owner.ask(CONFLICT_REGENERATE_KIND, buildConflictRegenerateMessage(region), 'unit', prepared.retrievalSources);
+  const answer = await owner.ask(CONFLICT_REGENERATE_KIND, buildConflictRegenerateMessage(region), 'unit');
   if (answer.kind === 'failed') return settled('failed', answer.message, answer.outcomeUnknown);
   const reading = readConflictRegenerateAnswer(answer.text);
   if (reading.kind === 'withheld') return settled('withheld', `${reading.reason}；没有改动解决草稿。`);
