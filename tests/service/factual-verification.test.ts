@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { Socket } from 'node:net';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -196,6 +197,17 @@ function changesOf(): number {
   }
 }
 
+/** Hash every table without exposing row payloads; counts alone cannot detect updates or delete/insert pairs. */
+function databaseState(): Record<string, string> {
+  const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all();
+    return Object.fromEntries(tables.map(({ name }) => [String(name), createHash('sha256').update(JSON.stringify(
+      database.prepare(`SELECT * FROM "${String(name).replaceAll('"', '""')}"`).all(),
+    )).digest('hex')]));
+  } finally { database.close(); }
+}
+
 function binding(book: Book): Book & { windowStartBlockId: string } {
   return { ...book, windowStartBlockId: store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks[0]!.blockId };
 }
@@ -214,8 +226,10 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
     // Every other assertion was never researched by its unit: 待核查, never a verdict.
     expect(results.filter((entry) => entry.resultId !== result.resultId).every((entry) => entry.states.factualVerification === '待核查')).toBe(true);
     const before = changesOf();
+    const state = databaseState();
     const workspace = store.inspectEvidenceWorkspace({ bookId: book.bookId, resultId: result.resultId, sourcesAfter: null });
     expect(changesOf()).toBe(before);
+    expect(databaseState()).toEqual(state);
     const [exact, candidate] = workspace.sources;
     expect(exact).toMatchObject({ checkState: 'exact', checkLabel: '已精确取文', relation: '支持', excerpt: HELD, integrity: 'located', freshness: 'current', lineage: 'original', reused: false });
     expect(exact!.sourceVersion).toMatch(/^[0-9a-f]{64}$/u);
@@ -289,7 +303,9 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
   it('runs 快速整理 with no tool and no egress, records only 待核查, and keeps 证据核查未完成 through Apply and reversal', async () => {
     await setup({ relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: null }] });
     const book = await newBook('快速整理回归');
+    const socket = vi.spyOn(Socket.prototype, 'connect');
     const { results } = await review(book, 'quick');
+    expect(socket).not.toHaveBeenCalled();
     expect(sends.search).toBe(0);
     expect(sends.pages).toEqual([]);
     expect(sends.toolSchemas).toBe(0);
@@ -321,7 +337,14 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
   it('lowers 标准核查 to 快速整理 only on an offline verdict at Run start, and says so in the result', async () => {
     await setup({ relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: null }], offline: true });
     const book = await newBook('离线降级回归');
+    const socket = vi.spyOn(Socket.prototype, 'connect');
     const { results } = await review(book);
+    expect(results.length).toBeGreaterThan(0);
+    expect(sends.toolSchemas).toBe(0);
+    expect(sends.search).toBe(0);
+    expect(sends.pages).toEqual([]);
+    expect(socket).not.toHaveBeenCalled();
+    expect(store.inspectFactualReview(book.bookId).taskOutcome?.report?.factualAssurance?.disclosure).toBe(EVIDENCE_ASSURANCE_OFFLINE_DEGRADE);
     expect(results.every((entry) => entry.plannedLevel === 'standard' && entry.level === 'quick' && entry.disclosure === EVIDENCE_ASSURANCE_OFFLINE_DEGRADE &&
       entry.states.factualVerification === '待核查')).toBe(true);
     expect(results[0]!.limitations).toContain(EVIDENCE_ASSURANCE_OFFLINE_DEGRADE);
@@ -357,9 +380,13 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
     expect(storeError(() => store.recordVerificationReviewDecision({ bookId: book.bookId, resultId: result.resultId, resultVersion: 1, disposition: 'accept', ownWords: null,
       reason: { state: 'selected', text: '别的理由', suggestion: '与我掌握的出处一致' } }))).toBe('FACTUAL_DECISION_INVALID');
     const before = changesOf();
+    const priorState = databaseState();
     const own = store.recordVerificationReviewDecision({ bookId: book.bookId, resultId: result.resultId, resultVersion: 1, disposition: 'own-words', ownWords: '以馆方公告为准。',
       reason: { state: 'corrected', text: '与我掌握的出处一致，补充了馆方公告', suggestion: '与我掌握的出处一致' } });
     expect(changesOf()).toBe(before + 1);
+    const nextState = databaseState();
+    expect(nextState.factual_review_decisions).not.toBe(priorState.factual_review_decisions);
+    expect({ ...nextState, factual_review_decisions: null }).toEqual({ ...priorState, factual_review_decisions: null });
     expect(own.supplementary).toBeNull();
     expect(own.workspace.decisions).toEqual([expect.objectContaining({ boundVersion: 1, superseded: false, disposition: 'own-words', ownWords: '以馆方公告为准。',
       reason: { state: 'corrected', text: '与我掌握的出处一致，补充了馆方公告', suggestion: '与我掌握的出处一致' }, requestedLevel: null })]);
@@ -390,6 +417,15 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
     expect(stale).toMatchObject({ anchor: { state: 'stale', label: STALE_VERIFICATION_ANCHOR_LABEL }, version: 1, blockId: result.blockId, fromGrapheme: result.fromGrapheme,
       states: { factualVerification: '证据支持' }, correctionAvailable: false });
     expect(store.inspectEvidenceWorkspace({ bookId: book.bookId, resultId: result.resultId, sourcesAfter: null }).decisionCard.drift).toContain(STALE_VERIFICATION_ANCHOR_LABEL);
+    const editedWindow = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: result.blockId });
+    const editedBlock = editedWindow.blocks.find((entry) => entry.blockId === result.blockId)!;
+    const original = [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(block.text)].map((entry) => entry.segment);
+    store.flushJournalEdit({
+      clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: editedWindow.revisionId, blockId: block.blockId,
+      windowStartBlockId: editedWindow.blocks[0]!.blockId, baseBlockDigest: editedBlock.digest, expectedJournalSequence: editedWindow.journalSequence,
+      fromGrapheme: result.fromGrapheme + 1, toGrapheme: result.fromGrapheme + 2, insertText: original[result.fromGrapheme + 1]!,
+    });
+    expect(store.inspectEvidenceWorkspace({ bookId: book.bookId, resultId: result.resultId, sourcesAfter: null }).result.anchor.state).toBe('stale');
     expect(storeError(() => store.recordVerificationReviewDecision({ bookId: book.bookId, resultId: result.resultId, resultVersion: 1, disposition: 'accept', ownWords: null, reason: null })))
       .toBe('FACTUAL_DECISION_DRIFT');
   }, 120_000);

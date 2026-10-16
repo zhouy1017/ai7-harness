@@ -24,6 +24,7 @@ import {
 export interface MountResearchEvidenceOptions {
   readonly root: HTMLElement;
   readonly bookId: string;
+  readonly focusEvidenceId?: string;
   readonly api: Pick<RendererApi, 'inspectResearchEvidence' | 'saveEvidenceAsMaterial'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
@@ -149,5 +150,15 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
     }
   };
 
-  return { load: () => page(null) };
+  return { load: async () => {
+    await page(null);
+    // A read-only deep link follows bounded existing pages; ordinary source navigation remains one page at a time.
+    const target = options.focusEvidenceId;
+    if (target === undefined) return;
+    for (let count = 1; count < 20 && !records.some((record) => record.evidenceId === target) && last?.next != null; count += 1) {
+      if (!root.isConnected) return;
+      await page(last.next);
+    }
+    if (!records.some((record) => record.evidenceId === target)) options.setStatus('目标来源尚未显示；可继续读取更多来源。');
+  } };
 }

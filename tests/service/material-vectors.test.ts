@@ -21,7 +21,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { LATEST_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { LibraryMaterialKind, LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { malformedPdf, sampleTextPdf, syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
-import { dropMaterialIndexLayerRelations } from '../support/pre74-schema.js';
+import { dropFactualVerificationRelations, FACTUAL_VERIFICATION_SCHEMA_NAMES, dropMaterialIndexLayerRelations } from '../support/pre74-schema.js';
 import { withoutRuleFor } from '../support/policy-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -517,10 +517,11 @@ describe('revision 76', () => {
     const plant = new DatabaseSync(storePath());
     const earlierLayers = ['material_index_builds', 'material_index_segments'].map((table) =>
       plant.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+    dropFactualVerificationRelations(plant);
     dropMaterialIndexLayerRelations(plant);
     plant.exec(`PRAGMA user_version = ${RESEARCH_EVIDENCE_SCHEMA_VERSION}`);
     plant.close();
-    const names = [...Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL), ...Object.keys(MATERIAL_INDEX_LAYER_TRIGGER_SQL)];
+    const names = [...FACTUAL_VERIFICATION_SCHEMA_NAMES, ...Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL), ...Object.keys(MATERIAL_INDEX_LAYER_TRIGGER_SQL)];
     expect(schemaRows()).toEqual(terminal.filter((row) => !names.includes(row.name)));
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

@@ -1095,6 +1095,7 @@ export class BaselineAnalysisStore {
   }
 
   #factualUnwrapped(level: EvidenceAssuranceLevel, rule: ReturnType<typeof liveKindRule>): AnalysisKindDefinition {
+    if (level === 'quick') return factualReviewLevelDefinition('quick');
     if (this.#factualLevelsActive(rule)) return factualReviewLevelDefinition(level);
     const v1 = factualReviewKindDefinition();
     return platformToolsFromProjection(rule) === null ? v1 : withFactualResearch(v1);
@@ -1132,6 +1133,24 @@ export class BaselineAnalysisStore {
       if (wrapped.promptContractDigest === promptContractDigest) return wrapped;
     }
     return current;
+  }
+
+  /** The only permitted departure from a frozen factual plan is its durable offline-at-start downgrade. */
+  definitionForRun(runRecordId: string, promptContractDigest: string): AnalysisKindDefinition {
+    const planned = this.definitionForDigest(promptContractDigest);
+    if (planned.kind !== FACTUAL_REVIEW_KIND) return planned;
+    const assurance = this.factualRunAssurance(runRecordId);
+    return assurance?.effectiveLevel === 'quick' ? this.#factualDefinitionFor('quick') : planned;
+  }
+
+  factualRunAssurance(runRecordId: string): import('../../shared/protocol.js').FactualRunAssuranceProjection | null {
+    if (this.#definition.kind !== FACTUAL_REVIEW_KIND ||
+        this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'factual_run_assurance'").get() === undefined) return null;
+    const row = this.#db.prepare('SELECT canonical_json, sha256 FROM factual_run_assurance WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const json = asString(row.canonical_json);
+    requireAnalysis(sha256Hex(json) === row.sha256, 'ANALYSIS_RECORD_INVALID', '事实核查运行级别记录已损坏。');
+    return JSON.parse(json) as import('../../shared/protocol.js').FactualRunAssuranceProjection;
   }
 
   /** A closed unit record read back by the contract that wrote it: a factual v2 record carries `corrections` (Issue #901). */
@@ -4999,7 +5018,7 @@ export class BaselineAnalysisStore {
         },
         coverageManifestDigest: facts.manifestDigest,
         // The contract the Run executed (Issue #901): a factual level's own; every other kind's, and an earlier plan's, as before.
-        schemaDigest: this.definitionForDigest(facts.promptContractDigest).schemaDigest,
+        schemaDigest: this.definitionForRun(facts.runRecordId, facts.promptContractDigest).schemaDigest,
         reducerDigest: this.#definition.reducerDigest,
         // The revision pins the route that produced it: the fixture on the deterministic route, the
         // live route's own identity when the Run actually transmitted.

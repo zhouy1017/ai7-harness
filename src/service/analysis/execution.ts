@@ -897,12 +897,14 @@ export class BaselineAnalysisExecutionOwner {
     // summary promises what the Run kept, and not first when the execution refuses it.
     const { route, model } = routeFactsOf(facts, live);
     // A factual plan executes under the level it froze (Issue #901): 快速整理 declares no local tool.
-    const definition = ledger.definitionForDigest(facts.promptContractDigest);
+    const definition = ledger.definitionForRun(facts.runRecordId, facts.promptContractDigest);
+    const webTools = definition.evidenceAssuranceLevel !== 'quick' && facts.webToolsBackend !== undefined;
     const composition = describeComposition(route, model, definition.promptContractDigest, {
-      platformTools: facts.webToolsBackend !== undefined,
+      platformTools: webTools,
       localTools: definition.evidenceAssuranceLevel !== 'quick' &&
         kindLocalTools(this.#policy(), ledger.definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground') !== null,
-      ...(facts.webToolsBackend === undefined ? {} : { researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } as const }),
+      ...(definition.evidenceAssuranceLevel === 'quick' ? { researchDeclaration: definition.researchDeclaration } :
+        webTools ? { researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } as const } : {}),
     });
     const rebuilt = executionBindingRecordOf({
       facts, definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
@@ -1222,9 +1224,11 @@ export class BaselineAnalysisExecutionOwner {
     // its header, the unit result parser, the reducer, and whether the kind declares a cross-unit
     // suboperation at all. The owner itself is the same owner for every analysis kind.
     // A factual Task's frozen level decides its contract (Issue #901); for every other kind this is the ledger's own definition.
-    const definition: AnalysisKindDefinition = ledger.definitionForDigest(facts.promptContractDigest);
+    if (ledger.kind === FACTUAL_REVIEW_KIND) this.#deps.factualRunStart?.({ bookId: facts.bookId, runRecordId: facts.runRecordId, taskIntentId: facts.taskIntentId });
+    const definition: AnalysisKindDefinition = ledger.definitionForRun(facts.runRecordId, facts.promptContractDigest);
     const promptContractDigest = definition.promptContractDigest;
-    if (definition.kind === FACTUAL_REVIEW_KIND) this.#deps.factualRunStart?.({ bookId: facts.bookId, runRecordId: facts.runRecordId, taskIntentId: facts.taskIntentId });
+    const factualAssurance = ledger.factualRunAssurance(facts.runRecordId);
+    const webTools = definition.evidenceAssuranceLevel !== 'quick' && facts.webToolsBackend !== undefined;
     const live = this.#live();
     // Ordinary production (Issue #811): the Run's route is its plan's, from the editor's configured binding when it froze.
     const production = isOrdinaryProductionRuntime(live) ? live : null;
@@ -1281,7 +1285,7 @@ export class BaselineAnalysisExecutionOwner {
       return promptContractDigest;
     };
     const bootstrap = production === null && validation?.family === 'policy-selection' && validation.case === 'wave6-tool-evidence-bootstrap';
-    if (facts.webToolsBackend !== undefined) liveModelProfile = platformToolModelProfile(liveModelProfile, production === null ? 'developer-live' : 'ordinary-production', validation);
+    if (webTools) liveModelProfile = platformToolModelProfile(liveModelProfile, production === null ? 'developer-live' : 'ordinary-production', validation);
     let cache: ProviderResultCache | null = null;
     if (live !== null && production === null && validation !== null) {
       cache = new ProviderResultCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
@@ -1363,7 +1367,7 @@ export class BaselineAnalysisExecutionOwner {
         admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
         acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
       } }),
-      ...(facts.webToolsBackend === undefined ? {} : { platformTools: {
+      ...(!webTools ? {} : { platformTools: {
         execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
         admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
         acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
@@ -1446,7 +1450,12 @@ export class BaselineAnalysisExecutionOwner {
       readonly refused?: { readonly attempts: number; readonly wallMs: number; readonly usage: { inputTokens: number; outputTokens: number } | null };
     } | null = null;
     try {
-      requireCompositionMatch(harness.composition.digest, facts.behaviorCompositionDigest);
+      // The plan remains immutable. An offline-at-start row authorizes exactly the quick composition recorded for this Run.
+      const expectedComposition = factualAssurance?.disclosure != null
+        ? describeComposition(route, model, definition.promptContractDigest, live === null ? {} : {
+          platformTools: false, localTools: false, researchDeclaration: { webSearch: false, searchEngine: null },
+        }).digest : facts.behaviorCompositionDigest;
+      requireCompositionMatch(harness.composition.digest, expectedComposition);
       requireAssuranceContractMatch(definition, facts.assurancePromptContractDigest);
       const bindingRecord: ExecutionBindingRecord = executionBindingRecordOf({
         facts, definition, live, fixture, attemptId, harnessSessionId, boundAt, compositionDigest: harness.composition.digest,
@@ -1503,7 +1512,7 @@ export class BaselineAnalysisExecutionOwner {
         admittedUserMessages,
         ...(localRule === null ? {} : { localTools: localRule }),
       };
-      if (facts.webToolsBackend !== undefined && live !== null) {
+      if (webTools && facts.webToolsBackend !== undefined && live !== null) {
         const selectedRule = liveKindRule(policy, definition.kind);
         const tools = platformToolsFromProjection(selectedRule);
         if (tools === null) throw new ExecutionAdmissionError('PLATFORM_TOOLS_NOT_NAMED', '本任务的规则未声明联网工具。');
@@ -2712,13 +2721,13 @@ export class BaselineAnalysisExecutionOwner {
               },
             }
           : {}),
-        report: buildRunReport(reportFacts, await this.#reflect({
+        report: { ...buildRunReport(reportFacts, await this.#reflect({
           active, harness, runRecordId: facts.runRecordId, accounting: runReportAccounting(reportFacts),
           admittedUserMessages, acceptedOutputDigests, liveAdapter, accumulated, ceilingState, live, policy,
           // An exclusion recorded since the revision was persisted keeps the reflection back too (Issue #64, S29b).
           stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
             (!active.cancelRequested && this.#deps.readGuard?.(facts.runRecordId) != null),
-        })),
+        })), ...(factualAssurance === null ? {} : { factualAssurance }) },
       });
     } finally {
       currentBindingDigest = null;

@@ -1076,7 +1076,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   // ---- the Fact-check Lens (Issue #901; V2-UX-FACT-004, FACT-005, FACT-007, FACT-008) ------------------------------------
 
   /** A lens control: its own action key beside the review's, so a repaint finds it again. */
-  function factButton(action: 'fact-more' | 'fact-workspace', tone: 'secondary' | 'quiet', run: () => void): HTMLButtonElement {
+  function factButton(action: 'fact-more' | 'fact-workspace' | 'fact-go-to-text', tone: 'secondary' | 'quiet', run: () => void): HTMLButtonElement {
     const control = el('button', tone);
     control.type = 'button';
     control.dataset['factAction'] = action;
@@ -1180,6 +1180,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     toggle.setAttribute('aria-expanded', open === undefined ? 'false' : 'true');
     toggle.disabled = working;
     actions.append(toggle);
+    const locate = factButton('fact-go-to-text', 'quiet', () => void options.goToText({
+      manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, blockId: result.blockId, markId: result.markId,
+    }));
+    locate.textContent = '在稿件中查看';
+    locate.disabled = working || result.anchor.state === 'stale';
+    actions.append(locate);
     row.append(actions);
     // The open workspace is the same element across repaints, so what the editor pinned, chose or typed stays.
     if (open !== undefined) row.append(open.element);

@@ -141,6 +141,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   let draft: CorrectionProposalDraftProjection | null = null;
   let correction: CorrectionForm | null = null;
   let saved: CorrectionProposalSavedProjection | null = null;
+  let savedBlockId: string | null = null;
 
   const button = (label: string, action: string, variant: 'primary' | 'secondary' | 'quiet', run: () => void): HTMLButtonElement => {
     const node = el('button', variant, label);
@@ -189,6 +190,15 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       working = false;
       render();
     }
+  }
+
+  async function focusSource(cardId: string): Promise<void> {
+    while (!destroyed && !sources.some((card) => card.cardId === cardId) && nextCursor !== null) {
+      const before = nextCursor;
+      await moreSources();
+      if (nextCursor === before) break;
+    }
+    element.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(cardId)}"]`)?.focus();
   }
 
   // ---- rendering ------------------------------------------------------------------------------------------------------
@@ -320,7 +330,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       for (const [label, id] of [['支持', conflict.supportingCardId], ['反驳', conflict.refutingCardId]] as const) {
         const card = sources.find((entry) => entry.cardId === id);
         const side = el('div', 'evidence-conflict-side');
-        side.append(el('span', 'evidence-term', label), el('p', undefined, card === undefined ? id : sourceCardTitle(card)));
+        side.append(el('span', 'evidence-term', label), button(card === undefined ? '查看关联来源' : sourceCardTitle(card), 'focus-source', 'quiet', () => void focusSource(id)));
         if (card?.excerpt != null) side.append(el('blockquote', 'evidence-excerpt', card.excerpt));
         pair.append(side);
       }
@@ -339,10 +349,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       const item = el('li', undefined, statement.text);
       for (const id of statement.cardIds) {
         const card = sources.find((entry) => entry.cardId === id);
-        if (card === undefined) continue;
-        const link = button(sourceCardTitle(card), 'focus-source', 'quiet', () => {
-          element.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(id)}"]`)?.focus();
-        });
+        const link = button(card === undefined ? '查看关联来源' : sourceCardTitle(card), 'focus-source', 'quiet', () => void focusSource(id));
         link.dataset['summaryLink'] = id;
         item.append(' ', link);
       }
@@ -499,7 +506,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       done.append(el('h6', undefined, CORRECTION_HEADING), line);
       if (saved.label !== null) done.append(el('p', 'correction-assurance-label', saved.label));
       const first = saved.markIds[0];
-      if (first !== undefined) done.append(button(CORRECTION_SAVED_GO, 'go-to-correction', 'secondary', () => void options.goToText({ blockId: current.result.blockId, markId: first })));
+      if (first !== undefined) done.append(button(CORRECTION_SAVED_GO, 'go-to-correction', 'secondary', () => void options.goToText({ blockId: savedBlockId ?? current.result.blockId, markId: first })));
       return done;
     }
     if (draft === null || correction === null) {
@@ -548,6 +555,17 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       for (const line of choice.lines) body.append(el('span', 'field-note', line));
       label.append(input, body);
       group.append(label);
+      const variant = draft.variants.find((entry) => entry.variantId === choice.id);
+      if (variant !== undefined) {
+        const links = el('div', 'button-row');
+        for (const cardId of variant.evidenceCardIds) {
+          const card = sources.find((entry) => entry.cardId === cardId);
+          const link = button(card === undefined ? '查看关联来源' : sourceCardTitle(card), 'focus-source', 'quiet', () => void focusSource(cardId));
+          link.dataset['correctionEvidenceLink'] = cardId;
+          links.append(link);
+        }
+        group.append(links);
+      }
     }
     section.append(group);
     if (form.choice === 'own-edit') {
@@ -629,6 +647,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
         bookId, resultId, resultVersion: offer.result.version, variantId: form.choice === 'own-edit' ? null : form.choice,
         text: form.text, rationale: form.rationale, rangeIds: [...form.ranges],
       });
+      savedBlockId = offer.ranges.find((range) => range.rangeId === [...form.ranges][0])?.blockId ?? null;
       if (destroyed) return;
       options.setStatus(saved.completionLabel, 'success');
       options.changed();

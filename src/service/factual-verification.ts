@@ -30,6 +30,7 @@ import {
   type EvidenceWorkspaceProjection,
   type FactualActionNeed,
   type FactualAssertionCategory,
+  type FactualAssertionClass,
   type FactualCorrectionLineageProjection,
   type FactualDecisionCardProjection,
   type FactualEvidenceState,
@@ -143,18 +144,31 @@ export function registrableDomain(url: string): string | null {
  * share a registrable domain or a named publisher share a group, so neither is counted twice.
  */
 export function independenceGroups(sources: ReadonlyArray<{ readonly domain: string | null; readonly publisher: string | null; readonly lineage: EvidenceLineageClass | null }>): Array<string | null> {
-  const groups: Array<string | null> = [];
-  const assigned: Array<{ domain: string | null; publisher: string | null; group: string }> = [];
-  for (const source of sources) {
-    if (source.lineage !== null && source.lineage !== 'original') { groups.push(null); continue; }
-    const publisher = source.publisher === null ? null : source.publisher.trim().toLowerCase();
-    const peer = assigned.find((entry) => (source.domain !== null && entry.domain === source.domain) || (publisher !== null && entry.publisher === publisher));
-    if (peer !== undefined) { groups.push(peer.group); continue; }
-    const group = `g${assigned.length + 1}`;
-    assigned.push({ domain: source.domain, publisher, group });
-    groups.push(group);
+  const identities = sources.map((source) => ({
+    domain: source.domain?.trim().toLowerCase() || null,
+    publisher: source.publisher?.trim().toLowerCase() || null,
+  }));
+  const roots = sources.map((_, index) => index);
+  const root = (index: number): number => roots[index] === index ? index : root(roots[index]!);
+  // A shared publisher can bridge two domains. Keep every identity and merge the entire connected group, including
+  // unknown/dependent members; only explicitly original members may count as corroboration afterwards.
+  for (let index = 0; index < identities.length; index += 1) {
+    for (let prior = 0; prior < index; prior += 1) {
+      const left = identities[index]!;
+      const right = identities[prior]!;
+      if ((left.domain !== null && left.domain === right.domain) || (left.publisher !== null && left.publisher === right.publisher)) {
+        roots[root(index)] = root(prior);
+      }
+    }
   }
-  return groups;
+  const named = new Map<number, string>();
+  return sources.map((source, index) => {
+    const identity = identities[index]!;
+    if (source.lineage !== 'original' || (identity.domain === null && identity.publisher === null)) return null;
+    const key = root(index);
+    if (!named.has(key)) named.set(key, `g${named.size + 1}`);
+    return named.get(key)!;
+  });
 }
 
 // ---- Outcome mapping --------------------------------------------------------------------------------------------------
@@ -191,27 +205,22 @@ export function mapVerificationOutcome(input: {
     : refutes.length > 0 ? '不成立' : '未核查';
   const independent = (entries: ReadonlyArray<MappedRelation>): number => new Set(entries.map((entry) => entry.group).filter((group) => group !== null)).size;
   if (supports.length > 0 && refutes.length > 0) return { outcome: '证据冲突', claimSupport, gateUnmet: false };
+  // Checked passages remain Claim Support, but unfinished required research cannot close factual verification.
+  if (input.research === 'incomplete') return { outcome: '无法核实', claimSupport, gateUnmet: false };
   if (supports.length > 0 || refutes.length > 0) {
     const side = supports.length > 0 ? supports : refutes;
     if (input.level === 'strict' && independent(side) < 2) return { outcome: '证据不足', claimSupport, gateUnmet: true };
     return { outcome: supports.length > 0 ? '证据支持' : '疑似错误', claimSupport, gateUnmet: false };
   }
-  if (input.research === 'incomplete') return { outcome: '无法核实', claimSupport, gateUnmet: false };
   if (input.relations.length > 0 || input.research === 'researched') return { outcome: '证据不足', claimSupport, gateUnmet: false };
   return { outcome: '待核查', claimSupport, gateUnmet: false };
 }
 
 // ---- Exact excerpts ---------------------------------------------------------------------------------------------------
 
-/** The form an excerpt is sought in: compatibility-normalized, whitespace removed. No other character moves. */
-function foldExcerpt(text: string): string {
-  return text.normalize('NFKC').replace(/\s+/gu, '');
-}
-
-/** Whether a captured text holds an excerpt verbatim, whitespace aside (EVID-005). */
+/** Whether the captured source holds these exact characters (EVID-005), without a normalization that can change meaning. */
 export function excerptLocated(captured: string, excerpt: string): boolean {
-  const needle = foldExcerpt(excerpt);
-  return needle.length > 0 && foldExcerpt(captured).includes(needle);
+  return excerpt.trim().length > 0 && captured.includes(excerpt);
 }
 
 function graphemesOf(text: string): string[] {
@@ -238,6 +247,7 @@ interface SnapshotSource {
   readonly evidenceId: string | null;
   readonly group: string | null;
   readonly reused: boolean;
+  readonly inBookPin: FactualEvidenceRelation['exactFetch'];
 }
 
 interface StoredResult {
@@ -292,6 +302,7 @@ interface StoredDecision {
 
 /** One finding of a settled factual Run, as the store hands it to {@link FactualVerificationLedger.materialize}. */
 export interface MaterializedFactualFinding {
+  readonly assertionClass: FactualAssertionClass;
   readonly reviewFindingId: string;
   readonly findingId: string;
   readonly blockId: string;
@@ -312,6 +323,10 @@ export interface MaterializedFactualFinding {
 
 /** What the store reads of the Book's current manuscript for the anchor and range checks. */
 export interface ManuscriptReader {
+  /** A touched verification range stays historical even if identical words are subsequently restored. */
+  rangeUntouched(runRecordId: string, blockId: string, fromGrapheme: number, toGrapheme: number): boolean;
+  /** Revalidate a retained Exact Fetch against the Run's pinned, still-admitted sources without fetching externally. */
+  sourceCurrent(runRecordId: string, pin: NonNullable<FactualEvidenceRelation['exactFetch']>): boolean;
   /** The current working text of a block, or `null` when the block no longer stands. */
   currentBlockText(blockId: string): string | null;
   /** The blocks of one committed revision, in order, with the chapter heading each falls under. */
@@ -378,15 +393,16 @@ export class FactualVerificationLedger {
     if (existing !== null) return existing;
     const degraded = input.offline && input.plannedLevel !== 'quick';
     const effectiveLevel: EvidenceAssuranceLevel = degraded ? 'quick' : input.plannedLevel;
+    const contractLevel = degraded ? 'quick' : input.contractLevel;
     const disclosure = degraded ? EVIDENCE_ASSURANCE_OFFLINE_DEGRADE : null;
     const recordedAt = (input.now ?? new Date()).toISOString();
     const record = canonicalRecord({
       schema: RUN_ASSURANCE_SCHEMA, runRecordId: input.runRecordId, bookId: input.bookId, taskIntentId: input.taskIntentId,
-      plannedLevel: input.plannedLevel, effectiveLevel, contractLevel: input.contractLevel, disclosure, recordedAt,
+      plannedLevel: input.plannedLevel, effectiveLevel, contractLevel, disclosure, recordedAt,
     });
     this.#db.prepare(`INSERT INTO factual_run_assurance(run_record_id, book_id, task_intent_id, planned_level, effective_level, contract_level,
       disclosure, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(input.runRecordId, input.bookId, input.taskIntentId, input.plannedLevel, effectiveLevel, input.contractLevel, disclosure, recordedAt, record.json, record.digest);
+      .run(input.runRecordId, input.bookId, input.taskIntentId, input.plannedLevel, effectiveLevel, contractLevel, disclosure, recordedAt, record.json, record.digest);
     return { runRecordId: input.runRecordId, plannedLevel: input.plannedLevel, effectiveLevel, disclosure, recordedAt };
   }
 
@@ -433,7 +449,7 @@ export class FactualVerificationLedger {
       const latest = this.#db.prepare('SELECT MAX(version) AS version FROM factual_verification_results WHERE assertion_key = ?').get(assertionKey) as SqlRow;
       const version = (latest.version === null ? 0 : Number(latest.version)) + 1;
       const relationsStated = contractLevel !== null && finding.relations !== null;
-      const sources = relationsStated ? this.#sources(input.bookId, input.runRecordId, finding.relations!, level !== 'quick') : [];
+      const sources = relationsStated && level !== 'quick' ? this.#sources(input.bookId, input.runRecordId, finding.relations!, finding.assertionClass, true, now) : [];
       const researchReach: FactualResearchReach = finding.unitOrdinals.some((ordinal) => units.get(ordinal) === 'incomplete') ? 'incomplete'
         : finding.unitOrdinals.some((ordinal) => units.get(ordinal) === 'completed') ? 'researched' : 'not-attempted';
       const mapped = mapVerificationOutcome({
@@ -478,7 +494,7 @@ export class FactualVerificationLedger {
    * where `reuse` holds, an earlier Run of the Book captured whole and nothing has captured it differently since (EASSURE-009)
    * — whose text holds the excerpt; an in-Book source Exact Fetch found the excerpt in. Everything else is a candidate.
    */
-  #sources(bookId: string, runRecordId: string, relations: ReadonlyArray<FactualEvidenceRelation>, reuse: boolean): SnapshotSource[] {
+  #sources(bookId: string, runRecordId: string, relations: ReadonlyArray<FactualEvidenceRelation>, assertionClass: FactualAssertionClass, reuse: boolean, now: Date): SnapshotSource[] {
     const evidencePresent = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'research_evidence'").get() !== undefined;
     const captureOf = (url: string, own: boolean): SqlRow | undefined => !evidencePresent ? undefined : this.#db.prepare(`SELECT e.evidence_id, e.url, e.captured_at,
         e.capture_state, e.content_sha256, e.canonical_json, c.content_text FROM research_evidence e LEFT JOIN research_evidence_contents c ON c.content_sha256 = e.content_sha256
@@ -490,10 +506,12 @@ export class FactualVerificationLedger {
       if (candidateId !== null) {
         const found = relation.exactFetch ?? null;
         return {
-          cardId, sourceRef: relation.sourceRef, sourceKind: 'in-book', relation: relation.relation, excerptRef: relation.excerptRef, lineage: relation.lineage,
-          exact: found !== null, title: found === null ? null : found.sourceKind === 'manuscript' ? '本书稿件' : '本书资料', publisher: 'AI7 书内来源',
+          cardId, sourceRef: relation.sourceRef, sourceKind: 'in-book',
+          relation: assertionClass === 'real-world-fact' || assertionClass === 'judgment' ? '仅提供背景' : relation.relation,
+          excerptRef: relation.excerptRef, lineage: relation.lineage,
+          exact: found !== null && relation.excerptRef !== null, title: found === null ? null : found.sourceKind === 'manuscript' ? '本书稿件' : '本书资料', publisher: 'AI7 书内来源',
           domain: found === null ? null : `in-book:${found.sourceId}`, contentSha256: found?.digest ?? null, capturedAt: null,
-          captureState: found === null ? 'not-captured' : 'exact-fetch', evidenceId: null, reused: false,
+          captureState: found === null ? 'not-captured' : 'exact-fetch', evidenceId: null, reused: false, inBookPin: found,
         };
       }
       let url = relation.sourceRef;
@@ -501,16 +519,20 @@ export class FactualVerificationLedger {
       const ownRow = captureOf(url, true);
       const row = ownRow !== undefined && ownRow.capture_state === 'full-text' ? ownRow : reuse ? captureOf(url, false) ?? ownRow : ownRow;
       const fullText = row !== undefined && row.capture_state === 'full-text' && typeof row.content_text === 'string';
-      const exact = fullText && relation.excerptRef !== null && excerptLocated(String(row.content_text), relation.excerptRef);
+      const current = fullText && Number.isFinite(Date.parse(String(row.captured_at))) && evidenceStaleness({
+        capturedAt: String(row.captured_at), now,
+        laterDifferentHash: this.#laterDifferentCapture(bookId, url, String(row.captured_at), String(row.content_sha256)),
+      }).state === 'current';
+      const exact = current && relation.excerptRef !== null && excerptLocated(String(row.content_text), relation.excerptRef);
       let title: string | null = null;
       try { title = row === undefined ? null : (JSON.parse(String(row.canonical_json)) as { sourceTitle?: unknown }).sourceTitle as string | null ?? null; } catch { title = null; }
       const domain = registrableDomain(url);
       return {
-        cardId, sourceRef: relation.sourceRef, sourceKind: 'web', relation: relation.relation, excerptRef: relation.excerptRef, lineage: relation.lineage,
+        cardId, sourceRef: url, sourceKind: 'web', relation: relation.relation, excerptRef: relation.excerptRef, lineage: relation.lineage,
         exact, title, publisher: titleSiteLabel(title) ?? domain, domain, contentSha256: row === undefined || row.content_sha256 === null ? null : String(row.content_sha256),
         capturedAt: row === undefined ? null : String(row.captured_at),
         captureState: row === undefined ? 'not-captured' : String(row.capture_state) as 'full-text' | 'snippet-only' | 'failed',
-        evidenceId: row === undefined ? null : String(row.evidence_id), reused: row !== undefined && row !== ownRow,
+        evidenceId: row === undefined ? null : String(row.evidence_id), reused: row !== undefined && row !== ownRow, inBookPin: null,
       };
     });
     const exactOnes = drafted.filter((source) => source.exact);
@@ -576,7 +598,8 @@ export class FactualVerificationLedger {
   /** Whether the manuscript still holds the result's words at its range now (FACT-010, FACT-011). */
   #anchorCurrent(result: StoredResult, reader: ManuscriptReader): boolean {
     const text = reader.currentBlockText(result.blockId);
-    return text !== null && graphemesOf(text).slice(result.fromGrapheme, result.toGrapheme).join('') === result.body.pinnedText;
+    return reader.rangeUntouched(result.runRecordId, result.blockId, result.fromGrapheme, result.toGrapheme) &&
+      text !== null && graphemesOf(text).slice(result.fromGrapheme, result.toGrapheme).join('') === result.body.pinnedText;
   }
 
   #projection(result: StoredResult, reader: ManuscriptReader): FactualVerificationResultProjection {
@@ -641,17 +664,17 @@ export class FactualVerificationLedger {
     const matching = all.filter((result) => (filters.outcome === null || result.outcome === filters.outcome) &&
       (filters.severity === null || result.body.severity === filters.severity) &&
       (filters.chapterBlockId === null || input.chapterOf(result.blockId) === filters.chapterBlockId));
+    const filtered = matching.map((result) => ({ result, projected: this.#projection(result, reader) })).filter(({ projected }) =>
+      (filters.sourceCondition === null || projected.sourceCondition === filters.sourceCondition) &&
+      (filters.actionNeed === null || projected.actionNeed === filters.actionNeed));
     const page: FactualVerificationResultProjection[] = [];
     let nextCursor: number | null = null;
-    for (const result of matching) {
+    for (const { result, projected } of filtered) {
       if (input.after !== null && result.rowid <= input.after) continue;
-      const projected = this.#projection(result, reader);
-      if ((filters.sourceCondition !== null && projected.sourceCondition !== filters.sourceCondition) ||
-          (filters.actionNeed !== null && projected.actionNeed !== filters.actionNeed)) continue;
       if (page.length === MAX_FACTUAL_VERIFICATION_PAGE) { nextCursor = page.at(-1) === undefined ? null : this.#rowidOf(page.at(-1)!.resultId); break; }
       page.push(projected);
     }
-    return { results: page, nextCursor, total: matching.length, counts };
+    return { results: page, nextCursor, total: filtered.length, counts };
   }
 
   #rowidOf(resultId: string): number {
@@ -672,7 +695,7 @@ export class FactualVerificationLedger {
     const result = this.#requireResult(bookId, resultId);
     requireVerification(sourcesAfter === null || (Number.isSafeInteger(sourcesAfter) && sourcesAfter >= 0), 'FACTUAL_VERIFICATION_INVALID', '来源分页位置无效。');
     const projected = this.#projection(result, reader);
-    const cards = result.body.sources.map((source) => this.#card(source, now));
+    const cards = result.body.sources.map((source) => this.#card(result.bookId, source, now));
     const start = sourcesAfter ?? 0;
     const page = cards.slice(start, start + MAX_EVIDENCE_SOURCE_PAGE);
     const supporting = cards.filter((card) => card.checkState === 'exact' && card.relation === '支持');
@@ -690,15 +713,15 @@ export class FactualVerificationLedger {
       totalSources: cards.length, conflicts, summary: comparisonSummary(cards),
       history: versions.map((version) => ({ resultId: version.resultId, version: version.version, outcome: version.outcome, level: version.level, recordedAt: version.recordedAt })),
       decisions: this.#decisions(result.assertionKey).map((decision) => this.#decisionProjection(decision, latestVersion)),
-      decisionCard: this.#decisionCard(result, projected, reader),
+      decisionCard: this.#decisionCard(result, projected, reader, now),
       matrix: { minPinned: EVIDENCE_MATRIX_MIN_PINNED, maxPinned: EVIDENCE_MATRIX_MAX_PINNED },
     };
   }
 
-  #card(source: SnapshotSource, now: Date): EvidenceSourceCardProjection {
+  #card(bookId: string, source: SnapshotSource, now: Date): EvidenceSourceCardProjection {
     const freshness = source.capturedAt === null ? null : evidenceStaleness({
       capturedAt: source.capturedAt, now, staleAfterDays: RESEARCH_EVIDENCE_STALE_AFTER_DAYS,
-      laterDifferentHash: source.sourceKind === 'web' && source.contentSha256 !== null && this.#laterDifferentCapture(source.sourceRef, source.capturedAt, source.contentSha256),
+      laterDifferentHash: source.sourceKind === 'web' && source.contentSha256 !== null && this.#laterDifferentCapture(bookId, source.sourceRef, source.capturedAt, source.contentSha256),
     });
     const integrity = source.captureState === 'not-captured' || source.captureState === 'failed' ? 'not-captured' as const : source.exact ? 'located' as const : 'not-located' as const;
     return {
@@ -715,28 +738,34 @@ export class FactualVerificationLedger {
     };
   }
 
-  #laterDifferentCapture(url: string, capturedAt: string, contentSha256: string): boolean {
+  #laterDifferentCapture(bookId: string, url: string, capturedAt: string, contentSha256: string): boolean {
     if (this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'research_evidence'").get() === undefined) return false;
-    return this.#db.prepare("SELECT 1 FROM research_evidence WHERE url = ? AND captured_at > ? AND capture_state = 'full-text' AND content_sha256 <> ? LIMIT 1")
-      .get(url, capturedAt, contentSha256) !== undefined;
+    return this.#db.prepare("SELECT 1 FROM research_evidence WHERE book_id = ? AND url = ? AND captured_at >= ? AND capture_state = 'full-text' AND content_sha256 <> ? LIMIT 1")
+      .get(bookId, url, capturedAt, contentSha256) !== undefined;
   }
 
-  #decisionCard(result: StoredResult, projected: FactualVerificationResultProjection, reader: ManuscriptReader): FactualDecisionCardProjection {
+  #decisionCard(result: StoredResult, projected: FactualVerificationResultProjection, reader: ManuscriptReader, now: Date): FactualDecisionCardProjection {
     return {
       choices: VERIFICATION_REVIEW_DISPOSITIONS.map((disposition) => ({ disposition, label: VERIFICATION_REVIEW_DISPOSITION_LABELS[disposition] })),
       recommendation: RECOMMENDATIONS[result.outcome] ?? null,
       reasonSuggestions: DECISION_REASON_SUGGESTIONS[result.outcome],
-      drift: this.#drift(result, projected, reader),
+      drift: this.#drift(result, projected, reader, now),
     };
   }
 
   /** The exact dependency that changed since the result, which refuses a decision on it now (FREV-011); `null` when none did. */
-  #drift(result: StoredResult, projected: FactualVerificationResultProjection, reader: ManuscriptReader): string | null {
+  #drift(result: StoredResult, projected: FactualVerificationResultProjection, reader: ManuscriptReader, now: Date = new Date()): string | null {
     if (result.version !== this.#latestVersion(result.assertionKey)) return `这条断言已有更新的核查结果（第 ${this.#latestVersion(result.assertionKey)} 版）；请看最新结果再决定。`;
     if (!this.#anchorCurrent(result, reader)) return `${STALE_VERIFICATION_ANCHOR_LABEL}：稿件在这段文字处已经改动，核查结果只作为历史保留。`;
+    const inBookMoved = result.body.sources.find((source) => source.exact && source.sourceKind === 'in-book' &&
+      (source.inBookPin == null || !reader.sourceCurrent(result.runRecordId, source.inBookPin)));
+    if (inBookMoved !== undefined) return '书内来源版本或授权已变化，请重新核对这条结果的来源。';
     const moved = result.body.sources.find((source) => source.exact && source.sourceKind === 'web' && source.contentSha256 !== null && source.capturedAt !== null &&
-      this.#laterDifferentCapture(source.sourceRef, source.capturedAt, source.contentSha256));
+      this.#laterDifferentCapture(result.bookId, source.sourceRef, source.capturedAt, source.contentSha256));
     if (moved !== undefined) return `来源版本已变化：${moved.title ?? moved.sourceRef} 后来取回的内容与这次核查所用的不同。`;
+    const expired = result.body.sources.find((source) => source.exact && source.sourceKind === 'web' && source.capturedAt !== null &&
+      evidenceStaleness({ capturedAt: source.capturedAt, now, laterDifferentHash: false }).state !== 'current');
+    if (expired !== undefined) return `来源新鲜度已变化：${expired.title ?? expired.sourceRef} 已超过有效核查期限，请重新核对。`;
     void projected;
     return null;
   }
@@ -756,7 +785,7 @@ export class FactualVerificationLedger {
     requireVerification(VERIFICATION_REVIEW_DISPOSITIONS.includes(input.disposition), 'FACTUAL_DECISION_INVALID', '请选择一项核查审阅决定。');
     requireVerification(input.resultVersion === result.version, 'FACTUAL_DECISION_STALE', '你看到的不是这条核查结果的这一版；请重新打开。');
     const projected = this.#projection(result, reader);
-    const drift = this.#drift(result, projected, reader);
+    const drift = this.#drift(result, projected, reader, now);
     requireVerification(drift === null, 'FACTUAL_DECISION_DRIFT', drift ?? '');
     const ownWords = input.disposition === 'own-words' ? (input.ownWords ?? '').trim() : null;
     requireVerification(input.disposition === 'own-words' ? ownWords !== null && ownWords.length > 0 && [...ownWords].length <= MAX_VERIFICATION_OWN_WORDS_CHARACTERS : input.ownWords === null,
@@ -795,7 +824,9 @@ export class FactualVerificationLedger {
     const offer = this.#correctionOffer(result, decision, anchorCurrent);
     requireVerification(offer !== null, 'CORRECTION_NOT_OFFERED', anchorCurrent ? '这条核查结果现在不能准备更正提案。' : `${STALE_VERIFICATION_ANCHOR_LABEL}：不能在已改动的文字上准备更正提案。`);
     const projected = this.#projection(result, reader);
-    const cards = result.body.sources.map((source) => this.#card(source, new Date()));
+    const drift = this.#drift(result, projected, reader);
+    requireVerification(drift === null, 'CORRECTION_STALE', drift ?? '');
+    const cards = result.body.sources.map((source) => this.#card(result.bookId, source, new Date()));
     const against = cards.filter((card) => card.checkState === 'exact' && card.relation === '反驳').map((card) => card.cardId);
     const unresolved = [
       ...cards.filter((card) => card.checkState === 'candidate').map((card) => `${card.title ?? card.sourceRef}：${card.checkLabel}`),
@@ -827,7 +858,8 @@ export class FactualVerificationLedger {
           rangeId: `rng_${sha256Hex(`${block.blockId}:${start}:${start + needle.length}`).slice(0, 24)}`,
           blockId: block.blockId, fromGrapheme: start, toGrapheme: start + needle.length, text: result.body.pinnedText, heading: block.heading,
           primary: block.blockId === result.blockId && start === result.fromGrapheme,
-          current: current !== null && graphemesOf(current).slice(start, start + needle.length).join('') === result.body.pinnedText,
+          current: reader.rangeUntouched(result.runRecordId, block.blockId, start, start + needle.length) &&
+            current !== null && graphemesOf(current).slice(start, start + needle.length).join('') === result.body.pinnedText,
         });
       }
     }
@@ -846,6 +878,8 @@ export class FactualVerificationLedger {
     const variant = input.variantId === null ? 'own-edit' as const : draft.variants.find((entry) => entry.variantId === input.variantId)?.variantId as 'v1' | 'v2' | 'v3' | undefined;
     requireVerification(variant !== undefined, 'CORRECTION_INVALID', '所选更正方案不在这次运行给出的方案中。');
     const text = input.text;
+    requireVerification(variant === 'own-edit' || text === draft.variants.find((entry) => entry.variantId === variant)?.text,
+      'CORRECTION_INVALID', '修改方案文字后请使用自行编辑，不能记为运行给出的原方案。');
     requireVerification(typeof text === 'string' && text.isWellFormed() && text.trim().length > 0 && graphemeCount(text) <= MAX_CORRECTION_TEXT_GRAPHEMES,
       'CORRECTION_INVALID', `更正文字需要 1–${MAX_CORRECTION_TEXT_GRAPHEMES} 个字。`);
     requireVerification(text !== (draft.ranges.find((range) => range.primary)?.text ?? draft.result.quote), 'CORRECTION_INVALID', '更正文字与原文相同。');

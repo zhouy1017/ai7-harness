@@ -2896,6 +2896,8 @@ export type RunReportIfRedoneProjection =
 
 /** The Run Report as it is recorded inside the Task Outcome, before its own digest is taken. */
 export interface RunReportRecordProjection {
+  /** The factual Run's frozen level and its disclosed offline-at-start downgrade, absent on predecessor reports. */
+  factualAssurance?: FactualRunAssuranceProjection;
   webToolsBackend?: FrozenWebToolsBackend;
   /** Editorial choices only; no question or answer content enters the Run Report. */
   modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'timed-out' | 'unanswered'; line: string }>;

@@ -9333,6 +9333,32 @@ export class EditorialStore {
   #manuscriptReader(branchId: string, manuscriptId: string): ManuscriptReader {
     const working = this.#authority.prepare('SELECT text FROM working_blocks WHERE branch_id = ? AND block_id = ?');
     return {
+      rangeUntouched: (runRecordId, blockId, fromGrapheme, toGrapheme) => {
+        const facts = this.#factualReview.loadExecutionPlan(runRecordId);
+        let from = fromGrapheme;
+        let to = toGrapheme;
+        const edits = this.#authority.prepare(`SELECT from_grapheme, to_grapheme, insert_text FROM edit_journal_entries
+          WHERE branch_id = ? AND block_id = ? AND sequence > ? ORDER BY sequence`)
+          .all(branchId, blockId, facts.checkpoint.journalSequence) as SqlRow[];
+        for (const edit of edits) {
+          const start = asNumber(edit.from_grapheme);
+          const end = asNumber(edit.to_grapheme);
+          if (start < to && end > from || start === end && start > from && start < to) return false;
+          if (end <= from) {
+            const delta = graphemeLength(asString(edit.insert_text)) - (end - start);
+            from += delta;
+            to += delta;
+          }
+        }
+        return true;
+      },
+      sourceCurrent: (runRecordId, pin) => {
+        try {
+          const source = this.retrievalSourcesForRun(runRecordId, this.#factualReview).find((entry) =>
+            entry.sourceKind === pin.sourceKind && entry.sourceId === pin.sourceId && entry.digest === pin.digest);
+          return source !== undefined && source.read().digest === pin.digest;
+        } catch { return false; }
+      },
       currentBlockText: (blockId) => {
         const row = working.get(branchId, blockId) as SqlRow | undefined;
         return row === undefined ? null : asString(row.text);
@@ -9424,6 +9450,7 @@ export class EditorialStore {
       if (finding === undefined || text === undefined) continue;
       const entry = stated.get(finding.findingId);
       findings.push({
+        assertionClass: finding.assertionClass,
         reviewFindingId: asString(row.finding_id), findingId: finding.findingId, blockId: finding.sourceRange.blockId,
         fromGrapheme: finding.sourceRange.fromGrapheme, toGrapheme: finding.sourceRange.toGrapheme, quote: finding.quote,
         pinnedText: sliceGraphemes(text, finding.sourceRange.fromGrapheme, finding.sourceRange.toGrapheme), question: finding.question,

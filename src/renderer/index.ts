@@ -2639,7 +2639,8 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
     element('p', 'field-note', SOURCES_LEDE),
     host,
   );
-  const surface = mountResearchEvidence({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
+  const surface = mountResearchEvidence({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage,
+    ...(focusEvidenceId === undefined ? {} : { focusEvidenceId }) });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
     openManuscript.disabled = true;
@@ -2669,7 +2670,7 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
     () => {
       if (!content.isConnected) return;
       setStatus(SOURCES_STATUS.opened);
-      // 在来源与证据中查看 from the Evidence Workspace (Issue #901; EVID-005): the retained source it names, when on this page.
+      // The source view has followed its existing cursor pages to the retained source named by this deep link.
       if (focusEvidenceId !== undefined) {
         const card = content.querySelector<HTMLElement>(`[data-evidence-id="${CSS.escape(focusEvidenceId)}"]`);
         if (card !== null) {
@@ -3332,6 +3333,7 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
   disclosure.dataset['runReportClassification'] = report.classification;
   disclosure.append(element('summary', undefined, `查看运行报告 · ${RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
   disclosure.append(element('p', 'research-status', researchStatusLine(report)));
+  if (report.factualAssurance?.disclosure != null) disclosure.append(element('p', 'fact-lens-disclosure', report.factualAssurance.disclosure));
   const stages = element('ul', 'analysis-list analysis-run-report-stages');
   for (const stage of report.stages) {
     const item = element('li', undefined, `${RUN_REPORT_STAGE_LABELS[stage.stage]}：${RUN_REPORT_STAGE_STATE_LABELS[stage.state]}${stage.wallMs === null ? '' : ` · 用时 ${durationLabel(stage.wallMs)}`}`);

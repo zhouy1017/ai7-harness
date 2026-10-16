@@ -19,7 +19,7 @@ import {
 import { factualReviewDefinitionsByDigest, factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from '../../src/service/analysis/kind-definition.js';
 import { canonicalPlanEdits, planEditAssuranceLevel, planEditDiff, planEditsOf, NO_PLAN_EDITS } from '../../src/service/analysis/plan-edits.js';
 import { levelBelowPolicyMinimum } from '../../src/service/analysis/baseline-analysis-store.js';
-import { assuranceSelector, ASSURANCE_LEVEL_POLICY_REQUIREMENT, driftEntry } from '../../src/service/task-plan.js';
+import { assuranceSelector, driftEntry } from '../../src/service/task-plan.js';
 import {
   FactualVerificationLedger,
   excerptLocated,
@@ -65,6 +65,9 @@ describe('Factual Review Contract /2 is additive', () => {
     const unit = { ordinal: 1, digest: 'a'.repeat(64), blockIds: ['blk_000000000000000000000001'], overlapBlockIds: [] } as unknown as CoverageManifestUnitProjection;
     const blocks = new Map([['blk_000000000000000000000001', { blockId: 'blk_000000000000000000000001', kind: 'paragraph', level: null, text: '合成段落。' }]]);
     expect(standard.buildUnitMessage(unit, 1, blocks as never)).toBe(buildFactualReviewUnitMessage(unit, 1, blocks as never));
+    // Recorded from the integration baseline de8227ca: the complete /1 system + user message bytes, not just schema identity.
+    expect(sha(JSON.stringify([{ role: 'system', content: quick.systemPrompt },
+      { role: 'user', content: quick.buildUnitMessage(unit, 1, blocks as never) }]))).toBe('b94f66cbc24ffdac111bc6f1e32f7f68cc3326e57c3b82d8f3ddf8fdc1ee8f54');
     // Every frozen factual plan finds its own definition back by digest, the two predecessors included.
     expect([...factualReviewDefinitionsByDigest().keys()].sort()).toEqual([standard.promptContractDigest, strict.promptContractDigest,
       '639d98f1576761aa320d4d48e7df182d389ba537ddef9da2de4a36f45a44592b', FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST].sort());
@@ -109,6 +112,8 @@ describe('the outcome mapping (FACT-006), row by row', () => {
   it('maps each row, never by counting sources', () => {
     expect(map('standard', [exact('支持')]).outcome).toBe('证据支持');
     expect(map('standard', [exact('反驳')]).outcome).toBe('疑似错误');
+    expect(map('standard', [exact('支持')], 'incomplete')).toMatchObject({ outcome: '无法核实', claimSupport: '成立' });
+    expect(map('strict', [exact('反驳'), exact('反驳', 'g2')], 'incomplete').outcome).toBe('无法核实');
     expect(map('standard', [exact('支持'), exact('反驳', 'g2')]).outcome).toBe('证据冲突');
     expect(map('standard', [candidate('支持'), candidate('反驳')]).outcome).toBe('证据不足');
     expect(map('standard', [exact('仅提供背景')]).outcome).toBe('证据不足');
@@ -144,8 +149,18 @@ describe('the outcome mapping (FACT-006), row by row', () => {
       { domain: 'example.cn', publisher: '馆藏', lineage: 'original' },
       { domain: 'example.com', publisher: '档案', lineage: 'translated' },
       { domain: 'example.net', publisher: '报社', lineage: 'original' },
-    ])).toEqual(['g1', 'g1', 'g1', null, 'g2']);
-    expect(excerptLocated('它现藏湖北省 博物馆，是重器。', '现藏湖北省博物馆')).toBe(true);
+    ])).toEqual(['g1', null, 'g1', null, 'g2']);
+    expect(independenceGroups([
+      { domain: 'a.example', publisher: 'one', lineage: 'original' },
+      { domain: 'b.example', publisher: 'two', lineage: 'original' },
+      { domain: 'a.example', publisher: 'two', lineage: 'original' },
+      { domain: 'c.example', publisher: 'two', lineage: 'original' },
+      { domain: null, publisher: null, lineage: 'original' },
+      { domain: 'd.example', publisher: 'three', lineage: null },
+    ])).toEqual(['g1', 'g1', 'g1', 'g1', null, null]);
+    expect(excerptLocated('它现藏湖北省 博物馆，是重器。', '现藏湖北省博物馆')).toBe(false);
+    expect(excerptLocated('public value 1 000 units', '1000')).toBe(false);
+    expect(excerptLocated('public value ² units', '2')).toBe(false);
     expect(excerptLocated('它现藏湖北省博物馆。', '现藏省博物馆')).toBe(false);
     expect(excerptLocated('任何文字', '   ')).toBe(false);
   });
@@ -176,7 +191,7 @@ describe('the level as a plan edit, the selector and the policy pin', () => {
     expect(open.options.map((option) => [option.label, option.disabled])).toEqual([['快速整理', false], ['标准核查', false], ['严格核查', false]]);
     expect(open.options.every((option) => !/更正确|准确率|模型/u.test(option.consequence))).toBe(true);
     const raised = assuranceSelector('strict', { editable: true, reason: null }, 'standard');
-    expect(raised.options.find((option) => option.level === 'quick')).toMatchObject({ disabled: true, requirement: ASSURANCE_LEVEL_POLICY_REQUIREMENT });
+    expect(raised.options.find((option) => option.level === 'quick')).toMatchObject({ disabled: true, requirement: '事实核查政策要求至少采用标准核查，不能选更低的级别。' });
     expect(raised.options.find((option) => option.level === 'strict')).toMatchObject({ disabled: false, requirement: null });
   });
 });
@@ -212,14 +227,36 @@ function retain(db: DatabaseSync, input: { runRecordId: string; url: string; con
 
 function finding(relations: MaterializedFactualFinding['relations'], corrections: MaterializedFactualFinding['corrections'] = []): MaterializedFactualFinding {
   return { reviewFindingId: `rvf_${'d'.repeat(24)}`, findingId: FINDING, blockId: BLOCK, fromGrapheme: 2, toGrapheme: 9, quote: '藏湖北省博物馆', pinnedText: '藏湖北省博物馆', question: '现藏何处？',
-    category: '机构', severity: 'A', heading: '第一章', markId: null, unitOrdinals: [1], relations, corrections };
+    assertionClass: 'real-world-fact', category: '机构', severity: 'A', heading: '第一章', markId: null, unitOrdinals: [1], relations, corrections };
 }
 
 function reader(text: { value: string }): ManuscriptReader {
-  return { currentBlockText: () => text.value, revisionBlocks: () => [{ blockId: BLOCK, text: text.value, heading: '第一章' }] };
+  return { rangeUntouched: () => true, sourceCurrent: () => true, currentBlockText: () => text.value, revisionBlocks: () => [{ blockId: BLOCK, text: text.value, heading: '第一章' }] };
 }
 
 describe('the factual verification ledger', () => {
+  it('keeps an in-Book exact fetch as textual background for a real-world claim and refuses source drift', () => {
+    const { db, ledger } = bareLedger();
+    try {
+      const manuscript = reader({ value: '它现藏湖北省博物馆，是重器。' });
+      const runRecordId = randomUUID();
+      ledger.materialize({ bookId: BOOK, reviewRunId: REVIEW, taskIntentId: randomUUID(), revisionId: randomUUID(),
+        manuscriptRevisionId: 'rev-1', runRecordId, plannedLevel: 'standard', contractLevel: 'standard', findings: [finding([
+          { sourceRef: `retrieval:${'b'.repeat(64)}`, relation: '支持', excerptRef: '原文一句', lineage: 'original',
+            exactFetch: { sourceKind: 'manuscript', sourceId: 'm1', digest: 'd1' } },
+        ])] });
+      const filters = { chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null };
+      const lens = ledger.lens({ bookId: BOOK, reviewRunId: null, after: null, chapterOf: () => null, filters }, manuscript);
+      const result = lens.results[0]!;
+      expect(result.states.factualVerification).toBe('证据不足');
+      expect(ledger.workspace(BOOK, result.resultId, null, manuscript).sources[0]).toMatchObject({ relation: '仅提供背景', checkState: 'exact' });
+      expect(ledger.lens({ bookId: BOOK, reviewRunId: null, after: null, chapterOf: () => null,
+        filters: { ...filters, sourceCondition: 'no-source' } }, manuscript)).toMatchObject({ results: [], total: 0 });
+      expect(() => ledger.recordDecision({ bookId: BOOK, resultId: result.resultId, resultVersion: 1, disposition: 'accept', ownWords: null, reason: null },
+        { ...manuscript, sourceCurrent: () => false })).toThrow('书内来源版本或授权已变化');
+    } finally { db.close(); }
+  });
+
   it('versions one assertion across Runs, supersedes the earlier decision, reuses a current capture, and refuses drift', () => {
     const { db, ledger } = bareLedger();
     const text = { value: '它现藏湖北省博物馆，是重器。' };
@@ -257,6 +294,8 @@ describe('the factual verification ledger', () => {
     // A later capture of the museum page under another hash marks only that source's dependency changed.
     retain(db, { runRecordId: randomUUID(), url: MUSEUM, content: '这件尊盘出土于1978年。它现已移交他馆。', capturedAt: '2026-10-16T04:00:00.000Z' });
     expect(ledger.workspace(BOOK, second.resultId, null, manuscript).decisionCard.drift).toContain('来源版本已变化');
+    expect(() => ledger.recordDecision({ bookId: BOOK, resultId: second.resultId, resultVersion: 2, disposition: 'accept', ownWords: null, reason: null }, manuscript))
+      .toThrow(/来源版本已变化/u);
     // An edit inside the range: 锚点已失效, the result kept as history and never moved.
     text.value = '它现藏湖北某博物馆，是重器。';
     const stale = ledger.workspace(BOOK, second.resultId, null, manuscript);
@@ -266,6 +305,33 @@ describe('the factual verification ledger', () => {
     // Every row is append-only.
     expect(() => db.prepare('DELETE FROM factual_review_decisions').run()).toThrow(/IMMUTABLE/u);
     expect(() => db.prepare("UPDATE factual_verification_results SET level = 'quick'").run()).toThrow(/IMMUTABLE/u);
+  });
+
+  it('refuses expired evidence and checks source drift again before saving a previously accepted correction', () => {
+    const { db, ledger } = bareLedger();
+    const manuscript = reader({ value: '它现藏湖北省博物馆，是重器。' });
+    const run = randomUUID();
+    const capturedAt = new Date().toISOString();
+    retain(db, { runRecordId: run, url: MUSEUM, content: PAGE, capturedAt });
+    const input = { bookId: BOOK, reviewRunId: REVIEW, runRecordId: run, taskIntentId: randomUUID(), revisionId: randomUUID(),
+      manuscriptRevisionId: 'revision-drift', plannedLevel: 'standard' as const, contractLevel: 'standard' as const,
+      findings: [finding([{ sourceRef: `${MUSEUM}#fragment`, relation: '反驳', excerptRef: '它现藏湖北省博物馆', lineage: 'original' }], [{ text: '待改', rationale: '待核' }])] };
+    ledger.materialize(input);
+    const resultId = String(db.prepare('SELECT result_id FROM factual_verification_results').get()!.result_id);
+    ledger.recordDecision({ bookId: BOOK, resultId, resultVersion: 1, disposition: 'accept', ownWords: null, reason: null }, manuscript);
+    const draft = ledger.draft(BOOK, resultId, manuscript);
+    const save = { bookId: BOOK, resultId, resultVersion: 1, variantId: 'v1', text: '待改', rationale: '待核', rangeIds: [draft.ranges[0]!.rangeId] };
+    expect(() => ledger.prepareSave({ ...save, text: 'not the model variant' }, manuscript)).toThrow(/自行编辑/u);
+    const later = new Date(Date.now() + 91 * 86_400_000);
+    expect(ledger.workspace(BOOK, resultId, null, manuscript, later).decisionCard.drift).toContain('来源新鲜度已变化');
+    expect(() => ledger.recordDecision({ bookId: BOOK, resultId, resultVersion: 1, disposition: 'accept', ownWords: null, reason: null }, manuscript, later))
+      .toThrow(/来源新鲜度已变化/u);
+    retain(db, { runRecordId: randomUUID(), url: MUSEUM, content: 'changed public source', capturedAt });
+    expect(() => ledger.prepareSave(save, manuscript)).toThrow(/来源版本已变化/u);
+    // Reusing the older full capture must not certify an excerpt after a different version was captured, even at the same instant.
+    ledger.materialize({ ...input, runRecordId: randomUUID(), manuscriptRevisionId: 'revision-after-drift' });
+    expect(db.prepare('SELECT factual_verification FROM factual_verification_results ORDER BY rowid DESC LIMIT 1').get()!.factual_verification).toBe('证据不足');
+    db.close();
   });
 
   it('records the level a Run executes once, lowering it only on an offline start, and the schema refuses a formal quick outcome', () => {
