@@ -4,19 +4,32 @@ import { opendir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
+  MATERIAL_TRANSLATION_LABEL,
   MAX_MATERIAL_SEGMENTS_PAGE,
+  MAX_MATERIAL_VECTOR_CANDIDATES,
   type LibraryMaterialFormat,
   type MaterialIndexLanguage,
   type MaterialIndexLayerState,
   type MaterialIndexProjection,
   type MaterialIndexReason,
   type MaterialSegmentsPageProjection,
+  type MaterialTranslationProjection,
+  type MaterialVectorSearchProjection,
+  type MaterialVectorsProjection,
 } from '../shared/protocol.js';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
 import { UUID_PATTERN, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { DOC_CONVERTER_IDENTITY, convertDocManuscript } from './doc-manuscript.js';
 import { DOCX_PARSER_IDENTITY, MAX_ARCHIVE_BYTES, parseDocx, type ParsedDocxBlock } from './docx.js';
-import { MATERIAL_FORMAT_CONVERTER_IDENTITIES, MaterialFormatRefusal, extractMaterialFormatText, isMaterialTextFormat } from './material-formats.js';
+import { cosineSimilarity, vectorBytes, vectorFromBytes, vectorNorm, type EmbeddingReadiness } from './knowledge/embedding.js';
+import {
+  MATERIAL_FORMAT_CONVERTER_IDENTITIES,
+  MaterialFormatRefusal,
+  PDF_TEXT_CONVERTER_IDENTITY,
+  extractMaterialFormatText,
+  extractPdfText,
+  isMaterialTextFormat,
+} from './material-formats.js';
 import { TEXT_CONVERTER_IDENTITY, buildManuscriptPackage, convertTextManuscript } from './text-manuscript.js';
 
 /**
@@ -34,17 +47,29 @@ import { TEXT_CONVERTER_IDENTITY, buildManuscriptPackage, convertTextManuscript 
  *    in `material-formats.ts` — fflate and saxes again, and two small tokenizers — into the same paragraphs, packaged and
  *    read through the same DOCX parser;
  * 4. segments — each paragraph with its sentences, every sentence citable by its position anchor (第 n 段第 m 句). These
- *    formats carry no page layout, so the anchors are positions and never claim a page.
+ *    formats carry no page layout, so the anchors are positions and never claim a page. A PDF's text (Issue #892) is read
+ *    from its text layer by `pdfjs-dist` (the Commander's admission of the exact pin, ADR 0070 §3), and its anchors name the
+ *    page: 第 p 页第 m 段, each paragraph on one page. A PDF with no text layer to speak of needs recognition (需要识别).
  *
- * Similarity vectors (相似段落检索) and text recognition for scans need a local embedding, recognition or vector-store
- * dependency the Owner has not admitted (ADR 0070 §3 covers only intake conversion), and machine 来源译文 needs a Model
- * Role: those layers are stated as not provided, never imitated. PDF text is the same: no admitted dependency reads it.
+ * Issue #892 adds the fifth layer and 来源译文, both made only when the editor asks and both kept beside the build they were
+ * made from — so a build made again, from a text read again, starts without them and nothing stale is ever served:
+ *
+ * 5. similarity vectors (相似段落检索) — one vector per paragraph, made on this machine by the store's `EmbeddingProvider`
+ *    and recorded under its identity; a search ranks paragraphs, and the words are read where the anchor points (ADR 0026);
+ *
+ * and, for an item whose text is not Chinese, its 来源译文 — each paragraph's machine translation, labelled and attributed to
+ * the paragraph it translates, never in its place, made by the Fast Interaction Role under the selected policy's rule.
+ *
+ * Text recognition for scans (OCR) is not provided: such a PDF is said to need it, never imitated.
  *
  * An index grants nothing. It is no Run Source Scope; a Task reads it read-only, only for an item its plan lists under
- * 允许参考 at the exact index version it pinned (`readForTask`), and what any Task sends stays bounded by its plan.
+ * 允许参考 at the exact index version it pinned (`readForTask`, `queryForTask`), and what any Task sends stays bounded by its
+ * plan. Its vectors and translations grant no scope, egress or learning eligibility either.
  *
  * Schema revision 67 owns two append-only relations: one build per item per indexer identity — its state, the metadata
  * and layer facts, and the digest over its segments — and the segments of a complete build, one row per paragraph.
+ * Revision 76 (Issue #892) adds two more, append-only as well: the vectors of a build's paragraphs, by provider identity,
+ * and their 来源译文. Neither moves a byte of revision 67's.
  */
 
 export const MATERIAL_INDEX_SCHEMA_SQL = {
@@ -90,6 +115,59 @@ export const MATERIAL_INDEX_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<
 };
 
 /**
+ * Revision 76's relations (Issue #892): the similarity vectors of a build's paragraphs — one per paragraph per provider
+ * identity, naming the build's digest and the segment's own digest it was made from — and the 来源译文 of a build's
+ * paragraphs, one per paragraph, its record naming the model and the policy rule it was made under. Both append-only.
+ */
+export const MATERIAL_INDEX_LAYER_SCHEMA_SQL = {
+  material_index_vectors: `CREATE TABLE material_index_vectors (
+  index_id TEXT NOT NULL REFERENCES material_index_builds(index_id),
+  index_sha256 TEXT NOT NULL CHECK(length(index_sha256) = 64),
+  embedding TEXT NOT NULL CHECK(length(embedding) BETWEEN 1 AND 256),
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+  segment_sha256 TEXT NOT NULL CHECK(length(segment_sha256) = 64),
+  dimensions INTEGER NOT NULL CHECK(dimensions BETWEEN 1 AND 4096),
+  vector BLOB NOT NULL CHECK(length(vector) = dimensions * 4),
+  norm REAL NOT NULL CHECK(norm >= 0),
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY(index_id, embedding, ordinal)
+) STRICT`,
+  material_index_translations: `CREATE TABLE material_index_translations (
+  index_id TEXT NOT NULL REFERENCES material_index_builds(index_id),
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+  segment_sha256 TEXT NOT NULL CHECK(length(segment_sha256) = 64),
+  model TEXT NOT NULL CHECK(length(model) BETWEEN 1 AND 256),
+  recorded_at TEXT NOT NULL,
+  canonical_json TEXT NOT NULL,
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+  PRIMARY KEY(index_id, ordinal)
+) STRICT`,
+} as const;
+
+export const MATERIAL_INDEX_LAYER_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL).flatMap((table) => [
+    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
+    BEFORE UPDATE ON ${table}
+    BEGIN
+      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
+    END`],
+    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
+    BEFORE DELETE ON ${table}
+    BEGIN
+      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
+    END`],
+  ]),
+);
+
+export const MATERIAL_INDEX_LAYER_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  material_index_vectors: ['index_id>material_index_builds.index_id:NO ACTION/NO ACTION/NONE'],
+  material_index_translations: ['index_id>material_index_builds.index_id:NO ACTION/NO ACTION/NONE'],
+};
+
+/** The revision that adds them; a store stamped at or above it must already hold them exactly. */
+const MATERIAL_INDEX_LAYER_REVISION = 76;
+
+/**
  * The indexer's identity: what a build was made by. A build is made once per item per identity, so a later indexer that
  * reads more makes a new build beside the old one, and nothing is rewritten.
  *
@@ -100,29 +178,41 @@ export const MATERIAL_INDEX_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<
  * anchors (`splitSentences`) are not versioned this way: a build made earlier keeps the anchors it was made with, and a
  * plan pins a build by its digest, so what a plan froze never moves under it (#729; #751 review, P3-3).
  */
-export const MATERIAL_INDEXER_IDENTITY = `ai7-material-index/2+${DOCX_PARSER_IDENTITY}`;
+export const MATERIAL_INDEXER_IDENTITY = `ai7-material-index/3+${DOCX_PARSER_IDENTITY}`;
 /**
- * The indexer before this one (#725), which read DOCX, DOC, TXT and MD as this one does and refused HTML, EPUB, ODT and RTF
- * as `format-unsupported` (Issue #428). Its builds stand for this indexer — they are what this one would build — except
- * those refusals, which this one builds again beside them: an item whose text could now be read is read, and no other item
- * is built twice, its digest and any plan pinned to it unmoved.
+ * The indexer before this one (Issue #428), which read every format this one reads but PDF, and refused a PDF as
+ * `needs-local-dependency`. Its builds stand for this indexer — they are what this one would build — except those PDF
+ * refusals, which this one builds again beside them (Issue #892): a PDF is read now, and no other item is built twice, its
+ * digest and any plan pinned to it unmoved.
  */
-export const MATERIAL_INDEXER_PREDECESSOR = `ai7-material-index/1+${DOCX_PARSER_IDENTITY}`;
-/** Which builds stand for the current indexer: its own, and its predecessor's other than a format it could not read. */
-const STANDING_BUILD = `(indexer = ? OR (indexer = ? AND NOT (state = 'unsupported' AND json_extract(canonical_json, '$.reason') = 'format-unsupported')))`;
-const STANDING_PARAMETERS = [MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEXER_PREDECESSOR] as const;
+export const MATERIAL_INDEXER_PREDECESSOR = `ai7-material-index/2+${DOCX_PARSER_IDENTITY}`;
+/**
+ * The first indexer (#725), which read DOCX, DOC, TXT and MD as this one does and refused HTML, EPUB, ODT and RTF as
+ * `format-unsupported` and PDF as `needs-local-dependency`. Its builds stand too, but for those refusals.
+ */
+export const MATERIAL_INDEXER_FIRST = `ai7-material-index/1+${DOCX_PARSER_IDENTITY}`;
+/**
+ * Which builds stand for the current indexer: its own; its predecessor's but a PDF it could not read; the first indexer's
+ * but a format or a PDF it could not read. At most one of them is an item's.
+ */
+const STANDING_BUILD = `(indexer = ? OR (indexer = ? AND NOT (state = 'unsupported' AND json_extract(canonical_json, '$.reason') = 'needs-local-dependency'))
+  OR (indexer = ? AND NOT (state = 'unsupported' AND json_extract(canonical_json, '$.reason') IN ('format-unsupported', 'needs-local-dependency'))))`;
+const STANDING_PARAMETERS = [MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEXER_PREDECESSOR, MATERIAL_INDEXER_FIRST] as const;
 /** Where a converted working copy is written while it is read, inside the Agent Data Root; removed after, and at open. */
 export const MATERIAL_INDEX_WORK_DIRECTORY = 'material-index-work';
 const BUILD_SCHEMA = 'ai7.material-index/1';
 const SEGMENT_SCHEMA = 'ai7.material-index-segment/1';
+const TRANSLATION_SCHEMA = 'ai7.material-index-translation/1';
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'material_index_builds'";
 const WORK_NAME = /^\.work-[0-9a-f-]{36}\.docx$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
-const READABLE: ReadonlySet<LibraryMaterialFormat> = new Set(['DOCX', 'DOC', 'TXT', 'MD', 'HTML', 'EPUB', 'ODT', 'RTF']);
+const READABLE: ReadonlySet<LibraryMaterialFormat> = new Set(['DOCX', 'DOC', 'TXT', 'MD', 'HTML', 'EPUB', 'ODT', 'RTF', 'PDF']);
 const SEGMENT_KINDS: ReadonlySet<string> = new Set(['title', 'heading', 'paragraph']);
 const REASONS: ReadonlySet<MaterialIndexReason> = new Set([
   'needs-local-dependency', 'format-unsupported', 'over-bound', 'unreadable', 'original-changed', 'empty', 'encrypted', 'external-entity',
+  'needs-recognition',
 ]);
+const LAYER_TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?";
 const LANGUAGES: ReadonlySet<MaterialIndexLanguage> = new Set(['zh', 'other', 'none']);
 
 export class MaterialIndexError extends Error {
@@ -137,6 +227,43 @@ function requireIndex(condition: unknown, code: string, message: string): assert
 }
 
 type SqlRow = Record<string, SQLOutputValue>;
+
+function foldSql(sql: string): string {
+  return sql.replace(/\s+/gu, ' ').trim();
+}
+
+/**
+ * Revision 76's relations (Issue #892), created once before the version is stamped: a store that predates them gains two
+ * empty relations and nothing existing moves. A store that holds them must hold them exactly; one stamped 76 or later
+ * without them is refused.
+ */
+export function initializeMaterialIndexLayerSchema(db: DatabaseSync, version: number): void {
+  const present = Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL).filter((table) => db.prepare(LAYER_TABLE_PRESENT).get(table) !== undefined);
+  if (present.length > 0) {
+    validateMaterialIndexLayerSchema(db);
+    return;
+  }
+  requireIndex(version < MATERIAL_INDEX_LAYER_REVISION, 'SCHEMA_INVALID', '资料索引的相似向量与来源译文表缺失。');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const sql of Object.values(MATERIAL_INDEX_LAYER_SCHEMA_SQL)) db.exec(sql);
+    for (const sql of Object.values(MATERIAL_INDEX_LAYER_TRIGGER_SQL)) db.exec(sql);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'Material index layer schema rollback failed.');
+    }
+    throw error;
+  }
+}
+
+/** Every relation and trigger of revision 76 exactly as written, and nothing of it missing. */
+export function validateMaterialIndexLayerSchema(db: DatabaseSync): void {
+  for (const [name, sql] of [...Object.entries(MATERIAL_INDEX_LAYER_SCHEMA_SQL), ...Object.entries(MATERIAL_INDEX_LAYER_TRIGGER_SQL)]) {
+    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name = ?').get(name) as SqlRow | undefined;
+    requireIndex(row !== undefined && typeof row.sql === 'string' && foldSql(row.sql) === foldSql(sql), 'SCHEMA_INVALID', '资料索引的相似向量与来源译文表结构不兼容。');
+  }
+}
 
 /** Revision 67's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
 export function initializeMaterialIndexSchema(db: DatabaseSync): void {
@@ -271,6 +398,8 @@ export interface PreparedMaterialIndex {
   readonly headings: number;
   readonly characters: number;
   readonly language: MaterialIndexLanguage | null;
+  /** A PDF's page count (Issue #892); absent for every format without pages. */
+  readonly pages?: number;
 }
 
 /**
@@ -298,9 +427,12 @@ function* preparing(extraction: MaterialExtraction, indexId: string): Generator<
       if (block.kind !== 'paragraph') headings += 1;
       characters += block.graphemeLength;
       countLetters(block.text, counts);
+      // A PDF paragraph names its page and its place on it (Issue #892); a paragraph of any other format names neither, so its
+      // record is byte for byte what it was before.
       segments.push(canonicalRecord({
         schema: SEGMENT_SCHEMA, indexId, ordinal: index + 1, kind: block.kind, level: block.level,
         sourceParagraphIndex: block.sourceParagraphIndex, text: block.text, sentences: ranges,
+        ...(block.page === undefined ? {} : { page: block.page.page, pageParagraph: block.page.paragraph }),
       }));
       slice += block.text.length;
       if (slice >= MATERIAL_INDEX_PREPARE_SLICE) {
@@ -310,7 +442,10 @@ function* preparing(extraction: MaterialExtraction, indexId: string): Generator<
     }
     language = languageOf(counts);
   }
-  return { indexId, extraction, segments, sentences, headings, characters, language };
+  return {
+    indexId, extraction, segments, sentences, headings, characters, language,
+    ...(extraction.pageCount === undefined ? {} : { pages: extraction.pageCount }),
+  };
 }
 
 /** A build prepared in one piece: for a caller that records it at once. */
@@ -350,14 +485,27 @@ export interface MaterialExtractionInput {
   readonly signal?: AbortSignal;
 }
 
+/** One paragraph as the extraction read it; a PDF's names its page and its place on that page (Issue #892). */
+export type MaterialExtractedBlock = Pick<ParsedDocxBlock, 'kind' | 'level' | 'text' | 'graphemeLength' | 'sourceParagraphIndex'> & {
+  readonly page?: { readonly page: number; readonly paragraph: number };
+};
+
 export type MaterialExtraction =
   | {
     readonly state: 'complete';
     readonly converter: string;
     readonly documentTitle: string | null;
-    readonly blocks: ReadonlyArray<Pick<ParsedDocxBlock, 'kind' | 'level' | 'text' | 'graphemeLength' | 'sourceParagraphIndex'>>;
+    readonly blocks: ReadonlyArray<MaterialExtractedBlock>;
+    /** A PDF's page count; absent for every format without pages. */
+    readonly pageCount?: number;
   }
-  | { readonly state: 'unsupported' | 'failed'; readonly reason: MaterialIndexReason; readonly converter: string | null };
+  | {
+    readonly state: 'unsupported' | 'failed';
+    readonly reason: MaterialIndexReason;
+    readonly converter: string | null;
+    /** A PDF's page count when it was read that far (a scan that needs recognition); absent otherwise. */
+    readonly pageCount?: number;
+  };
 
 /** The extraction stopped because the store is closing: nothing is recorded, and the next open builds it again. */
 export class MaterialIndexAborted extends Error {
@@ -389,16 +537,16 @@ function conversionRefusal(error: unknown): MaterialIndexReason {
  * Root and removed. Nothing it reads leaves this process.
  */
 export async function extractMaterialText(input: MaterialExtractionInput): Promise<MaterialExtraction> {
-  if (input.format === 'PDF') return { state: 'unsupported', reason: 'needs-local-dependency', converter: null };
   if (!READABLE.has(input.format)) return { state: 'unsupported', reason: 'format-unsupported', converter: null };
-  const blocks: Array<Pick<ParsedDocxBlock, 'kind' | 'level' | 'text' | 'graphemeLength' | 'sourceParagraphIndex'>> = [];
+  const blocks: Array<MaterialExtractedBlock> = [];
   const onBlock = (block: ParsedDocxBlock): void => {
     blocks.push({ kind: block.kind, level: block.level, text: block.text, graphemeLength: block.graphemeLength, sourceParagraphIndex: block.sourceParagraphIndex });
   };
   const aborted = (): boolean => input.signal?.aborted === true;
   const format = input.format;
   const converter = format === 'DOCX' ? DOCX_PARSER_IDENTITY
-    : `${format === 'DOC' ? DOC_CONVERTER_IDENTITY : isMaterialTextFormat(format) ? MATERIAL_FORMAT_CONVERTER_IDENTITIES[format] : TEXT_CONVERTER_IDENTITY}+${DOCX_PARSER_IDENTITY}`;
+    : `${format === 'DOC' ? DOC_CONVERTER_IDENTITY : format === 'PDF' ? PDF_TEXT_CONVERTER_IDENTITY
+      : isMaterialTextFormat(format) ? MATERIAL_FORMAT_CONVERTER_IDENTITIES[format] : TEXT_CONVERTER_IDENTITY}+${DOCX_PARSER_IDENTITY}`;
   try {
     if (input.format === 'DOCX') {
       const parsed = await parseDocx(input.originalPath, input.displayName, onBlock,
@@ -421,14 +569,26 @@ export async function extractMaterialText(input: MaterialExtractionInput): Promi
     // The file's own title, for the formats that name one beside their text (a page's <title>, a book's or document's
     // metadata, an RTF's information group).
     let documentTitle: string | null = null;
+    // A PDF's paragraphs on their pages, in the package's paragraph order (Issue #892).
+    let pages: ReadonlyArray<{ readonly page: number; readonly paragraph: number }> | null = null;
+    let pageCount: number | undefined;
     try {
       if (format === 'DOC') docx = (await convertDocManuscript(bytes)).docx;
-      else if (isMaterialTextFormat(format)) {
+      else if (format === 'PDF') {
+        const read = await extractPdfText(bytes, input.signal);
+        documentTitle = read.title;
+        pages = read.pages;
+        pageCount = read.pageCount;
+        docx = buildManuscriptPackage(read.paragraphs);
+      } else if (isMaterialTextFormat(format)) {
         const read = extractMaterialFormatText(bytes, format);
         documentTitle = read.title;
         docx = buildManuscriptPackage(read.paragraphs);
       } else docx = convertTextManuscript(bytes, { format: format as 'TXT' | 'MD' }).docx;
     } catch (error) {
+      if (aborted()) throw new MaterialIndexAborted();
+      // A scan is not unreadable: its original and metadata stand, and its text waits for recognition AI7 does not provide.
+      if (error instanceof MaterialFormatRefusal && error.reason === 'needs-recognition') return { state: 'unsupported', reason: error.reason, converter };
       if (error instanceof MaterialFormatRefusal) return { state: 'failed', reason: error.reason, converter };
       return { state: 'failed', reason: conversionRefusal(error), converter };
     }
@@ -443,7 +603,14 @@ export async function extractMaterialText(input: MaterialExtractionInput): Promi
     }
     if (aborted()) throw new MaterialIndexAborted();
     if (blocks.length === 0) return { state: 'failed', reason: 'empty', converter };
-    return { state: 'complete', converter, documentTitle, blocks };
+    if (pages === null) return { state: 'complete', converter, documentTitle, blocks };
+    // Each paragraph of the package is one paragraph of the PDF, in order: its source paragraph index names its page.
+    const paged = blocks.map((block) => {
+      const page = pages[block.sourceParagraphIndex];
+      requireIndex(page !== undefined, 'MATERIAL_INDEX_INVALID', '资料的分页无效。');
+      return { ...block, page };
+    });
+    return { state: 'complete', converter, documentTitle, blocks: paged, ...(pageCount === undefined ? {} : { pageCount }) };
   } catch (error) {
     if (error instanceof MaterialIndexAborted || aborted()) throw new MaterialIndexAborted();
     const refusal = docxRefusal(error);
@@ -489,6 +656,9 @@ interface StoredSegment {
   readonly text: string;
   readonly sentences: ReadonlyArray<readonly [number, number]>;
   readonly sha256: string;
+  /** A PDF paragraph's page and its place on that page (Issue #892); `null` for every other format. */
+  readonly page: number | null;
+  readonly pageParagraph: number | null;
 }
 
 /** The material a build is of, as the arrival record names it. */
@@ -528,8 +698,70 @@ export interface MaterialTaskReading {
     readonly text: string;
     readonly sentences: ReadonlyArray<{ readonly ordinal: number; readonly text: string; readonly citation: string }>;
   }>;
+  /**
+   * The 来源译文 of this page's paragraphs that were made (Issue #892): a separate layer, never the words of a segment. Each is
+   * labelled 来源译文 and attributed to the paragraph it translates — a citation always names the original.
+   */
+  readonly translations: ReadonlyArray<{
+    readonly ordinal: number;
+    readonly label: typeof MATERIAL_TRANSLATION_LABEL;
+    readonly text: string;
+    readonly model: string;
+    readonly attribution: string;
+  }>;
   readonly next: number | null;
 }
+
+/**
+ * One candidate of a similarity search (Issue #892; ADR 0026): a pointer to a paragraph of a pinned build, ranked by the
+ * cosine of its vector and the query's, with a short preview. It is never a quotation source: the words are read where the
+ * anchor points, at the pinned build (`readForTask` from `ordinal`).
+ */
+export interface MaterialVectorCandidate {
+  readonly materialId: string;
+  readonly indexDigest: string;
+  readonly ordinal: number;
+  readonly page: number | null;
+  readonly anchor: string;
+  readonly score: number;
+  readonly preview: string;
+}
+
+/** A Task's similarity search over the items its plan pinned (Issue #892). */
+export interface MaterialVectorQuery {
+  /** The provider identity the query and the vectors it was compared with were made by. */
+  readonly embedding: string;
+  /** The best `k`, highest score first; ties in the items' and paragraphs' order. */
+  readonly candidates: ReadonlyArray<MaterialVectorCandidate>;
+  /** Pinned items whose pinned build holds no complete vectors of this provider, or a provider not ready: not searched. */
+  readonly unsearched: ReadonlyArray<{ readonly materialId: string; readonly reason: 'vectors-not-built' | 'embedding-not-ready' }>;
+}
+
+/** The provider facts a projection or a search reads: what it is and whether it can embed now. */
+export interface MaterialEmbeddingFacts {
+  readonly identity: string;
+  readonly dimensions: number;
+  readonly readiness: EmbeddingReadiness;
+}
+
+/** What the store knows of the two on-request layers beyond the ledger: work under way, and whether 来源译文 may be asked. */
+export interface MaterialLayerActivity {
+  readonly embedding: MaterialEmbeddingFacts;
+  readonly vectorsBuilding: boolean;
+  readonly translating: boolean;
+  readonly translationRequest: MaterialTranslationProjection['request'];
+  readonly translationFailure: string | null;
+}
+
+/** One paragraph a vector or a translation is still to be made for. */
+export interface MaterialLayerTarget {
+  readonly ordinal: number;
+  readonly text: string;
+  readonly sha256: string;
+}
+
+/** The longest preview a search candidate carries, in code units. */
+const PREVIEW_CODE_UNITS = 120;
 
 /** One build within 最近完成's window, as 待我处理 reads it (ATTN-009). */
 export interface MaterialIndexCompletion {
@@ -546,9 +778,30 @@ export interface MaterialIndexCompletion {
  */
 export type MaterialReferenceAvailability = (materialId: string, bookId: string) => boolean;
 
-/** The citation of one sentence: the item's title and its position anchor. */
-export function materialCitation(title: string, paragraph: number, sentence: number): string {
-  return `《${title}》第 ${paragraph} 段第 ${sentence} 句`;
+/**
+ * The citation of one sentence: the item's title and its position anchor — for a PDF paragraph (Issue #892), its page and its
+ * place on that page.
+ */
+export function materialCitation(title: string, paragraph: number, sentence: number, page: { readonly page: number; readonly paragraph: number } | null = null): string {
+  return page === null ? `《${title}》第 ${paragraph} 段第 ${sentence} 句` : `《${title}》第 ${page.page} 页第 ${page.paragraph} 段第 ${sentence} 句`;
+}
+
+/** The anchor of one paragraph, as a candidate or a 来源译文 names it. */
+export function materialParagraphCitation(title: string, paragraph: number, page: { readonly page: number; readonly paragraph: number } | null = null): string {
+  return page === null ? `《${title}》第 ${paragraph} 段` : `《${title}》第 ${page.page} 页第 ${page.paragraph} 段`;
+}
+
+function pageOf(segment: Pick<StoredSegment, 'page' | 'pageParagraph'>): { page: number; paragraph: number } | null {
+  return segment.page === null || segment.pageParagraph === null ? null : { page: segment.page, paragraph: segment.pageParagraph };
+}
+
+/** A paragraph's preview: its first characters, whole code points, with an ellipsis when cut. */
+function previewOf(text: string): string {
+  if (text.length <= PREVIEW_CODE_UNITS) return text;
+  let end = PREVIEW_CODE_UNITS;
+  const code = text.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+  return `${text.slice(0, end)}…`;
 }
 
 function integer(value: SQLOutputValue | undefined): number {
@@ -586,13 +839,21 @@ export class MaterialIndexLedger {
     requireIndex((metadata.documentTitle === null || typeof metadata.documentTitle === 'string') &&
       (metadata.language === null || LANGUAGES.has(metadata.language as MaterialIndexLanguage)) &&
       naturalCount(metadata.paragraphs) && naturalCount(metadata.headings) && naturalCount(metadata.sentences) && naturalCount(metadata.characters) &&
-      metadata.paragraphs === record.segmentCount,
+      metadata.paragraphs === record.segmentCount && (metadata.pages === undefined || (naturalCount(metadata.pages) && metadata.pages > 0)),
     'MATERIAL_INDEX_RECORD_INVALID', '资料索引的记录已损坏。');
     return {
       indexId: String(row.index_id), materialId: String(row.material_id), state: row.state as StoredBuild['state'],
       reason: record.reason as MaterialIndexReason | null, segmentCount: integer(row.segment_count), recordedAt: String(row.recorded_at),
       sha256: String(row.sha256), segmentsSha256: record.segmentsSha256 as string | null,
-      metadata: metadata as unknown as StoredBuild['metadata'],
+      metadata: {
+        documentTitle: metadata.documentTitle as string | null,
+        language: metadata.language as MaterialIndexLanguage | null,
+        paragraphs: metadata.paragraphs as number,
+        headings: metadata.headings as number,
+        sentences: metadata.sentences as number,
+        characters: metadata.characters as number,
+        pages: metadata.pages === undefined ? null : metadata.pages as number,
+      },
     };
   }
 
@@ -603,7 +864,10 @@ export class MaterialIndexLedger {
     const ordinal = integer(row.ordinal);
     requireIndex(isRecord(record) && record.schema === SEGMENT_SCHEMA && record.indexId === indexId && record.ordinal === ordinal &&
       SEGMENT_KINDS.has(record.kind as string) && typeof record.text === 'string' && record.text.length > 0 && Array.isArray(record.sentences) &&
-      record.sentences.length > 0,
+      record.sentences.length > 0 &&
+      // A PDF paragraph names both its page and its place on it; any other names neither (Issue #892).
+      ((record.page === undefined && record.pageParagraph === undefined) ||
+        (naturalCount(record.page) && record.page > 0 && naturalCount(record.pageParagraph) && record.pageParagraph > 0)),
     'MATERIAL_INDEX_RECORD_INVALID', '资料索引的分段记录已损坏。');
     const text = record.text;
     let previous = 0;
@@ -614,7 +878,11 @@ export class MaterialIndexLedger {
       previous = range[1] as number;
       return [range[0], range[1]] as const;
     });
-    return { ordinal, kind: record.kind as StoredSegment['kind'], text, sentences, sha256: String(row.sha256) };
+    return {
+      ordinal, kind: record.kind as StoredSegment['kind'], text, sentences, sha256: String(row.sha256),
+      page: record.page === undefined ? null : record.page as number,
+      pageParagraph: record.pageParagraph === undefined ? null : record.pageParagraph as number,
+    };
   }
 
   /** The build that stands for the current indexer for one item (`STANDING_BUILD`), verified; `null` before one is made. */
@@ -647,7 +915,7 @@ export class MaterialIndexLedger {
       'MATERIAL_INDEX_MATERIAL_MOVED', '资料库里没有这份资料。');
     requireIndex(this.current(material.materialId) === null, 'MATERIAL_INDEX_EXISTS', '这份资料的索引已经建好。');
     const prepared = 'indexId' in extraction ? extraction : prepareMaterialIndex(extraction);
-    const { indexId, segments, sentences, headings, characters, language } = prepared;
+    const { indexId, segments, sentences, headings, characters, language, pages } = prepared;
     const read = prepared.extraction;
     const build = canonicalRecord({
       schema: BUILD_SCHEMA,
@@ -667,6 +935,8 @@ export class MaterialIndexLedger {
         headings,
         sentences,
         characters,
+        // A PDF's page count (Issue #892); a build of any other format names none, its record unchanged.
+        ...(pages === undefined ? {} : { pages }),
       },
       recordedAt,
     });
@@ -680,29 +950,68 @@ export class MaterialIndexLedger {
   }
 
   /**
-   * The item's index as its card reads it (KB-009): every layer's state honestly, the deferred ones as not provided. `queue`
-   * says whether the store is building it now or it waits its turn, when no build exists yet.
+   * The item's index as its card reads it (KB-009): every layer's state honestly, recognition (OCR) as not provided. `queue`
+   * says whether the store is building it now or it waits its turn, when no build exists yet; `activity` what the store is
+   * making of the two on-request layers (Issue #892) and whether 来源译文 may be asked.
    */
-  projection(material: IndexedMaterial, queue: 'queued' | 'indexing'): MaterialIndexProjection {
+  projection(material: IndexedMaterial, queue: 'queued' | 'indexing', activity: MaterialLayerActivity): MaterialIndexProjection {
     const build = this.current(material.materialId);
-    const recognition: MaterialIndexLayerState = material.format === 'PDF' ? 'deferred' : 'not-needed';
     if (build === null) {
       return {
-        state: queue, reason: null, builtAt: null, digest: null, metadata: null,
-        layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition, translation: 'pending', segments: 'pending', vectors: 'deferred' },
+        state: queue, reason: null, builtAt: null, digest: null, metadata: null, vectors: null, translation: null,
+        layers: {
+          original: 'complete', metadata: 'pending', text: 'pending', recognition: material.format === 'PDF' ? 'pending' : 'not-needed',
+          translation: 'pending', segments: 'pending', vectors: 'pending',
+        },
       };
     }
     const text: MaterialIndexLayerState = build.state === 'complete' ? 'complete'
       : build.reason === 'needs-local-dependency' ? 'deferred' : build.state;
-    const translation: MaterialIndexLayerState = build.state !== 'complete' ? text
-      : build.metadata.language === 'other' ? 'deferred' : 'not-needed';
+    // A scan's text waits for recognition, which is not provided (OCR, Issue #892): said, never imitated.
+    const recognition: MaterialIndexLayerState = build.reason === 'needs-recognition' || build.reason === 'needs-local-dependency' && material.format === 'PDF'
+      ? 'deferred' : 'not-needed';
+    let vectors: MaterialVectorsProjection | null = null;
+    let translation: MaterialTranslationProjection | null = null;
+    if (build.state === 'complete') {
+      const facts = this.#vectorFacts(build.indexId, activity.embedding.identity);
+      const readiness = activity.embedding.readiness;
+      vectors = {
+        state: readiness.state !== 'ready' ? 'needs-model' : activity.vectorsBuilding ? 'building' : facts.built === build.segmentCount ? 'complete' : 'not-built',
+        embedding: activity.embedding.identity,
+        dimensions: activity.embedding.dimensions,
+        built: facts.built,
+        total: build.segmentCount,
+        builtAt: facts.builtAt,
+        expectedDigest: readiness.state === 'ready' ? null : readiness.expectedDigest,
+      };
+      if (build.metadata.language === 'other') {
+        const translated = this.#translationFacts(build.indexId);
+        translation = {
+          state: activity.translating ? 'building' : translated.translated === build.segmentCount ? 'complete' : translated.translated > 0 ? 'partial' : 'not-built',
+          translated: translated.translated,
+          total: build.segmentCount,
+          model: translated.model,
+          request: translated.translated === build.segmentCount
+            ? { available: false, reason: '每段都已有来源译文。' }
+            : activity.translating ? { available: false, reason: '正在生成来源译文。' } : activity.translationRequest,
+          lastFailure: activity.translationFailure,
+        };
+      }
+    }
     return {
       state: build.state,
       reason: build.reason,
       builtAt: build.recordedAt,
       digest: build.sha256,
       metadata: build.metadata,
-      layers: { original: 'complete', metadata: 'complete', text, recognition, translation, segments: text, vectors: 'deferred' },
+      vectors,
+      translation,
+      layers: {
+        original: 'complete', metadata: 'complete', text, recognition,
+        translation: translation?.state ?? (build.state !== 'complete' ? text : 'not-needed'),
+        segments: text,
+        vectors: vectors?.state ?? text,
+      },
     };
   }
 
@@ -752,20 +1061,31 @@ export class MaterialIndexLedger {
       .all(indexId, from, count) as SqlRow[]).map((row) => this.#segment(row, indexId));
   }
 
-  /** 查看分段 (KB-009): one page of the item's paragraphs from `from`, each with its sentence ranges; read-only. */
+  /**
+   * 查看分段 (KB-009): one page of the item's paragraphs from `from`, each with its sentence ranges, a PDF paragraph with its
+   * page, and each paragraph's 来源译文 beside it when one was made (Issue #892); read-only.
+   */
   page(materialId: string, title: string, from: number): MaterialSegmentsPageProjection {
     requireIndex(UUID_PATTERN.test(materialId) && Number.isSafeInteger(from) && from >= 1, 'MATERIAL_INDEX_CURSOR_INVALID', '分段位置无效。');
     const build = this.#complete(materialId);
     requireIndex(from <= build.segmentCount, 'MATERIAL_INDEX_CURSOR_INVALID', '分段位置无效。');
     const segments = this.#segments(build.indexId, from, MAX_MATERIAL_SEGMENTS_PAGE);
     const last = from + segments.length - 1;
+    const translations = this.#translations(build, segments);
     return {
       materialId,
       title,
       indexDigest: build.sha256,
       total: build.segmentCount,
       from,
-      segments: segments.map((segment) => ({ ordinal: segment.ordinal, kind: segment.kind, text: segment.text, sentences: segment.sentences })),
+      segments: segments.map((segment) => {
+        const translation = translations.get(segment.ordinal);
+        return {
+          ordinal: segment.ordinal, kind: segment.kind, text: segment.text, sentences: segment.sentences,
+          page: segment.page, pageParagraph: segment.pageParagraph,
+          translation: translation === undefined ? null : { text: translation.text, model: translation.model },
+        };
+      }),
       next: last < build.segmentCount ? last + 1 : null,
       previous: from > 1 ? Math.max(1, from - MAX_MATERIAL_SEGMENTS_PAGE) : null,
     };
@@ -796,6 +1116,7 @@ export class MaterialIndexLedger {
     requireIndex(from <= build.segmentCount, 'MATERIAL_INDEX_CURSOR_INVALID', '分段位置无效。');
     const segments = this.#segments(build.indexId, from, MAX_MATERIAL_SEGMENTS_PAGE);
     const last = from + segments.length - 1;
+    const translations = this.#translations(build, segments);
     return {
       materialId,
       indexDigest: build.sha256,
@@ -805,9 +1126,16 @@ export class MaterialIndexLedger {
         kind: segment.kind,
         text: segment.text,
         sentences: segment.sentences.map(([start, end], index) => ({
-          ordinal: index + 1, text: segment.text.slice(start, end), citation: materialCitation(title, segment.ordinal, index + 1),
+          ordinal: index + 1, text: segment.text.slice(start, end), citation: materialCitation(title, segment.ordinal, index + 1, pageOf(segment)),
         })),
       })),
+      translations: segments.flatMap((segment) => {
+        const translation = translations.get(segment.ordinal);
+        return translation === undefined ? [] : [{
+          ordinal: segment.ordinal, label: MATERIAL_TRANSLATION_LABEL, text: translation.text, model: translation.model,
+          attribution: materialParagraphCitation(title, segment.ordinal, pageOf(segment)),
+        }];
+      }),
       next: last < build.segmentCount ? last + 1 : null,
     };
   }
@@ -841,5 +1169,277 @@ export class MaterialIndexLedger {
       const build = this.#build(row);
       return { materialId: build.materialId, indexId: build.indexId, state: build.state, recordedAt: build.recordedAt, sha256: build.sha256 };
     });
+  }
+
+  // ---- the two on-request layers (Issue #892) ------------------------------------------------------------------------
+
+  #layerPresent(table: keyof typeof MATERIAL_INDEX_LAYER_SCHEMA_SQL): boolean {
+    return this.#db.prepare(LAYER_TABLE_PRESENT).get(table) !== undefined;
+  }
+
+  /** How many of a build's paragraphs have their vector by `embedding`, and when the last was recorded. */
+  #vectorFacts(indexId: string, embedding: string): { built: number; builtAt: string | null } {
+    if (!this.#layerPresent('material_index_vectors')) return { built: 0, builtAt: null };
+    const row = this.#db.prepare('SELECT count(*) AS built, max(recorded_at) AS built_at FROM material_index_vectors WHERE index_id = ? AND embedding = ?')
+      .get(indexId, embedding) as SqlRow;
+    return { built: integer(row.built), builtAt: row.built_at === null ? null : String(row.built_at) };
+  }
+
+  /** How many of a build's paragraphs have their 来源译文, and the model that made the latest. */
+  #translationFacts(indexId: string): { translated: number; model: string | null } {
+    if (!this.#layerPresent('material_index_translations')) return { translated: 0, model: null };
+    const row = this.#db.prepare(
+      `SELECT count(*) AS translated,
+        (SELECT model FROM material_index_translations WHERE index_id = ? ORDER BY recorded_at DESC, ordinal DESC LIMIT 1) AS model
+       FROM material_index_translations WHERE index_id = ?`,
+    ).get(indexId, indexId) as SqlRow;
+    return { translated: integer(row.translated), model: row.model === null ? null : String(row.model) };
+  }
+
+  /** One recorded 来源译文, verified against its digest, its columns, its build and the paragraph it translates. */
+  #translation(row: SqlRow, build: StoredBuild, segment: StoredSegment): { text: string; model: string } {
+    const json = String(row.canonical_json);
+    requireIndex(sha256Hex(json) === String(row.sha256), 'MATERIAL_INDEX_RECORD_INVALID', '资料索引的来源译文记录已损坏。');
+    const record = JSON.parse(json) as unknown;
+    requireIndex(isRecord(record) && record.schema === TRANSLATION_SCHEMA && record.indexId === build.indexId && record.indexSha256 === build.sha256 &&
+      record.ordinal === segment.ordinal && record.segmentSha256 === segment.sha256 && row.segment_sha256 === segment.sha256 &&
+      record.label === MATERIAL_TRANSLATION_LABEL && typeof record.text === 'string' && record.text.length > 0 &&
+      record.model === row.model && record.recordedAt === row.recorded_at,
+    'MATERIAL_INDEX_RECORD_INVALID', '资料索引的来源译文记录已损坏。');
+    return { text: record.text, model: String(row.model) };
+  }
+
+  /** The 来源译文 recorded for these paragraphs of a verified build, by ordinal. */
+  #translations(build: StoredBuild, segments: ReadonlyArray<StoredSegment>): Map<number, { text: string; model: string }> {
+    const found = new Map<number, { text: string; model: string }>();
+    if (segments.length === 0 || !this.#layerPresent('material_index_translations')) return found;
+    const byOrdinal = new Map(segments.map((segment) => [segment.ordinal, segment]));
+    const rows = this.#db.prepare('SELECT * FROM material_index_translations WHERE index_id = ? AND ordinal BETWEEN ? AND ? ORDER BY ordinal')
+      .all(build.indexId, segments[0]!.ordinal, segments.at(-1)!.ordinal) as SqlRow[];
+    for (const row of rows) {
+      const segment = byOrdinal.get(integer(row.ordinal));
+      if (segment !== undefined) found.set(segment.ordinal, this.#translation(row, build, segment));
+    }
+    return found;
+  }
+
+  /** A complete current build's paragraphs that still lack a row in `table` (by `embedding` for vectors), at most `limit`. */
+  #targets(build: StoredBuild, table: 'material_index_vectors' | 'material_index_translations', embedding: string | null, limit: number): MaterialLayerTarget[] {
+    const rows = (table === 'material_index_vectors'
+      ? this.#db.prepare(`SELECT s.* FROM material_index_segments s WHERE s.index_id = ? AND NOT EXISTS
+          (SELECT 1 FROM material_index_vectors v WHERE v.index_id = s.index_id AND v.embedding = ? AND v.ordinal = s.ordinal) ORDER BY s.ordinal LIMIT ?`)
+        .all(build.indexId, embedding, limit)
+      : this.#db.prepare(`SELECT s.* FROM material_index_segments s WHERE s.index_id = ? AND NOT EXISTS
+          (SELECT 1 FROM material_index_translations t WHERE t.index_id = s.index_id AND t.ordinal = s.ordinal) ORDER BY s.ordinal LIMIT ?`)
+        .all(build.indexId, limit)) as SqlRow[];
+    return rows.map((row) => {
+      const segment = this.#segment(row, build.indexId);
+      return { ordinal: segment.ordinal, text: segment.text, sha256: segment.sha256 };
+    });
+  }
+
+  /**
+   * 构建相似索引's next paragraphs (Issue #892): the item's current build — complete, every segment verified — and up to
+   * `limit` of its paragraphs without a vector by `embedding`, in order. None left means its vectors are complete.
+   */
+  vectorTargets(materialId: string, embedding: string, limit: number): { indexId: string; indexSha256: string; total: number; targets: MaterialLayerTarget[] } {
+    requireIndex(UUID_PATTERN.test(materialId) && Number.isSafeInteger(limit) && limit >= 1, 'MATERIAL_INDEX_INVALID', '资料标识无效。');
+    requireIndex(this.#layerPresent('material_index_vectors'), 'MATERIAL_INDEX_NOT_READY', '这份资料的相似索引还不能建立。');
+    const build = this.#complete(materialId);
+    return { indexId: build.indexId, indexSha256: build.sha256, total: build.segmentCount, targets: this.#targets(build, 'material_index_vectors', embedding, limit) };
+  }
+
+  /**
+   * Some paragraphs' vectors recorded, inside the caller's transaction (Issue #892): each against the build it was made from,
+   * by its digest, and the segment digest it was made from; a paragraph that already has its vector by this identity, or a
+   * build that is gone, refuses the write. Nothing earlier is touched.
+   */
+  recordVectors(
+    target: { readonly indexId: string; readonly indexSha256: string },
+    embedding: { readonly identity: string; readonly dimensions: number },
+    rows: ReadonlyArray<{ readonly ordinal: number; readonly sha256: string; readonly vector: Float32Array }>,
+    recordedAt = new Date().toISOString(),
+  ): void {
+    const build = this.#db.prepare('SELECT sha256 FROM material_index_builds WHERE index_id = ?').get(target.indexId) as SqlRow | undefined;
+    requireIndex(build !== undefined && build.sha256 === target.indexSha256, 'MATERIAL_INDEX_MOVED', '这份资料的索引版本已不在本机。');
+    const segment = this.#db.prepare('SELECT sha256 FROM material_index_segments WHERE index_id = ? AND ordinal = ?');
+    const insert = this.#db.prepare(
+      `INSERT INTO material_index_vectors(index_id, index_sha256, embedding, ordinal, segment_sha256, dimensions, vector, norm, recorded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const row of rows) {
+      requireIndex(row.vector.length === embedding.dimensions && row.vector.every(Number.isFinite), 'MATERIAL_INDEX_INVALID', '相似向量无效。');
+      requireIndex((segment.get(target.indexId, row.ordinal) as SqlRow | undefined)?.sha256 === row.sha256, 'MATERIAL_INDEX_MOVED', '这份资料的分段已不是建立相似索引时读到的样子。');
+      insert.run(target.indexId, target.indexSha256, embedding.identity, row.ordinal, row.sha256, embedding.dimensions, vectorBytes(row.vector), vectorNorm(row.vector), recordedAt);
+    }
+  }
+
+  /**
+   * Every vector of a verified build by `embedding`, each matched to its build's digest, the segment it was made from, its
+   * dimensions and its recorded norm; `null` when not every paragraph has one yet.
+   */
+  #vectors(build: StoredBuild, embedding: MaterialEmbeddingFacts): Array<{ ordinal: number; vector: Float32Array; norm: number }> | null {
+    if (!this.#layerPresent('material_index_vectors')) return null;
+    const rows = this.#db.prepare(
+      `SELECT v.*, s.sha256 AS segment_row_sha256 FROM material_index_vectors v
+       LEFT JOIN material_index_segments s ON s.index_id = v.index_id AND s.ordinal = v.ordinal
+       WHERE v.index_id = ? AND v.embedding = ? ORDER BY v.ordinal`,
+    ).all(build.indexId, embedding.identity) as SqlRow[];
+    if (rows.length !== build.segmentCount) return null;
+    return rows.map((row, index) => {
+      const bytes = row.vector instanceof Uint8Array ? row.vector : null;
+      const vector = bytes === null ? null : vectorFromBytes(bytes, embedding.dimensions);
+      const norm = Number(row.norm);
+      requireIndex(integer(row.ordinal) === index + 1 && row.index_sha256 === build.sha256 && row.segment_sha256 === row.segment_row_sha256 &&
+        integer(row.dimensions) === embedding.dimensions && vector !== null && Math.abs(vectorNorm(vector) - norm) <= 1e-4 * Math.max(1, norm),
+      'MATERIAL_INDEX_RECORD_INVALID', '资料索引的相似向量记录已损坏。');
+      return { ordinal: index + 1, vector, norm };
+    });
+  }
+
+  /**
+   * The best `k` of a build's paragraphs for a query vector: highest cosine first, the earlier paragraph first on a tie. A
+   * paragraph nothing like the query (a cosine of zero or less) is no candidate.
+   */
+  #rank(vectors: ReadonlyArray<{ ordinal: number; vector: Float32Array; norm: number }>, query: Float32Array, k: number): Array<{ ordinal: number; score: number }> {
+    const queryNorm = vectorNorm(query);
+    return vectors.map((entry) => ({ ordinal: entry.ordinal, score: cosineSimilarity(entry.vector, entry.norm, query, queryNorm) }))
+      .filter((entry) => entry.score > 0)
+      .sort((left, right) => right.score - left.score || left.ordinal - right.ordinal)
+      .slice(0, k);
+  }
+
+  #segmentAt(indexId: string, ordinal: number): StoredSegment {
+    const row = this.#db.prepare('SELECT * FROM material_index_segments WHERE index_id = ? AND ordinal = ?').get(indexId, ordinal) as SqlRow | undefined;
+    requireIndex(row !== undefined, 'MATERIAL_INDEX_RECORD_INVALID', '资料索引的分段记录已损坏。');
+    return this.#segment(row, indexId);
+  }
+
+  /**
+   * 相似段落检索 in an item's 查看索引 (Issue #892): its current build's paragraphs nearest the query, by the vectors the editor
+   * built; read-only. Refused while the vectors are not complete, or the provider cannot embed.
+   */
+  search(materialId: string, embedding: MaterialEmbeddingFacts, query: Float32Array, k: number): MaterialVectorSearchProjection {
+    requireIndex(UUID_PATTERN.test(materialId) && Number.isSafeInteger(k) && k >= 1 && k <= MAX_MATERIAL_VECTOR_CANDIDATES, 'MATERIAL_INDEX_INVALID', '检索条件无效。');
+    const build = this.#complete(materialId);
+    requireIndex(embedding.readiness.state === 'ready', 'MATERIAL_VECTORS_NEED_MODEL', '相似索引的模型文件不在本机或摘要不符。');
+    const vectors = this.#vectors(build, embedding);
+    requireIndex(vectors !== null, 'MATERIAL_VECTORS_NOT_BUILT', '这份资料的相似索引还没有建好：先「构建相似索引」。');
+    return {
+      materialId,
+      indexDigest: build.sha256,
+      embedding: embedding.identity,
+      candidates: this.#rank(vectors, query, k).map(({ ordinal, score }) => {
+        const segment = this.#segmentAt(build.indexId, ordinal);
+        return { ordinal, page: segment.page, pageParagraph: segment.pageParagraph, score: Math.round(score * 10_000) / 10_000, preview: previewOf(segment.text) };
+      }),
+    };
+  }
+
+  /**
+   * A Task's similarity search (Issue #892; ADR 0026, ADR 0047): read-only, within its plan boundary exactly as `readForTask`
+   * — every item searched is one its plan lists, at the build its plan pinned, which this Book's Tasks may still list; an item
+   * named that the plan does not list, an item no longer referable, or a pinned build gone, refuses the whole search. Each
+   * pinned build is searched by its own vectors; one without complete vectors of this provider is listed as not searched,
+   * never built here. Nothing is written, sent or scheduled, and no scope, egress or learning eligibility follows from it.
+   */
+  queryForTask(
+    boundary: MaterialReferenceBoundary,
+    materialIds: ReadonlyArray<string> | undefined,
+    embedding: MaterialEmbeddingFacts,
+    query: Float32Array | null,
+    k: number,
+    available: MaterialReferenceAvailability,
+    titleOf: (materialId: string) => string,
+  ): MaterialVectorQuery {
+    requireIndex(UUID_PATTERN.test(boundary.bookId) && Number.isSafeInteger(k) && k >= 1 && k <= MAX_MATERIAL_VECTOR_CANDIDATES &&
+      (materialIds === undefined || materialIds.every((id) => UUID_PATTERN.test(id))), 'MATERIAL_INDEX_INVALID', '检索条件无效。');
+    const pins = materialIds === undefined ? boundary.references : materialIds.map((materialId) => {
+      const pin = boundary.references.find((reference) => reference.materialId === materialId);
+      requireIndex(pin !== undefined, 'MATERIAL_OUTSIDE_PLAN', '这份资料不在这项任务计划的「允许参考」里。');
+      return pin;
+    });
+    const builds = pins.map((pin) => {
+      requireIndex(available(pin.materialId, boundary.bookId), 'MATERIAL_REFERENCE_UNAVAILABLE', '这份资料现在不能列进这本书任务的「允许参考」。');
+      return { pin, build: this.#pinned(pin.materialId, pin.indexDigest) };
+    });
+    const unsearched: Array<MaterialVectorQuery['unsearched'][number]> = [];
+    const ranked: Array<{ materialId: string; build: StoredBuild; ordinal: number; score: number }> = [];
+    for (const { pin, build } of builds) {
+      if (embedding.readiness.state !== 'ready' || query === null) {
+        unsearched.push({ materialId: pin.materialId, reason: 'embedding-not-ready' });
+        continue;
+      }
+      const vectors = this.#vectors(build, embedding);
+      if (vectors === null) {
+        unsearched.push({ materialId: pin.materialId, reason: 'vectors-not-built' });
+        continue;
+      }
+      for (const entry of this.#rank(vectors, query, k)) ranked.push({ materialId: pin.materialId, build, ...entry });
+    }
+    const order = new Map(builds.map(({ pin }, index) => [pin.materialId, index]));
+    const best = ranked.sort((left, right) => right.score - left.score || order.get(left.materialId)! - order.get(right.materialId)! || left.ordinal - right.ordinal).slice(0, k);
+    return {
+      embedding: embedding.identity,
+      candidates: best.map(({ materialId, build, ordinal, score }) => {
+        const segment = this.#segmentAt(build.indexId, ordinal);
+        return {
+          materialId, indexDigest: build.sha256, ordinal, page: segment.page,
+          anchor: materialParagraphCitation(titleOf(materialId), ordinal, pageOf(segment)),
+          score: Math.round(score * 10_000) / 10_000,
+          preview: previewOf(segment.text),
+        };
+      }),
+      unsearched,
+    };
+  }
+
+  /**
+   * 生成来源译文's next paragraphs (Issue #892): the item's current build — complete, every segment verified, its text not
+   * Chinese — and up to `limit` of its paragraphs without a 来源译文, in order. None left means every paragraph has one.
+   */
+  translationTargets(materialId: string, limit: number): { indexId: string; indexSha256: string; total: number; targets: MaterialLayerTarget[] } {
+    requireIndex(UUID_PATTERN.test(materialId) && Number.isSafeInteger(limit) && limit >= 1, 'MATERIAL_INDEX_INVALID', '资料标识无效。');
+    requireIndex(this.#layerPresent('material_index_translations'), 'MATERIAL_INDEX_NOT_READY', '这份资料的来源译文还不能生成。');
+    const build = this.#complete(materialId);
+    requireIndex(build.metadata.language === 'other', 'MATERIAL_TRANSLATION_NOT_NEEDED', '这份资料是中文，不需要来源译文。');
+    return { indexId: build.indexId, indexSha256: build.sha256, total: build.segmentCount, targets: this.#targets(build, 'material_index_translations', null, limit) };
+  }
+
+  /** How many of the item's current build's paragraphs still have no 来源译文. */
+  translationRemaining(materialId: string): number {
+    const build = this.#complete(materialId);
+    return build.segmentCount - this.#translationFacts(build.indexId).translated;
+  }
+
+  /**
+   * Some paragraphs' 来源译文 recorded, inside the caller's transaction (Issue #892): each labelled, attributed to the paragraph
+   * it translates by the build's digest and the segment's own digest, and naming the model, route, rule and contract it was
+   * made under. A paragraph that already has one, or a build that is gone, refuses the write; nothing earlier is touched.
+   */
+  recordTranslations(
+    target: { readonly indexId: string; readonly indexSha256: string },
+    made: { readonly model: string; readonly route: string; readonly policyRuleId: string | null; readonly promptContractDigest: string },
+    rows: ReadonlyArray<{ readonly ordinal: number; readonly sha256: string; readonly text: string }>,
+    recordedAt = new Date().toISOString(),
+  ): void {
+    const build = this.#db.prepare('SELECT sha256 FROM material_index_builds WHERE index_id = ?').get(target.indexId) as SqlRow | undefined;
+    requireIndex(build !== undefined && build.sha256 === target.indexSha256, 'MATERIAL_INDEX_MOVED', '这份资料的索引版本已不在本机。');
+    requireIndex(made.model.length >= 1 && made.model.length <= 256 && DIGEST_PATTERN.test(made.promptContractDigest), 'MATERIAL_INDEX_INVALID', '来源译文的来历无效。');
+    const segment = this.#db.prepare('SELECT sha256 FROM material_index_segments WHERE index_id = ? AND ordinal = ?');
+    const insert = this.#db.prepare(
+      `INSERT INTO material_index_translations(index_id, ordinal, segment_sha256, model, recorded_at, canonical_json, sha256)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const row of rows) {
+      requireIndex(row.text.length > 0 && row.text.isWellFormed(), 'MATERIAL_INDEX_INVALID', '来源译文无效。');
+      requireIndex((segment.get(target.indexId, row.ordinal) as SqlRow | undefined)?.sha256 === row.sha256, 'MATERIAL_INDEX_MOVED', '这份资料的分段已不是请求来源译文时读到的样子。');
+      const record = canonicalRecord({
+        schema: TRANSLATION_SCHEMA, indexId: target.indexId, indexSha256: target.indexSha256, ordinal: row.ordinal, segmentSha256: row.sha256,
+        label: MATERIAL_TRANSLATION_LABEL, text: row.text, model: made.model, route: made.route, policyRuleId: made.policyRuleId,
+        promptContractDigest: made.promptContractDigest, recordedAt,
+      });
+      insert.run(target.indexId, row.ordinal, row.sha256, made.model, recordedAt, record.json, record.digest);
+    }
   }
 }

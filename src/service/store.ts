@@ -658,13 +658,32 @@ import {
   MaterialIndexError,
   MaterialIndexLedger,
   extractMaterialText,
+  initializeMaterialIndexLayerSchema,
   initializeMaterialIndexSchema,
   prepareMaterialIndexInSlices,
   sweepMaterialIndexWork,
+  type MaterialEmbeddingFacts,
+  type MaterialLayerActivity,
   type MaterialReferenceBoundary,
   type MaterialReferencePin,
   type MaterialTaskReading,
+  type MaterialVectorQuery,
 } from './material-index.js';
+import type { EmbeddingProvider } from './knowledge/embedding.js';
+import { StubEmbeddingProvider } from './knowledge/embedding-stub.js';
+import {
+  MATERIAL_TRANSLATION_BATCH_CODE_UNITS,
+  MATERIAL_TRANSLATION_BATCH_PARAGRAPHS,
+  MATERIAL_TRANSLATION_NOT_ADMITTED,
+  MAX_MATERIAL_TRANSLATION_REQUESTS,
+  type MaterialTranslator,
+} from './fast-role/material-translation-contract.js';
+import {
+  MAX_MATERIAL_VECTOR_CANDIDATES,
+  MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS,
+  type MaterialTranslationProjection,
+  type MaterialVectorSearchProjection,
+} from '../shared/protocol.js';
 import {
   BUILTIN_EVALUATION_PROFILE,
   EvaluationError,
@@ -1004,7 +1023,7 @@ import {
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   MODEL_CLARIFICATION_SCHEMA_VERSION,
-  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION,
+  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -2295,7 +2314,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2359,7 +2378,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2737,7 +2756,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2790,7 +2809,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2935,7 +2954,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2987,7 +3006,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3484,7 +3503,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3536,7 +3555,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4438,6 +4457,11 @@ const WAITING_TASK_MOVED_FALLBACK = '计划依据的内容';
 export const EVALUATION_PROFILE_UNKNOWN_ID = 'unknown/merged-profile';
 export const EVALUATION_PROFILE_UNKNOWN_TITLE = '未知版本';
 
+/** How many paragraphs 构建相似索引 embeds and writes at a time (Issue #892): the service takes its other work between two. */
+const MATERIAL_VECTOR_BATCH = 256;
+/** Why the two on-request layers are not made while a database replacement waits (Issue #892). */
+const MATERIAL_LAYERS_READ_ONLY = '数据库替换正在等待：资料索引暂不建立新的层。';
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -4513,6 +4537,19 @@ export class EditorialStore {
   #indexStopped = false;
   /** Set once the service serves (`startMaterialIndexing`): a store opened for any other purpose builds no index by itself. */
   #indexEnabled = false;
+  /**
+   * 相似段落检索 (Issue #892): what makes the similarity vectors on this machine — the deterministic built-in provider until a
+   * model adapter is admitted — and the items whose vectors the editor asked for, in order, and the one being built now.
+   */
+  readonly #embedding: EmbeddingProvider = new StubEmbeddingProvider();
+  readonly #vectorQueue: string[] = [];
+  #vectorBuilding: string | null = null;
+  #vectorRun: Promise<void> | null = null;
+  /** 来源译文 (Issue #892): who makes it, if this launch can; the item being translated now; why an item's last request stopped. */
+  #translator: MaterialTranslator | null = null;
+  #translating: string | null = null;
+  #translationRun: Promise<void> | null = null;
+  readonly #translationFailures = new Map<string, string>();
   readonly #learningEligibility: LearningEligibilityLedger;
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
@@ -4608,7 +4645,7 @@ export class EditorialStore {
     this.#researchEvidence = new ResearchEvidenceLedger(authority);
     this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot, (material) =>
       this.#materialIndex.projection({ materialId: material.materialId, sha256: material.sha256, format: material.source.format },
-        this.#indexing === material.materialId ? 'indexing' : 'queued'));
+        this.#indexing === material.materialId ? 'indexing' : 'queued', this.#layerActivity(material.materialId, material.source.sha256)));
     this.#learningEligibility = new LearningEligibilityLedger(authority);
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#series = new SeriesLedger(authority);
@@ -4947,6 +4984,8 @@ export class EditorialStore {
       initializeSearchBackendSchema(authority);
       // Revision 75 (Issue #425, S70): the retained external evidence of research Runs.
       initializeResearchEvidenceSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
+      // Revision 76 (Issue #892): the Material Index's similarity vectors and 来源译文.
+      initializeMaterialIndexLayerSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -7371,6 +7410,8 @@ export class EditorialStore {
     this.#indexStopped = true;
     this.#indexQueue.length = 0;
     this.#indexController?.abort();
+    // Vectors and 来源译文 asked for stop after the batch under way; what was recorded stays, the rest is asked for again (#892).
+    this.#vectorQueue.length = 0;
     // A backup still under way stops at its next chunk rather than write on past the store (Issue #434 review).
     void this.#scheduledBackups.stop();
     // A database export still under way stops as 取消导出 stops it (Issue #434 review).
@@ -9250,7 +9291,8 @@ export class EditorialStore {
    * is not prepared meanwhile (`replacementBlockedBy`), as it is not while a Run or a 后台分析登记 pass is under way.
    */
   materialIndexing(): boolean {
-    return this.#indexRun !== null;
+    // Similarity vectors and 来源译文 asked for write too (Issue #892).
+    return this.#indexRun !== null || this.#vectorRun !== null || this.#translationRun !== null;
   }
 
   /**
@@ -9265,6 +9307,14 @@ export class EditorialStore {
   /** Resolves once the queue is empty: for a caller that must see the index built. */
   async settleMaterialIndexing(): Promise<void> {
     while (this.#indexRun !== null) await this.#indexRun;
+  }
+
+  /** Resolves once no similarity vectors or 来源译文 are being made (Issue #892): for a caller that must see them recorded. */
+  async settleMaterialLayers(): Promise<void> {
+    while (this.#vectorRun !== null || this.#translationRun !== null) {
+      await this.#vectorRun;
+      await this.#translationRun;
+    }
   }
 
   #scheduleMaterialIndex(materialIds: ReadonlyArray<string>): void {
@@ -9360,6 +9410,193 @@ export class EditorialStore {
       const original = this.#libraryMaterials.original(materialId);
       return this.#materialIndex.readForTask(boundary, materialId, original.title, from, (id, book) => this.#libraryMaterials.available(id, book));
     });
+  }
+
+  // ---- 相似段落检索 and 来源译文 (Issue #892; editor-surfaces §8.4, V2-UX-KB-009) ---------------------------------------------
+
+  /** The store's similarity provider: the built-in one in every test, CI run and test guest, and until a model adapter is admitted. */
+  embeddingProvider(): EmbeddingProvider {
+    return this.#embedding;
+  }
+
+  #embeddingFacts(): MaterialEmbeddingFacts {
+    return { identity: this.#embedding.identity, dimensions: this.#embedding.dimensions, readiness: this.#embedding.readiness() };
+  }
+
+  /** Who makes 来源译文 under this launch — the service sets it once it serves; `null` refuses every request. */
+  useMaterialTranslator(translator: MaterialTranslator | null): void {
+    this.#translator = translator;
+  }
+
+  /** Whether 生成来源译文 may be asked for an item, by its original's SHA-256, now; in the editor's words when not. */
+  #translationRequest(sha256: string): MaterialTranslationProjection['request'] {
+    if (this.replacementFrozen()) return { available: false, reason: MATERIAL_LAYERS_READ_ONLY };
+    if (this.#translating !== null) return { available: false, reason: '另一份资料的来源译文正在生成；请等它完成。' };
+    const reason = this.#translator === null ? MATERIAL_TRANSLATION_NOT_ADMITTED : this.#translator.refusal(sha256);
+    return { available: reason === null, reason };
+  }
+
+  #layerActivity(materialId: string, sha256: string): MaterialLayerActivity {
+    return {
+      embedding: this.#embeddingFacts(),
+      vectorsBuilding: this.#vectorBuilding === materialId || this.#vectorQueue.includes(materialId),
+      translating: this.#translating === materialId,
+      translationRequest: this.#translationRequest(sha256),
+      translationFailure: this.#translationFailures.get(materialId) ?? null,
+    };
+  }
+
+  /**
+   * 构建相似索引 (Issue #892; KB-009): the item's current build gets its similarity vectors, made on this machine by the
+   * store's provider, a batch at a time beside the service's other work — never on open, only when the editor asks. Refused
+   * before its text was read, while the provider's model files are missing, or while a database replacement waits; asking
+   * again for vectors already complete or under way changes nothing. Nothing is sent.
+   */
+  buildMaterialVectors(materialId: string): LibraryMaterialProjection {
+    requireStore(typeof materialId === 'string' && UUID_PATTERN.test(materialId), 'LIBRARY_MATERIAL_INVALID', '资料标识无效。');
+    this.#libraryCall(() => this.#libraryMaterials.original(materialId));
+    const pending = this.#materialIndexCall(() => this.#materialIndex.vectorTargets(materialId, this.#embedding.identity, 1));
+    requireStore(this.#embedding.readiness().state === 'ready', 'MATERIAL_VECTORS_NEED_MODEL', '相似索引的模型文件不在本机或摘要不符：请在 设置 › 本机 › 相似索引模型 处理。');
+    requireStore(!this.replacementFrozen(), 'MATERIAL_INDEX_READ_ONLY', MATERIAL_LAYERS_READ_ONLY);
+    if (pending.targets.length > 0 && !this.#indexStopped && this.#vectorBuilding !== materialId && !this.#vectorQueue.includes(materialId)) {
+      this.#vectorQueue.push(materialId);
+      if (this.#vectorRun === null) {
+        this.#vectorRun = this.#pumpMaterialVectors().finally(() => {
+          this.#vectorRun = null;
+        });
+      }
+    }
+    return this.inspectLibraryMaterial(materialId);
+  }
+
+  /**
+   * One item's vectors after another, `MATERIAL_VECTOR_BATCH` paragraphs at a time: each batch embedded outside any
+   * transaction, then written in one, the service taking its other work between two. A stop, a replacement waiting or a
+   * store that can no longer write ends the item's run; what was recorded stays and the next request goes on from there.
+   */
+  async #pumpMaterialVectors(): Promise<void> {
+    while (!this.#indexStopped && this.#vectorQueue.length > 0) {
+      const materialId = this.#vectorQueue.shift()!;
+      this.#vectorBuilding = materialId;
+      try {
+        for (;;) {
+          if (this.#indexStopped || this.#poisoned || this.replacementFrozen() || this.#embedding.readiness().state !== 'ready') break;
+          const next = this.#materialIndexCall(() => this.#materialIndex.vectorTargets(materialId, this.#embedding.identity, MATERIAL_VECTOR_BATCH));
+          if (next.targets.length === 0) break;
+          const vectors = await this.#embedding.embed(next.targets.map((target) => target.text));
+          requireStore(vectors.length === next.targets.length, 'MATERIAL_INDEX_INVALID', '相似向量无效。');
+          await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+          if (this.#indexStopped || this.#poisoned || this.replacementFrozen()) break;
+          this.#transaction(this.#authority, () => this.#materialIndexCall(() => this.#materialIndex.recordVectors(
+            next, { identity: this.#embedding.identity, dimensions: this.#embedding.dimensions },
+            next.targets.map((target, index) => ({ ordinal: target.ordinal, sha256: target.sha256, vector: vectors[index]! })))));
+        }
+      } catch {
+        // Refused, or its build changed meanwhile: what was recorded stays, and asking again goes on from there. A rollback that
+        // itself failed has already left the store unable to write: `#transaction` poisons it and throws `StoreFatalError`.
+      } finally {
+        this.#vectorBuilding = null;
+      }
+    }
+  }
+
+  /**
+   * 相似段落检索 in an item's 查看索引 (Issue #892): its paragraphs nearest the editor's text, by the vectors the editor built;
+   * read-only, on this machine. The ranking finds candidates; the words are read where each anchor points (ADR 0026).
+   */
+  async searchLibraryMaterialVectors(input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection> {
+    requireStore(typeof input.materialId === 'string' && UUID_PATTERN.test(input.materialId) && typeof input.text === 'string' &&
+      input.text.trim().length > 0 && input.text.length <= MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS && input.text.isWellFormed() &&
+      Number.isSafeInteger(input.k) && input.k >= 1 && input.k <= MAX_MATERIAL_VECTOR_CANDIDATES, 'MATERIAL_VECTOR_QUERY_INVALID', '检索内容无效：请写 1 到 2,000 字。');
+    this.#libraryCall(() => this.#libraryMaterials.original(input.materialId));
+    const embedding = this.#embeddingFacts();
+    requireStore(embedding.readiness.state === 'ready', 'MATERIAL_VECTORS_NEED_MODEL', '相似索引的模型文件不在本机或摘要不符：请在 设置 › 本机 › 相似索引模型 处理。');
+    const [query] = await this.#embedding.embed([input.text]);
+    return this.#materialIndexCall(() => this.#materialIndex.search(input.materialId, embedding, query!, input.k));
+  }
+
+  /**
+   * A Task's similarity search over the 资料库 items its plan lists (Issue #892; KB-009, ADR 0026, ADR 0047): read-only, within
+   * its plan boundary exactly as `readMaterialIndexForTask` — every item searched is one its plan lists (`materialIds`, when
+   * given, must each be one), at the build its plan pinned, which this Book's Tasks may still list. Each pinned build is
+   * searched by its own vectors; one without them is listed as not searched, never built here. Candidates are pointers:
+   * their words are read through `readMaterialIndexForTask` from the candidate's paragraph. Nothing is written, sent or
+   * scheduled, and a built index grants no Run scope, egress or learning eligibility.
+   */
+  async queryMaterialVectors(boundary: MaterialReferenceBoundary, text: string, k: number, materialIds?: readonly string[]): Promise<MaterialVectorQuery> {
+    requireStore(typeof text === 'string' && text.trim().length > 0 && text.length <= MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS && text.isWellFormed(),
+      'MATERIAL_VECTOR_QUERY_INVALID', '检索内容无效。');
+    const embedding = this.#embeddingFacts();
+    const query = embedding.readiness.state === 'ready' ? (await this.#embedding.embed([text]))[0]! : null;
+    return this.#materialIndexCall(() => this.#materialIndex.queryForTask(boundary, materialIds, embedding, query, k,
+      (id, book) => this.#libraryMaterials.available(id, book), (id) => this.#libraryMaterials.original(id).title));
+  }
+
+  /**
+   * 生成来源译文 (Issue #892; KB-009): a non-Chinese item's paragraphs translated by the Fast Interaction Role under the selected
+   * policy's rule, a bounded batch per request, each translation recorded beside the paragraph it translates — labelled,
+   * attributed, never in its place. Refused before anything is sent when no rule names it (「当前策略未开放来源译文」), when
+   * the text is Chinese or not read, or while another item's is being made. The requests run beside the service's request
+   * loop; the item is read again until it settles. A request that fails or whose answer does not align stops the run, says
+   * why, and is never sent again on its own; asking again goes on from the first paragraph without one.
+   */
+  requestMaterialTranslation(materialId: string): LibraryMaterialProjection {
+    requireStore(typeof materialId === 'string' && UUID_PATTERN.test(materialId), 'LIBRARY_MATERIAL_INVALID', '资料标识无效。');
+    const original = this.#libraryCall(() => this.#libraryMaterials.original(materialId));
+    const pending = this.#materialIndexCall(() => this.#materialIndex.translationTargets(materialId, 1));
+    requireStore(pending.targets.length > 0, 'MATERIAL_TRANSLATION_COMPLETE', '每段都已有来源译文。');
+    const request = this.#translationRequest(original.source.sha256);
+    requireStore(request.available, this.#translating !== null ? 'MATERIAL_TRANSLATION_BUSY' : 'MATERIAL_TRANSLATION_NOT_ADMITTED', request.reason ?? MATERIAL_TRANSLATION_NOT_ADMITTED);
+    const translator = this.#translator!;
+    this.#translationFailures.delete(materialId);
+    this.#translating = materialId;
+    this.#translationRun = this.#translateMaterial(materialId, translator, original.source.sha256).finally(() => {
+      this.#translating = null;
+      this.#translationRun = null;
+    });
+    return this.inspectLibraryMaterial(materialId);
+  }
+
+  async #translateMaterial(materialId: string, translator: MaterialTranslator, originalSha256: string): Promise<void> {
+    try {
+      for (let requests = 0; ; requests += 1) {
+        if (this.#indexStopped || this.#poisoned) return;
+        if (this.replacementFrozen()) {
+          this.#translationFailures.set(materialId, MATERIAL_LAYERS_READ_ONLY);
+          return;
+        }
+        const next = this.#materialIndexCall(() => this.#materialIndex.translationTargets(materialId, MATERIAL_TRANSLATION_BATCH_PARAGRAPHS));
+        if (next.targets.length === 0) return;
+        // One 生成来源译文 sends at most this many requests (Issue #892, brief revision 5); the rest is asked for again.
+        if (requests >= MAX_MATERIAL_TRANSLATION_REQUESTS) {
+          const remaining = this.#materialIndexCall(() => this.#materialIndex.translationRemaining(materialId));
+          this.#translationFailures.set(materialId,
+            `已达到一次生成的上限（${MAX_MATERIAL_TRANSLATION_REQUESTS} 批，至多 ${(MAX_MATERIAL_TRANSLATION_REQUESTS * MATERIAL_TRANSLATION_BATCH_PARAGRAPHS).toLocaleString('en-US')} 段）；还有 ${remaining} 段未译，可再次「生成来源译文」。`);
+          return;
+        }
+        const batch: typeof next.targets[number][] = [];
+        let characters = 0;
+        for (const target of next.targets) {
+          if (batch.length > 0 && characters + target.text.length > MATERIAL_TRANSLATION_BATCH_CODE_UNITS) break;
+          batch.push(target);
+          characters += target.text.length;
+        }
+        if (characters > MATERIAL_TRANSLATION_BATCH_CODE_UNITS) {
+          this.#translationFailures.set(materialId, `第 ${batch[0]!.ordinal} 段超过一次可译的长度（${MATERIAL_TRANSLATION_BATCH_CODE_UNITS.toLocaleString('en-US')} 字），来源译文停在这一段之前。`);
+          return;
+        }
+        const answer = await translator.translate(originalSha256, batch.map((target) => target.text), `${next.indexSha256.slice(0, 16)}/${batch[0]!.ordinal}`);
+        if (answer.kind === 'failed') {
+          this.#translationFailures.set(materialId, answer.message);
+          return;
+        }
+        if (this.#indexStopped || this.#poisoned) return;
+        this.#transaction(this.#authority, () => this.#materialIndexCall(() => this.#materialIndex.recordTranslations(next, answer.made,
+          batch.map((target, index) => ({ ordinal: target.ordinal, sha256: target.sha256, text: answer.texts[index]! })))));
+      }
+    } catch (error) {
+      this.#translationFailures.set(materialId, error instanceof StoreError ? error.message : '来源译文没有完成；已记录的译文保留。');
+    }
   }
 
   /** 定归属 or 定学习准入 (KB-007, LEARN-007): one decision appended to the item's chain, and the item as it now reads. */

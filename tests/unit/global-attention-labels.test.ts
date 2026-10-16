@@ -451,7 +451,7 @@ describe('each item', () => {
       'learning-materials-pending': '你的反馈与改动里有可以用来学习的材料：学习准入策略还只是建议，没有你的决定，它们不会用来学习。',
       'learning-materials-deferred': '这些学习材料记为稍后决定：决定之前，它们不会用来学习。',
       // Issue #428 (S80a; ATTN-009, KB-009): 索引完成, and which layers it holds; it asks nothing.
-      'indexing-completed': '资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪；相似段落检索与文字识别未提供（需要本地依赖）。',
+      'indexing-completed': '资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪；相似段落检索可在资料里按需构建。',
       // Issue #52 (S17a; DIALOG-010, 012, 016): a dialogue Task in the 任务 panel, read in the background.
       'dialogue-answering': '回答在后台继续；打开对话可以看到已经收到的完整内容。',
       'dialogue-answered': '回答已完成；它只是生成的内容，不改稿件，需要时可以转为修改建议。',

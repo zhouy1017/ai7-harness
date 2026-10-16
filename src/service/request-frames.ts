@@ -32,6 +32,8 @@ import {
   MAINTENANCE_CLASSIFICATIONS,
   LEARNING_MATERIAL_KEY_PATTERN,
   LIBRARY_MATERIAL_KINDS,
+  MAX_MATERIAL_VECTOR_CANDIDATES,
+  MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS,
   MAX_FRAME_BYTES,
   LIBRARY_REASON_PAGE_UNITS,
   type LibraryMaterialKind,
@@ -862,6 +864,20 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectLibraryMaterialSegments': {
       const input = requireInput(value.input, ['materialId', 'from'], tentativeId);
       if (!validUuid(input.materialId) || !isSafeInteger(input.from, 1)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 构建相似索引 and 生成来源译文 (Issue #892): one item.
+    case 'buildMaterialVectors':
+    case 'requestMaterialTranslation': {
+      const input = requireInput(value.input, ['materialId'], tentativeId);
+      if (!validUuid(input.materialId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 相似段落检索 (Issue #892): one item, the editor's text within its bound, and how many candidates.
+    case 'queryMaterialVectors': {
+      const input = requireInput(value.input, ['materialId', 'text', 'k'], tentativeId);
+      if (!validUuid(input.materialId) || !isBoundedString(input.text, MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS) ||
+          !isSafeInteger(input.k, 1) || Number(input.k) > MAX_MATERIAL_VECTOR_CANDIDATES) throw new ProtocolError(tentativeId);
       break;
     }
     // 放入资料… (Issue #427, S79c): the absolute path main's picker returned.

@@ -8,6 +8,7 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import type { TaskPlanConnectivity } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { MATERIAL_INDEX_TRIGGER_SQL } from '../../src/service/material-index.js';
+import { syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
 import { LIBRARY_MATERIAL_TRIGGER_SQL } from '../../src/service/library-materials.js';
 import { readPendingReplacement, replacementStagingFor } from '../../src/service/database-replacement.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
@@ -135,7 +136,7 @@ function emptyBook(store: EditorialStore, title: string): string {
   return store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
 }
 
-function file(name: string, content: string): string {
+function file(name: string, content: string | Uint8Array): string {
   const directory = join(roots.inputRoot, 'library-writing');
   mkdirSync(directory, { recursive: true });
   const path = join(directory, name);
@@ -143,7 +144,7 @@ function file(name: string, content: string): string {
   return path;
 }
 
-async function put(store: EditorialStore, name: string, content: string, title: string, kind: LibraryMaterialKind = 'document'): Promise<LibraryMaterialProjection> {
+async function put(store: EditorialStore, name: string, content: string | Uint8Array, title: string, kind: LibraryMaterialKind = 'document'): Promise<LibraryMaterialProjection> {
   const preview = await store.previewLibraryMaterial(file(name, content));
   return store.addLibraryMaterial({ previewId: preview.previewId, title, kind });
 }
@@ -380,7 +381,7 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       const deferred = await put(store, '待定资料.txt', sized(200, 0x8400), '待定资料');
       await put(store, '没定归属.txt', sized(200, 0x8800), '没定归属');
       // A scan whose text no admitted dependency reads (a web page was this item until Issue #428 read HTML).
-      const scan = await put(store, '扫描件.pdf', '%PDF-1.4\n% synthetic test bytes, not a real document\n', '扫描件资料');
+      const scan = await put(store, '扫描件.pdf', syntheticPdf({ pages: [[['x']]], imageOnly: new Set([0]) }), '扫描件资料');
       decide(store, listed.materialId, { scope: 'book', bookId }, 'book');
       decide(store, house.materialId, { scope: 'house' }, 'excluded');
       decide(store, middle.materialId, { scope: 'book', bookId }, 'book');

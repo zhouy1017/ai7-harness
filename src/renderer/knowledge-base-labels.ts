@@ -458,6 +458,18 @@ export const MATERIAL_INDEX_LAYER_TERMS: Readonly<Record<(typeof MATERIAL_INDEX_
 export const MATERIAL_INDEX_TERM = '资料索引';
 /** What a layer this build does not provide says: never imitated, never hidden (Owner 2026-10-09, option 乙). */
 export const MATERIAL_INDEX_NEEDS_DEPENDENCY = '未提供（需要本地依赖）';
+/** 构建相似索引 (Issue #892): the item's vectors made on this machine, only when the editor asks. */
+export const MATERIAL_VECTORS_BUILD = '构建相似索引';
+export const MATERIAL_VECTORS_SEARCH_LABEL = '相似段落检索';
+export const MATERIAL_VECTORS_SEARCH = '检索';
+export const MATERIAL_VECTORS_SEARCH_NOTE = '在本机按已建的相似索引找出与这段文字相近的段落；结果只是线索，原文以分段为准。';
+export const MATERIAL_VECTORS_SEARCH_FAILED = '暂时无法检索，请重试。';
+export const MATERIAL_VECTORS_BUILD_FAILED = '暂时无法构建相似索引，请重试。';
+/** 生成来源译文 (Issue #892): a non-Chinese item's machine translation, asked for under the selected policy's rule. */
+export const MATERIAL_TRANSLATION_REQUEST = '生成来源译文';
+export const MATERIAL_TRANSLATION_FAILED = '暂时无法生成来源译文，请重试。';
+/** What a translation shown beside its paragraph is called: the machine's, never the original. */
+export const MATERIAL_TRANSLATION_TERM = '来源译文';
 /** What the index is and is not, said once on the card (KB-009). */
 export const MATERIAL_INDEX_BOUNDARY = '索引只在本机建立：它不授予任务读取范围；任务只读计划列进「允许参考」的资料，发送什么仍由任务计划决定。';
 export const MATERIAL_SEGMENTS_OPEN = '查看分段';
@@ -475,7 +487,23 @@ export const MATERIAL_INDEX_REASONS: Readonly<Record<MaterialIndexReason, string
   empty: '文件里没有可提取的文字',
   encrypted: '文件已加密或带有版权保护（DRM），AI7 不读取其中的文字',
   'external-entity': '文件声明了实体或内部文档类型定义，AI7 为安全起见不读取',
+  'needs-recognition': '这份 PDF 没有可用的文字层（像是扫描件），需要先识别文字',
 };
+
+/** What makes an item's similarity vectors, in the editor's words (Issue #892). */
+export function materialEmbeddingLabel(identity: string): string {
+  return identity === 'ai7-embedding/stub-1' ? '本机内置相似向量（按字词相近）' : `本机模型 ${identity}`;
+}
+
+/** One 相似段落检索 candidate's anchor: its page and place on it for a PDF, its position otherwise. */
+export function materialParagraphAnchorLabel(paragraph: number, page: number | null, pageParagraph: number | null): string {
+  return page === null || pageParagraph === null ? `第 ${paragraph} 段` : `第 ${page} 页第 ${pageParagraph} 段`;
+}
+
+/** How many candidates 相似段落检索 found. */
+export function materialVectorResultsHeading(count: number): string {
+  return count === 0 ? '没有找到相近的段落。' : `相近段落：${count} 条（按相近程度排序；原文以分段为准）`;
+}
 
 /** The index as a whole, in one line beside its term. */
 export function materialIndexStateLine(index: MaterialIndexProjection): string {
@@ -487,7 +515,7 @@ export function materialIndexStateLine(index: MaterialIndexProjection): string {
     case 'complete':
       return '已在本机建好';
     case 'unsupported':
-      return '已建好可读的层；这种格式的文字未能提取';
+      return index.reason === 'needs-recognition' ? '已建好可读的层；扫描件需要先识别文字' : '已建好可读的层；这种格式的文字未能提取';
     case 'failed':
       return `未能提取文字：${MATERIAL_INDEX_REASONS[index.reason ?? 'unreadable']}`;
   }
@@ -517,26 +545,49 @@ export function materialIndexLayerLine(index: MaterialIndexProjection, layer: (t
       if (state === 'deferred') return MATERIAL_INDEX_NEEDS_DEPENDENCY;
       return `未能提取：${MATERIAL_INDEX_REASONS[index.reason ?? 'unreadable']}`;
     case 'recognition':
-      return state === 'deferred' ? `${MATERIAL_INDEX_NEEDS_DEPENDENCY}：扫描件要先识别文字` : '不需要：文件里就是文字';
-    case 'translation':
+      if (state === 'pending') return waiting(index);
+      if (state === 'deferred') return index.reason === 'needs-recognition' ? '需要识别：这份 PDF 没有文字层，文字识别尚未提供' : `${MATERIAL_INDEX_NEEDS_DEPENDENCY}：扫描件要先识别文字`;
+      return '不需要：文件里就是文字';
+    case 'translation': {
+      const translation = index.translation;
       if (state === 'pending') return '等待提取全文';
-      if (state === 'deferred' && index.state === 'complete') return '未提供：非中文资料的机器译文要经模型服务，尚未接通';
       if (state === 'not-needed') return metadata?.language === 'none' ? '不需要：没有可译的文字' : '不需要：中文资料';
-      return '没有提取出全文，无从翻译';
+      if (translation === null) return '没有提取出全文，无从翻译';
+      if (state === 'building') return `正在生成… 已译 ${translation.translated} / ${translation.total} 段`;
+      if (state === 'complete') return `已生成 ${translation.total} 段（${translation.model ?? '模型'}）；译文只供对照，不替换原文`;
+      if (state === 'partial') return `已生成 ${translation.translated} / ${translation.total} 段${translation.lastFailure === null ? '' : `；${translation.lastFailure}`}`;
+      return translation.lastFailure === null ? '未生成：非中文资料可以「生成来源译文」（每次至多 1,000 段）' : `未生成：${translation.lastFailure}`;
+    }
     case 'segments':
       if (state === 'pending') return '等待提取全文';
       if (state === 'complete' && metadata !== null) {
-        return `${metadata.paragraphs} 段 · ${metadata.sentences} 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）`;
+        return metadata.pages !== null
+          ? `${metadata.paragraphs} 段 · ${metadata.sentences} 句 · ${metadata.pages} 页；每句可按「第 p 页第 m 段第 s 句」引用`
+          : `${metadata.paragraphs} 段 · ${metadata.sentences} 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）`;
       }
       return '没有提取出全文，无从分段';
-    case 'vectors':
-      return MATERIAL_INDEX_NEEDS_DEPENDENCY;
+    case 'vectors': {
+      const vectors = index.vectors;
+      if (state === 'pending') return waiting(index);
+      if (vectors === null) return '没有提取出全文，无从建立相似索引';
+      if (state === 'needs-model') {
+        return vectors.expectedDigest === null ? '需要模型文件：尚未选择嵌入依赖' : `需要模型文件：在 设置 › 本机 › 相似索引模型 放入摘要为 ${vectors.expectedDigest} 的模型文件`;
+      }
+      if (state === 'building') return `构建中… ${vectors.built} / ${vectors.total} 段`;
+      if (state === 'complete') return `已构建：${vectors.total} 段 · ${materialEmbeddingLabel(vectors.embedding)}`;
+      return vectors.built > 0
+        ? `未构建完：${vectors.built} / ${vectors.total} 段；可以继续「${MATERIAL_VECTORS_BUILD}」（在本机建立，不发送任何内容）`
+        : `未构建：可以「${MATERIAL_VECTORS_BUILD}」（在本机建立，不发送任何内容）`;
+    }
   }
 }
 
-/** A sentence's position anchor (KB-009): the paragraph and the sentence, as a citation names it. */
-export function materialAnchorLabel(paragraph: number, sentence: number): string {
-  return `第 ${paragraph} 段第 ${sentence} 句`;
+/**
+ * A sentence's position anchor (KB-009): the paragraph and the sentence, as a citation names it — for a PDF paragraph (Issue
+ * #892), its page and its place on that page.
+ */
+export function materialAnchorLabel(paragraph: number, sentence: number, page: { readonly page: number; readonly paragraph: number } | null = null): string {
+  return page === null ? `第 ${paragraph} 段第 ${sentence} 句` : `第 ${page.page} 页第 ${page.paragraph} 段第 ${sentence} 句`;
 }
 
 /** Which paragraphs a page of 查看分段 shows, of how many. */
@@ -549,7 +600,7 @@ export function materialSegmentsHeading(page: Pick<MaterialSegmentsPageProjectio
 export function materialIndexCompletedReason(outcome: 'complete' | 'unsupported' | 'failed'): string {
   switch (outcome) {
     case 'complete':
-      return '资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪；相似段落检索与文字识别未提供（需要本地依赖）。';
+      return '资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪；相似段落检索可在资料里按需构建。';
     case 'unsupported':
       return '资料索引已建好可读的层：原件与元数据已就绪，这种格式的文字未能提取。';
     case 'failed':
