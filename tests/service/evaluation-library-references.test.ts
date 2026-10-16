@@ -215,7 +215,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(accepted.ledger.unitCheckpoints(accepted.dispatchRunRecordId!)).toHaveLength(0);
   });
 
-  it.each(['between-units', 'before-synthesis'] as const)('interrupts with completed units kept when withdrawn %s', async (when) => {
+  it.each((['between-units', 'before-synthesis'] as const).flatMap((when) => (['withdrawn', 'missing', 'corrupt'] as const).map((change) => ({ when, change }))))('interrupts $change $when with completed units kept (Issue #759)', async ({ when, change }) => {
     const id = await material();
     const prepared = prepare(kind, [id]);
     answer(kind, prepared);
@@ -226,7 +226,9 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     unitBoundary = (settled) => {
       if (!withdrawn && (when === 'between-units' ? settled === 0 : settled === total - 1)) {
         withdrawn = true;
-        store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+        if (change === 'withdrawn') store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+        else if (change === 'missing') removeBuild(id);
+        else breakIndex(id, 'segments');
       }
     };
     owner.admitAndDispatch(accepted.dispatchRunRecordId!, accepted.ledger);
@@ -234,9 +236,9 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     const projection = kind === 'initial-evaluation' ? store.inspectInitialEvaluation(bookId) : store.inspectReadersReport(bookId)!;
     expect(projection.run!.state).toBe('interrupted');
     const state = database((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY rowid DESC LIMIT 1').get(accepted.dispatchRunRecordId!)!.canonical_json)));
-    expect(state.detail).toContain('资料《合成背景资料》在任务运行中已撤回允许参考');
+    expect(state.detail).toContain(`资料《合成背景资料》在任务运行中${change === 'withdrawn' ? '已撤回允许参考' : change === 'missing' ? '的索引版本已不在本机' : '的索引记录已损坏'}`);
     expect(state.detail).toContain('已完成的单元保留');
-    expect(state.cause).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+    expect(state.cause).toBe(change === 'withdrawn' ? 'MATERIAL_REFERENCE_UNAVAILABLE' : change === 'missing' ? 'MATERIAL_INDEX_MOVED' : 'MATERIAL_INDEX_RECORD_INVALID');
     expect(projection.resultSetRevision!.coverage.unitsClosed).toBe(when === 'between-units' ? 1 : total);
   });
   it('pins selected items without text, discloses them separately, survives restart and preserves old pins after re-preparation', async () => {
@@ -273,7 +275,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(indexRows()).toBe(before);
     expect(database((db) => db.prepare('PRAGMA user_version').get()!.user_version)).toBe(LATEST_SCHEMA_VERSION);
   });
-  it('executes units and whole-book synthesis under the wrapper, keeps finalized semantics, and reads settled output with missing pins', async () => {
+  it.each(['missing', 'withdrawn', 'corrupt'] as const)('keeps completed evaluation results readable with a precise %s note (Issue #759)', async (change) => {
     const id = await material();
     const beforeRecord = store.inspectEvaluation(bookId, null).record;
     const prepared = prepare(kind, [id]);
@@ -296,7 +298,9 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
       expect(task.input.record.items.every((item: { score: number }) => item.score === 12)).toBe(true);
       expect(task.input.record.conclusion).toBe('修改后再议');
     }
-    removeBuild(id);
+    if (change === 'withdrawn') store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    else if (change === 'corrupt') breakIndex(id, 'build');
+    else removeBuild(id);
     await close(); await open();
     const after = kind === 'initial-evaluation' ? store.inspectInitialEvaluation(bookId) : store.inspectReadersReport(bookId)!;
     expect(after.resultSetRevision!.revisionId).toBe(projection.resultSetRevision!.revisionId);
@@ -304,7 +308,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(frozenRows(kind).blocked).toBe(false);
     expect(frozenRows(kind).lines.join(' ')).not.toContain('不能再开始');
     // …but it says the build is gone, that the result stays readable and what a further run needs (Issue #759).
-    expect(frozenRows(kind).lines).toEqual([expect.stringContaining('计划冻结的索引版本现已不在本机；已有的结果仍可查看，再次运行需重新准备计划')]);
+    expect(frozenRows(kind).lines).toEqual([expect.stringContaining(`${change === 'missing' ? '计划冻结的索引版本现已不在本机' : change === 'withdrawn' ? '这份资料现已撤回允许参考' : '这份资料的索引记录现已损坏'}；已有的结果仍可查看，再次运行需重新准备计划`)]);
     expect(plan(kind, prepared.taskIntent!.taskIntentId).scope.reference.join(' ')).toContain('已有的结果仍可查看，再次运行需重新准备计划');
     expect(plan(kind, prepared.taskIntent!.taskIntentId).start.readiness).toBe('started');
   });

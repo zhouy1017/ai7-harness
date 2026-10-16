@@ -4429,6 +4429,9 @@ function registerRendererHandlers(
     (event, input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>
       envelope(async () => {
         const owned = requireSender(event);
+        requireDesktop(input !== null && typeof input === 'object' &&
+          (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS &&
+            input.materialIds.every((id) => typeof id === 'string' && id.length <= 64))), 'AI7_RENDERER_BOUNDARY_INVALID');
         return serializeEffect(async () => {
           requireAuthority();
           const route = requireCurrentBookRoute(owned);

@@ -215,7 +215,7 @@ describe('material ids at the request frame are bounded to what the service take
     const ids = Array.from({ length: 5 }, () => randomUUID());
     const encode = (materialIds: unknown) => new TextEncoder().encode(JSON.stringify({ id: randomUUID(), ...build(materialIds) }));
     expect(decodeRequest(encode(ids.slice(0, 4))).input).toMatchObject({ materialIds: ids.slice(0, 4) });
-    expect(() => decodeRequest(encode(ids))).toThrow(ProtocolError);
+    expect(() => decodeRequest(encode(ids))).toThrowError(expect.objectContaining({ code: 'PROTOCOL_INVALID', message: '服务请求格式无效。' }));
   });
 });
 

@@ -96,7 +96,7 @@ interface Session {
   readonly owner: BaselineAnalysisExecutionOwner;
 }
 
-async function withSession(fixture: ResolvedModelFixture, body: (session: Session) => Promise<void>, dataRoot = roots.dataRoot): Promise<void> {
+async function withSession(fixture: ResolvedModelFixture, body: (session: Session) => Promise<void>, dataRoot = roots.dataRoot, unitBoundary?: (settled: number) => void): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const store = await EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
@@ -106,7 +106,7 @@ async function withSession(fixture: ResolvedModelFixture, body: (session: Sessio
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, materialGuard: (id, ledger) => store.materialGuard(id, ledger) });
+  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async (settled) => { unitBoundary?.(settled); } });
   try {
     await body({ store, owner });
     store.markCleanShutdown();
@@ -251,6 +251,57 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       expect(() => owner.admitAndDispatch(accepted.dispatchRunRecordId!, accepted.ledger)).toThrowError(expect.objectContaining({ code: 'MATERIAL_REFERENCE_UNAVAILABLE' }));
       expect(accepted.ledger.currentRunState(accepted.dispatchRunRecordId!)).toBe('blocked-before-dispatch');
     });
+  }, 300_000);
+
+  it.each((['before', 'during', 'after'] as const).flatMap((stage) => (['missing', 'withdrawn', 'corrupt'] as const).map((change) => ({ stage, change }))))('says why writing material is $change $stage execution (Issue #759)', async ({ stage, change }) => {
+    const { fixture, entries } = await memoryFixture();
+    let changeMaterial: (() => void) | null = null;
+    await withSession(fixture, async (session) => {
+      const { store, owner } = session;
+      const bookId = await sample1Book(store, WRITING_BOOK_TITLE);
+      const item = await put(store, '合成参考.txt', LISTED_TEXT, '合成参考');
+      decide(store, item.materialId, { scope: 'book', bookId }, 'book');
+      store.startMaterialIndexing(); await store.settleMaterialIndexing();
+      const prepared = prepare(store, bookId, { ...WRITING_REQUEST, materialIds: [item.materialId] });
+      answerWriting(entries, prepared, AUTHORED_WRITING_DRAFT);
+      const mutate = () => {
+        if (change === 'withdrawn') store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+        else withDatabase((db) => {
+          for (const name of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
+          if (change === 'missing') {
+            db.prepare('DELETE FROM material_index_segments WHERE index_id IN (SELECT index_id FROM material_index_builds WHERE material_id = ?)').run(item.materialId);
+            db.prepare('DELETE FROM material_index_builds WHERE material_id = ?').run(item.materialId);
+          } else db.prepare("UPDATE material_index_builds SET canonical_json = '{}' WHERE material_id = ?").run(item.materialId);
+          for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
+        }, false);
+      };
+      const plan = () => store.inspectTaskPlan({ bookId, kind: 'writing', ref: prepared.taskIntent!.taskIntentId });
+      const code = change === 'withdrawn' ? 'MATERIAL_REFERENCE_UNAVAILABLE' : change === 'missing' ? 'MATERIAL_INDEX_MOVED' : 'MATERIAL_INDEX_RECORD_INVALID';
+      if (stage === 'before') {
+        mutate();
+        expect(plan().scope.reference.join(' ')).toContain(change === 'withdrawn' ? '现在不能列进' : change === 'missing' ? '索引版本已不在本机' : '索引记录已损坏');
+        expect(plan().scope.reference.join(' ')).toContain('这次起草不能再开始');
+        expect(() => store.authorizeWriting(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest)).toThrowError(expect.objectContaining({ code }));
+      } else {
+        if (stage === 'during') changeMaterial = mutate;
+        const settled = await run(session, bookId, prepared);
+        if (stage === 'during') {
+          expect(settled.run!.state).toBe('interrupted');
+          const state = withDatabase((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY rowid DESC LIMIT 1').get(settled.run!.runRecordId)!.canonical_json)));
+          expect(state.cause).toBe(code);
+          expect(state.detail).toContain(change === 'withdrawn' ? '在任务运行中已撤回允许参考' : change === 'missing' ? '在任务运行中的索引版本已不在本机' : '在任务运行中的索引记录已损坏');
+          expect(state.detail).toContain('已完成的单元保留');
+        } else {
+          expect(settled.run!.state).toBe('completed');
+          const revision = settled.resultSetRevision!.revisionId;
+          mutate();
+          expect(store.inspectWriting(bookId)!.resultSetRevision!.revisionId).toBe(revision);
+          expect(plan().scope.reference.join(' ')).toContain(change === 'withdrawn' ? '现已撤回允许参考' : change === 'missing' ? '索引版本现已不在本机' : '索引记录现已损坏');
+          expect(plan().scope.reference.join(' ')).toContain('已有的草稿仍可查看');
+          expect(plan().scope.reference.join(' ')).not.toContain('不能再开始');
+        }
+      }
+    }, roots.dataRoot, (settled) => { if (settled === 0 && changeMaterial !== null) { const mutate = changeMaterial; changeMaterial = null; mutate(); } });
   }, 300_000);
 
   it('offers a damaged index as a named, unselectable choice and keeps the other items offered (Issue #759)', async () => {

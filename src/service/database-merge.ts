@@ -489,19 +489,25 @@ function writingExemplarLeftBehind(db: DatabaseSync): boolean {
 }
 
 /**
- * Whether a merging Book's writing Tasks pinned a Material Index build this store does not hold. Builds do not merge, and a build
- * made here afterwards gets a new digest, never the pinned one: such a Task keeps its pins, outcome and drafts readable but cannot
- * start again. An item no merging Book owns does not merge either (`library_materials` is `owned`), so its builds are missing too.
+ * Whether a merging Book's writing, review or evaluation Tasks pinned a Material Index build this store does not hold.
+ * Builds do not merge, and a build made here afterwards gets a new digest, never the pinned one: the Task keeps its pins,
+ * outcome and drafts readable but needs a newly prepared plan to run again (Issue #759). An item no merging Book owns
+ * does not merge either (`library_materials` is `owned`), so its builds are missing too.
  */
-function writingMaterialLeftBehind(db: DatabaseSync): boolean {
-  if (!tableExists(db, 'src', 'writing_tasks')) return false;
-  return db.prepare(
-    `SELECT 1 FROM src.writing_tasks t, json_each(t.canonical_json, '$.materialSources') m
-     WHERE t.book_id IN (SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK})
+function taskMaterialLeftBehind(db: DatabaseSync): boolean {
+  const sources = [
+    { table: 'writing_tasks', from: 'src.writing_tasks t', book: 't.book_id', pins: "json_each(t.canonical_json, '$.materialSources')", where: '' },
+    { table: 'review_runs', from: 'src.review_runs t', book: 't.book_id', pins: "json_each(t.canonical_json, '$.materialReferences.references')", where: '' },
+    { table: 'analysis_plan_records', from: 'src.analysis_plan_records t JOIN src.analysis_task_intents i ON i.task_intent_id = t.task_intent_id',
+      book: 'i.book_id', pins: "json_each(t.canonical_json, '$.materialReferences')", where: "AND t.component = 'execution-plan'" },
+  ];
+  return sources.some((source) => tableExists(db, 'src', source.table) && db.prepare(
+    `SELECT 1 FROM ${source.from}, ${source.pins} m
+     WHERE ${source.book} IN (SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK}) ${source.where}
        AND NOT EXISTS (SELECT 1 FROM main.material_index_builds i
          WHERE i.material_id = json_extract(m.value, '$.materialId') AND i.sha256 = json_extract(m.value, '$.indexDigest'))
      LIMIT 1`,
-  ).get() !== undefined;
+  ).get() !== undefined);
 }
 
 /** At most this many of a package's Books are listed in a preview or a waiting merge; the rest are counted (Issue #434 review). */
@@ -568,7 +574,7 @@ export function planMerge(db: DatabaseSync, listed = MAX_MERGE_BOOKS_LISTED, mer
   }
   if (numberCleared) notices.add('internal-number');
   if (counts.new + counts.sameTitle > 0 && writingExemplarLeftBehind(db)) notices.add('writing-exemplar');
-  if (counts.new + counts.sameTitle > 0 && writingMaterialLeftBehind(db)) notices.add('writing-material');
+  if (counts.new + counts.sameTitle > 0 && taskMaterialLeftBehind(db)) notices.add('writing-material');
   const refusal = counts.new + counts.sameTitle === 0 ? null : libraryRefusal(db, `SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK}`);
   return { books, counts, notices: [...notices].sort(), refusal };
 }
