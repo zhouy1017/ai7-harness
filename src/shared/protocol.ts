@@ -2348,7 +2348,7 @@ export type OutboundDataCategoryId =
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
 export interface AdmittedProviderRule {
-  /** Absent in predecessor policies: Series knowledge remains refused. */
+  /** `true` on the v22/v23 review rule alone (`source.seriesKnowledgeAllowed`); absent on every other rule and policy, which refuses Series knowledge. */
   readonly seriesKnowledgeAllowed?: boolean;
   readonly ruleId: string;
   readonly taskKinds: readonly string[];

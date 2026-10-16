@@ -190,6 +190,8 @@ const V16_CHANGED_RULES: Record<string, AdmittedProviderRule> = {
     crossUnitSynthesisAllowed: false,
     materialReferencesAllowed: true,
     editorialDeliverablesAllowed: true,
+    // v22/v23's verified Series flag, projected on this rule alone (Issue #64, 7b).
+    seriesKnowledgeAllowed: true,
     clarificationQuestionAllowed: true,
     clarificationTimeoutHours: 24,
     backgroundOrigin: false,
@@ -953,6 +955,7 @@ function productionAdmittedRules(binding: ConfiguredProviderBinding): AdmittedPr
     crossUnitSynthesisAllowed: rule.crossUnitSynthesisAllowed,
     materialReferencesAllowed: rule.materialReferencesAllowed,
     editorialDeliverablesAllowed: rule.editorialDeliverablesAllowed,
+    ...(rule.seriesKnowledgeAllowed === true ? { seriesKnowledgeAllowed: true } : {}),
     clarificationQuestionAllowed: rule.clarificationQuestionAllowed,
     clarificationTimeoutHours: rule.clarificationTimeoutHours,
     backgroundOrigin: rule.backgroundOrigin,
@@ -2074,6 +2077,15 @@ describe('Provider Processing v22 and v23: custom analysis dimensions and Series
       'editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency',
       ...WEB_REVIEW_KINDS, SERIES_REVIEW_KIND,
     ]);
+  });
+
+  it.each(scopes)('%s projects the verified Series flag on the review rule alone, and its predecessor projects none (Issue #64, 7b)', ({ path, before, reviewId, verify }) => {
+    for (const rule of verify(readPolicySync(path))) {
+      if (rule.ruleId === reviewId) expect(rule.seriesKnowledgeAllowed, rule.ruleId).toBe(true);
+      else expect(Object.hasOwn(rule, 'seriesKnowledgeAllowed'), rule.ruleId).toBe(false);
+    }
+    // v20 and v21 are no longer a reading this launch accepts, so no projection of theirs can carry the flag.
+    expect(() => verify(readPolicySync(before))).toThrow('LAUNCH_POLICY_INVALID');
   });
 
   it('lists a kind family entry in the custom analysis rule alone, in every policy document of the repository', () => {

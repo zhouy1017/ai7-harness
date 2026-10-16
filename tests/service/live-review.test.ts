@@ -22,7 +22,7 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/p
 import { LEARNING_INFLUENCE_RESULT_MARKER, LEARNING_INFLUENCE_WITHDRAWN_LABEL, type LaunchPolicyProjection, type ReviewCategoryResultSetRevisionProjection, type ReviewRunProjection } from '../../src/shared/protocol.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { withoutHouseReviewPreference, withSeriesKnowledgeFor, withRuleFor } from '../support/policy-rules.js';
+import { ruleFor, withoutHouseReviewPreference, withSeriesKnowledgeFor, withRuleFor } from '../support/policy-rules.js';
 import { makeJ13Series, J13_SERIES_TITLE } from '../support/series-consistency.js';
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
 import { HOUSE_PREFERENCE_CLOSED } from '../../src/service/task-plan.js';
@@ -147,10 +147,16 @@ describe('reference-free review on the Go execution path', () => {
     recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
     makeJ13Series(store, book.bookId);
     const kind = 'editorial-review/series-consistency';
-    const admitted = withSeriesKnowledgeFor(policy, kind);
+    // The selected v22 review rule lists the kind, names the category and projects its verified flag (7p, projected by 7b).
+    const admitted = policy;
+    expect(ruleFor(admitted, kind)).toMatchObject({ seriesKnowledgeAllowed: true, outboundDataCategories: expect.arrayContaining(['series-knowledge-excerpt']) });
     const original = store.baselineAnalysisLedger.launch;
-    for (const closed of [policy, withRuleFor(admitted, kind, { seriesKnowledgeAllowed: false }),
-      withRuleFor(admitted, kind, { outboundDataCategories: ['public-or-synthetic'] })]) {
+    // The flag absent, as every predecessor's projection reads, or false; the category dropped; the kind unlisted.
+    const absent: LaunchPolicyProjection = { ...admitted, providerProcessing: { ...admitted.providerProcessing,
+      admittedRules: admitted.providerProcessing.admittedRules.map(({ seriesKnowledgeAllowed: _flag, ...rule }) => rule) } };
+    for (const closed of [absent, withRuleFor(admitted, kind, { seriesKnowledgeAllowed: false }),
+      withRuleFor(admitted, kind, { outboundDataCategories: ruleFor(admitted, kind).outboundDataCategories.filter((category) => category !== 'series-knowledge-excerpt') }),
+      withRuleFor(admitted, kind, { taskKinds: ruleFor(admitted, kind).taskKinds.filter((listed) => listed !== kind) })]) {
       store.baselineAnalysisLedger.bindLaunch({ ...original, policy: closed });
       expect(store.inspectReviewWorkspace(book.bookId, null).categories.find((entry) => entry.categoryId === 'series-consistency')!.unavailableReason).toBe('当前策略未开放书系知识');
     }

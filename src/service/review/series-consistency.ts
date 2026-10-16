@@ -349,7 +349,10 @@ export function seriesScopeMaterials(db: DatabaseSync, scopes: ReadonlyArray<Fro
   ]);
 }
 
-/** Material is reconstructed only from exact immutable revisions, never from current membership or latest knowledge. */
+/**
+ * Material is reconstructed only from exact immutable revisions, never from current membership or latest knowledge. Each revision
+ * is cut into the same clauses of at most 300 graphemes 书系一致性 keeps, as the Series knowledge excerpt is declared (v22/v23).
+ */
 function seriesWords(db: DatabaseSync, scopes: ReadonlyArray<FrozenSeriesScope>) {
   const ledger = new SeriesKnowledgeLedger(db);
   return scopes.flatMap((scope) => scope.knowledge.map((pin) => {
@@ -357,7 +360,8 @@ function seriesWords(db: DatabaseSync, scopes: ReadonlyArray<FrozenSeriesScope>)
     const revision = ledger.revision(pin.itemId, pin.revisionId);
     requireAnalysis(item !== null && item.seriesId === scope.seriesId && revision !== null && revision.ordinal === pin.ordinal && sha256Hex(revision.content) === pin.digest,
       'SERIES_SCOPE_INVALID', '计划冻结的书系知识版本无法核对。');
-    return { series: scope.title, subject: item.subject, knowledgeClass: item.knowledgeClass, ordinal: pin.ordinal, content: revision.content };
+    return { series: scope.title, subject: item.subject, knowledgeClass: item.knowledgeClass, ordinal: pin.ordinal,
+      clauses: seriesKnowledgeItemClauses(1, { subject: item.subject, knowledgeClass: item.knowledgeClass, content: revision.content }).map((clause) => clause.text) };
   }));
 }
 
