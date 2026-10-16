@@ -26,7 +26,7 @@ function facts(id = 'search-tinyfish'): EgressBindingFacts {
   const declared = searchBackend(id).declaration;
   return { bindingDigest: 'a'.repeat(64), route: 'opencode-go', model: 'deepseek-v4.1-flash', systemPrompt: '',
     outboundDataCategory: 'public-or-synthetic', admittedUserMessages: new Set(),
-    policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v16', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+    policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v18', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
     platformTools: platformToolsFromProjection(searchToolsRule()),
     searchBackend: { backendId: id, host: declared.host!, endpoint: declared.endpoint!, credentialSlot: declared.credentialSlot, credentialReference: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
   };

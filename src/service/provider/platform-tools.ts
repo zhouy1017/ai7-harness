@@ -6,7 +6,7 @@ import { isPublicHostName } from '../../shared/network-denial.js';
  * say for them to exist, the exact schemas the model sees, the canonical form of their arguments, and the breakers against
  * loops (§7.4). Nothing here reaches a network or registers a tool. Every identifier of the search service — its name, its
  * host, its tool — is read from the rule's `platformTools` block. A rule that names none yields `null`, and every consumer
- * of this module refuses on `null`; selected v16/v17 name tools only for review, writing and evaluation.
+ * of this module refuses on `null`; selected v18/v19 (like v16/v17 before them) name tools only for review, writing and evaluation.
  */
 
 /** The two tool names, sorted: the exact set a payload's tools must equal (ADR 0080 §7.2). */

@@ -26,7 +26,7 @@ installNodeNetworkDenial();
 const openBackendHosts = (): string[] => shipped.filter((entry) => allowanceAdmitsConnection([{ host: entry.host, port: 443 }])).map((entry) => entry.host!);
 const binding: EgressBindingFacts = { bindingDigest: 'a'.repeat(64), route: 'opencode-go', model: 'deepseek-v4.1-flash', systemPrompt: '',
   admittedUserMessages: new Set(), outboundDataCategory: 'public-or-synthetic',
-  policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v16', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+  policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v18', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
   platformTools: platformToolsFromProjection(searchToolsRule()),
   searchBackend: { backendId: frozen.id, host: frozen.host!, endpoint: frozen.endpoint!, credentialSlot: frozen.credentialSlot, credentialReference: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
 };

@@ -150,10 +150,10 @@ describe('under the selected Provider Processing v5 every platform-tool path sti
     expect(() => EgressTicketBook.open(malformed, { currentBindingDigest: () => BINDING_DIGEST })).toThrowError('PLATFORM_TOOLS_NOT_NAMED');
   });
 
-  it('counts a rule naming the platform tools under ordinary-production as under developer-live (Provider Processing v17)', async () => {
+  it('counts a rule naming the platform tools under ordinary-production as under developer-live (Provider Processing v19)', async () => {
     const production: EgressBindingFacts = {
       ...binding(await ruleOf('v7'), 'v8'),
-      policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v17', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+      policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v19', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
       ruleOutboundCategories: new Set(['public-or-synthetic']),
     };
     expect(evaluateEgress(payload([user(UNIT)]), production, scope())).toMatchObject({ decision: 'transmit-remote' });
