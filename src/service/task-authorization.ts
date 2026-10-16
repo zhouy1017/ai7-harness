@@ -478,11 +478,12 @@ export const HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION = 79;
  * Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts — three additive, append-only relations owned by
  * `task-intent-drafts.ts` and created before this version is stamped — and `analysis_task_intents` rebuilt, every row copied
  * byte for byte, so that a Task promoted from a draft keeps the draft's own bounded sentence as its goal for every kind, and so
- * that the custom analysis kind family (slice 7f) is admitted with its contract version and the baseline modes. This is the
- * terminal version.
+ * that the custom analysis kind family (slice 7f) is admitted with its contract version and the baseline modes.
  */
 export const TASK_INTENT_DRAFT_SCHEMA_VERSION = 80;
-export const LATEST_SCHEMA_VERSION = TASK_INTENT_DRAFT_SCHEMA_VERSION;
+/** Revision 81 (ADR 0090 / #66): the additive foreign Skill ledgers. This is the terminal version. */
+export const IMPORTED_SKILL_SCHEMA_VERSION = 81;
+export const LATEST_SCHEMA_VERSION = IMPORTED_SKILL_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -2252,6 +2253,14 @@ function migrateAnalysisLedgerToRevision80(db: DatabaseSync): void {
 }
 
 /**
+ * Revision 80 → 81 (Issue #66; ADR 0090). Revision 81 adds `imported-skill-schema.ts`'s relations, which `EditorialStore.open`
+ * creates before this runs, and moves nothing here: the ledger is already the terminal one, so only the version moves.
+ */
+function advanceToTerminalRevision(db: DatabaseSync): void {
+  migrateInTransaction(db, `PRAGMA user_version = ${LATEST_SCHEMA_VERSION};`, 'Terminal version');
+}
+
+/**
  * The rebuild revisions 20, 24, 59 and 62 share. Each rebuilds the same three relations from their *current*
  * exact text, so whichever revision a store starts from, it lands on the terminal shapes — and the
  * terminal version, which the revisions between them moved without touching them — in this one transaction;
@@ -2342,10 +2351,12 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === MATERIAL_INDEX_SCHEMA_VERSION || version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
       version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION ||
-      version === TASK_INTENT_DRAFT_SCHEMA_VERSION,
+      version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === TASK_INTENT_DRAFT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === IMPORTED_SKILL_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // Revision 81 (Issue #66) moves no task-authorization or analysis relation, so a revision-80 store carries the terminal ledger.
+  if (version === TASK_INTENT_DRAFT_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
   // Revisions 67 to 79 move no analysis relation but the plan records' web-tools component (revision 74, widened in place), so a
   // store at 66 to 79 carries `analysis_task_intents` as revision 65 left it: it is validated as exactly that, and revision 80's
   // rebuild of the Task Intents brings it to the terminal ledger and stamps the terminal version (Issue #423, slice 7a).

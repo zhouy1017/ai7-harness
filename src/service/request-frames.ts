@@ -1558,6 +1558,33 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'importSkillPackage': {
+      const input = requireInput(value.input, ['path'], tentativeId);
+      if (!isBoundedString(input.path, 2048) || input.path.length === 0) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'validateImportedSkill': {
+      const input = requireInput(value.input, ['revisionId'], tentativeId);
+      if (!validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'installImportedSkill':
+    case 'enableImportedSkill': {
+      const input = requireInput(value.input, op === 'enableImportedSkill' ? ['revisionId', 'bookId', 'previewDigest'] : ['revisionId', 'previewDigest'], tentativeId);
+      if (!validUuid(input.revisionId) || !isBoundedString(input.previewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.previewDigest) || (op === 'enableImportedSkill' && !validUuid(input.bookId))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectImportedSkills': {
+      const input = requireInput(value.input, ['revisionId', 'before'], tentativeId);
+      if ((input.revisionId !== null && !validUuid(input.revisionId)) || (input.before !== null && !validUuid(input.before))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'recommendProcedures': {
+      const input = requireInput(value.input, ['bookId', 'goal', 'taskKind', 'scope', 'categoryIds'], tentativeId);
+      if (!validUuid(input.bookId) || !isBoundedString(input.goal, 2000) || !['review-run', 'baseline-analysis', 'writing', 'unclassified'].includes(String(input.taskKind)) ||
+        !['whole', 'chapters', 'selection'].includes(String(input.scope)) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 0)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'inspectCapturedProcedure':
     case 'inspectDeveloperProposal': {
       const key = op === 'inspectCapturedProcedure' ? 'procedureId' : 'proposalId';

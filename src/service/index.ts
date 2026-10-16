@@ -714,6 +714,18 @@ async function dispatch(
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): deterministic, provider-free; running one is an ordinary Review Run.
     case 'inspectCapturedProcedures':
       return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedures() };
+    case 'importSkillPackage':
+      return { id: request.id, ok: true, op: request.op, result: await store.importSkillPackage(request.input.path) };
+    case 'validateImportedSkill':
+      return { id: request.id, ok: true, op: request.op, result: store.validateImportedSkill(request.input.revisionId) };
+    case 'installImportedSkill':
+      return { id: request.id, ok: true, op: request.op, result: store.installImportedSkill(request.input.revisionId, request.input.previewDigest) };
+    case 'enableImportedSkill':
+      return { id: request.id, ok: true, op: request.op, result: store.enableImportedSkill(request.input.revisionId, request.input.bookId, request.input.previewDigest) };
+    case 'inspectImportedSkills':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectImportedSkills(request.input.revisionId, request.input.before) };
+    case 'recommendProcedures':
+      return { id: request.id, ok: true, op: request.op, result: store.recommendProcedures(request.input) };
     case 'inspectCapturedProcedure':
       return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedure(request.input.procedureId, request.input.before) };
     case 'inspectDeveloperProposal':

@@ -1,0 +1,60 @@
+import { join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { afterEach, describe, expect, it } from 'vitest';
+import { EditorialStore } from '../../src/service/store.js';
+import { IMPORTED_SKILL_SCHEMA_SQL, IMPORTED_SKILL_TRIGGER_SQL } from '../../src/service/imported-skill-schema.js';
+import { NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL } from '../../src/service/editorial-workspace-profile.js';
+import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
+import { IMPORTED_SKILL_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+let roots: ServiceTestRoots | undefined;
+afterEach(async () => { await roots?.dispose(); roots = undefined; });
+
+describe('imported Skill store boundary', () => {
+  it('migrates schema 79 additively, preserving existing schema and native installation bytes, and retains exact history across restart', async () => {
+    roots = await createServiceTestRoots('ai7-imported-skill-service-');
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const creation = store.prepareBookCreation('合成工序测试图书', null);
+    const bookId = store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+    store.markCleanShutdown(); store.close();
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const prior = new DatabaseSync(path);
+    let before: unknown[];
+    try {
+      for (const trigger of Object.keys(IMPORTED_SKILL_TRIGGER_SQL)) prior.exec(`DROP TRIGGER ${trigger}`);
+      for (const table of Object.keys(IMPORTED_SKILL_SCHEMA_SQL).reverse()) prior.exec(`DROP TABLE ${table}`);
+      prior.exec('PRAGMA user_version = 79');
+      before = prior.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
+      expect(String(prior.prepare("SELECT sql FROM sqlite_schema WHERE name = 'native_artifact_installations'").get()?.sql)).toBe(NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL);
+    } finally { prior.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const after = new DatabaseSync(path, { readOnly: true });
+      try {
+        expect(Number(after.prepare('PRAGMA user_version').get()?.user_version)).toBe(IMPORTED_SKILL_SCHEMA_VERSION);
+        const added = new Set([...Object.keys(IMPORTED_SKILL_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_TRIGGER_SQL)]);
+        expect(after.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all().filter((row) => !added.has(String(row.name)))).toEqual(before!);
+        for (const table of Object.keys(IMPORTED_SKILL_SCHEMA_SQL)) expect(MERGE_TABLE_POLICY[table as keyof typeof MERGE_TABLE_POLICY]).toBe('house');
+      } finally { after.close(); }
+      const imported = await store.importSkillPackage(resolve('tests/fixtures/skills/plain'));
+      const validated = store.validateImportedSkill(imported.revisionId);
+      const installed = store.installImportedSkill(validated.revisionId, validated.previewDigest);
+      const enabled = store.enableImportedSkill(installed.revisionId, bookId, installed.previewDigest);
+      expect(enabled.enabledBooks).toEqual([bookId]);
+      const writes = new DatabaseSync(path, { readOnly: true });
+      const counts = (): unknown[] => writes.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map((row) => [row.name, writes.prepare(`SELECT count(*) AS n FROM "${String(row.name).replaceAll('"', '""')}"`).get()?.n]);
+      try {
+        const priorCounts = counts();
+        const recommendation = store.recommendProcedures({ bookId, goal: '合成审阅', taskKind: 'review-run', scope: 'whole', categoryIds: [] });
+        expect(recommendation.status).toBe('none');
+        expect(recommendation.excludedSkillReason).toContain('没有执行器');
+        expect(recommendation.candidates).toEqual([]);
+        expect(counts()).toEqual(priorCounts);
+      } finally { writes.close(); }
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.inspectImportedSkills(enabled.revisionId, null).revision).toEqual(enabled);
+    } finally { store.markCleanShutdown(); store.close(); }
+  });
+});

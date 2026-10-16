@@ -469,6 +469,10 @@ async function constructPredecessorV12(dataRoot, bookId) {
       DROP TABLE task_intent_draft_versions;
       DROP TABLE task_intent_drafts;
       DROP TABLE review_run_preference_pins;
+      DROP TABLE imported_skill_states;
+      DROP TABLE imported_skill_revisions;
+      DROP TABLE imported_skill_snapshots;
+      DROP TABLE imported_skills;
       DROP TABLE house_review_preference_versions;
       DROP TABLE correction_proposals;
       DROP TABLE factual_review_decisions;
