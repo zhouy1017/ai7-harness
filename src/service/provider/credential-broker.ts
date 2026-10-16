@@ -1,5 +1,5 @@
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
-import { CONFIGURED_CREDENTIAL_SLOTS } from '../../shared/provider-configuration.generated.js';
+import { CONFIGURED_CREDENTIAL_SLOTS, CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
 import { DIGEST_PATTERN } from '../analysis/canonical.js';
 import { consumeSearchCredentialRelease, type CredentialSlot, type TransmitTicket, type SearchServiceTicket } from './egress-gate.js';
 
@@ -100,8 +100,12 @@ export class CredentialBroker {
   async releaseTo<T>(binding: CredentialSlotBinding, ticket: TransmitTicket | SearchServiceTicket | null, consume: (value: string) => Promise<T>): Promise<T> {
     requireBinding(binding);
     this.#requireAdmittedReference(binding.credentialReference);
-    const searchRelease = ticket?.decision === 'call-search-service' && ticket.backend !== undefined &&
+    // A search ticket releases only its frozen backend's own slot: a development reference must be that slot's own, so no
+    // search host is ever handed the model's key or another backend's.
+    const developmentReference = DEVELOPMENT_CREDENTIAL_REFERENCES.has(binding.credentialReference.toLowerCase());
+    const searchRelease = ticket?.decision === 'call-search-service' && ticket.backend !== undefined && binding.slot.startsWith('search-') &&
       ticket.backend.credentialSlot === binding.slot && ticket.backend.credentialReference === binding.credentialReference &&
+      (!developmentReference || CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[binding.slot as keyof typeof CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES]?.toLowerCase() === binding.credentialReference.toLowerCase()) &&
       ticket.backend.host === ticket.host && ticket.bindingDigest === binding.bindingDigest && consumeSearchCredentialRelease(ticket);
     if (ticket === null || ticket.bindingDigest !== binding.bindingDigest || (ticket.decision !== 'transmit-remote' && !searchRelease) ||
         (ticket.decision === 'transmit-remote' && binding.slot.startsWith('search-'))) {

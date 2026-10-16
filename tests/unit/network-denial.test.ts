@@ -3,7 +3,8 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import { describe, expect, it } from 'vitest';
-import { NETWORK_DENIED_CODE, installNodeNetworkDenial } from '../../src/shared/network-denial.js';
+import { NETWORK_ALLOWANCE_INVALID_CODE, NETWORK_DENIED_CODE, admitTicketHost, allowanceAdmitsConnection, hostAllowanceSet, installNodeNetworkDenial, perTicketHostAdmissionArmed } from '../../src/shared/network-denial.js';
+import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
 
 // The denial patches process-wide Node primitives, so this file runs in its own isolated worker.
 installNodeNetworkDenial();
@@ -41,5 +42,18 @@ describe('installNodeNetworkDenial', () => {
 
   it('denies WebSocket construction', () => {
     expect(deniedCode(() => new WebSocket('ws://127.0.0.1:9/'))).toBe(NETWORK_DENIED_CODE);
+  });
+
+  // development-ci, guests and CI (#473): nothing is armed, so no search backend host opens by connection, by ticket or by fetch.
+  it('keeps every shipped search backend host closed: no allowance, no per-ticket admission, no fetch', async () => {
+    expect(hostAllowanceSet()).toEqual([]);
+    expect(perTicketHostAdmissionArmed()).toBe(false);
+    const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped);
+    expect(shipped).toHaveLength(5);
+    for (const [index, entry] of shipped.entries()) {
+      expect(allowanceAdmitsConnection([{ host: entry.host, port: 443 }])).toBe(false);
+      expect(() => admitTicketHost({ host: entry.host!, port: 443, ticketId: `ticket-${index}` })).toThrowError(new RegExp(NETWORK_ALLOWANCE_INVALID_CODE, 'u'));
+      await expect(fetch(entry.endpoint!)).rejects.toMatchObject({ code: NETWORK_DENIED_CODE });
+    }
   });
 });

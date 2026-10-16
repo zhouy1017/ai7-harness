@@ -8,6 +8,13 @@ import { EgressTicketBook, evaluateSearchServiceCall, type EgressBindingFacts } 
 import { toolArgumentsDigest } from '../../src/service/provider/platform-tools.js';
 import { searchToolsRule } from '../support/search-tools-policy.js';
 
+type Vendors = {
+  evaluationRequest: (declaration: unknown, query: string, credential: string) => unknown;
+  readEvaluationAnswer: (declaration: unknown, json: unknown) => { hits: Array<{ title: string; url: string }> | null };
+};
+// @ts-expect-error tools/*.mjs carry no declarations; #883's evaluation speakers are the documents' measured reading.
+const vendors = (await import('../../tools/search-backend-evaluation/vendors.mjs')) as unknown as Vendors;
+
 function bodyOf(id: string, hits: Array<{ title: string; url: string }>): string {
   if (id === 'search-bochaai') return JSON.stringify({ data: { webPages: { value: hits.map((hit) => ({ name: hit.title, url: hit.url })) } } });
   if (id === 'search-brave') return JSON.stringify({ type: 'search', web: { results: hits } });
@@ -41,6 +48,16 @@ describe('the shipped keyed search adapters', () => {
       expect(JSON.stringify(request)).toContain('synthetic-key');
       expect(() => adapter.request('q', { credential: '', count: 10 })).toThrow(/CREDENTIAL_REQUIRED/);
       expect(searchBackendConfigurationDigest(entry.id)).toMatch(/^[0-9a-f]{64}$/u);
+    });
+
+    it(`${entry.id}: sends exactly the request #883 measured and reads the same titles and URLs`, () => {
+      const fixture = JSON.parse(readFileSync(new URL(`../fixtures/search-backends/${entry.id}.json`, import.meta.url), 'utf8')) as { hits: Array<{ title: string; url: string }> };
+      const adapter = searchBackend(entry.id);
+      // The document's reading as the evaluation spoke it: URL, method, headers (credential in its documented form) and body, byte for byte.
+      expect(adapter.request(SEARCH_BACKEND_PROBE_QUERY, { credential: 'synthetic-key', count: 10 })).toEqual(vendors.evaluationRequest(entry, SEARCH_BACKEND_PROBE_QUERY, 'synthetic-key'));
+      const body = bodyOf(entry.id, fixture.hits);
+      expect(adapter.readResults(200, 'application/json', body)!.map(({ title, url }) => ({ title, url })))
+        .toEqual(vendors.readEvaluationAnswer(entry, JSON.parse(body)).hits!.map((hit) => ({ title: hit.title, url: new URL(hit.url).href })));
     });
   }
 
@@ -84,5 +101,13 @@ describe('the shipped keyed search adapters', () => {
     });
     expect(sent).toBe(SEARCH_BACKEND_PROBE_QUERY); expect(result.resultCount).toBe(6); expect(result.results).toHaveLength(3);
     expect(result.results.every((hit) => hit.title.length === 120)).toBe(true);
+  });
+
+  it('reports an authentication refusal as unreachable with its status and no results', async () => {
+    for (const status of [401, 403]) {
+      const result = await probeSearchBackend({ binding: facts('search-brave'), broker: new CredentialBroker({ resolve: async () => 'synthetic-key' }), admitHost: () => () => undefined,
+        fetch: async () => new Response(JSON.stringify({ type: 'ErrorResponse', error: { code: 'SUBSCRIPTION_TOKEN_INVALID' } }), { status }) });
+      expect(result).toMatchObject({ backendId: 'search-brave', reachable: false, resultCount: 0, results: [], failure: `HTTP ${status}` });
+    }
   });
 });

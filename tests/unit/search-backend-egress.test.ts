@@ -1,16 +1,29 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
-import { EgressTicketBook, evaluateSearchServiceCall, type EgressBindingFacts } from '../../src/service/provider/egress-gate.js';
+import {
+  EgressTicketBook, OPENCODE_GO_MODEL, OPENCODE_GO_ROUTE, assistantToolCallDigest, evaluateEgress, evaluateSearchServiceCall, toolResultKey, type EgressBindingFacts,
+} from '../../src/service/provider/egress-gate.js';
+import type { AssembledContentBlock, AssembledModelPayload } from '../../src/service/provider/payload.js';
+import { PLATFORM_TOOL_SCHEMAS } from '../../src/service/provider/platform-tools.js';
 import { PlatformToolSession } from '../../src/service/provider/platform-tool-session.js';
-import { platformToolsFromProjection } from '../../src/service/provider/search-service.js';
+import { authorizeSearchCall, platformToolsFromProjection } from '../../src/service/provider/search-service.js';
+import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../src/shared/provider-configuration.generated.js';
+import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
-import { armHostAllowanceSet, armPerTicketHostAdmission, admitTicketHost, hostAllowanceSet, allowanceAdmitsConnection, installNodeNetworkDenial } from '../../src/shared/network-denial.js';
+import { armHostAllowanceSet, armPerTicketHostAdmission, admitTicketHost, hostAllowanceSet, allowanceAdmitsConnection, installNodeNetworkDenial, ticketHostHolds } from '../../src/shared/network-denial.js';
 import { searchToolsRule } from '../support/search-tools-policy.js';
 
 const frozen = SEARCH_BACKENDS.find((entry) => entry.id === 'search-tinyfish')!;
-armHostAllowanceSet([{ host: 'opencode.ai', port: 443 }, { host: frozen.host!, port: 443 }]);
+const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped);
+const MODEL = { host: 'opencode.ai', port: 443 };
+// Exactly what `src/service/index.ts` arms under developer-live: the model endpoint's single host, then per-ticket admission,
+// then the process-wide denial. No search backend host is armed; the frozen one opens only for a redeemed ticket.
+armHostAllowanceSet([MODEL]);
 armPerTicketHostAdmission();
 installNodeNetworkDenial();
+/** The shipped backend hosts a connection may address at this instant. */
+const openBackendHosts = (): string[] => shipped.filter((entry) => allowanceAdmitsConnection([{ host: entry.host, port: 443 }])).map((entry) => entry.host!);
 const binding: EgressBindingFacts = { bindingDigest: 'a'.repeat(64), route: 'opencode-go', model: 'deepseek-v4.1-flash', systemPrompt: '',
   admittedUserMessages: new Set(), outboundDataCategory: 'public-or-synthetic',
   policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v16', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
@@ -20,11 +33,11 @@ const binding: EgressBindingFacts = { bindingDigest: 'a'.repeat(64), route: 'ope
 const scope = { currentBindingDigest: () => 'a'.repeat(64), acceptedOutputDigests: new Set<string>(), ceilingState: () => 'within' as const };
 
 describe('frozen backend egress and per-Run tool accounting', () => {
-  it('holds exactly the model and frozen backend; another backend and every global fetch stay denied', async () => {
-    expect(hostAllowanceSet()).toEqual([{ host: 'opencode.ai', port: 443 }, { host: frozen.host!, port: 443 }]);
-    for (const entry of SEARCH_BACKENDS.filter((candidate) => candidate.id !== frozen.id)) {
-      expect(allowanceAdmitsConnection([{ host: entry.host, port: 443 }])).toBe(false);
-    }
+  it('holds exactly the model host at rest; no backend host and no global fetch is admitted', async () => {
+    expect(hostAllowanceSet()).toEqual([MODEL]);
+    expect(allowanceAdmitsConnection([MODEL])).toBe(true);
+    expect(openBackendHosts()).toEqual([]);
+    expect(ticketHostHolds()).toBe(0);
     await expect(globalThis.fetch(`https://${frozen.host}/`)).rejects.toMatchObject({ code: 'AI7_OUTBOUND_NETWORK_DENIED' });
     expect(() => EgressTicketBook.open({ ...binding, policy: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 } }, scope)).toThrow(/NOT_NAMED/);
     const book = EgressTicketBook.open(binding, scope);
@@ -34,9 +47,12 @@ describe('frozen backend egress and per-Run tool accounting', () => {
 
   it('searches a query once across units, binds fetches to citations and records counts, bytes and provenance', async () => {
     let searches = 0; let pages = 0;
+    // What the process admits at the instant each request leaves: the model host, plus exactly the one host its ticket opened.
+    const opened: Array<{ to: string; backends: string[]; page: boolean; model: boolean }> = [];
     const session = new PlatformToolSession({ binding, scope, broker: new CredentialBroker({ resolve: async () => 'synthetic-key' }),
       purpose: 'provider-free-boundary', admitHost: admitTicketHost,
       fetch: async (url) => {
+        opened.push({ to: new URL(url).hostname, backends: openBackendHosts(), page: allowanceAdmitsConnection([{ host: 'example.org', port: 443 }]), model: allowanceAdmitsConnection([MODEL]) });
         if (new URL(url).hostname === frozen.host) { searches += 1; return new Response(JSON.stringify({ results: [{ title: 'Public source', url: 'https://example.org/source', snippet: 'Public fact' }] })); }
         expect(url).toBe('https://example.org/source'); pages += 1;
         return new Response('<html><body><h1>Public source</h1><p>Public fact</p></body></html>', { headers: { 'content-type': 'text/html' } });
@@ -59,6 +75,11 @@ describe('frozen backend egress and per-Run tool accounting', () => {
     const page = await session.execute({ callId: 'cited', tool: 'webfetch', arguments: { url: 'https://example.org/source' }, signal: new AbortController().signal });
     expect(page.text).toContain('# Public source');
     expect(searches).toBe(1); expect(pages).toBe(1);
+    expect(opened).toEqual([
+      { to: frozen.host, backends: [frozen.host], page: false, model: true },
+      { to: 'example.org', backends: [], page: true, model: true },
+    ]);
+    expect(openBackendHosts()).toEqual([]); expect(ticketHostHolds()).toBe(0);
     expect(session.usage).toMatchObject({ requests: 2, searchCalls: { 'search-tinyfish': 1 }, fetchCount: 1 });
     expect(session.usage.fetchBytes).toBeGreaterThan(0);
     expect(session.provenance).toHaveLength(2);
@@ -95,5 +116,95 @@ describe('frozen backend egress and per-Run tool accounting', () => {
     expect(last.text).toContain('联网核查未完成');
     expect(session.breakerState).toBe('tripped');
     expect(sends).toBe(1);
+  });
+
+  it('counts every refused call as a round trip, so a model that keeps asking ends at 128 with 联网核查未完成', async () => {
+    let sends = 0;
+    const session = new PlatformToolSession({ binding, scope, broker: new CredentialBroker({ resolve: async () => 'synthetic-key' }),
+      purpose: 'provider-free-refusals', admitHost: admitTicketHost,
+      fetch: async () => { sends += 1; return new Response(JSON.stringify({ results: [{ title: 'Public source', url: 'https://example.org/source' }] })); },
+    });
+    const signal = new AbortController().signal;
+    await session.execute({ tool: 'websearch', callId: 'first', arguments: { query: 'public fact' }, signal });
+    // 1 fresh search + 126 different queries + 1 malformed call = 128 round trips: refused, counted, not yet tripped.
+    for (let n = 0; n < 126; n += 1) {
+      expect((await session.execute({ tool: 'websearch', callId: `other-${n}`, arguments: { query: `public fact ${n}` }, signal })).text).toContain('本单元的检索次数已用完');
+    }
+    expect((await session.execute({ tool: 'websearch', callId: 'malformed', arguments: { q: 'x' }, signal })).text).toContain('参数不是');
+    expect(session.breakerState).toBe('intact');
+    expect(session.usage.refusedSearchCalls).toBe(126);
+    const tripped = await session.execute({ tool: 'websearch', callId: 'other-last', arguments: { query: 'yet another public fact' }, signal });
+    expect(tripped.text).toContain('联网核查未完成');
+    expect(session.breakerState).toBe('tripped');
+    expect(session.unitDisclosure).toBe('联网核查未完成');
+    expect(sends).toBe(1);
+  });
+
+  it('runs tool calls one at a time', async () => {
+    let finish: (() => void) | undefined;
+    const session = new PlatformToolSession({ binding, scope, broker: new CredentialBroker({ resolve: async () => 'synthetic-key' }),
+      purpose: 'provider-free-sequential', admitHost: admitTicketHost,
+      fetch: async () => { await new Promise<void>((resolve) => { finish = resolve; }); return new Response(JSON.stringify({ results: [] })); },
+    });
+    const signal = new AbortController().signal;
+    const first = session.execute({ tool: 'websearch', callId: 'first', arguments: { query: 'public fact' }, signal });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect((await session.execute({ tool: 'webfetch', callId: 'second', arguments: { url: 'https://example.org/source' }, signal })).text).toContain('顺序');
+    finish!();
+    await first;
+    expect(ticketHostHolds()).toBe(0);
+  });
+
+  it('admits a search result only from the frozen backend host', () => {
+    const UNIT = `分析单元 1/1 · 单元摘要 ${'1'.repeat(64)}\n[blk_${'a'.repeat(24)}] (paragraph) 合成段落。`;
+    const CALL: AssembledContentBlock[] = [{ type: 'tool-call', id: 'call_1', name: 'websearch', arguments: '{"query":"public fact"}' }];
+    const RESULT = '[{"title":"Public source","url":"https://example.org/source"}]';
+    const facts: EgressBindingFacts = { ...binding, route: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL, systemPrompt: '合成系统提示。', admittedUserMessages: new Set([UNIT]) };
+    const payload: AssembledModelPayload = { provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL, system: '合成系统提示。',
+      tools: PLATFORM_TOOL_SCHEMAS.map((tool) => JSON.parse(JSON.stringify(tool)) as unknown),
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: UNIT }], source: { kind: 'user' } },
+        { role: 'assistant', content: CALL, source: { kind: 'model', provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL } },
+        { role: 'user', content: [{ type: 'tool-result', toolCallId: 'call_1', content: [{ type: 'text', text: RESULT }] }], source: { kind: 'tool', callId: 'call_1' } },
+      ] };
+    const from = (sourceUrl: string) => evaluateEgress(payload, facts, { ...scope, acceptedToolCallDigests: new Set([assistantToolCallDigest(CALL)]),
+      admittedToolResults: new Map([[toolResultKey('call_1', 'websearch'), { callId: 'call_1', tool: 'websearch', sourceUrl,
+        sha256: createHash('sha256').update(RESULT).digest('hex'), byteCount: Buffer.byteLength(RESULT) }]]),
+      breakerState: () => 'intact', citationAdmits: () => false });
+    expect(from(frozen.endpoint!).decision).toBe('transmit-remote');
+    for (const other of [...shipped.filter((entry) => entry.id !== frozen.id).map((entry) => entry.endpoint!), 'https://search.parallel.ai/mcp', `http://${frozen.host}/`]) {
+      expect(from(other)).toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
+    }
+  });
+
+  it('releases a search key only for its own frozen slot and never against transmit-remote', async () => {
+    const resolve = { resolve: async () => 'synthetic-key' };
+    const args = { tool: 'websearch' as const, query: 'public fact' };
+    const redeemed = (reference: string) => {
+      const facts = { ...binding, searchBackend: { ...binding.searchBackend!, credentialReference: reference } };
+      const book = EgressTicketBook.open(facts, scope);
+      const decision = evaluateSearchServiceCall({ arguments: args }, facts, scope, book);
+      if (decision.decision !== 'call-search-service') throw new Error('expected a search ticket');
+      authorizeSearchCall({ ticket: decision.ticket, book, arguments: args });
+      return decision.ticket;
+    };
+    const slot = (credentialReference: string, slotId: string = frozen.credentialSlot) =>
+      ({ bindingDigest: binding.bindingDigest, modelRole: 'Main Editorial Role' as const, slot: slotId as typeof frozen.credentialSlot, credentialReference });
+    const broker = new CredentialBroker(resolve);
+    // Another slot's development reference (the model's own) is never handed to a search host.
+    const modelKey = redeemed(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE);
+    await expect(broker.releaseTo(slot(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE), modelKey, async () => 'never')).rejects.toMatchObject({ code: 'CREDENTIAL_RELEASE_REFUSED' });
+    await expect(broker.releaseTo(slot(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, 'opencode-go'), modelKey, async () => 'never')).rejects.toMatchObject({ code: 'CREDENTIAL_RELEASE_REFUSED' });
+    const ownReference = CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[frozen.credentialSlot];
+    const own = redeemed(ownReference);
+    // A transmit-remote decision for the same binding releases a model slot, never a search slot.
+    const transmit = { decision: 'transmit-remote', ticketId: 'ticket', bindingDigest: binding.bindingDigest, payloadDigest: 'b'.repeat(64) } as unknown as Parameters<CredentialBroker['releaseTo']>[1];
+    await expect(broker.releaseTo(slot(ownReference), transmit, async () => 'never')).rejects.toMatchObject({ code: 'CREDENTIAL_RELEASE_REFUSED' });
+    expect(await broker.releaseTo(slot(ownReference), own, async (value) => value.length)).toBe('synthetic-key'.length);
+    // Once only, and never under ordinary production for a development reference.
+    await expect(broker.releaseTo(slot(ownReference), own, async () => 'never')).rejects.toMatchObject({ code: 'CREDENTIAL_RELEASE_REFUSED' });
+    await expect(new CredentialBroker(resolve, { developmentReferences: 'refused' }).releaseTo(slot(ownReference), redeemed(ownReference), async () => 'never'))
+      .rejects.toMatchObject({ code: 'CREDENTIAL_DEVELOPMENT_REFERENCE_REFUSED' });
+    expect(broker.releaseCount).toBe(1);
   });
 });

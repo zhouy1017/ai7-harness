@@ -1907,7 +1907,9 @@ async function run(): Promise<void> {
       const tools = platformToolsFromProjection(rule);
       if (tools === null || rule === undefined) throw new StoreError('SEARCH_PROBE_NOT_ADMITTED', '当前策略未准许测试检索。');
       const connection = store!.getSearchBackendConnections().find((entry) => entry.backendId === id)!;
-      const reference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot] : connection.credentialReference;
+      // A removed production key keeps its row's reference with state `missing`: only a `ready` key is probed.
+      const reference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot]
+        : connection.credentialOperationState === 'ready' ? connection.credentialReference : null;
       if (reference === null) throw new StoreError('SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
       return probeSearchBackend({ broker: probeBroker, fetch: modelServiceFetch, admitHost: admitTicketHost, binding: {
         bindingDigest: sha256Hex(canonicalJson({ backendId: id, reference, query: SEARCH_BACKEND_PROBE_QUERY, policy: launchPolicy.providerProcessing.version })),
