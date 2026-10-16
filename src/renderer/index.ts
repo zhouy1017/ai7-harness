@@ -729,8 +729,9 @@ let manuscriptRail: PositionRail | undefined;
 let reviewWorkspace: ReviewWorkspaceSurface | undefined;
 /** ⑥ 交付物 while it is on screen: nothing still in flight paints once the screen is replaced. */
 let deliverablesSurface: DeliverablesSurface | undefined;
-/** 稿件冲突 while it is on screen: a draft save still in flight never paints once the screen is replaced. */
+/** The dedicated Proposal review workspace while it is on screen (Issue #902): it stops painting once replaced. */
 let proposalWorkspaceSurface: ReturnType<typeof mountProposalWorkspace> | undefined;
+/** 稿件冲突 while it is on screen: a draft save still in flight never paints once the screen is replaced. */
 let proposalConflictSurface: ProposalConflictSurface | undefined;
 /** 待我处理 while it is on screen: it stops painting once the screen is replaced. */
 let globalAttentionSurface: GlobalAttentionSurface | undefined;
@@ -1001,8 +1002,19 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
         await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
         const receipt = await window.ai7.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'settled' });
-        const content = panel(); content.append(element('h2', undefined, receipt.state === 'applied' ? '已应用' : receipt.state === 'not-applied' ? '未应用' : '结果待确认'), element('p', undefined, receipt.reason));
-        const details = element('details'); details.append(element('summary', undefined, '查看完整凭据'), element('pre', undefined, JSON.stringify(receipt, null, 2))); content.append(details);
+        const labels = { applied: '已应用', 'not-applied': '未应用', confirming: '正在确认应用结果', unresolved: '结果待确认' } as const;
+        const content = panel(); const heading = element('h2', undefined, labels[receipt.state]); const reason = element('p', undefined, receipt.reason);
+        heading.dataset['applyReceiptState'] = receipt.state; content.append(heading, reason);
+        const details = element('details'); const full = element('pre', undefined, JSON.stringify(receipt, null, 2)); details.append(element('summary', undefined, '查看完整凭据'), full); content.append(details);
+        // EREC-005: the editor's re-check reads the authoritative records by the same Effect identity; it dispatches nothing.
+        if (receipt.state === 'unresolved') {
+          const recheck = button('重新核对应用结果', 'primary', async () => {
+            const next = await window.ai7.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'recheck' });
+            heading.textContent = labels[next.state]; heading.dataset['applyReceiptState'] = next.state; reason.textContent = next.reason; full.textContent = JSON.stringify(next, null, 2);
+            if (next.state !== 'unresolved') recheck.remove();
+          });
+          content.append(recheck);
+        }
         content.append(button('在稿件中查看', 'secondary', async () => { const opened = await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }); await openEditorWindow(opened, route.bookTitle); }), button('返回提案', 'secondary', () => renderProposalWorkspace({ manuscriptId: target.manuscriptId, branchId: target.branchId, resultId: null }, target.bookId, route.bookTitle)));
         replaceScreen('apply-receipt', content);
       });
@@ -2518,10 +2530,8 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
  * so the sticky region stays on screen for the whole page (V2-UX-LAYER-005).
  */
 /**
- * 稿件冲突 of one 修改建议 as a Dedicated Work Workspace (Issue #57; ED-003, IA › Proposal conflict workspace).
- * It takes the manuscript view's place; the surface is `proposal-conflict.ts`, and this only routes to it
- * and back: 返回稿件 — and every way the conflict is left — opens the manuscript at the conflict's paragraph
- * with the card it came from, or the new version's, open again.
+ * The dedicated Proposal review workspace (Issue #902, V2-UX-PROP-002): offered, never entered by itself. It takes the
+ * manuscript view's place; 返回稿件 opens the manuscript at the active change with its card.
  */
 async function renderProposalWorkspace(input: { manuscriptId: string; branchId: string; resultId: string | null }, bookId: string, bookTitle: string): Promise<void> {
   const origin = screen.firstElementChild;
@@ -2539,6 +2549,12 @@ async function renderProposalWorkspace(input: { manuscriptId: string; branchId: 
   replaceScreen('proposal-workspace', content); proposalWorkspaceSurface = surface; leaveGuard = () => surface.settle(); surface.start();
 }
 
+/**
+ * 稿件冲突 of one 修改建议 as a Dedicated Work Workspace (Issue #57; ED-003, IA › Proposal conflict workspace).
+ * It takes the manuscript view's place; the surface is `proposal-conflict.ts`, and this only routes to it
+ * and back: 返回稿件 — and every way the conflict is left — opens the manuscript at the conflict's paragraph
+ * with the card it came from, or the new version's, open again.
+ */
 function renderProposalConflict(target: { bookId: string; manuscriptId: string; branchId: string; markId: string }, bookTitle: string): void {
   const content = panel();
   content.classList.add('proposal-conflict-workspace');

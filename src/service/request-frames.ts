@@ -1936,7 +1936,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectApplyReceipt': {
       const input = requireInput(value.input, ['manuscriptId', 'branchId', 'clientEffectId', 'recovery'], tentativeId);
       if (![input.manuscriptId, input.branchId, input.clientEffectId].every((v) => typeof v === 'string' && UUID_PATTERN.test(v)) ||
-        !(input.recovery === 'settled' || input.recovery === 'confirming' || input.recovery === 'unresolved')) throw new ProtocolError(tentativeId);
+        !(input.recovery === 'settled' || input.recovery === 'confirming' || input.recovery === 'unresolved' || input.recovery === 'recheck')) throw new ProtocolError(tentativeId);
       break;
     }
     case 'prepareReverseApply': {

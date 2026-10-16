@@ -1,6 +1,6 @@
-import { proposalReviewPosition } from './editorial-workspace-profile.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { proposalReviewPosition } from './editorial-workspace-profile.js';
 import {
   coverSpanEdit,
   followGraphemeEdit,
@@ -922,18 +922,25 @@ export const PROPOSAL_REVIEW_SCHEMA_SQL = {
     actor TEXT NOT NULL CHECK(actor = 'editor'),
     recorded_at TEXT NOT NULL
   ) STRICT`,
+  // Append-only (#902 rev 6): the latest ordinal is the current Return Position; an unchanged one is not appended.
   proposal_review_positions: `CREATE TABLE proposal_review_positions (
     branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
     result_key TEXT NOT NULL,
-    position_json TEXT NOT NULL,
-    PRIMARY KEY(branch_id, result_key)
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+    position_json TEXT NOT NULL CHECK(length(position_json) BETWEEN 2 AND 4000),
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY(branch_id, result_key, ordinal)
   ) STRICT`,
+  // Append-only (#902 rev 6): the latest ordinal is an Effect identity's recovery state; a re-check appends the
+  // settled `applied` / `not-applied` it proved, so an unresolved episode stays on record.
   manuscript_outcome_recovery: `CREATE TABLE manuscript_outcome_recovery (
-    client_effect_id TEXT PRIMARY KEY,
+    client_effect_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
     manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
     branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-    state TEXT NOT NULL CHECK(state IN ('confirming', 'unresolved')),
-    updated_at TEXT NOT NULL
+    state TEXT NOT NULL CHECK(state IN ('confirming', 'unresolved', 'applied', 'not-applied')),
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY(client_effect_id, ordinal)
   ) STRICT`,
 } as const;
 export const PROPOSAL_REVIEW_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
@@ -944,7 +951,7 @@ export const PROPOSAL_REVIEW_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray
   manuscript_outcome_recovery: ['branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE', 'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE'],
 };
 export const PROPOSAL_REVIEW_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
-  ['proposal_atomic_groups', 'proposal_decision_drafts', 'proposal_decisions'].flatMap((table) =>
+  Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL).flatMap((table) =>
     ['update', 'delete'].map((action) => [`${table}_no_${action}`, `CREATE TRIGGER ${table}_no_${action}
       BEFORE ${action.toUpperCase()} ON ${table} BEGIN SELECT RAISE(ABORT, 'PROPOSAL_RECORD_IMMUTABLE'); END`])),
 );
@@ -1059,8 +1066,8 @@ export class EditorialMarkStore {
   }
 
   /**
-   * A mark made by AI7 or carried in from an imported file. The range is verified against the working
-   * state exactly as an editor's is; nothing reaches the manuscript surface unanchored.
+   * The dedicated Proposal review workspace (Issue #902): one exact scope over a Run result, or the branch's own
+   * suggestions, read in bounded metadata pages whose scope digest always binds the whole result.
    */
   #pageWorkspace(workspace: ProposalWorkspaceProjection, offset = 0): ProposalWorkspaceProjection {
     const items = workspace.items.slice(offset, offset + 50);
@@ -1095,8 +1102,7 @@ export class EditorialMarkStore {
       (SELECT MAX(d.ordinal) FROM proposal_decision_drafts d WHERE d.item_id = i.item_id) draft_ordinal,
       (SELECT d.disposition FROM proposal_item_decisions d WHERE d.item_id = i.item_id ORDER BY d.ordinal DESC LIMIT 1) disposition,
       (SELECT d.decision_id FROM proposal_item_decisions d WHERE d.item_id = i.item_id ORDER BY d.ordinal DESC LIMIT 1) item_decision_id,
-      (SELECT r.resulting_revision_id FROM manuscript_effect_targets t JOIN manuscript_effect_receipts r ON r.effect_id = t.effect_id WHERE t.item_id = i.item_id ORDER BY r.resulting_journal_sequence DESC LIMIT 1) applied_revision,
-      0 conflicting
+      (SELECT r.resulting_revision_id FROM manuscript_effect_targets t JOIN manuscript_effect_receipts r ON r.effect_id = t.effect_id WHERE t.item_id = i.item_id ORDER BY r.resulting_journal_sequence DESC LIMIT 1) applied_revision
       FROM editorial_marks m JOIN proposal_change_items i ON i.mark_id = m.mark_id
       LEFT JOIN working_blocks w ON w.branch_id = m.branch_id AND w.block_id = m.block_id
       LEFT JOIN proposal_atomic_groups g ON g.group_id = i.atomic_group_id
@@ -1109,7 +1115,8 @@ export class EditorialMarkStore {
       position: row.position === null ? 0 : integer(row.position), fromGrapheme: integer(row.from_grapheme), toGrapheme: integer(row.to_grapheme),
       chapterBlockId: nullableText(row.chapter_id), chapter: nullableText(row.chapter)?.slice(0, 120) ?? '未分章',
       changeType: text(row.change_type) as ProposalNavigatorItem['changeType'], baseRevisionId: text(row.pinned_revision_id),
-      stale: row.pinned_revision_id !== state.revisionId || Number(row.pinned_journal_sequence) !== state.journalSequence, conflict: row.anchor_state !== 'exact' || Number(row.conflicting) === 1,
+      stale: row.pinned_revision_id !== state.revisionId || Number(row.pinned_journal_sequence) !== state.journalSequence,
+      anchorState: text(row.anchor_state) as ProposalNavigatorItem['anchorState'], conflict: row.anchor_state !== 'exact',
       loaded: row.position !== null, otherVersion: false,
       atomicGroupId: nullableText(row.atomic_group_id), atomicReason: nullableText(row.atomic_reason),
       draft: nullableText(row.draft) as ProposalNavigatorItem['draft'], draftOrdinal: Number(row.draft_ordinal ?? 0),
@@ -1160,9 +1167,11 @@ export class EditorialMarkStore {
               (input.chapterBlockId === null || item.chapterBlockId === input.chapterBlockId) && (input.changeType === null || item.changeType === input.changeType));
       const excluded: Array<ProposalDraftBatchProjection['excluded'][number]> = [];
       const included: string[] = [];
+      // A drifted anchor is a classified Three-way Proposal Conflict (原文已变, ADR 0085) whatever its base pin says;
+      // only a detached one is a stale base not yet classified (V2-UX-PDEC-005).
       for (const item of scope) {
         const reason = item.atomicGroupId !== null ? 'atomic-group' : item.otherVersion ? 'other-version' : !item.loaded ? 'unloaded'
-          : item.conflict ? (item.stale ? 'unclassified-stale' : 'conflict') : item.appliedRevisionId !== null ? 'applied' : null;
+          : item.anchorState === 'detached' ? 'unclassified-stale' : item.conflict ? 'conflict' : item.appliedRevisionId !== null ? 'applied' : null;
         if (reason === null) included.push(item.markId); else excluded.push({ markId: item.markId, reason });
       }
       for (const markId of input.markIds) if (input.scope === 'selection' && !scope.some((item) => item.markId === markId)) {
@@ -1212,6 +1221,10 @@ export class EditorialMarkStore {
     });
   }
 
+  /**
+   * A mark made by AI7 or carried in from an imported file. The range is verified against the working
+   * state exactly as an editor's is; nothing reaches the manuscript surface unanchored.
+   */
   createProduced(input: ProducedEditorialMarkInput): string {
     return transact(this.#db, () => this.#produce(input));
   }

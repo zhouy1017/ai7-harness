@@ -34,12 +34,15 @@ describe('Proposal workspace commands (#902)', () => {
       { id: randomUUID(), op: 'batchProposalDecisionDraft', input: { ...common, scope: 'filter', markIds: [], chapterBlockId: null, changeType: null, review: 'unreviewed', disposition: 'accepted', confirmDigest: null } },
       { id: randomUUID(), op: 'recordProposalDecision', input: { ...common, expectedScopeDigest: 'a'.repeat(64), clientDecisionId: randomUUID() } },
       { id: randomUUID(), op: 'inspectApplyReceipt', input: { manuscriptId: common.manuscriptId, branchId: common.branchId, clientEffectId: randomUUID(), recovery: 'confirming' } },
+      { id: randomUUID(), op: 'inspectApplyReceipt', input: { manuscriptId: common.manuscriptId, branchId: common.branchId, clientEffectId: randomUUID(), recovery: 'recheck' } },
       { id: randomUUID(), op: 'prepareReverseApply', input: { manuscriptId: common.manuscriptId, branchId: common.branchId, markId: randomUUID() } },
     ];
     for (const frame of frames) {
       expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
       expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...frame.input, approved: true } })))).toThrow(ProtocolError);
     }
+    // A re-check is a read: no value outside the four names, and no dispatch-shaped field rides along.
+    expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frames[4], input: { ...frames[4]!.input, recovery: 'retry' } })))).toThrow(ProtocolError);
   });
 
   it('preserves the existing batch Apply request bytes', () => {

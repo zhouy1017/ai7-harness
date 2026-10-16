@@ -1024,6 +1024,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
       if (pendingReceipt?.state === 'confirming' || pendingReceipt?.state === 'unresolved') {
         yours.append(el('p', 'muted', '应用结果确认前不能再次应用。'));
+        // EREC-005: the editor's re-check reads the authoritative records by the same Effect identity; it dispatches nothing.
+        if (pendingReceipt.state === 'unresolved') yours.append(actionButton('receipt-recheck', '重新核对应用结果', 'secondary', () => void api.inspectApplyReceipt({
+          manuscriptId: binding().manuscriptId, branchId: binding().branchId, clientEffectId: pendingReceipt.clientEffectId, recovery: 'recheck',
+        }).then(async (receipt) => {
+          if (receipt.state === 'unresolved') recoveryCards.set(card.markId, receipt); else recoveryCards.delete(card.markId);
+          options.setStatus(receipt.reason, receipt.state === 'unresolved' ? 'error' : 'success');
+          await openCard(card.markId);
+        }).catch((error) => options.setStatus(options.errorMessage(error, '无法重新核对应用结果。'), 'error'))));
       } else if (suggestion.atomicGroupId !== null && applied === null) {
         yours.append(el('p', 'muted', '本组只能记录一个整体处理；在专用提案工作区记录决定和准备应用。'));
       } else if (applied !== null) {

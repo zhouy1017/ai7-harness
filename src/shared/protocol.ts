@@ -234,12 +234,12 @@ export const IPC_CHANNELS = {
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
   getManuscriptApplyOutcome: 'ai7:j05:get-manuscript-apply-outcome',
-  inspectProposalWorkspace: 'ai7:j05:inspectProposalWorkspace',
-  saveProposalDecisionDraft: 'ai7:j05:saveProposalDecisionDraft',
-  batchProposalDecisionDraft: 'ai7:j05:batchProposalDecisionDraft',
-  recordProposalDecision: 'ai7:j05:recordProposalDecision',
-  inspectApplyReceipt: 'ai7:j05:inspectApplyReceipt',
-  prepareReverseApply: 'ai7:j05:prepareReverseApply',
+  inspectProposalWorkspace: 'ai7:j05:inspect-proposal-workspace',
+  saveProposalDecisionDraft: 'ai7:j05:save-proposal-decision-draft',
+  batchProposalDecisionDraft: 'ai7:j05:batch-proposal-decision-draft',
+  recordProposalDecision: 'ai7:j05:record-proposal-decision',
+  inspectApplyReceipt: 'ai7:j05:inspect-apply-receipt',
+  prepareReverseApply: 'ai7:j05:prepare-reverse-apply',
   inspectProposalConflict: 'ai7:j06:inspect-proposal-conflict',
   saveProposalConflictDraft: 'ai7:j06:save-proposal-conflict-draft',
   resolveProposalConflict: 'ai7:j06:resolve-proposal-conflict',
@@ -1672,6 +1672,8 @@ export interface ProposalNavigatorItem {
   changeType: ProposalChangeType;
   baseRevisionId: string;
   stale: boolean;
+  /** `drifted` is a classified Three-way Proposal Conflict (原文已变, ADR 0085); `detached` is not yet classified. */
+  anchorState: 'exact' | 'drifted' | 'detached';
   conflict: boolean;
   loaded: boolean;
   otherVersion: boolean;
@@ -1742,7 +1744,12 @@ export interface InspectApplyReceiptInput {
   manuscriptId: string;
   branchId: string;
   clientEffectId: string;
-  recovery: 'settled' | 'confirming' | 'unresolved';
+  /**
+   * `settled` reads; `confirming` and `unresolved` are what a surface that lost its acknowledgement, or its recovery
+   * read too, reports; `recheck` is the editor's explicit re-check of a 结果待确认 against the authoritative records.
+   * None of them dispatches.
+   */
+  recovery: 'settled' | 'confirming' | 'unresolved' | 'recheck';
 }
 export interface PrepareReverseApplyInput {
   manuscriptId: string;
@@ -12604,18 +12611,22 @@ export interface ServiceOperationMap {
    * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
    */
   applyChangeSuggestion: { input: ApplyChangeSuggestionInput; output: ManuscriptApplyCommandProjection };
-  inspectProposalWorkspace: { input: ProposalWorkspaceInput; output: ProposalWorkspaceProjection };
-  saveProposalDecisionDraft: { input: SaveProposalDecisionDraftInput; output: ProposalWorkspaceProjection };
-  batchProposalDecisionDraft: { input: BatchProposalDecisionDraftInput; output: ProposalDraftBatchProjection };
-  recordProposalDecision: { input: RecordProposalDecisionInput; output: ProposalWorkspaceProjection };
-  inspectApplyReceipt: { input: InspectApplyReceiptInput; output: ApplyReceiptProjection };
-  prepareReverseApply: { input: PrepareReverseApplyInput; output: ReverseApplyPreparationProjection };
   applyChangeSuggestionBatch: { input: ApplyChangeSuggestionBatchInput; output: ManuscriptApplyCommandProjection };
   reverseAppliedChangeSuggestion: { input: ReverseAppliedChangeSuggestionInput; output: ManuscriptApplyCommandProjection };
   getManuscriptApplyOutcome: {
     input: { manuscriptId: string; branchId: string; clientEffectId: string };
     output: ManuscriptApplyOutcomeProjection;
   };
+  /**
+   * The dedicated Proposal review workspace (Issue #902): metadata pages, durable decision drafts, frozen batch drafts
+   * and 记录提案决定 write no manuscript text; the four-state receipt and the reverse preparation dispatch nothing.
+   */
+  inspectProposalWorkspace: { input: ProposalWorkspaceInput; output: ProposalWorkspaceProjection };
+  saveProposalDecisionDraft: { input: SaveProposalDecisionDraftInput; output: ProposalWorkspaceProjection };
+  batchProposalDecisionDraft: { input: BatchProposalDecisionDraftInput; output: ProposalDraftBatchProjection };
+  recordProposalDecision: { input: RecordProposalDecisionInput; output: ProposalWorkspaceProjection };
+  inspectApplyReceipt: { input: InspectApplyReceiptInput; output: ApplyReceiptProjection };
+  prepareReverseApply: { input: PrepareReverseApplyInput; output: ReverseApplyPreparationProjection };
   /**
    * 稿件冲突 of one 修改建议 (Issue #57, plan slice S22; ADR 0085). The read compares the three texts; the
    * Resolution Draft is saved on exactly the basis the editor saw; the conflict is left by 保留当前稿件,
@@ -13115,13 +13126,13 @@ export interface RendererApi {
   quitApplication(): Promise<{ outcome: 'quitting' } | { outcome: 'blocked' }>;
   cancelDatabaseExport(input: { activityId: string }): Promise<DatabaseExportActivityProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
-  /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   inspectProposalWorkspace(input: ProposalWorkspaceInput): Promise<ProposalWorkspaceProjection>;
   saveProposalDecisionDraft(input: SaveProposalDecisionDraftInput): Promise<ProposalWorkspaceProjection>;
   batchProposalDecisionDraft(input: BatchProposalDecisionDraftInput): Promise<ProposalDraftBatchProjection>;
   recordProposalDecision(input: RecordProposalDecisionInput): Promise<ProposalWorkspaceProjection>;
   inspectApplyReceipt(input: InspectApplyReceiptInput): Promise<ApplyReceiptProjection>;
   prepareReverseApply(input: PrepareReverseApplyInput): Promise<ReverseApplyPreparationProjection>;
+  /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;
   reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   getManuscriptApplyOutcome(input: ServiceOperationMap['getManuscriptApplyOutcome']['input']): Promise<ManuscriptApplyOutcomeProjection>;

@@ -342,6 +342,15 @@ export class ManuscriptApplyStore {
     }
   }
 
+  /**
+   * The Apply Effect Receipt Card's one classified state (Issue #902, V2-UX-EREC-001 to 009), read from the authoritative
+   * records by Effect identity. `已应用` stands only on a verified receipt. An intent without its receipt chain is
+   * `结果待确认`, and so is an Effect identity whose surface lost both its acknowledgement and its recovery read
+   * (`unresolved`) until the editor's explicit `recheck`: the Effect's records are written in the one transaction
+   * that writes the manuscript, so no intent under the identity is classified evidence that no included change
+   * committed (`未应用`). `confirming` is the lost-acknowledgement report. Nothing here dispatches, approves or
+   * removes a record; each answer appends at most one row to the append-only recovery log.
+   */
   inspectApplyReceipt(input: InspectApplyReceiptInput): ApplyReceiptProjection {
     const identity = this.#db.prepare('SELECT idempotency_key FROM manuscript_effect_intents WHERE effect_id = ? AND manuscript_id = ? AND branch_id = ?').get(input.clientEffectId, input.manuscriptId, input.branchId);
     if (identity !== undefined) input = { ...input, clientEffectId: String(identity.idempotency_key) };
@@ -350,18 +359,26 @@ export class ManuscriptApplyStore {
     requireApply(branch !== undefined && this.#db.prepare('SELECT 1 FROM manuscript_branches WHERE branch_id = ? AND manuscript_id = ?').get(input.branchId, input.manuscriptId), 'APPLY_INVALID', '稿件分支无效。');
     const application = outcome.application;
     const intent = this.#db.prepare('SELECT effect_id FROM manuscript_effect_intents WHERE idempotency_key = ?').get(input.clientEffectId);
-    const recovery = this.#db.prepare('SELECT state FROM manuscript_outcome_recovery WHERE client_effect_id = ? AND manuscript_id = ? AND branch_id = ?').get(input.clientEffectId, input.manuscriptId, input.branchId);
+    const latest = this.#db.prepare('SELECT ordinal, state FROM manuscript_outcome_recovery WHERE client_effect_id = ? AND manuscript_id = ? AND branch_id = ? ORDER BY ordinal DESC LIMIT 1')
+      .get(input.clientEffectId, input.manuscriptId, input.branchId);
+    const rechecked = input.recovery === 'recheck';
     const state: ApplyReceiptProjection['state'] = application !== null ? 'applied'
-      : input.recovery === 'unresolved' || intent !== undefined || recovery?.state === 'unresolved' ? 'unresolved'
-        : input.recovery === 'confirming' ? 'confirming' : applyReceiptState(outcome);
-    if (state === 'confirming' || state === 'unresolved') this.#db.prepare(`INSERT INTO manuscript_outcome_recovery(client_effect_id, manuscript_id, branch_id, state, updated_at) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(client_effect_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`).run(input.clientEffectId, input.manuscriptId, input.branchId, state, new Date().toISOString());
+      : intent !== undefined ? 'unresolved'
+        : rechecked ? 'not-applied'
+          : input.recovery === 'unresolved' || latest?.state === 'unresolved' ? 'unresolved'
+            : input.recovery === 'confirming' ? 'confirming' : applyReceiptState(outcome);
+    const append = state === 'confirming' || state === 'unresolved' ? latest?.state !== state : rechecked && latest !== undefined && latest.state !== state;
+    if (append) {
+      this.#db.prepare('INSERT INTO manuscript_outcome_recovery(client_effect_id, ordinal, manuscript_id, branch_id, state, recorded_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(input.clientEffectId, latest === undefined ? 1 : Number(latest.ordinal) + 1, input.manuscriptId, input.branchId, state, new Date().toISOString());
+    }
     const approval = application === null ? undefined : this.#db.prepare('SELECT approved_at FROM manuscript_effect_approvals WHERE effect_id = ?').get(application.effectId);
     const decisions = application === null ? [] : this.#db.prepare('SELECT decision_id FROM manuscript_effect_targets WHERE effect_id = ? ORDER BY ordinal').all(application.effectId);
     return { state, application, clientEffectId: input.clientEffectId, manuscriptId: input.manuscriptId, branchId: input.branchId,
       bookId: String(branch.book_id), actor: 'editor', approvedAt: approval ? String(approval.approved_at) : null, replayPolicy: 'idempotency-keyed', safeRetry: state === 'not-applied',
-      reason: state === 'applied' ? '权威稿件与应用凭据已确认。' : state === 'not-applied' ? '本地原子事务与凭据记录证明此次未提交；重新准备后需新的明确批准。'
-        : state === 'confirming' ? '正在按同一应用标识核对本地权威记录，不会再次派发。' : '权威记录尚不能证明结果；禁止重试或重复应用。',
+      reason: state === 'applied' ? '权威稿件与应用凭据已确认。'
+        : state === 'not-applied' ? (rechecked ? '已重新核对：本地记录中没有这一应用标识的应用意图，证明没有任何修改写入稿件；重新准备后需新的明确批准。' : '本地原子事务与凭据记录证明此次未提交；重新准备后需新的明确批准。')
+          : state === 'confirming' ? '正在按同一应用标识核对本地权威记录，不会再次派发。' : '权威记录尚不能证明结果；禁止重试或重复应用。可以重新核对权威记录。',
       decisionIds: decisions.map((row) => String(row.decision_id)) };
   }
 
@@ -439,7 +456,9 @@ export class ManuscriptApplyStore {
     planned: ReadonlyArray<PlannedTarget>,
     projectedMarkId: string,
   ): ManuscriptApplyCommandProjection {
+    // EREC-005: while an Effect identity of this branch stands 结果待确认, no other Apply could be told apart from it.
     requireApply(this.#db.prepare(`SELECT 1 FROM manuscript_outcome_recovery o WHERE o.manuscript_id = ? AND o.branch_id = ? AND o.state = 'unresolved'
+      AND o.ordinal = (SELECT MAX(x.ordinal) FROM manuscript_outcome_recovery x WHERE x.client_effect_id = o.client_effect_id)
       AND NOT EXISTS(SELECT 1 FROM manuscript_effect_intents i JOIN manuscript_effect_receipts r ON r.effect_id = i.effect_id WHERE i.idempotency_key = o.client_effect_id) LIMIT 1`).get(binding.manuscriptId, binding.branchId) === undefined,
       'APPLY_OUTCOME_UNRESOLVED', '这份稿件有尚未确认的应用结果，不能重复应用；请查看应用凭据。');
     const targets: ExactReplacementTarget[] = planned.map((target) => ({

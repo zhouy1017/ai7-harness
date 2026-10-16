@@ -150,12 +150,17 @@ describe('Proposal decision workspace', () => {
       typeInto(store, book, block.blockId, 6, 7, '改');
       const absent = randomUUID();
       const old = suggest(store, book, block.blockId, 12, 14).markId;
+      const detached = suggest(store, book, block.blockId, 16, 18).markId;
       const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
       db.prepare("UPDATE editorial_marks SET status = 'converted' WHERE mark_id = ?").run(old);
-      const request = { ...book, resultId: null, scope: 'selection' as const, markIds: [good, conflict, absent, old], chapterBlockId: null, changeType: null, review: 'all' as const, disposition: 'accepted' as const, confirmDigest: null };
+      // A reimport that could not map a mark detaches it: its stale base is not yet classified as safe or conflicting.
+      db.prepare("UPDATE editorial_marks SET anchor_state = 'detached' WHERE mark_id = ?").run(detached);
+      const request = { ...book, resultId: null, scope: 'selection' as const, markIds: [good, conflict, absent, old, detached], chapterBlockId: null, changeType: null, review: 'all' as const, disposition: 'accepted' as const, confirmDigest: null };
       const preview = store.batchProposalDecisionDraft(request);
       expect(preview.included).toEqual([good]);
-      expect(preview.excluded).toEqual(expect.arrayContaining([{ markId: conflict, reason: 'unclassified-stale' }, { markId: absent, reason: 'unloaded' }, { markId: old, reason: 'other-version' }]));
+      // 原文已变 is a classified Three-way Proposal Conflict (ADR 0085) even though its base is stale.
+      expect(preview.excluded).toEqual(expect.arrayContaining([{ markId: conflict, reason: 'conflict' }, { markId: detached, reason: 'unclassified-stale' }, { markId: absent, reason: 'unloaded' }, { markId: old, reason: 'other-version' }]));
+      expect(preview.excluded).toHaveLength(4);
       expect(preview.saved).toBe(false);
       expect(preview.workspace.items.every((item) => item.draft === null)).toBe(true);
       const saved = store.batchProposalDecisionDraft({ ...request, confirmDigest: preview.scopeDigest });
@@ -251,6 +256,63 @@ describe('Proposal decision workspace', () => {
       expect(storeError(() => store.applyChangeSuggestionBatch({ ...binding(store, book), markIds: [markId], clientEffectId: randomUUID() }))).toBe('APPLY_OUTCOME_UNRESOLVED');
       store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.inspectApplyReceipt(input).state).toBe('unresolved');
+      // The way out (#902 rev 6): the editor's re-check reads the records by the same identity and dispatches nothing.
+      const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+      const counts = (): unknown => { const read = new DatabaseSync(path, { readOnly: true }); try {
+        return EFFECT_RELATIONS.map((table) => read.prepare(`SELECT count(*) total FROM ${table}`).get()!.total);
+      } finally { read.close(); } };
+      const before = counts();
+      const journal = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).journalSequence;
+      const rechecked = store.inspectApplyReceipt({ ...input, recovery: 'recheck' });
+      expect(rechecked.state).toBe('not-applied'); expect(rechecked.safeRetry).toBe(true); expect(rechecked.reason).toContain('重新核对');
+      expect(counts()).toEqual(before);
+      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).journalSequence).toBe(journal);
+      const log = new DatabaseSync(path);
+      expect(log.prepare('SELECT ordinal, state FROM manuscript_outcome_recovery WHERE client_effect_id = ? ORDER BY ordinal').all(input.clientEffectId))
+        .toEqual([{ ordinal: 1, state: 'confirming' }, { ordinal: 2, state: 'unresolved' }, { ordinal: 3, state: 'not-applied' }]);
+      expect(() => log.exec("UPDATE manuscript_outcome_recovery SET state = 'confirming'")).toThrow(/IMMUTABLE/u);
+      expect(() => log.exec('DELETE FROM manuscript_outcome_recovery')).toThrow(/IMMUTABLE/u);
+      expect(readApplyOutcomeAttention(log, 50)).toEqual([]); log.close();
+      expect(store.inspectApplyReceipt(input).state).toBe('not-applied');
+      expect(store.inspectApplyReceipt({ ...input, recovery: 'recheck' }).state).toBe('not-applied');
+      expect(counts()).toEqual(before);
+      // A proven non-commit admits a new prepared Effect identity with its own approval; the old identity never replays.
+      expect(store.applyChangeSuggestionBatch({ ...binding(store, book), markIds: [markId], clientEffectId: randomUUID() }).application.changeCount).toBe(1);
+    } finally { store.close(); }
+  });
+
+  it('re-checks 结果待确认 to 已应用 only on a verified receipt and keeps an intent without its receipt chain unresolved', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const block = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[0]!;
+      const markId = suggest(store, book, block.blockId, 0, 2).markId;
+      const committed = randomUUID();
+      store.applyChangeSuggestionBatch({ ...binding(store, book), markIds: [markId], clientEffectId: committed });
+      const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+      const db = new DatabaseSync(path);
+      // A surface reported 结果待确认 for an identity whose receipt it never read.
+      db.prepare("INSERT INTO manuscript_outcome_recovery(client_effect_id, ordinal, manuscript_id, branch_id, state, recorded_at) VALUES (?, 1, ?, ?, 'unresolved', '2026-10-16T00:00:00.000Z')")
+        .run(committed, book.manuscriptId, book.branchId);
+      const dispatches = (): unknown => db.prepare('SELECT count(*) total FROM manuscript_effect_dispatches').get()!.total;
+      const before = dispatches();
+      const applied = store.inspectApplyReceipt({ ...book, clientEffectId: committed, recovery: 'recheck' });
+      expect(applied.state).toBe('applied'); expect(applied.safeRetry).toBe(false); expect(applied.application?.changeCount).toBe(1);
+      expect(db.prepare('SELECT state FROM manuscript_outcome_recovery WHERE client_effect_id = ? ORDER BY ordinal').all(committed).map((row) => row.state)).toEqual(['unresolved', 'applied']);
+      expect(readApplyOutcomeAttention(db, 50)).toEqual([]);
+      // An intent that no approval, dispatch or receipt follows proves neither outcome: the re-check leaves 结果待确认.
+      const orphan = randomUUID();
+      const columns = db.prepare("SELECT name FROM pragma_table_info('manuscript_effect_intents') ORDER BY cid").all().map((row) => String(row.name));
+      db.prepare(`INSERT INTO manuscript_effect_intents(${columns.join(', ')}) SELECT ${columns.map((name) => name === 'effect_id' ? '?' : name === 'idempotency_key' ? '?' : name).join(', ')} FROM manuscript_effect_intents WHERE idempotency_key = ?`)
+        .run(randomUUID(), orphan, committed);
+      const unresolved = store.inspectApplyReceipt({ ...book, clientEffectId: orphan, recovery: 'recheck' });
+      expect(unresolved.state).toBe('unresolved'); expect(unresolved.safeRetry).toBe(false); expect(legacyApplyOutcome(unresolved)).toBeNull();
+      expect(store.inspectApplyReceipt({ ...book, clientEffectId: orphan, recovery: 'recheck' }).state).toBe('unresolved');
+      expect(db.prepare('SELECT state FROM manuscript_outcome_recovery WHERE client_effect_id = ? ORDER BY ordinal').all(orphan).map((row) => row.state)).toEqual(['unresolved']);
+      expect(readApplyOutcomeAttention(db, 50).map((item) => item.state)).toEqual(['apply-outcome-unresolved']);
+      expect(dispatches()).toBe(before);
+      expect(storeError(() => store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId, clientEffectId: randomUUID() }))).toBe('APPLY_OUTCOME_UNRESOLVED');
+      db.close();
     } finally { store.close(); }
   });
 
@@ -317,6 +379,80 @@ describe('Proposal decision workspace', () => {
       expect(store.inspectProposalWorkspace(input).returnPosition).toEqual(position);
       expect(store.inspectProposalWorkspace(input).items.find((item) => item.markId === marks[0])?.draft).toBe('rejected');
       expect(store.inspectProposalWorkspace(input).decision?.supersedes).toBe(old);
+    } finally { store.close(); }
+  });
+
+  it('reads, pages, filters, previews and compares without any decision, draft, Effect or manuscript change', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const block = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[0]!;
+      const marks = Array.from({ length: 21 }, (_, index) => suggest(store, book, block.blockId, index % 2 === 0 ? 0 : 3, index % 2 === 0 ? 2 : 5).markId);
+      const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+      const ledgers = ['proposal_decisions', 'proposal_item_decisions', 'proposal_decision_drafts', ...EFFECT_RELATIONS];
+      const counts = (): unknown => { const read = new DatabaseSync(path, { readOnly: true }); try {
+        return ledgers.map((table) => read.prepare(`SELECT count(*) total FROM ${table}`).get()!.total);
+      } finally { read.close(); } };
+      const before = counts();
+      const journal = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).journalSequence;
+      const input = { ...book, resultId: null };
+      const read = await readProposalWorkspace({ inspectProposalWorkspace: async (request) => store.inspectProposalWorkspace(request) }, input);
+      expect(read.items).toHaveLength(21); expect(read.offerWorkspace).toBe(true);
+      const position = { blockId: block.blockId, activeMarkId: marks[3]!, comparison: 'inline' as const, review: 'unreviewed' as const, chapterBlockId: null, changeType: 'replace' as const, expanded: false };
+      store.inspectProposalWorkspace({ ...input, returnPosition: position });
+      store.inspectProposalWorkspace({ ...input, returnPosition: position });
+      store.inspectProposalWorkspace({ ...input, returnPosition: { ...position, comparison: 'side-by-side' } });
+      for (const scope of ['selection', 'chapter', 'change-type', 'filter'] as const) {
+        for (const review of ['all', 'unreviewed', 'reviewed', 'stale', 'conflicting'] as const) {
+          const preview = store.batchProposalDecisionDraft({ ...input, scope, markIds: marks.slice(0, 4), chapterBlockId: read.items[0]!.chapterBlockId, changeType: 'replace', review, disposition: 'accepted', confirmDigest: null });
+          expect(preview.saved).toBe(false);
+        }
+      }
+      for (const markId of marks.slice(0, 3)) store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId);
+      store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: block.blockId });
+      expect(counts()).toEqual(before);
+      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).journalSequence).toBe(journal);
+      expect(store.inspectProposalWorkspace(input).items.every((item) => item.draft === null && item.decisionId === null)).toBe(true);
+      // Return Position is append-only and an unchanged position is not appended again.
+      const log = new DatabaseSync(path, { readOnly: true });
+      expect(log.prepare('SELECT ordinal FROM proposal_review_positions ORDER BY ordinal').all().map((row) => row.ordinal)).toEqual([1, 2]);
+      log.close();
+    } finally { store.close(); }
+  });
+
+  it('采纳全部无冲突项 drafts only exact conflict-free items of the visible filter and names every exclusion first', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const [block, other] = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null));
+      const good = suggest(store, book, block!.blockId, 0, 2).markId;
+      const conflict = suggest(store, book, block!.blockId, 5, 8).markId;
+      typeInto(store, book, block!.blockId, 6, 7, '改');
+      const detached = suggest(store, book, block!.blockId, 12, 14).markId;
+      const unloaded = suggest(store, book, block!.blockId, 16, 18).markId;
+      const superseded = suggest(store, book, block!.blockId, 20, 22).markId;
+      const groupId = randomUUID();
+      const group = [24, 28].map((from) => store.createProducedEditorialMark({ ...book, blockId: other!.blockId, fromGrapheme: from, toGrapheme: from + 2,
+        pinnedText: graphemesOf(other!.text).slice(from, from + 2).join(''), kind: 'change-suggestion', body: '', proposedText: PROPOSED, rationale: null,
+        atomicGroupId: groupId, atomicReason: '两处称谓必须同时一致。', source: { kind: 'ai7', origin: 'task', taskId: null, label: '合成测试' }, basis: [] }));
+      // Synthetic states only reachable through other owners (reimport, conflict resolution): written directly, references unchecked.
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { enableForeignKeyConstraints: false });
+      db.prepare("UPDATE editorial_marks SET anchor_state = 'detached' WHERE mark_id = ?").run(detached);
+      // Outside every loaded window: its paragraph is not in the working state the comparison would read.
+      db.prepare("UPDATE editorial_marks SET block_id = ? WHERE mark_id = ?").run(`blk_${'f'.repeat(24)}`, unloaded);
+      // A different Proposal version: superseded by a resolution's new version, so it is not in the result at all.
+      db.prepare("UPDATE editorial_marks SET status = 'converted' WHERE mark_id = ?").run(superseded);
+      db.close();
+      const request = { ...book, resultId: null, scope: 'filter' as const, markIds: [], chapterBlockId: null, changeType: null, review: 'all' as const, disposition: 'accepted' as const, confirmDigest: null };
+      const preview = store.batchProposalDecisionDraft(request);
+      expect(preview.included).toEqual([good]);
+      expect(new Map(preview.excluded.map((item) => [item.markId, item.reason]))).toEqual(new Map([
+        [conflict, 'conflict'], [detached, 'unclassified-stale'], [unloaded, 'unloaded'], [group[0]!, 'atomic-group'], [group[1]!, 'atomic-group'],
+      ]));
+      expect([...preview.included, ...preview.excluded.map((item) => item.markId)]).not.toContain(superseded);
+      expect(preview.workspace.items.every((item) => item.draft === null)).toBe(true);
+      const saved = store.batchProposalDecisionDraft({ ...request, confirmDigest: preview.scopeDigest });
+      expect(saved.workspace.items.filter((item) => item.draft !== null).map((item) => [item.markId, item.draft])).toEqual([[good, 'accepted']]);
     } finally { store.close(); }
   });
 });
