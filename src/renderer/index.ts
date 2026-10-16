@@ -155,6 +155,7 @@ import {
   exemplarAttribution,
   exemplarDesignation,
   exemplarLine,
+  exemplarSkippedNote,
   GUIDELINE_STATUS,
   LIBRARY_STATUS,
   KNOWLEDGE_BASE_LEDE,
@@ -5053,7 +5054,8 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
         element('p', 'field-note exemplar-attribution', exemplarAttribution(book)),
         element('p', 'field-note exemplar-designation', exemplarDesignation(book, localInstantLabel)),
       );
-      if (book.exemplars.length === 0) card.append(element('p', 'field-note', EXEMPLARS_NONE_DELIVERED));
+      const skipped = book.skipped ?? [];
+      if (book.exemplars.length === 0 && skipped.length === 0) card.append(element('p', 'field-note', EXEMPLARS_NONE_DELIVERED));
       const items = element('ul', 'exemplar-items');
       for (const exemplar of book.exemplars) {
         const item = element('li', undefined, exemplarLine(exemplar, localInstantLabel));
@@ -5064,6 +5066,8 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
         items.append(item);
       }
       if (book.exemplars.length > 0) card.append(items);
+      // A damaged imported version is named and skipped while the rest of the Book stays listed (Issue #800).
+      if (skipped.length > 0) card.append(element('p', 'field-note exemplars-skipped', exemplarSkippedNote(skipped)));
       card.append(readersReportExemplars(book));
       if (book.imported) card.append(exemplarImportButton(surface, book));
       list.append(card);

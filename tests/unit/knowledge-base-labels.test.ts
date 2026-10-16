@@ -34,6 +34,7 @@ import {
   exemplarAttribution,
   exemplarDesignation,
   exemplarLine,
+  exemplarSkippedNote,
   GUIDELINE_CANCEL,
   GUIDELINE_CONFIRM,
   GUIDELINE_IMPORT,
@@ -146,6 +147,10 @@ describe('范例 (Issue #427, S79b)', () => {
     // Past the versions it names, the line says how many there were.
     expect(exemplarLine({ ...exemplar, version: 14, earlierVersionCount: 12, earlierVersions: [12, 13] }, (iso) => iso))
       .toBe('新闻稿 · 版本 14 · 交付给编辑部于 t1 · 归入于 t2 · 学习准入：仅本社 · 此前还交付过 12 个版本，最近的是版本 12、13');
+    // A damaged imported version is named by Book and document type as 写作任务 names it, and skipped (Issue #800).
+    expect(exemplarSkippedNote(['以前出版的测试图书 · 新闻稿'])).toBe('另有 1 份范例记录已损坏，无法读取：《以前出版的测试图书 · 新闻稿》');
+    expect(exemplarSkippedNote(['甲书 · 新闻稿', '乙书 · 审稿意见']))
+      .toBe('另有 2 份范例记录已损坏，无法读取：《甲书 · 新闻稿》、《乙书 · 审稿意见》');
     // The 审稿意见 now come in (Issue #429); only the import of earlier Books is still to come.
     expect(EXEMPLARS_LATER).toEqual([]);
   });

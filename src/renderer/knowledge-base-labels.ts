@@ -270,6 +270,14 @@ export function exemplarLine(exemplar: ExemplarProjection, instant: (iso: string
     ` · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}${earlier}`;
 }
 
+/**
+ * The imported 范例 of a Book that no longer read, said as 写作任务 says it (Issue #799, #800): how many are damaged and which,
+ * each named by Book and document type, while the rest of the Book stays listed.
+ */
+export function exemplarSkippedNote(skipped: ReadonlyArray<string>): string {
+  return `另有 ${skipped.length} 份范例记录已损坏，无法读取：${skipped.map((title) => `《${title}》`).join('、')}`;
+}
+
 // ---- 工序与规则's expert 工序 (Issue #427, plan slice S79d; KB-010, REUSE-029, REUSE-030) --------------------------------
 
 export const PROCEDURES_HEADING = '专家经验工序';

@@ -8378,16 +8378,14 @@ export class EditorialStore {
       return (left.length - i) - (right.length - j);
     };
     const page = [...archived, ...imported].sort((a, b) => compareTitles(a.title, b.title) || (a.bookId < b.bookId ? -1 : a.bookId > b.bookId ? 1 : 0));
-    // With a sink (the 写作任务 scan, Issue #789) an imported Book reads one type at a time and a damaged one is named there.
-    const books = page.slice(0, MAX_EXEMPLAR_BOOKS_PAGE).map((book) => importedIds.has(book.bookId)
-      ? damaged === undefined
-        ? this.#importedCall(() => this.#importedExemplars.book(book.bookId))
-        : this.#importedCall(() => {
-          const read = this.#importedExemplars.bookForWriting(book.bookId, book.title);
-          damaged.push(...read.damaged);
-          return read.book;
-        })
-      : this.#documentCall(() => this.#publicationCall(() => readExemplarBook(sources, book))));
+    // An imported Book reads one type at a time (Issue #789, #800): a damaged version is named and skipped — in the `damaged`
+    // sink for the 写作任务 scan, or on the Book as `skipped` for the 范例 view — while every other item stays listed.
+    const books = page.slice(0, MAX_EXEMPLAR_BOOKS_PAGE).map((book) => {
+      if (!importedIds.has(book.bookId)) return this.#documentCall(() => this.#publicationCall(() => readExemplarBook(sources, book)));
+      const read = this.#importedCall(() => this.#importedExemplars.bookForWriting(book.bookId, book.title));
+      damaged?.push(...read.damaged);
+      return damaged === undefined && read.damaged.length > 0 ? { ...read.book, skipped: read.damaged.map((entry) => entry.title) } : read.book;
+    });
     const last = books.at(-1);
     return { books, nextCursor: page.length > MAX_EXEMPLAR_BOOKS_PAGE && last !== undefined ? { title: last.bookTitle, bookId: last.bookId } : null };
   }
