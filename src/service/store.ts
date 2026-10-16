@@ -681,6 +681,8 @@ import {
   type PrepareCorrectionProposalInput,
   type RecordVerificationReviewDecisionInput,
   type SaveCorrectionProposalInput,
+  type VerificationReviewDecisionRecordedProjection,
+  SUPPLEMENTARY_CHECK_DEFERRED,
 } from '../shared/protocol.js';
 
 /** The Fact-check Lens's words (Issue #901). */
@@ -9493,14 +9495,16 @@ export class EditorialStore {
 
   /**
    * 记录核查审阅决定 (FREV-006): one immutable Review Decision bound to the result version the editor read. 要求补充证据 names the
-   * range and level of the supplementary Task, which the service then prepares through the ordinary 审阅 preparation.
+   * range and level of the supplementary check it asks for; no Task is prepared until the factual update modes land (#905).
    */
-  recordVerificationReviewDecision(input: RecordVerificationReviewDecisionInput): { workspace: EvidenceWorkspaceProjection; supplementary: null | { blockId: string; level: EvidenceAssuranceLevel } } {
+  recordVerificationReviewDecision(input: RecordVerificationReviewDecisionInput): VerificationReviewDecisionRecordedProjection {
     return this.#verificationCall(() => {
       const { reader } = this.#resultBinding(input.bookId, input.resultId);
       const recorded = this.#transaction(this.#authority, () => this.#factualVerification.recordDecision(input, reader));
       const workspace = this.#factualVerification.workspace(input.bookId, input.resultId, null, reader);
-      return { workspace, supplementary: recorded.requestedLevel === null ? null : { blockId: workspace.result.blockId, level: recorded.requestedLevel } };
+      // 要求补充证据 (FREV-008): recorded with its range and level; a Book holds one 事实核查 Run until #905, so no Task is prepared.
+      return { workspace, supplementary: recorded.requestedLevel === null ? null
+        : { blockId: workspace.result.blockId, level: recorded.requestedLevel, statement: SUPPLEMENTARY_CHECK_DEFERRED } };
     });
   }
 

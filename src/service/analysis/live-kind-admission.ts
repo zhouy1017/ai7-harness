@@ -37,6 +37,8 @@ export interface LiveKindDefinition {
   readonly livePromptContractDigest?: () => string;
   readonly materialReferences?: unknown;
   readonly systemPrompt?: string;
+  /** A factual-review definition's Evidence Assurance Level (Issue #901). */
+  readonly evidenceAssuranceLevel?: string;
 }
 
 /** What the kind's own owner says its live contract must be. */

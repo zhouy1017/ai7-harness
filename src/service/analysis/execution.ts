@@ -1,7 +1,7 @@
 import { PlatformToolSession, platformToolModelProfile } from '../provider/platform-tool-session.js';
 import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
 import { researchSnapshotDigest, retainUnitEvidence, retainedPageOf, searchHitsOf, type RetainedPage, type RetainedUnit } from './factual-review-evidence.js';
-import { locatedUnitFindings } from './factual-review-reducers.js';
+import { factualFindingId, locatedUnitFindings } from './factual-review-reducers.js';
 import { FACTUAL_REVIEW_KIND, type FactualReviewUnitResult } from './factual-review-contract.js';
 import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, markInBookExactFetch, type FactualReviewUnitResultV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
@@ -1942,7 +1942,11 @@ export class BaselineAnalysisExecutionOwner {
         const outcome = outcomes.find((entry) => entry.unitOrdinal === unit.ordinal);
         if (outcome === undefined) return;
         let retentionFailure: 'capture-processing' | 'storage' = 'capture-processing';
-        const findings = outcome.state === 'closed' ? locatedUnitFindings(unit, outcome.result as FactualReviewUnitResult, blocksById) : [];
+        const located = outcome.state === 'closed' ? locatedUnitFindings(unit, outcome.result as FactualReviewUnitResult, blocksById) : [];
+        // Factual Review Contract v2 (Issue #901): every https source a finding's relations name is a citation of that finding,
+        // retained as its basis's addresses are — so a relation can later be checked against what AI7 captured of it.
+        const findings = outcome.state === 'closed' && (outcome.result as { schema?: unknown }).schema === FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA
+          ? withRelationCitations(located, unit, outcome.result as unknown as FactualReviewUnitResultV2) : located;
         try {
           const captures = session.unitCaptures;
           const pages = new Map<string, RetainedPage>();
@@ -3213,4 +3217,26 @@ function productionModelProfile(route: ExecutionRouteId, model: string): Provide
   const profile = route === LOCAL_DETERMINISTIC_ROUTE ? null : modelProfileFor(route, model);
   if (profile === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '冻结计划的模型没有声明。');
   return profile;
+}
+
+/** A v2 unit's located findings with the https sources their assertions' relations name appended to their basis (Issue #901). */
+function withRelationCitations<T extends { findingId: string; basis: string }>(
+  findings: ReadonlyArray<T>,
+  unit: Pick<CoverageManifestUnitProjection, 'overlapBlockIds' | 'blockIds'>,
+  result: FactualReviewUnitResultV2,
+): T[] {
+  const messageBlockIds = [...unit.overlapBlockIds, ...unit.blockIds];
+  const sources = new Map<string, Set<string>>();
+  for (const assertion of result.assertions) {
+    const blockId = messageBlockIds[assertion.blockOrdinal - 1];
+    if (blockId === undefined) continue;
+    const id = factualFindingId(blockId, assertion.quote);
+    const named = sources.get(id) ?? new Set<string>();
+    for (const relation of assertion.evidenceRelations) if (relation.sourceRef.startsWith('https://')) named.add(relation.sourceRef);
+    sources.set(id, named);
+  }
+  return findings.map((finding) => {
+    const named = [...(sources.get(finding.findingId) ?? [])].filter((url) => !finding.basis.includes(url));
+    return named.length === 0 ? finding : { ...finding, basis: `${finding.basis} ${named.join(' ')}` };
+  });
 }

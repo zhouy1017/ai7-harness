@@ -770,17 +770,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectFactualVerification(request.input) };
     case 'inspectEvidenceWorkspace':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvidenceWorkspace(request.input) };
-    case 'recordVerificationReviewDecision': {
-      const recorded = store.recordVerificationReviewDecision(request.input);
-      // 要求补充证据 (FREV-008): the range-mode 事实核查 Task is prepared through the ordinary 审阅 preparation, on the result's
-      // own block; its plan opens at the level the decision names, which the editor then reads before 开始任务.
-      const job = recorded.supplementary === null ? null : jobs.startReviewRunPreparation(request.input.bookId, ['factual-review'],
-        { kind: 'selection', fromChapterBlockId: recorded.supplementary.blockId, toChapterBlockId: recorded.supplementary.blockId }, launchPolicy);
-      return { id: request.id, ok: true, op: request.op, result: {
-        workspace: recorded.workspace,
-        supplementary: job === null || recorded.supplementary === null ? null : { job, level: recorded.supplementary.level },
-      } };
-    }
+    case 'recordVerificationReviewDecision':
+      return { id: request.id, ok: true, op: request.op, result: store.recordVerificationReviewDecision(request.input) };
     case 'prepareCorrectionProposal':
       return { id: request.id, ok: true, op: request.op, result: store.prepareCorrectionProposal(request.input) };
     case 'saveCorrectionProposal':

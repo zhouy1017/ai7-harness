@@ -4634,13 +4634,16 @@ export interface RecordVerificationReviewDecisionInput {
   reason: null | { state: VerificationReasonState; text: string; suggestion: string | null };
 }
 /**
- * What 记录核查审阅决定 answers: the workspace as it now reads, and — for 要求补充证据 — the preparation of the range-mode
- * factual-review Task it asked for through the ordinary 审阅 preparation, with the level that Task must run at (FREV-008).
+ * What 记录核查审阅决定 answers: the workspace as it now reads, and — for 要求补充证据 — the supplementary check it recorded: the
+ * result's own block and the level, the same or higher, it must run at (FREV-008). A Book holds one 事实核查 Run until the
+ * factual update modes land (#905), so no Task is prepared now and the statement says so.
  */
 export interface VerificationReviewDecisionRecordedProjection {
   workspace: EvidenceWorkspaceProjection;
-  supplementary: null | { job: ServiceJobProjection; level: EvidenceAssuranceLevel };
+  supplementary: null | { blockId: string; level: EvidenceAssuranceLevel; statement: string };
 }
+/** Why 要求补充证据 prepares no Task yet (Issue #901 rev 4; follow-up #905). */
+export const SUPPLEMENTARY_CHECK_DEFERRED = '已记录补充核查的要求（同一段文字、同级或更高级别）。这本书的事实核查目前只能运行一次；补充核查任务将在事实核查的更新方式接入后开放（#905）。' as const;
 export interface PrepareCorrectionProposalInput {
   bookId: string;
   resultId: string;
