@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { restoreTaskIntentDraftPredecessor, pre80SchemaRows } from '../support/pre74-schema.js';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
@@ -26,7 +27,8 @@ function dropFactualVerificationRelations(db: DatabaseSync): void {
 describe('revision 78', () => {
   it('migrates an exact revision-77 store by adding its four relations, moving nothing else, and refuses a 78 without them', async () => {
     expect(FACTUAL_VERIFICATION_SCHEMA_VERSION).toBe(78);
-    expect(LATEST_SCHEMA_VERSION).toBe(FACTUAL_VERIFICATION_SCHEMA_VERSION + 1);
+    // Synchronized delta with Issue #423 (slice 7a): revision 80 (Task Intent Drafts) is the terminal version.
+    expect(LATEST_SCHEMA_VERSION).toBe(FACTUAL_VERIFICATION_SCHEMA_VERSION + 2);
     expect(PROPOSAL_REVIEW_SCHEMA_VERSION).toBe(77);
     roots = await createServiceTestRoots('ai7-factual-verification-schema-');
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
@@ -47,10 +49,12 @@ describe('revision 78', () => {
     expect(names.every((name) => terminal.some((row) => row.name === name))).toBe(true);
     const plant = new DatabaseSync(path);
     const books = plant.prepare('SELECT * FROM books ORDER BY book_id').all();
+    // Synchronized delta with Issue #423 (slice 7a): a predecessor of revision 80 has no drafts and the narrower Task Intents.
+    restoreTaskIntentDraftPredecessor(plant);
     dropFactualVerificationRelations(plant);
     plant.exec(`PRAGMA user_version = ${PROPOSAL_REVIEW_SCHEMA_VERSION}`);
     plant.close();
-    expect(schemaRows()).toEqual(terminal.filter((row) => !names.includes(row.name)));
+    expect(schemaRows()).toEqual(pre80SchemaRows(terminal).filter((row) => !names.includes(row.name)));
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     store.markCleanShutdown();
     store.close();

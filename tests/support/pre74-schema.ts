@@ -30,7 +30,8 @@ export function pre77SchemaRows<T extends { name: string; sql: unknown }>(rows: 
 /** Plant an actual predecessor, including revision 74's newly widened component CHECK and house settings. */
 export function execPre74Fixture(db: DatabaseSync, sql: string): void {
   const version = /PRAGMA user_version\s*=\s*(\d+)/iu.exec(sql)?.[1];
-  if (version !== undefined && Number(version) < 80) restoreTaskIntentDraftPredecessor(db);
+  // Revisions 15 and 16 are validated against the terminal Task Intents text, as they always were; only 17 to 79 are narrowed.
+  if (version !== undefined && Number(version) < 80) restoreTaskIntentDraftPredecessor(db, Number(version) >= 17);
   if (version !== undefined && Number(version) < 79) dropHouseReviewPreferenceRelations(db);
   if (version !== undefined && Number(version) < 78) dropFactualVerificationRelations(db);
   if (version !== undefined && Number(version) < 77) restoreProposalReviewPredecessor(db);
@@ -125,11 +126,11 @@ export function dropHouseReviewPreferenceRelations(db: DatabaseSync): void {
  * their triggers, and narrow `analysis_task_intents` back to its revision-79 text by the same byte-preserving rebuild the
  * migration widens it with — every rowid and value unchanged. A store holding a Task promoted from a draft has no predecessor.
  */
-export function restoreTaskIntentDraftPredecessor(db: DatabaseSync): void {
+export function restoreTaskIntentDraftPredecessor(db: DatabaseSync, narrow = true): void {
   for (const trigger of Object.keys(TASK_INTENT_DRAFT_TRIGGER_SQL)) db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
   for (const table of Object.keys(TASK_INTENT_DRAFT_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE IF EXISTS ${table}`);
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_task_intents'").get();
-  if (typeof row?.sql !== 'string' || !row.sql.includes('custom-analysis/')) return;
+  if (!narrow || typeof row?.sql !== 'string' || !row.sql.includes('custom-analysis/')) return;
   if (db.prepare("SELECT 1 FROM analysis_task_intents WHERE canonical_json LIKE '%intentDraftVersionId%'").get() !== undefined) throw new Error('PRE80_FIXTURE_HAS_DRAFT_TASK');
   const enforced = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
   if (enforced) db.exec('PRAGMA foreign_keys = OFF');
@@ -143,4 +144,11 @@ export function restoreTaskIntentDraftPredecessor(db: DatabaseSync): void {
   } finally {
     if (enforced) db.exec('PRAGMA foreign_keys = ON');
   }
+}
+
+/** The exact schema before revision 80 (Issue #423, slice 7a): no draft relations, and the revision-79 Task Intents text. */
+export function pre80SchemaRows<T extends { name: string; sql: unknown }>(rows: readonly T[]): Array<T | { name: string; sql: unknown }> {
+  const added = new Set([...Object.keys(TASK_INTENT_DRAFT_SCHEMA_SQL), ...Object.keys(TASK_INTENT_DRAFT_TRIGGER_SQL)]);
+  return rows.filter((row) => !added.has(row.name)).map((row) => row.name === 'analysis_task_intents'
+    ? { ...row, sql: ANALYSIS_LEDGER_REVISION_79_SQL.analysis_task_intents } : row);
 }

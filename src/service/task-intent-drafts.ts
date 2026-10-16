@@ -8,6 +8,7 @@ import {
   type TaskIntentDraftAnswerProjection,
   type TaskIntentDraftOption,
   type TaskIntentDraftOrigin,
+  type TaskIntentDraftProcedurePin,
   type TaskIntentDraftResolution,
   type TaskIntentOutcomeClass,
 } from '../shared/protocol.js';
@@ -145,6 +146,8 @@ export interface DraftContent {
   readonly outcomeClass: TaskIntentOutcomeClass | null;
   readonly ranges: ReadonlyArray<StoredDraftRange>;
   readonly answer: TaskIntentDraftAnswerProjection | null;
+  /** The 工序 picked in the recommendation slot (#423 rev 6), by identity only. */
+  readonly procedurePin: TaskIntentDraftProcedurePin | null;
 }
 
 export interface StoredDraftVersion extends DraftContent {
@@ -197,6 +200,11 @@ function isStoredRange(value: unknown): value is StoredDraftRange {
     typeof value.pendingSave === 'boolean' && typeof value.text === 'string' && value.text.length > 0;
 }
 
+export function isProcedurePin(value: unknown): value is TaskIntentDraftProcedurePin {
+  return isRecord(value) && Object.keys(value).length === 2 && typeof value.procedureId === 'string' && UUID_PATTERN.test(value.procedureId) &&
+    typeof value.versionId === 'string' && UUID_PATTERN.test(value.versionId);
+}
+
 function isStoredAnswer(value: unknown): value is TaskIntentDraftAnswerProjection {
   return isRecord(value) && typeof value.dialogueId === 'string' && UUID_PATTERN.test(value.dialogueId) &&
     typeof value.attemptId === 'string' && UUID_PATTERN.test(value.attemptId) && Number.isSafeInteger(value.attemptOrdinal) &&
@@ -241,7 +249,7 @@ export class TaskIntentDraftLedger {
     const goal = draftGoal(content.goal);
     requireDraft((content.target === 'ranges') === (content.ranges.length > 0) && content.ranges.length <= MAX_TASK_INTENT_DRAFT_RANGES &&
       content.ranges.every(isStoredRange) && new Set(content.ranges.map((range) => range.rangeId)).size === content.ranges.length &&
-      (content.answer === null || isStoredAnswer(content.answer)),
+      (content.answer === null || isStoredAnswer(content.answer)) && (content.procedurePin === null || isProcedurePin(content.procedurePin)),
     'TASK_INTENT_DRAFT_INVALID', '任务意图草稿的内容无效。');
     const versionId = randomUUID();
     const record = canonicalRecord({
@@ -252,6 +260,7 @@ export class TaskIntentDraftLedger {
       ordinal,
       outcomeClass: content.outcomeClass,
       previousVersionId,
+      procedurePin: content.procedurePin === null ? null : { procedureId: content.procedurePin.procedureId, versionId: content.procedurePin.versionId },
       ranges: content.ranges,
       target: content.target,
       versionId,
@@ -350,7 +359,8 @@ export class TaskIntentDraftLedger {
       record.draftId !== draftId || record.versionId !== text(row.version_id) || record.ordinal !== integer(row.ordinal) ||
       record.goal !== text(row.goal) || record.target !== text(row.target_kind) || record.outcomeClass !== (row.outcome_class ?? null) ||
       !Array.isArray(record.ranges) || record.ranges.length !== integer(row.range_count) || !record.ranges.every(isStoredRange) ||
-      (record.answer !== null && !isStoredAnswer(record.answer)) || typeof record.createdAt !== 'string') throw invalidRecord();
+      (record.answer !== null && !isStoredAnswer(record.answer)) || (record.procedurePin !== null && !isProcedurePin(record.procedurePin)) ||
+      typeof record.createdAt !== 'string') throw invalidRecord();
     return {
       versionId: record.versionId as string,
       ordinal: record.ordinal as number,
@@ -359,6 +369,7 @@ export class TaskIntentDraftLedger {
       outcomeClass: record.outcomeClass as TaskIntentOutcomeClass | null,
       ranges: record.ranges as StoredDraftRange[],
       answer: record.answer as TaskIntentDraftAnswerProjection | null,
+      procedurePin: record.procedurePin as TaskIntentDraftProcedurePin | null,
       createdAt: record.createdAt,
     };
   }

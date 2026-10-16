@@ -11992,6 +11992,17 @@ export interface SaveTaskIntentDraftInput {
   readonly goal: string;
   readonly target: TaskIntentDraftTargetInput;
   readonly outcomeClass: TaskIntentOutcomeClass | null;
+  /**
+   * The 工序 the editor picked from the composer's recommendation slot (slice 7c fills it; #423 rev 6): kept by identity in the
+   * version, never resolved, validated or enabled here. Absent or `null` when none is picked.
+   */
+  readonly procedurePin?: TaskIntentDraftProcedurePin | null;
+}
+
+/** A 工序 picked for a draft, by identity (#423 rev 6): selection is never acquisition, enablement or authorization (TASK-013). */
+export interface TaskIntentDraftProcedurePin {
+  readonly procedureId: string;
+  readonly versionId: string;
 }
 
 /** The Book's drafts, or — `draftId` set — one draft with how it would be promoted. */
@@ -12070,6 +12081,7 @@ export interface TaskIntentDraftProjection {
     readonly outcomeClass: TaskIntentOutcomeClass | null;
     readonly ranges: ReadonlyArray<TaskIntentDraftRangeProjection>;
     readonly answer: TaskIntentDraftAnswerProjection | null;
+    readonly procedurePin: TaskIntentDraftProcedurePin | null;
     readonly createdAt: string;
   };
   /** The Task the draft became with 准备计划 — a normal prepared Task that still needs 开始任务 — or `null`. */

@@ -902,6 +902,7 @@ import {
   draftOutcomeClass,
   goalFromText,
   initializeTaskIntentDraftSchema,
+  isProcedurePin,
   requireDraft,
   resolutionOffers,
   resolveDraft,
@@ -19722,7 +19723,10 @@ export class EditorialStore {
       } else {
         requireDraft(input.target.kind === 'book', 'TASK_INTENT_DRAFT_INVALID', '任务意图草稿请求无效。');
       }
-      const content = { goal, target: input.target.kind, outcomeClass, ranges, answer: previous?.latest.answer ?? null };
+      const procedurePin = input.procedurePin ?? null;
+      requireDraft(procedurePin === null || isProcedurePin(procedurePin), 'TASK_INTENT_DRAFT_INVALID', '所选工序无效。');
+      const content = { goal, target: input.target.kind, outcomeClass, ranges, answer: previous?.latest.answer ?? null,
+        procedurePin: procedurePin === null ? null : { procedureId: procedurePin.procedureId, versionId: procedurePin.versionId } };
       const stored = this.#transaction(this.#authority, () => input.draftId === null
         ? this.#drafts.create(input.bookId, input.origin, content, now)
         : this.#drafts.saveVersion(input.draftId, input.bookId, input.expectedOrdinal as number, content, now));
@@ -19840,7 +19844,7 @@ export class EditorialStore {
         draft.latest.answer?.attemptId === content.answer.attemptId);
       if (existing !== undefined) return this.#draftProjection(existing, bookTitle, true);
       const stored = this.#transaction(this.#authority, () => this.#drafts.create(bookId, 'dialogue-answer',
-        { goal: content.goal, target: 'ranges', outcomeClass: null, ranges: [content.range], answer: content.answer }, now));
+        { goal: content.goal, target: 'ranges', outcomeClass: null, ranges: [content.range], answer: content.answer, procedurePin: null }, now));
       return this.#draftProjection(stored, bookTitle, true);
     });
   }
@@ -19919,6 +19923,7 @@ export class EditorialStore {
         outcomeClass: latest.outcomeClass,
         ranges: this.#draftRanges(latest.ranges),
         answer: latest.answer,
+        procedurePin: latest.procedurePin,
         createdAt: latest.createdAt,
       },
       promotion: promotion === null ? null : {

@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { restoreTaskIntentDraftPredecessor } from '../support/pre74-schema.js';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
@@ -44,6 +45,8 @@ describe('the persisted search settings and schema 74', () => {
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); store.close(); store = undefined;
       const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
       const db = new DatabaseSync(path);
+      // Synchronized delta with Issue #423 (slice 7a): a predecessor of revision 80 has no drafts and the narrower Task Intents.
+      restoreTaskIntentDraftPredecessor(db);
       db.exec('DROP TABLE search_backend_connections; DROP TABLE analysis_plan_records;');
       db.exec(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records);
       db.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_update']!);
@@ -52,8 +55,8 @@ describe('the persisted search settings and schema 74', () => {
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.getSearchBackendConnections()).toHaveLength(5); store.close(); store = undefined;
       const terminal = new DatabaseSync(path);
-      // Synchronized delta with Issue #901: revision 79 (house review preference) is the terminal version.
-      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(79);
+      // Synchronized delta with Issue #423 (slice 7a): revision 80 (Task Intent Drafts) is the terminal version.
+      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(80);
       expect(String(terminal.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_plan_records'").get()!.sql)).toContain('web-tools-backend');
       expect(() => terminal.prepare("INSERT INTO search_backend_connections VALUES ('search-kimi', NULL, 'missing', NULL, 'now')").run()).toThrow();
       terminal.exec('DROP TABLE search_backend_connections'); terminal.close();
