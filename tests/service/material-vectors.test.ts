@@ -22,7 +22,7 @@ import { LATEST_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, RESEARCH_EV
 import type { LibraryMaterialKind, LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { malformedPdf, sampleTextPdf, syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
 import { dropMaterialIndexLayerRelations } from '../support/pre74-schema.js';
-import { withMaterialTranslationRule } from '../support/policy-rules.js';
+import { withoutRuleFor } from '../support/policy-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for the Material Index's similarity vectors, PDF text layer and 来源译文 (Issue #892) over the
@@ -303,6 +303,27 @@ describe('来源译文 over the real store', () => {
     }
   }, 120_000);
 
+  it('splits translation batches at 6,000 code units while retaining each paragraph', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const paragraphs = ['A', 'B', 'C', 'D'].map((letter) => `${letter} ${'word '.repeat(400)}`.trim());
+      const added = await put(store, file('bounded-translation.txt', paragraphs.join('\n\n')), 'Bounded reference');
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      const translator = double();
+      store.useMaterialTranslator(translator);
+      store.requestMaterialTranslation(added.materialId);
+      await store.settleMaterialLayers();
+      expect(translator.batches.map((batch) => batch.length)).toEqual([2, 2]);
+      expect(translator.batches.flat()).toEqual(paragraphs);
+      expect(translator.batches.every((batch) => batch.reduce((sum, paragraph) => sum + paragraph.length, 0) <= 6_000)).toBe(true);
+      expect(store.inspectLibraryMaterial(added.materialId).index.translation?.state).toBe('complete');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
   it('holds a translation answer back when replacement freezes the data while the request is in flight', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let release = (): void => {};
@@ -379,7 +400,7 @@ describe('来源译文 over the real store', () => {
       const go = store.saveModelServiceConnection('Go', null, 'ready', 'opencode-go');
       const verified = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: go.credentialReference });
       expect(verified.integrityState).toBe('verified');
-      const policy = withMaterialTranslationRule(verified);
+      const policy = verified;
       const calls: Array<{ url: string; body: string }> = [];
       const transport = (async (url: string, init: { body: string }) => {
         calls.push({ url, body: init.body });
@@ -418,8 +439,8 @@ describe('来源译文 over the real store', () => {
     try {
       const verified = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
       expect(verified.integrityState).toBe('verified');
-      // Until #891's policy is selected, the rule is stubbed in the projection only (tests/support/policy-rules.ts).
-      const policy = withMaterialTranslationRule(verified);
+      // Exercise the selected v18 rule; only the transport is a double, so no provider is contacted.
+      const policy = verified;
       const bodies: string[] = [];
       const transport = (async (_url: string, init: { body: string }) => {
         bodies.push(init.body);
@@ -440,8 +461,8 @@ describe('来源译文 over the real store', () => {
         { resolve: async () => 'placeholder-development-key' },
       );
       expect(routes.routes[MATERIAL_TRANSLATION_KIND]?.ruleId).toBe('developer-live-public-samplebook-material-translation');
-      // The selected policy as it ships names no such rule: the kind has no route there.
-      expect(fastRoleLiveRoutes({ launch: { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1 }, providerCacheRoot: cacheRoot, validation: null }, nativeFetch: transport }, verified, { resolve: async () => null })
+      // A policy without this kind has no route; only the refusal case changes its rules in memory.
+      expect(fastRoleLiveRoutes({ launch: { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1 }, providerCacheRoot: cacheRoot, validation: null }, nativeFetch: transport }, withoutRuleFor(verified, MATERIAL_TRANSLATION_KIND), { resolve: async () => null })
         .routes[MATERIAL_TRANSLATION_KIND]).toBeNull();
       const owner = new FastRoleExecutionOwner({ fixture: null, live: routes });
       const rules = (): number => policy.providerProcessing.admittedRules.filter((rule) => rule.taskKinds.includes(MATERIAL_TRANSLATION_KIND)).length;
@@ -493,6 +514,8 @@ describe('revision 76', () => {
     store.close();
     const terminal = schemaRows();
     const plant = new DatabaseSync(storePath());
+    const earlierLayers = ['material_index_builds', 'material_index_segments'].map((table) =>
+      plant.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
     dropMaterialIndexLayerRelations(plant);
     plant.exec(`PRAGMA user_version = ${RESEARCH_EVIDENCE_SCHEMA_VERSION}`);
     plant.close();
@@ -508,6 +531,8 @@ describe('revision 76', () => {
     }
     expect(schemaRows()).toEqual(terminal);
     const migrated = new DatabaseSync(storePath());
+    expect(['material_index_builds', 'material_index_segments'].map((table) =>
+      migrated.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(earlierLayers);
     expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(76);
     dropMaterialIndexLayerRelations(migrated);
     migrated.close();

@@ -22,22 +22,6 @@ export function withoutRuleFor(policy: LaunchPolicyProjection, kind: string): La
   return withRules(policy, policy.providerProcessing.admittedRules.filter((rule) => !rule.taskKinds.includes(kind)));
 }
 
-/**
- * The projection with a 生成来源译文 rule added (Issue #892) as #891 adds it to v18/v19: the Fast Interaction Role's binding of
- * the polish rule, naming only `material-translation`, under developer-live's public-or-synthetic category or ordinary
- * production's frozen material excerpt. A stand-in until the policy that names it is selected; the policy bytes are untouched.
- */
-export function withMaterialTranslationRule(policy: LaunchPolicyProjection): LaunchPolicyProjection {
-  const production = policy.operationalScope === 'ordinary-production';
-  return withRules(policy, [...policy.providerProcessing.admittedRules, {
-    ...ruleFor(policy, 'editorial-polish'),
-    ruleId: production ? 'ordinary-production-material-translation' : 'developer-live-public-samplebook-material-translation',
-    taskKinds: ['material-translation'],
-    outboundDataCategories: production ? ['frozen-material-reference-excerpt'] : ['public-or-synthetic'],
-    materialReferencesAllowed: true,
-  }]);
-}
-
 /** The projection with the rule naming `kind` listed twice: an ambiguous admission. */
 export function withRepeatedRuleFor(policy: LaunchPolicyProjection, kind: string): LaunchPolicyProjection {
   return withRules(policy, [...policy.providerProcessing.admittedRules, ruleFor(policy, kind)]);
