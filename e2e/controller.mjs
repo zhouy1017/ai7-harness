@@ -831,6 +831,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'factual-evidence-workspace',
     'factual-review-decision',
     'factual-correction-proposal',
+    // Issue #922 (slice 7f): a 自定义分析维度 written in 知识库 › 工序与规则, run from ②A's 自定义 tab, its answers read there.
+    'custom-dimension-define',
+    'custom-dimension-run',
+    'custom-dimension-tab',
   ]),
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.

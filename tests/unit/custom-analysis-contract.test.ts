@@ -182,7 +182,7 @@ describe('the custom analysis kind family (custom-analysis/<dimension-id>)', () 
       technical: [],
     } as unknown as TaskPlanProjection;
     const local = customAnalysisPlan(plan, { ...version }, false);
-    expect(local.goal.chips.procedure).toBe(`自定义分析「${CUSTOM_DIMENSION_TITLE}」第 1 版`);
+    expect(local.goal.chips.procedure).toBe(`自定义分析 · ${CUSTOM_DIMENSION_TITLE} · 第 1 版`);
     expect(local.scope.send).toBe(`不发送任何内容；实时运行时会一并发送该维度第 1 版的提问模板「${CUSTOM_DIMENSION_TEMPLATE}」`);
     expect(local.service.send).toBe('不发送任何内容');
     expect(local.steps.map((step) => step.id)).toEqual(['units', 'reduction']);

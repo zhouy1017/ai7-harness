@@ -170,7 +170,7 @@ describe('a custom analysis Run over the real store on exact sample1', () => {
       const taskIntentId = await run(book, dimensionId);
       // The plan the Task Drawer showed names the dimension version and its template (会发送 on a live route only).
       const plan = book.store.inspectTaskPlan({ bookId: book.bookId, kind: 'baseline-analysis', ref: taskIntentId });
-      expect(plan.goal.chips.procedure).toBe(`自定义分析「${CUSTOM_DIMENSION_TITLE}」第 1 版`);
+      expect(plan.goal.chips.procedure).toBe(`自定义分析 · ${CUSTOM_DIMENSION_TITLE} · 第 1 版`);
       expect(plan.scope.send).toContain(`该维度第 1 版的提问模板「${CUSTOM_DIMENSION_TEMPLATE}」`);
       expect(plan.technical.some((row) => row.key === 'custom-analysis-dimension' && row.value.startsWith(versionId))).toBe(true);
       const settled = book.store.inspectAnalysisTask(book.bookId, taskIntentId);

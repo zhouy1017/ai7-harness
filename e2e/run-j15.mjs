@@ -462,9 +462,13 @@ async function constructPredecessorV12(dataRoot, bookId) {
     // tables (`includeMaterialIndexTables ||= committed(…)` in bounded-manuscript.ts), so that mutant survives by design.
     // Synchronized delta with Issue #901: revision 77's four factual verification relations lead the list.
     // Synchronized delta with Issue #423 (slice 7a): revision 80's three Task Intent Draft relations come first.
+    // Synchronized delta with Issue #922 (slice 7f): revision 83's three 自定义分析维度 relations come before them.
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE custom_analysis_dimension_states;
+      DROP TABLE custom_analysis_dimension_versions;
+      DROP TABLE custom_analysis_dimensions;
       DROP TABLE task_intent_draft_promotions;
       DROP TABLE task_intent_draft_versions;
       DROP TABLE task_intent_drafts;

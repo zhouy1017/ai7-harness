@@ -290,7 +290,8 @@ export function customAnalysisPlan(
   return {
     ...plan,
     goal: { ...plan.goal, sentence: `逐单元回答${named}的提问，定位每条回答所依据的原文，形成结果集修订版。`,
-      chips: { ...plan.goal.chips, procedure: named } },
+      // The chip reads 工序「…」, so the procedure is named without brackets of its own.
+      chips: { ...plan.goal.chips, procedure: `自定义分析 · ${version.title} · 第 ${version.version} 版` } },
     scope: { ...plan.scope, send: live ? `${plan.scope.send}，以及${template}` : `${plan.scope.send}；实时运行时会一并发送${template}` },
     steps: [
       { ...units!, label: units!.label.replace('逐章读取', '逐单元回答提问'), result: '每个单元的回答与所依据的引文' },
