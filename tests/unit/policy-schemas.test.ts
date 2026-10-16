@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all thirty-two current and historical pairs and validates every one at this base', () => {
+  it('discovers all thirty-five current and historical pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(32);
+    expect(pairs).toHaveLength(35);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(32);
+    expect(results).toHaveLength(35);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -642,5 +642,51 @@ describe('Provider Processing v18 and v19 schemas: 来源译文 (Issue #891, rev
       added.decision.providerAllowRules[index]!.sourceTranslationAllowed = true;
       expect(() => validatePolicyDocument(added, schemaData), String(index)).toThrowError(/additional properties|sourceTranslationAllowed/i);
     }
+  });
+});
+
+describe('Provider Processing v20, v21 and active-set v14 schemas: the house review-preference category (Issue #910, slice 6p)', () => {
+  const CATEGORY = 'house-review-preference-excerpt';
+  const reviewRuleOf = (policy: any, ruleId: string) => policy.decision.providerAllowRules.find((rule: any) => rule.ruleId === ruleId);
+
+  it.each([
+    ['v20', 'v18', 'developer-live-public-samplebook-reference-free-review'],
+    ['v21', 'v19', 'ordinary-production-review'],
+  ] as const)('validates %s, and rejects a review rule that drops the category or the declaration, or a bound that moves', (now, _before, reviewId) => {
+    const { policyData, schemaData } = readPair(`provider-processing-policy.${now}.json`, `provider-processing-policy.${now}.schema.json`);
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    const dropped = structuredClone(policyData) as any;
+    const rule = reviewRuleOf(dropped, reviewId);
+    rule.allowedOutboundDataCategories = rule.allowedOutboundDataCategories.filter((category: string) => category !== CATEGORY);
+    expect(() => validatePolicyDocument(dropped, schemaData)).toThrow();
+    const undeclared = structuredClone(policyData) as any;
+    delete reviewRuleOf(undeclared, reviewId).houseReviewPreference;
+    expect(() => validatePolicyDocument(undeclared, schemaData)).toThrow();
+    for (const [key, value] of [['maxLines', 13], ['maxGraphemesTotal', 201], ['authorOrEditorNamesAllowed', true], ['manuscriptTextAllowed', true]] as const) {
+      const moved = structuredClone(policyData) as any;
+      reviewRuleOf(moved, reviewId).houseReviewPreference[key] = value;
+      expect(() => validatePolicyDocument(moved, schemaData), key).toThrow();
+    }
+  });
+
+  it.each(['v20', 'v21'] as const)('rejects %s with the category on a rule other than the review rule', (now) => {
+    const { policyData, schemaData } = readPair(`provider-processing-policy.${now}.json`, `provider-processing-policy.${now}.schema.json`);
+    const moved = structuredClone(policyData) as any;
+    const other = moved.decision.providerAllowRules.find((rule: any) => rule.ruleId.endsWith('-writing'));
+    other.allowedOutboundDataCategories = [...other.allowedOutboundDataCategories, CATEGORY];
+    expect(() => validatePolicyDocument(moved, schemaData)).toThrow();
+  });
+
+  it('validates active-set v14 and rejects a pin that is not the exact v21 or v20 document', () => {
+    const { policyData, schemaData } = readPair('active-policy-set.v14.json', 'active-policy-set.v14.schema.json');
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    for (const [scope, version] of [['ordinary-production', 'v19'], ['developer-live', 'v18']] as const) {
+      const moved = structuredClone(policyData) as any;
+      moved.activePolicies['provider-processing-policy'].scopePins[scope].version = version;
+      expect(() => validatePolicyDocument(moved, schemaData), scope).toThrow();
+    }
+    const unpinned = structuredClone(policyData) as any;
+    unpinned.activePolicies['provider-processing-policy'].scopePins['developer-live'].sha256 = '0'.repeat(64);
+    expect(() => validatePolicyDocument(unpinned, schemaData)).toThrow();
   });
 });

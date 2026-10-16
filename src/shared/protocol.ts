@@ -2095,18 +2095,18 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ordinary-production';
 /**
- * Historical v5, v9, v10, v11, v12, v14, v16 and the superseded web reservation v8 remain readable identities; selected v18 admits
+ * Historical v5, v9, v10, v11, v12, v14, v16, v18 and the superseded web reservation v8 remain readable identities; selected v20 admits
  * baseline analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable
  * consistency and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and
  * 润色 and conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules, and AI7's platform
  * tools (websearch through the user-selected backend, webfetch) on review, writing and evaluation, and AI7's local targeted-retrieval
  * tool on every rule but enrolled background analysis and material translation. A type member does not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19';
-/** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, and selected v13. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21';
+/** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, and selected v14. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
@@ -2318,6 +2318,7 @@ export type OutboundDataCategoryId =
   | 'manuscript-conflict-region-excerpt'
   | 'frozen-material-reference-excerpt'
   | 'editorial-deliverable-excerpt'
+  | 'house-review-preference-excerpt'
   | 'unpublished-metadata'
   | 'unpublished-excerpts'
   | 'unpublished-full-content'
