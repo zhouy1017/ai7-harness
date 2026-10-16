@@ -4122,6 +4122,7 @@ export interface BaselineAnalysisHistoryProjection {
 export type RunAttemptState = 'dispatched' | 'awaiting-response' | 'retrying';
 
 export interface BaselineAnalysisProjection {
+  readonly historicalMarker?: string;
   bookId: string;
   kind: typeof BASELINE_ANALYSIS_KIND;
   contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
@@ -6869,6 +6870,7 @@ export interface TaskPlanDriftEntryProjection {
  * drawer's authorization bar offers, and only the bar's own activation records anything (Issue #420).
  */
 export interface TaskPlanProjection {
+  readonly seriesScopes?: ReadonlyArray<FrozenSeriesScope>;
   bookId: string;
   kind: TaskPlanKind;
   /** The Task Intent or the Review Run this plan belongs to. */
@@ -7948,6 +7950,7 @@ export interface CapturedProcedureRunProjection {
   readonly procedureId: string;
   readonly title: string;
   readonly resolved: null | {
+    readonly runSourceScope?: 'series';
     readonly versionId: string;
     readonly version: number;
     /** Whether it is the latest eligible version — `false` when the editor chose an older eligible one (REUSE-054). */
@@ -8536,6 +8539,7 @@ export interface EvaluationInitialDraftProjection {
 export interface EvaluationInitialProjection {
   /** The Book's latest 初评 Task, which the Task Drawer opens; `null` before the first is prepared. */
   readonly task: null | {
+    readonly historicalMarker?: string;
     readonly taskIntentId: string;
     readonly state: BaselineAnalysisProjection['state'];
     /** The Task's state in the editor's words. */

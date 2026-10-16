@@ -108,6 +108,23 @@ function readable(_store: EditorialStore, bookId: string): string[] | string {
 }
 
 describe('书系检索排除 over the real store', () => {
+  it('honours an exact source-version exclusion when knowledge provenance names that manuscript revision', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const member = await importBook(store, MEMBER);
+      const seriesId = store.createSeries({ title: '来源范围测试', note: '' }).seriesId;
+      joinSeries(store, seriesId, member.bookId);
+      const candidate = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '合成条目', knowledgeClass: 'canon' }, content: '合成知识说明', span: span(store, member) });
+      const review = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: candidate.candidateId });
+      store.promoteSeriesKnowledge({ seriesId, candidateId: candidate.candidateId, candidateVersion: 1, reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'none' });
+      expect(readable(store, member.bookId)).toHaveLength(1);
+      const source = store.inspectSeriesExclusionTargets({ seriesId, kind: 'source-version', after: null }).targets[0]!;
+      const recorded = exclude(store, seriesId, 'add', { target: { kind: 'source-version', id: source.id } });
+      expect(readable(store, member.bookId)).toContain('都已排除在书系检索之外');
+      exclude(store, seriesId, 'end', { exclusionId: recorded.exclusionId });
+      expect(readable(store, member.bookId)).toHaveLength(1);
+    } finally { store.close(); }
+  }, 300_000);
   it('appends 添加, 修改 and 停止 as revisions behind the preview, and refuses what a Series cannot name', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

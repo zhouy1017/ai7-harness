@@ -17,9 +17,10 @@ import {
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
 import { AUTHORED_REWRITE_WORDS, beginRewriteAsJ11 } from '../support/evaluation-rewrite.js';
-import { ruleFor, withRuleFor, withoutRuleFor } from '../support/policy-rules.js';
+import { ruleFor, withRuleFor, withoutRuleFor, withSeriesKnowledgeFor } from '../support/policy-rules.js';
+import { makeJ13Series, J13_SERIES_TITLE } from '../support/series-consistency.js';
 import { AUTHORED_SECTIONS, finalizeAsJ11 } from '../support/readers-report.js';
-import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
+import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1, SAMPLE1_UNITS } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // #429 / J-11: AI7 初评, 审稿意见 and 按我的评分重写评语 on the Go execution path — the real store, ledger, execution owner, broker,
@@ -115,6 +116,7 @@ function liveOwner(policy: LaunchPolicyProjection, family: string): BaselineAnal
   activeFamily = family;
   const owner = new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
     secretResolver: { resolve: async () => 'placeholder-development-key' },
     developerLive: { launch: { runBudgetCeiling: ceiling, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: { family, case: 'sample1-whole-book', delta: null } }, nativeFetch },
   });
@@ -138,14 +140,14 @@ async function refusal(operation: () => unknown): Promise<string> {
   return 'no-error';
 }
 
-async function runInitial(policy: LaunchPolicyProjection): Promise<void> {
+async function runInitial(policy: LaunchPolicyProjection, seriesId: string | null = null): Promise<void> {
   const owner = liveOwner(policy, 'evaluation-initial');
-  let progress = store.createInitialEvaluationPreparationWork(bookId, policy);
+  let progress = store.createInitialEvaluationPreparationWork(bookId, policy, [], null, seriesId);
   while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
   const prepared = progress.projection!;
   const authorized = store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-  activeRun = { owner, ledger: store.initialEvaluationLedger, runRecordId: authorized.dispatchRunRecordId!, taskIntentId: prepared.taskIntent!.taskIntentId };
-  expect(owner.admitOrQueue(authorized.dispatchRunRecordId!, store.initialEvaluationLedger)).toBe('admitted');
+  activeRun = { owner, ledger: authorized.ledger, runRecordId: authorized.dispatchRunRecordId!, taskIntentId: prepared.taskIntent!.taskIntentId };
+  expect(owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger)).toBe('admitted');
   await owner.whenIdle();
 }
 
@@ -221,6 +223,43 @@ async function contractCase(kind: 'initial' | 'readers' | 'rewrite') {
 }
 
 describe('evaluation on the Go execution path (#429)', () => {
+  it.each([1, SAMPLE1_UNITS])('stops the Series evaluation after %s admitted unit reads, before the next unit or synthesis can transmit', async (units) => {
+    const seriesId = makeJ13Series(store, bookId);
+    const policy = withSeriesKnowledgeFor(selected, 'evaluation');
+    bindLive(policy);
+    holdTurn = units;
+    const running = runInitial(policy, seriesId);
+    await arrived;
+    const itemId = store.inspectSeries(seriesId).knowledge.items[0]!.itemId;
+    const request = { seriesId, action: 'add' as const, exclusionId: null, target: { kind: 'knowledge-item' as const, id: itemId }, reason: '' };
+    const preview = store.previewSeriesExclusion(request);
+    store.recordSeriesExclusion({ ...request, previewDigest: preview.previewDigest });
+    release();
+    await running;
+    const stopped = store.inspectInitialEvaluation(bookId);
+    expect(stopped.run!.state).toBe('interrupted');
+    expect(stopped.run!.transitions.at(-1)!.detail).toContain('书系检索范围已变化');
+    expect(sent).toBe(units);
+    expect(stopped.taskOutcome!.report!.usagePerStage['cross-unit-reduction'].requests).toBe(0);
+  });
+  it('executes the Series-scoped evaluation through a synthetic transport and keeps completed history readable after exclusion', async () => {
+    const seriesId = makeJ13Series(store, bookId);
+    const policy = withSeriesKnowledgeFor(selected, 'evaluation');
+    bindLive(policy);
+    await runInitial(policy, seriesId);
+    const completed = store.inspectInitialEvaluation(bookId);
+    expect(completed.run!.state).toBe('completed');
+    expect(completed.resultSetRevision!.evaluation.synthesis.state).toBe('closed');
+    expect(completed.runSourceScope!.seriesScopes![0]!.title).toBe(J13_SERIES_TITLE);
+    const itemId = completed.runSourceScope!.seriesScopes![0]!.knowledge[0]!.itemId;
+    const request = { seriesId, action: 'add' as const, exclusionId: null, target: { kind: 'knowledge-item' as const, id: itemId }, reason: '' };
+    const preview = store.previewSeriesExclusion(request);
+    store.recordSeriesExclusion({ ...request, previewDigest: preview.previewDigest });
+    const opened = store.inspectInitialEvaluation(bookId);
+    expect(opened.resultSetRevision).toEqual(completed.resultSetRevision);
+    expect(opened.historicalMarker).toBe('此结果使用的材料后来被排除');
+    expect(sent).toBeGreaterThan(0); // Only the injected synthetic transport was reached.
+  });
   it('offers none of the three contracts under a selected policy that names no evaluation rule, and sends nothing', async () => {
     bindLive(withoutRuleFor(selected, 'evaluation'));
     const workspace = store.inspectEvaluation(bookId, null);

@@ -402,6 +402,8 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       expect([stopped.state, stopped.canContinue, stopped.categories[0]!.state, stopped.categories[0]!.stateLabel])
         .toEqual(['scope-changed', false, 'interrupted', SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL]);
       expect(stopped.categories[0]!.detail?.startsWith(SERIES_SCOPE_STOP_SUMMARY)).toBe(true);
+      expect(store.inspectTaskPlan({ bookId, kind: 'review-run', ref: reviewing.reviewRunId }).technical.find((line) => line.key === 'series-read-counts')?.value)
+        .toBe('1 个阅读范围 · 1 次模型请求');
       // Exactly the one range that was out was read; nothing after it was sent, and nothing reached the manuscript.
       const ledger = store.inspectReviewWorkspace(bookId, reviewing.reviewRunId);
       expect(ledger.run!.findings).toHaveLength(0);

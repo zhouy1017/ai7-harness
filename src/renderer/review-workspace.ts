@@ -1989,6 +1989,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // The choice settles into the sheet in one composed step (Issue #705 item 3): a reason is announced once, on the sheet's alert
     // line, and the status bar never repeats it (Issue #691).
     const settled = settleProcedureChoice(state, ticket, outcome, versionId !== null);
+    if (state.procedure !== null && state.procedure.resolved?.runSourceScope !== 'series') state.seriesId = null;
     if (settled.status !== null) options.setStatus(settled.status);
     renderSheet(projection, state);
     // Back on the selector the editor used, while the sheet still shows it.
@@ -2156,7 +2157,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     scopes.append(range);
 
     const { field: materialField, inputs: materialInputs, items: materialItems } = reviewMaterialsField(workspace.materials, state, updateSheet);
-    if (state.seriesChoices.length > 0) {
+    if (state.seriesChoices.length > 0 && (state.procedure === null || state.procedure.resolved?.runSourceScope === 'series')) {
       const row = el('label', 'review-field');
       row.append(el('span', undefined, '参考什么'));
       const select = el('select');

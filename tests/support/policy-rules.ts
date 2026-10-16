@@ -65,7 +65,10 @@ export function withHouseReviewPreferenceFor(policy: LaunchPolicyProjection, kin
 
 /** Successor admission without altering any policy asset; fixture transport remains local. */
 export function withSeriesKnowledgeFor(policy: LaunchPolicyProjection, kind: string): LaunchPolicyProjection {
-  const seeded = withHouseReviewPreferenceFor(policy, kind);
+  const review = policy.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes('editorial-review/typos-and-usage'));
+  const listed = ruleFor(policy, kind) === undefined && kind === 'editorial-review/series-consistency' && review !== undefined
+    ? withRules(policy, policy.providerProcessing.admittedRules.map((rule) => rule === review ? { ...rule, taskKinds: [...rule.taskKinds, kind] } : rule)) : policy;
+  const seeded = withHouseReviewPreferenceFor(listed, kind);
   const prior = ruleFor(seeded, kind);
   return withRuleFor(seeded, kind, { seriesKnowledgeAllowed: true,
     outboundDataCategories: [...prior.outboundDataCategories.filter((category) => category !== 'house-review-preference-excerpt'), 'series-knowledge-excerpt'] });

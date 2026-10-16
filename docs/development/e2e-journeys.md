@@ -363,6 +363,8 @@ It answers `书系知识已更新`, and the item reads `第 2 版`, in the edito
 
 **Offered over the knowledge.** The Series page's member row for 星河之三 reads `尚未审阅 · 可以审阅`. In 星河之三's 审阅 the coverage row of 书系一致性 reads 未审阅, and 新建审阅 offers the category unticked, its basis `依据：书系「星河三部曲」的书系知识：地点「海边小城」第 2 版 · 工序：书系一致性检查（第 1 版） · 不使用搜索引擎` — the Series and the exact revision, the editor's words, that the review reads.
 
+Since wave 10 slice 7b (#64), `series-scope-review-run` reads the exact frozen Series/member primary-manuscript/knowledge/exclusion pins from the existing authored consistency Run. `series-exclusion-payload-refused` checks that its held fixture Run stops as `series-retrieval-scope-changed` with the frozen scope unchanged; asynchronous assembly refusal and the opt-in review-category/evaluation consumers under a stubbed admitting rule are service/unit evidence, without a runtime fixture-policy seam or a new test-control operation. Cross-project access beyond one Series remains deferred under SER-029.
+
 **The Run.** 书系一致性 over 全书 is prepared; the Run's one category states the same basis. The drawer's `开始任务` records the approval, and the Run executes on the J-04 adapter through the authored fixture `sample1-series-consistency-authored`. It settles with three findings and nothing excluded: each a pending 批注 on exact text, citing clause `series-knowledge/1` of `地点「海边小城」` with that clause's words. The coverage row reads current, and 回到原文 opens the manuscript at the first finding's mark, its card naming `AI7 · 审阅「书系一致性」`.
 
 **The member column.** Back on the Series page, the row reads `审阅于 … · 可以审阅`.

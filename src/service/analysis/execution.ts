@@ -1435,7 +1435,9 @@ export class BaselineAnalysisExecutionOwner {
       gate: (payload) => {
         if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
         capturePendingLoopUsage();
-        const decision = evaluateEgress(payload, { ...bindingFacts, seriesScopeGuard: () => this.#deps.seriesScopeGuard?.(facts.runRecordId) ?? null }, platformSession?.egressScope ?? { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
+        const decision = evaluateEgress(payload, { ...bindingFacts, seriesScopeGuard: () => this.#deps.seriesScopeGuard === undefined || this.#deps.seriesScopeGuard === null
+          ? definition.seriesScopes === undefined ? null : '无法核对书系检索范围'
+          : this.#deps.seriesScopeGuard(facts.runRecordId) }, platformSession?.egressScope ?? { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
         admittedPayloadDigest = decision.decision === 'refuse' ? null : decision.payloadDigest;
         return decision;
       },

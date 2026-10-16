@@ -462,6 +462,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     section.append(heading, el('p', 'field-note', EVALUATION_AI7_LEDE));
     const initialBlocked = page.materialReferences?.blocked.initial === true;
     section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked)));
+    if (initial.task?.historicalMarker !== undefined) section.append(el('p', 'field-note', initial.task.historicalMarker));
     if (page.market.series.length > 0 && initial.prepare.allowed) {
       const row = el('label', 'evaluation-field');
       row.append(el('span', undefined, '参考什么'));

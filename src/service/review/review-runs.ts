@@ -4,7 +4,7 @@ import type { HouseReviewPreferenceUse, LearningLedgerMaterialKind, ReviewRunInf
 import { randomUUID } from 'node:crypto';
 import { clarificationPlanBaseDigest } from '../provider/clarification-contract.js';
 import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSettled, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading, type MaterialGuardRefusal } from '../task-material-references.js';
-import { liveMaterialRule } from '../analysis/live-kind-admission.js';
+import { liveMaterialRule, liveKindAdmission } from '../analysis/live-kind-admission.js';
 import { reviewDeliverables, REVIEW_DELIVERABLE_CHANGED } from '../production-documents.js';
 import { liveReviewRule, liveReviewUnavailableReason } from './live-review-admission.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
@@ -493,12 +493,11 @@ function seriesKnowledgeMovedReason(label: string): string {
  * public or synthetic text until the Owner admits house guideline text in a policy revision. Under development-ci nothing
  * is transmitted, so nothing is refused. `null` when nothing stands in the way.
  */
-export function houseGuidelineRefusal(entry: ReviewCategoryConfigurationEntry, live: boolean): string | null {
+export function houseGuidelineRefusal(entry: ReviewCategoryConfigurationEntry, live: boolean, seriesAdmitted = false): string | null {
   if (!live || entry.executor !== 'review-category-contract') return null;
   // 书系一致性's clauses are the house's own Series Knowledge (Issue #64, S29a), held back exactly as imported guidelines are.
   if (entry.seriesKnowledge !== undefined) {
-    const named = Array.from(new Set(entry.guidelineDocuments.map((document) => document.issuer))).join('、');
-    return `这一类以${named}的书系知识审阅；开发者实时模式下，本社的书系知识在获准发给模型之前不会发出，这一类暂不能开始。`;
+    return seriesAdmitted ? null : SERIES_POLICY_CLOSED;
   }
   const house = houseGuidelineDocuments(entry);
   if (house.length === 0) return null;
@@ -1889,7 +1888,8 @@ export class ReviewRunStore {
       const stands = current !== null && current.taskIntent?.taskIntentId === category.task.taskIntentId && current.state === 'prepared' &&
         current.actions.canAuthorize && current.planEnvelope?.digest === category.task.planEnvelopeDigest &&
         approvals.get(category.categoryId) === category.task.planEnvelopeDigest &&
-        this.#unverifiedTargets(category, snapshot.createdAt) === null && !this.#seriesKnowledgeMoved(snapshot.bookId, category) &&
+        this.#unverifiedTargets(category, snapshot.createdAt) === null &&
+        (this.#authorizationOf(snapshot.reviewRunId) !== null || !this.#seriesKnowledgeMoved(snapshot.bookId, category)) &&
         this.#deliverablesMoved(snapshot.bookId, category.entry) === null;
       if (!stands) moved.push(`「${category.entry.label}」的计划`);
     }
@@ -2121,7 +2121,7 @@ export class ReviewRunStore {
     if (this.#stopForWithdrawnInfluence(snapshot, category)) return null;
     const ledger = this.#categoryLedger(category);
     // House guideline text never reaches a live model before the Owner admits it, whenever the Run was prepared.
-    const withheld = houseGuidelineRefusal(category.entry, ledger.launch.live !== null);
+    const withheld = this.#guidelineRefusal(category.entry);
     if (withheld !== null) {
       this.#recordEvent(reviewRunId, categoryId, 'refused', withheld, { extra: { code: HOUSE_GUIDELINE_NOT_TRANSMITTABLE } });
       return null;
@@ -2981,8 +2981,21 @@ export class ReviewRunStore {
     const resolution = house.categories.some((entry) => entry.executor === 'series-knowledge') ? resolveSeriesConsistency(this.#db, bookId, readings) : null;
     return {
       ...house,
-      categories: house.categories.map((entry) => entry.executor === 'series-knowledge' ? seriesConsistencyEntry(entry, resolution!) : reviewCategoryEntryForBook(entry, this.#db, bookId)),
+      categories: house.categories.map((entry) => {
+        if (entry.executor !== 'series-knowledge') return reviewCategoryEntryForBook(entry, this.#db, bookId);
+        const resolved = seriesConsistencyEntry(entry, resolution!);
+        if (resolved.seriesKnowledge === undefined || this.#ledgers.baseline().launch.live === null) return resolved;
+        return { ...resolved, seriesScopes: resolved.seriesKnowledge.series.filter((series) => resolved.seriesKnowledge!.revisions.some((pin) => pin.seriesId === series.seriesId))
+          .map((series) => freezeSeriesScope(this.#db, bookId, series.seriesId, resolved.seriesKnowledge!.revisions.filter((pin) => pin.seriesId === series.seriesId))) };
+      }),
     };
+  }
+
+  #guidelineRefusal(entry: ReviewCategoryConfigurationEntry): string | null {
+    const launch = this.#ledgers.baseline().launch;
+    const admitted = entry.seriesKnowledge === undefined || launch.live === null || launch.policy === undefined ? false
+      : liveKindAdmission(launch.policy, this.#ledgers.ledgerOf(entry).definition, launch.live) !== null;
+    return houseGuidelineRefusal(entry, launch.live !== null, admitted);
   }
 
   #deliverablesMoved(bookId: string, entry: ReviewCategoryConfigurationEntry): string | null {
@@ -3031,8 +3044,10 @@ export class ReviewRunStore {
    * A revision taken in or a membership changed after preparation leaves the frozen plan approvable by nobody.
    */
   #seriesKnowledgeMoved(bookId: string, category: SnapshotCategory): boolean {
-    if (category.entry.seriesScopes !== undefined && category.entry.seriesKnowledge === undefined) {
-      try { return canonicalJson(category.entry.seriesScopes) !== canonicalJson(category.entry.seriesScopes.map((scope) => freezeSeriesScope(this.#db, bookId, scope.seriesId))); }
+    if (category.entry.seriesScopes !== undefined) {
+      const scopes = category.task === null ? category.entry.seriesScopes : frozenSeriesScopes(this.#db, category.task.taskIntentId, category.task.planEnvelopeDigest) ?? category.entry.seriesScopes;
+      try { if (canonicalJson(scopes) !== canonicalJson(scopes.map((scope) => freezeSeriesScope(this.#db, bookId, scope.seriesId,
+        category.entry.seriesKnowledge?.revisions.filter((pin) => pin.seriesId === scope.seriesId))))) return true; }
       catch { return true; }
     }
     const pins = category.entry.seriesKnowledge;
@@ -3491,7 +3506,7 @@ export class ReviewRunStore {
       ? '这一类暂不可用。'
       : entry.executor === 'unavailable'
         ? entry.unavailableReason ?? '这一类暂不可用。'
-        : this.#head(bookId) === null ? NO_MANUSCRIPT_REASON : houseGuidelineRefusal(entry, this.#ledgers.baseline().launch.live !== null);
+        : this.#head(bookId) === null ? NO_MANUSCRIPT_REASON : this.#guidelineRefusal(entry);
     return { unavailableReason, reviewedAt: nullableText(last.reviewed_at) };
   }
 
@@ -3506,7 +3521,7 @@ export class ReviewRunStore {
     if (entry.executor === 'baseline-leads') {
       return { entry, unavailableReason: baseline.error ?? (baseline.revision === null ? LEADS_ABSENT_REASON : null), facts: none, projection: null };
     }
-    const withheld = houseGuidelineRefusal(entry, this.#ledgers.baseline().launch.live !== null);
+    const withheld = this.#guidelineRefusal(entry);
     if (withheld !== null) return { entry, unavailableReason: withheld, facts: none, projection: null };
     const launch = this.#ledgers.baseline().launch;
     if (launch.live !== null && (launch.policy === undefined || liveReviewRule(launch.policy, entry) === null)) {
