@@ -587,7 +587,11 @@ function boundedTitle(title: string): string {
  */
 export interface ReviewRunLedgers {
   ledgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string, preference?: HouseReviewPreferenceUse | null): BaselineAnalysisStore;
-  housePreference?(bookId: string, policy: LaunchPolicyProjection): Readonly<Record<string, HouseReviewPreferenceUse>> | undefined;
+  /**
+   * The house's 本社审阅偏好 for one category of one Book (Issue #911): its use when the category has lines and the kind's one rule
+   * names the outbound category, `'closed'` when it has lines and the rule does not, `null` when it has none.
+   */
+  housePreference?(bookId: string, categoryId: string, kind: string, policy: LaunchPolicyProjection): HouseReviewPreferenceUse | 'closed' | null;
   materialReadings?(boundary: TaskMaterialBoundary): ReadonlyArray<TaskMaterialReading>;
   materialOffers?(bookId: string): NonNullable<ReviewWorkspaceProjection['materials']>;
   baseline(): BaselineAnalysisStore;
@@ -616,6 +620,7 @@ interface SnapshotCategory {
 
 /** The canonical record of `review_runs`. */
 interface RunSnapshot {
+  /** By category kind, the version each category Task reads; empty when the house has lines but the selected rule is closed to them. */
   readonly housePreferences?: Readonly<Record<string, HouseReviewPreferenceUse>> | undefined;
   readonly materialReferences?: TaskMaterialBoundary;
   readonly schema: typeof RUN_SCHEMA;
@@ -785,7 +790,8 @@ interface RunView {
  * approval — why that approval would now be refused, in the words the refusal itself uses (D8).
  */
 export interface ReviewRunPlanFacts {
-  readonly housePreferences?: ReadonlyArray<HouseReviewPreferenceUse>;
+  /** Each category that reads 本社审阅偏好 with the version it reads; empty when the selected rule is closed to them. */
+  readonly housePreferences?: ReadonlyArray<{ readonly categoryLabel: string; readonly preference: HouseReviewPreferenceUse }>;
   readonly materials?: ReadonlyArray<Pick<TaskMaterialReading, 'source' | 'refusal'> & { readonly settledNote?: string }>;
   /** The Run lists 资料库 items and the launch now bound is developer-live, which sends none of them: the plan is refused. */
   readonly materialsRefusedLive?: boolean;
@@ -1020,11 +1026,14 @@ export class ReviewRunStore {
         requireReview(plan.kind !== 'refused', 'REVIEW_SCOPE_UNAVAILABLE', `「${entry.label}」：${plan.kind === 'refused' ? plan.reason : ''}`);
         return { position: position + 1, entry, plan };
       });
-    const offeredPreferences = this.#ledgers.housePreference?.(bookId, input.launchPolicy);
-    const housePreferences = offeredPreferences === undefined ? undefined : Object.fromEntries(planned
-      .filter((category) => category.entry.executor === 'review-category-contract')
-      .map((category) => this.#ledgers.ledgerOf(category.entry).definition.kind)
-      .filter((kind) => offeredPreferences[kind] !== undefined).map((kind) => [kind, offeredPreferences[kind]!]));
+    // 本社审阅偏好 (Issue #911): each model-backed category reads its own lines when its rule names the outbound category.
+    const offeredPreferences = planned.filter((category) => category.entry.executor === 'review-category-contract').map((category) => {
+      const kind = this.#ledgers.ledgerOf(category.entry).definition.kind;
+      return [kind, this.#ledgers.housePreference?.(bookId, category.entry.categoryId, kind, input.launchPolicy) ?? null] as const;
+    });
+    const usedPreferences = offeredPreferences.flatMap(([kind, offer]) => offer === null || offer === 'closed' ? [] : [[kind, offer] as const]);
+    const housePreferences = usedPreferences.length > 0 ? Object.fromEntries(usedPreferences)
+      : offeredPreferences.some(([, offer]) => offer === 'closed') ? {} : undefined;
     const work: PreparationWork = {
       ...(housePreferences === undefined ? {} : { housePreferences }),
       redoOf: input.redoOf ?? null,
@@ -1572,7 +1581,10 @@ export class ReviewRunStore {
     return {
       ...(this.#materialsRefusedLive(snapshot) ? { materialsRefusedLive: true } : {}),
       ...(snapshot.materialReferences === undefined ? {} : { materials: this.#materialReadings(snapshot).map((reading) => view.authorization === null ? reading : taskMaterialSettled(reading)) }),
-      ...(snapshot.housePreferences === undefined ? {} : { housePreferences: Object.values(snapshot.housePreferences).filter((preference, index, all) => all.findIndex((entry) => entry.versionId === preference.versionId) === index) }),
+      ...(snapshot.housePreferences === undefined ? {} : { housePreferences: snapshot.categories.flatMap((category) => {
+        const preference = category.task === null ? undefined : snapshot.housePreferences![category.task.kind];
+        return preference === undefined ? [] : [{ categoryLabel: category.entry.label, preference }];
+      }) }),
       reviewRunId: snapshot.reviewRunId,
       ordinal: snapshot.ordinal,
       label: `第 ${snapshot.ordinal} 次`,
@@ -1680,7 +1692,7 @@ export class ReviewRunStore {
     if (category.task === null || category.entry.executor !== 'review-category-contract') return this.#ledgers.ledgerOf(category.entry);
     const frozen = this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
     const execution = frozen.components['execution-plan'] as Record<string, unknown>;
-    const preference = new HouseReviewPreferenceLedger(this.#db).pinned(category.task.taskIntentId, category.task.planEnvelopeDigest);
+    const preference = new HouseReviewPreferenceLedger(this.#db).pinned(category.task.taskIntentId);
     if (execution.materialReferences === undefined) return this.#ledgers.ledgerOf(category.entry, undefined, undefined, undefined, preference);
     const references = taskMaterialSources(execution.materialReferences);
     const envelope = frozen.components['plan-envelope'] as Record<string, unknown>;

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { deriveSpanEdit, followBlockTextChange, followSpanEdit, graphemesOf } from '../shared/mark-anchor.js';
-import type { EditQualitySignalsProjection } from '../shared/protocol.js';
+import type { EditQualitySignalsProjection, TrustedOperationalScope } from '../shared/protocol.js';
 import { canonicalJson, sha256Hex } from './analysis/canonical.js';
 
 /** Grapheme Levenshtein distance for accepted-with-edit text; common edges avoid work on unchanged prose. */
@@ -31,8 +31,31 @@ export function editCategoryWeight(categoryId: string): number {
   return categoryId === 'literary-expression' ? 3 : categoryId === 'style-and-format' ? 2 : 1;
 }
 
-/** Read-only projection over explicitly accepted Apply targets, their receipts and later durable journal edits. */
-export function inspectEditQualitySignals(db: DatabaseSync, bookId: string | null, operationalScope?: import('../shared/protocol.js').TrustedOperationalScope): EditQualitySignalsProjection {
+/** One explicitly accepted Apply target as it stands now: whether it survives, its unweighted effort and its lineage. */
+interface TargetSignal {
+  readonly decisionId: string;
+  readonly categoryId: string;
+  readonly survives: boolean;
+  readonly volume: number;
+  readonly lineage: unknown;
+}
+
+/** One decision's own targets (Issue #911 review): what the house record may read of a source it admits, and nothing else. */
+export interface DecisionEditQuality {
+  readonly applied: number;
+  readonly surviving: number;
+  readonly editVolume: number;
+  readonly lineageDigest: string;
+}
+
+/** A decision with no applied target: nothing survives or was rewritten, and its lineage is the empty one. */
+export const NO_EDIT_QUALITY: DecisionEditQuality = { applied: 0, surviving: 0, editVolume: 0, lineageDigest: sha256Hex(canonicalJson([])) };
+
+/**
+ * Each explicitly accepted Apply target with its receipt and the later durable journal edits touching it. With a scope, only
+ * targets whose 修改建议 came from a review finding materialized under that scope are read (the development-data rule).
+ */
+function* targetSignals(db: DatabaseSync, bookId: string | null, operationalScope?: TrustedOperationalScope): IterableIterator<TargetSignal> {
   const targets = db.prepare(`SELECT t.*, i.book_id, i.branch_id, r.resulting_journal_sequence, r.receipt_digest,
       d.disposition, d.edited_text, p.proposed_text, m.anchor_state, m.status, m.from_grapheme, m.to_grapheme,
       w.digest AS current_digest, w.text AS current_text,
@@ -46,7 +69,6 @@ export function inspectEditQualitySignals(db: DatabaseSync, bookId: string | nul
     LEFT JOIN working_blocks w ON w.branch_id = i.branch_id AND w.block_id = t.block_id
     WHERE i.kind = 'apply' AND d.disposition IN ('accepted', 'accepted-with-edit') AND (? IS NULL OR i.book_id = ?)
     ORDER BY i.book_id, i.effect_id, t.ordinal`).all(bookId, bookId);
-  const categories = new Map<string, { categoryId: string; applied: number; surviving: number; editVolume: number; lineage: unknown[] }>();
   for (const target of targets) {
     if (operationalScope !== undefined) {
       const origin = db.prepare(`SELECT r.canonical_json, r.sha256 FROM review_findings f
@@ -59,7 +81,6 @@ export function inspectEditQualitySignals(db: DatabaseSync, bookId: string | nul
       if (record.policyPin?.operationalScope !== operationalScope) continue;
     }
     const categoryId = String(target.category_id);
-    const metric = categories.get(categoryId) ?? { categoryId, applied: 0, surviving: 0, editVolume: 0, lineage: [] };
     const current = target.current_text === null ? null : graphemesOf(String(target.current_text));
     const rangeDigest = current === null ? null : sha256Hex(current.slice(Number(target.from_grapheme), Number(target.to_grapheme)).join(''));
     const survives = target.reversed === 0 && target.status === 'applied' && target.anchor_state === 'exact' &&
@@ -104,15 +125,41 @@ export function inspectEditQualitySignals(db: DatabaseSync, bookId: string | nul
       if (edit.effect_command === 0) volume += editedVolume;
       lineage.push({ sequence: edit.sequence, digest: edit.command_kind === 'undo' ? edit.before_digest : edit.after_digest ?? edit.resulting_block_digest, touches });
     }
+    yield { decisionId: String(target.decision_id), categoryId, survives, volume, lineage: { decisionId: target.decision_id, receiptDigest: target.receipt_digest,
+      currentDigest: target.current_digest, anchor: target.anchor_state, status: target.status, reversed: target.reversed, survives, volume, edits: lineage } };
+  }
+}
+
+/** Read-only projection over explicitly accepted Apply targets, their receipts and later durable journal edits. */
+export function inspectEditQualitySignals(db: DatabaseSync, bookId: string | null, operationalScope?: TrustedOperationalScope): EditQualitySignalsProjection {
+  const categories = new Map<string, { categoryId: string; applied: number; surviving: number; editVolume: number; lineage: unknown[] }>();
+  for (const signal of targetSignals(db, bookId, operationalScope)) {
+    const metric = categories.get(signal.categoryId) ?? { categoryId: signal.categoryId, applied: 0, surviving: 0, editVolume: 0, lineage: [] };
     metric.applied += 1;
-    metric.surviving += survives ? 1 : 0;
-    metric.editVolume += volume * editCategoryWeight(categoryId);
-    metric.lineage.push({ decisionId: target.decision_id, receiptDigest: target.receipt_digest, currentDigest: target.current_digest,
-      anchor: target.anchor_state, status: target.status, reversed: target.reversed, survives, volume, edits: lineage });
-    categories.set(categoryId, metric);
+    metric.surviving += signal.survives ? 1 : 0;
+    metric.editVolume += signal.volume * editCategoryWeight(signal.categoryId);
+    metric.lineage.push(signal.lineage);
+    categories.set(signal.categoryId, metric);
   }
   const projected = [...categories.values()].sort((a, b) => a.categoryId.localeCompare(b.categoryId)).map(({ lineage, ...metric }) =>
     ({ ...metric, lineageDigest: sha256Hex(canonicalJson(lineage)) }));
   return { bookId, applied: projected.reduce((sum, metric) => sum + metric.applied, 0), surviving: projected.reduce((sum, metric) => sum + metric.surviving, 0),
     editVolume: projected.reduce((sum, metric) => sum + metric.editVolume, 0), categories: projected, lineageDigest: sha256Hex(canonicalJson(projected)) };
+}
+
+/**
+ * The same signals by the decision that applied them (Issue #911 review): the house record reads each admitted source's own
+ * targets, so an excluded, deferred or never-offered decision's survival and edits never shape a preference line.
+ */
+export function editQualityOfDecisions(db: DatabaseSync, bookId: string, operationalScope: TrustedOperationalScope): ReadonlyMap<string, DecisionEditQuality> {
+  const decisions = new Map<string, { applied: number; surviving: number; editVolume: number; lineage: unknown[] }>();
+  for (const signal of targetSignals(db, bookId, operationalScope)) {
+    const metric = decisions.get(signal.decisionId) ?? { applied: 0, surviving: 0, editVolume: 0, lineage: [] };
+    metric.applied += 1;
+    metric.surviving += signal.survives ? 1 : 0;
+    metric.editVolume += signal.volume * editCategoryWeight(signal.categoryId);
+    metric.lineage.push(signal.lineage);
+    decisions.set(signal.decisionId, metric);
+  }
+  return new Map([...decisions].map(([decisionId, { lineage, ...metric }]) => [decisionId, { ...metric, lineageDigest: sha256Hex(canonicalJson(lineage)) }]));
 }

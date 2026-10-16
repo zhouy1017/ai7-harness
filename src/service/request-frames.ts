@@ -1342,7 +1342,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
-    // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
+    // 知识库 › 社级编辑记忆 (Issue #911): the house record takes no input; 质量与学习's edit signals, the house or one Book.
     case 'inspectHouseReviewPreference':
     case 'rebuildHouseReviewPreference': {
       requireInput(value.input, [], tentativeId);
@@ -1353,6 +1353,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!(input.bookId === null || validUuid(input.bookId))) throw new ProtocolError(tentativeId);
       break;
     }
+    // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
     case 'inspectLearningMaterials': {
       const input = requireInput(value.input, ['bookId', 'after'], tentativeId);
       const after = input.after;

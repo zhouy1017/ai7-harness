@@ -1,6 +1,6 @@
-import { HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, initializeHouseReviewPreferenceSchema, type HousePreferenceSource } from './house-review-preference.js';
+import { HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
 import { inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
-import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection, TrustedOperationalScope } from '../shared/protocol.js';
+import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
 import type { ApplyReceiptProjection, BatchProposalDecisionDraftInput, InspectApplyReceiptInput, PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordProposalDecisionInput, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput } from '../shared/protocol.js';
 import { initializeProposalReviewSchema } from './editorial-marks.js';
 import { SEARCH_BACKENDS, defaultSearchBackend } from './provider/search-backends.js';
@@ -4765,11 +4765,12 @@ export class EditorialStore {
     this.#capturedProcedures = new CapturedProcedures(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       ledgerOf: (entry, materials, digest, bookId, preference) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference),
-      housePreference: (bookId, policy) => {
-        const use = new HouseReviewPreferenceLedger(this.#authority).use(this.#baselineAnalysis.launch.operationalScope, bookId);
-        if (use === null) return undefined;
-        const rules = policy.providerProcessing.admittedRules.filter((rule) => !rule.backgroundOrigin);
-        return Object.fromEntries(rules.filter((rule) => rule.outboundDataCategories.includes('house-review-preference-excerpt')).flatMap((rule) => rule.taskKinds.filter((kind) => rules.filter((entry) => entry.taskKinds.includes(kind)).length === 1).map((kind) => [kind, use])));
+      housePreference: (bookId, categoryId, kind, policy) => {
+        const use = new HouseReviewPreferenceLedger(this.#authority).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId);
+        if (use === null) return null;
+        // The kind's one foreground rule must name the category; the live admission asks the same again before any dispatch.
+        const rules = policy.providerProcessing.admittedRules.filter((rule) => rule.backgroundOrigin !== true && rule.taskKinds.includes(kind));
+        return rules.length === 1 && rules[0]!.outboundDataCategories.includes('house-review-preference-excerpt') ? use : 'closed';
       },
       materialReadings: (boundary) => this.#taskMaterialReadings(boundary),
       materialOffers: (bookId) => this.#taskMaterialOffers(bookId),
@@ -5350,8 +5351,12 @@ export class EditorialStore {
     }
     if (materials === undefined) return this.reviewCategoryLedger(houseReviewPreferenceKindDefinition(base, preference ?? null, true));
     const readings = this.#taskMaterialReadings(materials);
-    const definition = houseReviewPreferenceKindDefinition(this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, preference == null ? frozenPromptDigest : undefined)), preference ?? null, true);
-    requireStore(preference == null || frozenPromptDigest === undefined || readings.some((reading) => reading.refusal !== null) || definition.promptContractDigest === frozenPromptDigest,
+    // The frozen digest is the outermost contract's. A readable pin re-derives the material contract and wraps it again, which
+    // must give that digest; an unreadable one is the material wrapper's own blocked definition under it, and never sends.
+    const refused = readings.some((reading) => reading.refusal !== null);
+    const material = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, preference == null || refused ? frozenPromptDigest : undefined));
+    const definition = refused ? material : houseReviewPreferenceKindDefinition(material, preference ?? null, true);
+    requireStore(preference == null || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
       'HOUSE_REVIEW_PREFERENCE_INVALID', '本社审阅偏好与任务计划不一致。');
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
@@ -12243,43 +12248,32 @@ export class EditorialStore {
     return this.inspectHouseReviewPreference();
   }
 
-  /** Review material only, bound to the exact source Result Set Revision and current eligibility standing. */
+  /**
+   * The house record from every Book's review material as it stands (Issue #911): the sources are read, and filtered by
+   * eligibility and by the scope of the Result Set Revision each came from, in `house-review-preference.ts`; every person the
+   * house's Books name now is kept out of the lines besides each decision's own attribution.
+   */
   #rebuildHouseReviewPreference(): void {
     const scope = this.#baselineAnalysis.launch.operationalScope;
     const sources: HousePreferenceSource[] = [];
-    for (const book of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY book_id').iterate()) {
+    const names: string[] = [];
+    for (const book of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY book_id').iterate() as IterableIterator<SqlRow>) {
       const bookId = asString(book.book_id);
-      const quality = readEditQualitySignals(this.#authority, bookId, scope);
-      for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false))) {
-        if (projection.state !== 'decided' || (projection.decision?.choice !== 'house' && projection.decision?.choice !== 'book')) continue;
-        let finding: SqlRow | undefined;
-        if (candidate.source.kind === 'review') {
-          finding = this.#authority.prepare(`SELECT f.review_run_id, f.category_id, (SELECT q.disposition_id FROM quality_signals q WHERE q.review_run_id = f.review_run_id AND q.finding_id = f.finding_id ORDER BY q.recorded_at DESC, q.rowid DESC LIMIT 1) AS disposition_id FROM review_findings f WHERE f.review_run_id = ? AND f.finding_id = ?`).get(candidate.source.reviewRunId, candidate.source.findingId) as SqlRow | undefined;
-        } else if (candidate.source.kind === 'decision') {
-          finding = this.#authority.prepare(`SELECT f.review_run_id, f.category_id FROM proposal_item_decisions d JOIN proposal_change_items i ON i.item_id = d.item_id
-            JOIN review_findings f ON f.mark_id = i.mark_id WHERE d.decision_id = ? ORDER BY f.rowid LIMIT 1`).get(candidate.source.decisionId) as SqlRow | undefined;
-        }
-        if (finding === undefined) continue;
-        const revision = this.#authority.prepare(`SELECT r.canonical_json, r.sha256 FROM review_run_category_events e
-          JOIN analysis_result_set_revisions r ON r.revision_id = e.result_set_revision_id
-          WHERE e.review_run_id = ? AND e.category_id = ? AND e.state = 'materialized' ORDER BY e.sequence DESC LIMIT 1`).get(finding.review_run_id!, finding.category_id!) as SqlRow | undefined;
-        if (revision === undefined) continue;
-        requireStore(sha256(asString(revision.canonical_json)) === revision.sha256, 'ANALYSIS_RECORD_INVALID', '审阅结果与摘要不一致。');
-        const record = JSON.parse(asString(revision.canonical_json)) as { policyPin?: { operationalScope?: TrustedOperationalScope } };
-        if (record.policyPin?.operationalScope !== scope) continue;
-        const decision = this.#learningEligibility.history(bookId, candidate.materialKey).at(-1)!;
-        const content = candidate.content as { disposition?: string; reason?: string | null };
-        const categoryId = asString(finding.category_id);
-        const metric = quality.categories.find((entry) => entry.categoryId === categoryId);
-        sources.push({ bookId, bookTitle: asString(book.title), categoryId, categoryLabel: reviewCategoryEntry(categoryId)?.label ?? categoryId,
-          materialDigest: projection.digest, decisionId: candidate.source.kind === 'decision' ? candidate.source.decisionId : asString(finding.disposition_id),
-          eligibilityDecisionId: decision.decisionId, eligibility: projection.decision.choice, operationalScope: scope,
-          disposition: content.disposition ?? 'ignored', reason: typeof content.reason === 'string' && (candidate.content as { reasonSource?: string }).reasonSource !== 'suggested' ? content.reason : null,
-          attribution: decision.attribution ?? { peopleVersion: 0, authors: [], editors: [] },
-          quality: metric ?? { applied: 0, surviving: 0, editVolume: 0, lineageDigest: quality.lineageDigest } });
-      }
+      const people = this.#bookPeople.current(bookId);
+      names.push(...people.authors, ...people.editors, ...people.related.map((person) => person.name));
+      sources.push(...housePreferenceSources(this.#authority, scope, { bookId, title: asString(book.title) }, this.#standingMaterials(bookId),
+        (categoryId) => reviewCategoryEntry(categoryId)?.label ?? categoryId));
     }
-    new HouseReviewPreferenceLedger(this.#authority).rebuild(scope, sources);
+    new HouseReviewPreferenceLedger(this.#authority).rebuild(scope, sources, names);
+  }
+
+  /** Each of one Book's Learning Materials where it stands, a decided one with the newest decision of its chain. */
+  *#standingMaterials(bookId: string): IterableIterator<StandingReviewMaterial> {
+    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false))) {
+      const latest = projection.state === 'decided' ? this.#learningEligibility.history(bookId, candidate.materialKey).at(-1) ?? null : null;
+      yield { candidate, state: projection.state, materialDigest: projection.digest,
+        decision: latest === null ? null : { decisionId: latest.decisionId, choice: latest.choice, attribution: latest.attribution } };
+    }
   }
 
   /**

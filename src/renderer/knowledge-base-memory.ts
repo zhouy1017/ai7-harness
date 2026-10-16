@@ -1,4 +1,5 @@
 import type { HouseReviewPreferenceProjection, RendererApi } from '../shared/protocol.js';
+import { learningChoiceLabel } from './quality-learning-labels.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -7,18 +8,25 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLEl
 }
 
 /** A local record, with its explicit eligibility basis and attribution; rebuilding never calls a model. */
-export function renderHouseReviewPreference(root: HTMLElement, projection: HouseReviewPreferenceProjection, api: Pick<RendererApi, 'rebuildHouseReviewPreference'>): void {
+export function renderHouseReviewPreference(root: HTMLElement, projection: HouseReviewPreferenceProjection, api: Pick<RendererApi, 'rebuildHouseReviewPreference'>,
+  announce: string | null = null): void {
   root.replaceChildren();
   const section = el('section', '');
   section.dataset['houseReviewPreference'] = '';
   section.append(el('h3', '本社审阅偏好'), el('p', '已判定反馈形成的偏好，供后续审阅参考；不改变审阅规范或编辑定稿。'), el('p', projection.basis));
   const update = el('button', '更新本社审阅偏好');
   update.type = 'button';
-  const status = el('p', '');
+  const status = el('p', announce ?? '');
   status.setAttribute('role', 'status');
   update.addEventListener('click', () => {
     update.disabled = true;
-    void api.rebuildHouseReviewPreference().then((next) => renderHouseReviewPreference(root, next, api)).catch(() => {
+    status.textContent = '正在更新本社审阅偏好…';
+    void api.rebuildHouseReviewPreference().then((next) => {
+      const changed = next.current?.versionId !== projection.current?.versionId;
+      renderHouseReviewPreference(root, next, api, changed ? `已更新为本社审阅偏好 v${next.current!.ordinal}。` : '本社审阅偏好没有变化。');
+      // The new rendering's own button keeps the keyboard where the editor left it.
+      root.querySelector<HTMLButtonElement>('[data-house-review-preference] button')?.focus();
+    }).catch(() => {
       update.disabled = false;
       status.textContent = '无法更新本社审阅偏好，请稍后重试。';
     });
@@ -31,7 +39,8 @@ export function renderHouseReviewPreference(root: HTMLElement, projection: House
     const lines = el('ul', '');
     for (const line of version.lines) {
       const item = el('li', line.text);
-      item.append(el('p', line.bookId === null ? '学习准入：仅本社' : '学习准入：仅当前图书'));
+      const bookTitle = line.bookId === null ? null : line.sources.find((source) => source.bookId === line.bookId)?.bookTitle ?? null;
+      item.append(el('p', `学习准入：${learningChoiceLabel(line.bookId === null ? 'house' : 'book')}${bookTitle === null ? '' : `《${bookTitle}》`}`));
       const books = new Map<string, Set<string>>();
       const authors = new Map<string, Set<string>>();
       const editors = new Map<string, Set<string>>();

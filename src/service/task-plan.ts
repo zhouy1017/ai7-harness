@@ -2284,6 +2284,11 @@ function frozenRoute(components: Readonly<Record<string, unknown>>): { kind: str
   return { kind: 'none', model: '' };
 }
 
+/** The plan's words when the house has 本社审阅偏好 lines the selected rule does not let leave the machine (Issue #911). */
+export const HOUSE_PREFERENCE_CLOSED = '本社审阅偏好未启用：当前策略未开放';
+/** What a Run reading 本社审阅偏好 does not do with it: advice, never a rule (Issue #911). */
+export const HOUSE_PREFERENCE_NOT_RULE = '不把本社审阅偏好当作规则：它只作参考，不改变审阅类别、条款或编辑定稿';
+
 /**
  * The plan of one Review Run: one step per category — its findings become marks on the manuscript — and
  * the 审阅报告 the Run's findings are summed up in (D7). A Review Run has no revision route (S69): a plan
@@ -2303,7 +2308,11 @@ export function reviewRunPlan(input: {
   const position = scope.kind === 'changed' ? '改动过的章' : reading === null ? scope.label : positionLabel(reading);
   const categories = facts.categories;
   const materials = facts.materials ?? [];
-  const preferenceLines = facts.housePreferences === undefined ? [] : facts.housePreferences.length === 0 ? ['本社审阅偏好未启用：当前策略未开放'] : [...new Map(facts.housePreferences.map((preference) => [preference.versionId, housePreferenceLabel(preference)])).values()];
+  // 本社审阅偏好 (Issue #911): each category that reads it names the version; a closed rule says so once.
+  const preferences = facts.housePreferences ?? [];
+  const preferenceLines = facts.housePreferences === undefined ? [] : preferences.length === 0 ? [HOUSE_PREFERENCE_CLOSED]
+    : preferences.map(({ categoryLabel, preference }) => `${categoryLabel}：参考${housePreferenceLabel(preference)}`);
+  const preferenceSent = preferences.length === 0 ? '' : `，以及${[...new Set(preferences.map(({ preference }) => `本社审阅偏好 v${preference.ordinal}`))].join('、')}的摘录`;
   const tasks = categories.filter((category) => category.task !== null);
   const procedures = [...new Set(categories.map((category) => category.procedure.title))];
   const firstProcedure = procedures[0] ?? '审阅工序';
@@ -2374,7 +2383,7 @@ export function reviewRunPlan(input: {
           ? `${category.label}：${category.procedure.title}（第 ${category.procedure.version} 版）`
           : `${category.label}：${category.guidelineDocuments.map((document) => `${document.issuer}《${document.title}》第 ${document.version} 版`).join('、')}`), ...materials.map(taskMaterialReferenceLine), ...preferenceLines,
         ...(materials.length === 0 ? [] : ['资料库资料只供调用模型的审阅类别参考；事实核查与只读已有线索的类别不参考这些资料。'])],
-      send: facts.materialsRefusedLive === true && materials.length > 0 ? '不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始' : tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取' : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}`,
+      send: facts.materialsRefusedLive === true && materials.length > 0 ? '不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始' : tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取' : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}${preferenceSent}`,
       notRead: scope.kind === 'whole' ? NOT_READ : spans === null ? `所选范围以外的正文；${NOT_READ}` : `${spans}以外的正文；${NOT_READ}`,
     },
     steps: [
@@ -2401,7 +2410,7 @@ export function reviewRunPlan(input: {
             ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
             : '远程模型服务被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行') + ' · ' + (tasks.length === 0 ? '未联网核查' : tasks.map((category) =>
         researchDecisionLine(category.label, category.task!.researchReport, category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined)).join('；')),
-      send: route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，发往为审阅配置的模型服务` : NOTHING_SENT,
+      send: route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往为审阅配置的模型服务` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
       usage: live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: live && allSet,
@@ -2422,8 +2431,7 @@ export function reviewRunPlan(input: {
         ...(selection ? ['不在所选段落以外标出发现：所读范围里别处的发现只计数，不标在稿件上'] : []),
         ...(riskPoints ? ['不给出合规、查重或政策结论'] : []),
       ],
-      technical: [
-      ...preferenceLines,...namedNonEffects(facts.live, unitsRead === 0 ? null : unitsRead)],
+      technical: [...(preferences.length === 0 ? [] : [HOUSE_PREFERENCE_NOT_RULE]), ...namedNonEffects(facts.live, unitsRead === 0 ? null : unitsRead)],
     },
     boundary: {
       adaptable: tasks.length === 0 ? [] : [{ id: 'safe-retry', label: SAFE_RETRY_ADAPTATION, removable: false, removed: false, movable: false, askFirst: false }],
@@ -2438,7 +2446,9 @@ export function reviewRunPlan(input: {
         : '没有开始的类别可以在「审阅」里新建一次审阅再审。',
     },
     technical: [
-      ...preferenceLines.map((line, index) => ({ key: `house-review-preference:${index}`, label: '本社审阅偏好', value: `${line}${facts.housePreferences?.[index] === undefined ? '' : ` · ${facts.housePreferences[index]!.versionId} · ${facts.housePreferences[index]!.materialSetDigest}`}` })),
+      ...(facts.housePreferences === undefined ? [] : preferences.length === 0 ? [{ key: 'house-review-preference', label: '本社审阅偏好', value: HOUSE_PREFERENCE_CLOSED }]
+        : preferences.map(({ categoryLabel, preference }, index) => ({ key: `house-review-preference:${index}`, label: '本社审阅偏好',
+          value: `${categoryLabel} · ${housePreferenceLabel(preference)} · ${preference.versionId} · ${preference.materialSetDigest}` }))),
       ...(materials.length === 0 ? [] : [{ key: 'material-references', label: '资料库参考版本', value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest}`).join('；') }]),
       { key: 'review-run', label: '审阅记录', value: `${facts.label} · ${facts.reviewRunId} · ${facts.createdAt}` },
       { key: 'manuscript', label: '稿件 pin', value: `${facts.manuscript.revisionLabel} · ${facts.manuscript.revisionId} · 修订日志序号 ${facts.manuscript.journalSequence} · ${facts.manuscript.workingDigest}` },
