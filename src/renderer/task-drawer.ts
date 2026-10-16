@@ -1234,6 +1234,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           if (plan === null || working) return;
           editBuffers.delete(editKey(plan));
           budgetBuffers.delete(editKey(plan));
+          assuranceBuffers.delete(editKey(plan));
           budgetForm = null;
           focusBar = true;
           paint(plan, true);

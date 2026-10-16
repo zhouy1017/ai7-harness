@@ -3131,6 +3131,11 @@ async function main() {
     const factualPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     requireJourney(factualPrepared?.state === 'prepared' && UUID_PATTERN.test(factualPrepared.reviewRunId), 'factual-prepared-run');
     await drawerShowing(renderer, factualPrepared.reviewRunId, 'ready', 'factual-drawer');
+    // The selector is part of the full plan: 完整 is the mode J-04 left remembered, and is chosen here if it is not.
+    if ((await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawerMode`)) !== 'full') {
+      await reviewAction(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', 'factual-drawer-full');
+    }
+    await waitFor(renderer, `document.querySelector('#task-drawer fieldset.task-plan-assurance') !== null`, 'factual-selector-shown');
     // One compact selector: three levels, 标准核查 by default, each with its consequence, none disabled while the policy names no
     // minimum (EASSURE-001, EASSURE-008); it names no model, provider or quality ladder (EASSURE-013).
     const selector = await renderer.evaluate(`(() => { const box=document.querySelector('#task-drawer fieldset.task-plan-assurance'); if(!(box instanceof HTMLElement))return null; return { shown:box.dataset.taskPlanAssurance, options:Array.from(box.querySelectorAll('input[type=radio]')).map((input)=>({ level:input.value, checked:input.checked, disabled:input.disabled, label:input.closest('label')?.querySelector('strong')?.textContent, consequence:input.closest('label')?.querySelector('.field-note')?.textContent ?? '' })) }; })()`);
@@ -3205,14 +3210,12 @@ async function main() {
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="save-correction"]`, 'factual-correction-save');
     await waitFor(renderer, `(document.querySelector('${workspaceSelector} .correction-saved')?.dataset.markIds ?? '').length===36`, 'factual-correction-saved');
     const correctionMarkId = await renderer.evaluate(`document.querySelector('${workspaceSelector} .correction-saved')?.dataset.markIds`);
-    const correctionCard = await renderer.evaluate(`window.ai7.getEditorialMarkCard({ manuscriptId: ${JSON.stringify(factualPrepared.manuscript.manuscriptId)}, branchId: ${JSON.stringify(factualPrepared.manuscript.branchId)}, markId: ${JSON.stringify(correctionMarkId)} })`);
-    requireJourney(correctionCard?.kind === 'change-suggestion' && correctionCard.status === 'open' && correctionCard.suggestion?.decision === null &&
-      correctionCard.suggestion.atomicGroupId === null && correctionCard.source?.label === '事实核查 · 更正提案' &&
-      correctionCard.factualCorrection?.assuranceLabel === '证据核查未完成' && correctionCard.factualCorrection.resultId === sourced.resultId &&
-      correctionCard.factualCorrection.states.factualVerification === '证据不足', 'factual-correction-mark', correctionCard?.factualCorrection);
-    // The manuscript is unchanged: the proposal waits for the editor's own decision and Apply.
+    // The manuscript is unchanged: the proposal waits for the editor's own decision and Apply. Its card is an ordinary 修改建议
+    // from 事实核查 · 更正提案, nothing decided, and its 依据与核查 keeps 证据核查未完成 with the result it came from.
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="go-to-correction"]`, 'factual-correction-go');
-    await waitFor(renderer, `document.querySelector('.editorial-mark-card[data-mark-card=${JSON.stringify(correctionMarkId)}] .editorial-mark-factual-incomplete')?.textContent==='证据核查未完成'`, 'factual-correction-card');
+    const correctionCardSelector = `.editorial-mark-card[data-mark-card=${JSON.stringify(correctionMarkId)}]`;
+    await waitFor(renderer, `document.querySelector('${correctionCardSelector} .editorial-mark-factual-incomplete')?.textContent==='证据核查未完成'`, 'factual-correction-card');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('${correctionCardSelector}'); const lineage=card?.querySelector('.editorial-mark-factual'); return card?.dataset.markKind==='change-suggestion' && lineage?.dataset.markFactualResult===${JSON.stringify(sourced.resultId)} && lineage.dataset.markFactualVersion==='1' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').includes('事实核查 · 更正提案'); })()`, 'factual-correction-mark');
     cancellation.throwIfRequested();
 
     // S41-f1 (#387): a fresh, unedited sample1 Book keeps the real recorded result independent of
