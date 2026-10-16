@@ -1370,6 +1370,7 @@ async function main() {
     at('dialogue-retrieval-anchors');
     // #893: the authored fixture explicitly asks the real registered local tools for a candidate and Exact Fetch.
     // Only anchors cross this assertion boundary; no manuscript words enter a fixture or diagnostic.
+    await assertRenderer(renderer, MARK_HELPERS, 'dialogue-retrieval-helpers');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'dialogue-retrieval-close');
     await openSelectionMenu(renderer, askBlock, 2, 22, 'dialogue-retrieval-menu');
     await assertRenderer(renderer, `(() => { window.__j16.item('ask-on-selection')?.click(); return true; })()`, 'dialogue-retrieval-choose');
