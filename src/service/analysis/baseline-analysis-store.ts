@@ -1,4 +1,4 @@
-import { modelAdmitsPlatformTools, taskDeclaresPlatformTools } from './live-kind-admission.js';
+import { kindResearchDeclaration } from './live-kind-admission.js';
 import { withFactualResearch } from './kind-definition.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
@@ -3571,8 +3571,8 @@ export class BaselineAnalysisStore {
     const admittedToolRule = this.#definition.kind === BASELINE_ANALYSIS_KIND || intent.preparedByEnrollmentVersionId !== null ? null
       : liveKindRule(this.#launch.policy, this.#definition.kind);
     const toolsProjection: unknown = admittedToolRule !== null && 'platformTools' in admittedToolRule ? admittedToolRule.platformTools : null;
-    const toolsDeclared = live !== null && taskDeclaresPlatformTools(this.#definition.kind) && platformToolsFromProjection(admittedToolRule) !== null &&
-      modelAdmitsPlatformTools(live.route, live.model);
+    const researchDeclaration = kindResearchDeclaration(this.#launch.policy, this.#definition.kind, this.#definition.researchDeclaration);
+    const toolsDeclared = live !== null && researchDeclaration.webSearch;
     let webToolsBackend: FrozenWebToolsBackend | undefined;
     let searchCredentialReference: string | undefined;
     if (toolsDeclared) {
@@ -3586,7 +3586,7 @@ export class BaselineAnalysisStore {
     }
     const composition = live === null
       ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest)
-      : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined });
+      : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined, researchDeclaration });
     const providerPlan = {
       ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }),
       role: 'Main Editorial Role',

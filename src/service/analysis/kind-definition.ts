@@ -230,7 +230,14 @@ export function applyAssuranceSample(reduction: AnalysisReductionResult, sample:
   };
 }
 
+/** Internal research declaration; the selected rule and exact-model evidence resolve its effective value. */
+export interface ResearchDeclaration {
+  readonly webSearch: boolean;
+  readonly searchEngine: 'user-selected-backend' | null;
+}
+
 export interface AnalysisKindDefinition {
+  readonly researchDeclaration?: ResearchDeclaration;
   readonly platformToolBase?: AnalysisKindDefinition;
   /** The exact result contract beneath the optional provider clarification instruction /2. */
   readonly clarificationBase?: AnalysisKindDefinition;

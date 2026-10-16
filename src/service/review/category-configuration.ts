@@ -1,6 +1,7 @@
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import type { ReviewCategoryOutputKind } from '../../shared/protocol.js';
 import type { ReviewCategoryContractInput } from './review-category-contract.js';
+import type { ResearchDeclaration } from '../analysis/kind-definition.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { REVIEW_DELIVERABLES_ABSENT, reviewDeliverables, type ReviewDeliverableReading } from '../production-documents.js';
 
@@ -60,6 +61,7 @@ export interface ReviewGuidelineDocument {
 }
 
 export interface ReviewCategoryConfigurationEntry {
+  readonly researchDeclaration?: ResearchDeclaration;
   readonly categoryId: string;
   readonly label: string;
   /** One sentence under the label on the 新建审阅 sheet: what the category looks for and what it yields. */
@@ -69,7 +71,7 @@ export interface ReviewCategoryConfigurationEntry {
   readonly riskPointsOnly: boolean;
   /** Its 修改建议 may be accepted together through one confirmation strip (REV-006); only category 1. */
   readonly batchApply: boolean;
-  /** Stated once in the basis and never disclosed per Run (REV-010). */
+  /** The category's search capability; each Run separately discloses whether it actually executed research. */
   readonly searchEngine: boolean;
   readonly executor: ReviewCategoryExecutor;
   /** Why the category cannot be chosen, exactly when its executor is `unavailable`. */
@@ -149,6 +151,7 @@ export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration 
     },
     {
       categoryId: 'factual-review',
+      researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' },
       label: '事实核查',
       description: '逐段列出可以核查的事实断言并精确定位原文；外部核查接入前，每条都标为「未外部复核」。',
       output: 'annotation',
@@ -165,6 +168,7 @@ export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration 
     },
     {
       categoryId: 'academic-integrity',
+      researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' },
       label: '学术道德与引用',
       description: '指出引用标注的缺漏与疑似未注明来源的表述；只标「需人工复核的风险点」，不作结论。',
       output: 'annotation',
@@ -183,6 +187,7 @@ export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration 
     },
     {
       categoryId: 'publication-risk',
+      researchDeclaration: { webSearch: false, searchEngine: null },
       label: '出版政策与风险',
       description: '指出需要按出版单位制度人工复核的内容；只标「需人工复核的风险点」，不作结论。',
       output: 'annotation',
@@ -302,8 +307,7 @@ export function houseGuidelineDocuments(entry: ReviewCategoryConfigurationEntry)
 
 /**
  * The category's basis in one line, stated once on the sheet and snapshotted into the Review Run
- * (REV-010, REV-012). Search-engine use is said here and nowhere else; before the research path exists
- * (S70, #425) a category that would search says what its findings carry instead.
+ * (REV-010, REV-012). This states the capability; the producing Run Report supplies the observed research status (#744).
  */
 export function reviewCategoryBasisStatement(entry: ReviewCategoryConfigurationEntry): string {
   const procedure = `工序：${entry.procedure.title}（第 ${entry.procedure.version} 版）`;
@@ -329,6 +333,6 @@ export function reviewCategoryBasisStatement(entry: ReviewCategoryConfigurationE
     return `依据：${knowledge} · ${procedure} · 不使用搜索引擎`;
   }
   const documents = entry.guidelineDocuments.map((document) => `${document.issuer} · ${document.title}（第 ${document.version} 版）`).join('、');
-  const search = entry.searchEngine ? '会使用搜索引擎（外部核查接入前为「未联网核查」）' : '不使用搜索引擎';
+  const search = entry.searchEngine ? '使用用户所选的联网检索后端；是否完成以本次运行的核查状态为准' : '不使用搜索引擎 · 未联网核查';
   return `依据：${documents} · ${procedure} · ${search}`;
 }

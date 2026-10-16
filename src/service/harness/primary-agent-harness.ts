@@ -17,6 +17,7 @@ import {
   type PlatformToolName,
 } from '../provider/platform-tools.js';
 import { HarnessSessionLogBackend } from './session-log.js';
+import type { ResearchDeclaration } from '../analysis/kind-definition.js';
 
 /**
  * `PrimaryAgentHarness`: the AI7-owned composition of the pinned DSH subset for one execution
@@ -44,6 +45,7 @@ export const HARNESS_SERVICE_SET = ['agents', 'sessions', 'llm', 'systemPrompt',
 export const PROMPT_SECTION_NAME = 'ai7:baseline-analysis-contract' as const;
 
 export interface HarnessCompositionDescriptor {
+  readonly researchDeclaration?: ResearchDeclaration;
   readonly packages: typeof HARNESS_PACKAGE_PINS;
   readonly services: typeof HARNESS_SERVICE_SET;
   readonly systemPrompt: { readonly includeHarnessIdentity: false; readonly includeRuntimeContext: false; readonly persona: ''; readonly completeSection: typeof PROMPT_SECTION_NAME };
@@ -74,6 +76,7 @@ export interface HarnessCompositionDescriptor {
 export const SESSION_LOG_PACKAGE_PIN = '0.1.0-rc.6' as const;
 
 export interface CompositionOptions {
+  readonly researchDeclaration?: ResearchDeclaration;
   /** The composition persists its Session log under the Agent Data Root. */
   readonly sessionLog?: boolean;
   /** The composition registers the two platform tools (Issue #473); only for a Run whose rule names them and whose plan declares web search. */
@@ -82,6 +85,10 @@ export interface CompositionOptions {
 
 export function describeComposition(route: ExecutionRoute, model: string, promptContractDigest: string, options: CompositionOptions = {}): HarnessCompositionDescriptor {
   const withTools = options.platformTools === true;
+  if (options.researchDeclaration !== undefined && (options.researchDeclaration.webSearch !== withTools ||
+      options.researchDeclaration.searchEngine !== (withTools ? 'user-selected-backend' : null))) {
+    throw new Error('RESEARCH_DECLARATION_COMPOSITION_MISMATCH');
+  }
   const body = {
     packages: HARNESS_PACKAGE_PINS,
     services: HARNESS_SERVICE_SET,
@@ -92,6 +99,7 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
     route,
     model,
     promptContractDigest,
+    ...(withTools ? { researchDeclaration: options.researchDeclaration ?? { webSearch: true, searchEngine: 'user-selected-backend' as const } } : {}),
     ...(options.sessionLog === true
       ? { sessionLog: { package: { '@deepseek-ai/dsh-session-persistence': SESSION_LOG_PACKAGE_PIN }, storage: 'agent-data-root-jsonl' as const } }
       : {}),

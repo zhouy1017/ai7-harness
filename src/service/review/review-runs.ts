@@ -818,6 +818,7 @@ export interface ReviewRunPlanFacts {
       readonly planVersion: number;
       readonly plan: ReviewRunCategoryPlanProjection;
       readonly components: Readonly<Record<string, unknown>>;
+      readonly researchReport?: import('../../shared/protocol.js').RunReportProjection | null;
     };
   }>;
   /** Why the one approval would be refused now; empty while the prepared plans still stand, and once approved. */
@@ -1487,6 +1488,10 @@ export class ReviewRunStore {
     const categories = view.categories.map((categoryView) => {
       const { category } = categoryView;
       const frozen = category.task === null ? null : this.#categoryLedger(category).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
+      const inspected = category.task === null ? null : this.#categoryLedger(category).inspect(bookId);
+      const researchReport = inspected?.taskIntent?.taskIntentId === category.task?.taskIntentId
+        ? inspected?.taskOutcome?.report ?? null
+        : inspected?.history?.entries.find((entry) => entry.producingRun.taskIntentId === category.task?.taskIntentId)?.report ?? null;
       return {
         categoryId: category.categoryId,
         label: category.entry.label,
@@ -1506,6 +1511,7 @@ export class ReviewRunStore {
           planVersion: frozen.planVersion,
           plan: category.task.plan,
           components: frozen.components,
+          researchReport,
         },
         checkpoint: frozen?.checkpoint ?? null,
       };

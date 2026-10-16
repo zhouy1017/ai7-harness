@@ -36,6 +36,17 @@ function bindingFacts(bindingDigest: string): EgressBindingFacts {
 }
 
 describe('PrimaryAgentHarness', () => {
+  it('pins the research declaration in tool compositions and preserves non-web compositions (#744)', () => {
+    const plain = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST);
+    const web = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST, { platformTools: true });
+    expect(web.researchDeclaration).toEqual({ webSearch: true, searchEngine: 'user-selected-backend' });
+    expect(web.digest).toBe('ba328a177e73f47501260431dea68b98bc660d39e8850390ce85491e2aa97bc2');
+    expect(plain).not.toHaveProperty('researchDeclaration');
+    expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST,
+      { researchDeclaration: { webSearch: false, searchEngine: null } }).digest).toBe(plain.digest);
+    expect(() => describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST,
+      { platformTools: true, researchDeclaration: { webSearch: false, searchEngine: null } })).toThrow('RESEARCH_DECLARATION_COMPOSITION_MISMATCH');
+  });
   it('pins exactly the versions package.json declares', async () => {
     const manifest = JSON.parse(await readFile(resolve(REPO_ROOT, 'package.json'), 'utf8')) as { dependencies: Record<string, string> };
     for (const [name, version] of Object.entries(HARNESS_PACKAGE_PINS)) expect(manifest.dependencies[name]).toBe(version);

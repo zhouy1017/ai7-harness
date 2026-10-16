@@ -248,7 +248,7 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
   });
 
   it('says the market section rests on the Book and house data, tags comparables, and says 暂无法预测 where AI7 could not tell (S81b2)', () => {
-    expect(EVALUATION_MARKET_OFFLINE).toBe('未联网核查：市场部分只依据本书稿件与本社数据，没有检索外网，也没有对比他社图书或获奖作品。');
+    expect(EVALUATION_MARKET_OFFLINE).toBe('市场部分是否检索外网，以产生这一版的运行报告为准；没有检索记录时为「未联网核查」。市场判断仍需人工核对。');
     expect(EVALUATION_PREDICTION_HEADING).toBe('预测 · 低确定性');
     expect(evaluationComparableLine({ bookId: 'b', title: '星河之二', seriesTitle: '星河', published: true, source: 'series' })).toBe('《星河之二》 · 同书系「星河」 · 已发稿');
     expect(evaluationComparableLine({ bookId: 'b', title: '星河之三', seriesTitle: '星河', published: false, source: 'series' })).toBe('《星河之三》 · 同书系「星河」 · 尚未发稿');

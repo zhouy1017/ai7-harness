@@ -852,7 +852,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     const full = control(next.edit.editable ? TASK_PLAN_FULL_LINK_EDITABLE : TASK_PLAN_FULL_LINK, 'quiet task-plan-full-link', 'full-link');
     full.addEventListener('click', () => setMode('full', true));
-    section.append(rows, full);
+    section.append(el('p', 'research-status', next.service.decision), rows, full);
     return section;
   }
 

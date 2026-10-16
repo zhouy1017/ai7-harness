@@ -1,3 +1,4 @@
+import { researchDecisionLine } from '../shared/research-status.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import { taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
 
@@ -793,11 +794,11 @@ export function baselineAnalysisPlan(input: {
     service: {
       role: roleLabel(provider.role),
       provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
-      decision: live
+      decision: researchDecisionLine(live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
-          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
+          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
       send: live ? `所读范围内的稿件正文发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       // The ceiling the Run is held to, the launch's or the editor's (Issue #51, S16a), is a ceiling and never a prediction.
@@ -1040,11 +1041,11 @@ export function initialEvaluationPlan(input: {
     service: {
       role: roleLabel(provider.role),
       provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
-      decision: live
+      decision: researchDecisionLine(live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
-          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
+          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
       send: live ? `所读范围内的稿件正文发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
@@ -1195,11 +1196,11 @@ export function readersReportPlan(input: {
     service: {
       role: roleLabel(provider.role),
       provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
-      decision: live
+      decision: researchDecisionLine(live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
-          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
+          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
       send: live ? `所读范围内的稿件正文与评估记录发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
@@ -1480,11 +1481,11 @@ export function writingPlan(input: {
     service: {
       role: roleLabel(provider.role),
       provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
-      decision: live
+      decision: researchDecisionLine(live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
-          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
+          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
       send: live ? `所读范围内的稿件正文与参考材料发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
@@ -1643,11 +1644,11 @@ export function evaluationRewritePlan(input: {
     service: {
       role: roleLabel(provider.role),
       provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
-      decision: live
+      decision: researchDecisionLine(live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
-          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
+          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
       send: live ? `所读范围内的稿件正文与这一版评估的评分和评语发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
@@ -2356,12 +2357,13 @@ export function reviewRunPlan(input: {
     service: {
       role: roleLabel('Main Editorial Role'),
       provider: (route === null ? '不调用模型' : live ? `${route.kind} · ${route.model}` : 'AI7 本地确定性模型适配器') + (webSearchLabels.length === 0 ? '' : ` · 联网检索 · ${webSearchLabels.join('、')}`),
-      decision: route === null
+      decision: (route === null
         ? '只读基线分析的线索，不调用模型'
         : live ? `${production ? '本地正式生产' : '开发者实时'}：实时传输受运行边界约束`
           : route.kind === 'none'
             ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
-            : '远程模型服务被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行',
+            : '远程模型服务被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行') + ' · ' + (tasks.length === 0 ? '未联网核查' : tasks.map((category) =>
+        researchDecisionLine(category.label, category.task!.researchReport, category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined)).join('；')),
       send: route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，发往为审阅配置的模型服务` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
       usage: live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,

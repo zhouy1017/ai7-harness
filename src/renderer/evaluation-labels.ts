@@ -387,8 +387,8 @@ export function readersReportDraftLine(draft: NonNullable<EvaluationReadersRepor
 
 export const EVALUATION_MARKET_HEADING = '市场定位与策略';
 export const EVALUATION_MARKET_LEDE = '「读者与市场潜力」一项的展开：目标读者、卖点与渠道是 AI7 从所读书稿的题材与写法推断的，不是书稿里写明的；可比图书与定价首印来自本社数据。';
-/** The market section's basis while web search is not connected (ADR 0080 §7: 未联网核查). */
-export const EVALUATION_MARKET_OFFLINE = '未联网核查：市场部分只依据本书稿件与本社数据，没有检索外网，也没有对比他社图书或获奖作品。';
+/** The producing Run owns the research status; a market section alone establishes no web research. */
+export const EVALUATION_MARKET_OFFLINE = '市场部分是否检索外网，以产生这一版的运行报告为准；没有检索记录时为「未联网核查」。市场判断仍需人工核对。';
 export const EVALUATION_MARKET_LISTS = { readers: '目标读者', sellingPoints: '差异化卖点', channels: '渠道与策略' } as const;
 /** Said beside AI7's market words: whose they are, and what they rest on. */
 export const EVALUATION_MARKET_AI7 = 'AI7 · 据书稿题材推断';

@@ -878,7 +878,10 @@ export class BaselineAnalysisExecutionOwner {
     // describe it, never the one the plan froze: a harness a later release pins differently is seen here, before a
     // summary promises what the Run kept, and not first when the execution refuses it.
     const { route, model } = routeFactsOf(facts, live);
-    const composition = describeComposition(route, model, ledger.definition.promptContractDigest, { platformTools: facts.webToolsBackend !== undefined });
+    const composition = describeComposition(route, model, ledger.definition.promptContractDigest, {
+      platformTools: facts.webToolsBackend !== undefined,
+      ...(facts.webToolsBackend === undefined ? {} : { researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } as const }),
+    });
     const rebuilt = executionBindingRecordOf({
       facts, definition: ledger.definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
       harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: composition.digest,

@@ -1,4 +1,5 @@
 import { renderEvaluationProfiles } from './evaluation-profiles.js';
+import { researchPlanLine, researchStatusLine, researchUnavailableLine } from '../shared/research-status.js';
 import { exemplarImportButton, exemplarEligibility } from './imported-exemplars.js';
 import { consumeReturnPlace, preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type {
@@ -803,7 +804,8 @@ function hasErrorCode(error: unknown, code: string): boolean {
 }
 
 function rendererErrorMessage(error: unknown, fallback: string): string {
-  return rendererErrorData(error)?.message ?? (error instanceof Error ? error.message : fallback);
+  const data = rendererErrorData(error);
+  return researchUnavailableLine(data?.code, data?.message ?? (error instanceof Error ? error.message : fallback));
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -3263,6 +3265,7 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
   disclosure.dataset['runReportRun'] = report.runRecordId;
   disclosure.dataset['runReportClassification'] = report.classification;
   disclosure.append(element('summary', undefined, `查看运行报告 · ${RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
+  disclosure.append(element('p', 'research-status', researchStatusLine(report)));
   const stages = element('ul', 'analysis-list analysis-run-report-stages');
   for (const stage of report.stages) {
     const item = element('li', undefined, `${RUN_REPORT_STAGE_LABELS[stage.stage]}：${RUN_REPORT_STAGE_STATE_LABELS[stage.state]}${stage.wallMs === null ? '' : ` · 用时 ${durationLabel(stage.wallMs)}`}`);
@@ -4012,6 +4015,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   card.append(heading, element('p', 'field-note', analysisKindSubtitle(
     projection.providerResolutionPlan?.remoteBinding.providerProcessing ?? projection.resultSetRevision?.policyPin ?? null,
   )));
+  card.append(element('p', 'research-status', researchPlanLine(projection.providerResolutionPlan?.webToolsBackend)));
 
   // One follow-up read per card at a time, of the revision the editor is looking at: a newer draw replaces the
   // pending one rather than adding another loop, and an answer that changed nothing draws nothing, so the editor's
