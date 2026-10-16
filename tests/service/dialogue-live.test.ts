@@ -279,7 +279,7 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     const dialogues = new DialogueExecutionOwner({ records: store, fixture: null,
       sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
       live: liveRoute(nativeFetch),
-      retrievalSources: (id) => store.dialogueRetrievalSources(id) });
+      retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
     try {
       dialogues.requireReady(store.dialogueSourceDigest(book.bookId, selection));
       const turn = store.askAboutSelection(book.bookId, { selection, question: '找到书中哪里有相似的描写？' });

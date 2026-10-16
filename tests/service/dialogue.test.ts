@@ -134,7 +134,7 @@ describe('就这段提问… over the real store and harness', () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const retrievalFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-dialogue-retrieval');
     const dialogues = new DialogueExecutionOwner({ records: store, fixture: retrievalFixture, live: null,
-      sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), retrievalSources: (id) => store.dialogueRetrievalSources(id) });
+      sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
     try {
       const book = await importSample1Book(store, roots.codeRoot, '本机检索回归');
       const selection = selectionOf(store, book);

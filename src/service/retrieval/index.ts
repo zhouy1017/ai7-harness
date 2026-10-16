@@ -1,4 +1,5 @@
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import type { EmbeddingProvider } from '../knowledge/embedding.js';
 
 /** Disposable projections only. Readers own authorization, availability and the authoritative pinned bytes. */
 export type RetrievalSourceKind = 'manuscript' | 'material' | 'retained-source';
@@ -25,13 +26,8 @@ export interface RetrievalSource {
   /** Must recheck withdrawal and read this pin, never substitute the current revision/build. */
   read(): { readonly digest: string; readonly segments: ReadonlyArray<{ readonly blockId?: string; readonly segmentOrdinal?: number; readonly startOffset?: number; readonly text: string }> };
 }
-/** Temporary narrow seam until #892's interface is integrated; embeddings must be local. */
-export interface RetrievalEmbeddingProvider {
-  readonly identity: string;
-  readonly dimensions: number;
-  readiness(): { readonly state: 'ready' } | { readonly state: 'needs-model'; readonly expectedDigest: string | null } | { readonly state: 'digest-mismatch'; readonly expectedDigest: string; readonly actualDigest: string };
-  embed(texts: readonly string[]): Promise<Float32Array[]>;
-}
+/** #892's local embedding seam: the store's provider (the built-in stub until a model adapter is admitted); nothing is sent. */
+export type RetrievalEmbeddingProvider = EmbeddingProvider;
 export class RetrievalError extends Error {
   constructor(readonly code: 'RETRIEVAL_SOURCE_MOVED' | 'RETRIEVAL_SOURCE_NOT_AUTHORIZED' | 'MATERIAL_REFERENCE_UNAVAILABLE') {
     super(code);
@@ -70,7 +66,7 @@ function termFrequencies(tokens: readonly string[]): Map<string, number> {
   for (const token of tokens) result.set(token, (result.get(token) ?? 0) + 1);
   return result;
 }
-/** Material vectors are read at the same frozen builds by #892's queryMaterialVectors seam. */
+/** A Task's material vectors, read at the frozen builds its plan pinned through #892's `queryMaterialVectors`. */
 export type RetrievalMaterialVectorQuery = (query: string, k: number) => Promise<readonly { readonly materialId: string; readonly indexDigest: string; readonly ordinal: number; readonly score: number }[]>;
 function boundaryEnd(text: string, end: number): number {
   return end > 0 && end < text.length && /[\uD800-\uDBFF]/u.test(text[end - 1]!) && /[\uDC00-\uDFFF]/u.test(text[end]!) ? end - 1 : end;

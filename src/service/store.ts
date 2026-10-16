@@ -1,5 +1,5 @@
 import { SEARCH_BACKENDS, defaultSearchBackend } from './provider/search-backends.js';
-import { RetrievalIndex, RetrievalError, type RetrievalSource } from './retrieval/index.js';
+import { RetrievalIndex, RetrievalError, type RetrievalMaterialVectorQuery, type RetrievalSource } from './retrieval/index.js';
 import { materialRetrievalSources } from './retrieval/source-readers.js';
 import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -9621,17 +9621,37 @@ export class EditorialStore {
   }
 
   retrievalSourcesForRun(runRecordId: string, ledger: BaselineAnalysisStore): RetrievalSource[] {
+    return this.#runRetrieval(runRecordId, ledger).sources;
+  }
+
+  /** A Run's disposable index over exactly its pinned sources, ranked lexically and by this store's local vectors (#892). */
+  retrievalIndexForRun(runRecordId: string, ledger: BaselineAnalysisStore): RetrievalIndex {
+    const { boundary, sources } = this.#runRetrieval(runRecordId, ledger);
+    return new RetrievalIndex(sources, this.#embedding, this.#materialVectorQuery(boundary));
+  }
+
+  #runRetrieval(runRecordId: string, ledger: BaselineAnalysisStore): { boundary: MaterialReferenceBoundary; sources: RetrievalSource[] } {
     const facts = ledger.loadExecutionPlan(runRecordId);
     const boundary = ledger.definition.kind === 'writing' ? this.#writingTasks.materialBoundary(facts.taskIntentId, ledger.definition.promptContractDigest)
       : { bookId: facts.bookId, references: ledger.definition.materialReferences?.sources ?? [] };
-    return [this.manuscriptRetrievalSource(facts.bookId, facts.checkpoint.manuscriptId, facts.checkpoint.revisionId),
-      ...materialRetrievalSources(boundary, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from))];
+    return { boundary, sources: [this.manuscriptRetrievalSource(facts.bookId, facts.checkpoint.manuscriptId, facts.checkpoint.revisionId),
+      ...materialRetrievalSources(boundary, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from))] };
+  }
+
+  /** The pinned builds' own vectors through the Task seam; an item without them is ranked lexically only. */
+  #materialVectorQuery(boundary: MaterialReferenceBoundary): RetrievalMaterialVectorQuery {
+    return async (query, k) => (await this.queryMaterialVectors(boundary, query, k)).candidates
+      .map(({ materialId, indexDigest, ordinal, score }) => ({ materialId, indexDigest, ordinal, score }));
   }
 
   dialogueRetrievalSources(dialogueId: string): RetrievalSource[] {
     const task = this.#dialogues.task(dialogueId);
     if (task === null) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
     return [this.manuscriptRetrievalSource(task.bookId, task.manuscriptId, task.revisionId)];
+  }
+
+  dialogueRetrievalIndex(dialogueId: string): RetrievalIndex {
+    return new RetrievalIndex(this.dialogueRetrievalSources(dialogueId), this.#embedding);
   }
 
   /** Editor-side discovery: no Run, no model, no persisted projection or implicit reference selection. */
@@ -9641,7 +9661,9 @@ export class EditorialStore {
     const references = this.#libraryMaterials.referable(input.bookId).flatMap((item) => {
       try { return [this.pinMaterialReference(input.bookId, item.materialId)]; } catch { return []; }
     });
-    const index = new RetrievalIndex(materialRetrievalSources({ bookId: input.bookId, references }, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from)));
+    const boundary = { bookId: input.bookId, references };
+    const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => this.readMaterialIndexForTask(scope, id, from)),
+      this.#embedding, this.#materialVectorQuery(boundary));
     try { return { candidates: await index.retrieve(input.query, input.k, ['material']) }; } finally { index.dispose(); }
   }
 

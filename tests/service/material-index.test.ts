@@ -123,6 +123,14 @@ describe('资料索引 over the real store', () => {
         // Nothing persisted: no index, embedding or projection file is written anywhere under the data root.
         expect(dataRootFiles()).toEqual(files);
         await expect(store.searchReferableMaterials({ bookId, query: 'alpha', k: 9 })).rejects.toMatchObject({ code: 'RETRIEVAL_ARGUMENTS_INVALID' });
+        // Hybrid ranking (#892 seam): without the item's vectors only the lexical rank counts; once the editor builds them, the
+        // pinned build's own vectors rank the same paragraph too and reciprocal-rank fusion lifts it above a single rank.
+        expect(Math.max(...(await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 })).candidates.map((candidate) => candidate.score))).toBeLessThanOrEqual(1 / 61);
+        store.buildMaterialVectors(item.materialId);
+        await store.settleMaterialLayers();
+        const hybrid = await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 });
+        expect(hybrid.candidates[0]!.score).toBeGreaterThan(1 / 61);
+        expect(hybrid.candidates.every((candidate) => candidate.sourceId === item.materialId && candidate.revisionOrIndexDigest === pin.indexDigest)).toBe(true);
         store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
         expect((await index.retrieve('alpha')).length).toBe(0);
         expect(() => index.exactFetch(candidates[0]!.candidateId)).toThrowError('MATERIAL_REFERENCE_UNAVAILABLE');

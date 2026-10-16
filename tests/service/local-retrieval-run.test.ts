@@ -54,7 +54,7 @@ async function session(name: string, policyOf: (policy: LaunchPolicyProjection) 
   };
   const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' },
-    retrievalSources: (id, ledger) => store.retrievalSourcesForRun(id, ledger),
+    retrievalIndex: (id, ledger) => store.retrievalIndexForRun(id, ledger),
     developerLive: { launch: { runBudgetCeiling: live.runBudgetCeiling, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: null }, nativeFetch } });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   const book = await importSample1Book(store, roots.codeRoot, `本机检索运行回归 ${name}`);
@@ -141,7 +141,8 @@ describe('registered local retrieval in a non-web authorized Run', () => {
       expect(results.length).toBeGreaterThan(1);
       const unpinnedQueries = results.filter((_, index) => index % 2 === 0);
       const pinnedQueries = results.filter((_, index) => index % 2 === 1);
-      expect(unpinnedQueries.every((candidates) => candidates.length === 0)).toBe(true);
+      // The unpinned item's own word finds nothing of it; any candidate comes from the pinned revision (approximate ranking).
+      expect(unpinnedQueries.every((candidates) => candidates.every((candidate) => candidate.sourceKind === 'manuscript'))).toBe(true);
       expect(pinnedQueries.every((candidates) => candidates.length > 0 && candidates.every((candidate) =>
         candidate.sourceKind === 'material' && candidate.sourceId === pinned && candidate.revisionOrIndexDigest === pin.indexDigest))).toBe(true);
       expect(results.flat().some((candidate) => candidate.sourceId === unpinned)).toBe(false);

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { RetrievalIndex, type RetrievalSource } from '../retrieval/index.js';
+import { RetrievalIndex } from '../retrieval/index.js';
 import { PlatformToolSession } from '../provider/platform-tool-session.js';
 import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import { sha256Hex } from '../analysis/canonical.js';
@@ -74,7 +74,8 @@ export interface DialogueLiveRoute {
 }
 
 export interface DialogueExecutionDeps {
-  readonly retrievalSources?: (dialogueId: string) => readonly RetrievalSource[];
+  /** The attempt's disposable retrieval index over the dialogue's pinned revision (#893); empty when absent. */
+  readonly retrievalIndex?: (dialogueId: string) => RetrievalIndex;
   readonly records: DialogueRecords;
   /** The J-04 adapter's fixture when the launch binds one; `null` binds no local dialogue route. */
   readonly fixture: ResolvedModelFixture | null;
@@ -265,7 +266,7 @@ export class DialogueExecutionOwner {
     let failure: string | null = null;
     try {
       // Inside the attempt: a source that cannot be read settles the attempt as failed rather than leaving it answering.
-      retrieval = localRule === null ? null : new RetrievalIndex(this.#deps.retrievalSources?.(turn.dialogueId) ?? []);
+      retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(turn.dialogueId) ?? new RetrievalIndex([]);
       active.retrieval = retrieval;
       const route = live === null ? null : live.route!;
       // Read once: under ordinary-production the configured reference may change while this answer is in flight (Issue #811).
