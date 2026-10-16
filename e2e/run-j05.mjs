@@ -884,7 +884,7 @@ async function main() {
     await click(renderer, '撤销上次草稿处理', 'proposal-draft-undo');
     await waitFor(renderer, `!document.querySelector('[data-proposal-action="draft-undo"]')`, 'proposal-undo-saved');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-proposal-action="draft-deferred"]').click(); return true; })()`, 'proposal-save-deferred');
-    await waitFor(renderer, `document.querySelector('.proposal-navigator').textContent.includes('暂不决定') && document.querySelector('[data-screen="proposal-workspace"]').getAttribute('aria-busy') === 'false'`, 'proposal-deferred-saved');
+    await waitFor(renderer, `document.querySelector('.proposal-navigator').textContent.includes('暂不决定') && document.querySelector('.proposal-workspace').getAttribute('aria-busy') === 'false'`, 'proposal-deferred-saved');
 
     at('proposal-decision-record');
     await click(renderer, '记录提案决定', 'proposal-record');
