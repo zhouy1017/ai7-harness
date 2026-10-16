@@ -52,7 +52,7 @@ describe('material-bearing live kind admission (#809)', () => {
     }
   });
 
-  it.each([() => wrap(review), () => wrap(initial), () => wrap(report), writing])('is admitted by the selected Provider Processing v18 rule exactly as projected', (make) => {
+  it.each([() => wrap(review), () => wrap(initial), () => wrap(report), writing])('is admitted by the selected Provider Processing v20 rule exactly as projected', (make) => {
     const definition = make();
     expect(selected.providerProcessing.version).toBe('v20');
     expect(liveMaterialRule(selected, definition.kind)).not.toBeNull();

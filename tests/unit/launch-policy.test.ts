@@ -36,7 +36,7 @@ const CARRIED_PATHS = [
   'docs/policies/external-export-policy.v1.json',
   'docs/policies/external-export-policy.v2.json',
 ] as const;
-/** The exact pins active-set v13 records; the resolver and the carrier must agree with the bytes. */
+/** The exact pins active-set v14 records; the resolver and the carrier must agree with the bytes. */
 const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
@@ -58,7 +58,7 @@ const RETAINED_PREDECESSOR_DIGESTS = {
   'docs/policies/active-policy-set.v11.json': 'fba12d9b8da7b826b620ac33c0b34eadd92da86d6da88f610e480af9aee5328c',
   'docs/policies/active-policy-set.v12.json': 'e841b438da109d866d990cc788ffd7c45edcb38a5121d8b18c41a0345e75693e',
 } as const;
-/** ADR 0079 §3 decides External Export v2; active-set v13 pins its exact bytes, unchanged since v7. */
+/** ADR 0079 §3 decides External Export v2; active-set v14 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
 const ACTIVE_SET_SHA256 = '1e9f3c4736a0f7b0ac8066978637e3dc813aee6f51d1f98673fe1fba3564a6e9';
 
@@ -392,7 +392,7 @@ afterEach(async () => {
   await rm(sandbox, { recursive: true, force: true });
 });
 
-describe('active policy set v13', () => {
+describe('active policy set v14', () => {
   it('is the sole active set: the carrier pins it, it maps all four scopes, and every pin matches the exact bytes', async () => {
     expect(ACTIVE_SET_VERSION).toBe('v14');
     expect(DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION).toBe('v20');
@@ -529,7 +529,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('development-ci');
-    // One active set per launch: development-ci reports v13 while its Provider Processing pin stays v1.
+    // One active set per launch: development-ci reports v14 while its Provider Processing pin stays v1.
     expect(projection.activePolicySetVersion).toBe('v14');
     expect(projection.providerProcessing.version).toBe('v1');
     expect(projection.providerProcessing.label).toBe('开发与持续集成：零次实时传输');
@@ -539,7 +539,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(await resolveSourceCheckoutLaunchPolicy(codeRoot, 'development-ci')).toEqual(projection);
   });
 
-  it('binds the developer-live scope to Provider Processing v18 as eligible-only with its nine admitted rules', async () => {
+  it('binds the developer-live scope to Provider Processing v20 as eligible-only with its nine admitted rules', async () => {
     await placeValidCheckout();
     const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'developer-live');
 
@@ -587,12 +587,12 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(denied.providerProcessing.admittedRules).toEqual([]);
   });
 
-  it('reads N allow rules: the exact v18 bytes yield nine, and the immutable v16, v14, v12 and v11 bytes are no longer the pinned reading', async () => {
+  it('reads N allow rules: the exact v20 bytes yield nine, and the immutable v16, v14, v12 and v11 bytes are no longer the pinned reading', async () => {
     expect(verifyDeveloperLivePolicy(await readPolicy())).toEqual({
       crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true,
       admittedRules: V16_ADMITTED_RULES,
     });
-    // v16, v14, v12 and v11 stay immutable predecessors but this launch reads v18 alone.
+    // v16, v14, v12 and v11 stay immutable predecessors but this launch reads v20 alone.
     expect(() => verifyDeveloperLivePolicy(structuredClone(readPolicySync(V16_PATH)))).toThrow('LAUNCH_POLICY_INVALID');
     expect(() => verifyDeveloperLivePolicy(structuredClone(readPolicySync(V14_PATH)))).toThrow('LAUNCH_POLICY_INVALID');
     expect(() => verifyDeveloperLivePolicy(structuredClone(readPolicySync(V12_PATH)))).toThrow('LAUNCH_POLICY_INVALID');
@@ -630,7 +630,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     }
   });
 
-  it('refuses a dialogue or review reading that is not the pinned v18 bytes', async () => {
+  it('refuses a dialogue or review reading that is not the pinned v20 bytes', async () => {
     for (const [index, block, overrides] of [
       [DIALOGUE, 'transmissions', { webSearchToolAllowed: true }],
       [DIALOGUE, 'transmissions', { automaticResendInsideStoppedSessionAllowed: true }],
@@ -741,7 +741,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     }
   });
 
-  it('denies a developer-live launch whose v18 policy bytes drifted, while development-ci still verifies', async () => {
+  it('denies a developer-live launch whose v20 policy bytes drifted, while development-ci still verifies', async () => {
     await placeValidCheckout();
     const target = join(codeRoot, ...V20_PATH.split('/'));
     await writeFile(target, `${await readFile(target, 'utf8')}\n`);
@@ -975,7 +975,7 @@ function productionTamperings(policy: Record<string, unknown>): Mutation[] {
   return mutations;
 }
 
-describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 and #891)', () => {
+describe('Provider Processing v21 (ordinary-production, inherited from v19; Issue #910)', () => {
   it('is the direct successor of v17: same scope, local production, default deny, the same eight rules, and the local tools on every rule', async () => {
     const v19 = await readPolicy(V19_PATH);
     const v17 = await readPolicy(V17_PATH);
@@ -1082,7 +1082,7 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
     }
   });
 
-  it('reads the exact v19 bytes without a binding: nine rules, the policy\'s two bindings, nothing filled in', async () => {
+  it('reads the exact v21 bytes without a binding: nine rules, the policy\'s two bindings, nothing filled in', async () => {
     const reading = verifyOrdinaryProductionPolicy(await readPolicy(V21_PATH));
     expect(reading.rules.map((rule) => rule.ruleId)).toEqual(PRODUCTION_RULE_ID_ORDER);
     expect(reading.allowedBindings.map((binding) => binding.route)).toEqual(['opencode-go', 'deepseek-open-platform']);
@@ -1234,7 +1234,7 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
     }
   });
 
-  it('denies an ordinary-production launch whose v19 bytes drifted, under any binding, while the other scopes still verify', async () => {
+  it('denies an ordinary-production launch whose v21 bytes drifted, under any binding, while the other scopes still verify', async () => {
     await placeValidCheckout();
     const target = join(codeRoot, ...V21_PATH.split('/'));
     await writeFile(target, `${await readFile(target, 'utf8')}\n`);
@@ -1273,10 +1273,10 @@ describe('Provider Processing v19 (ordinary-production, Issues #853, #863, #473 
 const CLARIFICATION_ASKS = { modelQuestionAllowed: true, maxQuestionsPerUnit: 1, unitWaitsOthersContinue: true, timeoutHours: 24, timeoutContinuesAs: 'unanswered-with-run-report-disclosure' };
 const RUN_BASED = [BASELINE, REVIEW, WRITING, EVALUATION, BACKGROUND];
 
-describe('Provider Processing v18 and v19: enrolled background analysis and model-initiated clarification (Issue #863)', () => {
+describe('Provider Processing v20 and v21: enrolled background analysis and model-initiated clarification (Issue #863)', () => {
   const documents = [
-    ['v18 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
-    ['v19 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
+    ['v20 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
+    ['v21 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
   ] as const;
   const flip = (value: unknown): unknown => (typeof value === 'boolean' ? !value : typeof value === 'number' ? value + 1 : `${String(value)}-tampered`);
 
@@ -1457,7 +1457,7 @@ describe('Provider Processing v18 and v19: enrolled background analysis and mode
   });
 });
 
-describe('Provider Processing v18 and v19: platform tools on the research rules (Issue #473, slice 6d)', () => {
+describe('Provider Processing v20 and v21: platform tools on the research rules (Issue #473, slice 6d)', () => {
   it.each([
     ['developer-live', 'v14', V14_PATH, 'developer-live-public-samplebook-reference-free-review'],
     ['ordinary-production', 'v15', V15_PATH, 'ordinary-production-review'],
@@ -1490,8 +1490,8 @@ describe('Provider Processing v18 and v19: platform tools on the research rules 
   });
 
   const documents = [
-    ['v18 (developer-live)', V20_PATH, false, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
-    ['v19 (ordinary-production)', V21_PATH, true, (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)],
+    ['v20 (developer-live)', V20_PATH, false, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
+    ['v21 (ordinary-production)', V21_PATH, true, (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)],
   ] as const;
   const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped);
 
@@ -1633,14 +1633,14 @@ describe('Provider Processing v18 and v19: platform tools on the research rules 
   });
 });
 
-describe('Provider Processing v18 and v19: local targeted retrieval on every rule (Issue #891, slice 7d)', () => {
+describe('Provider Processing v20 and v21: local targeted retrieval on every rule (Issue #891, slice 7d)', () => {
   const documents = [
-    ['v18 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
-    ['v19 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)!],
+    ['v20 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
+    ['v21 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)!],
   ] as const;
   const verifiers = [
-    ['v18 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
-    ['v19 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
+    ['v20 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
+    ['v21 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
   ] as const;
   /** The rules that admit no model-initiated retrieval: enrolled background analysis and the 来源译文 rule. */
   const NO_RETRIEVAL = [BACKGROUND, TRANSLATION];
@@ -1727,10 +1727,10 @@ describe('Provider Processing v18 and v19: local targeted retrieval on every rul
   });
 });
 
-describe('Provider Processing v18 and v19: 来源译文 and the source translation term (Issue #891, revisions 2 and 3)', () => {
+describe('Provider Processing v20 and v21: 来源译文 and the source translation term (Issue #891, revisions 2 and 3)', () => {
   const verifiers = [
-    ['v18 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
-    ['v19 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
+    ['v20 (developer-live)', V20_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
+    ['v21 (ordinary-production)', V21_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
   ] as const;
   const refuseEach = (path: string, verify: (policy: Record<string, unknown>) => unknown, label: string, mutate: (policy: Record<string, unknown>, index: number) => void, indexes: readonly number[]): void => {
     for (const index of indexes) {

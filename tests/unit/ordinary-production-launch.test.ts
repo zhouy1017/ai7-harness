@@ -128,7 +128,7 @@ describe('the production data root', () => {
 const GO = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0];
 const OFFICIAL = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[1];
 
-describe('the configured binding the resolver reads (#853 v13, carried by #863 v15, #473 v17 and #891 v19)', () => {
+describe('the configured binding the resolver reads (#853 v13, carried by #863 v15, #473 v17, #891 v19 and #910 v21)', () => {
   const CARRIED = [
     'config/source-checkout-launch-authority.json',
     'docs/policies/active-policy-set.v14.json',
@@ -149,7 +149,7 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
     return root;
   }
 
-  it('mirrors exactly the bindings v19 allows both bound roles, Go first, as 设置 › 模型服务 offers them', async () => {
+  it('mirrors exactly the bindings v21 allows both bound roles, Go first, as 设置 › 模型服务 offers them', async () => {
     const policy = JSON.parse(await readFile(join(REPO_ROOT, 'docs', 'policies', 'provider-processing-policy.v21.json'), 'utf8')) as {
       roleBindings: Record<string, { defaultBinding?: string; allowedBindings: unknown[] }>;
     };

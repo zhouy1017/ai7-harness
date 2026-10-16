@@ -14,7 +14,7 @@ import { OPENCODE_GO_V41_FLASH_PROFILE } from '../../src/service/provider/model-
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
 describe('platform tool registration admission', () => {
-  it('admits local retrieval from the selected v18 rule for every foreground model kind, never for covered baseline or background (#893)', async () => {
+  it('admits local retrieval from the selected v20 rule for every foreground model kind, never for covered baseline or background (#893)', async () => {
     const policy = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live');
     expect(policy.providerProcessing.version).toBe('v20');
     const rules = policy.providerProcessing.admittedRules;
