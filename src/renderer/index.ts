@@ -1,6 +1,6 @@
 import { createAppearance } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
-import { createSaveMenu } from './save-menu.js';
+import { createSaveMenu, saveMenuPersistenceLine } from './save-menu.js';
 import { mountParagraphAnalysis } from './paragraph-analysis.js';
 import type { BookFindingProjection, ParagraphAnalysisProjection } from '../shared/protocol.js';
 import {
@@ -1146,7 +1146,6 @@ function instantValue(iso: string): HTMLElement {
 function setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void {
   statusRevision += 1;
   persistenceStatus.textContent = message;
-  activeSaveMenu?.update(message);
   if (tone) persistenceStatus.dataset['tone'] = tone;
   else delete persistenceStatus.dataset['tone'];
 }
@@ -8786,6 +8785,33 @@ function renderEditorWindow(
   let dirty = false;
   let saving = false;
   let retryRequired = false;
+  let editingInterrupted = false;
+  let changedSinceMilestone: string | null = null;
+  let milestonePersistenceTimer: number | undefined;
+  let milestonePersistenceRead = 0;
+  let milestoneReadDigest: string | undefined;
+  const updatePersistenceMenu = (): void => saveMenu?.update(saveMenuPersistenceLine({ dirty, saving, retryRequired, interrupted: editingInterrupted }, changedSinceMilestone));
+  const refreshMilestonePersistence = (force = false): void => {
+    if (saveMenu === undefined || (!force && milestoneReadDigest === currentWindow.workingDigest)) return;
+    milestoneReadDigest = currentWindow.workingDigest;
+    changedSinceMilestone = null;
+    updatePersistenceMenu();
+    if (milestonePersistenceTimer !== undefined) window.clearTimeout(milestonePersistenceTimer);
+    const request = ++milestonePersistenceRead;
+    milestonePersistenceTimer = window.setTimeout(() => {
+      if (!content.isConnected) return;
+      void window.ai7.inspectDeliverables().then((page) => {
+        if (!content.isConnected || request !== milestonePersistenceRead || page.manuscript?.manuscriptId !== currentWindow.manuscriptId ||
+            page.manuscript.workingDigest !== currentWindow.workingDigest || page.manuscript.revisionId !== currentWindow.revisionId) return;
+        const latest = page.publication.milestones[0];
+        changedSinceMilestone = latest?.changedSince === true ? `自里程碑版本「${latest.label}」后有修改` : null;
+        updatePersistenceMenu();
+      }).catch(() => {
+        if (content.isConnected && request === milestonePersistenceRead) { changedSinceMilestone = '里程碑版本状态暂不可用'; updatePersistenceMenu(); }
+      });
+    }, 250);
+  };
+  saveMenu?.element.addEventListener('toggle', () => { if ((saveMenu.element as HTMLDetailsElement).open) refreshMilestonePersistence(true); });
   let outlinePage: OutlineProjection | undefined;
   let searchPage: SearchResultsProjection | undefined;
   let replacementPreview: ReplacementPreviewProjection | undefined;
@@ -8836,6 +8862,8 @@ function renderEditorWindow(
   };
 
   const updateWindowChrome = (): void => {
+    updatePersistenceMenu();
+    refreshMilestonePersistence();
     position.textContent = currentWindow.position.label;
     revision.textContent = revisionWords(currentWindow);
     documentLens?.update(currentWindow.workingDigest);
@@ -9825,6 +9853,7 @@ function renderEditorWindow(
         await loadOutline(null, true);
       });
       if (!saved) return;
+      refreshMilestonePersistence(true);
       setStatus(saved.completionLabel, 'success');
     } catch (error) {
       setStatus(rendererErrorMessage(error, '里程碑未保存。'), 'error');
@@ -9886,6 +9915,8 @@ function renderEditorWindow(
       dirty = state.dirty;
       saving = state.saving;
       retryRequired = state.retryRequired;
+      editingInterrupted = state.interrupted;
+      updatePersistenceMenu();
       save.disabled = authoritativeMutationBusy() || !state.dirty || state.saving || state.interrupted;
       journal.textContent = `修订日志序号 ${state.journalSequence}`;
       setCloseRisk(authoritativeMutationBusy() || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty));

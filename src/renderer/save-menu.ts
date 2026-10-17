@@ -1,3 +1,9 @@
+export function saveMenuPersistenceLine(state: { dirty: boolean; saving: boolean; retryRequired: boolean; interrupted: boolean }, changedSince: string | null): string {
+  const persistence = state.retryRequired || state.interrupted ? '修订日志写入待确认'
+    : state.saving ? '正在写入修订日志' : state.dirty ? '修改尚未写入修订日志' : '已写入修订日志';
+  return changedSince === null ? persistence : `${persistence} · ${changedSince}`;
+}
+
 /** Hosts the existing milestone form unchanged; the persistence words remain independently visible. */
 export function createSaveMenu(form: HTMLElement, exportManuscript: () => void): { element: HTMLElement; update(message: string): void; destroy(): void } {
   const menu = document.createElement('details'); menu.className = 'editor-save-menu'; menu.dataset['saveMenu'] = 'manuscript';
