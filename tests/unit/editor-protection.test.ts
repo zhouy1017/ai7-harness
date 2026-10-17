@@ -25,6 +25,7 @@ import {
   readOnlyLine,
   retryLine,
 } from '../../src/renderer/editor-protection-labels.js';
+import { decodeRequest } from '../../src/service/request-frames.js';
 import {
   EDIT_JOURNAL_FAULT_CODE,
   editJournalFaultControlAdmitted,
@@ -161,5 +162,11 @@ describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
   it('knows exactly three modes', () => {
     expect(['off', 'fail-next', 'fail-all'].every(isEditJournalFaultMode)).toBe(true);
     expect(isEditJournalFaultMode('fail-some')).toBe(false);
+  });
+
+  it('takes a frame that names one mode and nothing else', () => {
+    const frame = (input: unknown): Buffer => Buffer.from(JSON.stringify({ id: '00000000-0000-4000-8000-0000000009f1', op: 'setEditJournalFault', input }), 'utf8');
+    for (const mode of ['off', 'fail-next', 'fail-all']) expect(decodeRequest(frame({ mode }))).toMatchObject({ op: 'setEditJournalFault', input: { mode } });
+    for (const input of [{}, { mode: 'fail-some' }, { mode: 'off', extra: true }, null]) expect(() => decodeRequest(frame(input))).toThrowError();
   });
 });

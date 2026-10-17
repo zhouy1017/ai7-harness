@@ -1560,7 +1560,12 @@ async function runEditorModesJourney(renderer) {
  */
 async function runProtectionJourney(renderer) {
   at('protection-arm');
-  await protectionChecks(renderer, `({ idle: !p.shown && p.document === null && p.writable && p.closeRisk === 'false', journal: Number.isSafeInteger(p.journal) })`, 'protection-idle');
+  // A window reached by paging holds its caret until the reader places one (the editor's deferred continuity): the caret is
+  // placed with a key, as a reader does, before anything is typed.
+  await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]')?.focus({ preventScroll: true })`);
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'End', code: 'End', windowsVirtualKeyCode: 35 });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'End', code: 'End', windowsVirtualKeyCode: 35 });
+  await protectionChecks(renderer, `({ bannerHidden: !p.shown, noProtection: p.document === null, writable: p.writable, closeRiskClear: p.closeRisk === 'false', journal: Number.isSafeInteger(p.journal) })`, 'protection-idle');
   const durable = await renderer.evaluate(JOURNAL_SEQUENCE_PROBE);
   requireJourney((await renderer.setJournalFault('fail-all'))?.mode === 'fail-all', 'protection-arm');
   at('protection-enter');
