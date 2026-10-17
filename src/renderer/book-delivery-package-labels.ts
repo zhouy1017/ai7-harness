@@ -143,6 +143,33 @@ export const PACKAGE_EXPORT_STATUS_LINES = {
   revealFailed: '无法在文件夹中显示。',
 } as const;
 
+// ---- the archive route (Issue #953; BUNDLE-004/005, EXP-010 to EXP-022) --------------------------------------------------
+
+export const PACKAGE_EXPORT_ROUTES_LEGEND = '导出方式';
+export const PACKAGE_EXPORT_ROUTE_LABELS = { folder: '导出为文件夹', archive: '导出为压缩包' } as const;
+
+/** BUNDLE-005: the archive bundles completed work, is neither 发稿 nor 交付, changes no record and is never sent. */
+export const PACKAGE_ARCHIVE_NOTE =
+  '压缩包包含这一版交付包的全部内容，包括其他页的文件；交付包清单与校验和会自动生成。它只汇集已完成的工作，不是发稿或交付，不改变任何记录，也不会发送文件。';
+export const PACKAGE_ARCHIVE_FILES_LABEL = '写入压缩包的内容文件';
+export const PACKAGE_ARCHIVE_PAGES_NOTE = '每页最多显示 40 个内容文件，可以翻页查看保真情况；导出包含全部内容文件。';
+export const PACKAGE_ARCHIVE_FILES_TRUNCATED = '这里只显示部分内容文件；压缩包会包含这一版的全部内容文件。';
+export const PACKAGE_ARCHIVE_DESTINATION_UNCHOSEN = '尚未选择压缩包的保存位置。';
+/** EXP-017: the archive's terminal status reveals its one file. */
+export const PACKAGE_ARCHIVE_REVEAL = '查看位置';
+
+export const PACKAGE_ARCHIVE_STATUS_LINES = {
+  choosing: '正在打开系统的保存对话框…',
+  writing: '正在写入所选压缩包…',
+} as const;
+
+/** What stopped the archive (EXP-012, EXP-021): a stopped staging leaves no partial archive, and nothing retries by itself. */
+export function packageArchiveStoppedLine(stopped: { fileName: string; reason: string }): string {
+  return stopped.reason === '结果待确认'
+    ? `压缩包「${stopped.fileName}」的写入结果待确认，请到所选位置查看；AI7 不会自动重试。`
+    : `压缩包没有导出：写到「${stopped.fileName}」时${stopped.reason}。所选位置没有留下不完整的压缩包，AI7 不会自动重试；可以重新导出。`;
+}
+
 /**
  * The one frozen version a Captured Procedure version's link brings into view (Issue #66, S31b review P3-4; Issue #697): the
  * version it names, on the card's first read only, and only when the listed page holds it — `null` focuses no version. Later

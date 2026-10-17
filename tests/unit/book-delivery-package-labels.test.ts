@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import * as labels from '../../src/renderer/book-delivery-package-labels.js';
 import {
+  BOOK_DELIVERY_PACKAGE_ARCHIVE_CHECKSUMS,
+  BOOK_DELIVERY_PACKAGE_ARCHIVE_MANIFEST,
+  BOOK_DELIVERY_PACKAGE_ARCHIVE_STATEMENT,
   BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT,
   BOOK_DELIVERY_PACKAGE_EXPORT_WORDS,
   bookDeliveryPackageExportSummary,
@@ -125,6 +128,24 @@ describe('the words of 图书交付包', () => {
     expect(bookDeliveryPackageExportSummary(['created', 'ambiguous', 'not-written'])).toBe('已导出 1 个文件，1 个结果待确认，其余 1 个没有写入');
   });
 
+  it('names the archive route, its generated members and what stopped it (Issue #953)', () => {
+    expect(labels.PACKAGE_EXPORT_ROUTES_LEGEND).toBe('导出方式');
+    expect(labels.PACKAGE_EXPORT_ROUTE_LABELS).toEqual({ folder: '导出为文件夹', archive: '导出为压缩包' });
+    expect(labels.PACKAGE_ARCHIVE_NOTE).toBe('压缩包包含这一版交付包的全部内容，包括其他页的文件；交付包清单与校验和会自动生成。它只汇集已完成的工作，不是发稿或交付，不改变任何记录，也不会发送文件。');
+    expect(labels.PACKAGE_ARCHIVE_FILES_LABEL).toBe('写入压缩包的内容文件');
+    expect(labels.PACKAGE_ARCHIVE_PAGES_NOTE).toBe('每页最多显示 40 个内容文件，可以翻页查看保真情况；导出包含全部内容文件。');
+    expect(labels.PACKAGE_ARCHIVE_FILES_TRUNCATED).toBe('这里只显示部分内容文件；压缩包会包含这一版的全部内容文件。');
+    expect(labels.PACKAGE_ARCHIVE_DESTINATION_UNCHOSEN).toBe('尚未选择压缩包的保存位置。');
+    expect(labels.PACKAGE_ARCHIVE_REVEAL).toBe('查看位置');
+    expect(labels.PACKAGE_ARCHIVE_STATUS_LINES).toEqual({ choosing: '正在打开系统的保存对话框…', writing: '正在写入所选压缩包…' });
+    expect(labels.packageArchiveStoppedLine({ fileName: '002 书名 · 新闻稿.docx', reason: '失败' }))
+      .toBe('压缩包没有导出：写到「002 书名 · 新闻稿.docx」时失败。所选位置没有留下不完整的压缩包，AI7 不会自动重试；可以重新导出。');
+    expect(labels.packageArchiveStoppedLine({ fileName: '图书交付包.zip', reason: '结果待确认' }))
+      .toBe('压缩包「图书交付包.zip」的写入结果待确认，请到所选位置查看；AI7 不会自动重试。');
+    expect(BOOK_DELIVERY_PACKAGE_ARCHIVE_STATEMENT).toBe('导出只把这一版图书交付包的全部内容、交付包清单和校验和写到你选择的压缩包；交付包本身不变，AI7 不会发送任何文件。');
+    expect([BOOK_DELIVERY_PACKAGE_ARCHIVE_MANIFEST, BOOK_DELIVERY_PACKAGE_ARCHIVE_CHECKSUMS]).toEqual(['交付包清单.md', 'checksums.txt']);
+  });
+
   it('never says a package was sent, published or delivered, and never shows a percentage (BUNDLE-005, WORK-007)', () => {
     const words = [
       labels.PACKAGE_HEADING, labels.PACKAGE_CONDITIONS_HEADING, ...Object.values(labels.PACKAGE_CONDITION_STATE), labels.PACKAGE_PREVIEW_HEADING,
@@ -141,6 +162,10 @@ describe('the words of 图书交付包', () => {
       labels.packageExportStoppedLine({ fileName: '交付包清单.md', reason: '未能写入。' }), labels.packageExportsAccessibleName('v1'),
       labels.PACKAGE_EXPORTS_TRUNCATED, ...Object.values(labels.PACKAGE_EXPORT_STATUS_LINES), BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT,
       ...Object.values(BOOK_DELIVERY_PACKAGE_EXPORT_WORDS), bookDeliveryPackageExportSummary(['created', 'failed', 'ambiguous', 'not-written']),
+      labels.PACKAGE_EXPORT_ROUTES_LEGEND, ...Object.values(labels.PACKAGE_EXPORT_ROUTE_LABELS), labels.PACKAGE_ARCHIVE_NOTE,
+      labels.PACKAGE_ARCHIVE_FILES_LABEL, labels.PACKAGE_ARCHIVE_PAGES_NOTE, labels.PACKAGE_ARCHIVE_FILES_TRUNCATED,
+      labels.PACKAGE_ARCHIVE_DESTINATION_UNCHOSEN, labels.PACKAGE_ARCHIVE_REVEAL, ...Object.values(labels.PACKAGE_ARCHIVE_STATUS_LINES),
+      labels.packageArchiveStoppedLine({ fileName: '图书交付包.zip', reason: '失败' }), BOOK_DELIVERY_PACKAGE_ARCHIVE_STATEMENT,
     ];
     for (const phrase of words) {
       for (const forbidden of PUBLICATION_FORBIDDEN_WORDS) expect(phrase).not.toContain(forbidden);

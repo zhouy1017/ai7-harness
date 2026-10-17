@@ -17,6 +17,13 @@ import {
 } from '../shared/protocol.js';
 import {
   LinkedPackageVersionFocus,
+  PACKAGE_ARCHIVE_DESTINATION_UNCHOSEN,
+  PACKAGE_ARCHIVE_FILES_LABEL,
+  PACKAGE_ARCHIVE_FILES_TRUNCATED,
+  PACKAGE_ARCHIVE_NOTE,
+  PACKAGE_ARCHIVE_PAGES_NOTE,
+  PACKAGE_ARCHIVE_REVEAL,
+  PACKAGE_ARCHIVE_STATUS_LINES,
   PACKAGE_CONDITION_STATE,
   PACKAGE_CONDITIONS_HEADING,
   PACKAGE_CURRENT_MARK,
@@ -27,6 +34,8 @@ import {
   PACKAGE_EXPORT_FILES_TRUNCATED,
   PACKAGE_EXPORT_FOLDER_UNCHOSEN,
   PACKAGE_EXPORT_OPTIONS_NOTE,
+  PACKAGE_EXPORT_ROUTE_LABELS,
+  PACKAGE_EXPORT_ROUTES_LEGEND,
   PACKAGE_EXPORT_STATUS_LINES,
   PACKAGE_EXPORTS_TRUNCATED,
   PACKAGE_HEADING,
@@ -42,6 +51,7 @@ import {
   PACKAGE_STATUS_LINES,
   PACKAGE_VERSIONS_HEADING,
   PACKAGE_VERSIONS_TRUNCATED,
+  packageArchiveStoppedLine,
   packageChangedLine,
   packageExportFidelitySummary,
   packageExportFileName,
@@ -443,7 +453,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     );
     if (entry.revealPreparationId !== null) {
       const preparationId = entry.revealPreparationId;
-      const reveal = el('button', 'quiet', entry.kind === 'archive' ? '查看位置' : PACKAGE_EXPORT_ACTION_LABELS.reveal);
+      const reveal = el('button', 'quiet', entry.kind === 'archive' ? PACKAGE_ARCHIVE_REVEAL : PACKAGE_EXPORT_ACTION_LABELS.reveal);
       reveal.type = 'button';
       reveal.dataset['packageAction'] = 'reveal-export';
       reveal.addEventListener('click', () => void revealExport(preparationId));
@@ -464,8 +474,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     panel.setAttribute('aria-labelledby', heading.id);
     panel.append(heading);
     const routes = el('fieldset', 'package-export-routes');
-    routes.append(el('legend', undefined, '导出方式'));
-    for (const [value, title] of [['folder', '导出为文件夹'], ['archive', '导出为压缩包']] as const) {
+    routes.append(el('legend', undefined, PACKAGE_EXPORT_ROUTES_LEGEND));
+    for (const value of ['folder', 'archive'] as const) {
+      const title = PACKAGE_EXPORT_ROUTE_LABELS[value];
       const label = el('label');
       const radio = el('input');
       radio.type = 'radio'; radio.name = 'package-export-route'; radio.value = value;
@@ -481,15 +492,14 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       label.append(radio, document.createTextNode(title)); routes.append(label);
     }
     panel.append(routes);
-    if (current.route === 'archive') panel.append(el('p', 'field-note',
-      '压缩包包含这一版交付包的全部内容，包括其他页的文件；交付包清单与校验和会自动生成。它只汇集已完成的工作，不是发稿或交付，不改变任何记录，也不会发送文件。'));
+    if (current.route === 'archive') panel.append(el('p', 'field-note', PACKAGE_ARCHIVE_NOTE));
     const shown = current.result ?? current.prepared;
     if (current.review !== null) panel.append(el('p', 'export-local-line', current.review.statement));
     panel.append(renderExportOptions(current));
     if (current.review !== null) {
       const review = current.review;
       panel.dataset['packageExportDegraded'] = String(review.degraded);
-      const label = el('p', 'package-export-files-label', PACKAGE_EXPORT_FILES_LABEL);
+      const label = el('p', 'package-export-files-label', current.route === 'archive' ? PACKAGE_ARCHIVE_FILES_LABEL : PACKAGE_EXPORT_FILES_LABEL);
       label.id = uid('export-files');
       const list = el('ol', 'package-export-files');
       list.setAttribute('aria-labelledby', label.id);
@@ -499,7 +509,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       panel.append(label, list);
       if (shown === null) {
         panel.append(el('p', 'field-note', current.route === 'archive'
-          ? '每页最多显示 40 个内容文件，可以翻页查看保真情况；导出包含全部内容文件。'
+          ? PACKAGE_ARCHIVE_PAGES_NOTE
           : '勾选本次要导出的文件，每次最多选择本页的 40 个。翻页会清除选择；其他文件不会一并导出。'));
         const pages = el('div', 'button-row');
         for (const [name, offset] of [['上一页', review.offset > 0 ? Math.max(0, review.offset - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED) : null], ['下一页', review.nextOffset]] as const) {
@@ -522,14 +532,14 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         panel.append(pages);
       }
       if ((shown?.filesTruncated ?? review.filesTruncated) === true) panel.append(el('p', 'field-note', current.route === 'archive'
-        ? '这里只显示部分内容文件；压缩包会包含这一版的全部内容文件。' : PACKAGE_EXPORT_FILES_TRUNCATED));
+        ? PACKAGE_ARCHIVE_FILES_TRUNCATED : PACKAGE_EXPORT_FILES_TRUNCATED));
       // EXP-008: what is degraded or cannot be written is said above; the approval accepts it for this export only.
       if (review.degraded) panel.append(el('p', 'export-degraded-note attention-note', EXPORT_DEGRADED_NOTE));
     }
     const folder = el('div', 'package-export-folder-choice');
     folder.dataset['packageExportFolder'] = current.prepared === null ? 'unchosen' : 'chosen';
     folder.append(el('p', 'package-export-folder-line', current.prepared === null
-      ? current.route === 'archive' ? '尚未选择压缩包的保存位置。' : PACKAGE_EXPORT_FOLDER_UNCHOSEN
+      ? current.route === 'archive' ? PACKAGE_ARCHIVE_DESTINATION_UNCHOSEN : PACKAGE_EXPORT_FOLDER_UNCHOSEN
       : packageExportFolderLine(current.prepared.folder)));
     if (current.result === null) {
       const choose = exportButton(current.prepared === null ? 'choose' : 'chooseAgain', 'secondary', () => void chooseFolder());
@@ -643,12 +653,13 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     block.dataset['packageExportState'] = result.state;
     block.setAttribute('role', 'status');
     block.append(el('strong', 'package-export-summary', result.summary));
-    if (result.stopped !== null) block.append(el('p', 'attention-note package-export-stopped', packageExportStoppedLine(result.stopped)));
+    if (result.stopped !== null) block.append(el('p', 'attention-note package-export-stopped', result.kind === 'archive'
+      ? packageArchiveStoppedLine(result.stopped) : packageExportStoppedLine(result.stopped)));
     const row = el('div', 'button-row');
     const shown = result.files.find((file) => file.revealAvailable);
     if (shown !== undefined) {
       const reveal = exportButton('reveal', 'secondary', () => void revealExport(shown.preparationId));
-      if (result.kind === 'archive') reveal.textContent = '查看位置';
+      if (result.kind === 'archive') reveal.textContent = PACKAGE_ARCHIVE_REVEAL;
       row.append(reveal);
     }
     row.append(exportButton('close', 'quiet', () => closeExport(false)));
@@ -733,7 +744,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     current.phase = 'choosing';
     current.problem = null;
     draw('keep');
-    options.setStatus(PACKAGE_EXPORT_STATUS_LINES.choosing, 'busy');
+    options.setStatus(current.route === 'archive' ? PACKAGE_ARCHIVE_STATUS_LINES.choosing : PACKAGE_EXPORT_STATUS_LINES.choosing, 'busy');
     try {
       const choose = current.route === 'archive' ? api.chooseBookDeliveryPackageArchiveDestination : api.chooseBookDeliveryPackageExportFolder;
       const chosen = await choose({
@@ -773,7 +784,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     current.phase = 'writing';
     current.problem = null;
     draw('keep');
-    options.setStatus(PACKAGE_EXPORT_STATUS_LINES.writing, 'busy');
+    options.setStatus(current.route === 'archive' ? PACKAGE_ARCHIVE_STATUS_LINES.writing : PACKAGE_EXPORT_STATUS_LINES.writing, 'busy');
     try {
       const approve = current.route === 'archive' ? api.approveBookDeliveryPackageArchiveExport : api.approveBookDeliveryPackageExport;
       const outcome = await approve({ exportId: prepared.exportId });

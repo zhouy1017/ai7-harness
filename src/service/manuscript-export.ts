@@ -911,20 +911,24 @@ export class ManuscriptExportStore {
       { exportId: input.exportId, destination: destination.path, memberPath: input.memberPath });
   }
 
-  /** Approve one exact member and pass its verified bytes to the archive writer; publication is still pending. */
-  async approvePackageArchiveMember(
-    bookId: string, preparationId: string, exportId: string, sink: (bytes: Uint8Array) => Promise<void>,
-    available: boolean,
-  ): Promise<void> {
+  /** One exact member's bytes, verified as prepared, for the archive writer to stage; nothing is recorded (EXP-011). */
+  async readPackageArchiveMember(bookId: string, preparationId: string, exportId: string, available: boolean): Promise<Uint8Array> {
     this.#requireAvailable(available);
     const row = this.#preparationRow(bookId, preparationId);
-    const record = parseCanonicalJson(text(row.canonical_json));
-    requireExport(isRecord(record) && isRecord(record.archive) && record.archive.exportId === exportId &&
-      record.archive.destination === text(row.destination) && record.archive.memberPath === text(row.file_name),
-    'EXPORT_RECORD_INVALID', '压缩包成员与导出准备不一致。');
+    this.#requireArchiveMember(row, exportId);
+    requireExport(this.#outcomeRow(preparationId) === undefined, 'EXPORT_ALREADY_APPROVED', '这次导出已经批准过。');
+    return this.#requireAsPrepared(bookId, row, this.#preparationProjection(row));
+  }
+
+  /**
+   * Approve one staged member at the archive's single commit boundary, as `approve` does before its one write; the
+   * archive owner calls it inside the transaction that approves every member, so a cancelled staging approves none.
+   */
+  approvePackageArchiveMember(bookId: string, preparationId: string, exportId: string): void {
+    const row = this.#preparationRow(bookId, preparationId);
+    this.#requireArchiveMember(row, exportId);
     requireExport(this.#outcomeRow(preparationId) === undefined, 'EXPORT_ALREADY_APPROVED', '这次导出已经批准过。');
     const preparation = this.#preparationProjection(row);
-    const bytes = await this.#requireAsPrepared(bookId, row, preparation);
     const approvalId = randomUUID();
     const approvedAt = new Date().toISOString();
     const approval = canonicalRecord({ schema: APPROVAL_SCHEMA, approvalId, preparationId,
@@ -934,7 +938,13 @@ export class ManuscriptExportStore {
       actor, interaction, approved_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, 'export-as-stated', ?, ?, ?)`)
       .run(approvalId, preparationId, preparation.technical.effectIntentId, preparation.technical.payloadDigest,
         ACTOR, approvedAt, approval.json, approval.digest);
-    await sink(bytes);
+  }
+
+  #requireArchiveMember(row: SqlRow, exportId: string): void {
+    const record = parseCanonicalJson(text(row.canonical_json));
+    requireExport(isRecord(record) && isRecord(record.archive) && record.archive.exportId === exportId &&
+      record.archive.destination === text(row.destination) && record.archive.memberPath === text(row.file_name),
+    'EXPORT_RECORD_INVALID', '压缩包成员与导出准备不一致。');
   }
 
   /** Only the archive owner settles a streamed member, after the single file commit's classified outcome. */

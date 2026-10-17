@@ -480,7 +480,7 @@ export class CooperativeJobOwner {
       if (job.cancelRequested) throw new StoreError('EXPORT_CANCELLED', '已取消导出，没有写入任何文件。');
       if (phase === 'commit') job.writeStarted = true;
     }).then((result) => {
-      job.projection = { ...job.projection, state: job.cancelRequested ? 'cancelled' : 'completed', result,
+      job.projection = { ...job.projection, state: 'completed', result,
         progress: { completed: 1, total: 1, label: result.export.summary } };
     }, (error: unknown) => {
       if (error instanceof StoreFatalError) { setImmediate(() => { throw error; }); return; }

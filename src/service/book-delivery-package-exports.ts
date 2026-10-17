@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
@@ -131,6 +131,11 @@ export function initializeBookDeliveryPackageExportSchema(db: DatabaseSync): voi
 /** EXP-014 and EXP-015: where the files go, and that nothing is sent. */
 export const BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT =
   '导出只把这些文件写到你选择的文件夹：每个文件都有自己的导出记录，交付包本身不变；AI7 不会发送任何文件。';
+/** Issue #953 (BUNDLE-004/005): the archive route's statement, and the two generated metadata members it adds. */
+export const BOOK_DELIVERY_PACKAGE_ARCHIVE_STATEMENT =
+  '导出只把这一版图书交付包的全部内容、交付包清单和校验和写到你选择的压缩包；交付包本身不变，AI7 不会发送任何文件。';
+export const BOOK_DELIVERY_PACKAGE_ARCHIVE_MANIFEST = '交付包清单.md';
+export const BOOK_DELIVERY_PACKAGE_ARCHIVE_CHECKSUMS = 'checksums.txt';
 export const BOOK_DELIVERY_PACKAGE_EXPORT_WORDS = {
   manifest: '交付包清单',
   prepared: '已准备',
@@ -243,7 +248,7 @@ export class BookDeliveryPackageExports {
       offset,
       nextOffset,
       degraded: (whole?.files ?? files).some((file) => file.degraded),
-      statement: whole === null ? BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT : '导出只把这一版图书交付包的全部内容、交付包清单和校验和写到你选择的压缩包；交付包本身不变，AI7 不会发送任何文件。',
+      statement: whole === null ? BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT : BOOK_DELIVERY_PACKAGE_ARCHIVE_STATEMENT,
       reviewDigest,
     };
   }
@@ -573,7 +578,7 @@ export class BookDeliveryPackageExports {
       receipt.members.every((member) => isRecord(member) && typeof member.path === 'string' && typeof member.sha256 === 'string' &&
         DIGEST_PATTERN.test(member.sha256) && (member.receiptId === null || typeof member.receiptId === 'string' && UUID_PATTERN.test(member.receiptId))) &&
       Array.isArray(receipt.metadata) && receipt.metadata.length <= 2 && (!success || receipt.metadata.length === 2) &&
-      receipt.metadata.every((member) => isRecord(member) && (member.path === '交付包清单.md' || member.path === 'checksums.txt') &&
+      receipt.metadata.every((member) => isRecord(member) && (member.path === BOOK_DELIVERY_PACKAGE_ARCHIVE_MANIFEST || member.path === BOOK_DELIVERY_PACKAGE_ARCHIVE_CHECKSUMS) &&
         typeof member.byteLength === 'number' && Number.isSafeInteger(member.byteLength) && member.byteLength > 0 &&
         typeof member.sha256 === 'string' && DIGEST_PATTERN.test(member.sha256)) &&
       (receipt.stopped === null || isRecord(receipt.stopped) && typeof receipt.stopped.fileName === 'string' && typeof receipt.stopped.reason === 'string'),
@@ -608,7 +613,12 @@ export class BookDeliveryPackageExports {
       'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '压缩包导出准备无效。');
     const replaces = isRecord(prepared.replaces) && typeof prepared.replaces.bytes === 'number' && typeof prepared.replaces.sha256 === 'string'
       ? { bytes: prepared.replaces.bytes, sha256: prepared.replaces.sha256 } : null;
-    beforeWrite?.('check');
+    // Cancellation stays possible until the archive is staged and verified (EXP-011); a cancelled staging records nothing.
+    let cancellation: unknown;
+    const checkCancelled = (phase: 'check' | 'commit'): void => {
+      try { beforeWrite?.(phase); } catch (error) { cancellation = error; throw error; }
+    };
+    checkCancelled('check');
     let writer: BookDeliveryPackageArchiveWriter | null = null;
     const approved: string[] = [];
     let stopped: BookDeliveryPackageExportProjection['stopped'] = null;
@@ -619,60 +629,64 @@ export class BookDeliveryPackageExports {
     const metadata: Array<{ path: string; byteLength: number; sha256: string }> = [];
     try {
       writer = await BookDeliveryPackageArchiveWriter.create(archive.destination, input.exportId);
-      const archiveWriter = writer;
       for (const file of files) {
         const preparation = this.#exports.preparationOf(input.bookId, file.preparationId);
         activeName = preparation.fileName;
-        await this.#exports.approvePackageArchiveMember(input.bookId, file.preparationId, input.exportId, async (bytes) => {
-          approved.push(file.preparationId);
-          await archiveWriter.add(preparation.fileName, bytes, preparation.format === 'markdown', () => beforeWrite?.('check'));
-        }, available);
+        const bytes = await this.#exports.readPackageArchiveMember(input.bookId, file.preparationId, input.exportId, available);
+        await writer.add(preparation.fileName, bytes, preparation.format === 'markdown', () => checkCancelled('check'));
       }
       const parentRow = this.#db.prepare('SELECT package_version_id FROM book_delivery_package_exports WHERE export_id = ?').get(input.exportId) as SqlRow;
       const manifest = this.manifest(input.bookId, text(parentRow.package_version_id));
       requirePackageExport(manifest !== null, 'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '交付包清单不存在。');
-      activeName = '交付包清单.md';
+      activeName = BOOK_DELIVERY_PACKAGE_ARCHIVE_MANIFEST;
       const manifestBytes = new TextEncoder().encode(manifest.markdown);
-      await writer.add(activeName, manifestBytes, true, () => beforeWrite?.('check'));
+      await writer.add(activeName, manifestBytes, true, () => checkCancelled('check'));
       metadata.push({ path: activeName, byteLength: manifestBytes.length, sha256: sha256Hex(manifestBytes) });
       const checksums = [...files.map((file) => { const member = this.#exports.preparationOf(input.bookId, file.preparationId);
         return { path: member.fileName, sha256: member.technical.payloadDigest }; }), ...metadata]
         .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
         .map((file) => `${file.sha256}  ${file.path}\n`).join('');
-      activeName = 'checksums.txt';
+      activeName = BOOK_DELIVERY_PACKAGE_ARCHIVE_CHECKSUMS;
       const checksumBytes = new TextEncoder().encode(checksums);
-      await writer.add(activeName, checksumBytes, true, () => beforeWrite?.('check'));
+      await writer.add(activeName, checksumBytes, true, () => checkCancelled('check'));
       metadata.push({ path: activeName, byteLength: checksumBytes.length, sha256: sha256Hex(checksumBytes) });
       const payload = await writer.finish();
       archiveBytes = payload.bytes;
       archiveSha256 = payload.sha256;
-      beforeWrite?.('commit');
+      activeName = basename(archive.destination);
+      // The one commit boundary: every member is approved together, then the archive is published once (EXP-012/013).
+      checkCancelled('commit');
+      this.#transaction(() => {
+        for (const file of files) this.#exports.approvePackageArchiveMember(input.bookId, file.preparationId, input.exportId);
+      });
+      approved.push(...files.map((file) => file.preparationId));
       result = await writeAtomically(archive.destination, payload, payload.sha256, prepared.disposition, input.exportId, replaces);
       if (result.outcome === 'failed' || result.outcome === 'ambiguous') stopped = { fileName: activeName, reason: result.outcome === 'ambiguous' ? '结果待确认' : '失败' };
     } catch (error) {
+      if (cancellation !== undefined && error === cancellation) throw error;
       stopped = { fileName: activeName, reason: error instanceof Error && error.message === '数据超过 4 GB' ? '数据超过 4 GB' : '失败' };
     } finally {
       await writer?.dispose();
     }
     this.#transaction(() => {
-    for (const preparationId of approved) this.#exports.settlePackageArchiveMember(input.bookId, preparationId, input.exportId, result);
-    const receiptId = randomUUID();
-    const receipt: BookDeliveryPackageArchiveReceiptProjection = { receiptId, finalPath: archive.destination, outcome: result.outcome,
-      byteLength: result.outcome === 'created' || result.outcome === 'replaced' ? archiveBytes : null,
-      sha256: result.outcome === 'created' || result.outcome === 'replaced' ? archiveSha256 : null, memberCount: files.length,
-      metadata, stopped,
-      members: files.map((file) => { const preparation = this.#exports.preparationOf(input.bookId, file.preparationId);
-        return { path: preparation.fileName, sha256: preparation.technical.payloadDigest,
-          receiptId: this.#exports.approvedReceipt(input.bookId, file.preparationId)?.technical.receiptId ?? null }; }),
-    };
-    const parent = this.#db.prepare('SELECT * FROM book_delivery_package_exports WHERE export_id = ?').get(input.exportId) as SqlRow;
-    const createdAt = new Date().toISOString();
-    const record = canonicalRecord({ schema: 'ai7.book-delivery-package-archive-receipt/1', kind: 'archive-receipt',
-      exportId: receiptId, parentExportId: input.exportId, bookId: input.bookId, packageVersionId: text(parent.package_version_id),
-      receipt, stopped, createdAt });
-    this.#db.prepare(`INSERT INTO book_delivery_package_exports(export_id, package_version_id, book_id, folder, file_count,
-      review_digest, actor, created_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, '本机编辑', ?, ?, ?)`)
-      .run(receiptId, text(parent.package_version_id), input.bookId, archive.destination, files.length, text(parent.review_digest), createdAt, record.json, record.digest);
+      for (const preparationId of approved) this.#exports.settlePackageArchiveMember(input.bookId, preparationId, input.exportId, result);
+      const receiptId = randomUUID();
+      const receipt: BookDeliveryPackageArchiveReceiptProjection = { receiptId, finalPath: archive.destination, outcome: result.outcome,
+        byteLength: result.outcome === 'created' || result.outcome === 'replaced' ? archiveBytes : null,
+        sha256: result.outcome === 'created' || result.outcome === 'replaced' ? archiveSha256 : null, memberCount: files.length,
+        metadata, stopped,
+        members: files.map((file) => { const preparation = this.#exports.preparationOf(input.bookId, file.preparationId);
+          return { path: preparation.fileName, sha256: preparation.technical.payloadDigest,
+            receiptId: this.#exports.approvedReceipt(input.bookId, file.preparationId)?.technical.receiptId ?? null }; }),
+      };
+      const parent = this.#db.prepare('SELECT * FROM book_delivery_package_exports WHERE export_id = ?').get(input.exportId) as SqlRow;
+      const createdAt = new Date().toISOString();
+      const record = canonicalRecord({ schema: 'ai7.book-delivery-package-archive-receipt/1', kind: 'archive-receipt',
+        exportId: receiptId, parentExportId: input.exportId, bookId: input.bookId, packageVersionId: text(parent.package_version_id),
+        receipt, stopped, createdAt });
+      this.#db.prepare(`INSERT INTO book_delivery_package_exports(export_id, package_version_id, book_id, folder, file_count,
+        review_digest, actor, created_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, '本机编辑', ?, ?, ?)`)
+        .run(receiptId, text(parent.package_version_id), input.bookId, archive.destination, files.length, text(parent.review_digest), createdAt, record.json, record.digest);
     });
     return { ...this.#projection(input.bookId, input.exportId), stopped };
   }

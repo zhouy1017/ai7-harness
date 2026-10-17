@@ -227,7 +227,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
     } finally { store.close(); }
   }, 240_000);
 
-  it('accepts cancellation while streaming and records no successful members or target archive', async () => {
+  it('accepts cancellation while streaming and records nothing: no approval, receipt, history line or target archive', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const jobs = new CooperativeJobOwner(store);
     let release!: () => void;
@@ -255,9 +255,13 @@ describe('图书交付包 · 导出 (S67b)', () => {
       }
       expect(terminal.state).toBe('cancelled');
       expect(existsSync(destination)).toBe(false);
+      expect((await readdir(roots.inputRoot)).some((name) => name.endsWith('.ai7-partial'))).toBe(false);
+      // EXP-011 / EXP-020: the cancelled staging leaves the export as prepared, with no Effect Approval or Receipt.
+      expect([await count('export_approvals'), await count('export_receipts')]).toEqual([0, 0]);
+      expect(store.inspectBookDeliveryPackage(bookId).versions[0]!.exports).toHaveLength(0);
       const result = await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
-      expect(result.export.files.every((file) => file.outcome !== 'created')).toBe(true);
-      expect(result.export.archiveReceipt?.outcome).toBe('failed');
+      expect(result.export.archiveReceipt?.outcome).toBe('created');
+      expect(result.export.files.every((file) => file.outcome === 'created')).toBe(true);
     } finally { release?.(); await jobs.dispose(); store.close(); }
   }, 180_000);
 
@@ -348,12 +352,16 @@ describe('图书交付包 · 导出 (S67b)', () => {
       const result = await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
       expect(result.export.state).toBe('incomplete');
       expect(result.export.stopped).toEqual({ fileName: review.files[1]!.fileName, reason: '失败' });
-      expect(result.export.files.map((file) => file.outcome)).toEqual(['failed', 'failed']);
+      // Staging stopped before the commit boundary: no member was approved, and the archive receipt names the member.
+      expect(result.export.files.map((file) => file.outcome)).toEqual(['not-written', 'not-written']);
+      expect(result.export.archiveReceipt).toMatchObject({ outcome: 'failed', byteLength: null, sha256: null,
+        stopped: { fileName: review.files[1]!.fileName, reason: '失败' } });
+      expect(result.export.archiveReceipt!.members.every((member) => member.receiptId === null)).toBe(true);
       expect(existsSync(destination)).toBe(false);
       expect((await readdir(roots.inputRoot)).some((name) => name.endsWith('.ai7-partial'))).toBe(false);
       await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
       expect(calls).toBe(2);
-      expect(await count('export_receipts')).toBe(2);
+      expect([await count('export_approvals'), await count('export_receipts')]).toEqual([0, 0]);
       expect(result.package.versions[0]!.exports).toHaveLength(1);
     } finally { store.close(); }
   }, 180_000);
