@@ -4,7 +4,38 @@ import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-con
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 152 as const;
+export const SERVICE_PROTOCOL_VERSION = 154 as const;
+
+export const BOOK_FINDINGS_PAGE_SIZE = 40;
+export interface BookFindingProjection {
+  id: string;
+  category: string;
+  categoryLabel: string;
+  severity: string;
+  status: string;
+  summary: string;
+  target:
+    | { kind: 'gap'; revisionId: string; unitOrdinal: number; blockId: string | null }
+    | { kind: 'review'; reviewRunId: string; findingId: string; blockId: string }
+    | { kind: 'risk'; recordId: string; riskId: string; revisionId: string };
+}
+export interface BookFindingsProjection {
+  bookId: string;
+  total: number;
+  offset: number;
+  next: number | null;
+  pageSize: typeof BOOK_FINDINGS_PAGE_SIZE;
+  groups: ReadonlyArray<{ category: string; label: string; count: number; bySeverity: Readonly<Record<string, number>>; byStatus: Readonly<Record<string, number>> }>;
+  items: ReadonlyArray<BookFindingProjection>;
+}
+export interface ParagraphAnalysisProjection {
+  bookId: string;
+  manuscriptId: string;
+  blockId: string;
+  revision: null | { revisionId: string; ordinal: number; freshness: AnalysisFreshnessAxis };
+  total: number;
+  items: ReadonlyArray<{ kind: 'entities' | 'events' | 'settingClaims' | 'relationships'; label: string; blockId: string }>;
+}
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -76,6 +107,8 @@ export const IPC_CHANNELS = {
   prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
   authorizeTaskAuthorization: 'ai7:j03:authorize-task-authorization',
   inspectBaselineAnalysis: 'ai7:j04:inspect-baseline-analysis',
+  inspectBookFindings: 'ai7:inspect-book-findings',
+  inspectParagraphAnalysis: 'ai7:inspect-paragraph-analysis',
   prepareBaselineAnalysis: 'ai7:j04:prepare-baseline-analysis',
   authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
   startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
@@ -13253,6 +13286,8 @@ export interface ServiceOperationMap {
     input: { bookId: string; revisionId: string | null };
     output: BaselineAnalysisProjection;
   };
+  inspectBookFindings: { input: { bookId: string; offset: number }; output: BookFindingsProjection };
+  inspectParagraphAnalysis: { input: { bookId: string; manuscriptId: string; blockId: string; radius: number }; output: ParagraphAnalysisProjection };
   prepareBaselineAnalysis: {
     /**
      * `reconfirm` is `重新确认计划`: resolve the pending Plan Revision of the prepared Task into its next plan version instead
@@ -14203,6 +14238,8 @@ export interface RendererApi {
     planEnvelopeDigest: string;
   }): Promise<TaskAuthorizationProjection>;
   inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisProjection>;
+  inspectBookFindings(input?: { offset: number }): Promise<BookFindingsProjection>;
+  inspectParagraphAnalysis(input: { manuscriptId: string; blockId: string; radius: number }): Promise<ParagraphAnalysisProjection>;
   prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; redoOf?: string | null }): Promise<ServiceJobProjection>;
   /**
    * The Task Drawer bar's 开始任务 for the analysis (Issue #420, S74a): records the Run Authorization and the

@@ -444,6 +444,10 @@ async function dispatch(
         op: request.op,
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress, request.input.revisionId),
       };
+    case 'inspectBookFindings':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBookFindings(request.input.bookId, request.input.offset) };
+    case 'inspectParagraphAnalysis':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectParagraphAnalysis(request.input.bookId, request.input.manuscriptId, request.input.blockId, request.input.radius) };
     case 'prepareBaselineAnalysis':
       return {
         id: request.id,

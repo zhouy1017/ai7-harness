@@ -2755,6 +2755,32 @@ function registerRendererHandlers(
         });
       }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectBookFindings, (event, input?: { offset: number }) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('inspectBookFindings', { bookId: route.bookId, offset: input?.offset ?? 0 });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '发现不属于当前图书。');
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectParagraphAnalysis, (event, input: Omit<ServiceOperationMap['inspectParagraphAnalysis']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('inspectParagraphAnalysis', { manuscriptId: input?.manuscriptId, blockId: input?.blockId, radius: input?.radius, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      if (result.bookId !== route.bookId || result.manuscriptId !== input.manuscriptId || result.blockId !== input.blockId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '段落分析不属于当前稿件。');
+      return result;
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.inspectBaselineAnalysis, (event, input?: Omit<ServiceOperationMap['inspectBaselineAnalysis']['input'], 'bookId'>) =>
     envelope(async () => {
       const owned = requireSender(event);
