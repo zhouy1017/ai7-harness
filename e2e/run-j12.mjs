@@ -1271,7 +1271,8 @@ async function main() {
     await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .panel', returnToScreen: async () => {
       await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dark-pass-return-settings');
       await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dark-pass-return-settings-hub');
-      await click(primary, '模型服务', 'dark-pass-return-model-service');
+      // 设置 paints its hub after the click, so the 模型服务 row is waited for and followed once it is there (#935).
+      await waitFor(primary, `(() => { const node=Array.from(document.querySelectorAll('#screen[data-screen="settings"] button')).find((item)=>item.textContent==='模型服务'); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, 'dark-pass-return-model-service');
     } });
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready-after-dark-pass');
     await assertRenderer(primary, `(() => {
