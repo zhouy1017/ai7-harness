@@ -47,8 +47,8 @@ function refusal(operation: () => unknown): PreferenceError {
 
 describe('the preferences registry', () => {
   it('declares the shell keys with their defaults, and each default passes its own validator', () => {
-    expect(Object.keys(PREFERENCE_KEYS)).toEqual(['shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme']);
-    expect(preferenceDefaults()).toEqual({ 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system' });
+    expect(Object.keys(PREFERENCE_KEYS)).toEqual(['usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme']);
+    expect(preferenceDefaults()).toEqual({ 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system' });
     for (const definition of Object.values(PREFERENCE_KEYS)) expect(definition.validate(definition.default)).toBe(true);
   });
 
@@ -178,6 +178,7 @@ describe('pinning and recency through ShellPreferences', () => {
     expect(new Set(called)).toEqual(new Set(['getPreferences', 'savePreference']));
     expect(await readFile(databasePath)).toEqual(before);
     expect(shell.current).toEqual({
+      ...preferenceDefaults(),
       'shell.sidebarCollapsed': true,
       'shell.pinnedBooks': [BOOK],
       'shell.recentBooks': [{ ...BOOK, section: 'manuscript' }],

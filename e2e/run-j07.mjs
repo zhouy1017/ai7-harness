@@ -146,8 +146,9 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 // 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
 // Issue #416 (S67b): a 图书交付包 version's export adds its own three, and nothing else that exports, publishes or sends.
 // Issue #938: 诊断's local folder export adds exportDiagnosticsBundle; it carries no manuscript and neither publishes nor sends.
+// Issue #936: exportUsageCsv saves numbers and ids only; the native Save dialog grants no Run or manuscript export authority.
 const EXPORT_MEMBERS = Object.freeze([
-  'approveBookDeliveryPackageExport', 'approveDatabaseExport', 'approveManuscriptExport', 'cancelBookDeliveryPackageExport', 'cancelDatabaseExport', 'chooseBookDeliveryPackageExportFolder', 'chooseDatabaseExportDestination', 'chooseManuscriptExportDestination', 'exportDiagnosticsBundle', 'inspectDatabaseExports', 'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
+  'approveBookDeliveryPackageExport', 'approveDatabaseExport', 'approveManuscriptExport', 'cancelBookDeliveryPackageExport', 'cancelDatabaseExport', 'chooseBookDeliveryPackageExportFolder', 'chooseDatabaseExportDestination', 'chooseManuscriptExportDestination', 'exportDiagnosticsBundle', 'exportUsageCsv', 'inspectDatabaseExports', 'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
 ]);
 // Issue #415 (S66a): a 新闻稿's draft, composed at run time from exact sample1's paragraphs after the manuscript's own,
 // imported as source material and made the Book's 新闻稿; the house's five types in its order; and the document's edit.

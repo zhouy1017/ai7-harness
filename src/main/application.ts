@@ -33,6 +33,7 @@ import {
   VALIDATION_DELTA_ARGUMENT,
   parseTrustedLaunchForm,
   type AskAboutSelectionInput,
+  type UsageCsvExportResult,
   type InspectFastInteractionRequestInput,
   type PolishSelectionInput,
   type ConvertDialogueToChangeSuggestionInput,
@@ -85,6 +86,8 @@ import {
   type ServiceOperationMap,
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
+import { usageCsv } from '../shared/usage.js';
+import { USAGE_CSV_DIALOG, usageCsvFileName } from '../shared/usage-labels.js';
 import { developerProposalFileName } from '../shared/developer-proposal.js';
 import { CrashRecords, crashHook, installCrashHooks } from './crash-records.js';
 import { DIAGNOSTICS_CHANNELS, writeDiagnosticsBundle } from './diagnostics.js';
@@ -1385,6 +1388,22 @@ function registerRendererHandlers(
       buttonLabel: '选择此位置',
       defaultPath: resolve(app.getPath('documents'), `AI7 数据库 ${date}.ai7db`),
       filters: [{ name: 'AI7 数据库', extensions: ['ai7db'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
+    requireDesktop(isAbsolute(chosen.filePath));
+    return chosen.filePath;
+  };
+
+  /** 导出为 CSV… of 用量 (Issue #936, S11c): the platform's own Save dialog; `undefined` is a cancelled dialog. */
+  const chooseUsageCsvFile = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+    const today = new Date();
+    const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const chosen = await dialog.showSaveDialog(owned.window, {
+      title: USAGE_CSV_DIALOG.title,
+      buttonLabel: USAGE_CSV_DIALOG.button,
+      defaultPath: resolve(app.getPath('documents'), usageCsvFileName(date)),
+      filters: [{ name: USAGE_CSV_DIALOG.filter, extensions: ['csv'] }],
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
@@ -4325,6 +4344,32 @@ function registerRendererHandlers(
       requireSender(event);
       requireAuthority();
       return service.call('inspectScheduledBackups', {});
+    }),
+  );
+  // 用量 (Issue #936, S11c): a read of the recorded Runs; the CSV is numbers and ids only, built here from the same read and
+  // the editor's own unit prices, and written where the Save dialog said.
+  ipcMain.handle(IPC_CHANNELS.inspectUsage, (event, input: Parameters<RendererApi['inspectUsage']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectUsage', { range: input.range, groupBy: input.groupBy,
+        ...(input.runOffset === undefined ? {} : { runOffset: input.runOffset }),
+        ...(input.runRecordId === undefined ? {} : { runRecordId: input.runRecordId }),
+        ...(input.asOf === undefined ? {} : { asOf: input.asOf }) });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.exportUsageCsv, (event, input: Parameters<RendererApi['exportUsageCsv']>[0]) =>
+    envelope(async (): Promise<UsageCsvExportResult> => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      const usage = await service.call('inspectUsage', { range: input.range, groupBy: input.groupBy });
+      const destination = await chooseUsageCsvFile(owned);
+      if (destination === undefined) return { outcome: 'cancelled' };
+      const { values } = preferences.read();
+      await writeFile(destination, usageCsv(usage, values['usage.unitPrices']), 'utf8');
+      return { outcome: 'written', rows: usage.rows.reduce((count, row) => count + row.byRoute.length, 0) };
     }),
   );
   ipcMain.handle(IPC_CHANNELS.setScheduledBackup, (event, input: Parameters<RendererApi['setScheduledBackup']>[0]) =>

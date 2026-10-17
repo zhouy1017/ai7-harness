@@ -886,6 +886,9 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectDatabaseExports() };
     case 'inspectScheduledBackups':
       return { id: request.id, ok: true, op: request.op, result: store.inspectScheduledBackups() };
+    // 用量 (Issue #936, S11c): a read over the recorded Runs.
+    case 'inspectUsage':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectUsage(request.input) };
     case 'setScheduledBackup':
       return { id: request.id, ok: true, op: request.op, result: await store.setScheduledBackup(request.input) };
     case 'inspectDatabaseImport':

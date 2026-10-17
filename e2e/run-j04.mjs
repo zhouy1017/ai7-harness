@@ -91,6 +91,8 @@ const EXPORT_MEMBERS = [
   'chooseDatabaseExportDestination', 'approveDatabaseExport', 'inspectDatabaseExports', 'cancelDatabaseExport',
   // Synchronized delta with Issue #938: 诊断's folder export, main-only, of crash records and redacted metadata, never a manuscript.
   'exportDiagnosticsBundle',
+  // Synchronized delta with Issue #936: local usage CSV, numbers and ids only, never manuscript text or Run authority.
+  'exportUsageCsv',
 ];
 // Synchronized delta with Issue #417: 审阅's seven members. None is named like an execution, effect,
 // apply or export member, so the two pins below hold them without an exception.

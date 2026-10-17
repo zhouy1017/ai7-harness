@@ -26,6 +26,21 @@ import type { ServiceOperation, ServiceOperationMap, ServiceRequest } from '../.
 
 const encoder = new TextEncoder();
 
+// Issue #936: historical Run detail and link paging stay reads of the existing usage op.
+describe('usage input bounds', () => {
+  it('accepts closed filters, a safe link offset and an exact Run id only', () => {
+    const base = { range: 'all', groupBy: 'book' } as const;
+    for (const input of [base, { ...base, runOffset: 50, asOf: '2026-10-17T12:00:00.000Z' }, { ...base, runRecordId: randomUUID() }]) {
+      const frame = { id: randomUUID(), op: 'inspectUsage', input } satisfies ServiceRequest;
+      expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    }
+    for (const invalid of [{ range: 'year' }, { groupBy: 'route' }, { runOffset: -1 }, { runOffset: 0.5 }, { runOffset: null }, { runRecordId: 'not-an-id' }, { asOf: '2026-02-30' }, { asOf: null }, { write: true }]) {
+      const frame = { id: randomUUID(), op: 'inspectUsage', input: { ...base, ...invalid } };
+      expect(() => decodeRequest(encoder.encode(JSON.stringify(frame)))).toThrow(ProtocolError);
+    }
+  });
+});
+
 describe('Proposal workspace commands (#902)', () => {
   it('decodes the six exact inputs and refuses forged write or approval fields', () => {
     const common = { manuscriptId: randomUUID(), branchId: randomUUID(), resultId: null };
