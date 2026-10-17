@@ -3,9 +3,9 @@ import type {
   ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCheckProjection, RendererApi,
 } from '../shared/protocol.js';
 import {
-  importedSkillCeilingLines, importedSkillHistoryLine, importedSkillIdentityLine, importedSkillRuleActiveLine, importedSkillRuleConfirmLine,
+  importedSkillCeilingLines, importedSkillDisclosureLines, importedSkillHistoryLine, importedSkillIdentityLine, importedSkillRuleActiveLine, importedSkillRuleConfirmLine,
   importedSkillThreeWayLines, importedSkillUpdateCandidateLine, importedSkillUpdateCheckTitle, importedSkillUpdateDispositionLine, importedSkillUpdateFileLine,
-  importedSkillUpdateRelationLine, importedSkillUpdateStatusLine, IMPORTED_SKILLS_HEADING, IMPORTED_SKILLS_NO_EXECUTOR, IMPORTED_SKILL_HISTORY_HEADING,
+  importedSkillUpdateRelationLine, importedSkillUpdateStatusLine, importedSkillUpdateValidatorLine, IMPORTED_SKILLS_HEADING, IMPORTED_SKILLS_NO_EXECUTOR, IMPORTED_SKILL_HISTORY_HEADING,
   IMPORTED_SKILL_HISTORY_NOT_RESTORED, IMPORTED_SKILL_NOT_CURRENT_NOTE, IMPORTED_SKILL_RULE_CREATE_LABEL, IMPORTED_SKILL_RULE_HEADING, IMPORTED_SKILL_RULE_INACTIVE,
   IMPORTED_SKILL_RULE_REVOKE_LABEL, IMPORTED_SKILL_RULE_SCOPE, IMPORTED_SKILL_UPDATE_ACCEPT_LABEL, IMPORTED_SKILL_UPDATE_ACTIONS, IMPORTED_SKILL_UPDATE_BOUNDARY,
   IMPORTED_SKILL_UPDATE_CHECK_DIRECTORY_LABEL, IMPORTED_SKILL_UPDATE_CHECK_LABEL, IMPORTED_SKILL_UPDATE_CONFLICT_NOTE, IMPORTED_SKILL_UPDATE_HEADING,
@@ -91,6 +91,9 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     const files = el('ul');
     for (const file of disclosed.files) files.append(el('li', `${file.path} · ${file.bytes} 字节 · SHA-256 ${file.sha256}`));
     panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.files), files);
+    panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.conversion));
+    for (const line of importedSkillDisclosureLines(disclosed)) panel.append(el('p', line));
+    if (projection.rule?.active) panel.append(el('p', importedSkillRuleActiveLine(projection.rule.since)));
     for (const problem of disclosed.problems) panel.append(el('p', problem));
     for (const line of importedSkillCeilingLines(disclosed.ceiling)) panel.append(el('p', line));
     const keep = button(IMPORTED_SKILL_UPDATE_ACTIONS.keep, 'keep-update', async () => {
@@ -128,7 +131,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     }
     panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.perFile), files);
     const disposition = el('p', importedSkillUpdateDispositionLine(read.disposition)); disposition.dataset['skillDispositionLine'] = read.disposition;
-    panel.append(disposition);
+    panel.append(disposition, el('p', importedSkillUpdateValidatorLine(read.validator.state)));
     for (const [heading, lines] of [[IMPORTED_SKILL_UPDATE_HEADINGS.validation, read.validator.state === 'validated' ? [] : read.validator.reasons], [IMPORTED_SKILL_UPDATE_HEADINGS.authority, read.authorityChanges], [IMPORTED_SKILL_UPDATE_HEADINGS.conflicts, read.conflicts]] as const) {
       if (lines.length === 0) continue;
       const list = el('ul'); for (const line of lines) list.append(el('li', line));

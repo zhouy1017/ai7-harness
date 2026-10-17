@@ -1,4 +1,6 @@
 import { join, resolve } from 'node:path';
+import { cp } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
@@ -171,6 +173,73 @@ describe('foreign Skill updates over the real store (ADR 0090 §3; REUSE-032 to 
       const waiting = (await (await check(store, first.skillId, 'plain-v3-text')).kept()).candidate!;
       expect(waiting).toMatchObject({ disposition: 'clean', status: 'open', adoptedBy: null });
       expect(store.inspectImportedSkills(auto.adoptedRevisionId, null).history.map((entry) => entry.ordinal)).toEqual([2, 1]);
+    } finally { store.markCleanShutdown(); store.close(); }
+  });
+});
+
+describe('import and update stay distinct at the shared acquisition seam', () => {
+  it('binds a disclosure to import or update of the exact Skill, without consuming it on refusal', async () => {
+    const store = await open();
+    try {
+      const first = await importPlain(store);
+      const update = (await check(store, first.skillId, 'plain-v2-text')).disclosed;
+      const before = counts();
+      await expect(store.importSkillPackage({ path: null, keep: update.acquisition.acquisitionId }))
+        .rejects.toMatchObject({ code: 'SKILL_ACQUISITION_PURPOSE_DIFFERS' });
+      await expect(store.checkImportedSkillUpdate({ skillId: randomUUID(), path: null, keep: update.acquisition.acquisitionId }))
+        .rejects.toMatchObject({ code: 'SKILL_ACQUISITION_PURPOSE_DIFFERS' });
+      const imported = await store.importSkillPackage({ path: fixture('plain-v3-text'), keep: null });
+      await expect(store.checkImportedSkillUpdate({ skillId: first.skillId, path: null, keep: imported.acquisition.acquisitionId }))
+        .rejects.toMatchObject({ code: 'SKILL_ACQUISITION_PURPOSE_DIFFERS' });
+      expect(counts()).toEqual(before);
+      const kept = await store.checkImportedSkillUpdate({ skillId: first.skillId, path: null, keep: update.acquisition.acquisitionId });
+      expect(kept.candidate).toMatchObject({ status: 'open', adoptedRevisionId: null });
+      expect(store.inspectImportedSkills(first.revisionId, null).skills[0]!.revisionId).toBe(first.revisionId);
+    } finally { store.markCleanShutdown(); store.close(); }
+  });
+
+  it('cannot import an inert candidate snapshot to bypass reviewed adoption, and identical history stays idempotent', async () => {
+    const store = await open();
+    try {
+      const first = await importPlain(store);
+      const candidate = (await (await check(store, first.skillId, 'plain-v2-text')).kept()).candidate!;
+      const disclosed = await store.importSkillPackage({ path: fixture('plain-v2-text'), keep: null });
+      const before = counts();
+      await expect(store.importSkillPackage({ path: null, keep: disclosed.acquisition.acquisitionId }))
+        .rejects.toMatchObject({ code: 'SKILL_IMPORT_REQUIRES_UPDATE', message: expect.stringContaining('检查更新（从文件）…') });
+      expect(counts()).toEqual(before);
+      expect(store.inspectImportedSkillUpdate(candidate.candidateId).status).toBe('open');
+      const adopted = store.adoptImportedSkillUpdate({ candidateId: candidate.candidateId, reviewDigest: candidate.reviewDigest, acceptItems: [], upstreamPaths: [] });
+      store.rollbackImportedSkill(first.skillId, first.revisionId);
+      const after = counts();
+      // Re-importing the same already-kept bytes returns that exact revision, without selecting it again.
+      const repeat = await store.importSkillPackage({ path: null, keep: disclosed.acquisition.acquisitionId });
+      expect(repeat.revision!.revisionId).toBe(adopted.adoptedRevisionId);
+      const original = await store.importSkillPackage({ path: fixture('plain'), keep: null });
+      expect((await store.importSkillPackage({ path: null, keep: original.acquisition.acquisitionId })).revision!.revisionId).toBe(first.revisionId);
+      expect(counts()).toEqual(after);
+      expect(store.inspectImportedSkills(first.revisionId, null).skills[0]!.revisionId).toBe(first.revisionId);
+    } finally { store.markCleanShutdown(); store.close(); }
+  });
+
+  it('preserves repair of an identityless rejected source but requires update review once it has an identity', async () => {
+    const store = await open();
+    try {
+      const source = join(roots!.dataRoot, 'synthetic-skill');
+      await cp(fixture('malformed'), source, { recursive: true });
+      const importSource = async () => {
+        const read = await store.importSkillPackage({ path: source, keep: null });
+        return (await store.importSkillPackage({ path: null, keep: read.acquisition.acquisitionId })).revision!;
+      };
+      const bad = await importSource();
+      expect(store.validateImportedSkill(bad.revisionId).state).toBe('rejected');
+      await cp(fixture('plain'), source, { recursive: true });
+      const repaired = await importSource();
+      expect(repaired).toMatchObject({ skillId: bad.skillId, ordinal: 2, previousRevisionId: bad.revisionId, state: 'pending-validation' });
+      await cp(fixture('plain-v2-text'), source, { recursive: true });
+      const before = counts();
+      await expect(importSource()).rejects.toMatchObject({ code: 'SKILL_IMPORT_REQUIRES_UPDATE' });
+      expect(counts()).toEqual(before);
     } finally { store.markCleanShutdown(); store.close(); }
   });
 });

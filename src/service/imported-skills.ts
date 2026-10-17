@@ -270,17 +270,19 @@ export async function acquireSkillPackage(path: string): Promise<AcquiredSkillPa
 
 /** Acquisitions disclosed and not yet kept (ADR 0090 §2): a few, in this process's memory only, never written. */
 export class SkillAcquisitions {
-  readonly #staged = new Map<string, AcquiredSkillPackage>();
-  stage(acquired: AcquiredSkillPackage): string {
+  readonly #staged = new Map<string, { acquired: AcquiredSkillPackage; updateSkillId: string | null }>();
+  /** null is an import; an update is bound to the exact Skill whose disclosure the editor saw. */
+  stage(acquired: AcquiredSkillPackage, updateSkillId: string | null = null): string {
     const acquisitionId = randomUUID();
     while (this.#staged.size >= 4) this.#staged.delete(this.#staged.keys().next().value!);
-    this.#staged.set(acquisitionId, acquired);
+    this.#staged.set(acquisitionId, { acquired, updateSkillId });
     return acquisitionId;
   }
-  read(acquisitionId: string): AcquiredSkillPackage {
+  read(acquisitionId: string, updateSkillId: string | null = null): AcquiredSkillPackage {
     const staged = typeof acquisitionId === 'string' && UUID_PATTERN.test(acquisitionId) ? this.#staged.get(acquisitionId) : undefined;
     requireSkill(staged !== undefined, 'SKILL_ACQUISITION_GONE', '请重新选择要导入的 Skill。');
-    return staged;
+    requireSkill(staged.updateSkillId === updateSkillId, 'SKILL_ACQUISITION_PURPOSE_DIFFERS', '请从原来的导入或检查更新卡片保留所选内容。');
+    return staged.acquired;
   }
   release(acquisitionId: string): void { this.#staged.delete(acquisitionId); }
 }
@@ -308,8 +310,10 @@ export class ImportedSkills {
     const skillId = existing !== undefined ? String(existing.skill_id) : identity !== undefined ? String(identity.skill_id) : null;
     const latest = skillId === null ? undefined
       : this.db.prepare('SELECT * FROM imported_skill_revisions WHERE skill_id = ? ORDER BY ordinal DESC LIMIT 1').get(skillId) as Row | undefined;
-    const kept = existing !== undefined && latest !== undefined && latest.snapshot_id === existing.snapshot_id && latest.working_sha256 === acquired.contentSha256
-      ? String(latest.revision_id) : null;
+    const identical = existing === undefined ? undefined : this.db.prepare(
+      'SELECT revision_id FROM imported_skill_revisions WHERE snapshot_id = ? AND working_sha256 = ? ORDER BY ordinal DESC LIMIT 1',
+    ).get(String(existing.snapshot_id), acquired.contentSha256);
+    const kept = identical === undefined ? null : String(identical.revision_id);
     return { existing, identity, sourceKey, skillId, latest, kept };
   }
 
@@ -332,6 +336,13 @@ export class ImportedSkills {
       const placed = this.#placement(acquired);
       if (placed.identity !== undefined) recordOf(placed.identity);
       if (placed.kept !== null) return this.revision(placed.kept);
+      if (placed.skillId !== null && placed.latest !== undefined) {
+        const current = this.revision(this.currentRevisionId(placed.skillId));
+        // Keep 7c's repair of a rejected package with no declared identity: it cannot be matched by check-update.
+        const source = convertSkillFiles(current.files, current.snapshotSha256, '');
+        requireSkill(current.state === 'rejected' && source.name.trim() === '', 'SKILL_IMPORT_REQUIRES_UPDATE',
+          '这个 Skill 已有修订；请在它的卡片里用「检查更新（从文件）…」查看并采纳新版本。');
+      }
       const now = new Date().toISOString();
       const skillId = placed.skillId ?? randomUUID();
       if (placed.skillId === null) {
@@ -421,7 +432,10 @@ export class ImportedSkills {
   history(skillId: string): ImportedSkillHistoryEntry[] {
     const current = this.currentRevisionId(skillId);
     const selected = this.db.prepare('SELECT reason FROM imported_skill_current_selections WHERE skill_id = ? ORDER BY sequence DESC LIMIT 1').get(skillId);
-    const rows = this.db.prepare('SELECT revision_id FROM imported_skill_revisions WHERE skill_id = ? ORDER BY ordinal DESC LIMIT 20').all(skillId) as Row[];
+    // Keep the current marker visible even after returning to a revision older than the recent history window.
+    const rows = this.db.prepare(`SELECT revision_id FROM imported_skill_revisions WHERE skill_id = ? AND
+      (revision_id = ? OR revision_id IN (SELECT revision_id FROM imported_skill_revisions WHERE skill_id = ? ORDER BY ordinal DESC LIMIT 20))
+      ORDER BY ordinal DESC`).all(skillId, current, skillId) as Row[];
     return rows.map((row) => {
       const revision = this.revision(String(row.revision_id));
       const origin = this.db.prepare('SELECT canonical_json FROM imported_skill_revisions WHERE revision_id = ?').get(revision.revisionId);

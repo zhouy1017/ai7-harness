@@ -130,6 +130,10 @@ describe('the foreign Skill card: checking an update from a file (REUSE-032)', (
     expect(panel).toContain('尚未保留');
     expect(panel).toContain('这是一个新的版本');
     expect(panel).toContain('内容 SHA-256 ' + '7'.repeat(64));
+    expect(panel).toContain('转换报告');
+    expect(panel).toContain('声明文件：未提供');
+    expect(panel).toContain('保留：SKILL.md');
+    expect(panel).toContain('不支持：无');
     expect(check).toHaveBeenCalledTimes(1);
     await click('keep-update');
     expect(check).toHaveBeenLastCalledWith({ skillId: SKILL, keep: read.acquisition.acquisitionId });
@@ -178,6 +182,7 @@ describe('the foreign Skill card: a candidate and its adoption (REUSE-033)', () 
     await click('open-candidate');
     expect(text('[data-skill-candidate]')).toContain(IMPORTED_SKILL_UPDATE_DISPOSITION_LABELS['authority-change']);
     expect(text('[data-skill-candidate]')).toContain('新增资源类别：scripts/');
+    expect(text('[data-skill-candidate]')).toContain('校验结果：通过');
     expect(root.querySelectorAll('[data-skill-file]').map((item) => [item.dataset['skillFile'], item.dataset['skillFileChange']])).toEqual([['SKILL.md', 'upstream'], ['resources/note.md', 'unchanged']]);
     expect(button('adopt')?.disabled).toBe(true);
     root.querySelector('[data-skill-field="accept"]')!.checked = true;

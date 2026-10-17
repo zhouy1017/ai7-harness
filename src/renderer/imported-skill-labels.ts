@@ -1,5 +1,5 @@
 import type {
-  ImportedSkillCeiling, ImportedSkillHistoryEntry, ImportedSkillRevisionProjection, ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCandidateSummary,
+  ImportedSkillAcquisitionProjection, ImportedSkillCeiling, ImportedSkillHistoryEntry, ImportedSkillRevisionProjection, ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCandidateSummary,
   ImportedSkillUpdateCheckProjection, ImportedSkillUpdateDisposition, ImportedSkillUpdateFileChange,
 } from '../shared/protocol.js';
 
@@ -21,7 +21,7 @@ export function importedSkillCeilingLines(ceiling: ImportedSkillCeiling): string
 // 外部 Skill 的更新 (Issue #89; ADR 0090 §3): a local file, an inert candidate, an explicit adoption.
 export const IMPORTED_SKILL_UPDATE_CHECK_LABEL = '检查更新（从文件）…';
 export const IMPORTED_SKILL_UPDATE_CHECK_DIRECTORY_LABEL = '从目录检查更新…';
-export const IMPORTED_SKILL_UPDATE_BOUNDARY = '检查更新只读取你选的本地文件或目录：不联网，不读取任何图书内容，不运行任何内容。保留后只生成一个待你处理的更新，不改动任何现有修订。';
+export const IMPORTED_SKILL_UPDATE_BOUNDARY = '检查更新只读取你选的本地文件或目录：不联网，不读取任何图书内容，不运行任何内容。保留后生成更新候选；只有你亲自采纳，或此 Skill 的自动采纳规则接受无冲突、校验通过、未扩权的更新，才生成新修订，不会安装或启用。';
 export const IMPORTED_SKILL_UPDATE_NOT_ENABLED = '采纳只生成一个待验证的新修订，不会安装或启用；启用仍要另行逐本图书确认。';
 export const IMPORTED_SKILL_UPDATE_NONE = '还没有检查过更新。';
 export function importedSkillUpdateRelationLine(relation: ImportedSkillUpdateCheckProjection['relation']): string {
@@ -71,8 +71,18 @@ export const IMPORTED_SKILL_UPDATE_ACTIONS = {
   keep: '保留此更新', discard: '不保留', open: '查看更新', adopt: '采纳', dismiss: '忽略', close: '关闭', inspectRevision: '查看此修订', rollback: '回到此版本',
 } as const;
 export const IMPORTED_SKILL_UPDATE_HEADINGS = {
-  files: '所选文件', threeWay: '三方对照', perFile: '逐个文件', validation: '校验', authority: '新增的要求', conflicts: '冲突',
+  files: '所选文件', conversion: '转换报告', threeWay: '三方对照', perFile: '逐个文件', validation: '校验', authority: '新增的要求', conflicts: '冲突',
 } as const;
+export function importedSkillDisclosureLines(read: ImportedSkillAcquisitionProjection): string[] {
+  return [
+    `声明文件：${read.notices.join('、') || '未提供'}`,
+    ...([['preserved', '保留'], ['mapped', '确定性映射'], ['reviewRequired', '需要审查'], ['unsupported', '不支持']] as const)
+      .map(([key, label]) => `${label}：${read.conversion[key].join('；') || '无'}`),
+  ];
+}
+export function importedSkillUpdateValidatorLine(state: ImportedSkillUpdateCandidateProjection['validator']['state']): string {
+  return `校验结果：${state === 'validated' ? '通过' : state === 'restricted' ? '受限' : '未通过'}`;
+}
 export const IMPORTED_SKILL_UPDATE_STATUS = {
   disclosed: '已读取所选更新，尚未保留',
   keptOpen: '已保留更新，等你处理；没有改动任何现有修订',

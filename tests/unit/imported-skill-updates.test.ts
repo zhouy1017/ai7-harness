@@ -1,13 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Socket } from 'node:net';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import {
   IMPORTED_SKILL_UPDATE_RULE_CONFIRMATION, IMPORTED_SKILL_UPDATE_SCHEMA_SQL, initializeImportedSkillSchema, initializeImportedSkillUpdateSchema,
 } from '../../src/service/imported-skill-schema.js';
 import { authorityChanges, ImportedSkillUpdates, reconcileFiles, skillIdentity } from '../../src/service/imported-skill-updates.js';
 import { acquireSkillPackage, convertSkillFiles, ImportedSkills } from '../../src/service/imported-skills.js';
+import { CapturedProcedures, capturedProcedureDocument, initializeCapturedProcedureSchema, recordReviewRunProcedurePin } from '../../src/service/captured-procedures.js';
+import { reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import type { ImportedSkillFile, ImportedSkillUpdateCandidateProjection } from '../../src/shared/protocol.js';
 
 const fixture = (name: string) => resolve('tests/fixtures/skills', name);
@@ -57,7 +60,7 @@ beforeEach(() => {
   skills = new ImportedSkills(db);
   updates = new ImportedSkillUpdates(db, skills);
 });
-afterEach(() => { db.close(); });
+afterEach(() => { vi.restoreAllMocks(); db.close(); });
 
 describe('three-way reconciliation of a foreign Skill update (REUSE-032)', () => {
   it('classifies each file against the prior snapshot, the working revision and the incoming snapshot', () => {
@@ -94,6 +97,24 @@ describe('three-way reconciliation of a foreign Skill update (REUSE-032)', () =>
 });
 
 describe('checking an update from a file', () => {
+  it('compares the full declared identity even when two display names truncate to the same label', async () => {
+    const source = await acquireSkillPackage(fixture('plain'));
+    const original = Buffer.from(source.files[0]!.base64, 'base64').toString('utf8');
+    const identity = `synthetic-${'a'.repeat(120)}-one`;
+    const packageOf = (name: string, revision: string) => {
+      const files = [file('SKILL.md', original.replace('synthetic-style-review', name).replace('1.0.0', revision))];
+      const contentSha256 = sha256Hex(canonicalJson(files));
+      return { ...source, files, contentSha256, conversion: convertSkillFiles(files, contentSha256, '') };
+    };
+    const base = skills.keep(packageOf(identity, '1.0.0'));
+    const other = packageOf(identity.replace(/one$/u, 'two'), '1.1.0');
+    expect(other.conversion.name).toBe(base.name);
+    const before = tableCounts();
+    expect(() => updates.keep(base.skillId, other, randomUUID())).toThrow('这不是同一个 Skill 的新版本');
+    expect(tableCounts()).toEqual(before);
+    expect(updates.verify(base.skillId, packageOf(identity, '1.1.0'))).toBe('newer');
+  });
+
   it('refuses a package whose identity differs, or that is not a Skill, before anything is staged or kept', async () => {
     const base = await imported();
     const before = tableCounts();
@@ -162,6 +183,18 @@ describe('checking an update from a file', () => {
     expect(candidate).toMatchObject({ disposition: 'validator-failed', validator: { state: 'rejected' }, authorityChanges: [], conflicts: [] });
     expect(candidate.validator.reasons).toEqual(['前置信息需要非空的 name 和 description。']);
     expect(candidate.acceptItems).toEqual(candidate.validator.reasons);
+  });
+
+  it.each(['data-scope', 'host-behaviour', 'analysis-contract', 'schema', 'reducer', 'budget', 'schedule'])('names a new %s declaration as an authority change even when the converter restricts it', async (key) => {
+    const base = await imported();
+    const source = await acquireSkillPackage(fixture('plain-v2-text'));
+    const original = Buffer.from(source.files[0]!.base64, 'base64').toString('utf8');
+    const files = [file('SKILL.md', original.replace('license: MIT', `license: MIT\n${key}: synthetic-new-value`))];
+    const contentSha256 = sha256Hex(canonicalJson(files));
+    const candidate = updates.keep(base.skillId, { ...source, files, contentSha256, conversion: convertSkillFiles(files, contentSha256, base.name) }, randomUUID()).candidate!;
+    expect(candidate).toMatchObject({ disposition: 'authority-change', validator: { state: 'restricted' } });
+    expect(candidate.authorityChanges).toContain(`新增或改变的范围、宿主或运行约定：${key}`);
+    expect(candidate.acceptItems).toContain(`新增或改变的范围、宿主或运行约定：${key}`);
   });
 
   it('dispositions a file changed both by the editor and upstream as a conflict', async () => {
@@ -301,6 +334,55 @@ describe('the Artifact Update Rule (REUSE-034)', () => {
 });
 
 describe('current selection and rollback (REUSE-035)', () => {
+  it('leaves a recorded Captured Procedure version and its exact Run pin byte for byte through update and rollback', async () => {
+    // A minimal Run identity supplies the FK; the version and by-value pin use the product schema and writers.
+    // Imported Skills have no executor, so no test invents an executable Run pin to an imported revision.
+    db.exec('CREATE TABLE review_runs(review_run_id TEXT PRIMARY KEY) STRICT');
+    initializeCapturedProcedureSchema(db);
+    const runId = randomUUID();
+    db.prepare('INSERT INTO review_runs VALUES (?)').run(runId);
+    const procedures = new CapturedProcedures(db);
+    const document = capturedProcedureDocument('合成工序', [reviewCategoryEntry('style-and-format')!], 'whole');
+    const version = procedures.save({ procedureId: null, document, sourceBookId: bookId, sourceReviewRunId: runId, sourceRunOrdinal: 1 });
+    recordReviewRunProcedurePin(db, runId, {
+      procedureId: version.procedureId, versionId: version.versionId, version: version.version, title: document.title,
+      documentSha256: version.documentSha256, scope: 'whole', steps: ['style-and-format'], chosenApart: [],
+    }, ['style-and-format'], [], new Date().toISOString());
+    const pins = () => ['captured_procedures', 'captured_procedure_versions', 'review_run_procedure_pins']
+      .map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+    const base = await imported();
+    const before = pins();
+    const candidate = (await check(base.skillId, 'plain-v2-text')).candidate!;
+    expect(pins()).toEqual(before);
+    adopt(candidate);
+    expect(pins()).toEqual(before);
+    updates.rollback(base.skillId, base.revisionId);
+    expect(pins()).toEqual(before);
+  });
+
+  it('does no network work while checking, adopting, using a rule or rolling back', async () => {
+    const connect = vi.spyOn(Socket.prototype, 'connect');
+    const fetch = vi.spyOn(globalThis, 'fetch');
+    const base = await imported();
+    adopt((await check(base.skillId, 'plain-v2-text')).candidate!);
+    updates.createRule(base.skillId, IMPORTED_SKILL_UPDATE_RULE_CONFIRMATION);
+    expect((await check(base.skillId, 'plain-v3-text')).candidate!.adoptedBy).toBe('rule');
+    updates.revokeRule(base.skillId);
+    updates.rollback(base.skillId, base.revisionId);
+    expect(connect).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps the current marker visible after rollback beyond the recent twenty revisions', async () => {
+    const base = await imported();
+    for (let ordinal = 2; ordinal <= 22; ordinal += 1) derive(base.skillId, `${LOCAL_SKILL}\nSynthetic revision ${ordinal}.`);
+    updates.rollback(base.skillId, base.revisionId);
+    const page = updates.inspect(base.revisionId, null);
+    expect(page.history).toHaveLength(21);
+    expect(page.history.filter((entry) => entry.current)).toEqual([expect.objectContaining({ revisionId: base.revisionId, selectedReason: 'rollback' })]);
+    expect(page.skills[0]!.revisionId).toBe(base.revisionId);
+  });
+
   it('returns to an earlier revision as a new current selection, without rewriting history or restoring enablement', async () => {
     const base = await imported();
     skills.validate(base.revisionId);

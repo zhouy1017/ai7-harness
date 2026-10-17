@@ -28,7 +28,16 @@ const NOT_THE_SAME = '这不是同一个 Skill 的新版本。';
 /** The stable identity of a Skill across its versions: the `name` its SKILL.md front matter declares, or none when it declares none. */
 export function skillIdentity(files: readonly ImportedSkillFile[], digest: string): string | null {
   const name = convertSkillFiles(files, digest, NO_IDENTITY).name.trim();
-  return name === '' || name === NO_IDENTITY ? null : name;
+  if (name === '' || name === NO_IDENTITY) return null;
+  // The converter bounds display names to 120 characters. Stable identity compares the full declared scalar, not that label.
+  const skill = files.filter(isSkillFile);
+  if (skill.length !== 1) return null;
+  const front = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(Buffer.from(skill[0]!.base64, 'base64').toString('utf8'))?.[1];
+  const names = [...front?.matchAll(/^name:[ \t]*(.*)$/gimu) ?? []];
+  if (names.length !== 1) return null;
+  const scalar = names[0]![1]!.trim();
+  const identity = /^["']/u.test(scalar) && scalar.endsWith(scalar[0]!) ? scalar.slice(1, -1).trim() : scalar;
+  return identity === '' ? null : identity;
 }
 
 /** Three-way, file by file: what changed upstream since the prior snapshot, what changed locally in the working revision, and both. */
@@ -56,8 +65,27 @@ export function authorityChanges(
   for (const line of incoming.conversion.unsupported) if (!unsupported.has(line)) items.push(`新增脚本、依赖或宿主配置：${line}`);
   const declared = new Set(base.ceiling.requestedCapabilities);
   for (const capability of incoming.ceiling.requestedCapabilities) if (!declared.has(capability)) items.push(`新增或改变的权限、工具声明：${capability}`);
+  // These declarations remain unrecognized/restricted by 7c's converter. They still must be named as authority changes,
+  // rather than disappearing into a generic validator failure (ADR 0090 §3, ADR 0045 § Update and rollback).
+  const declarations = (files: readonly ImportedSkillFile[]): Map<string, string> => {
+    const values = new Map<string, string>();
+    for (const file of files.filter(isSkillFile)) {
+      const front = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(Buffer.from(file.base64, 'base64').toString('utf8'))?.[1];
+      let key = '';
+      for (const line of front?.split(/\r?\n/u) ?? []) {
+        const field = /^([A-Za-z][A-Za-z0-9_-]*):[ \t]*(.*)$/u.exec(line);
+        if (field !== null) {
+          key = /^(?:data[-_]scope|host[-_]behaviou?r|analysis[-_]contracts?|schemas?|reducers?|budgets?|schedules?)$/iu.test(field[1]!) ? field[1]!.toLowerCase() : '';
+          if (key !== '') values.set(key, field[2]!.trim());
+        } else if (key !== '' && /^[ \t]+\S/u.test(line)) values.set(key, `${values.get(key) ?? ''} ${line.trim()}`);
+      }
+    }
+    return values;
+  };
+  const priorDeclarations = declarations(base.workingFiles);
+  for (const [key, value] of declarations(incomingFiles)) if (priorDeclarations.get(key) !== value) items.push(`新增或改变的范围、宿主或运行约定：${key}`);
   const resourceClass = (path: string): string => path.includes('/') ? `${path.slice(0, path.indexOf('/'))}/` : '（根目录）';
-  const known = new Set([...base.workingFiles, ...base.files].map((file) => resourceClass(file.path)));
+  const known = new Set(base.workingFiles.map((file) => resourceClass(file.path)));
   for (const kind of [...new Set(incomingFiles.map((file) => resourceClass(file.path)))].sort()) if (!known.has(kind)) items.push(`新增资源类别：${kind}`);
   for (const key of Object.keys(incoming.ceiling) as Array<keyof ImportedSkillCeiling>) {
     if (key !== 'requestedCapabilities' && incoming.ceiling[key] !== base.ceiling[key]) items.push(`权限上限扩大：${key}`);
@@ -108,7 +136,7 @@ export class ImportedSkillUpdates {
   #relation(base: ImportedSkillRevisionProjection, acquired: AcquiredSkillPackage): ImportedSkillUpdateCheckProjection['relation'] {
     requireSkill(acquired.files.some(isSkillFile), 'SKILL_NOT_A_PACKAGE', '所选内容里没有 SKILL.md，不是 Skill 包；不会保留。');
     const identity = skillIdentity(acquired.files, acquired.contentSha256);
-    requireSkill(identity !== null && identity === base.name, 'SKILL_UPDATE_IDENTITY_DIFFERS', NOT_THE_SAME);
+    requireSkill(identity !== null && identity === skillIdentity(base.files, base.snapshotSha256), 'SKILL_UPDATE_IDENTITY_DIFFERS', NOT_THE_SAME);
     const existing = this.db.prepare('SELECT snapshot_id, skill_id FROM imported_skill_snapshots WHERE content_sha256 = ?').get(acquired.contentSha256);
     if (existing === undefined) return 'newer';
     requireSkill(existing.skill_id === base.skillId, 'SKILL_UPDATE_IDENTITY_DIFFERS', NOT_THE_SAME);

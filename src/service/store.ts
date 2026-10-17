@@ -9201,7 +9201,7 @@ export class EditorialStore {
     const { keep } = input;
     if (keep !== null) {
       return this.#procedureCall(() => {
-        const acquired = this.#skillAcquisitions.read(keep);
+        const acquired = this.#skillAcquisitions.read(keep, input.skillId);
         const result = this.#skillUpdates().keep(input.skillId, acquired, keep);
         this.#skillAcquisitions.release(keep);
         return result;
@@ -9216,7 +9216,7 @@ export class EditorialStore {
     return this.#procedureCall(() => {
       // Identity is checked before the package is staged: one that is not this Skill leaves no trace.
       this.#skillUpdates().verify(input.skillId, acquired);
-      return this.#skillUpdates().disclose(input.skillId, acquired, this.#skillAcquisitions.stage(acquired));
+      return this.#skillUpdates().disclose(input.skillId, acquired, this.#skillAcquisitions.stage(acquired, input.skillId));
     });
   }
 
