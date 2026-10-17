@@ -3,7 +3,7 @@ import { HouseReviewPreferenceLedger } from '../../src/service/house-review-pref
 import { HOUSE_PREFERENCE_CLOSED, HOUSE_PREFERENCE_NOT_RULE } from '../../src/service/task-plan.js';
 import { editCategoryWeight, graphemeEditVolume } from '../../src/service/edit-quality-signals.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -514,6 +514,17 @@ describe('a Review Run over the real store on exact sample1', () => {
     await withBook('sample1-review-authored', async (session, book) => {
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
       const reviewRunId = run.reviewRunId;
+      const databaseBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      const walBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal'));
+      const aggregateBefore = session.store.inspectBookFindings(book.bookId);
+      expect(aggregateBefore.items.filter((item) => item.target.kind === 'review').length).toBe(run.findingCounts.pending);
+      expect(aggregateBefore.groups.some((group) => group.category === `review:${TYPOS}`)).toBe(true);
+      expect(aggregateBefore.groups.some((group) => group.category === `review:${STYLE}`)).toBe(true);
+      const aggregateAgain = session.store.inspectBookFindings(book.bookId, 1);
+      // Filtering, grouping and dropping this projection are reads. Compare booleans to keep payloads out of failures.
+      aggregateAgain.items.filter((item) => item.category === `review:${TYPOS}`);
+      expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite')).equals(databaseBytes)).toBe(true);
+      expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal')).equals(walBytes)).toBe(true);
       const [annotation, anotherAnnotation] = run.findings.filter((finding) => finding.categoryId === STYLE);
       const [applied, ignored] = run.findings.filter((finding) => finding.categoryId === TYPOS && finding.severity !== 'must');
       const must = run.findings.filter((finding) => finding.severity === 'must');
@@ -538,6 +549,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, applied!.findingId, '已经应用'))).toBe('REVIEW_FINDING_NOT_PENDING');
       const reason = '作者坚持保留这一写法，出版社体例允许。';
       current = session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, `  ${reason}  `).run!;
+      const aggregateAfter = session.store.inspectBookFindings(book.bookId);
+      expect(aggregateAfter.items.some((item) => item.id === ignored!.findingId)).toBe(false);
+      expect(aggregateAfter.items.filter((item) => item.target.kind === 'review').length).toBe(current.findingCounts.pending);
       expect(status(ignored!.findingId)).toMatchObject({ status: 'ignored', statusLabel: '已忽略', ignoreReason: reason, markStatus: 'removed' });
       expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, reason))).toBe('REVIEW_FINDING_NOT_PENDING');
       // The ignored finding's mark is set aside: it no longer stands on the manuscript.
@@ -1821,6 +1835,26 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
       // A report that is not this Book's — or none at all — is refused, and nothing is prepared.
       expect(await exportCode(() => session.store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'report', reportId: randomUUID() }, options }, true)))
         .toBe('EXPORT_TARGET_NOT_FOUND');
+      // #953: a frozen package carries the exact recorded report through S64's archive stream hook too.
+      const milestone = await session.store.saveMilestone(book.manuscriptId, book.branchId, '归档稿', 'stage-archive', null, '');
+      session.store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '测试存档', basis: '测试记录' });
+      for (const typeId of ['news-release', 'promotion-article', 'review-article', 'launch-materials', 'marketing-points']) {
+        session.store.decideProductionDocumentType({ bookId: book.bookId, typeId, notForThisBook: true });
+      }
+      const bundle = session.store.inspectBookDeliveryPackage(book.bookId);
+      const version = session.store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '报告存档', expectedContentDigest: bundle.content.digest }).package.versions[0]!;
+      const archiveReview = await session.store.reviewBookDeliveryPackageExport({ bookId: book.bookId, packageVersionId: version.packageVersionId,
+        options: { includeAnnotations: true, includeSuggestions: true }, route: 'archive' }, true);
+      const archivePath = join(outbox, '含审阅报告.zip');
+      const preparedArchive = await session.store.prepareBookDeliveryPackageArchiveExport({ bookId: book.bookId, packageVersionId: version.packageVersionId,
+        options: archiveReview.options, memberKeys: [], reviewDigest: archiveReview.reviewDigest, destination: archivePath }, true);
+      const exportedArchive = await session.store.approveBookDeliveryPackageExport({ bookId: book.bookId, exportId: preparedArchive.exportId }, true);
+      const reportMember = exportedArchive.export.files.find((file) => file.key === `report:${report.reportId}`)!;
+      expect(reportMember.outcome).toBe('created');
+      const archive = unzipSync(await readFile(archivePath));
+      expect(createHash('sha256').update(archive[reportMember.fileName]!).digest('hex'))
+        .toBe(createHash('sha256').update(written).digest('hex'));
+
     });
   }, 300_000);
 });

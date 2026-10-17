@@ -1,4 +1,11 @@
 import { createAppearance } from './appearance.js';
+import { mountFindingsCenter } from './findings-center.js';
+import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
+import { createSaveMenu } from './save-menu.js';
+import { SAVE_MENU_WORDS } from './save-menu-labels.js';
+import { mountParagraphAnalysis } from './paragraph-analysis.js';
+import { PARAGRAPH_ANALYSIS_WORDS } from './paragraph-analysis-labels.js';
+import type { BookFindingProjection, ParagraphAnalysisProjection } from '../shared/protocol.js';
 import {
   APPEARANCE_BACK,
   APPEARANCE_CHOICES,
@@ -336,6 +343,15 @@ function requiredElement(selector: string): HTMLElement {
 
 const screen = requiredElement('#screen');
 const persistenceStatus = requiredElement('#persistence-status');
+let activeSaveMenu: ReturnType<typeof createSaveMenu> | undefined;
+let paragraphPanel: ReturnType<typeof mountParagraphAnalysis> | undefined;
+let paragraphSelectionOff: (() => void) | undefined;
+persistenceStatus.addEventListener('click', () => {
+  if (activeSaveMenu !== undefined) (activeSaveMenu.element as HTMLDetailsElement).open = !(activeSaveMenu.element as HTMLDetailsElement).open;
+});
+persistenceStatus.addEventListener('keydown', (event) => {
+  if (activeSaveMenu !== undefined && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); persistenceStatus.click(); }
+});
 /** Incremented on every status update so a delayed completion cannot overwrite a newer message. */
 let statusRevision = 0;
 if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
@@ -1205,6 +1221,16 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   keyboardSettingsOff?.();
   keyboardSettingsOff = undefined;
   closeNavigation = null;
+  paragraphPanel?.destroy();
+  paragraphPanel = undefined;
+  paragraphSelectionOff?.();
+  paragraphSelectionOff = undefined;
+  activeSaveMenu?.destroy();
+  activeSaveMenu = undefined;
+  persistenceStatus.setAttribute('role', 'status');
+  persistenceStatus.removeAttribute('tabindex');
+  persistenceStatus.removeAttribute('aria-controls');
+  persistenceStatus.removeAttribute('aria-expanded');
   leaveGuard = null;
   taskSurfaceRefresh = {};
   screen.dataset['screen'] = state;
@@ -2663,7 +2689,23 @@ async function renderBookWorkbenchChooser(
  * The way back to the manuscript and to the overview sits in a persistent region, because a settled
  * result set is the longest thing this product renders and its way out must survive it (LAYER-005).
  */
-function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAnalysisItem | string): void {
+function renderBookFindings(bookId: string, bookTitle: string): void {
+  const content = panel();
+  content.classList.add('book-findings'); content.dataset['bookId'] = bookId;
+  const host = element('div', 'findings-center');
+  content.append(element('p', 'section-label', FINDINGS_CENTER_WORDS.section(bookTitle)), element('h2', undefined, FINDINGS_CENTER_WORDS.heading),
+    element('p', 'lede', FINDINGS_CENTER_WORDS.lede), host);
+  replaceScreen('book-findings', content, { bookId, title: bookTitle, section: 'findings' });
+  mountFindingsCenter(host, (offset) => window.ai7.inspectBookFindings({ offset }), (item: BookFindingProjection) => {
+    const target = item.target;
+    if (target.kind === 'review') renderBookReview(bookId, bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId });
+    else if (target.kind === 'risk') renderBookEvaluation(bookId, bookTitle, target);
+    else renderBookAnalysis(bookId, bookTitle, target.revisionId, { tab: 'chapters', gap: target.unitOrdinal });
+  });
+  setStatus(FINDINGS_CENTER_WORDS.opened);
+}
+
+function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAnalysisItem | string, focus?: { tab: AnalysisTabId; gap?: number }): void {
   const judged = typeof target === 'string' ? undefined : target;
   const revisionId = typeof target === 'string' ? target : undefined;
   const content = panel();
@@ -2714,6 +2756,11 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
       (projection) => {
         if (!host.isConnected || projection.bookId !== host.dataset['analysisBookId']) return;
         renderBaselineAnalysis(host, projection, bookTitle);
+        if (first && focus !== undefined) {
+          host.querySelector<HTMLButtonElement>(`button[data-analysis-tab="${focus.tab}"]`)?.click();
+          const item = focus.gap === undefined ? host.querySelector<HTMLElement>(`[data-analysis-panel="${focus.tab}"]`) : host.querySelector<HTMLElement>(`[data-analysis-gap-unit="${focus.gap}"]`);
+          if (item !== null) { item.tabIndex = -1; item.scrollIntoView({ block: 'center' }); item.focus({ preventScroll: true }); }
+        }
         if (first && judged !== undefined) showJudgedAnalysisItem(host, judged.itemKey);
       },
       (error) => {
@@ -2924,7 +2971,7 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
  * ②C 评估 (Issue #429, plan slice S81a; editor-surfaces §5): the Book's Evaluation Records under the house profile — the surface
  * is `evaluation.ts` — with the way back to the manuscript and to 工作概览.
  */
-function renderBookEvaluation(bookId: string, bookTitle: string): void {
+function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recordId: string; riskId: string }): void {
   const content = panel();
   content.classList.add('book-evaluation');
   content.dataset['bookId'] = bookId;
@@ -2935,9 +2982,13 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
     element('p', 'field-note', EVALUATION_LEDE),
     host,
   );
+  let firstEvaluationRead = true;
   const surface = mountEvaluation({
     root: host,
-    api: window.ai7,
+    api: { ...window.ai7, inspectEvaluation: (input) => {
+      const first = firstEvaluationRead; firstEvaluationRead = false;
+      return window.ai7.inspectEvaluation(first && focus !== undefined ? { recordId: focus.recordId } : input);
+    } },
     setStatus,
     errorMessage: rendererErrorMessage,
     technicalDetails,
@@ -2982,7 +3033,13 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
   setStatus(EVALUATION_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
-      if (content.isConnected) setStatus(EVALUATION_STATUS.opened);
+      if (content.isConnected) {
+        setStatus(EVALUATION_STATUS.opened);
+        if (focus !== undefined) {
+          const risk = host.querySelector<HTMLElement>(`[data-risk-id="${CSS.escape(focus.riskId)}"]`);
+          if (risk !== null) { risk.tabIndex = -1; risk.scrollIntoView({ block: 'center' }); risk.focus({ preventScroll: true }); }
+        }
+      }
     },
     (error: unknown) => {
       if (content.isConnected) setStatus(rendererErrorMessage(error, EVALUATION_STATUS.unavailable), 'error');
@@ -6431,7 +6488,7 @@ function renderHelp(): void {
  * A section of the current Book's groups, from the sidebar (Issue #934; IA-012): reuse the window's owned Book route so
  * section changes preserve its manuscript capabilities. Reassigning even the same Book deliberately revokes those in main.
  * A different route still goes through the window owner; 稿件 enters at the remembered position (RET-002), as 书库 does.
- * 发现 is ②A's judged items until the Book-level aggregate exists (IA-013, a follow-up); 历史与恢复 is 工作概览's records.
+ * 发现 opens its read-only Book aggregate; 历史与恢复 is 工作概览's records.
  */
 async function openBookSection(book: ShellBookEntry, section: ShellBookSection): Promise<void> {
   const recoveryReturn = currentRecoveryReturn();
@@ -6443,10 +6500,9 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
       else if (section === 'review') renderBookReview(bookId, bookTitle);
       else if (section === 'evaluation') renderBookEvaluation(bookId, bookTitle);
       else if (section === 'deliverables') renderBookDeliverables(bookId, bookTitle);
-      else if (section === 'analysis' || section === 'findings') {
-        renderBookAnalysis(bookId, bookTitle);
-        if (section === 'findings') shell.markSection('findings');
-      } else if (section === 'sources') renderBookSources(bookId, bookTitle);
+      else if (section === 'findings') renderBookFindings(bookId, bookTitle);
+      else if (section === 'analysis') renderBookAnalysis(bookId, bookTitle);
+      else if (section === 'sources') renderBookSources(bookId, bookTitle);
       else {
         renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }), undefined, recoveryReturn);
         if (section === 'history') {
@@ -8387,6 +8443,16 @@ function renderEditorWindow(
   const recordsGroup = element('nav', 'book-records-group');
   recordsGroup.setAttribute('aria-label', '资料与记录');
   recordsGroup.append(element('span', 'section-label', '资料与记录'), ...(isDocument ? [] : [openAnalysis, openSources]), backToOverview);
+  const processingGroup = element('nav', 'book-processing-group');
+  processingGroup.setAttribute('aria-label', '处理');
+  const openFindings = button('发现', 'secondary', async () => {
+    try {
+      if (!(await settleLocalEdit())) return;
+      await rememberEntryPosition(); renderBookFindings(currentWindow.bookId, bookTitle);
+    } catch (error) { setStatus(rendererErrorMessage(error, FINDINGS_CENTER_WORDS.openFailed), 'error'); }
+  });
+  openFindings.dataset['workDestination'] = 'findings';
+  processingGroup.append(element('span', 'section-label', '处理'), openFindings);
   // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物): 审阅 (editor-surfaces §4), 评估 (§5) and 交付物 (§9) — a document has
   // only its way back. They are destinations of the Book beside 资料与记录, never entries on the right edge, whose three
   // entries are 导航 / 分析 / 任务.
@@ -8396,7 +8462,7 @@ function renderEditorWindow(
   // 保存为版本 (Issue #415): a document's working text becomes its next version; the manuscript's milestones stay its own.
   const saveVersion = button(DOCUMENT_ACTION_LABELS.saveVersion, 'secondary', () => void saveDocumentVersion());
   saveVersion.dataset['documentAction'] = 'saveVersion';
-  toolbarActions.append(workGroup, recordsGroup, undo, redo, save, ...(isDocument ? [saveVersion] : []), retryAuthoritativeRefreshButton);
+  toolbarActions.append(workGroup, ...(isDocument ? [] : [processingGroup]), recordsGroup, undo, redo, save, ...(isDocument ? [saveVersion] : []), retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
   const workspace = element('div', 'editor-workspace');
@@ -8472,7 +8538,7 @@ function renderEditorWindow(
   // Nothing is preselected, and 保存里程碑版本 stays unavailable, its reason in words beside it, until a label
   // and a purpose are given. A purpose states the next use only and grants nothing (MILE-009).
   const milestoneSection = element('details', 'navigator-section milestone-section');
-  const milestoneSummary = element('summary', undefined, MILESTONE_FORM_WORDS.summary);
+  const milestoneSummary = element('summary', undefined, SAVE_MENU_WORDS.milestone);
   const milestoneLabel = element('label', undefined, MILESTONE_FORM_WORDS.label);
   milestoneLabel.htmlFor = 'milestone-label';
   const milestoneName = element('input');
@@ -8544,7 +8610,12 @@ function renderEditorWindow(
     milestoneButton,
     milestoneReason,
   );
-  navigator.append(outlineSection, searchSection, ...(isDocument ? [] : [milestoneSection]));
+  navigator.append(outlineSection, searchSection);
+  const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => openDeliverables.click());
+  const analysisPanel = element('aside', 'manuscript-navigator paragraph-analysis-panel');
+  analysisPanel.id = 'paragraph-analysis-panel';
+  analysisPanel.setAttribute('aria-label', PARAGRAPH_ANALYSIS_WORDS.title);
+  analysisPanel.hidden = true;
   // The outline and the search are one 导航 panel, opened on demand over the manuscript's right side and
   // closed by default, so the manuscript stays the central object (V2-UX-ED-015).
   navigator.id = 'manuscript-navigation-panel';
@@ -8582,9 +8653,11 @@ function renderEditorWindow(
   navigationEntry.dataset['shortcutCommand'] = 'search.find';
   navigationEntry.dataset['shortcutBase'] = '大纲与全稿查找';
   navigationEntry.title = `大纲与全稿查找（${shortcutHint('search.find') ?? ''}）`;
-  const analysisEntry = button('分析', 'quiet', () => openAnalysis.click());
+  let localParagraphPanel: ReturnType<typeof mountParagraphAnalysis> | undefined;
+  let analysisPositionSource: 'caret' | 'scroll' = 'caret';
+  const analysisEntry = button('分析', 'quiet', () => localParagraphPanel?.toggle());
   analysisEntry.dataset['edgeEntry'] = 'analysis';
-  analysisEntry.title = '打开这本书的分析';
+  analysisEntry.title = PARAGRAPH_ANALYSIS_WORDS.entry;
   // 任务 (Issue #423, S77a; TASK-044): the Book's 任务 panel in the side slot, and closed again from here.
   const tasksEntry = button('任务', 'quiet', () => {
     const showing = taskDrawer.view();
@@ -8618,11 +8691,11 @@ function renderEditorWindow(
     errorMessage: rendererErrorMessage,
   });
   if (documentLens !== undefined) workspace.classList.add('document-workspace');
-  workspace.append(manuscript, ...(documentLens === undefined ? [] : [documentLens.element]), navigator, edge);
+  workspace.append(manuscript, ...(documentLens === undefined ? [] : [documentLens.element]), navigator, ...(isDocument ? [] : [analysisPanel]), edge);
 
   const setNavigationOpen = (open: boolean): void => {
     // One supporting side surface at a time (IA): 导航 opening closes the Task Drawer beside the manuscript.
-    if (open) taskDrawer.close(false);
+    if (open) { taskDrawer.close(false); localParagraphPanel?.close(); }
     navigator.hidden = !open;
     navigationEntry.setAttribute('aria-expanded', open ? 'true' : 'false');
     workspace.dataset['navigation'] = open ? 'open' : 'closed';
@@ -8635,6 +8708,8 @@ function renderEditorWindow(
   });
   let scrollingTimer: number | undefined;
   editorWindow.addEventListener('scroll', () => {
+    analysisPositionSource = 'scroll';
+    localParagraphPanel?.refresh();
     editorWindow.dataset['scrolling'] = 'true';
     if (scrollingTimer !== undefined) window.clearTimeout(scrollingTimer);
     scrollingTimer = window.setTimeout(() => {
@@ -8659,16 +8734,87 @@ function renderEditorWindow(
   content.append(toolbar, workspace, identities);
   if (reimport !== undefined) toolbar.after(reimportLandingSection(reimport));
   replaceScreen('editor', content, { bookId: initialWindow.bookId, title: bookTitle, section: isDocument ? 'deliverables' : 'manuscript' });
+  if (saveMenu !== undefined) {
+    activeSaveMenu = saveMenu;
+    saveMenu.element.id = 'manuscript-save-menu';
+    saveMenu.update(null, null);
+    shell.setContextActions(saveMenu.element);
+    persistenceStatus.setAttribute('role', 'button'); persistenceStatus.tabIndex = 0;
+    persistenceStatus.setAttribute('aria-controls', saveMenu.element.id);
+    saveMenu.element.addEventListener('toggle', () => persistenceStatus.setAttribute('aria-expanded', String((saveMenu.element as HTMLDetailsElement).open)));
+  }
   // …and the drawer opening closes 导航: the slot is this manuscript's while it is on screen.
   closeNavigation = () => {
     if (!navigator.hidden) setNavigationOpen(false);
+    localParagraphPanel?.close();
   };
   if (entryNotice !== undefined) showEntryNotice(content, entryNotice);
 
   let currentWindow = initialWindow;
+  if (!isDocument) {
+    const currentBlock = (): string | null => {
+      const focused = editor?.captureContinuity();
+      return (analysisPositionSource === 'caret' ? focused?.head.blockId : focused?.scrollAnchor.blockId) ?? currentWindow.blocks[0]?.blockId ?? null;
+    };
+    localParagraphPanel = mountParagraphAnalysis({
+      bookId: initialWindow.bookId,
+      root: analysisPanel, entry: analysisEntry,
+      read: async () => {
+        const blockId = currentBlock(); if (blockId === null) return null;
+        const result = await window.ai7.inspectParagraphAnalysis({ manuscriptId: initialWindow.manuscriptId, blockId, radius: 1 });
+        if (blockId !== currentBlock()) { localParagraphPanel?.refresh(); return undefined; }
+        return result;
+      },
+      lastViewed: () => shellPreferences.current['analysis.lastViewedRevision'][initialWindow.bookId]?.ordinal ?? 0,
+      viewed: (revision) => shellPreferences.viewAnalysis(initialWindow.bookId, revision),
+      notice: () => showEntryNotice(content, PARAGRAPH_ANALYSIS_WORDS.hint),
+      beforeOpen: () => { setNavigationOpen(false); taskDrawer.close(false); },
+      openItem: (item: ParagraphAnalysisProjection['items'][number], revisionId: string) => {
+        void (async () => {
+          if (authoritativeMutationBusy()) return;
+          if (!(await settleLocalEdit())) return;
+          await rememberEntryPosition();
+          renderBookAnalysis(initialWindow.bookId, bookTitle, revisionId, { tab: item.kind === 'settingClaims' ? 'settings' : item.kind });
+        })().catch((error: unknown) => setStatus(rendererErrorMessage(error, PARAGRAPH_ANALYSIS_WORDS.openFailed), 'error'));
+      },
+    });
+    paragraphPanel = localParagraphPanel;
+    const selectionChanged = (): void => {
+      if (editorHost.contains(document.getSelection()?.anchorNode ?? null)) { analysisPositionSource = 'caret'; localParagraphPanel?.refresh(); }
+    };
+    document.addEventListener('selectionchange', selectionChanged);
+    paragraphSelectionOff = () => document.removeEventListener('selectionchange', selectionChanged);
+  }
   let dirty = false;
   let saving = false;
   let retryRequired = false;
+  let editingInterrupted = false;
+  let changedSinceMilestone: string | null = null;
+  let milestonePersistenceTimer: number | undefined;
+  let milestonePersistenceRead = 0;
+  let milestoneReadDigest: string | undefined;
+  const updatePersistenceMenu = (): void => saveMenu?.update({ dirty, saving, retryRequired, interrupted: editingInterrupted }, changedSinceMilestone);
+  const refreshMilestonePersistence = (force = false): void => {
+    if (saveMenu === undefined || (!force && milestoneReadDigest === currentWindow.workingDigest)) return;
+    milestoneReadDigest = currentWindow.workingDigest;
+    changedSinceMilestone = null;
+    updatePersistenceMenu();
+    if (milestonePersistenceTimer !== undefined) window.clearTimeout(milestonePersistenceTimer);
+    const request = ++milestonePersistenceRead;
+    milestonePersistenceTimer = window.setTimeout(() => {
+      if (!content.isConnected) return;
+      void window.ai7.inspectDeliverables().then((page) => {
+        if (!content.isConnected || request !== milestonePersistenceRead || page.manuscript?.manuscriptId !== currentWindow.manuscriptId ||
+            page.manuscript.workingDigest !== currentWindow.workingDigest || page.manuscript.revisionId !== currentWindow.revisionId) return;
+        const latest = page.publication.milestones[0];
+        changedSinceMilestone = latest?.changedSince === true ? SAVE_MENU_WORDS.changedSinceMilestone(latest.label) : null;
+        updatePersistenceMenu();
+      }).catch(() => {
+        if (content.isConnected && request === milestonePersistenceRead) { changedSinceMilestone = SAVE_MENU_WORDS.milestoneUnavailable; updatePersistenceMenu(); }
+      });
+    }, 250);
+  };
+  saveMenu?.element.addEventListener('toggle', () => { if ((saveMenu.element as HTMLDetailsElement).open) refreshMilestonePersistence(true); });
   let outlinePage: OutlineProjection | undefined;
   let searchPage: SearchResultsProjection | undefined;
   let replacementPreview: ReplacementPreviewProjection | undefined;
@@ -8719,6 +8865,8 @@ function renderEditorWindow(
   };
 
   const updateWindowChrome = (): void => {
+    updatePersistenceMenu();
+    refreshMilestonePersistence();
     position.textContent = currentWindow.position.label;
     revision.textContent = revisionWords(currentWindow);
     documentLens?.update(currentWindow.workingDigest);
@@ -8739,6 +8887,7 @@ function renderEditorWindow(
     openReview.disabled = busy;
     openEvaluation.disabled = busy;
     openDeliverables.disabled = busy;
+    openFindings.disabled = busy;
     undo.disabled = busy;
     redo.disabled = busy;
     positionRail.disabled = busy;
@@ -9707,6 +9856,7 @@ function renderEditorWindow(
         await loadOutline(null, true);
       });
       if (!saved) return;
+      refreshMilestonePersistence(true);
       setStatus(saved.completionLabel, 'success');
     } catch (error) {
       setStatus(rendererErrorMessage(error, '里程碑未保存。'), 'error');
@@ -9768,6 +9918,8 @@ function renderEditorWindow(
       dirty = state.dirty;
       saving = state.saving;
       retryRequired = state.retryRequired;
+      editingInterrupted = state.interrupted;
+      updatePersistenceMenu();
       save.disabled = authoritativeMutationBusy() || !state.dirty || state.saving || state.interrupted;
       journal.textContent = `修订日志序号 ${state.journalSequence}`;
       setCloseRisk(authoritativeMutationBusy() || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty));
@@ -9801,6 +9953,8 @@ function renderEditorWindow(
     // A window loaded keeps an open composer below its paragraph while it is still there (Issue #423 review, P2-3), and says what
     // loaded it — an authoritative refresh, or a navigation by its target — in the editor's `data-window-loads` (the last 12).
     onWindowLoaded: () => {
+      analysisPositionSource = 'caret';
+      localParagraphPanel?.refresh();
       editorialMarks?.reanchor();
       const loads = [...(editorHost.dataset['windowLoads'] ?? '').split(',').filter((entry) => entry.length > 0), windowLoadCause].slice(-12);
       editorHost.dataset['windowLoads'] = loads.join(',');

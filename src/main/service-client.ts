@@ -77,7 +77,8 @@ export function requestTimeoutMs(operation: ServiceOperation): number {
     operation === 'prepareManuscriptExport' || operation === 'approveManuscriptExport' ||
     // A 图书交付包 export (Issue #416, S67b) does the same for every file of the version, one after another.
     operation === 'reviewBookDeliveryPackageExport' || operation === 'prepareBookDeliveryPackageExport' ||
-    operation === 'approveBookDeliveryPackageExport' ||
+    operation === 'approveBookDeliveryPackageExport' || operation === 'prepareBookDeliveryPackageArchiveExport' ||
+    operation === 'approveBookDeliveryPackageArchiveExport' ||
     // 资料库 (Issue #427, S79c) reads a file of up to 1 GiB whole to digest it, and 放入资料库 copies, syncs and checks
     // it; from a slow disk or share that takes minutes, and a timeout would stop the service mid-copy.
     operation === 'previewLibraryMaterial' || operation === 'addLibraryMaterial' ||
@@ -162,7 +163,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 152 &&
+    value.protocolVersion === 154 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&

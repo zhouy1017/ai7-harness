@@ -164,6 +164,12 @@ export function parseKeyboardBindings(value: unknown): KeyboardBindings | null {
 const isUnitPrices = (value: unknown): value is UnitPrices => parseUnitPrices(value) !== null;
 const isKeyboardBindings = (value: unknown): value is KeyboardBindings => parseKeyboardBindings(value) !== null;
 
+export type AnalysisLastViewed = Readonly<Record<string, { revisionId: string; ordinal: number }>>;
+const isAnalysisLastViewed = (value: unknown): value is AnalysisLastViewed => isPlainObject(value) && Object.keys(value).length <= 256 &&
+  Object.entries(value).every(([bookId, revision]) => bookId.length > 0 && bookId.length <= MAX_SHELL_BOOK_ID_CHARACTERS && isPlainObject(revision) &&
+    Object.keys(revision).length === 2 && typeof revision['revisionId'] === 'string' && revision['revisionId'].length > 0 && revision['revisionId'].length <= 64 &&
+    Number.isSafeInteger(revision['ordinal']) && (revision['ordinal'] as number) > 0);
+
 export const PREFERENCE_KEYS = Object.freeze({
   'usage.unitPrices': preference(isUnitPrices, {} as UnitPrices),
   'keyboard.bindings': preference(isKeyboardBindings, {} as KeyboardBindings),
@@ -180,6 +186,8 @@ export const PREFERENCE_KEYS = Object.freeze({
   'notifications.completions': preference(isBoolean, false),
   'notifications.sound': preference(isBoolean, false),
   'notifications.bookName': preference(isBoolean, false),
+  // 12b: the last analysis panel actually viewed for each Book, local UI state only.
+  'analysis.lastViewedRevision': preference(isAnalysisLastViewed, {} as AnalysisLastViewed),
 });
 
 export type PreferenceKey = keyof typeof PREFERENCE_KEYS;

@@ -4,7 +4,38 @@ import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-con
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 152 as const;
+export const SERVICE_PROTOCOL_VERSION = 154 as const;
+
+export const BOOK_FINDINGS_PAGE_SIZE = 40;
+export interface BookFindingProjection {
+  id: string;
+  category: string;
+  categoryLabel: string;
+  severity: string;
+  status: string;
+  summary: string;
+  target:
+    | { kind: 'gap'; revisionId: string; unitOrdinal: number; blockId: string | null }
+    | { kind: 'review'; reviewRunId: string; findingId: string; blockId: string }
+    | { kind: 'risk'; recordId: string; riskId: string; revisionId: string };
+}
+export interface BookFindingsProjection {
+  bookId: string;
+  total: number;
+  offset: number;
+  next: number | null;
+  pageSize: typeof BOOK_FINDINGS_PAGE_SIZE;
+  groups: ReadonlyArray<{ category: string; label: string; count: number; bySeverity: Readonly<Record<string, number>>; byStatus: Readonly<Record<string, number>> }>;
+  items: ReadonlyArray<BookFindingProjection>;
+}
+export interface ParagraphAnalysisProjection {
+  bookId: string;
+  manuscriptId: string;
+  blockId: string;
+  revision: null | { revisionId: string; ordinal: number; freshness: AnalysisFreshnessAxis };
+  total: number;
+  items: ReadonlyArray<{ kind: 'entities' | 'events' | 'settingClaims' | 'relationships'; label: string; blockId: string }>;
+}
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -76,6 +107,8 @@ export const IPC_CHANNELS = {
   prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
   authorizeTaskAuthorization: 'ai7:j03:authorize-task-authorization',
   inspectBaselineAnalysis: 'ai7:j04:inspect-baseline-analysis',
+  inspectBookFindings: 'ai7:inspect-book-findings',
+  inspectParagraphAnalysis: 'ai7:inspect-paragraph-analysis',
   prepareBaselineAnalysis: 'ai7:j04:prepare-baseline-analysis',
   authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
   startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
@@ -297,6 +330,9 @@ export const IPC_CHANNELS = {
   prepareBookDeliveryPackage: 'ai7:j07:prepare-book-delivery-package',
   reviewBookDeliveryPackageExport: 'ai7:j07:review-book-delivery-package-export',
   chooseBookDeliveryPackageExportFolder: 'ai7:j07:choose-book-delivery-package-export-folder',
+  chooseBookDeliveryPackageArchiveDestination: 'ai7:j07:choose-book-delivery-package-archive-destination',
+  approveBookDeliveryPackageArchiveExport: 'ai7:j07:approve-book-delivery-package-archive-export',
+  cancelBookDeliveryPackageArchiveExport: 'ai7:j07:cancel-book-delivery-package-archive-export',
   approveBookDeliveryPackageExport: 'ai7:j07:approve-book-delivery-package-export',
   inspectMaintenanceCase: 'ai7:j07:inspect-maintenance-case',
   listMaintenanceCases: 'ai7:j07:list-maintenance-cases',
@@ -11863,6 +11899,8 @@ export interface BookDeliveryPackageExportFileOutcomeProjection extends BookDeli
 
 /** One export of one package version (DPKG-014): its folder, its files and what each came to. It never changes the package. */
 export interface BookDeliveryPackageExportProjection {
+  kind?: 'archive';
+  archiveReceipt?: BookDeliveryPackageArchiveReceiptProjection;
   exportId: string;
   packageVersionId: string;
   versionLabel: string;
@@ -11886,6 +11924,7 @@ export interface BookDeliveryPackageExportProjection {
  * approved is no export, and the history never lists one.
  */
 export interface BookDeliveryPackageExportSummaryProjection {
+  kind?: 'archive';
   exportId: string;
   folder: string;
   state: Exclude<BookDeliveryPackageExportProjection['state'], 'prepared'>;
@@ -11899,6 +11938,7 @@ export interface BookDeliveryPackageExportSummaryProjection {
 
 /** `导出…` of one version of the route's Book's package, under the options chosen. */
 export interface ReviewBookDeliveryPackageExportInput {
+  route?: 'archive';
   offset?: number;
   bookId: string;
   packageVersionId: string;
@@ -11914,6 +11954,21 @@ export interface PrepareBookDeliveryPackageExportInput {
   options: BookDeliveryPackageExportOptions;
   reviewDigest: string;
   folder: string;
+}
+
+export type PrepareBookDeliveryPackageArchiveInput = Omit<PrepareBookDeliveryPackageExportInput, 'folder'> & { destination: string };
+
+export interface BookDeliveryPackageArchiveReceiptProjection {
+  receiptId: string;
+  finalPath: string;
+  outcome: 'created' | 'replaced' | 'failed' | 'ambiguous';
+  byteLength: number | null;
+  sha256: string | null;
+  memberCount: number;
+  members: ReadonlyArray<{ path: string; sha256: string; receiptId: string | null }>;
+  membersTruncated?: boolean;
+  metadata: ReadonlyArray<{ path: string; byteLength: number; sha256: string }>;
+  stopped: { fileName: string; reason: string } | null;
 }
 
 /** `按上述方式导出` of one prepared package export. */
@@ -13253,6 +13308,8 @@ export interface ServiceOperationMap {
     input: { bookId: string; revisionId: string | null };
     output: BaselineAnalysisProjection;
   };
+  inspectBookFindings: { input: { bookId: string; offset: number }; output: BookFindingsProjection };
+  inspectParagraphAnalysis: { input: { bookId: string; manuscriptId: string; blockId: string; radius: number }; output: ParagraphAnalysisProjection };
   prepareBaselineAnalysis: {
     /**
      * `reconfirm` is `重新确认计划`: resolve the pending Plan Revision of the prepared Task into its next plan version instead
@@ -14013,6 +14070,9 @@ export interface ServiceOperationMap {
   prepareBookDeliveryPackage: { input: PrepareBookDeliveryPackageInput; output: BookDeliveryPackageResultProjection };
   /** `导出…` of one package version (Issue #416, S67b): the files it writes. A read. */
   reviewBookDeliveryPackageExport: { input: ReviewBookDeliveryPackageExportInput; output: BookDeliveryPackageExportReviewProjection };
+  prepareBookDeliveryPackageArchiveExport: { input: PrepareBookDeliveryPackageArchiveInput; output: BookDeliveryPackageExportProjection };
+  approveBookDeliveryPackageArchiveExport: { input: ApproveBookDeliveryPackageExportInput; output: ServiceJobProjection };
+  cancelBookDeliveryPackageArchiveExport: { input: { jobId: string }; output: boolean };
   /** The folder the main process's dialog returned: one preparation per file, recorded together; nothing is written. */
   prepareBookDeliveryPackageExport: { input: PrepareBookDeliveryPackageExportInput; output: BookDeliveryPackageExportProjection };
   /** `按上述方式导出`: each file approved and written in turn, with its receipt; a file that stops it stops the rest. */
@@ -14203,6 +14263,8 @@ export interface RendererApi {
     planEnvelopeDigest: string;
   }): Promise<TaskAuthorizationProjection>;
   inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisProjection>;
+  inspectBookFindings(input?: { offset: number }): Promise<BookFindingsProjection>;
+  inspectParagraphAnalysis(input: { manuscriptId: string; blockId: string; radius: number }): Promise<ParagraphAnalysisProjection>;
   prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; redoOf?: string | null }): Promise<ServiceJobProjection>;
   /**
    * The Task Drawer bar's 开始任务 for the analysis (Issue #420, S74a): records the Run Authorization and the
@@ -14526,6 +14588,9 @@ export interface RendererApi {
   reviewBookDeliveryPackageExport(input: Omit<ReviewBookDeliveryPackageExportInput, 'bookId'>): Promise<BookDeliveryPackageExportReviewProjection>;
   /** `选择位置…`: the system's own folder dialog, then the export prepared there; a cancelled dialog records nothing. */
   chooseBookDeliveryPackageExportFolder(input: Omit<PrepareBookDeliveryPackageExportInput, 'bookId' | 'folder'>): Promise<ChooseBookDeliveryPackageExportFolderResult>;
+  chooseBookDeliveryPackageArchiveDestination(input: Omit<PrepareBookDeliveryPackageArchiveInput, 'bookId' | 'destination'>): Promise<ChooseBookDeliveryPackageExportFolderResult>;
+  approveBookDeliveryPackageArchiveExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<BookDeliveryPackageExportResultProjection>;
+  cancelBookDeliveryPackageArchiveExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<boolean>;
   /** `按上述方式导出` of a prepared package export: its files written, each with its receipt. */
   approveBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<BookDeliveryPackageExportResultProjection>;
   /** 维护事项 (Issue #426, S68a): one case of that Book in its workspace. */

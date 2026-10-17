@@ -444,6 +444,10 @@ async function dispatch(
         op: request.op,
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress, request.input.revisionId),
       };
+    case 'inspectBookFindings':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBookFindings(request.input.bookId, request.input.offset) };
+    case 'inspectParagraphAnalysis':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectParagraphAnalysis(request.input.bookId, request.input.manuscriptId, request.input.blockId, request.input.radius) };
     case 'prepareBaselineAnalysis':
       return {
         id: request.id,
@@ -1449,13 +1453,18 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await store.reviewBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
+    case 'prepareBookDeliveryPackageArchiveExport':
+      return { id: request.id, ok: true, op: request.op,
+        result: await store.prepareBookDeliveryPackageArchiveExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable) };
     case 'prepareBookDeliveryPackageExport':
       return {
         id: request.id, ok: true, op: request.op,
         result: await store.prepareBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
+    case 'cancelBookDeliveryPackageArchiveExport':
     case 'cancelBookDeliveryPackageExport':
       return { id: request.id, ok: true, op: request.op, result: jobs.cancelPackageExport(request.input.jobId) };
+    case 'approveBookDeliveryPackageArchiveExport':
     case 'approveBookDeliveryPackageExport':
       return {
         id: request.id, ok: true, op: request.op,

@@ -237,6 +237,10 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['authorizeTaskAuthorization']['output']>(IPC_CHANNELS.authorizeTaskAuthorization, input),
   inspectBaselineAnalysis: (input?: Omit<ServiceOperationMap['inspectBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectBaselineAnalysis']['output']>(IPC_CHANNELS.inspectBaselineAnalysis, input ?? { revisionId: null }),
+  inspectBookFindings: (input?: { offset: number }) =>
+    invoke<ServiceOperationMap['inspectBookFindings']['output']>(IPC_CHANNELS.inspectBookFindings, input ?? { offset: 0 }),
+  inspectParagraphAnalysis: (input: Omit<ServiceOperationMap['inspectParagraphAnalysis']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['inspectParagraphAnalysis']['output']>(IPC_CHANNELS.inspectParagraphAnalysis, input),
   prepareBaselineAnalysis: (input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['prepareBaselineAnalysis']['output']>(IPC_CHANNELS.prepareBaselineAnalysis, input),
   authorizeBaselineAnalysis: (input: Omit<ServiceOperationMap['authorizeBaselineAnalysis']['input'], 'bookId'>) =>
@@ -676,6 +680,12 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<Awaited<ReturnType<RendererApi['reviewBookDeliveryPackageExport']>>>(IPC_CHANNELS.reviewBookDeliveryPackageExport, input),
   chooseBookDeliveryPackageExportFolder: (input: Parameters<RendererApi['chooseBookDeliveryPackageExportFolder']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageExportFolder']>>>(IPC_CHANNELS.chooseBookDeliveryPackageExportFolder, input),
+  chooseBookDeliveryPackageArchiveDestination: (input: Parameters<RendererApi['chooseBookDeliveryPackageArchiveDestination']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageArchiveDestination']>>>(IPC_CHANNELS.chooseBookDeliveryPackageArchiveDestination, input),
+  approveBookDeliveryPackageArchiveExport: (input: Parameters<RendererApi['approveBookDeliveryPackageArchiveExport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['approveBookDeliveryPackageArchiveExport']>>>(IPC_CHANNELS.approveBookDeliveryPackageArchiveExport, input),
+  cancelBookDeliveryPackageArchiveExport: (input: Parameters<RendererApi['cancelBookDeliveryPackageArchiveExport']>[0]) =>
+    invoke<boolean>(IPC_CHANNELS.cancelBookDeliveryPackageArchiveExport, input),
   cancelBookDeliveryPackageExport: (input: Parameters<RendererApi['cancelBookDeliveryPackageExport']>[0]) =>
     invoke<boolean>(IPC_CHANNELS.cancelBookDeliveryPackageExport, input),
   approveBookDeliveryPackageExport: (input: Parameters<RendererApi['approveBookDeliveryPackageExport']>[0]) =>
