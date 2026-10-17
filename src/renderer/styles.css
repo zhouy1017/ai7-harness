@@ -63,7 +63,7 @@ button:focus-visible, input:focus-visible, .ProseMirror:focus-visible {
 :root { --sidebar-width: 14rem; --sidebar-icons-width: 3.6rem; }
 :root[data-sidebar="icons"] { --sidebar-width: var(--sidebar-icons-width); }
 body { padding-left: var(--sidebar-width); }
-.app-sidebar { position: fixed; z-index: 25; top: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: .9rem; width: var(--sidebar-width); padding: .8rem .55rem 4rem; overflow-x: hidden; overflow-y: auto; border-right: 1px solid #d3d8d1; background: #eef0ea; color: #2c3a33; }
+.app-sidebar { position: fixed; z-index: 25; top: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: .9rem; width: var(--sidebar-width); padding: .8rem .55rem 4rem; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; border-right: 1px solid #d3d8d1; background: #eef0ea; color: #2c3a33; }
 .app-sidebar ul { margin: 0; padding: 0; list-style: none; }
 .app-sidebar li + li { margin-top: .1rem; }
 .sidebar-link { position: relative; display: flex; align-items: center; gap: .55rem; width: 100%; min-height: 40px; padding: .35rem .5rem; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #2c3a33; font: inherit; font-weight: 700; text-align: left; text-decoration: none; cursor: pointer; }
@@ -93,7 +93,8 @@ body { padding-left: var(--sidebar-width); }
 .sidebar-foot { display: grid; gap: .2rem; margin-top: auto; padding-top: .7rem; border-top: 1px solid #d3d8d1; }
 .sidebar-help-slot:empty { display: none; }
 /* Icons only: the names leave the row's box but not the accessibility tree. */
-:root[data-sidebar="icons"] .app-sidebar { padding-inline: .4rem; }
+/* A thin scrollbar and a narrow inset keep the icon column inside the rail when the Book's groups make it scroll. */
+:root[data-sidebar="icons"] .app-sidebar { padding-inline: .15rem; }
 :root[data-sidebar="icons"] .sidebar-link { justify-content: center; padding-inline: 0; }
 :root[data-sidebar="icons"] .nav-label, :root[data-sidebar="icons"] .nav-state, :root[data-sidebar="icons"] .sidebar-group-label,
 :root[data-sidebar="icons"] .app-sidebar .global-attention-entry-label, :root[data-sidebar="icons"] .sidebar-empty {
