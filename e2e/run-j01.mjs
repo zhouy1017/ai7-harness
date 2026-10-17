@@ -1885,7 +1885,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
     const filter = document.querySelector('#help-license-filter');
     if (document.activeElement?.id !== 'help-tab-licenses' || !(filter instanceof HTMLInputElement)) return false;
-    filter.value = '@napi-rs/keyring-win32-x64-msvc';
+    filter.value = 'prosemirror-view';
     filter.dispatchEvent(new Event('input', { bubbles: true }));
     const shown = [...document.querySelectorAll('.help-license')].filter((item) => !item.hidden);
     return shown.length === 1 && shown[0].dataset.licenseName === filter.value;
