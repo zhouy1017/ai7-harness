@@ -2059,11 +2059,11 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 @media (min-width: 1120px) {
   body[data-task-drawer="open"] #task-drawer-separator { display: block; }
 }
-/* At the column breakpoint a full sidebar can still leave too little room for both minima and the manuscript's rail/gutters. */
+/* Only a manuscript needs this fallback: other destinations retain the normal drawer column above 1120px. */
 @media (min-width: 1120px) and (max-width: 1184px) {
-  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"] { padding-right: 0; }
-  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"] .status-bar { right: 1.2rem; }
-  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"] #task-drawer-separator { display: none; }
+  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"]:has(.editor-workspace) { padding-right: 0; }
+  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"]:has(.editor-workspace) .status-bar { right: 1.2rem; }
+  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"]:has(.editor-workspace) #task-drawer-separator { display: none; }
 }
 /* Optional Surface Visibility (VIEW-010): only what `视图` names; identity, status and danger have no such switch. */
 :root[data-hidden-regions~="position-rail"] .rail-column { display: none; }
