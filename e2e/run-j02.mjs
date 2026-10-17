@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -440,12 +440,17 @@ async function editThenInvokeOnDirty(renderer, suffix, actionLabels, location) {
  * visible either way, and the panel is first seen closed.
  */
 async function openNavigation(renderer, location) {
-  await assertRenderer(renderer, `(() => { const entry = document.querySelector('[data-edge-entry="navigation"]'); const panel = document.querySelector('#manuscript-navigation-panel'); const rail = document.querySelector('.rail-track .position-rail'); return entry?.getAttribute('aria-expanded') === 'false' && panel?.hidden === true && rail instanceof HTMLInputElement && rail.getBoundingClientRect().height > rail.getBoundingClientRect().width; })()`, `${location}-closed-with-rail`);
+  // A screen reopened after the J-14 dark pass paints in more than one step on a hosted runner, so the first sight of the
+  // closed panel and its rail is waited for, not read once (#935).
+  await waitFor(renderer, `(() => { const entry = document.querySelector('[data-edge-entry="navigation"]'); const panel = document.querySelector('#manuscript-navigation-panel'); const rail = document.querySelector('.rail-track .position-rail'); return entry?.getAttribute('aria-expanded') === 'false' && panel?.hidden === true && rail instanceof HTMLInputElement && rail.getBoundingClientRect().height > rail.getBoundingClientRect().width; })()`, `${location}-closed-with-rail`, 30_000);
   await assertRenderer(renderer, `(() => { const entry = document.querySelector('[data-edge-entry="navigation"]'); const panel = document.querySelector('#manuscript-navigation-panel'); if (!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if (entry.getAttribute('aria-expanded') !== 'true') entry.click(); return entry.getAttribute('aria-expanded') === 'true' && !panel.hidden; })()`, location);
   // The rail draws the manuscript's chapters as ticks, bounded however long the manuscript is, and says
   // when the bound cut them; the pane's own scrollbar shows only while the pane scrolls (V2-UX-ED-059).
   await waitFor(renderer, `(() => { const track = document.querySelector('.rail-track'); const chapters = Number(track?.dataset.railChapters); return chapters > 0 && chapters <= 400 && track.querySelectorAll('.rail-tick').length === chapters && track.dataset.railAnalysed === 'false' && track.querySelectorAll('.rail-marker').length === 0; })()`, `${location}-rail-ticks`, 30_000);
-  await assertRenderer(renderer, `(() => { const pane = document.querySelector('.editor-window'); if (pane.dataset.scrolling !== undefined) return false; pane.scrollTop += 24; return true; })()`, `${location}-scrollbar-at-rest`);
+  // The pane marks itself scrolling for 900 ms after any scroll event, including the ones a re-render makes; the bar is
+  // at rest once that mark is gone, and only then does the Journey scroll it itself (the hosted failure of #935).
+  await waitFor(renderer, `(() => { const pane = document.querySelector('.editor-window'); return pane instanceof HTMLElement && pane.dataset.scrolling === undefined; })()`, `${location}-scrollbar-at-rest`, 15_000);
+  await assertRenderer(renderer, `(() => { const pane = document.querySelector('.editor-window'); if (pane.dataset.scrolling !== undefined) return false; pane.scrollTop += 24; return true; })()`, `${location}-scrollbar-scroll`);
   await waitFor(renderer, `document.querySelector('.editor-window').dataset.scrolling === 'true'`, `${location}-scrollbar-while-scrolling`, 5_000);
   await waitFor(renderer, `document.querySelector('.editor-window').dataset.scrolling === undefined`, `${location}-scrollbar-rests-again`, 5_000);
   await assertRenderer(renderer, `(() => { const pane = document.querySelector('.editor-window'); pane.scrollTop = 0; return true; })()`, `${location}-scroll-back`);
@@ -682,6 +687,7 @@ async function waitForImportCommitted(renderer, dataRoot) {
 async function importAndOpen(renderer, dataRoot) {
   at('renderer-ready');
   await waitForRendererReady(renderer);
+  await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined'`, 'renderer-isolation');
   requireJourney(await renderer.evaluate(`(async () => { try { await fetch('http://127.0.0.1:9/j02-denial'); return false; } catch { return true; } })()`), 'renderer-network-denial');
   // The import is three long waits over a ten-million-character file; under the one name
@@ -703,8 +709,11 @@ async function importAndOpen(renderer, dataRoot) {
   await clickButton(renderer, '新建图书并导入稿件', 'commit-click');
   await waitForImportCommitted(renderer, dataRoot);
   at('import-editor-open');
-  await clickButton(renderer, '打开稿件', 'editor-open');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
+  // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+  await runJ14DarkPass({ renderer, journey: 'J-02', at, representative: '#screen[data-screen="editor"] .editor-window', returnTo: SIDEBAR.section('manuscript') });
+  await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor-after-dark-pass');
   await openNavigation(renderer, 'editor-navigation-open');
 }
 
@@ -1251,6 +1260,8 @@ async function runRestartJourney(renderer) {
   await assertRenderer(renderer, `document.querySelector('.recent-work-item')?.textContent.includes('10,000,303 字符') && document.querySelector('.recent-work-item')?.textContent.includes('结构复核完成')`, 'prior-work-exact');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.recent-work-item button'); if (!open) return false; open.click(); return true; })()`, 'prior-work-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'reopened-r2');
+  // A Book with a primary Manuscript is entered at 稿件, which the sidebar marks under the Book's 工作 (RET-002).
+  await assertRenderer(renderer, sidebarBookCurrent(null, 'manuscript'), 'reopened-sidebar-manuscript');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32`, 'restart-window-bounded');
   await clickButton(renderer, '重做', 'restart-redo');
   await waitForChecks(

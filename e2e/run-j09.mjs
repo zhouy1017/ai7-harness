@@ -6,7 +6,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_ICONS_ONLY, SIDEBAR_LIBRARY_READY, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-09 (Issue #424, plan slice S78): 待我处理 — a cross-Book attention view (editor-surfaces §8.1, V2-UX-ATTN-001
@@ -438,6 +438,7 @@ async function openMarkCard(renderer, kind, blockId, name) {
 /** Exact `sample1` through the import flow; the second import names the new Book as a distinct intended work. */
 async function importSample1(renderer, title, distinct, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+  await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
   const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
@@ -465,7 +466,7 @@ async function openAnalysisOf(renderer, bookId, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await clickSelector(renderer, `button[data-book-id=${JSON.stringify(bookId)}]`, `${name}-book`);
   await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, `${name}-manuscript`);
-  await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-records-group'); const open=group?.querySelector('button[data-records-destination="analysis"]'); if(!(open instanceof HTMLButtonElement)||open.disabled||open.textContent!=='分析')return false; open.click(); return true; })()`, `${name}-analysis-entry`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), `${name}-analysis-entry`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookId)}] .baseline-analysis-card')`, `${name}-analysis`);
 }
 
@@ -498,7 +499,7 @@ async function prepareRange(renderer, unitOrdinal, name) {
 /** 书库 from wherever the window is: the header's 待我处理, then its 返回图书列表. */
 async function toLibrary(renderer, name) {
   await openAttention(renderer, `${name}-attention`);
-  await click(renderer, '返回图书列表', `${name}-library`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), `${name}-library`);
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
 }
 
@@ -617,7 +618,7 @@ async function clickIn(renderer, scope, label, name) {
 
 /** 待我处理 from the shell's header: the screen opens in the library state and paints the service's answer. */
 async function openAttention(renderer, name) {
-  await clickSelector(renderer, '#global-attention-entry', `${name}-entry`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), `${name}-entry`);
   await waitAttentionPainted(renderer, name);
 }
 async function waitAttentionPainted(renderer, name) {
@@ -945,9 +946,9 @@ async function main() {
       await renderer.send('Page.setBypassCSP', { enabled: false });
     }
 
-    at('entry-in-the-header');
-    // 待我处理 sits in the shell's header of every window, with no number while nothing needs the editor.
-    await waitFor(renderer, `(() => { const entry=document.querySelector('header.app-header nav.app-destinations #global-attention-entry'); const badge=entry?.querySelector('.global-attention-badge'); return entry instanceof HTMLButtonElement && !entry.disabled && entry.querySelector('.global-attention-entry-label')?.textContent==='待我处理' && entry.dataset.attentionCount==='0' && badge instanceof HTMLElement && badge.hidden && entry.getAttribute('aria-label')==='待我处理'; })()`, 'entry-without-a-number');
+    at('entry-in-the-sidebar');
+    // 待我处理 sits in the shell's sidebar of every window, with no number while nothing needs the editor.
+    await waitFor(renderer, `(() => { const entry=document.querySelector('#app-sidebar .sidebar-destinations #global-attention-entry[data-nav-destination="attention"]'); const badge=entry?.querySelector('.global-attention-badge'); return entry instanceof HTMLButtonElement && !entry.disabled && entry.querySelector('.global-attention-entry-label')?.textContent==='待我处理' && entry.dataset.attentionCount==='0' && badge instanceof HTMLElement && badge.hidden && entry.getAttribute('aria-label')==='待我处理'; })()`, 'entry-without-a-number');
 
     at('first-book-import');
     const bookA = await importSample1(renderer, FIRST.title, false, 'first-import');
@@ -961,8 +962,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'artifact-enable-ready');
     await click(renderer, '审阅并为本图书启用 Revision 2', 'artifact-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'artifact-enabled');
-    await click(renderer, '返回图书列表', 'model-return-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
     await click(renderer, '模型服务', 'model-open');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     cancellation.throwIfRequested();
@@ -994,7 +997,7 @@ async function main() {
     at('count-after-blocked');
     // The header's number follows the screens: going on to 工作概览, one item needs the editor, said in words
     // and in a badge with its own outline.
-    await clickIn(renderer, '[data-screen="book-analysis"] .workbench-actions', '工作概览', 'count-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'count-overview');
     await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='1' && document.querySelector('#global-attention-entry .global-attention-badge')?.textContent==='1' && !document.querySelector('#global-attention-entry .global-attention-badge').hidden && document.querySelector('#global-attention-entry')?.getAttribute('aria-label')==='待我处理，1 项需要你处理'`, 'count-one', 30_000);
     await closeOwnedBrowser();
     cancellation.throwIfRequested();
@@ -1012,7 +1015,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'second-artifact-enable-ready');
     await click(renderer, '审阅并为本图书启用 Revision 2', 'second-artifact-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'second-artifact-enabled');
-    await click(renderer, '返回图书列表', 'second-return-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'second-return-library');
 
     at('second-book-completed-run');
     await openAnalysisOf(renderer, bookB, 'second-analysis');
@@ -1033,6 +1036,9 @@ async function main() {
 
     at('attention-groups');
     await openAttention(renderer, 'attention');
+    // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+    await runJ14DarkPass({ renderer, journey: 'J-09', at, representative: '#screen[data-screen="global-attention"] > .panel', returnTo: SIDEBAR.destination('attention') });
+    await waitAttentionPainted(renderer, 'attention-after-dark-pass');
     // The service's answer once nothing is in flight, and the page come to say exactly it: the screen paints
     // the reader's last answer at once and the fresh one as soon as it arrives.
     const service = await readSettledAttention(renderer);
@@ -1141,7 +1147,7 @@ async function main() {
     await openAttention(renderer, 'zoom');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('header.app-header'), ...document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group, [data-screen="global-attention"] li.global-attention-item')]; return parts.length === 8 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && document.querySelector('#global-attention-entry').getBoundingClientRect().width > 0; })()`, 'reflow-at-200', 10_000);
+    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('header.context-header'), ...document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group, [data-screen="global-attention"] li.global-attention-item')]; return parts.length === 8 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && ${SIDEBAR_ICONS_ONLY} && document.querySelector('#global-attention-entry').getBoundingClientRect().width > 0; })()`, 'reflow-at-200', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
 
@@ -1177,7 +1183,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'third-artifact-enable-ready');
     await click(renderer, '审阅并为本图书启用 Revision 2', 'third-artifact-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'third-artifact-enabled');
-    await click(renderer, '返回图书列表', 'third-return-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'third-return-library');
 
     at('concurrent-first-run');
     // From here each Run holds its second reading range in flight once it has read one. 甲's first baseline starts
@@ -1258,7 +1264,7 @@ async function main() {
     // Use the existing product chooser, as J-12 does, rather than a test hook that creates a window.
     await openItem(renderer, queuedItem.itemId, 'second-window-b');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}]')`, 'second-window-b-analysis', 30_000);
-    await click(renderer, '工作概览', 'second-window-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'second-window-overview');
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookB)}]')`, 'second-window-overview-ready', 30_000);
     await click(renderer, '打开另一本图书', 'second-window-open-other');
     await waitFor(renderer, `document.querySelector('[data-screen="book-workbench-chooser"]')`, 'second-window-chooser', 30_000);
@@ -1269,7 +1275,7 @@ async function main() {
     requireJourney((await observer.evaluate(`window.ai7.getBookWorkbenchRoute()`))?.bookId === bookC, 'second-window-c-route');
     // The editor returns to the main window through the same chooser: 乙 is already open there, so AI7 focuses that
     // window rather than opening a third (J-12's reuse) — the product's own focus, not a debugging command.
-    await click(observer, '返回图书工作概览', 'second-window-c-overview');
+    await assertRenderer(observer, sidebarNavigate(SIDEBAR.section('overview')), 'second-window-c-overview');
     await waitFor(observer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookC)}]')`, 'second-window-c-overview-ready', 30_000);
     await click(observer, '打开另一本图书', 'second-window-c-open-other');
     await waitFor(observer, `document.querySelector('[data-screen="book-workbench-chooser"]')`, 'second-window-c-chooser', 30_000);
@@ -1374,7 +1380,7 @@ async function main() {
     at('concurrent-cancel');
     // 取消任务 on 丙, from its own plan: its range in flight finishes, it stops there, and what it read forms 丙's own
     // partial revision — while 乙 runs to its end beside it.
-    await assertRenderer(renderer, `(() => { const open=document.querySelector('.editor-shell nav.book-records-group button[data-records-destination="analysis"]'); if(!(open instanceof HTMLButtonElement)||open.disabled)return false; open.click(); return true; })()`, 'concurrent-c-analysis-entry');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'concurrent-c-analysis-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookC)}] .baseline-analysis-card')?.dataset.analysisState==='executing'`, 'concurrent-c-record', 30_000);
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'concurrent-c-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(taskC)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='running' && document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.disabled===false`, 'concurrent-c-cancel-ready', 30_000);
@@ -1577,7 +1583,7 @@ async function main() {
       afterRevoke.items.filter((item) => item.group === 'recent' && item.bookId === bookB).length ===
         settledBackground.items.filter((item) => item.group === 'recent' && item.bookId === bookB).length,
     'background-nothing-started', afterRevoke.items.map((item) => [item.group, item.state]));
-    await assertRenderer(renderer, `(() => { const open=document.querySelector('.editor-shell nav.book-records-group button[data-records-destination="analysis"]'); if(!(open instanceof HTMLButtonElement)||open.disabled)return false; open.click(); return true; })()`, 'background-revoked-analysis-entry');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'background-revoked-analysis-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')`, 'background-revoked-card', 30_000);
     const unchanged = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify({ task: unchanged?.taskIntent, authorization: unchanged?.authorization, run: unchanged?.run?.state, revision: unchanged?.resultSetRevision?.revisionId }) === keptRecord &&
@@ -1594,7 +1600,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'model-question-artifact-ready');
     await click(renderer, '审阅并为本图书启用 Revision 2', 'model-question-artifact-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'model-question-artifact-enabled');
-    await click(renderer, '返回图书列表', 'model-question-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-question-library');
     await openAnalysisOf(renderer, questionBook, 'model-question-analysis');
     const beforeQuestion = await readSettledAttention(renderer);
     const recentBeforeQuestion = beforeQuestion.groups.find((group) => group.key === 'recent').items.map((item) => item.itemId);

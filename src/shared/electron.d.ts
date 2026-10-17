@@ -17,11 +17,12 @@ declare module 'electron' {
     on(event: 'will-download', listener: (event: Event) => void): void;
   };
   export class BrowserWindow {
+    static getAllWindows(): BrowserWindow[];
     constructor(options: Record<string, unknown>);
     readonly webContents: {
       id: number;
       mainFrame: unknown;
-      send(channel: string): void;
+      send(channel: string, payload?: unknown): void;
       setWindowOpenHandler(handler: () => { action: 'deny' }): void;
       on(event: string, listener: (...args: any[]) => void): void;
       cut(): void;
@@ -36,6 +37,7 @@ declare module 'electron' {
     isDestroyed(): boolean;
     isMinimized(): boolean;
     isVisible(): boolean;
+    isFocused(): boolean;
     loadFile(path: string): Promise<void>;
     on(event: string, listener: (...args: any[]) => void): void;
     once(event: 'ready-to-show', listener: () => void): void;
@@ -43,6 +45,9 @@ declare module 'electron' {
     show(): void;
   }
   export const app: {
+    // Diagnostics metadata and fatal-hook cleanup (Issue #938).
+    getLocale(): string;
+    once(event: string, listener: (...args: any[]) => void): void;
     commandLine: { getSwitchValue(name: string): string };
     enableSandbox(): void;
     getPath(name: 'userData' | 'documents'): string;
@@ -73,10 +78,23 @@ declare module 'electron' {
   };
   export const ipcRenderer: {
     invoke(channel: string, input?: unknown): Promise<unknown>;
-    on(channel: string, listener: () => void): void;
+    on(channel: string, listener: (event: unknown, payload: any) => void): void;
+    removeListener(channel: string, listener: (event: unknown, payload: any) => void): void;
     send(channel: string, input?: unknown): void;
   };
+  export class Notification {
+    constructor(options: { title: string; body: string; silent: boolean });
+    show(): void;
+    close(): void;
+    on(event: 'click', listener: () => void): this;
+  }
   export const Menu: { setApplicationMenu(menu: null): void };
+  export const nativeTheme: {
+    readonly shouldUseDarkColors: boolean;
+    themeSource: 'system' | 'light' | 'dark';
+    on(event: 'updated', listener: () => void): void;
+    removeListener(event: 'updated', listener: () => void): void;
+  };
   export const session: { defaultSession: Session; fromPartition(partition: string): Session };
   export const shell: { showItemInFolder(path: string): void };
 }

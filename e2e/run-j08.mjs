@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -252,6 +252,7 @@ async function press(renderer, key) {
 
 async function importBook(renderer, title, token, openEditor = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${token}-landing`);
+  await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', `${token}-import`);
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${token}-target`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, `${token}-target-select`);
@@ -263,7 +264,7 @@ async function importBook(renderer, title, token, openEditor = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, `${token}-committed`, 180_000);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, `${token}-acknowledged`, 180_000);
   if (openEditor) {
-    await click(renderer, '打开稿件', `${token}-open`);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), `${token}-open`);
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, `${token}-editor`);
   }
 }
@@ -416,6 +417,8 @@ async function main() {
       await renderer.send('Page.setBypassCSP', { enabled: false });
     }
     await loopback.close();
+    // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+    await runJ14DarkPass({ renderer, journey: 'J-08', at, representative: '#screen[data-screen="landing"] > .panel', returnTo: SIDEBAR.destination('library') });
     await importBook(renderer, '恢复边界甲', 'book-a', true);
     await saveMilestone(renderer, '中断前检查点', 'checkpoint-one');
     await saveMilestone(renderer, '中断前复核快照', 'checkpoint-two');
@@ -477,9 +480,14 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'lower-import-committed', 180_000);
     await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'lower-import-acknowledged', 180_000);
     await assertRenderer(renderer, `document.querySelector('[data-recovery-return]')`, 'return-route-completion');
-    await click(renderer, '打开稿件', 'lower-import-open');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'lower-import-open');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'lower-import-editor');
     await assertRenderer(renderer, `Array.from(document.querySelectorAll('button')).some((item)=>item.textContent==='返回恢复待确认')`, 'return-route-imported-editor');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'return-route-sidebar-overview');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] [data-recovery-return]')`, 'return-route-sidebar-overview-ready');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'return-route-sidebar-editor');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'return-route-sidebar-editor-ready');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('button')).some((item)=>item.textContent==='返回恢复待确认')`, 'return-route-sidebar-editor-preserved');
     await click(renderer, '返回恢复待确认', 'return-from-imported-editor');
     await assertRecoveryScreen(renderer, 'eligible');
     await click(renderer, '稍后处理', 'defer-after-import');

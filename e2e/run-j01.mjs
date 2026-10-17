@@ -17,7 +17,7 @@ import {
   IMPORTED_MARKS_RECIPE,
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
-import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { classifyBrowserLaunchMiss, classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, observeLaunchStart, probeStalledProduct, readBrowserLog, sampleProductProcesses, waitingForService } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -97,6 +97,9 @@ async function requireTracedReadiness() {
     await new Promise((settle) => setTimeout(settle, 50));
   }
 }
+
+/** The J-14 dark pass runs once per J-01 run, on the first manuscript it opens. */
+let j14DarkPassDone = false;
 
 function at(location) {
   diagnosticLocation = location;
@@ -502,7 +505,8 @@ async function attachRendererTarget(browser, onTarget = () => undefined) {
         deadline,
       )) {
         at('renderer-ready');
-        return { evaluate };
+        // The shared J-14 dark pass (#935) emulates forced colours through the same session.
+        return { evaluate, send: (method, params) => send(method, params) };
       }
       latestCarrierError = undefined;
     } catch (error) {
@@ -600,6 +604,8 @@ async function createRendererManager(browser) {
       };
       const renderer = {
         targetId: target.targetId,
+        // The shared J-14 dark pass (#935) emulates forced colours through the same session.
+        send: (method, params) => send(method, params),
         evaluate: async (expression) => {
           const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
           requireJourney(!response.exceptionDetails, 'renderer-evaluate', response.exceptionDetails);
@@ -1131,7 +1137,7 @@ async function assertCommittedManuscriptReimport(renderer, expectation) {
   requireJourney(/^[0-9a-f-]{36}$/i.test(recordIdentity?.sourceVersionId ?? ''), `${scenario}-source-version`);
   // The Book's records are one step away, through the manuscript's 资料与记录 group.
   at('reimport-history');
-  await clickExactButton(renderer, '返回图书工作概览', `${scenario}-to-overview`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), `${scenario}-to-overview`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(identities.bookId)}]')`, `${scenario}-overview`);
   await assertBoundedHistoryGraph(renderer, expectedRevisionCount, expectedRecordCount, scenario);
   return { ...identities, ...recordIdentity };
@@ -1239,7 +1245,7 @@ async function resolveAndCommitManuscriptReimport(renderer, expectation) {
 }
 
 async function createDurableJournalEdit(renderer) {
-  await clickExactButton(renderer, '打开稿件', 'reimport-dirty-open-editor');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'reimport-dirty-open-editor');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'reimport-dirty-editor');
   await assertRenderer(
     renderer,
@@ -1282,13 +1288,27 @@ async function importInitialManuscriptForReimport(renderer, sourceSha256, source
   return { bookId, lineageSourceVersionId };
 }
 
+// Sidebar 稿件 restores the last reading position (RET-002). Whole-document identity scans explicitly go to the start
+// through the manuscript's paging controls; opening a Book must not be changed back into an implicit rewind.
+async function rewindEditorPages(renderer, scenario) {
+  for (;;) {
+    const atStart = await renderer.evaluate(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向前浏览')?.disabled !== false`);
+    if (atStart) return;
+    const firstBlockId = await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId`);
+    await clickExactButton(renderer, '向前浏览', `${scenario}-previous-editor-page`);
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId !== ${JSON.stringify(firstBlockId)}`, `${scenario}-previous-editor-page-ready`);
+    await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  }
+}
+
 async function collectEditorBlockIdentities(renderer, scenario, openEditor = true) {
   if (openEditor) {
-    await clickExactButton(renderer, '打开稿件', `${scenario}-open-editor`);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), `${scenario}-open-editor`);
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, `${scenario}-editor`);
   } else {
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, `${scenario}-editor-already-open`);
   }
+  await rewindEditorPages(renderer, scenario);
   const identities = {};
   for (;;) {
     const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => ({ id: block.dataset.blockId, text: block.textContent }))`);
@@ -1308,8 +1328,9 @@ async function collectEditorBlockIdentities(renderer, scenario, openEditor = tru
 }
 
 async function collectEditorBlockIdentitySequence(renderer, scenario) {
-  await clickExactButton(renderer, '打开稿件', `${scenario}-open-editor`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), `${scenario}-open-editor`);
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, `${scenario}-editor`);
+  await rewindEditorPages(renderer, scenario);
   const identities = [];
   for (;;) {
     const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => ({ id: block.dataset.blockId, text: block.textContent }))`);
@@ -1494,9 +1515,11 @@ async function runJourney(
   // prepareCorrectionProposal and saveCorrectionProposal.
   // Synchronized delta (#922, protocol 150): 自定义分析维度 adds exactly five keys: inspectCustomAnalysisDimensions,
   // saveCustomAnalysisDimension, enableCustomAnalysisDimension, stopCustomAnalysisDimension and prepareCustomAnalysis.
+  // Synchronized delta (#938, main-process owners, protocol unchanged): 诊断 adds exactly three keys: listCrashRecords,
+  // exportDiagnosticsBundle and revealDiagnosticsLocation.
   await assertRenderer(
     renderer,
-    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptReimportDegradation,acknowledgeImportCompletion,addLibraryMaterial,admitReadersReportExemplar,adoptImportedSkillUpdate,answerBaselineAnalysisClarification,appendMaintenanceCaseRevision,applyChangeSuggestion,applyChangeSuggestionBatch,approveBookDeliveryPackageExport,approveDatabaseExport,approveManuscriptExport,askAboutSelection,authorizeBaselineAnalysis,authorizeEvaluationRewrite,authorizeInitialEvaluation,authorizeReadersReport,authorizeReviewRun,authorizeTaskAuthorization,authorizeWritingTask,batchProposalDecisionDraft,buildMaterialVectors,cancelBaselineAnalysisRun,cancelBookDeliveryPackageExport,cancelDatabaseExport,cancelDatabaseReplacement,cancelReviewRun,cancelServiceJob,cancelWaitingBaselineAnalysis,cancelWaitingTask,changeSeriesMembership,checkImportedSkillUpdate,chooseBookDeliveryPackageExportFolder,chooseDatabaseExportDestination,chooseDatabaseImportFile,chooseManuscriptExportDestination,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueDialogueAnswer,continueImportDraft,continueReviewRun,controlTaskRun,convertDialogueToChangeSuggestion,createEditorialMark,createImportedSkillUpdateRule,createProductionDocument,createReadersReportDraft,createSeries,createWritingDraft,deactivateDefaultExecutionRule,decideEvaluationRewrite,decideImportedExemplar,decideLearningMaterial,decideLibraryMaterial,decideProductionDocumentType,deferRecovery,designatePublicationVersion,dismissImportedSkillUpdate,dismissReplacementPreview,editBaselineAnalysisPlan,editSeriesKnowledgeCandidate,editTaskPlan,enableCapturedProcedure,enableCustomAnalysisDimension,enableEditorialWorkspaceProfile,enableImportedSkill,enrollBackgroundAnalysis,flushJournalEdit,freezeReplacement,generateReviewReport,getBookOverview,getBookWorkbenchRoute,getEditorialMarkCard,getHistoricalRevision,getImportStartup,getManuscriptApplyOutcome,getManuscriptRail,getManuscriptWindow,getManuscriptWindowAt,getModelServiceSettings,getOutline,getProductDataLocation,getRecoveryComparison,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,holdBackgroundAnalysisEnrollment,importEarlierExemplar,importReviewGuidelineVersion,importSkillPackage,inspectAnalysisFeedback,inspectApplyReceipt,inspectBackgroundAnalysisEnrollment,inspectBaselineAnalysis,inspectBookDeliveryPackage,inspectBookSeries,inspectBookTasks,inspectCapturedProcedure,inspectCapturedProcedureApplicability,inspectCapturedProcedureRun,inspectCapturedProcedures,inspectCustomAnalysisDimensions,inspectDataVersion,inspectDatabaseExports,inspectDatabaseReplacements,inspectDefaultExecutionRules,inspectDeliverables,inspectDeveloperProposal,inspectDialogue,inspectEditQualitySignals,inspectEditorialWorkspaceProfile,inspectEvaluation,inspectEvaluationCalibration,inspectEvaluationProfiles,inspectEvidenceWorkspace,inspectExemplars,inspectFactualVerification,inspectFastInteractionRequest,inspectFastInteractionRoutes,inspectFeedbackHistory,inspectForegroundExecutionBoundary,inspectGlobalAttention,inspectHouseReviewPreference,inspectImportedSkillUpdate,inspectImportedSkills,inspectKnowledgeProcedures,inspectLearningAudit,inspectLearningLineage,inspectLearningMaterial,inspectLearningMaterials,inspectLibraryMaterial,inspectLibraryMaterialSegments,inspectLibraryMaterials,inspectMaintenanceCase,inspectProcedureCapture,inspectProductionDocuments,inspectProposalConflict,inspectProposalWorkspace,inspectResearchEvidence,inspectReviewFindingOfMark,inspectReviewGuidelines,inspectReviewWorkspace,inspectScheduledBackups,inspectSeries,inspectSeriesCandidates,inspectSeriesExclusionHistory,inspectSeriesExclusionTargets,inspectSeriesHistory,inspectSeriesKnowledgeCandidates,inspectSeriesKnowledgeConflicts,inspectSeriesKnowledgeItems,inspectSeriesKnowledgeReview,inspectSeriesKnowledgeRevisions,inspectSeriesList,inspectSeriesMembers,inspectTaskAuthorization,inspectTaskIntentDrafts,inspectTaskPlan,inspectWritingTask,installEditorialWorkspaceProfile,installImportedSkill,leaveBookWorkbench,listBooks,listMaintenanceCases,listPriorWork,openBookWorkbench,pauseBaselineAnalysisRun,platform,polishSelection,pollServiceJob,prepareBaselineAnalysis,prepareBookCreation,prepareBookDeliveryPackage,prepareCorrectionProposal,prepareCustomAnalysis,prepareDatabaseMerge,prepareDatabaseReplacement,prepareEvaluationRewrite,prepareInitialEvaluation,prepareManuscriptReimport,prepareNewBookReview,prepareReadersReport,prepareReplacement,prepareReverseApply,prepareReviewRun,prepareSourceImportReview,prepareTaskAuthorization,prepareWritingTask,previewCapturedProcedureStop,previewCapturedProcedureValidation,previewImportedExemplar,previewLearningRemediation,previewLibraryMaterial,previewReviewGuidelineVersion,previewSeriesExclusion,previewSeriesMembershipChange,probeSearchBackend,promoteAnswerToTaskIntentDraft,promoteSeriesKnowledge,promoteTaskIntentDraft,proposeSeriesKnowledge,queryMaterialVectors,quickStartBaselineAnalysis,quickStartReviewRun,quickStartWritingTask,quitApplication,readLibraryDecisionReason,rebuildHouseReviewPreference,recommendProcedures,recordAnalysisFeedback,recordChangeSuggestionDecision,recordLearningRemediation,recordMaintenanceCase,recordManuscriptEntryPosition,recordProductionDocumentDelivery,recordProposalDecision,recordProposalDecisionFeedback,recordProposalDecisionReason,recordPublicationActuals,recordReviewFindingDisposition,recordSeriesExclusion,recordVerificationReviewDecision,redoManuscript,redoTaskPlan,regenerateDialogueAnswer,regenerateProposalConflictUnit,removeModelServiceCredential,removeSearchBackendCredential,requestMaterialTranslation,reselectImportDraft,resolveProposalConflict,resolveReimportMapping,resolveUnconfirmedOutcomes,restoreRecovery,resumeBaselineAnalysisRun,revealManuscriptExport,revealProductDataLocation,reverseAppliedChangeSuggestion,reviewBookDeliveryPackageExport,reviewManuscriptExport,revokeBackgroundAnalysisEnrollment,revokeImportedSkillUpdateRule,rollBackDatabaseReplacement,rollbackImportedSkill,runEditorClipboardCommand,runReconnectPreflight,saveCapturedProcedure,saveCorrectionProposal,saveCustomAnalysisDimension,saveDeveloperProposal,saveDeveloperProposalFile,saveEvaluation,saveEvaluationProfile,saveEvidenceAsMaterial,saveMaintenanceErrata,saveMilestone,saveModelServiceCredential,saveModelServiceProxy,saveProductionDocumentVersion,saveProposalConflictDraft,saveProposalDecisionDraft,saveSearchBackendCredential,saveTaskIntentDraft,searchReferableMaterials,selectAndStageManuscript,selectSearchBackend,setDefaultExecutionRule,setEvaluationPreferences,setScheduledBackup,startBaselineAnalysisWhenOnline,startEvaluation,startReplacementCommit,startSearch,startTaskWhenOnline,stopCapturedProcedure,stopCustomAnalysisDimension,stopDialogueAnswer,transitionProductionDocumentPhase,undoManuscript,updateBookPeople,updateEditorialMark,validateImportedSkill,viewRecoveryCandidate'`,
+    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptReimportDegradation,acknowledgeImportCompletion,addLibraryMaterial,admitReadersReportExemplar,adoptImportedSkillUpdate,answerBaselineAnalysisClarification,appendMaintenanceCaseRevision,applyChangeSuggestion,applyChangeSuggestionBatch,approveBookDeliveryPackageExport,approveDatabaseExport,approveManuscriptExport,askAboutSelection,authorizeBaselineAnalysis,authorizeEvaluationRewrite,authorizeInitialEvaluation,authorizeReadersReport,authorizeReviewRun,authorizeTaskAuthorization,authorizeWritingTask,batchProposalDecisionDraft,buildMaterialVectors,cancelBaselineAnalysisRun,cancelBookDeliveryPackageExport,cancelDatabaseExport,cancelDatabaseReplacement,cancelReviewRun,cancelServiceJob,cancelWaitingBaselineAnalysis,cancelWaitingTask,changeSeriesMembership,checkImportedSkillUpdate,chooseBookDeliveryPackageExportFolder,chooseDatabaseExportDestination,chooseDatabaseImportFile,chooseManuscriptExportDestination,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueDialogueAnswer,continueImportDraft,continueReviewRun,controlTaskRun,convertDialogueToChangeSuggestion,createEditorialMark,createImportedSkillUpdateRule,createProductionDocument,createReadersReportDraft,createSeries,createWritingDraft,deactivateDefaultExecutionRule,decideEvaluationRewrite,decideImportedExemplar,decideLearningMaterial,decideLibraryMaterial,decideProductionDocumentType,deferRecovery,designatePublicationVersion,dismissImportedSkillUpdate,dismissReplacementPreview,editBaselineAnalysisPlan,editSeriesKnowledgeCandidate,editTaskPlan,enableCapturedProcedure,enableCustomAnalysisDimension,enableEditorialWorkspaceProfile,enableImportedSkill,enrollBackgroundAnalysis,exportDiagnosticsBundle,exportUsageCsv,flushJournalEdit,freezeReplacement,generateReviewReport,getBookOverview,getBookWorkbenchRoute,getEditorialMarkCard,getHistoricalRevision,getImportStartup,getManuscriptApplyOutcome,getManuscriptRail,getManuscriptWindow,getManuscriptWindowAt,getModelServiceSettings,getOutline,getPreferences,getProductDataLocation,getRecoveryComparison,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,holdBackgroundAnalysisEnrollment,importEarlierExemplar,importReviewGuidelineVersion,importSkillPackage,inspectAnalysisFeedback,inspectApplyReceipt,inspectBackgroundAnalysisEnrollment,inspectBaselineAnalysis,inspectBookDeliveryPackage,inspectBookSeries,inspectBookTasks,inspectCapturedProcedure,inspectCapturedProcedureApplicability,inspectCapturedProcedureRun,inspectCapturedProcedures,inspectCustomAnalysisDimensions,inspectDataVersion,inspectDatabaseExports,inspectDatabaseReplacements,inspectDefaultExecutionRules,inspectDeliverables,inspectDeveloperProposal,inspectDialogue,inspectEditQualitySignals,inspectEditorialWorkspaceProfile,inspectEvaluation,inspectEvaluationCalibration,inspectEvaluationProfiles,inspectEvidenceWorkspace,inspectExemplars,inspectFactualVerification,inspectFastInteractionRequest,inspectFastInteractionRoutes,inspectFeedbackHistory,inspectForegroundExecutionBoundary,inspectGlobalAttention,inspectHouseReviewPreference,inspectImportedSkillUpdate,inspectImportedSkills,inspectKnowledgeProcedures,inspectLearningAudit,inspectLearningLineage,inspectLearningMaterial,inspectLearningMaterials,inspectLibraryMaterial,inspectLibraryMaterialSegments,inspectLibraryMaterials,inspectMaintenanceCase,inspectProcedureCapture,inspectProductionDocuments,inspectProposalConflict,inspectProposalWorkspace,inspectResearchEvidence,inspectReviewFindingOfMark,inspectReviewGuidelines,inspectReviewWorkspace,inspectScheduledBackups,inspectSeries,inspectSeriesCandidates,inspectSeriesExclusionHistory,inspectSeriesExclusionTargets,inspectSeriesHistory,inspectSeriesKnowledgeCandidates,inspectSeriesKnowledgeConflicts,inspectSeriesKnowledgeItems,inspectSeriesKnowledgeReview,inspectSeriesKnowledgeRevisions,inspectSeriesList,inspectSeriesMembers,inspectTaskAuthorization,inspectTaskIntentDrafts,inspectTaskPlan,inspectUsage,inspectWritingTask,installEditorialWorkspaceProfile,installImportedSkill,leaveBookWorkbench,listBooks,listCrashRecords,listMaintenanceCases,listPriorWork,notify,onAppearanceChanged,onNotificationNavigate,openBookWorkbench,pauseBaselineAnalysisRun,platform,polishSelection,pollServiceJob,prepareBaselineAnalysis,prepareBookCreation,prepareBookDeliveryPackage,prepareCorrectionProposal,prepareCustomAnalysis,prepareDatabaseMerge,prepareDatabaseReplacement,prepareEvaluationRewrite,prepareInitialEvaluation,prepareManuscriptReimport,prepareNewBookReview,prepareReadersReport,prepareReplacement,prepareReverseApply,prepareReviewRun,prepareSourceImportReview,prepareTaskAuthorization,prepareWritingTask,previewCapturedProcedureStop,previewCapturedProcedureValidation,previewImportedExemplar,previewLearningRemediation,previewLibraryMaterial,previewReviewGuidelineVersion,previewSeriesExclusion,previewSeriesMembershipChange,probeSearchBackend,promoteAnswerToTaskIntentDraft,promoteSeriesKnowledge,promoteTaskIntentDraft,proposeSeriesKnowledge,queryMaterialVectors,quickStartBaselineAnalysis,quickStartReviewRun,quickStartWritingTask,quitApplication,readLibraryDecisionReason,rebuildHouseReviewPreference,recommendProcedures,recordAnalysisFeedback,recordChangeSuggestionDecision,recordLearningRemediation,recordMaintenanceCase,recordManuscriptEntryPosition,recordProductionDocumentDelivery,recordProposalDecision,recordProposalDecisionFeedback,recordProposalDecisionReason,recordPublicationActuals,recordReviewFindingDisposition,recordSeriesExclusion,recordVerificationReviewDecision,redoManuscript,redoTaskPlan,regenerateDialogueAnswer,regenerateProposalConflictUnit,removeModelServiceCredential,removeSearchBackendCredential,requestMaterialTranslation,reselectImportDraft,resolveProposalConflict,resolveReimportMapping,resolveUnconfirmedOutcomes,restoreRecovery,resumeBaselineAnalysisRun,revealDiagnosticsLocation,revealManuscriptExport,revealProductDataLocation,reverseAppliedChangeSuggestion,reviewBookDeliveryPackageExport,reviewManuscriptExport,revokeBackgroundAnalysisEnrollment,revokeImportedSkillUpdateRule,rollBackDatabaseReplacement,rollbackImportedSkill,runEditorClipboardCommand,runReconnectPreflight,saveCapturedProcedure,saveCorrectionProposal,saveCustomAnalysisDimension,saveDeveloperProposal,saveDeveloperProposalFile,saveEvaluation,saveEvaluationProfile,saveEvidenceAsMaterial,saveMaintenanceErrata,saveMilestone,saveModelServiceCredential,saveModelServiceProxy,savePreference,saveProductionDocumentVersion,saveProposalConflictDraft,saveProposalDecisionDraft,saveSearchBackendCredential,saveTaskIntentDraft,searchReferableMaterials,selectAndStageManuscript,selectSearchBackend,setDefaultExecutionRule,setEvaluationPreferences,setScheduledBackup,startBaselineAnalysisWhenOnline,startEvaluation,startReplacementCommit,startSearch,startTaskWhenOnline,stopCapturedProcedure,stopCustomAnalysisDimension,stopDialogueAnswer,transitionProductionDocumentPhase,undoManuscript,updateBookPeople,updateEditorialMark,validateImportedSkill,viewRecoveryCandidate'`,
     'renderer-isolation',
   );
   await assertRenderer(
@@ -1744,10 +1767,17 @@ async function runJourney(
     `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const buttons = Array.from(document.querySelectorAll('.record-navigation button'), (button) => button.textContent); const exact = ['图书','主稿件','修订版 r1','来源版本与来源记录','工作流实例与精确 Profile 绑定','稿件导入记录']; const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); const values = Object.fromEntries(Array.from(record?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); return record?.textContent.includes('稿件导入记录 ID') && record.textContent.includes('导入保真审阅 ID') && values['导入降级决定 ID'] === '—' && values['保真结果'] === '完整保留 · 原文件随来源版本保留' && record.textContent.includes('查看导入保真审阅 · 9 类与预计往返') && record.textContent.includes('完整保留（随文件保留）') && !record.textContent.includes('查看受影响类别、示例与导出后果') && items.length === 0 && buttons.length === exact.length && buttons.every((label, index) => label === exact[index]); })()`,
     'exact-record-navigation',
   );
-  await clickExactButton(renderer, '打开稿件', 'editor-open');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor-screen');
+  // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+  if (!j14DarkPassDone) {
+    j14DarkPassDone = true;
+    await runJ14DarkPass({ renderer, journey: 'J-01', at, representative: '#screen[data-screen="editor"] .editor-window', returnTo: SIDEBAR.section('manuscript') });
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor-screen-after-dark-pass');
+  }
   at('editor');
-  await assertRenderer(
+  // The window is waited for, not read once: the editor reopened after the J-14 dark pass loads its blocks after it mounts.
+  await waitFor(
     renderer,
     `(() => { const forward = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向后浏览'); return document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32 && document.querySelector('.editor-meta')?.textContent.includes('全稿 0.000%') && forward && !forward.disabled; })()`,
     'bounded-window',
@@ -1836,6 +1866,33 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     'empty-book-landing',
   );
   await requireTracedReadiness();
+  // The shell (Issue #934): the library is 书库 in the sidebar, the five destinations in their order.
+  await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'empty-book-sidebar-library');
+  // 收起侧栏 at the context header's left end leaves icons, each row keeping its name; 展开侧栏 brings the names back.
+  await assertRenderer(renderer, sidebarNavigate('#sidebar-toggle'), 'empty-book-sidebar-collapse');
+  await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons' && document.documentElement.dataset.sidebarCollapsed === 'true' && document.querySelector('#sidebar-toggle')?.getAttribute('aria-expanded') === 'false' && document.querySelector('#sidebar-toggle')?.getAttribute('aria-label') === '展开侧栏' && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.title === '书库'`, 'empty-book-sidebar-collapsed');
+  await assertRenderer(renderer, sidebarNavigate('#sidebar-toggle'), 'empty-book-sidebar-expand');
+  await waitFor(renderer, `document.documentElement.dataset.sidebar === 'full' && document.documentElement.dataset.sidebarCollapsed === 'false' && document.querySelector('#sidebar-toggle')?.getAttribute('aria-expanded') === 'true'`, 'empty-book-sidebar-expanded');
+  // Help is read-only navigation inside this existing launch stage; it adds no preload member or stage.
+  await assertRenderer(renderer, sidebarNavigate('[data-shell-slot="help"] [data-nav-help="hub"]'), 'help-open');
+  await waitFor(renderer, `document.querySelector('[data-screen="help"] [data-help-ready="true"]') && document.activeElement?.id === 'help-tab-usage'`, 'help-usage-focus');
+  await waitFor(renderer, `Boolean(document.querySelector('.help-about-line')?.textContent.match(/^软件版本 .+ · 数据版本 [0-9]+ · 服务协议 [0-9]+$/)) && document.querySelector('#context-title')?.textContent === '帮助' && document.querySelector('[data-nav-help="hub"]')?.getAttribute('aria-current') === 'page'`, 'help-live-versions');
+  await assertRenderer(renderer, `(() => {
+    const tab = document.querySelector('#help-tab-usage');
+    tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    return document.activeElement?.id === 'help-tab-privacy' && document.querySelector('#help-panel-privacy')?.hidden === false;
+  })()`, 'help-privacy-keyboard');
+  await assertRenderer(renderer, `(() => {
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+    const filter = document.querySelector('#help-license-filter');
+    if (document.activeElement?.id !== 'help-tab-licenses' || !(filter instanceof HTMLInputElement)) return false;
+    filter.value = 'prosemirror-view';
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
+    const shown = [...document.querySelectorAll('.help-license')].filter((item) => !item.hidden);
+    return shown.length === 1 && shown[0].dataset.licenseName === filter.value;
+  })()`, 'help-licenses-filter');
+  await clickExactButton(renderer, '返回', 'help-back');
+  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'help-library-return');
   await clickExactButton(renderer, '新建图书', 'empty-book-create-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-book-form');
   await clickExactButton(renderer, '复核创建', 'empty-book-missing-title');
@@ -1876,6 +1933,8 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   );
   const bookId = await renderer.evaluate(`document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId`);
   requireJourney(typeof bookId === 'string' && /^[0-9a-f-]{36}$/i.test(bookId), 'empty-book-id');
+  // A Book with no Manuscript is entered at 工作概览, which the sidebar marks under the Book's 资料与记录 (ADR 0076).
+  await waitFor(renderer, sidebarBookCurrent(bookId, 'overview'), 'empty-book-sidebar-overview');
   await clickExactButton(renderer, '图书', 'empty-book-record-open');
   const beforeIdentity = await renderer.evaluate(`(() => {
     const values = Array.from(document.querySelectorAll('.record-detail dd'), (item) => item.textContent);
@@ -1888,8 +1947,17 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     'empty-book-exact-identity',
   );
 
-  await clickExactButton(renderer, '返回图书列表', 'empty-book-return-library');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'empty-book-return-library');
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'empty-book-library');
+  // Back in 书库 the window holds no Book: its groups go, and it is 最近打开 with where it was last seen. Pinning it and
+  // unpinning it again move the row and change nothing else (IA-009).
+  const recentRow = `document.querySelector('#app-sidebar [data-nav-books="recent"] [data-nav-book=${JSON.stringify(bookId)}]')`;
+  await waitFor(renderer, `document.querySelector('#app-sidebar .sidebar-book')?.hidden === true && ${recentRow}?.querySelector('.nav-label')?.textContent === ${JSON.stringify(title)} && ${recentRow}?.querySelector('.nav-state')?.textContent === '上次在「工作概览」'`, 'empty-book-sidebar-recent');
+  await assertRenderer(renderer, `(() => { const pin=document.querySelector('#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]'); if(!(pin instanceof HTMLButtonElement))return false; pin.focus(); return document.activeElement===pin; })()`, 'empty-book-sidebar-pin-focus');
+  await assertRenderer(renderer, sidebarNavigate(`#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]`), 'empty-book-sidebar-pin');
+  await waitFor(renderer, `document.querySelector('#app-sidebar [data-nav-books="pinned"] [data-nav-pin=${JSON.stringify(bookId)}]')?.getAttribute('aria-pressed') === 'true' && !${recentRow} && document.activeElement === document.querySelector('#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-pinned');
+  await assertRenderer(renderer, sidebarNavigate(`#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]`), 'empty-book-sidebar-unpin');
+  await waitFor(renderer, `${recentRow}?.parentElement?.querySelector('[data-nav-pin]')?.getAttribute('aria-pressed') === 'false' && !document.querySelector('#app-sidebar [data-nav-books="pinned"]') && document.activeElement === document.querySelector('#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-unpinned');
   await assertRenderer(
     renderer,
     `(() => { const row = document.querySelector('[data-screen="landing"] [data-book-id=${JSON.stringify(bookId)}]')?.closest('.book-summary-item'); return row?.textContent.includes(${JSON.stringify(title)}) && row.textContent.includes('尚无稿件') && row.textContent.includes(${JSON.stringify(internalNumber)}) && row.textContent.includes(${JSON.stringify(bookId)}) && row.textContent.includes(${JSON.stringify(`book:${bookId}`)}) && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '加载更多图书'); })()`,
@@ -1916,6 +1984,12 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     'compact-book-summary-open-exact',
   );
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(bookId)}]')`, 'empty-book-reopened-from-summary');
+  await waitFor(renderer, sidebarBookCurrent(bookId, 'overview'), 'empty-book-reopened-sidebar-overview');
+  // The Book's own sections through the sidebar: 历史与恢复 is 工作概览's records, its heading taken into focus; 工作概览 again.
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('history')), 'empty-book-sidebar-history');
+  await waitFor(renderer, `${sidebarBookCurrent(bookId, 'history')} && document.activeElement === document.querySelector('[data-screen="book-overview"] .record-navigation h3')`, 'empty-book-sidebar-history-records');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'empty-book-sidebar-overview-again');
+  await waitFor(renderer, `${sidebarBookCurrent(bookId, 'overview')} && document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-overview-again-ready');
 
   await clickExactButton(renderer, '导入首份稿件', 'empty-book-import-first');
   await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'existing-book-target-selected');
@@ -2643,7 +2717,7 @@ async function main() {
     // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(populatedBookId)}]')`, 'populated-book-manuscript-before-source');
-    await clickExactButton(renderer, '返回图书工作概览', 'populated-book-to-overview-before-source');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'populated-book-to-overview-before-source');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'populated-book-overview-before-source');
     const populatedBefore = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);
     const populatedSourceVersionId = populatedBefore.find((record) => record.kind === 'source')?.id;
@@ -2657,7 +2731,7 @@ async function main() {
       'populated-source-record-before',
     );
     const populatedProvenanceBefore = await renderer.evaluate(`(() => { const labels = Array.from(document.querySelectorAll('.record-detail dt')); return labels.find((item) => item.textContent === '来源记录 ID')?.nextElementSibling?.textContent; })()`);
-    await clickExactButton(renderer, '返回图书列表', 'populated-book-return-before-source');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'populated-book-return-before-source');
     const populatedReview = await prepareSourceImportReview(renderer, {
       ...sample1Expectation,
       targetBookId: populatedBookId,
@@ -2740,7 +2814,7 @@ async function main() {
         `retention-text-box-${disposition}-record-choice`,
       );
       // Merged, the box's two paragraphs are blocks of r1 beside the six of the body; kept, they are not.
-      await clickExactButton(renderer, '打开稿件', `retention-text-box-${disposition}-editor-open`);
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), `retention-text-box-${disposition}-editor-open`);
       await waitFor(
         renderer,
         `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === ${blocks}`,
@@ -2768,7 +2842,7 @@ async function main() {
       'imported-marks-record-row',
     );
     at('imported-marks-editor');
-    await clickExactButton(renderer, '打开稿件', 'imported-marks-editor-open');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'imported-marks-editor-open');
     await waitFor(
       renderer,
       `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === ${IMPORTED_MARKS_REJECTED_BLOCKS.length}`,
@@ -3118,7 +3192,7 @@ async function main() {
         sameBookKinds.filter((kind) => kind === 'source-import-record').length === 2,
       'source-same-book-record-counts',
     );
-    await clickExactButton(renderer, '返回图书列表', 'source-return-for-empty-book');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'source-return-for-empty-book');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'source-returned-for-empty-book');
     await clickExactButton(renderer, '新建图书', 'source-create-empty-book');
     await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'source-empty-book-form');
@@ -3394,7 +3468,7 @@ async function main() {
     // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(reimportBookId)}]')`, 'reimport-no-change-lineage-restart-manuscript');
-    await clickExactButton(renderer, '返回图书工作概览', 'reimport-no-change-lineage-restart-to-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'reimport-no-change-lineage-restart-to-overview');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'reimport-no-change-lineage-restart-overview');
     await assertRenderer(
       renderer,
