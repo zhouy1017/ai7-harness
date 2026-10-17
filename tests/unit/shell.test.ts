@@ -26,6 +26,11 @@ import {
 // marks as current, the context header's words, and the 设置 hub's rows. shell-dom.test.ts mounts it; Journeys check layout.
 
 describe('the sidebar', () => {
+  it('keeps Help current with a global heading even when a Book remains in the sidebar (#939)', () => {
+    const active = screenActive('help', null);
+    expect(active).toEqual({ kind: 'help' });
+    expect(contextHeading('help', active, { bookId: 'a', title: '甲书' })).toEqual({ title: '帮助', position: SHELL_LABELS.global, book: false });
+  });
   it('keeps usage, exact Run detail and keyboard pages in Settings (#936)', () => {
     for (const [state, position] of [['usage', '服务 · 用量'], ['usage-run', '服务 · 用量 · 运行详情'], ['keyboard', '本机 · 键盘与无障碍']]) {
       const active = screenActive(state!, null);

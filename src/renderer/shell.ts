@@ -23,6 +23,7 @@ import {
   shellSectionLabel,
   type ShellDestination,
 } from './shell-labels.js';
+import { HELP_ENTRY } from './help-labels.js';
 
 // The shell around every screen (Issue #934, wave 11 slice 11a; editor-surfaces §0.3; IA-006 to IA-013, ADR 0076): a
 // two-level sidebar — the five global destinations, 置顶 and 最近打开 Books, the current Book's three groups and 设置 — and
@@ -41,6 +42,7 @@ export interface ShellPlace {
 export type ShellActive =
   | { readonly kind: 'destination'; readonly destination: ShellDestination }
   | { readonly kind: 'settings' }
+  | { readonly kind: 'help' }
   | { readonly kind: 'section'; readonly section: ShellBookSection }
   | { readonly kind: 'none' };
 
@@ -62,6 +64,7 @@ const SCREEN_ACTIVE: Readonly<Record<string, ShellActive>> = Object.freeze({
   'knowledge-base': { kind: 'destination', destination: 'knowledge' },
   'quality-learning': { kind: 'destination', destination: 'quality' },
   settings: { kind: 'settings' },
+  help: { kind: 'help' },
   'model-service': { kind: 'settings' },
   'data-storage': { kind: 'settings' },
   'evaluation-calibration': { kind: 'settings' },
@@ -87,6 +90,7 @@ export function contextHeading(state: string, active: ShellActive, book: ShellBo
     return { title: book.title, position: `${shellSectionGroupLabel(active.section)} · ${shellSectionLabel(active.section)}`, book: true };
   }
   if (active.kind === 'settings') return { title: SHELL_SETTINGS.label, position: SETTINGS_PAGE_TITLES[state] ?? SHELL_LABELS.global, book: false };
+  if (active.kind === 'help') return { title: HELP_ENTRY.label, position: SHELL_LABELS.global, book: false };
   if (active.kind === 'destination') {
     const label = shellDestinationLabel(active.destination);
     return IMPORT_STATES.has(state) ? { title: SHELL_LABELS.importing, position: label, book: false } : { title: label, position: SHELL_LABELS.global, book: false };
@@ -433,6 +437,9 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     }
     if (active.kind === 'settings') settings.setAttribute('aria-current', 'page');
     else settings.removeAttribute('aria-current');
+    const helpLink = helpSlot.querySelector('[data-nav-help="hub"]');
+    if (active.kind === 'help') helpLink?.setAttribute('aria-current', 'page');
+    else helpLink?.removeAttribute('aria-current');
     bookGroup.hidden = book === null;
     if (book !== null) {
       bookTitle.textContent = book.title;

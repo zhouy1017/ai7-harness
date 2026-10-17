@@ -7,6 +7,7 @@ import { SETTINGS_HUB_GROUPS, SHELL_BOOK_GROUPS, SHELL_DESTINATIONS, SHELL_SETTI
 import { TASK_PANEL_TITLE } from './task-panel-labels.js';
 import { TASK_BAR_START } from './task-drawer-labels.js';
 import { KNOWLEDGE_BASE_TAB_VIEWS } from './knowledge-base-labels.js';
+import { MILESTONE_FORM_WORDS, PUBLICATION_ACTION_LABELS } from './deliverables-labels.js';
 
 export interface HelpSection {
   readonly heading: string;
@@ -33,7 +34,7 @@ export const HELP_USAGE_SECTIONS: ReadonlyArray<HelpSection> = Object.freeze([
     `${sectionLabel('review')}按类别给出结果与审阅报告，${sectionLabel('evaluation')}给出评估与审稿意见；两者都要你在原页面作出决定。`,
   ] },
   { heading: '交付物', paragraphs: [
-    `${sectionLabel('deliverables')}管理发稿、交付与图书交付包：先保存里程碑版本，再设为发稿版本，然后按关口推进。`,
+    `${sectionLabel('deliverables')}管理发稿、交付与图书交付包：先在稿件里选「${MILESTONE_FORM_WORDS.summary}」，再到交付物选「${PUBLICATION_ACTION_LABELS.designate}」，然后按关口推进。`,
   ] },
   { heading: '知识库与工序', paragraphs: [
     `${destinationLabel('knowledge')}七类：${KNOWLEDGE_BASE_TAB_VIEWS.map((entry) => entry.label).join('、')}；任务只选用并记版本。`,

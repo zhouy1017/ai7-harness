@@ -176,7 +176,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     node.addEventListener('keydown', (event) => {
       const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
       const jump = event.key === 'Home' ? -index : event.key === 'End' ? HELP_TABS.length - 1 - index : 0;
-      if (step === 0 && jump === 0) return;
+      if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
       const next = HELP_TABS[(index + (step !== 0 ? step : jump) + HELP_TABS.length) % HELP_TABS.length]!;
       select(next.tab, true);
