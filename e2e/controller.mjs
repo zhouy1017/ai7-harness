@@ -2145,9 +2145,14 @@ export function classifyJourneyResult(result, journey) {
  * `returnToScreen`. Neither touches a record: only the local appearance preference changes, and it ends at 跟随系统.
  */
 export async function runJ14DarkPass({ renderer, journey, at, representative = '[data-screen="landing"] .panel', returnTo = SIDEBAR.destination('library'), returnToScreen }) {
-  // Every check polls: a screen the sidebar opens may paint more than once, and a read between two paints sees no node.
-  const wait = async (expression, label) => {
-    const deadline = Date.now() + 15_000;
+  // Which screen was showing, as a check label's word: its own `data-screen` when that is a code word, else `other`; `none`
+  // before the renderer has painted its first screen or when it cannot be read.
+  const SCREEN_WORD = `(() => { const state = document.querySelector('#screen')?.dataset.screen; return typeof state !== 'string' ? 'none' : /^[a-z][a-z0-9-]{0,39}$/u.test(state) ? state : 'other'; })()`;
+  // Every check polls to a deadline: a screen the sidebar opens may paint more than once, a read between two paints sees
+  // no node, and a hosted runner is several times slower than a guest. Past the deadline the label names the check that
+  // waited and, after `-on-`, the screen it found instead (Issue #935's hosted J-08 failure carried the check alone).
+  const wait = async (expression, label, timeout = 15_000) => {
+    const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       try {
         if (await renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`)) return;
@@ -2156,20 +2161,24 @@ export async function runJ14DarkPass({ renderer, journey, at, representative = '
       }
       await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     }
-    throw journeyCheckFailure(journey, label);
+    const seen = await renderer.evaluate(SCREEN_WORD).catch(() => 'none');
+    throw journeyCheckFailure(journey, `${label}-on-${seen}`);
   };
   const node = `document.querySelector(${JSON.stringify(representative)})`;
   const open = async () => {
     await wait(sidebarNavigate(SIDEBAR.settings), 'j14-dark-pass-open-settings');
-    await wait(`(() => { const button = document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]'); if (!button || button.disabled) return false; button.click(); return true; })()`, 'j14-dark-pass-open-appearance');
-    await wait(`document.querySelector('#screen[data-screen="appearance"]')`, 'j14-dark-pass-appearance');
+    // 设置 opens through `leaveThen`, so the hub paints after the click: wait for its 外观 row before following it.
+    await wait(`(() => { const button = document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'j14-dark-pass-settings');
+    await wait(`(() => { const button = document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, 'j14-dark-pass-open-appearance');
+    // 外观 is ready when its three choices are there with the saved preference checked, so a choice reads a settled page.
+    await wait(`window.ai7.getPreferences().then((preferences) => { const inputs = Array.from(document.querySelectorAll('#screen[data-screen="appearance"] input[data-appearance-theme]')); return inputs.length === 3 && inputs.filter((input) => input.checked).map((input) => input.value).join() === (preferences.values['appearance.theme'] ?? 'system'); })`, 'j14-dark-pass-appearance');
   };
   const back = returnToScreen ?? (async () => {
     await wait(sidebarNavigate(returnTo), 'j14-dark-pass-return');
   });
   const choose = async (theme) => {
     await open();
-    await wait(`(() => { const input = document.querySelector('[data-appearance-theme="${theme}"]'); if (!input || input.disabled) return false; if (!input.checked) input.click(); return input.checked; })()`, `j14-dark-pass-choose-${theme}`);
+    await wait(`(() => { const input = document.querySelector('#screen[data-screen="appearance"] input[data-appearance-theme="${theme}"]'); if (!input || input.disabled) return false; if (!input.checked) input.click(); return input.checked; })()`, `j14-dark-pass-choose-${theme}`);
     await wait(`window.ai7.getPreferences().then((preferences) => preferences.values['appearance.theme'] === '${theme}')`, `j14-dark-pass-saved-${theme}`);
     await back();
     await wait(node, 'j14-dark-pass-representative');
@@ -2183,6 +2192,10 @@ export async function runJ14DarkPass({ renderer, journey, at, representative = '
     }
   };
   at('j14-dark-pass');
+  // The pass starts from its representative screen, painted: the renderer's first screen arrives after product-ready (its
+  // startup reads are asynchronous), and a 设置 opened before it is replaced by it — J-08's hosted failure (Issue #935).
+  // A Journey's own screen waits use 60 s, so this one does too.
+  await wait(node, 'j14-dark-pass-ready', 60_000);
   await choose('dark');
   at('j14-dark-pass-theme-applied');
   await wait(`(() => {

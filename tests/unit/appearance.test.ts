@@ -73,6 +73,37 @@ describe('application appearance', () => {
     }
   });
 
+  it('starts the J-14 dark pass from its painted screen and names the screen it found when a check passes its bound', async () => {
+    // The hosted J-08 failure: product-ready came before the first screen, and 设置 opened then was replaced by 书库.
+    const controller = (await import(new URL('../../e2e/controller.mjs', import.meta.url).href)) as {
+      runJ14DarkPass(options: object): Promise<void>;
+      journeyCheckLabel(error: unknown): string | null;
+    };
+    const representative = '#screen[data-screen="landing"] > .panel';
+    const painted = `Promise.resolve(document.querySelector(${JSON.stringify(representative)})).then(Boolean)`;
+    const labelOf = async (evaluate: (expression: string) => Promise<unknown>) => {
+      const outcome = controller.runJ14DarkPass({ renderer: { evaluate, send: async () => undefined }, journey: 'J-08', at: () => undefined, representative })
+        .then(() => null, (error: unknown) => controller.journeyCheckLabel(error));
+      await vi.runAllTimersAsync();
+      return outcome;
+    };
+    const screenWord = (word: string | Error) => async (expression: string) => {
+      if (expression.includes('#screen\')?.dataset.screen')) { if (word instanceof Error) throw word; return word; }
+      return false;
+    };
+    vi.useFakeTimers();
+    try {
+      expect(await labelOf(screenWord('none'))).toBe('j14-dark-pass-ready-on-none');
+      expect(await labelOf(screenWord(new Error('J-08/renderer-evaluate')))).toBe('j14-dark-pass-ready-on-none');
+      const landing = screenWord('landing');
+      expect(await labelOf(async (expression) => expression === painted || landing(expression))).toBe('j14-dark-pass-open-settings-on-landing');
+      expect(await labelOf(async (expression) => expression === painted || expression.includes('data-nav-settings') || landing(expression)))
+        .toBe('j14-dark-pass-settings-on-landing');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps the theme and the preference file out of every service module, so no record, export or model context can read them', () => {
     const service = new URL('../../src/service/', import.meta.url);
     const files = readdirSync(service, { recursive: true, encoding: 'utf8' }).filter((path) => path.endsWith('.ts'));
