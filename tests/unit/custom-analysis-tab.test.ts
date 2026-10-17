@@ -133,6 +133,27 @@ describe('②A › 自定义', () => {
   });
 });
 
+describe('②A › 自定义 while a Run is under way', () => {
+  it('reads again until the Task of the dimension settles, then stops', async () => {
+    vi.useFakeTimers();
+    try {
+      const running = projection([dimension({ taskState: { taskIntentId: '88888888-8888-4888-8888-888888888888', state: 'executing', stateLabel: '正在运行' }, latest: null, unavailableReason: '这个维度的上一项任务还在运行；它结束后才能再运行。' })]);
+      const settled = projection([dimension({ taskState: { taskIntentId: '88888888-8888-4888-8888-888888888888', state: 'settled', stateLabel: '已完成' }, latest: revision(), unavailableReason: null })]);
+      const { panel, api } = mountTab(running);
+      api.inspectCustomAnalysisDimensions.mockResolvedValueOnce(settled);
+      await settle();
+      expect(panel.querySelector('.custom-task-state')?.dataset['taskState']).toBe('executing');
+      await vi.advanceTimersByTimeAsync(1_000);
+      await settle();
+      expect(panel.querySelectorAll('.custom-row')).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(api.inspectCustomAnalysisDimensions).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('知识库 › 工序与规则 › 自定义分析维度', () => {
   it('states what AI7 fixes, lists each version with its state, and offers 验证并启用 and 停用 by state', async () => {
     const pending = { ...dimension(null).versions[0]!, versionId: '77777777-7777-4777-8777-777777777777', version: 2, state: 'pending-validation' as const, stateLabel: '待验证' };

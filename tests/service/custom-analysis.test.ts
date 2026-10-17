@@ -237,6 +237,23 @@ describe('a custom analysis Run over the real store on exact sample1', () => {
   }, 180_000);
 });
 
+describe('in J-04 order: the first baseline, then the dimension', () => {
+  it('answers every unit of the dimension after the first baseline of the Book on the same launch', async () => {
+    await withBook(async (book) => {
+      let progress = book.store.createBaselineAnalysisPreparationWork(book.bookId, '对当前书稿执行基线稿件分析，形成覆盖全部结构单元的结果集修订版。', null, launchPolicy);
+      while (!progress.done) progress = book.store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+      const authorized = book.store.authorizeBaselineAnalysis(book.bookId, progress.projection!.taskIntent!.taskIntentId, progress.projection!.planEnvelope!.digest);
+      book.owner.admitAndDispatch(authorized.dispatchRunRecordId!, authorized.ledger);
+      await book.owner.whenIdle();
+      const { dimensionId } = defineDimension(book);
+      await run(book, dimensionId);
+      const latest = custom(book.store.inspectCustomAnalysisDimensions(book.bookId), dimensionId).book!.latest!;
+      expect(latest.gaps).toEqual([]);
+      expect(latest.rowCounts).toEqual({ units: 8, rows: 9, located: 8, unlocated: 1 });
+    });
+  }, 180_000);
+});
+
 describe('schema revision 83', () => {
   it('rebuilds a revision-80 store\'s Result Set relations byte for byte, adds the dimension relations empty, and refuses an 83 without them', async () => {
     expect(CUSTOM_ANALYSIS_SCHEMA_VERSION).toBe(83);

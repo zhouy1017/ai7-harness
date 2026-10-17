@@ -84,6 +84,10 @@ export interface MountCustomAnalysisTabOptions {
 const READING_FRESH_MS = 2_000;
 const readings = new Map<string, { projection: CustomAnalysisDimensionsProjection; at: number }>();
 
+/** While a dimension's Task is under way the tab reads again this often, as ②A's card does for the baseline's Run. */
+const RUN_REFRESH_MS = 1_000;
+const RUN_UNDER_WAY: ReadonlySet<string> = new Set(['authorized-blocked', 'queued', 'waiting', 'admitted', 'executing', 'cancelling', 'pausing']);
+
 /** The event ②A's tab strip raises on a panel as it is shown, so the tab reads again when the editor comes to it. */
 export const ANALYSIS_TAB_SHOWN_EVENT = 'analysis-tab-shown';
 
@@ -216,11 +220,20 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     panel.replaceChildren(...cards);
   };
 
+  let refresh: ReturnType<typeof setTimeout> | null = null;
   const load = async (): Promise<void> => {
     try {
       const projection = await api.inspectCustomAnalysisDimensions({ forBook: true });
       readings.set(bookId, { projection, at: Date.now() });
-      if (panel.isConnected) render(projection);
+      if (!panel.isConnected) return;
+      render(projection);
+      // A Run under way settles into a new revision: the tab reads again until none is, and stops once the panel is gone.
+      if (refresh === null && projection.dimensions.some((dimension) => RUN_UNDER_WAY.has(dimension.book?.taskState?.state ?? ''))) {
+        refresh = setTimeout(() => {
+          refresh = null;
+          if (panel.isConnected) void load();
+        }, RUN_REFRESH_MS);
+      }
     } catch (error) {
       if (!panel.isConnected) return;
       panel.dataset['customAnalysis'] = 'unavailable';

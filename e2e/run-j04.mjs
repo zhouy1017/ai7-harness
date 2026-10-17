@@ -604,6 +604,16 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
   throw journeyCheckFailure('J-04', name);
 }
 
+/** Wait on a service read in the page: `waitFor` takes the truth of its expression, which a pending Promise always has. */
+async function waitForRead(renderer, expression, name, timeout = 60_000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`).catch(() => false)) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+  }
+  throw journeyCheckFailure('J-04', name);
+}
+
 async function importSample1(renderer, cancellation, distinct = false) {
   await click(renderer, '导入稿件', 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
@@ -3278,9 +3288,8 @@ async function main() {
     const dimensionCard = `.baseline-analysis-card [data-analysis-panel="custom"] .custom-dimension-card[data-dimension-id=${JSON.stringify(customDimension.dimensionId)}]`;
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${dimensionCard} [data-custom-empty="not-run"]`)})?.textContent==='尚未运行' && document.querySelector(${JSON.stringify(`${dimensionCard} [data-analysis-action="custom-run"]`)})?.disabled===false`, 'custom-tab-not-run');
     await reviewAction(renderer, `${dimensionCard} [data-analysis-action="custom-run"]`, 'custom-run');
-    let customTask = null;
-    await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.taskState?.state === 'prepared')`, 'custom-prepared', 120_000);
-    customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions[0].book.taskState;
+    await waitForRead(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.taskState?.state === 'prepared')`, 'custom-prepared', 120_000);
+    const customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions[0].book.taskState;
     // The plan opens in the Task Drawer as every ②A plan does: the dimension's exact version as its procedure, and nothing sent here.
     const customPlan = await drawerShowing(renderer, customTask.taskIntentId, 'ready', 'custom-drawer');
     requireJourney(customPlan?.kind === 'baseline-analysis' && customPlan.chips?.procedure === `工序「自定义分析 · ${CUSTOM_DIMENSION_TITLE} · 第 1 版」`, 'custom-plan', customPlan);
@@ -3289,7 +3298,7 @@ async function main() {
       customPlanRecord.technical?.some((row) => row.key === 'custom-analysis-dimension' && row.value.startsWith(customDimension.versions[0].versionId)), 'custom-plan-record', customPlanRecord?.scope);
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'custom-bar-ready');
     await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'custom-start');
-    await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.latest !== null && value.dimensions[0]?.book?.taskState?.state === 'settled')`, 'custom-settled', 180_000);
+    await waitForRead(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.latest !== null && value.dimensions[0]?.book?.taskState?.state === 'settled')`, 'custom-settled', 180_000);
     cancellation.throwIfRequested();
 
     at('custom-dimension-tab');
