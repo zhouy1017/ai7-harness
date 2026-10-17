@@ -1,8 +1,9 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
+import type { PreferencesProjection, SavePreferenceInput } from './preferences.js';
 
-export const SERVICE_PROTOCOL_VERSION = 151 as const;
+export const SERVICE_PROTOCOL_VERSION = 152 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -247,6 +248,10 @@ export const IPC_CHANNELS = {
   approveDatabaseExport: 'ai7:j12:approve-database-export',
   inspectDatabaseExports: 'ai7:j12:inspect-database-exports',
   inspectScheduledBackups: 'ai7:j12:inspect-scheduled-backups',
+  getPreferences: 'ai7:w11:get-preferences',
+  savePreference: 'ai7:w11:save-preference',
+  inspectUsage: 'ai7:w11:inspect-usage',
+  exportUsageCsv: 'ai7:w11:export-usage-csv',
   setScheduledBackup: 'ai7:j12:set-scheduled-backup',
   chooseDatabaseImportFile: 'ai7:j12:choose-database-import-file',
   prepareDatabaseReplacement: 'ai7:j12:prepare-database-replacement',
@@ -13054,6 +13059,73 @@ export interface ServiceReadiness {
   };
 }
 
+/**
+ * 用量 (Issue #936, plan slice 11c; V2-UX-MSET-010): the Runs already recorded, summed — never a new account. A Run's tokens are
+ * the Run Report's `usagePerStage` read from its Task Outcome; the route it ran on is the Execution Binding's. A Run settled
+ * before the Run Report existed has no usage record and is counted apart, not as zero.
+ */
+export const USAGE_RANGES = ['day', 'week', 'month', 'all'] as const;
+export type UsageRange = (typeof USAGE_RANGES)[number];
+export const USAGE_GROUPINGS = ['book', 'taskKind', 'time'] as const;
+export type UsageGrouping = (typeof USAGE_GROUPINGS)[number];
+export const USAGE_EMPTY_LABEL = '尚无用量' as const;
+/** The most Runs one row lists; `runCount` is always whole. */
+export const USAGE_ROW_RUN_LINKS = 50;
+
+/** One Run of a row: the exact record the editor can open. */
+export interface UsageRunLinkProjection {
+  runRecordId: string;
+  taskIntentId: string;
+  bookId: string;
+  bookTitle: string;
+  /** The ledger Task kind, exactly as recorded. */
+  taskKind: string;
+  /** The Review Run this Run is one category of; `null` for every other kind. */
+  reviewRunId: string | null;
+  /** The route the Run's Execution Binding names; `null` when it was never bound. */
+  route: string | null;
+  recordedAt: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface UsageRouteTokensProjection {
+  route: string | null;
+  runCount: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface UsageRowProjection {
+  /** The Book id, the ledger Task kind, or the start of the period (`YYYY-MM-DD`, `YYYY-MM-DDTHH` or `YYYY-MM`). */
+  key: string;
+  /** A Book's title or the kind's / period's own name; the renderer words kinds and periods. */
+  label: string;
+  runCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  byRoute: ReadonlyArray<UsageRouteTokensProjection>;
+  /** Newest first, at most `USAGE_ROW_RUN_LINKS`. */
+  runs: ReadonlyArray<UsageRunLinkProjection>;
+}
+
+export interface UsageProjection {
+  range: UsageRange;
+  groupBy: UsageGrouping;
+  asOf: string;
+  /** The earliest instant counted; `null` for 全部. */
+  since: string | null;
+  rows: ReadonlyArray<UsageRowProjection>;
+  totals: { runCount: number; inputTokens: number; outputTokens: number; byRoute: ReadonlyArray<UsageRouteTokensProjection> };
+  /** Runs in range that settled without a usage record: named, never counted as zero. */
+  unrecordedRuns: number;
+  /** `尚无用量` when no row exists. */
+  emptyLabel: typeof USAGE_EMPTY_LABEL | null;
+}
+
+/** The result of 导出为 CSV…: a file of numbers and ids, written where the editor chose. */
+export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'written'; rows: number };
+
 export interface ServiceOperationMap {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
   selectSearchBackend: { input: { backendId: string }; output: SearchBackendSettingsProjection };
@@ -13812,6 +13884,8 @@ export interface ServiceOperationMap {
   inspectDatabaseExports: { input: Record<string, never>; output: DatabaseExportsProjection };
   /** 定期自动备份 (Issue #434, S86b): the switch and the backups kept. */
   inspectScheduledBackups: { input: Record<string, never>; output: ScheduledBackupsProjection };
+  /** 用量 (Issue #936, S11c): read-only aggregate of the Runs already recorded; writes nothing and calls no Provider. */
+  inspectUsage: { input: { range: UsageRange; groupBy: UsageGrouping }; output: UsageProjection };
   /** Turn the switch from the state the editor saw; turning it on backs up at once when none was made in the day before. */
   setScheduledBackup: { input: SetScheduledBackupInput; output: ScheduledBackupsProjection };
   /** 导入数据库 (Issue #434, S86c): the file the Open dialog answered, read and verified whole; nothing is taken from it. */
@@ -14372,6 +14446,13 @@ export interface RendererApi {
   approveDatabaseExport(input: { preparationId: string }): Promise<DatabaseExportActivityProjection>;
   inspectDatabaseExports(): Promise<DatabaseExportsProjection>;
   inspectScheduledBackups(): Promise<ScheduledBackupsProjection>;
+  /** Local view/input preferences, kept by the main process (wave 11 seam map §2). */
+  getPreferences(): Promise<PreferencesProjection>;
+  savePreference(input: SavePreferenceInput): Promise<PreferencesProjection>;
+  /** 用量 (Issue #936): the Runs already recorded, summed by Book, Task kind or period. */
+  inspectUsage(input: { range: UsageRange; groupBy: UsageGrouping }): Promise<UsageProjection>;
+  /** 导出为 CSV… (Issue #936): the platform's Save dialog, then the table as numbers and ids only. */
+  exportUsageCsv(input: { range: UsageRange; groupBy: UsageGrouping }): Promise<UsageCsvExportResult>;
   setScheduledBackup(input: SetScheduledBackupInput): Promise<ScheduledBackupsProjection>;
   /** 导入数据库… (Issue #434, S86c): the platform's Open dialog, then the chosen package read and verified for its preview. */
   chooseDatabaseImportFile(): Promise<{ outcome: 'cancelled' } | { outcome: 'previewed'; preview: DatabaseImportPreviewProjection }>;

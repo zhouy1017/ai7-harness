@@ -76,7 +76,7 @@ import {
   type ServiceRequest,
   type TaskPlanKind,
 } from '../shared/protocol.js';
-import { MAX_WRITING_MATERIALS } from '../shared/protocol.js';
+import { MAX_WRITING_MATERIALS, USAGE_GROUPINGS, USAGE_RANGES } from '../shared/protocol.js';
 import { SERIES_EXCLUSION_ACTIONS, SERIES_EXCLUSION_TARGET_KINDS, type SeriesExclusionAction, type SeriesExclusionTargetKind } from '../shared/protocol.js';
 import { BACKGROUND_ANALYSIS_CEILING_MAX, FACTUAL_VERIFICATION_OUTCOMES, VERIFICATION_REVIEW_DISPOSITIONS } from '../shared/protocol.js';
 import { CONFLICT_RESOLUTIONS, type ConflictResolution } from '../shared/conflict-units.js';
@@ -1082,6 +1082,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectDatabaseReplacements':
       requireInput(value.input, [], tentativeId);
       break;
+    // 用量 (Issue #936, S11c): one of the closed ranges and one of the closed groupings.
+    case 'inspectUsage': {
+      const input = requireInput(value.input, ['range', 'groupBy'], tentativeId);
+      if (!(USAGE_RANGES as readonly unknown[]).includes(input.range) || !(USAGE_GROUPINGS as readonly unknown[]).includes(input.groupBy)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     // 导入数据库…: the package, only ever the main process's, from the system Open dialog.
     case 'inspectDatabaseImport': {
       const input = requireInput(value.input, ['source'], tentativeId);

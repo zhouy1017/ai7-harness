@@ -31,6 +31,7 @@ import {
   VALIDATION_DELTA_ARGUMENT,
   parseTrustedLaunchForm,
   type AskAboutSelectionInput,
+  type UsageCsvExportResult,
   type InspectFastInteractionRequestInput,
   type PolishSelectionInput,
   type ConvertDialogueToChangeSuggestionInput,
@@ -83,6 +84,8 @@ import {
   type ServiceOperationMap,
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
+import { usageCsv } from '../shared/usage.js';
+import { PreferencesStore } from './preferences.js';
 import { developerProposalFileName } from '../shared/developer-proposal.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
@@ -1370,6 +1373,26 @@ function registerRendererHandlers(
       buttonLabel: '选择此位置',
       defaultPath: resolve(app.getPath('documents'), `AI7 数据库 ${date}.ai7db`),
       filters: [{ name: 'AI7 数据库', extensions: ['ai7db'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
+    requireDesktop(isAbsolute(chosen.filePath));
+    return chosen.filePath;
+  };
+
+  /** The main process's preferences file under the data root's user-data folder (wave 11 seam map §2). */
+  let preferencesStore: PreferencesStore | undefined;
+  const preferences = (): PreferencesStore => (preferencesStore ??= new PreferencesStore(resolve(app.getPath('userData'), 'preferences.json')));
+
+  /** 导出为 CSV… of 用量 (Issue #936, S11c): the platform's own Save dialog; `undefined` is a cancelled dialog. */
+  const chooseUsageCsvFile = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+    const today = new Date();
+    const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const chosen = await dialog.showSaveDialog(owned.window, {
+      title: '选择用量表的保存位置',
+      buttonLabel: '保存到此位置',
+      defaultPath: resolve(app.getPath('documents'), `AI7 用量 ${date}.csv`),
+      filters: [{ name: 'CSV 表格', extensions: ['csv'] }],
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
@@ -4263,6 +4286,43 @@ function registerRendererHandlers(
       requireSender(event);
       requireAuthority();
       return service.call('inspectScheduledBackups', {});
+    }),
+  );
+  // Local view/input preferences (wave 11 seam map §2): the main process's own file, no service call and no business record.
+  ipcMain.handle(IPC_CHANNELS.getPreferences, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      return preferences().read();
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.savePreference, (event, input: Parameters<RendererApi['savePreference']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return preferences().save(input);
+    }),
+  );
+  // 用量 (Issue #936, S11c): a read of the recorded Runs; the CSV is numbers and ids only, built here from the same read and
+  // the editor's own unit prices, and written where the Save dialog said.
+  ipcMain.handle(IPC_CHANNELS.inspectUsage, (event, input: Parameters<RendererApi['inspectUsage']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectUsage', { range: input.range, groupBy: input.groupBy });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.exportUsageCsv, (event, input: Parameters<RendererApi['exportUsageCsv']>[0]) =>
+    envelope(async (): Promise<UsageCsvExportResult> => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      const usage = await service.call('inspectUsage', { range: input.range, groupBy: input.groupBy });
+      const destination = await chooseUsageCsvFile(owned);
+      if (destination === undefined) return { outcome: 'cancelled' };
+      const { values } = await preferences().read();
+      await writeFile(destination, usageCsv(usage, values['usage.unitPrices']), 'utf8');
+      return { outcome: 'written', rows: usage.rows.reduce((count, row) => count + row.byRoute.length, 0) };
     }),
   );
   ipcMain.handle(IPC_CHANNELS.setScheduledBackup, (event, input: Parameters<RendererApi['setScheduledBackup']>[0]) =>
