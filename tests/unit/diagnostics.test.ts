@@ -1,5 +1,6 @@
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildDiagnosticsBundle, type DiagnosticsInputs } from '../../src/main/diagnostics.js';
+import { DIAGNOSTICS_CHANNELS, buildDiagnosticsBundle, type DiagnosticsInputs } from '../../src/main/diagnostics.js';
 
 const facts: DiagnosticsInputs['facts'] = {
   appVersion: '0.1.0', dataVersion: 83, protocol: 151, policySetVersion: 'v15', platform: 'win32',
@@ -29,5 +30,23 @@ describe('pure diagnostics bundle', () => {
     expect(JSON.parse(files['summary.json']!).preferences).toEqual({ version: 1, values: {
       nested: { enabled: true }, name: '<redacted>', scale: 1.2, items: [{ active: false }],
     } });
+  });
+  it('keeps the main-process version facts and preload channels synchronized with their owners', () => {
+    const source = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
+    const application = source('src/main/application.ts');
+    // The data version is the service's newest schema constant; a schema bump must move the crash/summary fact with it.
+    const schemaVersions = readdirSync(new URL('../../src/service/', import.meta.url), { recursive: true, encoding: 'utf8' })
+      .filter((name) => name.endsWith('.ts'))
+      .flatMap((name) => [...source(`src/service/${name.replaceAll('\\', '/')}`).matchAll(/_SCHEMA_VERSION = (\d+);/gu)].map((match) => Number(match[1])));
+    expect(application.match(/dataVersion: (\d+), protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(Math.max(...schemaVersions)));
+    // The summary reads the same built active policy set the service's launch policy verifies.
+    const activeSet = source('src/service/launch-policy.ts').match(/const ACTIVE_SET_PATH = 'docs\/policies\/([^']+)';/u)?.[1];
+    expect(activeSet).toBeDefined();
+    expect(application).toContain(`resolve(__dirname, '..', 'docs', 'policies', '${activeSet}')`);
+    // The sandboxed preload cannot import the main module at runtime, so its literals must match the handler channels.
+    const preload = source('src/main/preload.ts');
+    for (const [member, channel] of Object.entries(DIAGNOSTICS_CHANNELS)) {
+      expect(preload.split(/\r?\n/u).find((line) => line.startsWith(`  ${member}: `))).toContain(`('${channel}')`);
+    }
   });
 });
