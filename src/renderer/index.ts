@@ -71,6 +71,7 @@ import type {
   TaskPlanKind,
   TaskPlanProjection,
 } from '../shared/protocol.js';
+import { createNotificationObserver, mountQuietNotice } from './notifications.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   J03_TASK_GOAL,
@@ -836,6 +837,23 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
   return node;
 })();
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
+const showQuietNotice = mountQuietNotice((item) => void leaveThen(() => openGlobalAttentionItem(item)));
+const observeNotifications = createNotificationObserver({
+  api: window.ai7,
+  focused: () => document.hasFocus(),
+  completed: showQuietNotice,
+});
+globalAttentionReader.subscribe((reading) => {
+  if (reading.kind === 'projection') observeNotifications(reading.projection);
+});
+window.ai7.onNotificationNavigate((target) => {
+  void leaveThen(async () => {
+    const projection = await window.ai7.inspectGlobalAttention();
+    const item = projection.groups.flatMap((group) => group.items).find((entry) => entry.itemId === target.eventId && entry.book.bookId === target.bookId);
+    if (item) await openGlobalAttentionItem(item);
+    else await openGlobalAttention(target.bookId);
+  });
+});
 window.addEventListener('focus', () => globalAttentionReader.refresh());
 
 /**
@@ -1069,7 +1087,7 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
  * 待我处理 from the header (Issue #424): the screen opens in the library state — the window leaves the Book it
  * showed, as 返回图书列表 does — after the surface on screen has settled what it must first.
  */
-async function openGlobalAttention(): Promise<void> {
+async function openGlobalAttention(bookId?: string | null): Promise<void> {
   if (authorityInterrupted) return;
   const guard = leaveGuard;
   if (guard !== null) {
@@ -1088,19 +1106,31 @@ async function openGlobalAttention(): Promise<void> {
   try {
     await window.ai7.leaveBookWorkbench();
     shell.leaveBook();
-    renderGlobalAttention();
+    renderGlobalAttention(bookId);
   } catch (error) {
     setStatus(rendererErrorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable), 'error');
   }
 }
 
 /** 待我处理's screen (editor-surfaces §8.1): the surface is `global-attention.ts`; this gives it its way out. */
-function renderGlobalAttention(): void {
+function renderGlobalAttention(bookId?: string | null): void {
   const content = panel();
   content.classList.add('global-attention');
   const surface = mountGlobalAttention({
     root: content,
-    reader: globalAttentionReader,
+    reader: bookId === undefined ? globalAttentionReader : {
+      ...globalAttentionReader,
+      subscribe: (listener) => globalAttentionReader.subscribe((reading) => listener(reading.kind !== 'projection' ? reading : {
+        kind: 'projection',
+        projection: {
+          ...reading.projection,
+          groups: reading.projection.groups.map((group) => {
+            const items = group.items.filter((item) => item.book.bookId === bookId);
+            return { ...group, items, total: items.length };
+          }),
+        },
+      })),
+    },
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,
@@ -6067,6 +6097,52 @@ async function renderEvaluationCalibration(focusBookId: string | null): Promise<
  * 设置 (Issue #934; editor-surfaces §8.6): 服务 · 编辑工作 · 本机, one row per page. A page that exists keeps its own render
  * function and its `data-settings-route`; a row whose page a later slice of the wave brings is unavailable, 即将提供.
  */
+async function renderNotificationSettings(): Promise<void> {
+  const preferences = await window.ai7.getPreferences();
+  let values = preferences.values;
+  const content = panel();
+  content.append(element('h2', undefined, '通知'), element('p', 'field-note', '系统通知仅在 AI7 所有窗口都不在前台时发送。默认只用通用措辞；这些开关不授予任何处理或发布权限。'));
+  if (preferences.notice) content.append(element('p', 'attention-note', preferences.notice));
+  const rows = [
+    ['notifications.enabled', '系统通知'],
+    ['notifications.completions', '普通完成提示也发系统通知'],
+    ['notifications.sound', '通知声音'],
+    ['notifications.bookName', '在通知中显示图书名'],
+  ] as const;
+  const controls = new Map<string, HTMLInputElement>();
+  const paint = (): void => {
+    for (const [key] of rows) {
+      const control = controls.get(key)!;
+      control.checked = values[key];
+      control.disabled = key === 'notifications.completions' && !values['notifications.enabled'];
+    }
+  };
+  for (const [key, label] of rows) {
+    const row = element('label', 'field');
+    const control = document.createElement('input');
+    control.type = 'checkbox';
+    control.dataset['notificationPreference'] = key;
+    controls.set(key, control);
+    control.addEventListener('change', () => {
+      const value = control.checked;
+      control.disabled = true;
+      void window.ai7.savePreference({ key, value }).then((saved) => {
+        values = saved.values;
+        setStatus('通知设置已保存在本机。', 'success');
+      }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '通知设置未保存。'), 'error')).finally(() => {
+        control.disabled = false;
+        paint();
+      });
+    });
+    row.append(control, document.createTextNode(label));
+    content.append(row);
+  }
+  paint();
+  content.append(button('返回设置', 'secondary', renderSettingsHub));
+  replaceScreen('notification-settings', content);
+  setStatus('通知设置');
+}
+
 function renderSettingsHub(): void {
   const content = panel();
   content.classList.add('settings-hub');
@@ -6079,6 +6155,7 @@ function renderSettingsHub(): void {
     'model-service': () => void renderModelServiceSettings(),
     'evaluation-calibration': () => void renderEvaluationCalibration(null),
     'data-storage': () => void renderDataAndStorage(),
+    'notifications': () => void renderNotificationSettings(),
   };
   for (const group of SETTINGS_HUB_GROUPS) {
     const section = element('section', 'settings-group');

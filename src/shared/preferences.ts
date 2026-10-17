@@ -80,6 +80,10 @@ export const PREFERENCE_KEYS = Object.freeze({
   'shell.pinnedBooks': preference(isBookList(MAX_PINNED_BOOKS, isPinnedEntry), [] as ReadonlyArray<ShellBookEntry>),
   // 11a: 最近打开 Books, most recent first, at most eight (IA-009); recency changes no business record.
   'shell.recentBooks': preference(isBookList(MAX_RECENT_BOOKS, isRecentEntry), [] as ReadonlyArray<ShellRecentBookEntry>),
+  'notifications.enabled': preference(isBoolean, false),
+  'notifications.completions': preference(isBoolean, false),
+  'notifications.sound': preference(isBoolean, false),
+  'notifications.bookName': preference(isBoolean, false),
 });
 
 export type PreferenceKey = keyof typeof PREFERENCE_KEYS;
@@ -111,6 +115,12 @@ export interface SavePreferenceInput<Key extends PreferenceKey = PreferenceKey> 
 export interface PreferencesRendererApi {
   getPreferences(): Promise<PreferencesProjection>;
   savePreference<Key extends PreferenceKey>(input: SavePreferenceInput<Key>): Promise<PreferencesProjection>;
+}
+
+/** Main-only notification navigation; no service protocol operation or record mutation. */
+export interface NotificationsRendererApi {
+  notify(input: { bookId: string | null; eventId: string }): Promise<void>;
+  onNotificationNavigate(listener: (target: { bookId: string | null; eventId: string | null }) => void): () => void;
 }
 
 /** The main process's IPC channels for the two members; they are not service operations and carry no protocol number. */

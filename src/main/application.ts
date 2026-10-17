@@ -8,6 +8,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  Notification,
   session,
   shell,
   type Event as ElectronEvent,
@@ -88,6 +89,7 @@ import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/prov
 import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
+import { createNotifier, NOTIFICATION_CHANNELS } from './notifications.js';
 import { PREFERENCE_IPC_CHANNELS } from '../shared/preferences.js';
 import {
   createCanonicalExternalDataRoot,
@@ -587,6 +589,29 @@ function registerRendererHandlers(
   unsavedWindows: () => boolean,
   preferences: PreferenceStore,
 ): () => void {
+  const notifier = createNotifier({
+    preferences: () => preferences.read().values,
+    focused: () => BrowserWindow.getAllWindows().some((window) => window.isFocused()),
+    factory: (input) => process.env.AI7_E2E_JOURNEY ? { show() {}, close() {}, on() {} } : new Notification(input),
+    navigate: (target) => {
+      const window = BrowserWindow.getAllWindows().find((entry) => !entry.isDestroyed());
+      if (!window) return;
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+      window.webContents.send(NOTIFICATION_CHANNELS.navigate, target);
+    },
+  });
+  ipcMain.handle(NOTIFICATION_CHANNELS.notify, (event, input: unknown) => envelope(async () => {
+    requireSender(event);
+    requireAuthority();
+    requireDesktop(typeof input === 'object' && input !== null);
+    const { eventId, bookId } = input as { eventId?: unknown; bookId?: unknown };
+    requireDesktop(typeof eventId === 'string' && eventId.length <= 300 && (bookId === null || typeof bookId === 'string'));
+    const projection = await service.call('inspectGlobalAttention', {});
+    const item = projection.groups.flatMap((group) => group.items).find((entry) => entry.itemId === eventId && entry.book.bookId === bookId);
+    if (item) notifier.accept(item);
+  }));
   const requireNothingUnsaved = (): void => {
     if (unsavedWindows()) throw new ServiceCallError('DATABASE_REPLACEMENT_UNSAVED', '还有窗口里的修改没有保存；请先保存或关闭那个窗口，再替换本机数据。');
   };
@@ -5738,6 +5763,8 @@ function registerRendererHandlers(
   return () => {
     for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel);
     for (const channel of Object.values(PREFERENCE_IPC_CHANNELS)) ipcMain.removeHandler(channel);
+    ipcMain.removeHandler(NOTIFICATION_CHANNELS.notify);
+    notifier.dispose();
     ipcMain.removeListener(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
   };
 }

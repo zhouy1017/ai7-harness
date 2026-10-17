@@ -17,11 +17,12 @@ declare module 'electron' {
     on(event: 'will-download', listener: (event: Event) => void): void;
   };
   export class BrowserWindow {
+    static getAllWindows(): BrowserWindow[];
     constructor(options: Record<string, unknown>);
     readonly webContents: {
       id: number;
       mainFrame: unknown;
-      send(channel: string): void;
+      send(channel: string, payload?: unknown): void;
       setWindowOpenHandler(handler: () => { action: 'deny' }): void;
       on(event: string, listener: (...args: any[]) => void): void;
       cut(): void;
@@ -36,6 +37,7 @@ declare module 'electron' {
     isDestroyed(): boolean;
     isMinimized(): boolean;
     isVisible(): boolean;
+    isFocused(): boolean;
     loadFile(path: string): Promise<void>;
     on(event: string, listener: (...args: any[]) => void): void;
     once(event: 'ready-to-show', listener: () => void): void;
@@ -73,9 +75,16 @@ declare module 'electron' {
   };
   export const ipcRenderer: {
     invoke(channel: string, input?: unknown): Promise<unknown>;
-    on(channel: string, listener: () => void): void;
+    on(channel: string, listener: (...args: any[]) => void): void;
+    removeListener(channel: string, listener: (...args: any[]) => void): void;
     send(channel: string, input?: unknown): void;
   };
+  export class Notification {
+    constructor(options: { title: string; body: string; silent: boolean });
+    show(): void;
+    close(): void;
+    on(event: 'click', listener: () => void): this;
+  }
   export const Menu: { setApplicationMenu(menu: null): void };
   export const session: { defaultSession: Session; fromPartition(partition: string): Session };
   export const shell: { showItemInFolder(path: string): void };
