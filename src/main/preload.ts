@@ -289,6 +289,21 @@ const api: RendererApi = Object.freeze({
   inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
   // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087).
   inspectCapturedProcedures: () => invoke<ServiceOperationMap['inspectCapturedProcedures']['output']>(IPC_CHANNELS.inspectCapturedProcedures),
+  // 外部 Skill and 工序推荐 (Issue #66; ADR 0090): the picker opens in main; nothing here names a path.
+  importSkillPackage: (input?: Parameters<RendererApi['importSkillPackage']>[0]) => invoke<Awaited<ReturnType<RendererApi['importSkillPackage']>>>(IPC_CHANNELS.importSkillPackage, input),
+  validateImportedSkill: (input: Parameters<RendererApi['validateImportedSkill']>[0]) => invoke<ServiceOperationMap['validateImportedSkill']['output']>(IPC_CHANNELS.validateImportedSkill, input),
+  installImportedSkill: (input: Parameters<RendererApi['installImportedSkill']>[0]) => invoke<ServiceOperationMap['installImportedSkill']['output']>(IPC_CHANNELS.installImportedSkill, input),
+  enableImportedSkill: (input: Parameters<RendererApi['enableImportedSkill']>[0]) => invoke<ServiceOperationMap['enableImportedSkill']['output']>(IPC_CHANNELS.enableImportedSkill, input),
+  inspectImportedSkills: (input: Parameters<RendererApi['inspectImportedSkills']>[0]) => invoke<ServiceOperationMap['inspectImportedSkills']['output']>(IPC_CHANNELS.inspectImportedSkills, input),
+  // 外部 Skill updates (Issue #89; ADR 0090 §3): the picker opens in main; nothing here names a path.
+  checkImportedSkillUpdate: (input: Parameters<RendererApi['checkImportedSkillUpdate']>[0]) => invoke<Awaited<ReturnType<RendererApi['checkImportedSkillUpdate']>>>(IPC_CHANNELS.checkImportedSkillUpdate, input),
+  inspectImportedSkillUpdate: (input: Parameters<RendererApi['inspectImportedSkillUpdate']>[0]) => invoke<ServiceOperationMap['inspectImportedSkillUpdate']['output']>(IPC_CHANNELS.inspectImportedSkillUpdate, input),
+  adoptImportedSkillUpdate: (input: Parameters<RendererApi['adoptImportedSkillUpdate']>[0]) => invoke<ServiceOperationMap['adoptImportedSkillUpdate']['output']>(IPC_CHANNELS.adoptImportedSkillUpdate, input),
+  dismissImportedSkillUpdate: (input: Parameters<RendererApi['dismissImportedSkillUpdate']>[0]) => invoke<ServiceOperationMap['dismissImportedSkillUpdate']['output']>(IPC_CHANNELS.dismissImportedSkillUpdate, input),
+  createImportedSkillUpdateRule: (input: Parameters<RendererApi['createImportedSkillUpdateRule']>[0]) => invoke<ServiceOperationMap['createImportedSkillUpdateRule']['output']>(IPC_CHANNELS.createImportedSkillUpdateRule, input),
+  revokeImportedSkillUpdateRule: (input: Parameters<RendererApi['revokeImportedSkillUpdateRule']>[0]) => invoke<ServiceOperationMap['revokeImportedSkillUpdateRule']['output']>(IPC_CHANNELS.revokeImportedSkillUpdateRule, input),
+  rollbackImportedSkill: (input: Parameters<RendererApi['rollbackImportedSkill']>[0]) => invoke<ServiceOperationMap['rollbackImportedSkill']['output']>(IPC_CHANNELS.rollbackImportedSkill, input),
+  recommendProcedures: (input: Parameters<RendererApi['recommendProcedures']>[0]) => invoke<ServiceOperationMap['recommendProcedures']['output']>(IPC_CHANNELS.recommendProcedures, input),
   inspectCapturedProcedure: (input: Parameters<RendererApi['inspectCapturedProcedure']>[0]) =>
     invoke<ServiceOperationMap['inspectCapturedProcedure']['output']>(IPC_CHANNELS.inspectCapturedProcedure, input),
   inspectDeveloperProposal: (input: Parameters<RendererApi['inspectDeveloperProposal']>[0]) =>
@@ -305,6 +320,16 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['previewCapturedProcedureStop']['output']>(IPC_CHANNELS.previewCapturedProcedureStop, input),
   stopCapturedProcedure: (input: Parameters<RendererApi['stopCapturedProcedure']>[0]) =>
     invoke<ServiceOperationMap['stopCapturedProcedure']['output']>(IPC_CHANNELS.stopCapturedProcedure, input),
+  inspectCustomAnalysisDimensions: (input: Parameters<RendererApi['inspectCustomAnalysisDimensions']>[0]) =>
+    invoke<ServiceOperationMap['inspectCustomAnalysisDimensions']['output']>(IPC_CHANNELS.inspectCustomAnalysisDimensions, input),
+  saveCustomAnalysisDimension: (input: Parameters<RendererApi['saveCustomAnalysisDimension']>[0]) =>
+    invoke<ServiceOperationMap['saveCustomAnalysisDimension']['output']>(IPC_CHANNELS.saveCustomAnalysisDimension, input),
+  enableCustomAnalysisDimension: (input: Parameters<RendererApi['enableCustomAnalysisDimension']>[0]) =>
+    invoke<ServiceOperationMap['enableCustomAnalysisDimension']['output']>(IPC_CHANNELS.enableCustomAnalysisDimension, input),
+  stopCustomAnalysisDimension: (input: Parameters<RendererApi['stopCustomAnalysisDimension']>[0]) =>
+    invoke<ServiceOperationMap['stopCustomAnalysisDimension']['output']>(IPC_CHANNELS.stopCustomAnalysisDimension, input),
+  prepareCustomAnalysis: (input: Parameters<RendererApi['prepareCustomAnalysis']>[0]) =>
+    invoke<ServiceOperationMap['prepareCustomAnalysis']['output']>(IPC_CHANNELS.prepareCustomAnalysis, input),
   inspectCapturedProcedureApplicability: (input?: Parameters<RendererApi['inspectCapturedProcedureApplicability']>[0]) =>
     invoke<ServiceOperationMap['inspectCapturedProcedureApplicability']['output']>(IPC_CHANNELS.inspectCapturedProcedureApplicability, input ?? {}),
   inspectCapturedProcedureRun: (input: Parameters<RendererApi['inspectCapturedProcedureRun']>[0]) =>
@@ -357,7 +382,7 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['startEvaluation']['output']>(IPC_CHANNELS.startEvaluation, input),
   saveEvaluation: (input: Omit<ServiceOperationMap['saveEvaluation']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['saveEvaluation']['output']>(IPC_CHANNELS.saveEvaluation, input),
-  prepareInitialEvaluation: (input?: { materialIds?: ReadonlyArray<string> }) => invoke<ServiceOperationMap['prepareInitialEvaluation']['output']>(IPC_CHANNELS.prepareInitialEvaluation, input),
+  prepareInitialEvaluation: (input?: { materialIds?: ReadonlyArray<string>; seriesId?: string | null }) => invoke<ServiceOperationMap['prepareInitialEvaluation']['output']>(IPC_CHANNELS.prepareInitialEvaluation, input),
   authorizeInitialEvaluation: (input: Omit<ServiceOperationMap['authorizeInitialEvaluation']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['authorizeInitialEvaluation']['output']>(IPC_CHANNELS.authorizeInitialEvaluation, input),
   prepareReadersReport: (input: Omit<ServiceOperationMap['prepareReadersReport']['input'], 'bookId'>) =>
@@ -611,6 +636,14 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['regenerateDialogueAnswer']['output']>(IPC_CHANNELS.regenerateDialogueAnswer, input),
   convertDialogueToChangeSuggestion: (input: Parameters<RendererApi['convertDialogueToChangeSuggestion']>[0]) =>
     invoke<ServiceOperationMap['convertDialogueToChangeSuggestion']['output']>(IPC_CHANNELS.convertDialogueToChangeSuggestion, input),
+  inspectTaskIntentDrafts: (input: Parameters<RendererApi['inspectTaskIntentDrafts']>[0]) =>
+    invoke<ServiceOperationMap['inspectTaskIntentDrafts']['output']>(IPC_CHANNELS.inspectTaskIntentDrafts, input),
+  saveTaskIntentDraft: (input: Parameters<RendererApi['saveTaskIntentDraft']>[0]) =>
+    invoke<ServiceOperationMap['saveTaskIntentDraft']['output']>(IPC_CHANNELS.saveTaskIntentDraft, input),
+  promoteTaskIntentDraft: (input: Parameters<RendererApi['promoteTaskIntentDraft']>[0]) =>
+    invoke<ServiceOperationMap['promoteTaskIntentDraft']['output']>(IPC_CHANNELS.promoteTaskIntentDraft, input),
+  promoteAnswerToTaskIntentDraft: (input: Parameters<RendererApi['promoteAnswerToTaskIntentDraft']>[0]) =>
+    invoke<ServiceOperationMap['promoteAnswerToTaskIntentDraft']['output']>(IPC_CHANNELS.promoteAnswerToTaskIntentDraft, input),
   inspectFastInteractionRoutes: () =>
     invoke<ServiceOperationMap['inspectFastInteractionRoutes']['output']>(IPC_CHANNELS.inspectFastInteractionRoutes),
   polishSelection: (input: Parameters<RendererApi['polishSelection']>[0]) =>

@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path';
+import { MAX_SKILL_PACKAGE_BYTES } from './imported-skills.js';
 import { clarificationGraphemes } from './analysis/clarifications.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -60,6 +61,9 @@ import {
   REVIEW_FINDING_STATUSES,
   REVIEW_SCOPE_KINDS,
   TASK_PLAN_KINDS,
+  MAX_TASK_INTENT_GOAL_LENGTH,
+  MAX_TASK_INTENT_DRAFT_RANGES,
+  TASK_INTENT_OUTCOME_CLASSES,
   isReviewCategoryId,
   publicationText,
   SERIES_KNOWLEDGE_CLASSES,
@@ -708,13 +712,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         throw new ProtocolError(tentativeId);
       }
       const update = input.update;
+      // 重新确认计划 of a Task promoted from a Task Intent Draft names the draft's sentence (Issue #423, slice 7a): bounded here,
+      // and checked by the ledger against the Task it reconfirms.
+      const draftGoal = input.reconfirm === true && isBoundedString(input.goal, MAX_TASK_INTENT_GOAL_LENGTH) && input.goal.trim() === input.goal && input.goal.length > 0;
       if (update === null) {
-        if (input.goal !== BASELINE_ANALYSIS_MODE_GOALS['first-baseline']) throw new ProtocolError(tentativeId);
+        if (input.goal !== BASELINE_ANALYSIS_MODE_GOALS['first-baseline'] && !draftGoal) throw new ProtocolError(tentativeId);
         break;
       }
       if (!isRecord(update) || !(hasExactKeys(update, ['mode', 'selectedRange']) || hasExactKeys(update, ['mode', 'selectedRange', 'selectedBlocks'])) ||
           !BASELINE_ANALYSIS_UPDATE_MODES.includes(update.mode as BaselineAnalysisUpdateMode) ||
-          input.goal !== BASELINE_ANALYSIS_MODE_GOALS[update.mode as BaselineAnalysisUpdateMode]) {
+          (input.goal !== BASELINE_ANALYSIS_MODE_GOALS[update.mode as BaselineAnalysisUpdateMode] && !draftGoal)) {
         throw new ProtocolError(tentativeId);
       }
       const range = update.selectedRange;
@@ -973,7 +980,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 准备 AI7 初评: the route's Book; the mode is the service's to decide from the Book's 初评 so far.
     case 'prepareInitialEvaluation': {
-      const input = requireInputWithOptional(value.input, ['bookId'], ['materialIds'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['materialIds', 'seriesId'], tentativeId);
+      if (!optionalOrNull(input, 'seriesId', validUuid)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every(validUuid)))) throw new ProtocolError(tentativeId);
       break;
     }
@@ -1526,7 +1534,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId'], tentativeId);
+      if (!optionalOrNull(input, 'seriesId', validUuid)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||
           !validReviewRunScope(input.scope) ||
           !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every(validUuid))) ||
@@ -1550,6 +1559,73 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           (input.procedureId !== null && !validUuid(input.procedureId))) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    case 'importSkillPackage': {
+      // Exactly one: the picked path to disclose, or the acquisition the editor keeps.
+      const input = requireInput(value.input, ['path', 'keep'], tentativeId);
+      const disclose = input.keep === null && isBoundedString(input.path, 2048) && input.path.length > 0;
+      if (!disclose && !(input.path === null && validUuid(input.keep))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'validateImportedSkill': {
+      const input = requireInput(value.input, ['revisionId'], tentativeId);
+      if (!validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'installImportedSkill':
+    case 'enableImportedSkill': {
+      const input = requireInput(value.input, op === 'enableImportedSkill' ? ['revisionId', 'bookId', 'previewDigest'] : ['revisionId', 'previewDigest'], tentativeId);
+      if (!validUuid(input.revisionId) || !isBoundedString(input.previewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.previewDigest) || (op === 'enableImportedSkill' && !validUuid(input.bookId))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectImportedSkills': {
+      const input = requireInput(value.input, ['revisionId', 'before'], tentativeId);
+      if ((input.revisionId !== null && !validUuid(input.revisionId)) || (input.before !== null && !validUuid(input.before))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'checkImportedSkillUpdate': {
+      // Exactly one: the picked path to disclose against the Skill, or the acquisition the editor keeps.
+      const input = requireInput(value.input, ['skillId', 'path', 'keep'], tentativeId);
+      const disclose = input.keep === null && isBoundedString(input.path, 2048) && input.path.length > 0;
+      if (!validUuid(input.skillId) || (!disclose && !(input.path === null && validUuid(input.keep)))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectImportedSkillUpdate':
+    case 'dismissImportedSkillUpdate': {
+      const input = requireInput(value.input, ['candidateId'], tentativeId);
+      if (!validUuid(input.candidateId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'adoptImportedSkillUpdate': {
+      const input = requireInput(value.input, ['candidateId', 'reviewDigest', 'acceptItems', 'upstreamPaths'], tentativeId);
+      const texts = (list: unknown, limit: number, count = 64): boolean => Array.isArray(list) && list.length <= count && list.every((item) => isBoundedString(item, limit));
+      // Acknowledgements name the converter's findings verbatim, including prefixes on 4096-character declarations and
+      // unrecognized field names bounded by the source package. Its byte bound is a conservative ceiling for both finding
+      // length and count; the existing MAX_FRAME_BYTES still bounds the whole request. Conflict-path bounds stay unchanged.
+      if (!validUuid(input.candidateId) || !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
+        !texts(input.acceptItems, MAX_SKILL_PACKAGE_BYTES, MAX_SKILL_PACKAGE_BYTES) || !texts(input.upstreamPaths, 240)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'createImportedSkillUpdateRule': {
+      const input = requireInput(value.input, ['skillId', 'confirmation'], tentativeId);
+      if (!validUuid(input.skillId) || !isBoundedString(input.confirmation, 200)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'revokeImportedSkillUpdateRule': {
+      const input = requireInput(value.input, ['skillId'], tentativeId);
+      if (!validUuid(input.skillId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'rollbackImportedSkill': {
+      const input = requireInput(value.input, ['skillId', 'revisionId'], tentativeId);
+      if (!validUuid(input.skillId) || !validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'recommendProcedures': {
+      const input = requireInput(value.input, ['bookId', 'goal', 'taskKind', 'scope', 'categoryIds'], tentativeId);
+      if (!validUuid(input.bookId) || !isBoundedString(input.goal, 2000) || !['review-run', 'baseline-analysis', 'writing', 'unclassified'].includes(String(input.taskKind)) ||
+        !['whole', 'chapters', 'selection'].includes(String(input.scope)) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 0)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectCapturedProcedure':
@@ -1598,6 +1674,44 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !optionalOrNull(input, 'scope', (scope) => scope === 'selection')) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // 自定义分析维度 (Issue #922, slice 7f): the house's dimensions, or one Book's 自定义 tab; a title and a template bounded by the
+    // document's own rules, which the store checks again; a version by its identity; a Book's Task of one dimension.
+    case 'inspectCustomAnalysisDimensions': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (input.bookId !== null && !validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'saveCustomAnalysisDimension': {
+      const input = requireInput(value.input, ['dimensionId', 'title', 'questionTemplate'], tentativeId);
+      if ((input.dimensionId !== null && !validUuid(input.dimensionId)) || !isBoundedString(input.title, 160) ||
+          !isBoundedString(input.questionTemplate, 1600)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'enableCustomAnalysisDimension':
+    case 'stopCustomAnalysisDimension': {
+      const input = requireInput(value.input, ['versionId'], tentativeId);
+      if (!validUuid(input.versionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'prepareCustomAnalysis': {
+      // `update` is null for the dimension's first Run on the Book, and otherwise one of the baseline's three update modes, with a
+      // block range exactly for 重新分析所选范围 — the same shape `prepareBaselineAnalysis` carries, with no goal: the store derives it.
+      const input = requireInput(value.input, ['bookId', 'dimensionId', 'update'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.dimensionId)) throw new ProtocolError(tentativeId);
+      const update = input.update;
+      if (update === null) break;
+      if (!isRecord(update) || !hasExactKeys(update, ['mode', 'selectedRange']) ||
+          !BASELINE_ANALYSIS_UPDATE_MODES.includes(update.mode as BaselineAnalysisUpdateMode)) {
+        throw new ProtocolError(tentativeId);
+      }
+      const range = update.selectedRange;
+      const validRange = isRecord(range) && hasExactKeys(range, ['startPosition', 'endPosition']) &&
+        isSafeInteger(range.startPosition, 1) && isSafeInteger(range.endPosition, 1) && range.endPosition >= range.startPosition;
+      if ((update.mode === 'reanalyze-range') !== validRange || (update.mode !== 'reanalyze-range' && range !== null)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectCapturedProcedureApplicability': {
@@ -2305,6 +2419,52 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !isBoundedString(input.proposedText, 2 * MAX_DIALOGUE_PROPOSAL_CHARACTERS) || !isBoundedString(input.rationale, 2 * MAX_DIALOGUE_PROPOSAL_CHARACTERS, true)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b): the route's Book; a draft and its version by identity; the goal,
+    // the target — the whole Book, or ranges each kept by identity or newly pinned as an exact span a mark names — the intended
+    // outcome and the picked 工序 within their bounds; 准备计划's one choice of an existing preparation; an answer by its attempt.
+    case 'inspectTaskIntentDrafts': {
+      const input = requireInput(value.input, ['bookId', 'draftId'], tentativeId);
+      if (!validUuid(input.bookId) || !(input.draftId === null || validUuid(input.draftId))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'saveTaskIntentDraft': {
+      const input = requireInputWithOptional(value.input, ['bookId', 'draftId', 'expectedOrdinal', 'origin', 'goal', 'target', 'outcomeClass'], ['procedurePin'], tentativeId);
+      const target = input.target;
+      const validRange = (range: unknown): boolean => isRecord(range) && (
+        (hasExactKeys(range, ['kind', 'rangeId']) && range.kind === 'kept' && validUuid(range.rangeId)) ||
+        (hasExactKeys(range, ['kind', 'span']) && range.kind === 'new' && range.span !== null && validKnowledgeSpan(range.span)));
+      const validTarget = isRecord(target) && ((hasExactKeys(target, ['kind']) && target.kind === 'book') ||
+        (hasExactKeys(target, ['kind', 'ranges']) && target.kind === 'ranges' && Array.isArray(target.ranges) && target.ranges.length >= 1 &&
+          target.ranges.length <= MAX_TASK_INTENT_DRAFT_RANGES && target.ranges.every(validRange)));
+      const pin = input.procedurePin;
+      const validPin = pin === undefined || pin === null ||
+        (isRecord(pin) && hasExactKeys(pin, ['procedureId', 'versionId']) && validUuid(pin.procedureId) && validUuid(pin.versionId));
+      if (!validUuid(input.bookId) || !(input.draftId === null ? input.expectedOrdinal === null : validUuid(input.draftId) && isSafeInteger(input.expectedOrdinal, 1)) ||
+          (input.origin !== 'composer-selection' && input.origin !== 'composer-book') || !isBoundedString(input.goal, 4 * MAX_TASK_INTENT_GOAL_LENGTH) ||
+          !validTarget || !(input.outcomeClass === null || TASK_INTENT_OUTCOME_CLASSES.includes(input.outcomeClass as never)) || !validPin) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'promoteTaskIntentDraft': {
+      const input = requireInputWithOptional(value.input, ['bookId', 'draftId', 'versionId', 'choice'], ['writing'], tentativeId);
+      const choice = input.choice;
+      const validChoice = isRecord(choice) && (
+        (hasExactKeys(choice, ['kind', 'mode']) && choice.kind === 'baseline' &&
+          ['first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book'].includes(choice.mode as string)) ||
+        (hasExactKeys(choice, ['kind', 'categoryId']) && choice.kind === 'review' && isReviewCategoryId(choice.categoryId)) ||
+        (hasExactKeys(choice, ['kind', 'typeId']) && choice.kind === 'writing' && isBoundedString(choice.typeId, 64)));
+      const writing = input.writing;
+      const validWriting = writing === undefined ||
+        (isRecord(writing) && hasExactKeys(writing, ['audience', 'channel']) && isBoundedString(writing.audience, 240, true) && isBoundedString(writing.channel, 240, true));
+      if (!validUuid(input.bookId) || !validUuid(input.draftId) || !validUuid(input.versionId) || !validChoice || !validWriting) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'promoteAnswerToTaskIntentDraft': {
+      const input = requireInput(value.input, ['bookId', 'dialogueId', 'attemptId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
       break;
     }
     // 润色这段 and 基于当前稿件重新生成建议 (Issue #842): the route's Book and the exact span as a mark names one; a conflict unit by

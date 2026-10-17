@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
+import { MAX_SKILL_PACKAGE_BYTES } from '../../src/service/imported-skills.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION } from '../../src/service/review/category-configuration.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -1539,6 +1540,82 @@ describe('decodeRequest rejects malformed frames', () => {
       ['inspectEditQualitySignals', {}],
       ['inspectEditQualitySignals', { bookId: 'book' }],
       ['inspectEditQualitySignals', { bookId: null, operationalScope: 'developer-live' }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
+  it('accepts 外部 Skill 的更新 — disclosure or keeping, candidates, the rule and the way back — and nothing off its shape (Issue #89; ADR 0090 §3)', () => {
+    const [skillId, candidateId, revisionId] = [randomUUID(), randomUUID(), randomUUID()];
+    const accepted: ReadonlyArray<AcceptedInput> = [
+      { op: 'checkImportedSkillUpdate', input: { skillId, path: '/synthetic/skill-v2', keep: null } },
+      { op: 'checkImportedSkillUpdate', input: { skillId, path: null, keep: randomUUID() } },
+      { op: 'inspectImportedSkillUpdate', input: { candidateId } },
+      { op: 'adoptImportedSkillUpdate', input: { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: [], upstreamPaths: [] } },
+      { op: 'adoptImportedSkillUpdate', input: { candidateId, reviewDigest: 'b'.repeat(64), acceptItems: ['文件冲突：SKILL.md'], upstreamPaths: ['SKILL.md'] } },
+      { op: 'dismissImportedSkillUpdate', input: { candidateId } },
+      { op: 'createImportedSkillUpdateRule', input: { skillId, confirmation: '自动采纳无冲突、校验通过、未扩权的更新' } },
+      { op: 'revokeImportedSkillUpdateRule', input: { skillId } },
+      { op: 'rollbackImportedSkill', input: { skillId, revisionId } },
+    ];
+    for (const entry of accepted) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['checkImportedSkillUpdate', { skillId, path: '/synthetic/skill-v2', keep: randomUUID() }],
+      ['checkImportedSkillUpdate', { skillId, path: null, keep: null }],
+      ['checkImportedSkillUpdate', { skillId, path: '', keep: null }],
+      ['checkImportedSkillUpdate', { skillId: 'not-a-skill', path: '/synthetic/skill-v2', keep: null }],
+      ['checkImportedSkillUpdate', { path: '/synthetic/skill-v2', keep: null }],
+      ['inspectImportedSkillUpdate', { candidateId: 'c' }],
+      ['dismissImportedSkillUpdate', { candidateId: 'c' }],
+      ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'A'.repeat(64), acceptItems: [], upstreamPaths: [] }],
+      ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: 'x', upstreamPaths: [] }],
+      ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: [], upstreamPaths: [1] }],
+      ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: Array.from({ length: MAX_SKILL_PACKAGE_BYTES + 1 }, () => 'x'), upstreamPaths: [] }],
+      ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: ['x'.repeat(MAX_SKILL_PACKAGE_BYTES + 1)], upstreamPaths: [] }],
+      ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: [] }],
+      ['createImportedSkillUpdateRule', { skillId }],
+      ['createImportedSkillUpdateRule', { skillId, confirmation: 'x'.repeat(201) }],
+      ['revokeImportedSkillUpdateRule', { skillId: 's' }],
+      ['rollbackImportedSkill', { skillId, revisionId: 'r' }],
+      ['rollbackImportedSkill', { skillId }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
+  it('accepts 外部 Skill disclosure or keeping, its staged lifecycle, and 工序推荐 (Issue #66; ADR 0090)', () => {
+    const revisionId = randomUUID();
+    const inputs: ReadonlyArray<AcceptedInput> = [
+      { op: 'importSkillPackage', input: { path: '/synthetic/skill', keep: null } },
+      { op: 'importSkillPackage', input: { path: null, keep: randomUUID() } },
+      { op: 'validateImportedSkill', input: { revisionId } },
+      { op: 'installImportedSkill', input: { revisionId, previewDigest: 'a'.repeat(64) } },
+      { op: 'enableImportedSkill', input: { revisionId, bookId: randomUUID(), previewDigest: 'b'.repeat(64) } },
+      { op: 'inspectImportedSkills', input: { revisionId: null, before: null } },
+      { op: 'inspectImportedSkills', input: { revisionId, before: randomUUID() } },
+      { op: 'recommendProcedures', input: { bookId: randomUUID(), goal: '体例审阅', taskKind: 'review-run', scope: 'whole', categoryIds: ['style-and-format'] } },
+      { op: 'recommendProcedures', input: { bookId: randomUUID(), goal: 'a'.repeat(64), taskKind: 'unclassified', scope: 'selection', categoryIds: [] } },
+    ];
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['importSkillPackage', { path: '/synthetic/skill', keep: randomUUID() }],
+      ['importSkillPackage', { path: null, keep: null }],
+      ['importSkillPackage', { path: '', keep: null }],
+      ['importSkillPackage', { path: null, keep: 'not-an-acquisition' }],
+      ['importSkillPackage', { path: '/synthetic/skill' }],
+      ['validateImportedSkill', { revisionId: 'r' }],
+      ['installImportedSkill', { revisionId, previewDigest: 'A'.repeat(64) }],
+      ['enableImportedSkill', { revisionId, previewDigest: 'a'.repeat(64) }],
+      ['inspectImportedSkills', { revisionId: null }],
+      ['recommendProcedures', { bookId: randomUUID(), goal: '', taskKind: 'review-run', scope: 'whole', categoryIds: [] }],
+      ['recommendProcedures', { bookId: randomUUID(), goal: 'x', taskKind: 'review', scope: 'whole', categoryIds: [] }],
+      ['recommendProcedures', { bookId: randomUUID(), goal: 'x', taskKind: 'review-run', scope: 'whole-book', categoryIds: [] }],
     ] as const) {
       expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
     }

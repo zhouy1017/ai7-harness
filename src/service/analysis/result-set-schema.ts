@@ -1,4 +1,6 @@
 import {
+  CUSTOM_ANALYSIS_CONTRACT_VERSION,
+  CUSTOM_ANALYSIS_KIND_PREFIX,
   EDITORIAL_REVIEW_CONTRACT_VERSION,
   EDITORIAL_REVIEW_KIND_PREFIX,
   EVALUATION_REWRITE_CONTRACT_VERSION,
@@ -23,6 +25,13 @@ import { BASELINE_ANALYSIS_CONTRACT_VERSION, BASELINE_ANALYSIS_KIND } from './id
 export const EDITORIAL_REVIEW_KIND_GLOB = `${EDITORIAL_REVIEW_KIND_PREFIX}[a-z]*` as const;
 
 /**
+ * How the durable schema admits the custom analysis kind family (Issue #922, slice 7f): by the shape of the kind identity, exactly
+ * as `analysis_task_intents` has admitted it since revision 80 (slice 7a). A dimension is the editor's document, so no CHECK names
+ * one; `isCustomAnalysisDimensionId` checks the identity where a kind definition is built.
+ */
+export const CUSTOM_ANALYSIS_KIND_GLOB = `${CUSTOM_ANALYSIS_KIND_PREFIX}[a-z0-9-]*` as const;
+
+/**
  * Additive immutable relations of the covered-analysis owner inside the Book authority database:
  * one stable Book-bound Result Set identity per analysis kind, its immutable write-on-update
  * revisions, and the typed per-unit results each revision closed or recorded as a gap. They are
@@ -36,9 +45,53 @@ export const EDITORIAL_REVIEW_KIND_GLOB = `${EDITORIAL_REVIEW_KIND_PREFIX}[a-z]*
  * the two literal kinds stand as they were, and the family joins them by pattern. Revision 59 (Issue
  * #429, S81b1) widens them for the evaluation kind, AI7's 初评, one literal kind more, and revision 62 (Issue #429, S81c) for
  * the reader's report kind, 审稿意见, one more; revision 64 (Issue #429, S81b2) for the evaluation rewrite kind, 按我的评分重写评语;
- * revision 65 (Issue #432, S84a) for the writing kind, 写作任务.
+ * revision 65 (Issue #432, S84a) for the writing kind, 写作任务; revision 82 (Issue #922, slice 7f) for the custom analysis kind
+ * family, one Result Set per 自定义分析维度, joined by pattern as the review categories are, under its one contract version.
  */
 export const ANALYSIS_RESULT_SET_SCHEMA_SQL = {
+  analysis_result_sets: `CREATE TABLE analysis_result_sets (
+    result_set_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}', '${INITIAL_EVALUATION_KIND}', '${READERS_REPORT_KIND}', '${EVALUATION_REWRITE_KIND}', '${WRITING_KIND}') OR kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}'
+      OR kind GLOB '${CUSTOM_ANALYSIS_KIND_GLOB}'),
+    created_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    UNIQUE(book_id, kind)
+  ) STRICT`,
+  analysis_result_set_revisions: `CREATE TABLE analysis_result_set_revisions (
+    revision_id TEXT PRIMARY KEY,
+    result_set_id TEXT NOT NULL REFERENCES analysis_result_sets(result_set_id),
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+    task_intent_id TEXT NOT NULL REFERENCES analysis_task_intents(task_intent_id),
+    run_record_id TEXT NOT NULL REFERENCES analysis_run_records(run_record_id),
+    attempt_id TEXT NOT NULL REFERENCES analysis_execution_attempts(attempt_id),
+    manuscript_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    manuscript_revision_digest TEXT NOT NULL CHECK(length(manuscript_revision_digest) = 64),
+    coverage_manifest_sha256 TEXT NOT NULL CHECK(length(coverage_manifest_sha256) = 64),
+    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', '${EDITORIAL_REVIEW_CONTRACT_VERSION}', '${INITIAL_EVALUATION_CONTRACT_VERSION}', '${READERS_REPORT_CONTRACT_VERSION}', '${EVALUATION_REWRITE_CONTRACT_VERSION}', '${WRITING_CONTRACT_VERSION}',
+      '${CUSTOM_ANALYSIS_CONTRACT_VERSION}')),
+    created_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    UNIQUE(result_set_id, ordinal)
+  ) STRICT`,
+  analysis_unit_results: `CREATE TABLE analysis_unit_results (
+    revision_id TEXT NOT NULL REFERENCES analysis_result_set_revisions(revision_id),
+    unit_ordinal INTEGER NOT NULL CHECK(unit_ordinal >= 1),
+    state TEXT NOT NULL CHECK(state IN ('closed', 'gap')),
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+    PRIMARY KEY(revision_id, unit_ordinal)
+  ) STRICT`,
+} as const;
+
+/**
+ * The two Result Set relations as revisions 65 to 81 carried them — the writing kind beside the others, no custom analysis family —
+ * kept only to validate such a store exactly before revision 82 (Issue #922, slice 7f) rebuilds them, every row copied byte for
+ * byte, and for the migration case.
+ */
+export const ANALYSIS_RESULT_SET_REVISION_81_SQL = {
   analysis_result_sets: `CREATE TABLE analysis_result_sets (
     result_set_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),
@@ -63,14 +116,6 @@ export const ANALYSIS_RESULT_SET_SCHEMA_SQL = {
     canonical_json TEXT NOT NULL,
     sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
     UNIQUE(result_set_id, ordinal)
-  ) STRICT`,
-  analysis_unit_results: `CREATE TABLE analysis_unit_results (
-    revision_id TEXT NOT NULL REFERENCES analysis_result_set_revisions(revision_id),
-    unit_ordinal INTEGER NOT NULL CHECK(unit_ordinal >= 1),
-    state TEXT NOT NULL CHECK(state IN ('closed', 'gap')),
-    canonical_json TEXT NOT NULL,
-    sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
-    PRIMARY KEY(revision_id, unit_ordinal)
   ) STRICT`,
 } as const;
 

@@ -810,13 +810,13 @@ async function main() {
     // it holds nothing, so every other launch runs as before.
     const holdPath = resolve(runRoot, 'j13-unit-hold.txt');
     // `fixture` is the authored fixture the J-04 adapter answers from, and `extra` the capture branch's Save dialog answer (Issue #65).
-    const launch = async (fixture = FIXTURE_IDENTITY, extra = []) => {
+    const launch = async (fixture = FIXTURE_IDENTITY, extra = [], pickerPath = SAMPLE1_PATH) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
         // J-13's picker imports the member Book whose words become a Series Knowledge Candidate (Issue #63, S28b).
-        '--j13-picker-path', SAMPLE1_PATH,
+        '--j13-picker-path', pickerPath,
         // Its 书系一致性 Review Run executes on the J-04 model adapter (Issue #64, S29a).
         '--j04-model-adapter', fixture,
         '--j10-unit-hold-path', holdPath,
@@ -1292,6 +1292,15 @@ async function main() {
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'consistency-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'consistency-drawer-closed');
 
+    at('series-scope-review-run');
+    const seriesPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'review-run', ref: ${JSON.stringify(prepared.reviewRunId)} })`);
+    const exactScope = seriesPlan?.seriesScopes?.[0];
+    requireJourney(seriesPlan?.seriesScopes?.length === 1 && exactScope.seriesId === seriesId && exactScope.title === SERIES &&
+      exactScope.members.some((pin) => pin.bookId === member && UUID_PATTERN.test(pin.revisionId) && /^[0-9a-f]{64}$/.test(pin.revisionDigest)) &&
+      exactScope.knowledge.length === 1 && exactScope.knowledge[0].itemId === itemId && exactScope.knowledge[0].ordinal === 2 &&
+      UUID_PATTERN.test(exactScope.knowledge[0].revisionId) && /^[0-9a-f]{64}$/.test(exactScope.knowledge[0].digest) && exactScope.exclusions.length === 0 &&
+      seriesPlan.scope.reference.includes(`允许参考 · 书系《${SERIES}》的知识条目`), 'series-scope-pins');
+
     at('consistency-marks-on-manuscript');
     // A finding is the mark on the manuscript: 回到原文 opens the text at it, its card naming the category.
     await clickSelector(renderer, `article.review-finding[data-finding-id="${findings[0].findingId}"] [data-review-action="go-to-text"]`, 'consistency-go-to-text');
@@ -1388,6 +1397,14 @@ async function main() {
       stoppedRun.categories[0]?.state === 'interrupted' && stoppedRun.categories[0]?.stateLabel === SCOPE_CHANGED && stoppedRun.findings.length === 0,
     'exclusion-stopped-run', { state: stoppedRun?.state, categories: stoppedRun?.categories?.map((category) => [category.state, category.stateLabel]) });
     await assertRenderer(renderer, `document.querySelector('[data-review-action="continue"]') === null && document.querySelector('.review-scope-stop [data-review-action="scope-redo"]')?.textContent === '修改计划并重新授权' && document.querySelector('.review-scope-stop [data-review-action="scope-cancel"]')?.textContent === '取消任务'`, 'exclusion-stopped-actions');
+
+    at('series-exclusion-payload-refused');
+    // This fixture hold proves the observable stop before further use. Async assembly itself is covered provider-free by
+    // the final-gate service/unit tests; no runtime test-policy seam is added here.
+    const stoppedPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'review-run', ref: ${JSON.stringify(heldRun.reviewRunId)} })`);
+    requireJourney(stoppedPlan?.state?.label === SCOPE_CHANGED && stoppedPlan.seriesScopes?.[0]?.knowledge?.[0]?.itemId === itemId &&
+      stoppedPlan.seriesScopes[0].exclusions.length === 0 && stoppedRun.categories[0]?.detail?.includes(SCOPE_CHANGED) &&
+      stoppedPlan.technical.some((line) => line.key === 'series-read-counts' && line.value === '1 个阅读范围 · 1 次模型请求'), 'series-exclusion-stopped-frozen-plan');
 
     at('exclusion-plan-leaves-out');
     // 修改计划并重新授权 opens 新建审阅 with the Run's own choices; the plan it would make leaves the excluded item out, and here
@@ -2035,10 +2052,16 @@ async function main() {
     // 《体例复核》's versions are all stopped: it is offered nowhere.
     requireJourney(JSON.stringify(offeredHere) === JSON.stringify([['', '不按工序（自己选类别）', null],
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选`, 'all']]), 'series-sheet-offered', offeredHere);
-    await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure"]'); if(!(select instanceof HTMLSelectElement)||select.disabled)return false; select.value=${JSON.stringify(seriesProcedureId)}; select.dispatchEvent(new Event('change',{bubbles:true})); return true; })()`, 'series-sheet-choose');
+    at('procedure-recommendation');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-procedure-recommendation]')?.dataset.recommendationState==='clear' && document.querySelector('dialog.review-sheet [data-review-field="procedure"]')?.value===''`, 'recommendation-clear-unselected');
+    await assertRenderer(renderer, `(() => { const slot=document.querySelector('dialog.review-sheet [data-procedure-recommendation]'); return slot?.textContent.includes('书系资料') && slot.textContent.includes('外部 Skill 在此版本没有执行器') && slot.querySelectorAll('[data-recommendation-version-id]').length===1; })()`, 'recommendation-purpose-rationale');
+    await clickSelector(renderer, 'dialog.review-sheet [data-recommendation-action="choose"]', 'recommendation-exact-choice');
     const seriesSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1', 'series-sheet-filled');
     // The status says what the sheet ticked — nothing, here — in the sheet's own words (S31b review P3-5).
     await waitFor(renderer, `${status}===${JSON.stringify(`已读取《${SERIES_PROCEDURE_TITLE}》第 1 版：要运行的类别由你勾选。`)}`, 'series-sheet-status', 10_000);
+    at('procedure-series-step-optin');
+    const seriesCeiling = await renderer.evaluate(`(async () => { const procedure=await window.ai7.inspectCapturedProcedure({procedureId:${JSON.stringify(seriesProcedureId)},before:null}); const preview=await window.ai7.previewCapturedProcedureValidation({versionId:procedure.versions[0].versionId}); return preview.ceiling.runSourceScope; })()`);
+    requireJourney(seriesCeiling === 'series', 'procedure-v2-series-ceiling');
     const READ_SERIES_BOX = `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet?.querySelector('input[name="review-category"][value="series-consistency"]'); return box instanceof HTMLInputElement ? { checked: box.checked, disabled: box.disabled, apart: box.closest('label')?.dataset.procedureChosenApart ?? null, open: Array.from(sheet.querySelectorAll('input[name="review-category"]:not(:disabled)'), (input) => input.value) } : null; })()`;
     const seriesBox = await renderer.evaluate(READ_SERIES_BOX);
     requireJourney(JSON.stringify(seriesSheet.checked) === JSON.stringify([]) && seriesBox?.checked === false && seriesBox.disabled === false && seriesBox.apart === 'true' &&
@@ -2052,6 +2075,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('dialog.review-sheet .review-sheet-problem')?.textContent==='请至少选择一个审阅类别。' && document.querySelector('dialog.review-sheet')?.open===true`, 'series-sheet-nothing-chosen');
     await clickSelector(renderer, 'dialog.review-sheet input[name="review-category"][value="series-consistency"]', 'series-sheet-tick');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet input[name="review-category"][value="series-consistency"]')?.checked===true`, 'series-sheet-ticked');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-procedure-recommendation]')?.dataset.recommendationState==='stale' && document.querySelector('dialog.review-sheet [data-review-field="procedure"]')?.value===${JSON.stringify(seriesProcedureId)}`, 'recommendation-change-keeps-version');
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'series-sheet-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'series-prepared', 180_000);
     const seriesRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
@@ -2084,7 +2108,7 @@ async function main() {
     const procedureAction = `procedure:${seriesProcedureId}`;
     await openSelectionMenu(renderer, selectionBlock, 2, 8, 'selection-procedure-menu');
     // The group lists the house's procedures once the editor's read of them answers, and is drawn again then: wait for it.
-    await waitFor(renderer, `(() => { const item = window.__j13.item(${JSON.stringify(procedureAction)}); const polish = window.__j13.item('preset-polish'); const note = window.__j13.menu()?.textContent ?? ''; return item instanceof HTMLButtonElement && !item.disabled && item.textContent.includes(${JSON.stringify(`按《${SERIES_PROCEDURE_TITLE}》审阅这段`)}) && item.textContent.includes('可复用工序 · 第 1 版 · 1 步 · 「书系一致性」另行勾选') && window.__j13.item(${JSON.stringify(`procedure:${procedureId}`)}) === null && polish instanceof HTMLButtonElement && !polish.disabled && window.__j13.item('preset-names') === null && window.__j13.item('preset-continuity') === null && note.includes('不提供「再选一段加入」') && !note.includes('本社还没有启用的可复用工序'); })()`, 'selection-procedure-menu-words', 15_000);
+    await waitFor(renderer, `(() => { const item = window.__j13.item(${JSON.stringify(procedureAction)}); const polish = window.__j13.item('preset-polish'); const note = window.__j13.menu()?.textContent ?? ''; return item instanceof HTMLButtonElement && !item.disabled && item.textContent.includes(${JSON.stringify(`按《${SERIES_PROCEDURE_TITLE}》审阅这段`)}) && item.textContent.includes('可复用工序 · 第 1 版 · 1 步 · 「书系一致性」另行勾选') && window.__j13.item(${JSON.stringify(`procedure:${procedureId}`)}) === null && polish instanceof HTMLButtonElement && !polish.disabled && window.__j13.item('preset-names') === null && window.__j13.item('preset-continuity') === null && note.includes('要再选一段加入，请在任务草稿中操作。') && !note.includes('本社还没有启用的可复用工序'); })()`, 'selection-procedure-menu-words', 15_000);
     await assertRenderer(renderer, `(() => { window.__j13.item(${JSON.stringify(procedureAction)}).click(); return true; })()`, 'selection-procedure-choose');
     await waitFor(renderer, `window.__j13.composer()?.dataset.markComposer === 'task-on-selection' && window.__j13.composer().querySelector('select[data-mark-field="procedure"]')?.value === ${JSON.stringify(procedureAction)}`, 'selection-procedure-composer', 30_000);
     const READ_APART = `(() => { const composer = window.__j13.composer(); const set = composer?.querySelector('fieldset[data-mark-field="chosenApart"]'); const box = set?.querySelector('input[data-mark-checkbox="series-consistency"]'); if (!(set instanceof HTMLElement) || !(box instanceof HTMLInputElement)) return null; return { legend: set.querySelector('legend')?.textContent ?? null, shown: !set.hidden && box.closest('label')?.hidden === false, checked: box.checked, words: box.nextElementSibling?.textContent ?? null, hint: box.closest('label')?.querySelector('small')?.textContent ?? null, options: Array.from(composer.querySelectorAll('select[data-mark-field="procedure"] option'), (option) => option.value) }; })()`;
@@ -2190,6 +2214,39 @@ async function main() {
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     await clickSelector(renderer, '.developer-proposal-form [data-procedure-action="cancel-proposal"]', 'capture-keyboard-cancel');
+
+    at('skill-import-validate-enable');
+    // Commander-approved #66 test-only picker reuse: the native dialog is not driven; production still uses showOpenDialog.
+    // This path is only an in-repo synthetic Skill package, never third-party content or a manuscript.
+    await closeBrowser();
+    manager = await launch(REVIEW_FIXTURE_IDENTITY, [], resolve(ROOT, 'tests', 'fixtures', 'skills', 'plain'));
+    renderer = await waitForRenderer(manager, 'skill-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'skill-ready');
+    await openProcedures(renderer, 'skill-import');
+    await clickSelector(renderer, '[data-skill-action="import"]', 'skill-pick-synthetic');
+    // ADR 0090 §2: acquisition discloses before it keeps — identity, source revision, license, digest — and nothing is kept yet.
+    await waitFor(renderer, `document.querySelector('[data-skill-acquisition]')?.textContent.includes('尚未保留')`, 'skill-disclosed');
+    await assertRenderer(renderer, `(async () => { const panel=document.querySelector('[data-skill-acquisition]'); const text=panel?.textContent??''; const kept=await window.ai7.inspectImportedSkills({revisionId:null,before:null}); return text.includes('synthetic-style-review') && text.includes('1.0.0') && text.includes('MIT') && /SHA-256 [0-9a-f]{64}/.test(text) && text.includes('Run 可读范围：无') && kept.skills.length===0 && !document.querySelector('[data-skill-detail]'); })()`, 'skill-disclosed-nothing-kept');
+    await clickSelector(renderer, '[data-skill-action="keep"]', 'skill-keep');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='pending-validation' && !document.querySelector('[data-skill-acquisition]')`, 'skill-acquired');
+    await assertRenderer(renderer, `(() => { const detail=document.querySelector('[data-skill-detail]'); const text=detail?.textContent??''; return text.includes('synthetic-style-review') && text.includes('1.0.0') && text.includes('MIT') && text.includes('转换报告') && text.includes('来源快照') && text.includes('工作修订') && text.includes('Run 可读范围：无') && !detail.querySelector('[data-skill-action="install"], [data-skill-action="enable"]'); })()`, 'skill-identity-and-ceiling');
+    const importedSkillId = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillDetail`);
+    requireJourney(UUID_PATTERN.test(importedSkillId ?? ''), 'skill-exact-revision');
+    await clickSelector(renderer, '[data-skill-action="validate"]', 'skill-validate');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='validated'`, 'skill-validated-not-installed');
+    await clickSelector(renderer, '[data-skill-action="install"]', 'skill-install');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='installed-disabled'`, 'skill-installed-not-enabled');
+    await clickSelector(renderer, '[data-skill-action="books"]', 'skill-choose-scope');
+    await waitFor(renderer, `document.querySelectorAll('[data-skill-field="book"] option').length>1`, 'skill-books');
+    const enabledSkillBook = await renderer.evaluate(`(() => { const select=document.querySelector('[data-skill-field="book"]'); select.value=select.options[1].value; const value=select.value; select.dispatchEvent(new Event('change',{bubbles:true})); return value; })()`);
+    requireJourney(UUID_PATTERN.test(enabledSkillBook ?? ''), 'skill-selected-book');
+    await clickSelector(renderer, '[data-skill-action="enable"]', 'skill-explicit-enable');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='enabled'`, 'skill-enabled-inert');
+    await assertRenderer(renderer, `(async () => { const read=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(importedSkillId)},before:null}); const skill=read.revision; return skill.enabledBooks.length===1 && skill.enabledBooks[0]===${JSON.stringify(enabledSkillBook)} && skill.ceiling.executor===false && skill.ceiling.provider===false && skill.ceiling.runSourceScope==='none' && skill.ceiling.effect===false; })()`, 'skill-scoped-empty-authority');
+    await closeBrowser();
+    manager = await launch(); renderer = await waitForRenderer(manager, 'skill-restart-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'`, 'skill-restart-ready');
+    await assertRenderer(renderer, `(async () => { const read=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(importedSkillId)},before:null}); return read.revision.state==='enabled' && read.revision.enabledBooks[0]===${JSON.stringify(enabledSkillBook)} && read.revision.files[0].path==='SKILL.md'; })()`, 'skill-restart-keeps-snapshot');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

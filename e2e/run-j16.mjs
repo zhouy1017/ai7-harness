@@ -577,6 +577,55 @@ async function waitForDialogue(renderer, check, name, timeout = 60_000) {
   requireJourney(false, name, last);
 }
 
+// ---- The Context-bound Task Composer (Issue #423, wave 10 slice 7a; TASK-001 to 009, 046; #52 S17b) --------------------------
+
+/** The composer in the side slot, offering 按现成工序准备… for the one paragraph it holds. */
+const PROCEDURES_ROUTE = `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'composer' && document.querySelector('#task-drawer .task-composer [data-task-composer-action="procedures"]') instanceof HTMLButtonElement`;
+
+/** The composer as the editor reads it: its state, title, what it carries, whether 准备任务 can be pressed, and 7c's slot. */
+const READ_COMPOSER = `(() => {
+  const drawer = document.querySelector('#task-drawer');
+  const composer = drawer?.querySelector('.task-composer');
+  if (!(drawer instanceof HTMLElement) || drawer.hidden || drawer.dataset.taskDrawerView !== 'composer' || !(composer instanceof HTMLElement)) return null;
+  const text = (node) => node?.textContent ?? null;
+  const disabled = (action) => { const button = composer.querySelector('[data-task-composer-action="' + action + '"]'); return button === null ? null : button.disabled; };
+  return {
+    state: composer.dataset.taskComposer ?? null,
+    draftId: composer.dataset.taskComposerDraft ?? null,
+    title: text(composer.querySelector('h3')),
+    book: text(composer.querySelector('.task-composer-book')),
+    revision: text(composer.querySelector('.task-composer-revision')),
+    ranges: Array.from(composer.querySelectorAll('li.task-composer-range'), (item) => [text(item.querySelector('blockquote')), item.dataset.rangeState ?? null]),
+    target: Array.from(composer.querySelectorAll('[data-task-composer-field^="target-"]')).find((input) => input.checked)?.value ?? null,
+    goalLabel: text(composer.querySelector('.task-composer-goal span')),
+    prepare: disabled('prepare'),
+    promote: disabled('promote'),
+    slot: composer.querySelector('[data-procedure-recommendation]') !== null,
+    resolution: composer.querySelector('[data-task-composer-resolution]')?.dataset.taskComposerResolution ?? null,
+    unsupported: text(composer.querySelector('.task-composer-unsupported')),
+    answer: composer.querySelector('[data-task-composer-answer]')?.dataset.taskComposerAnswer ?? null,
+    problem: (() => { const node = composer.querySelector('.task-composer-problem'); return node === null || node.hidden ? null : node.textContent; })(),
+  };
+})()`;
+
+async function waitForComposer(renderer, check, name, timeout = 60_000) {
+  const deadline = Date.now() + timeout;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await renderer.evaluate(READ_COMPOSER).catch(() => null);
+    if (last !== null && check(last)) return last;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  requireJourney(false, name, last);
+}
+
+/** Write the composer's goal as typing does: the value, then its input event. */
+const writeGoal = (words) => `(() => { const goal = document.querySelector('#task-drawer .task-composer [data-task-composer-field="goal"]'); if (!(goal instanceof HTMLTextAreaElement)) return false; goal.focus(); goal.value = ${JSON.stringify(words)}; goal.dispatchEvent(new Event('input', { bubbles: true })); return goal.value === ${JSON.stringify(words)}; })()`;
+
+async function composerAction(renderer, action, name) {
+  await clickSelector(renderer, `#task-drawer .task-composer [data-task-composer-action=${JSON.stringify(action)}]`, name);
+}
+
 async function dialogueAction(renderer, action, name) {
   await clickSelector(renderer, `#task-drawer .dialogue [data-dialogue-action=${JSON.stringify(action)}]`, name);
 }
@@ -1421,9 +1470,13 @@ async function main() {
     // J-13's) — this house has none, which the group says once its read answers — 润色这段 is enabled, this launch binding a model
     // fixture (Issue #842), the other two prototype presets are gone, and 再选一段加入 is refused in words.
     await openSelectionMenu(renderer, taskBlock, 0, wordsTo, 'selection-task-open-menu');
-    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && polish instanceof HTMLButtonElement && !polish.disabled && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().textContent.includes('不提供「再选一段加入」'); })()`, 'selection-task-menu-items');
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && polish instanceof HTMLButtonElement && !polish.disabled && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().textContent.includes('要再选一段加入，请在任务草稿中操作。'); })()`, 'selection-task-menu-items');
     await waitFor(renderer, `window.__j16.menu()?.textContent.includes('本社还没有启用的可复用工序。') && window.__j16.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0 && window.__j16.item('task-on-selection') instanceof HTMLButtonElement`, 'selection-task-menu-procedures-none', 15_000);
     await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-choose');
+    // Synchronized delta (Issue #423, slice 7a): 就这段发起任务… hands the words to the Context-bound Task Composer in the side slot;
+    // its 按现成工序准备… closes it and opens the composer below the paragraph that prepares one of the house's 工序 at once.
+    await waitFor(renderer, PROCEDURES_ROUTE, 'selection-task-composer-slot', 30_000);
+    await clickSelector(renderer, '#task-drawer .task-composer [data-task-composer-action="procedures"]', 'selection-task-procedures');
 
     at('selection-task-composer');
     // The composer is anchored to the paragraph and holds only it: the selected words, the Book, the revision and journal position
@@ -1515,6 +1568,9 @@ async function main() {
     }
     requireJourney(markMenu, 'selection-task-mark-menu');
     await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-mark-choose');
+    // Synchronized delta (Issue #423, slice 7a): the marked words go to the Context-bound Task Composer first.
+    await waitFor(renderer, PROCEDURES_ROUTE, 'selection-task-mark-composer-slot', 30_000);
+    await clickSelector(renderer, '#task-drawer .task-composer [data-task-composer-action="procedures"]', 'selection-task-mark-procedures');
     await waitFor(renderer, `window.__j16.composer()?.dataset.markComposer === 'task-on-selection' && window.__j16.composer().querySelector('.editorial-mark-quote')?.textContent === ${JSON.stringify(markWords)}`, 'selection-task-mark-composer', 30_000);
     // With 重新分析这段 chosen, a real window load — 全稿位置 asked for the window the editor is on — keeps the composer below its
     // paragraph, with its choice and its words (review P2-5); the load is named in `data-window-loads`.
@@ -1552,6 +1608,107 @@ async function main() {
       statesOf(rangePanel, 'running').length === 0, 'selection-task-reanalyze-card', rangePanel);
     requireJourney((await paragraphText()) === paragraphBefore, 'selection-task-reanalyze-manuscript-unchanged');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-panel-close');
+
+    // ---- The Context-bound Task Composer and Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b) -----------------------
+    at('composer-selection-draft');
+    // 就这段发起任务… opens the composer in the side slot holding exactly the selected words, the Book and the revision; an input
+    // method's Enter prepares nothing (TASK-009); 再选一段加入 pins a second paragraph (TASK-046); 准备任务 saves a draft — no Task,
+    // plan or Run (TASK-004) — that waits in 等你处理 and in 待我处理 as its own card.
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'composer-drawer-closed');
+    await assertRenderer(renderer, MARK_HELPERS, 'composer-helpers');
+    const composerBlocks = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).filter((node) => { const head = (node.textContent ?? '').slice(0, 8); return node.dataset.blockId !== ${JSON.stringify(taskBlock)} && node.querySelector('.editorial-mark') === null && head.length === 8 && Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(head)).length === head.length; }).slice(0, 2).map((node) => node.dataset.blockId)`);
+    requireJourney(Array.isArray(composerBlocks) && composerBlocks.length === 2 && composerBlocks.every((id) => /^blk_[0-9a-f]{24}$/.test(id)), 'composer-blocks', composerBlocks);
+    const composerWords = await Promise.all(composerBlocks.map((id) => renderer.evaluate(`(window.__j16.block(${JSON.stringify(id)})?.textContent ?? '').slice(0, 6)`)));
+    const draftsBefore = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: null }).then((read) => read.drafts.length)`);
+    requireJourney(draftsBefore === 0, 'composer-no-drafts-before', draftsBefore);
+    await openSelectionMenu(renderer, composerBlocks[0], 0, 6, 'composer-menu');
+    await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'composer-choose');
+    const seeded = await waitForComposer(renderer, (composer) => composer.state === 'new', 'composer-open', 30_000);
+    requireJourney(seeded.title === '就这段发起任务' && seeded.book === `《${BOOK.title}》 · 稿件` && /^修订版 r[0-9]+ · 修订日志序号 [0-9]+/u.test(seeded.revision ?? '') &&
+      JSON.stringify(seeded.ranges.map(([words]) => words)) === JSON.stringify([composerWords[0]]) && ['exact', 'pending-save'].includes(seeded.ranges[0][1]) &&
+      seeded.target === 'ranges' && seeded.goalLabel === '描述希望 AI7 完成的编辑工作' && seeded.prepare === true && seeded.slot === true,
+    'composer-seeded', seeded);
+    const COMPOSER_GOAL = '统一这两段里的人名写法';
+    // An input method's Enter — Ctrl+Enter while a composition is under way — saves nothing (TASK-009).
+    await assertRenderer(renderer, `(() => { const goal = document.querySelector('#task-drawer .task-composer [data-task-composer-field="goal"]'); if (!(goal instanceof HTMLTextAreaElement)) return false; goal.focus(); goal.dispatchEvent(new CompositionEvent('compositionstart', { data: '人名', bubbles: true })); goal.value = ${JSON.stringify(COMPOSER_GOAL)}; goal.dispatchEvent(new Event('input', { bubbles: true })); goal.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, isComposing: true, bubbles: true, cancelable: true })); return true; })()`, 'composer-ime-enter');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 600));
+    requireJourney(await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: null }).then((read) => read.drafts.length)`) === 0 &&
+      (await renderer.evaluate(READ_COMPOSER))?.state === 'new', 'composer-ime-prepares-nothing');
+    await assertRenderer(renderer, `(() => { const goal = document.querySelector('#task-drawer .task-composer [data-task-composer-field="goal"]'); goal?.dispatchEvent(new CompositionEvent('compositionend', { data: '人名', bubbles: true })); return goal instanceof HTMLTextAreaElement; })()`, 'composer-ime-end');
+    // 再选一段加入: the words selected now in the manuscript, pinned beside the first.
+    let joined = null;
+    for (let attempt = 0; attempt < 10 && joined === null; attempt += 1) {
+      await assertRenderer(renderer, `window.__j16.place(${JSON.stringify(composerBlocks[1])}, 0, 6)`, 'composer-second-place');
+      await new Promise((resolveWait) => setTimeout(resolveWait, 150));
+      await composerAction(renderer, 'add-range', 'composer-add-range');
+      const read = await waitForComposer(renderer, (composer) => composer.ranges.length === 2 || composer.problem !== null, 'composer-add-range-read', 10_000);
+      if (read.ranges.length === 2) joined = read;
+    }
+    requireJourney(joined !== null && JSON.stringify(joined.ranges.map(([words]) => words)) === JSON.stringify(composerWords) && joined.target === 'ranges' && joined.prepare === false,
+      'composer-joined', joined);
+    await composerAction(renderer, 'prepare', 'composer-prepare');
+    const saved = await waitForComposer(renderer, (composer) => composer.state === 'draft', 'composer-draft-saved', 30_000);
+    const selectionDraft = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: null }).then((read) => read.drafts.map((draft) => ({ draftId: draft.draftId, origin: draft.origin, ordinal: draft.version.ordinal, goal: draft.version.goal, target: draft.version.target, ranges: draft.version.ranges.map((range) => range.text), promotion: draft.promotion })))`);
+    requireJourney(saved.title === '任务意图草稿 · 第 1 版' && Array.isArray(selectionDraft) && selectionDraft.length === 1 && selectionDraft[0].draftId === saved.draftId &&
+      selectionDraft[0].origin === 'composer-selection' && selectionDraft[0].ordinal === 1 && selectionDraft[0].goal === COMPOSER_GOAL && selectionDraft[0].target === 'ranges' &&
+      JSON.stringify(selectionDraft[0].ranges) === JSON.stringify(composerWords) && selectionDraft[0].promotion === null, 'composer-draft-recorded', { saved, selectionDraft });
+    // No Task was prepared for it: the Book's analysis is still the 重新分析所选范围 the editor left prepared.
+    requireJourney(await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => analysis.taskIntent?.mode ?? null)`) === 'reanalyze-range', 'composer-no-task');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'composer-back');
+    const draftPanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').includes('draft-unfinished'), 'composer-draft-waiting');
+    const draftCard = cardsOf(draftPanel, 'waiting').find((card) => card.state === 'draft-unfinished');
+    requireJourney(draftCard.kind === '任务草稿 · 尚未成为任务' && draftCard.title === `任务草稿 · 「${COMPOSER_GOAL}」` && draftCard.pill === '任务草稿 · 尚未准备计划' &&
+      JSON.stringify(draftCard.actions) === JSON.stringify([['next', '继续编辑草稿', 'enabled']]), 'composer-draft-card', draftCard);
+    const draftAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((attention) => attention.groups.flatMap((group) => group.items).filter((item) => item.state === 'draft-unfinished').map((item) => [item.book.bookId, item.target.kind, item.target.draftId]))`);
+    requireJourney(JSON.stringify(draftAttention) === JSON.stringify([[bookId, 'task-intent-draft', saved.draftId]]), 'composer-draft-attention', draftAttention);
+
+    at('draft-promote-prepared-task');
+    // 发起全书任务… opens the composer on the whole Book; 准备任务 saves the draft and 准备计划 makes it a prepared baseline Task through
+    // the existing preparation — the plan opens in the slot leading with the draft's sentence, and 开始任务 is still the editor's.
+    await clickSelector(renderer, '#task-drawer .task-panel [data-task-compose-action="compose"]', 'promote-compose');
+    const whole = await waitForComposer(renderer, (composer) => composer.state === 'new', 'promote-composer-open', 30_000);
+    requireJourney(whole.title === '发起全书任务' && whole.ranges.length === 0 && whole.target === 'book', 'promote-composer-whole-book', whole);
+    const PROMOTE_GOAL = '为这本书重新做一次基线分析，重点看人物与设定';
+    await assertRenderer(renderer, writeGoal(PROMOTE_GOAL), 'promote-goal');
+    await assertRenderer(renderer, `(() => { const outcome = document.querySelector('#task-drawer .task-composer [data-task-composer-field="outcome-analysis"]'); if (!(outcome instanceof HTMLInputElement)) return false; outcome.click(); return outcome.checked; })()`, 'promote-outcome');
+    await composerAction(renderer, 'prepare', 'promote-prepare');
+    const resolved = await waitForComposer(renderer, (composer) => composer.state === 'draft' && composer.resolution !== null, 'promote-draft-saved', 30_000);
+    requireJourney(resolved.resolution === 'ready' || resolved.resolution === 'choose', 'promote-resolution', resolved);
+    if (resolved.resolution === 'choose') {
+      await assertRenderer(renderer, `(() => { const choice = document.querySelector('#task-drawer .task-composer [data-task-composer-field^="choice-"]:not(:disabled)'); if (!(choice instanceof HTMLInputElement)) return false; choice.click(); return choice.checked; })()`, 'promote-choice');
+    }
+    await waitForComposer(renderer, (composer) => composer.promote === false, 'promote-ready', 10_000);
+    await composerAction(renderer, 'promote', 'promote-click');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'baseline-analysis' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('.task-plan-draft-sentence')?.textContent === ${JSON.stringify(`你的要求：「${PROMOTE_GOAL}」`)}; })()`, 'promote-plan-opened', 180_000);
+    const promotedRef = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? null`);
+    const promotion = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: ${JSON.stringify(resolved.draftId)} }).then((read) => read.drafts[0].promotion)`);
+    const promotedTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ taskIntentId: analysis.taskIntent?.taskIntentId ?? null, goal: analysis.taskIntent?.goal ?? null, state: analysis.state, authorization: analysis.authorization, run: analysis.run }))`);
+    requireJourney(UUID_PATTERN.test(promotedRef ?? '') && promotion?.taskKind === 'baseline-analysis' && promotion.planRef === promotedRef && promotion.taskIntentId === promotedRef &&
+      promotedTask.taskIntentId === promotedRef && promotedTask.goal === PROMOTE_GOAL && promotedTask.state === 'prepared' && promotedTask.authorization === null && promotedTask.run === null,
+    'promote-recorded', { promotedRef, promotion, promotedTask });
+    // A promoted draft is final: it leaves 等你处理, where its Task now waits; the selection's draft still waits beside it.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'promote-back');
+    const promotedPanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').includes('analysis-prepared'), 'promote-panel');
+    requireJourney(cardsOf(promotedPanel, 'waiting').filter((card) => card.state === 'draft-unfinished').map((card) => card.title).join() === `任务草稿 · 「${COMPOSER_GOAL}」`, 'promote-panel-drafts', promotedPanel);
+
+    at('dialogue-promote-draft');
+    // 转为任务意图草稿 (Issue #52, S17b; DIALOG-016): a completed dialogue answer becomes a draft carrying its words and provenance — the
+    // dialogue, the attempt and the selection's digest — opened in the composer; the dialogue, its records and the manuscript stay.
+    const promoteDigestBefore = await workingDigest();
+    await cardAction(renderer, 'dialogue-answered', 'next', 'dialogue-promote-open');
+    const promoting = await waitForDialogue(renderer, (dialogue) => dialogue.state === 'ready' && dialogue.attempts.at(-1)?.state === 'completed', 'dialogue-promote-ready');
+    const promotingId = promoting.dialogueId;
+    const promotingRead = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(promotingId)}, afterFragment: 0 }).then((dialogue) => ({ attemptId: dialogue.attempts.at(-1).attemptId, selection: dialogue.selection, attempts: dialogue.attempts.length }))`);
+    await clickSelector(renderer, '#task-drawer .dialogue [data-dialogue-promote]', 'dialogue-promote-click');
+    const answerDraft = await waitForComposer(renderer, (composer) => composer.state === 'draft' && composer.answer !== null, 'dialogue-promote-composer', 30_000);
+    const answerRecord = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: ${JSON.stringify(answerDraft.draftId)} }).then((read) => { const draft = read.drafts[0]; return { origin: draft.origin, answer: draft.version.answer, ranges: draft.version.ranges.map((range) => range.text), promotion: draft.promotion }; })`);
+    requireJourney(answerDraft.answer === promotingRead.attemptId && answerRecord.origin === 'dialogue-answer' && answerRecord.answer?.dialogueId === promotingId &&
+      answerRecord.answer.attemptId === promotingRead.attemptId && /^[0-9a-f]{64}$/.test(answerRecord.answer.selectionSha256 ?? '') && answerRecord.answer.text.length > 0 &&
+      JSON.stringify(answerRecord.ranges) === JSON.stringify([promotingRead.selection]) && answerRecord.promotion === null, 'dialogue-promote-recorded', { answerDraft, answerRecord });
+    requireJourney((await workingDigest()) === promoteDigestBefore &&
+      await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(promotingId)}, afterFragment: 0 }).then((dialogue) => dialogue.attempts.length)`) === promotingRead.attempts,
+    'dialogue-promote-nothing-moved');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'dialogue-promote-close');
 
     at('selection-task-gone');
     // 跳到所选文字 on a paragraph the manuscript no longer holds (Issue #423 review, P2-1). The bounded editor keeps every

@@ -5,6 +5,8 @@ deciders: Owner
 amends: V2-UX-REUSE-003 and REUSE-005 — a captured Review Run is saved as an AI7-owned Captured Procedure, not a native DSH Skill draft (§1); REUSE-012 — its steps keep the configuration's order (§2); the interaction specification's Reusable procedure classification table; Reusable Procedure Classification Preview and Authority Ceiling in their contexts (§1, §4); journeys J-15 (Consequences)
 ---
 
+> Amended by [ADR 0090](./0090-admit-procedure-recommendation-foreign-skill-import-and-custom-analysis-dimensions.md) (§1, §2, §3, §4, §5): 工序推荐 is admitted (§4's recommendation exclusion and §6's deferral); foreign Skill import and update are admitted but inert until a Skill executor exists (§6); the Custom Analysis Dimension is a separate document type that carries a bounded question template (§1); `ai7.captured-procedure/2` adds a `series` run-source scope beside `current-book` (§4). A Captured Procedure still carries no prompt text and never starts by itself.
+
 # Make a captured procedure runnable through the Review Run path
 
 On 2026-10-08, answering the questions S30 (#65) raised, the Owner decided two things. A procedure saved with `将以上工序保存为可复用工序` must be runnable in this version (「要能运行」), not only saved. A Developer Capability Proposal is kept locally and may be exported to a file; AI7 never sends it. This record decides the smallest carrier, validation and run path that make the first true without widening any authority. The Owner accepted this text on 2026-10-08.

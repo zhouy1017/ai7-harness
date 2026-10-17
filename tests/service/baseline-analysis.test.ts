@@ -660,11 +660,11 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     await requireExactSample1(roots.codeRoot);
     const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
     const store = await openWithRoute(roots.dataRoot, transient);
-    // The guard answers nothing for the five range checks, and turns from the sixth call on — unit 5's retry check.
+    // Series now checks both each range and final assembly: ten checks admit units 1–5; the retry is refused.
     let calls = 0;
     const owner = new BaselineAnalysisExecutionOwner({
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: fakeSecretResolver(),
-      ...(guard === 'series' ? { readGuard: () => (++calls >= 6 ? '书系知识条目「海边小城」（地点）' : null) }
+      ...(guard === 'series' ? { seriesScopeGuard: () => (++calls >= 11 ? '书系知识条目「海边小城」（地点）' : null) }
         : { materialGuard: () => (++calls >= 7 ? { code: 'MATERIAL_REFERENCE_UNAVAILABLE', materialTitle: '合成资料', message: '资料《合成资料》现在不能允许参考。' } : null) }),
     });
     try {

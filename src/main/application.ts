@@ -37,6 +37,11 @@ import {
   type DialogueAttemptInput,
   type DialogueProjection,
   type InspectDialogueInput,
+  type InspectTaskIntentDraftsInput,
+  type PromoteAnswerToTaskIntentDraftInput,
+  type PromoteTaskIntentDraftInput,
+  type SaveTaskIntentDraftInput,
+  type TaskIntentDraftProjection,
   type CommitNewBookRendererInput,
   type CommitManuscriptReimportRendererInput,
   type CommitSourceImportRendererInput,
@@ -3181,6 +3186,115 @@ function registerRendererHandlers(
       return service.call('inspectCapturedProcedures', {});
     }),
   );
+  // ADR 0090 §2: the path comes only from the platform picker; the renderer cannot select an arbitrary path. Picking discloses
+  // and keeps nothing; `keep` names the disclosed acquisition the service holds, never a path.
+  ipcMain.handle(IPC_CHANNELS.importSkillPackage, (event, input: Parameters<RendererApi['importSkillPackage']>[0]) => envelope(async () => {
+    const owned = requireSender(event);
+    requireDesktop(input === undefined || (input !== null && typeof input === 'object' && (
+      ('kind' in input && (input.kind === 'zip' || input.kind === 'directory')) || ('keep' in input && typeof input.keep === 'string' && UUID_PATTERN.test(input.keep)))));
+    return serializeEffect(async () => {
+      requireAuthority();
+      if (input !== undefined && 'keep' in input) return service.call('importSkillPackage', { path: null, keep: input.keep });
+      const kind = input?.kind;
+      let path = owned.injectedPickerPath;
+      owned.injectedPickerPath = undefined;
+      if (path === undefined) {
+        const picked = await dialog.showOpenDialog(owned.window, {
+          title: '选择要导入的 Skill', buttonLabel: '查看 Skill', properties: kind === 'directory' ? ['openDirectory'] : ['openFile'],
+          ...(kind === 'directory' ? {} : { filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }] }),
+        });
+        if (picked.canceled || picked.filePaths.length !== 1) return null;
+        path = picked.filePaths[0];
+      }
+      requireDesktop(path !== undefined && isAbsolute(path));
+      return service.call('importSkillPackage', { path, keep: null });
+    });
+  }));
+  ipcMain.handle(IPC_CHANNELS.inspectImportedSkills, (event, input: Parameters<RendererApi['inspectImportedSkills']>[0]) => envelope(async () => {
+    requireSender(event); requireAuthority();
+    requireDesktop(input !== null && typeof input === 'object');
+    return service.call('inspectImportedSkills', { revisionId: input.revisionId, before: input.before });
+  }));
+  ipcMain.handle(IPC_CHANNELS.validateImportedSkill, (event, input: Parameters<RendererApi['validateImportedSkill']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('validateImportedSkill', { revisionId: input.revisionId }); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.installImportedSkill, (event, input: Parameters<RendererApi['installImportedSkill']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('installImportedSkill', { revisionId: input.revisionId, previewDigest: input.previewDigest }); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.enableImportedSkill, (event, input: Parameters<RendererApi['enableImportedSkill']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => {
+      requireAuthority();
+      return service.call('enableImportedSkill', { revisionId: input.revisionId, bookId: input.bookId, previewDigest: input.previewDigest });
+    });
+  }));
+  // ADR 0090 §3: 检查更新（从文件）… takes its package from the same platform picker, for the Skill named, and discloses and keeps
+  // nothing; `keep` names the disclosed acquisition the service holds, never a path. The renderer never selects a path.
+  ipcMain.handle(IPC_CHANNELS.checkImportedSkillUpdate, (event, input: Parameters<RendererApi['checkImportedSkillUpdate']>[0]) => envelope(async () => {
+    const owned = requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object' && typeof input.skillId === 'string' && UUID_PATTERN.test(input.skillId) && (
+      ('kind' in input && (input.kind === 'zip' || input.kind === 'directory')) || ('keep' in input && typeof input.keep === 'string' && UUID_PATTERN.test(input.keep))));
+    return serializeEffect(async () => {
+      requireAuthority();
+      if ('keep' in input) return service.call('checkImportedSkillUpdate', { skillId: input.skillId, path: null, keep: input.keep });
+      let path = owned.injectedPickerPath;
+      owned.injectedPickerPath = undefined;
+      if (path === undefined) {
+        const picked = await dialog.showOpenDialog(owned.window, {
+          title: '选择这个 Skill 的新版本', buttonLabel: '查看更新', properties: input.kind === 'directory' ? ['openDirectory'] : ['openFile'],
+          ...(input.kind === 'directory' ? {} : { filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }] }),
+        });
+        if (picked.canceled || picked.filePaths.length !== 1) return null;
+        path = picked.filePaths[0];
+      }
+      requireDesktop(path !== undefined && isAbsolute(path));
+      return service.call('checkImportedSkillUpdate', { skillId: input.skillId, path, keep: null });
+    });
+  }));
+  ipcMain.handle(IPC_CHANNELS.inspectImportedSkillUpdate, (event, input: Parameters<RendererApi['inspectImportedSkillUpdate']>[0]) => envelope(async () => {
+    requireSender(event); requireAuthority();
+    requireDesktop(input !== null && typeof input === 'object');
+    return service.call('inspectImportedSkillUpdate', { candidateId: input.candidateId });
+  }));
+  ipcMain.handle(IPC_CHANNELS.adoptImportedSkillUpdate, (event, input: Parameters<RendererApi['adoptImportedSkillUpdate']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => {
+      requireAuthority();
+      return service.call('adoptImportedSkillUpdate', {
+        candidateId: input.candidateId, reviewDigest: input.reviewDigest, acceptItems: input.acceptItems, upstreamPaths: input.upstreamPaths,
+      });
+    });
+  }));
+  ipcMain.handle(IPC_CHANNELS.dismissImportedSkillUpdate, (event, input: Parameters<RendererApi['dismissImportedSkillUpdate']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('dismissImportedSkillUpdate', { candidateId: input.candidateId }); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.createImportedSkillUpdateRule, (event, input: Parameters<RendererApi['createImportedSkillUpdateRule']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('createImportedSkillUpdateRule', { skillId: input.skillId, confirmation: input.confirmation }); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.revokeImportedSkillUpdateRule, (event, input: Parameters<RendererApi['revokeImportedSkillUpdateRule']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('revokeImportedSkillUpdateRule', { skillId: input.skillId }); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.rollbackImportedSkill, (event, input: Parameters<RendererApi['rollbackImportedSkill']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('rollbackImportedSkill', { skillId: input.skillId, revisionId: input.revisionId }); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.recommendProcedures, (event, input: Parameters<RendererApi['recommendProcedures']>[0]) => envelope(async () => {
+    const owned = requireSender(event); requireAuthority();
+    requireDesktop(input !== null && typeof input === 'object');
+    const route = requireCurrentBookRoute(owned);
+    const generation = owned.routeGeneration;
+    const sequence = owned.routeRequestSequence;
+    const result = await service.call('recommendProcedures', {
+      bookId: route.bookId, goal: input.goal, taskKind: input.taskKind, scope: input.scope, categoryIds: input.categoryIds,
+    });
+    requireCurrentRouteReadEpoch(owned, generation, sequence);
+    return result;
+  }));
   ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedure, (event, input: Parameters<RendererApi['inspectCapturedProcedure']>[0]) =>
     envelope(async () => {
       requireSender(event);
@@ -3280,6 +3394,66 @@ function registerRendererHandlers(
       requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
       if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '工序的运行预览不属于当前图书工作台。');
       return result;
+    }),
+  );
+  // 自定义分析维度 (Issue #922, slice 7f): 知识库's house documents name no Book; ②A's 自定义 tab and 运行 read and prepare on the
+  // route's Book, which the renderer never names.
+  ipcMain.handle(IPC_CHANNELS.inspectCustomAnalysisDimensions, (event, input: Parameters<RendererApi['inspectCustomAnalysisDimensions']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && typeof input.forBook === 'boolean', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      if (!input.forBook) return service.call('inspectCustomAnalysisDimensions', { bookId: null });
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectCustomAnalysisDimensions', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '自定义分析维度不属于当前图书工作台。');
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveCustomAnalysisDimension, (event, input: Parameters<RendererApi['saveCustomAnalysisDimension']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('saveCustomAnalysisDimension', { dimensionId: input.dimensionId, title: input.title, questionTemplate: input.questionTemplate });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.enableCustomAnalysisDimension, (event, input: Parameters<RendererApi['enableCustomAnalysisDimension']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('enableCustomAnalysisDimension', { versionId: input.versionId });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.stopCustomAnalysisDimension, (event, input: Parameters<RendererApi['stopCustomAnalysisDimension']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('stopCustomAnalysisDimension', { versionId: input.versionId });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.prepareCustomAnalysis, (event, input: Parameters<RendererApi['prepareCustomAnalysis']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const result = await service.call('prepareCustomAnalysis', { bookId: route.bookId, dimensionId: input.dimensionId, update: input.update });
+        if (result.dimensions.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '自定义分析任务不属于当前图书工作台。');
+        return result;
+      });
     }),
   );
   // 按已保存的工序 (Issue #66, S31b): the house's enabled procedures as each applies to the route's Book, which the renderer never names;
@@ -3429,7 +3603,8 @@ function registerRendererHandlers(
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
-        const result = await service.call('prepareInitialEvaluation', { bookId: route.bookId, ...(input?.materialIds === undefined ? {} : { materialIds: input.materialIds }) });
+        requireDesktop(input?.seriesId == null || (typeof input.seriesId === 'string' && /^[0-9a-f-]{36}$/i.test(input.seriesId)), 'AI7_RENDERER_BOUNDARY_INVALID');
+        const result = await service.call('prepareInitialEvaluation', { bookId: route.bookId, ...(input?.seriesId == null ? {} : { seriesId: input.seriesId }), ...(input?.materialIds === undefined ? {} : { materialIds: input.materialIds }) });
         const prepared = result.result;
         if (result.kind !== 'initial-evaluation-preparation' ||
             (prepared !== null && !('recordCount' in prepared && 'initial' in prepared && prepared.bookId === route.bookId))) {
@@ -4453,7 +4628,9 @@ function registerRendererHandlers(
         return serializeEffect(async () => {
           requireAuthority();
           const route = requireCurrentBookRoute(owned);
+          requireDesktop(input.seriesId == null || (typeof input.seriesId === 'string' && /^[0-9a-f-]{36}$/i.test(input.seriesId)), 'AI7_RENDERER_BOUNDARY_INVALID');
           const result = await service.call('prepareReviewRun', {
+            ...(input.seriesId == null ? {} : { seriesId: input.seriesId }),
             categoryIds: input.categoryIds,
             scope: input.scope,
             ...(input.materialIds === undefined ? {} : { materialIds: input.materialIds }),
@@ -4807,6 +4984,81 @@ function registerRendererHandlers(
         requireCurrentRouteGeneration(owned, routeGeneration);
         requireDialogueOfRoute(route, result.dialogue);
         return result;
+      });
+    }),
+  );
+  // Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b): the route's Book always, never the renderer's; a draft read or
+  // saved is the route's Book's, and 准备计划 starts the existing preparation job of the kind the draft resolves to.
+  const requireDraftOfRoute = (route: { bookId: string }, draft: TaskIntentDraftProjection): TaskIntentDraftProjection => {
+    if (draft.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务意图草稿不属于当前图书工作台。');
+    return draft;
+  };
+  ipcMain.handle(IPC_CHANNELS.inspectTaskIntentDrafts, (event, input: Omit<InspectTaskIntentDraftsInput, 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectTaskIntentDrafts', { bookId: route.bookId, draftId: input.draftId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务意图草稿不属于当前图书工作台。');
+      for (const draft of result.drafts) requireDraftOfRoute(route, draft);
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveTaskIntentDraft, (event, input: Omit<SaveTaskIntentDraftInput, 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && input.target !== null && typeof input.target === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        // A newly pinned range is the exact selection of the manuscript this window holds (TASK-003).
+        if (input.target.kind === 'ranges') {
+          for (const range of input.target.ranges) if (range !== null && typeof range === 'object' && range.kind === 'new') requireManuscriptCapability(owned, range.span);
+        }
+        const result = await service.call('saveTaskIntentDraft', {
+          bookId: route.bookId, draftId: input.draftId, expectedOrdinal: input.expectedOrdinal, origin: input.origin, goal: input.goal,
+          target: input.target, outcomeClass: input.outcomeClass, ...(input.procedurePin === undefined ? {} : { procedurePin: input.procedurePin }),
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return requireDraftOfRoute(route, result);
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.promoteTaskIntentDraft, (event, input: Omit<PromoteTaskIntentDraftInput, 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const result = await service.call('promoteTaskIntentDraft', {
+          bookId: route.bookId, draftId: input.draftId, versionId: input.versionId, choice: input.choice,
+          ...(input.writing === undefined ? {} : { writing: input.writing }),
+        });
+        const operation = result.kind === 'baseline-analysis-preparation' ? 'baseline-analysis'
+          : result.kind === 'review-run-preparation' ? 'review-run' : result.kind === 'writing-preparation' ? 'writing' : null;
+        if (operation === null) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '准备计划的结果类型无效。');
+        rememberEditorResource(owned, 'job', result.jobId, { operation, bookId: route.bookId, manuscriptId: null, branchId: null });
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.promoteAnswerToTaskIntentDraft, (event, input: Omit<PromoteAnswerToTaskIntentDraftInput, 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('promoteAnswerToTaskIntentDraft', { bookId: route.bookId, dialogueId: input.dialogueId, attemptId: input.attemptId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return requireDraftOfRoute(route, result);
       });
     }),
   );

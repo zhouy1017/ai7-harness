@@ -240,12 +240,18 @@ import {
   type SelectionProcedureEntry,
   type SelectionTaskChoice,
   type SelectionTaskChoices,
+  SELECTION_TASK_PICK_RANGE,
 } from './selection-task-labels.js';
 import { marksRefreshStep } from './marks-refresh.js';
-import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
+import { mountEditorialMarks, type EditorialMarksSurface, type SelectionSpanReading } from './editorial-marks.js';
+import type { ComposerRange } from './task-panel.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
+import { ANALYSIS_TAB_SHOWN_EVENT, mountCustomAnalysisDimensions, mountCustomAnalysisTab } from './custom-analysis.js';
+import { CUSTOM_TAB_LABEL } from './custom-analysis-labels.js';
+import { mountImportedSkills } from './imported-skills.js';
+import { mountProcedureRecommendationSlots } from './procedure-choice.js';
 import { mountTaskDrawer } from './task-drawer.js';
 import {
   TASK_DRAWER_TITLE,
@@ -343,7 +349,48 @@ const taskDrawer = mountTaskDrawer({
   // 就这段提问… (Issue #52, S17a): 回到所选文字, and a 修改建议 made from an answer opened on the manuscript with its card.
   dialogueJump: (bookId, target) => void jumpToManuscript(bookId, { manuscriptId: target.manuscriptId, blockId: target.blockId, markId: null }),
   dialogueConverted: (dialogue, markId) => void jumpToManuscript(dialogue.bookId, { manuscriptId: dialogue.manuscriptId, blockId: dialogue.range.blockId, markId }),
+  // The Context-bound Task Composer (Issue #423, wave 10 slice 7a; TASK-001 to 009, 046): the whole-Book composer names its Book;
+  // 再选一段加入 takes the words selected in that Book's manuscript on screen; the house's 工序 open the composer beside them.
+  wholeBookSeed: async (bookId) => {
+    const read = await window.ai7.inspectTaskIntentDrafts({ draftId: null });
+    if (read.bookId !== bookId) throw new Error(SELECTION_TASK_PICK_RANGE);
+    return { bookId, bookTitle: read.bookTitle, origin: 'composer-book', manuscript: null, ranges: [] };
+  },
+  pickRange: async (bookId) => {
+    const showing = manuscriptOnScreen;
+    if (showing === null || showing.bookId !== bookId) return SELECTION_TASK_PICK_RANGE;
+    const reading = await showing.selectionSpan();
+    return typeof reading === 'string' ? reading : composerRangeOf(reading);
+  },
+  openProcedures: (bookId, range) => {
+    const showing = manuscriptOnScreen;
+    if (showing !== null && showing.bookId === bookId && range.span !== null) showing.composeProcedures(range.span);
+  },
+  settle: () => settleScreen(),
+  resumeDraft: (bookId, resume) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
+    renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
+    resume();
+  }),
 });
+
+const procedureRecommendationSlots = mountProcedureRecommendationSlots(document.body, window.ai7, () => void renderKnowledgeBase('rules'));
+window.addEventListener('unload', () => procedureRecommendationSlots.disconnect(), { once: true });
+
+/** One range the composer carries, from the words selected now (Issue #423, slice 7a). */
+function composerRangeOf(reading: SelectionSpanReading): ComposerRange {
+  return {
+    key: `new-${crypto.randomUUID()}`,
+    rangeId: null,
+    span: reading.span,
+    blockId: reading.span.blockId,
+    text: reading.span.selectedText,
+    position: reading.position,
+    revisionLabel: reading.revisionLabel,
+    journalSequence: reading.journalSequence,
+    state: 'exact',
+    stateLabel: null,
+  };
+}
 
 /** 查看结果's floating window while it is open (Issue #423, S77a); any change of screen closes it. */
 let taskResultWindow: TaskResultWindow | undefined;
@@ -579,6 +626,10 @@ let manuscriptOnScreen: null | {
    * when the editor is busy, typing or has something open over the text, so the caller asks again later.
    */
   refreshMarks(): Promise<boolean>;
+  /** 再选一段加入 (Issue #423, slice 7a): the words selected now as an exact span, or why there are none. */
+  selectionSpan(): Promise<SelectionSpanReading | string>;
+  /** 按现成工序准备…: the house's 工序 on those words, in the composer beside their paragraph. */
+  composeProcedures(span: { readonly blockId: string; readonly fromGrapheme: number; readonly toGrapheme: number }): void;
 } = null;
 
 /**
@@ -1096,6 +1147,13 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
         renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
         taskDrawer.openDialogue(route.bookId, target.dialogueId, () => null);
+      });
+      return;
+    // A Task Intent Draft (Issue #423, slice 7a; TASK-006): its own Book's 工作概览, with the draft in the composer beside it.
+    case 'task-intent-draft':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
+        taskDrawer.openDraft(route.bookId, target.draftId, () => null);
       });
       return;
   }
@@ -3275,6 +3333,8 @@ const ANALYSIS_TABS = [
   ['relationships', '关系'],
   ['settings', '设定'],
   ['chapters', '各章'],
+  // 自定义分析维度 (Issue #922, slice 7f): each enabled dimension's latest result on this Book, its 运行 and its per-unit answers.
+  ['custom', CUSTOM_TAB_LABEL],
   ['history', '历史与更新'],
 ] as const;
 type AnalysisTabId = (typeof ANALYSIS_TABS)[number][0];
@@ -3316,6 +3376,7 @@ function analysisTabs(card: HTMLElement, bookId: string, initial: AnalysisTabId)
     tab.addEventListener('click', () => {
       analysisTabChoice.set(bookId, id);
       select(id);
+      panels[id].dispatchEvent(new Event(ANALYSIS_TAB_SHOWN_EVENT));
     });
     tab.addEventListener('keydown', (event) => {
       const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
@@ -3326,6 +3387,7 @@ function analysisTabs(card: HTMLElement, bookId: string, initial: AnalysisTabId)
       const next = ANALYSIS_TABS[target]![0];
       analysisTabChoice.set(bookId, next);
       select(next);
+      panels[next].dispatchEvent(new Event(ANALYSIS_TAB_SHOWN_EVENT));
       tabs[next].focus();
     });
     const panel = element('section', 'analysis-panel');
@@ -4161,6 +4223,32 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     failed: (error) => setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error'),
   });
 
+  // 自定义 is available before the first baseline too: each dimension owns its own Result Set and needs no built-in result.
+  const revision = projection.inspectedRevision?.revision ?? projection.resultSetRevision;
+  const taskInFlight = projection.state === 'prepared' || projection.state === 'authorized-blocked' || projection.state === 'queued' ||
+    projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing' || projection.state === 'cancelling' ||
+    projection.state === 'pausing' || projection.state === 'paused' || projection.state === 'resumable' ||
+    projection.state === 'awaiting-clarification';
+  const { panels, select } = analysisTabs(card, projection.bookId, revision === null || taskInFlight ? 'history' : 'synopsis');
+  if (revision !== null) {
+    renderBaselineAnalysisOverview(card, panels, select, projection, revision, bookTitle, projection.inspectedRevision !== null
+      ? { historical: true, current: projection.inspectedRevision.current }
+      : { historical: false, current: true });
+  } else {
+    for (const [id] of ANALYSIS_TABS) {
+      if (id !== 'custom' && id !== 'history') panels[id].append(element('p', 'field-note', '尚无基线分析结果。'));
+    }
+  }
+  const records = panels.history;
+  mountCustomAnalysisTab(panels.custom, {
+    bookId: projection.bookId,
+    api: window.ai7,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+    openPlan: (taskIntentId) => openTaskPlan(projection.bookId, 'baseline-analysis', taskIntentId),
+    jump: (blockId) => void jumpToManuscript(projection.bookId, { manuscriptId: null, blockId, markId: null }, '这段原文已不在当前稿件中。'),
+  });
+
   // The first-baseline form exists only while the Book holds no Result Set Revision; afterwards every
   // new Task is one of the three Analysis Update Controls below the Overview. A first baseline cancelled while
   // it waited to start leaves no revision either, so the form is offered again (Issue #502, OFF-010).
@@ -4179,30 +4267,11 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     start.dataset['analysisAction'] = 'prepare';
     actions.append(start, cancel);
     form.append(label, goal, element('p', 'field-note', '开始后先为任务保存修订版并整理阅读范围，计划在右侧的任务计划里打开；不会构造模型请求。'), actions);
-    card.append(form);
+    records.append(form);
     host.replaceChildren(card);
     return;
   }
 
-  // Once the Book holds a revision the card reads as ②A's seven tabs, and everything about how the
-  // analysis was made and is brought up to date — the current Task's plan and Run, its outcome and Run
-  // Report, the three update modes, the history — lives under 历史与更新. Before that there is nothing
-  // to tab through, and the first baseline's plan reads straight down the card as it always has.
-  const revision = projection.inspectedRevision?.revision ?? projection.resultSetRevision;
-  let records: HTMLElement = card;
-  if (revision !== null) {
-    // A Task in flight is what the editor came for, so the card opens where its plan and its Run are;
-    // a choice the editor made themselves always wins over either default.
-    const taskInFlight = projection.state === 'prepared' || projection.state === 'authorized-blocked' || projection.state === 'queued' ||
-      projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing' || projection.state === 'cancelling' ||
-      projection.state === 'pausing' || projection.state === 'paused' || projection.state === 'resumable' ||
-      projection.state === 'awaiting-clarification';
-    const { panels, select } = analysisTabs(card, projection.bookId, taskInFlight ? 'history' : 'synopsis');
-    renderBaselineAnalysisOverview(card, panels, select, projection, revision, bookTitle, projection.inspectedRevision !== null
-      ? { historical: true, current: projection.inspectedRevision.current }
-      : { historical: false, current: true });
-    records = panels.history;
-  }
   if (projection.checkpoint !== null) renderFrozenAnalysisPlan(records, projection);
 
   if (projection.taskOutcome) {
@@ -5453,9 +5522,19 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
         }
       },
     });
-    panelNode.append(section, captured, element('h3', undefined, RULES_HEADING));
+    // 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4): the house's own per-unit questions, beside its 工序.
+    const custom = element('div', 'knowledge-custom');
+    const customSurface = mountCustomAnalysisDimensions({ root: custom, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails, localInstantLabel });
+    const imported = element('section', 'knowledge-imported-skills');
+    panelNode.append(section, captured, custom, imported, element('h3', undefined, RULES_HEADING));
+    void mountImportedSkills({ root: imported, api: window.ai7, setStatus, errorMessage: rendererErrorMessage }).load().catch((error: unknown) => {
+      if (imported.isConnected) imported.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取外部 Skill。')));
+    });
     void surface.load().catch((error: unknown) => {
       if (captured.isConnected) captured.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取可复用工序。')));
+    });
+    void customSurface.load().catch((error: unknown) => {
+      if (custom.isConnected) custom.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取自定义分析维度。')));
     });
   }
   panelNode.append(element('p', 'field-note', projection.statement));
@@ -8563,6 +8642,8 @@ function renderEditorWindow(
     manuscriptId: initialWindow.manuscriptId,
     branchId: initialWindow.branchId,
     readingPlace,
+    selectionSpan: async () => editorialMarks === undefined ? SELECTION_TASK_PICK_RANGE : editorialMarks.selectionSpan(),
+    composeProcedures: (span) => editorialMarks?.composeProcedures(span),
     // A 审阅 of this Book settled (Issue #423 review, P2-6): the window on screen is read again, in place, so its marks — the ones
     // a 审阅这段 started here made on this paragraph — appear where the editor is. Nothing is read while the editor is busy
     // or holding words not yet written; an open composer stays (it is re-anchored).
@@ -9271,6 +9352,14 @@ function renderEditorWindow(
         bookTitle,
         choices: selectionTaskOffer,
         procedures: selectionProcedureOffer,
+        // The Context-bound Task Composer (Issue #423, slice 7a; TASK-001): exactly the selected words, in the side slot.
+        compose: (reading: SelectionSpanReading) => taskDrawer.openComposer({
+          bookId: initialWindow.bookId,
+          bookTitle,
+          origin: 'composer-selection',
+          manuscript: { revisionLabel: reading.revisionLabel, journalSequence: reading.journalSequence, pending: false },
+          ranges: [composerRangeOf(reading)],
+        }, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
         prepare: (choice: SelectionTaskChoice, anchor: { readonly blockId: string }, chosenApart: ReadonlyArray<string>) =>
           prepareSelectionTask(initialWindow.bookId, choice, anchor, chosenApart, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
       },

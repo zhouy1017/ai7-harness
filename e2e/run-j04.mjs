@@ -59,7 +59,9 @@ const REUSE_PLAN_SCHEMA = 'ai7.baseline-manuscript-analysis.reuse-plan/1';
 // open, `记录反馈` and `取消`; J-11 walks the card, and this Journey never opens it.
 const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'open-revision', 'close-revision', 'cancel-preparation',
   'select-tab', 'go-history', 'go-chapters', 'choose-sync-current', 'choose-reanalyze-range', 'choose-reanalyze-book', 'quick-sync-current', 'quick-reanalyze-range', 'quick-reanalyze-book',
-  'open-review', 'view-plan', 'open-feedback', 'record-feedback', 'cancel-feedback'];
+  'open-review', 'view-plan', 'open-feedback', 'record-feedback', 'cancel-feedback',
+  // Synchronized delta with Issue #922 (slice 7f): the 自定义 tab's 运行, 查看计划 and each answer's quotation link.
+  'custom-run', 'custom-open-plan', 'custom-jump'];
 /** Every button on screen and in the drawer whose words name 授权: AUTH-002 keeps the word off every start (ADR 0077). */
 const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen button, #task-drawer button')).filter((button)=>/授权/u.test(button.textContent??'')).length`;
 /** The words the authorization bar says before every start (AUTH-003 as ADR 0077 revised it). */
@@ -95,8 +97,8 @@ const REVIEW_MEMBERS = ['inspectReviewWorkspace', 'prepareReviewRun', 'authorize
 const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
 /** The 分析 destination's own persistent actions, in the order it builds them (#406, V2-UX-LAYER-005). */
 const ANALYSIS_DESTINATION_ACTIONS = ['打开稿件', '工作概览'];
-/** ②A's seven tabs in the specification's order (editor-surfaces §3). */
-const ANALYSIS_TAB_LABELS = ['梗概', '人物与名称', '事件', '关系', '设定', '各章', '历史与更新'];
+/** ②A's tabs in the specification's order (editor-surfaces §3); 自定义 since Issue #922 (slice 7f; ADR 0090 item 4). */
+const ANALYSIS_TAB_LABELS = ['梗概', '人物与名称', '事件', '关系', '设定', '各章', '自定义', '历史与更新'];
 /** The four sentences' headings in the order V2-UX-ANALYSIS-025 fixes. */
 const ANALYSIS_SENTENCE_HEADINGS = ['覆盖范围', '全书综合', '与当前稿件', '可信程度'];
 const ASSURANCE_STATEMENT = '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。';
@@ -158,6 +160,10 @@ const RETRY_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 const REVIEW_FIXTURE_IDENTITY = 'sample1-review-authored';
 // Issue #901: contract /2 at 标准核查, layered on sample1-factual-authored; provider-free, nothing fetched.
 const FACTUAL_FIXTURE_IDENTITY = 'sample1-factual-verified';
+// Issue #922 (slice 7f): one synthetic 自定义分析维度 on a fresh sample1 Book, layered on sample1-baseline-happy; provider-free.
+const CUSTOM_FIXTURE_IDENTITY = 'sample1-custom-analysis-authored';
+const CUSTOM_DIMENSION_TITLE = '单元开篇';
+const CUSTOM_DIMENSION_TEMPLATE = '{本单元}是从哪个场景或事件开始写的？用一两句话概括开篇写了什么，并引用最能说明这一点的一句原文。';
 const RECORDED_FIXTURE_IDENTITY = 'sample1-recorded-v41-baseline';
 /** The reviewed recorded range recomputation of units 1 and 2 under the current contracts (Issue #826). */
 const RECORDED_RANGE_FIXTURE_IDENTITY = 'sample1-recorded-v41-range';
@@ -592,7 +598,8 @@ async function fill(renderer, selector, value, name) {
 async function waitFor(renderer, expression, name, timeout = 60_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
+    // Await before testing truth: DOM expressions and asynchronous service reads share the same predicate semantics.
+    if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`).catch(() => false)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-04', name);
@@ -682,8 +689,8 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.harnessSessionId === attempt.executionBinding.harnessSessionId &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    // Synchronized delta with Issue #910: selected active set v14; Provider Processing remains v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v14', liveTransmissions: 0 }) &&
+    // Synchronized delta with Issue #920: selected active set v15; Provider Processing remains v1.
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v15', liveTransmissions: 0 }) &&
     revision?.provenance?.taskIntentId === prepared.taskIntent.taskIntentId && revision?.provenance?.attemptId === attempt.attemptId &&
     // Synchronized delta (#274, #275): eight unit turns, the reduction's, and the sample's.
     revision?.usage?.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
@@ -778,8 +785,8 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     revision?.adapterPin?.fixtureIdentity === FIXTURE_IDENTITY && revision?.adapterPin?.fixtureSha256 === fixtureDigest &&
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    // Synchronized delta with Issue #910: selected active set v14; Provider Processing remains v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v14', liveTransmissions: 0 }) &&
+    // Synchronized delta with Issue #920: selected active set v15; Provider Processing remains v1.
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v15', liveTransmissions: 0 }) &&
     revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
     sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
     sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
@@ -1385,7 +1392,7 @@ async function main() {
       const card=document.querySelector('.baseline-analysis-card');
       const tabs=Array.from(card?.querySelectorAll('[role="tablist"] > [role="tab"]')??[]);
       const panels=Array.from(card?.querySelectorAll('[role="tabpanel"]')??[]);
-      if(JSON.stringify(tabs.map((tab)=>tab.textContent))!==${JSON.stringify(JSON.stringify(ANALYSIS_TAB_LABELS))} || panels.length!==7) return false;
+      if(JSON.stringify(tabs.map((tab)=>tab.textContent))!==${JSON.stringify(JSON.stringify(ANALYSIS_TAB_LABELS))} || panels.length!==8) return false;
       if(tabs.filter((tab)=>tab.getAttribute('aria-selected')==='true').length!==1 || tabs[0].getAttribute('aria-selected')!=='true' || card.dataset.analysisTab!=='synopsis') return false;
       if(panels.filter((panel)=>!panel.hidden).length!==1 || panels[0].hidden || tabs.some((tab,index)=>tab.getAttribute('aria-controls')!==panels[index].id || (tab.tabIndex===0)!==(index===0))) return false;
       const synopsis=card.querySelector('[data-analysis-panel="synopsis"]');
@@ -3220,6 +3227,97 @@ async function main() {
     const correctionCardSelector = `.editorial-mark-card[data-mark-card=${JSON.stringify(correctionMarkId)}]`;
     await waitFor(renderer, `document.querySelector('${correctionCardSelector} .editorial-mark-factual-incomplete')?.textContent==='证据核查未完成'`, 'factual-correction-card');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('${correctionCardSelector}'); const lineage=card?.querySelector('.editorial-mark-factual'); return card?.dataset.markKind==='change-suggestion' && lineage?.dataset.markFactualResult===${JSON.stringify(sourced.resultId)} && lineage.dataset.markFactualVersion==='1' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').includes('事实核查 · 更正提案'); })()`, 'factual-correction-mark');
+    cancellation.throwIfRequested();
+
+    // ---- 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4) ----
+    // Synchronized delta with Issue #922: a fresh, unedited sample1 Book on the provider-free `sample1-custom-analysis-authored`
+    // fixture, layered on `sample1-baseline-happy`, running the dimension before any baseline on this Book and reading the one
+    // synthetic dimension 「单元开篇」 the fixture answers. The dimension is written in 知识库 › 工序与规则 and run from ②A through
+    // the ordinary plan and 开始任务; nothing reaches a network.
+    at('custom-dimension-define');
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    modelAdapterIdentity = CUSTOM_FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'custom-launch-ready');
+    const customBook = await importSample1(renderer, cancellation, true);
+    at('custom-dimension-define');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'custom-artifact-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'custom-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'custom-artifact-enabled');
+    await click(renderer, '返回图书列表', 'custom-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'custom-library');
+    await click(renderer, '知识库', 'custom-knowledge-open');
+    await click(renderer, '工序与规则', 'custom-knowledge-rules');
+    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='0' && document.querySelector('.knowledge-custom-dimensions .custom-dimensions-empty')?.textContent==='还没有自定义分析维度。'`, 'custom-knowledge-empty');
+    // AI7's fixed answer schema and Authority Ceiling are stated beside the template the editor writes.
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.knowledge-custom-dimensions .custom-dimension-fixed li')).map((item)=>item.textContent).join('').includes('不打分') && document.querySelector('.knowledge-custom-dimensions')?.textContent.includes('名称只在本机显示，不会发送')`, 'custom-knowledge-fixed');
+    await reviewAction(renderer, '.knowledge-custom-dimensions [data-custom-action="new"]', 'custom-new');
+    await assertRenderer(renderer, `(() => { const form=document.querySelector('.knowledge-custom-dimensions [data-custom-form="new"]'); const title=form?.querySelector('input[name="title"]'); const template=form?.querySelector('textarea[name="questionTemplate"]'); if(!(title instanceof HTMLInputElement)||!(template instanceof HTMLTextAreaElement))return false; title.value=${JSON.stringify(CUSTOM_DIMENSION_TITLE)}; template.value=${JSON.stringify(CUSTOM_DIMENSION_TEMPLATE)}; const save=form.querySelector('[data-custom-action="save"]'); if(!(save instanceof HTMLButtonElement))return false; save.click(); return true; })()`, 'custom-save');
+    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='1' && document.querySelector('.knowledge-custom-dimensions .custom-dimension-version[data-version="1"]')?.dataset.versionState==='pending-validation'`, 'custom-saved');
+    await reviewAction(renderer, '.knowledge-custom-dimensions .custom-dimension-version[data-version="1"] [data-custom-action="enable"]', 'custom-enable');
+    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions .custom-dimension-version[data-version="1"]')?.dataset.versionState==='enabled'`, 'custom-enabled');
+    const defined = await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: false })`);
+    const customDimension = defined?.dimensions?.[0];
+    requireJourney(defined?.dimensions?.length === 1 && customDimension.title === CUSTOM_DIMENSION_TITLE && customDimension.kind === `custom-analysis/${customDimension.dimensionId}` &&
+      customDimension.enabledVersion?.version === 1 && customDimension.versions[0].questionTemplate === CUSTOM_DIMENSION_TEMPLATE &&
+      customDimension.versions[0].supersedes === null && DIGEST_PATTERN.test(customDimension.versions[0].documentDigest), 'custom-defined', defined);
+    cancellation.throwIfRequested();
+
+    at('custom-dimension-run');
+    // 自定义 is its own kind: the tab and its Run require no baseline Result Set Revision on this Book.
+    await click(renderer, '返回', 'custom-knowledge-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'custom-back-library');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(customBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'custom-open-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(customBook.bookId)}]')`, 'custom-manuscript-ready');
+    await openAnalysisDestination(renderer, 'custom-analysis');
+    await reviewAction(renderer, '.baseline-analysis-card [role="tab"][data-analysis-tab="custom"]', 'custom-tab-open');
+    const dimensionCard = `.baseline-analysis-card [data-analysis-panel="custom"] .custom-dimension-card[data-dimension-id=${JSON.stringify(customDimension.dimensionId)}]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${dimensionCard} [data-custom-empty="not-run"]`)})?.textContent==='尚未运行' && document.querySelector(${JSON.stringify(`${dimensionCard} [data-analysis-action="custom-run"]`)})?.disabled===false`, 'custom-tab-not-run');
+    await reviewAction(renderer, `${dimensionCard} [data-analysis-action="custom-run"]`, 'custom-run');
+    await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.taskState?.state === 'prepared')`, 'custom-prepared', 120_000);
+    const customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions[0].book.taskState;
+    // The plan opens in the Task Drawer as every ②A plan does: the dimension's exact version as its procedure, and nothing sent here.
+    const customPlan = await drawerShowing(renderer, customTask.taskIntentId, 'ready', 'custom-drawer');
+    requireJourney(customPlan?.kind === 'baseline-analysis' && customPlan.chips?.procedure === `工序「自定义分析 · ${CUSTOM_DIMENSION_TITLE} · 第 1 版」`, 'custom-plan', customPlan);
+    const customPlanRecord = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(customTask.taskIntentId)} })`);
+    requireJourney(customPlanRecord?.scope?.send === `不发送任何内容；实时运行时会一并发送该维度第 1 版的提问模板「${CUSTOM_DIMENSION_TEMPLATE}」` &&
+      customPlanRecord.technical?.some((row) => row.key === 'custom-analysis-dimension' && row.value.startsWith(customDimension.versions[0].versionId)), 'custom-plan-record', customPlanRecord?.scope);
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'custom-bar-ready');
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'custom-start');
+    await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.latest !== null && value.dimensions[0]?.book?.taskState?.state === 'settled')`, 'custom-settled', 180_000);
+    cancellation.throwIfRequested();
+
+    at('custom-dimension-tab');
+    // The tab refreshes itself after the drawer starts the Run, without leaving and returning: coverage, freshness, per-unit answers, each located
+    // quotation a link back to the manuscript, the one the fixture meant not to be found said so, and no 分析反馈 offered.
+    await waitFor(renderer, `document.querySelectorAll(${JSON.stringify(`${dimensionCard} .custom-row`)}).length===9`, 'custom-tab-rows');
+    const builtInAfterCustom = await renderer.evaluate('window.ai7.inspectBaselineAnalysis().then((value) => value.resultSetRevision === null)');
+    requireJourney(builtInAfterCustom === true, 'custom-built-in-unchanged');
+    const customTab = await renderer.evaluate(`(() => {
+      const card=document.querySelector(${JSON.stringify(dimensionCard)});
+      const section=card?.querySelector('.custom-revision');
+      return {
+        coverage:section?.dataset.coverage, freshness:section?.dataset.freshness,
+        anchors:Array.from(card?.querySelectorAll('.custom-row') ?? [], (row)=>[row.dataset.unitOrdinal, row.dataset.anchorState]),
+        links:card?.querySelectorAll('.custom-row [data-analysis-action="custom-jump"]').length ?? 0,
+        counts:section?.querySelector('.custom-counts')?.textContent ?? null,
+        feedback:section?.querySelector('.custom-feedback-note')?.textContent ?? null,
+        judged:card?.querySelectorAll('[data-analysis-action="open-feedback"]').length ?? 0,
+        state:card?.querySelector('.custom-task-state')?.dataset.taskState ?? null,
+      };
+    })()`);
+    requireJourney(customTab?.coverage === 'complete' && customTab.freshness === 'current' && customTab.links === 8 &&
+      JSON.stringify(customTab.anchors) === JSON.stringify([['1', 'located'], ['2', 'located'], ['3', 'located'], ['3', 'not-found'], ['4', 'located'], ['5', 'located'], ['6', 'located'], ['7', 'located'], ['8', 'located']]) &&
+      customTab.counts === '8 个单元作答 · 9 条回答 · 8 条已定位原文 · 1 条未能定位' && customTab.feedback === '自定义维度的回答暂不提供分析反馈。' &&
+      customTab.judged === 0 && customTab.state === 'settled', 'custom-tab-result', customTab);
+    // The hidden history panel still offers the Book's first baseline; constrain this assertion to the custom result surface.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card [data-analysis-panel="custom"]'); return card!==null && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'custom-tab-actions');
+    // A quotation link opens the manuscript at its paragraph.
+    const jumpBlock = await renderer.evaluate(`document.querySelector(${JSON.stringify(`${dimensionCard} .custom-row [data-analysis-action="custom-jump"]`)})?.dataset.blockId ?? null`);
+    await reviewAction(renderer, `${dimensionCard} .custom-row [data-analysis-action="custom-jump"]`, 'custom-jump');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(customBook.bookId)}] [data-block-id=${JSON.stringify(jumpBlock)}]')`, 'custom-jump-manuscript');
+    requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'custom-zero-network');
     cancellation.throwIfRequested();
 
     // S41-f1 (#387): a fresh, unedited sample1 Book keeps the real recorded result independent of

@@ -7,7 +7,7 @@ import type { OutboundDataCategoryId } from '../../shared/protocol.js';
 import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES } from '../../shared/protocol.js';
 import { graphemeLength, writingMaterialDigest } from '../writing-tasks.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex, isRecord } from '../analysis/canonical.js';
-import { assistantToolCalls, messageText, toolResultOf, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
+import { assistantToolCalls, messageText, toolResultOf, seriesScopeRefusal, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
 import {
   PLATFORM_TOOL_NAMES,
   ruleNamedToolSchemas,
@@ -63,10 +63,10 @@ export type RemoteExecutionRoute = ConfiguredRouteId;
 export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
- * The trusted scope's Provider Processing pin: selected v18 admits baseline analysis, enrolled background analysis within a
+ * The trusted scope's Provider Processing pin: selected v22 admits baseline analysis, enrolled background analysis within a
  * mandatory ceiling, editorial dialogue, review (with cross-deliverable consistency), writing, evaluation, and 润色 and
  * conflict-regeneration Suggestions on V4.1, with the platform tools on review, writing and evaluation and the local
- * retrieval tool on every rule but background analysis and material translation. Historical v5, v9, v10, v11, v12, v14 and v16 and the superseded web
+ * retrieval tool on every rule but background analysis, material translation and custom analysis. Historical v5, v9, v10, v11, v12, v14 and v16 and the superseded web
  * reservation v8 are readable identities, not launch selections.
  */
 export type EgressPolicyPin =
@@ -78,7 +78,7 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20';
+      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22';
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     }
@@ -136,6 +136,7 @@ export interface SearchBackendBinding {
 }
 
 export interface EgressBindingFacts {
+  readonly seriesScopeGuard?: () => string | null;
   readonly searchBackend?: SearchBackendBinding;
   readonly bindingDigest: string;
   readonly route: ExecutionRoute;
@@ -209,6 +210,7 @@ export interface EgressAttemptScope {
 }
 
 export type EgressRefusalReason =
+  | 'series-retrieval-scope-changed'
   | 'binding-stale'
   | 'route-mismatch'
   | 'model-mismatch'
@@ -481,6 +483,8 @@ export function evaluateEgress(
   binding: EgressBindingFacts,
   scope: EgressAttemptScope,
 ): EgressDecision {
+  const excluded = seriesScopeRefusal(binding.seriesScopeGuard);
+  if (excluded !== null) return refuse('series-retrieval-scope-changed', `书系检索范围已变化 · 需要重新确认计划：${excluded}；未发送任何内容。`);
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {
     return refuse('binding-stale', '执行绑定已不是当前绑定；未发送任何内容。');
   }

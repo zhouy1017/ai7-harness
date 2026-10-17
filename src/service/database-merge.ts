@@ -223,6 +223,10 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   dialogue_harness_spans: 'owned',
   dialogue_attempt_outcomes: 'owned',
   dialogue_conversions: 'owned',
+  // Its Task Intent Drafts (Issue #423, slice 7a): what the editor asked for, each version, and the Task each draft became.
+  task_intent_drafts: 'owned',
+  task_intent_draft_versions: 'owned',
+  task_intent_draft_promotions: 'owned',
   // The Captured Procedure version each of its Review Runs pinned (Issue #65, S30): named by value, so the Run keeps naming
   // what it ran in a house that never had that procedure.
   review_run_procedure_pins: 'owned',
@@ -309,11 +313,23 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   review_guideline_versions: 'house',
   series: 'house',
   // The house's Captured Procedures and Developer Capability Proposals (Issue #65, S30; ADR 0087): no Book material in them.
+  imported_skills: 'house',
+  imported_skill_snapshots: 'house',
+  imported_skill_revisions: 'house',
+  imported_skill_states: 'house',
+  imported_skill_update_rules: 'house',
+  imported_skill_update_candidates: 'house',
+  imported_skill_current_selections: 'house',
   captured_procedures: 'house',
   captured_procedure_versions: 'house',
   captured_procedure_states: 'house',
   developer_capability_proposals: 'house',
   developer_capability_proposal_exports: 'house',
+  // The house's 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4): the editor's documents, no Book material in them. A merged
+  // Book's Tasks keep naming the version they ran under through their frozen contracts.
+  custom_analysis_dimensions: 'house',
+  custom_analysis_dimension_versions: 'house',
+  custom_analysis_dimension_states: 'house',
   series_knowledge_items: 'house',
   series_knowledge_promotions: 'house',
   series_knowledge_conflicts: 'house',

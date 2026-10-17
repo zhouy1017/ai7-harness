@@ -666,6 +666,15 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // 资料索引 of HTML, EPUB, ODT and RTF (Issue #428), and a PDF's text layer with page anchors (Issue #892).
     'knowledge-library-index-formats',
     'knowledge-earlier-exemplar-import',
+    // 外部 Skill 的更新 (Issue #89, S33): check from a file, an inert candidate, explicit adoption, the Artifact Update Rule, rollback.
+    'skill-update-seed',
+    'skill-update-check-from-file',
+    'skill-update-candidate-inert',
+    'skill-update-adopt',
+    'skill-update-new-revision-not-enabled',
+    'skill-update-rule-create',
+    'skill-update-rule-clean-auto-adopt',
+    'skill-update-rollback-current-selection',
     'zero-activity',
   ]),
   'J-03': Object.freeze([
@@ -831,6 +840,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'factual-evidence-workspace',
     'factual-review-decision',
     'factual-correction-proposal',
+    // Issue #922 (slice 7f): a 自定义分析维度 written in 知识库 › 工序与规则, run from ②A's 自定义 tab, its answers read there.
+    'custom-dimension-define',
+    'custom-dimension-run',
+    'custom-dimension-tab',
   ]),
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
@@ -1364,6 +1377,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'selection-task-review-run',
     'selection-task-from-mark',
     'selection-task-reanalyze',
+    // The Context-bound Task Composer and Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b): a selection's draft with
+    // 再选一段加入 and the IME guard, a whole-Book draft promoted into a prepared Task, and a dialogue answer made a draft.
+    'composer-selection-draft',
+    'draft-promote-prepared-task',
+    'dialogue-promote-draft',
     // 跳到所选文字 on a paragraph the manuscript no longer holds (Issue #423 review, P2-1): the Book reimported without it.
     'selection-task-gone',
     'zero-loopback-requests',
@@ -1410,6 +1428,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-credential-removed',
     'consistency-offered',
     'consistency-review-run',
+    'series-scope-review-run',
     'consistency-marks-on-manuscript',
     'consistency-member-reviewed',
     // Issue #64 (S29b): 书系检索排除 — a held 书系一致性 Run, the four-part impact preview, the exclusion in force, the guard
@@ -1419,6 +1438,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'exclusion-preview',
     'exclusion-recorded',
     'exclusion-held-run-stopped',
+    'series-exclusion-payload-refused',
     'exclusion-plan-leaves-out',
     'exclusion-marker',
     'j14-exclusions-keyboard',
@@ -1444,12 +1464,15 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Issue #66 (S31b): a 书系一致性 procedure whose Series step the editor chooses apart, and how it fits a Book in no Series.
     'procedure-series-capture',
     'procedure-series-chosen-apart',
+    'procedure-recommendation',
+    'procedure-series-step-optin',
     // Issue #423 (S77 deferred items a and d): the house's procedure on a selection from the menu, and the card's 跳到所选文字.
     'procedure-selection-run',
     'procedure-series-mismatch',
     'capture-proposal-file',
     'capture-restart',
     'j14-capture-keyboard-reflow-forced-colors',
+    'skill-import-validate-enable',
     'zero-activity',
   ]),
 });

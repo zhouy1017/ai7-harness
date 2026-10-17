@@ -151,6 +151,7 @@ export function taskPanelCardView(entry: BookTaskItemProjection): TaskPanelCardV
   if (entry.selection !== undefined) actions = [...actions, action('jump')];
   return {
     kindLabel: item.object.kind === 'review' ? TASK_PANEL_KIND_LABELS.review
+      : item.object.kind === 'draft' ? TASK_PANEL_DRAFT_KIND
       : item.object.kind === 'dialogue' ? TASK_PANEL_KIND_LABELS.dialogue
         : item.object.kind === 'task' ? (item.object.taskKind === 'writing' ? TASK_PANEL_KIND_LABELS.writing : TASK_PANEL_KIND_LABELS.evaluation)
           : TASK_PANEL_KIND_LABELS.analysis,
@@ -267,3 +268,119 @@ export const RETURN_CHIP_TITLE = '回到跳转前的位置';
 export function returnChipArrived(place: string): string {
   return `已回到${place}。`;
 }
+
+// ---- The Context-bound Task Composer and Task Intent Drafts (Issue #423, wave 10 slice 7a; TASK-001 to 009, 042, 043, 046) --
+
+/** A draft's card in 等你处理 (TASK-004): no Task yet, nothing started by itself. */
+export const TASK_PANEL_DRAFT_KIND = '任务草稿 · 尚未成为任务';
+/** 发起全书任务's own way to the composer (TASK-001): the editor says what AI7 should do; the procedures below stay for 快速开始. */
+export const TASK_PANEL_COMPOSE_OPEN = '发起全书任务…';
+export const TASK_PANEL_COMPOSE_OPEN_NOTE = '用自己的话说明要做的编辑工作，先存为任务草稿；下面的全书工序可以直接准备或快速开始。';
+
+export const TASK_COMPOSER_TITLES = {
+  selection: '就这段发起任务',
+  book: '发起全书任务',
+  draft: '任务意图草稿',
+} as const;
+/** The composer's one field, in editorial words (TASK-001): never a chat box. */
+export const TASK_COMPOSER_GOAL_LABEL = '描述希望 AI7 完成的编辑工作';
+export const TASK_COMPOSER_GOAL_PLACEHOLDER = '例如：统一全书人名的译法，列出前后不一致的地方';
+export function taskComposerGoalCount(length: number, max: number): string {
+  return `${length} / ${max} 字`;
+}
+export const TASK_COMPOSER_OUTCOME_LEGEND = '希望得到的结果';
+export const TASK_COMPOSER_OUTCOME_LABELS = {
+  analysis: '稿件分析',
+  review: '审阅（在稿件上标出发现）',
+  factual: '事实核查',
+  writing: '写作任务（起草一份文档）',
+} as const;
+export const TASK_COMPOSER_TARGET_LEGEND = '要处理什么';
+export const TASK_COMPOSER_TARGET_LABELS = {
+  ranges: '只处理所选文字',
+  book: '全书稿件',
+} as const;
+/** A whole-Book target names the manuscript, never its access (TASK-007): what is read is set by the plan. */
+export const TASK_COMPOSER_BOOK_TARGET_NOTE = '全书稿件：准备计划时，计划会写明读取哪些范围、发送什么；在那之前不读取、不发送。';
+export const TASK_COMPOSER_CONTEXT_HEADING = '这项任务带着';
+export function taskComposerBookLine(bookTitle: string): string {
+  return `《${bookTitle}》 · 稿件`;
+}
+/** The branch and revision the composer was opened on (TASK-002); `待保存修订版` while edits are newer than it. */
+export function taskComposerRevisionLine(revisionLabel: string, journalSequence: number, pending: boolean): string {
+  return `修订版 ${revisionLabel} · 修订日志序号 ${journalSequence}${pending ? ' · 待保存修订版' : ''}`;
+}
+export const TASK_COMPOSER_NO_RANGES = '没有带所选文字。';
+/** Words pinned while the journal holds edits no revision holds yet (TASK-002, 031). */
+export const TASK_COMPOSER_PENDING_LABEL = '待保存修订版';
+export function taskComposerRangeLine(position: number | null, graphemes: number, revisionLabel: string): string {
+  return `${position === null ? '段落已不在当前稿件中' : `第 ${position} 个内容块`} · ${graphemes} 字 · 修订版 ${revisionLabel}`;
+}
+export const TASK_COMPOSER_RANGE_REMOVE = '移除';
+/** 再选一段加入 lives here, never in the selection menu (TASK-046). */
+export const TASK_COMPOSER_ADD_RANGE = '再选一段加入';
+export const TASK_COMPOSER_ADD_RANGE_NONE = '先在稿件里选中要加入的文字，再按「再选一段加入」。';
+export const TASK_COMPOSER_ADD_RANGE_SAME = '这段文字已经在草稿里。';
+export function taskComposerAddRangeLimit(max: number): string {
+  return `一份草稿最多带 ${max} 段所选文字。`;
+}
+/** The house's existing 工序 on the one selected paragraph: the composer that prepares one at once. */
+export const TASK_COMPOSER_PROCEDURES = '按现成工序准备…';
+export const TASK_COMPOSER_ACTIONS = {
+  prepare: '准备任务',
+  save: '保存修改',
+  promote: '准备计划',
+  close: '收起',
+  cancel: '取消',
+  copy: '另起一份草稿',
+  clearPin: '移除',
+  resume: '返回继续',
+} as const;
+/** What 准备任务 does (TASK-004): a durable draft, and nothing else. */
+export const TASK_COMPOSER_NOTE = '准备任务只把这些存为任务草稿：不调用模型、不发送任何内容，也不会开始任务；准备计划后它才成为任务，由你开始。';
+export function taskComposerDraftHeading(ordinal: number): string {
+  return `任务意图草稿 · 第 ${ordinal} 版`;
+}
+export const TASK_COMPOSER_UNSAVED = '有未保存的修改。';
+export const TASK_COMPOSER_PROMOTE_SAVE_FIRST = '先保存修改，再准备计划。';
+export const TASK_COMPOSER_RESOLUTION_HEADING = '准备成什么任务';
+export function taskComposerResolutionReady(label: string): string {
+  return `准备计划会按「${label}」准备一项任务；由你在计划里开始。`;
+}
+export const TASK_COMPOSER_RESOLUTION_CHOOSE = '有几种任务都合适，选一种：';
+export const TASK_COMPOSER_WRITING_AUDIENCE = '受众';
+export const TASK_COMPOSER_WRITING_CHANNEL = '渠道';
+export const TASK_COMPOSER_PICK_CHOICE = '请先选一种任务。';
+export const TASK_COMPOSER_WRITING_FIELDS = '请写下这份文档的受众和渠道。';
+/** A promoted draft is final: its Task is a normal prepared Task (AUTH-002). */
+export const TASK_COMPOSER_PROMOTED = '这份草稿已准备成任务：在任务计划里查看并开始。要改要求，请另起一份草稿。';
+export const TASK_COMPOSER_OPEN_PLAN = '查看计划';
+export const TASK_COMPOSER_COPY_RANGES_DROPPED = '另起的草稿不带原来的所选文字；需要时请在稿件里重新选择后「再选一段加入」。';
+/** A draft made from a dialogue answer (DIALOG-016): generated content, with where it came from. */
+export function taskComposerAnswerHeading(ordinal: number): string {
+  return `来自对话回答 · 第 ${ordinal} 次`;
+}
+export const TASK_COMPOSER_ANSWER_NOTE = '回答是生成的内容，只供参考，不是事实结论；它随草稿保存，不会发送。';
+export const TASK_COMPOSER_ANSWER_TRUNCATED = '回答较长，这里只保留了前面完整的句子。';
+export function taskComposerPinLine(title: string | null): string {
+  return title === null ? '已选工序' : `已选工序：《${title}》`;
+}
+/** Switching Books (TASK-006): the unfinished draft stays with its Book, collapsed, with the way back. */
+export function taskComposerParkedLine(bookTitle: string): string {
+  return `《${bookTitle}》有一份没有完成的任务草稿，留在那本书里。`;
+}
+export const TASK_COMPOSER_STATUS = {
+  saving: '正在保存任务草稿…',
+  saved: '已存为任务草稿：准备计划后它才成为任务。',
+  updated: '已保存修改，成为草稿的新版本。',
+  saveFailed: '无法保存任务草稿。',
+  reading: '正在读取任务草稿…',
+  unreadable: '无法读取这份任务草稿。',
+  preparing: '正在为任务保存修订版并准备计划…',
+  prepared: '任务计划已准备；可在任务计划里开始任务。',
+  promoteFailed: '无法准备计划；草稿保持不变。',
+  cancelled: '准备计划已取消；草稿保持不变。',
+  goalEmpty: '请描述希望 AI7 完成的编辑工作。',
+  composing: '输入法正在输入，完成后再准备任务。',
+} as const;
+

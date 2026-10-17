@@ -193,6 +193,9 @@ describe('合并图书 over two real stores', () => {
     try {
       book = await richBook(source);
       emptyId = emptyBook(source, '空白之书', 'AI7-0001');
+      // Issue #922: a Custom Analysis Dimension belongs to the house, so a Book merge must leave its document history behind.
+      const dimension = source.saveCustomAnalysisDimension({ dimensionId: null, title: '合并维度', questionTemplate: '本单元从哪里开始？' }).dimensions[0]!;
+      source.enableCustomAnalysisDimension(dimension.versions[0]!.versionId);
       // The rich Book is in a Series here; the Series stays behind.
       const series = source.createSeries({ title: '合并书系', note: '' });
       const membership = source.previewSeriesMembershipChange({ seriesId: series.seriesId, bookId: book.bookId, kind: 'add' });
@@ -240,6 +243,7 @@ describe('合并图书 over two real stores', () => {
       expect(found(target, book, '合并前')).toBe(foundBefore);
       expect(foundBefore).toBeGreaterThan(0);
       expect(target.inspectSeriesList().series).toEqual([]);
+      expect(target.inspectCustomAnalysisDimensions(null).dimensions).toEqual([]);
       expect(target.inspectBookSeries(book.bookId).memberships).toEqual([]);
       // A 内部编号 already another Book's here is not taken.
       expect(target.listBooks(null).items.filter((item) => item.title === '空白之书').map((item) => item.internalNumber)).toEqual([null]);
@@ -267,6 +271,7 @@ describe('合并图书 over two real stores', () => {
     source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       expect(readings(source, book)).toEqual(before);
+      expect(source.inspectCustomAnalysisDimensions(null).dimensions[0]!.versions[0]!.state).toBe('enabled');
     } finally {
       source.close();
     }

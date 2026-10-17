@@ -8,7 +8,7 @@ import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
 import { LEARNING_ELIGIBILITY_POLICY_BASIS, LEARNING_ELIGIBILITY_SCHEMA_SQL } from '../../src/service/learning-eligibility.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { dropHouseReviewPreferenceRelations } from '../support/pre74-schema.js';
+import { dropHouseReviewPreferenceRelations, restoreTaskIntentDraftPredecessor } from '../support/pre74-schema.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 
 let roots: ServiceTestRoots | undefined;
@@ -130,6 +130,8 @@ describe('house review preference ledger', () => {
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     let db = new DatabaseSync(path);
     const before = db.prepare('SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY name').all();
+    // Synchronized delta with Issue #423 (slice 7a): a predecessor of revision 80 has no drafts and the narrower Task Intents.
+    restoreTaskIntentDraftPredecessor(db);
     dropHouseReviewPreferenceRelations(db); db.exec('PRAGMA user_version = 78'); db.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(store.inspectHouseReviewPreference().current).toBeNull();

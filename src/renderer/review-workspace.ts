@@ -65,6 +65,8 @@ import {
   procedureSheetCloseStatus,
   settleProcedureChoice,
   procedurePreparationPin,
+  ProcedureRecommendationSelection,
+  mountProcedureRecommendation,
   type ProcedureChoiceOutcome,
 } from './procedure-choice.js';
 import {
@@ -229,7 +231,7 @@ export interface ReviewWorkspaceSurface {
   destroy(): void;
 }
 
-type ReviewApi = Pick<
+type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries'>> & Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' |
   'inspectTaskPlan' | 'quickStartReviewRun' | 'searchReferableMaterials' |
@@ -237,7 +239,7 @@ type ReviewApi = Pick<
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
-  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' |
+  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' | 'recommendProcedures' |
   // 事实核查's retained sources on its finding cards (Issue #425, S70).
   'inspectProposalWorkspace' | 'inspectResearchEvidence' |
   // The Fact-check Lens and the Evidence Workspace (Issue #901).
@@ -315,6 +317,9 @@ interface BatchStrip {
 type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
 
 interface SheetState {
+  seriesId: string | null;
+  readonly seriesChoices: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>;
+  readonly recommendation: ProcedureRecommendationSelection;
   readonly materialIds: Set<string>;
   readonly categories: Set<string>;
   /**
@@ -1924,9 +1929,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     } catch {
       procedures = [];
     }
+    let seriesChoices: SheetState['seriesChoices'] = [];
+    try { seriesChoices = (await api.inspectBookSeries?.({ bookId: options.bookId, membershipsAfter: null }))?.memberships ?? []; } catch { /* no selection is offered without a reading */ }
     sheetOpening = false;
     if (destroyed || projection === null || sheet.open) return;
     sheetState = {
+      seriesId: null,
+      seriesChoices,
+      recommendation: new ProcedureRecommendationSelection(),
       categories: new Set(prefill?.categories ?? []),
       materialIds: new Set(),
       selection: prefill?.selection ?? null,
@@ -1979,6 +1989,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // The choice settles into the sheet in one composed step (Issue #705 item 3): a reason is announced once, on the sheet's alert
     // line, and the status bar never repeats it (Issue #691).
     const settled = settleProcedureChoice(state, ticket, outcome, versionId !== null);
+    if (state.procedure !== null && state.procedure.resolved?.runSourceScope !== 'series') state.seriesId = null;
     if (settled.status !== null) options.setStatus(settled.status);
     renderSheet(projection, state);
     // Back on the selector the editor used, while the sheet still shows it.
@@ -2032,6 +2043,23 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       for (const line of sheetProcedureLines(state.procedure)) procedureField.append(el('p', 'field-note review-sheet-procedure-line', line));
     }
     form.append(procedureField);
+    const recommendationSlot = el('section', 'review-procedure-recommendation');
+    recommendationSlot.dataset['procedureRecommendation'] = '';
+    form.append(recommendationSlot);
+    const recommendations = mountProcedureRecommendation({
+      root: recommendationSlot, api, state: state.recommendation,
+      input: () => ({ goal: '审阅当前稿件', taskKind: 'review-run', scope: state.scope === 'selection' ? 'selection' : state.scope === 'chapters' ? 'chapters' : 'whole', categoryIds: [...state.categories] }),
+      choose: async (candidate) => {
+        await chooseProcedure(state, candidate.procedureId, candidate.versionId);
+        if (state.procedure?.resolved?.versionId !== candidate.versionId) throw new Error('PROCEDURE_CHOICE_UNAVAILABLE');
+        state.recommendation.adopt(candidate);
+        if (projection !== null && sheetState === state) renderSheet(projection, state);
+      },
+      edit: () => sheet.querySelector<HTMLElement>('[data-review-field="scope"], input[name="review-category"]')?.focus(),
+      browse: () => procedureSelect.focus(),
+    });
+    form.addEventListener('change', () => recommendations.refreshIntent());
+    if (state.recommendation.projection === null) void recommendations.load();
 
     const categories = el('fieldset', 'review-category-options');
     categories.append(el('legend', undefined, REVIEW_CATEGORY_LEGEND));
@@ -2129,6 +2157,18 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     scopes.append(range);
 
     const { field: materialField, inputs: materialInputs, items: materialItems } = reviewMaterialsField(workspace.materials, state, updateSheet);
+    if (state.seriesChoices.length > 0 && (state.procedure === null || state.procedure.resolved?.runSourceScope === 'series')) {
+      const row = el('label', 'review-field');
+      row.append(el('span', undefined, '参考什么'));
+      const select = el('select');
+      select.dataset['reviewField'] = 'series-scope';
+      select.append(new Option('仅本书，不参考书系知识', ''));
+      for (const series of state.seriesChoices) select.append(new Option(`允许参考 · 书系《${series.title}》的知识条目`, series.seriesId));
+      select.value = state.seriesId ?? '';
+      select.addEventListener('change', () => { state.seriesId = select.value || null; state.problem = null; updateSheet(); });
+      row.append(select, el('small', 'field-note', '仅供任务明确选用；只有当前策略开放书系知识时才能开始。'));
+      materialField.append(row);
+    }
     materialField.append(similarMaterialsField(api, workspace.bookId, materialItems, state.materialIds, (materialId) => {
       state.materialIds.add(materialId); state.problem = null; updateSheet();
     }));
@@ -2274,6 +2314,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     options.setStatus(REVIEW_STATUS_LINES.preparing, 'busy');
     try {
       const initial = await api.prepareReviewRun({
+        ...(state.seriesId === null ? {} : { seriesId: state.seriesId }),
         categoryIds,
         scope,
         ...(state.materialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(projection.materials?.items ?? [], state.materialIds) }),

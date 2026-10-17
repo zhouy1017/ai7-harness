@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 146 as const;
+export const SERVICE_PROTOCOL_VERSION = 151 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -109,6 +109,19 @@ export const IPC_CHANNELS = {
   admitReadersReportExemplar: 'ai7:j07:admit-readers-report-exemplar',
   inspectKnowledgeProcedures: 'ai7:j15:inspect-knowledge-procedures',
   inspectCapturedProcedures: 'ai7:j15:inspect-captured-procedures',
+  importSkillPackage: 'ai7:kb:import-skill-package',
+  validateImportedSkill: 'ai7:kb:validate-imported-skill',
+  installImportedSkill: 'ai7:kb:install-imported-skill',
+  enableImportedSkill: 'ai7:kb:enable-imported-skill',
+  inspectImportedSkills: 'ai7:kb:inspect-imported-skills',
+  checkImportedSkillUpdate: 'ai7:kb:check-imported-skill-update',
+  inspectImportedSkillUpdate: 'ai7:kb:inspect-imported-skill-update',
+  adoptImportedSkillUpdate: 'ai7:kb:adopt-imported-skill-update',
+  dismissImportedSkillUpdate: 'ai7:kb:dismiss-imported-skill-update',
+  createImportedSkillUpdateRule: 'ai7:kb:create-imported-skill-update-rule',
+  revokeImportedSkillUpdateRule: 'ai7:kb:revoke-imported-skill-update-rule',
+  rollbackImportedSkill: 'ai7:kb:rollback-imported-skill',
+  recommendProcedures: 'ai7:task:recommend-procedures',
   inspectCapturedProcedure: 'ai7:j15:inspect-captured-procedure',
   inspectDeveloperProposal: 'ai7:j15:inspect-developer-proposal',
   inspectProcedureCapture: 'ai7:j15:inspect-procedure-capture',
@@ -119,6 +132,12 @@ export const IPC_CHANNELS = {
   stopCapturedProcedure: 'ai7:j15:stop-captured-procedure',
   inspectCapturedProcedureRun: 'ai7:j15:inspect-captured-procedure-run',
   inspectCapturedProcedureApplicability: 'ai7:j15:inspect-captured-procedure-applicability',
+  // 自定义分析维度 (Issue #922, slice 7f): the house's dimensions in 知识库 › 工序与规则, and ②A's 自定义 tab over one Book.
+  inspectCustomAnalysisDimensions: 'ai7:kb:inspect-custom-analysis-dimensions',
+  saveCustomAnalysisDimension: 'ai7:kb:save-custom-analysis-dimension',
+  enableCustomAnalysisDimension: 'ai7:kb:enable-custom-analysis-dimension',
+  stopCustomAnalysisDimension: 'ai7:kb:stop-custom-analysis-dimension',
+  prepareCustomAnalysis: 'ai7:j04:prepare-custom-analysis',
   saveDeveloperProposal: 'ai7:j15:save-developer-proposal',
   saveDeveloperProposalFile: 'ai7:j15:save-developer-proposal-file',
   inspectLibraryMaterials: 'ai7:j15:inspect-library-materials',
@@ -294,6 +313,11 @@ export const IPC_CHANNELS = {
   continueDialogueAnswer: 'ai7:j16:continue-dialogue-answer',
   regenerateDialogueAnswer: 'ai7:j16:regenerate-dialogue-answer',
   convertDialogueToChangeSuggestion: 'ai7:j16:convert-dialogue-to-change-suggestion',
+  // Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b).
+  inspectTaskIntentDrafts: 'ai7:j16:inspect-task-intent-drafts',
+  saveTaskIntentDraft: 'ai7:j16:save-task-intent-draft',
+  promoteTaskIntentDraft: 'ai7:j16:promote-task-intent-draft',
+  promoteAnswerToTaskIntentDraft: 'ai7:j16:promote-answer-to-task-intent-draft',
   inspectFastInteractionRoutes: 'ai7:j05:inspect-fast-interaction-routes',
   polishSelection: 'ai7:j05:polish-selection',
   inspectFastInteractionRequest: 'ai7:j05:inspect-fast-interaction-request',
@@ -2098,18 +2122,19 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ordinary-production';
 /**
- * Historical v5, v9, v10, v11, v12, v14, v16, v18 and the superseded web reservation v8 remain readable identities; selected v20 admits
+ * Historical v5, v9, v10, v11, v12, v14, v16, v18, v20 and the superseded web reservation v8 remain readable identities; selected v22 admits
  * baseline analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable
  * consistency and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and
  * 润色 and conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules, and AI7's platform
  * tools (websearch through the user-selected backend, webfetch) on review, writing and evaluation, and AI7's local targeted-retrieval
- * tool on every rule but enrolled background analysis and material translation. A type member does not select or activate a policy.
+ * tool on every rule but enrolled background analysis, material translation and custom analysis; v22 adds the custom analysis rule (the family
+ * `custom-analysis/*` over an editor-authored question template) and Series Knowledge on the review rule. A type member does not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21';
-/** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, and selected v14. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23';
+/** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13 and v14, and selected v15. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
@@ -2322,6 +2347,8 @@ export type OutboundDataCategoryId =
   | 'frozen-material-reference-excerpt'
   | 'editorial-deliverable-excerpt'
   | 'house-review-preference-excerpt'
+  | 'editor-authored-question-template'
+  | 'series-knowledge-excerpt'
   | 'unpublished-metadata'
   | 'unpublished-excerpts'
   | 'unpublished-full-content'
@@ -2334,6 +2361,8 @@ export type OutboundDataCategoryId =
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
 export interface AdmittedProviderRule {
+  /** `true` on the v22/v23 review rule alone (`source.seriesKnowledgeAllowed`); absent on every other rule and policy, which refuses Series knowledge. */
+  readonly seriesKnowledgeAllowed?: boolean;
   readonly ruleId: string;
   readonly taskKinds: readonly string[];
   readonly modelRole: string;
@@ -2689,7 +2718,8 @@ export interface TaskAuthorizationProjection {
     bookId: string;
     manuscriptId: string;
     taskInputRevision: { revisionId: string; revisionDigest: string };
-    readableScopeKinds: readonly ['current-book-primary-manuscript-revision'];
+    readableScopeKinds: ReadonlyArray<'current-book-primary-manuscript-revision' | 'series'>;
+    seriesScopes?: ReadonlyArray<FrozenSeriesScope>;
     sourceVersionEvidence: { sourceVersionId: string; readable: false };
   };
   artifactPin: null | {
@@ -3253,8 +3283,12 @@ export const EVALUATION_REWRITE_ASSURANCE_STATEMENT =
 /** 写作任务 (Issue #432, S84a): a document draft the editor edits, with an exemplar only referenced (V2-UX-DELIV-007, KB-004). */
 export const WRITING_ASSURANCE_STATEMENT =
   '写作草稿是模型依据本书的稿件与所列参考材料写成的文档草稿，由编辑在稿件编辑面上修改；范例只作参照，不照抄；草稿不会交付或发送。' as const;
+/** 自定义分析维度 (Issue #922, slice 7f): per-unit answers to the editor's own question, located and never concluded across units. */
+export const CUSTOM_ANALYSIS_ASSURANCE_STATEMENT =
+  '仅为模型就编辑自拟的提问逐单元给出的回答与其精确引文位置；不跨单元归纳，不打分，不构成事实判定、编辑评审或稿件变更。' as const;
 export type AnalysisAssuranceStatement =
   | typeof WRITING_ASSURANCE_STATEMENT
+  | typeof CUSTOM_ANALYSIS_ASSURANCE_STATEMENT
   | typeof BASELINE_ANALYSIS_ASSURANCE_STATEMENT
   | typeof FACTUAL_REVIEW_ASSURANCE_STATEMENT
   | typeof REVIEW_CATEGORY_ASSURANCE_STATEMENT
@@ -3564,6 +3598,11 @@ export const REVIEW_CATEGORY_MODE_MEANINGS = {
  */
 export type ReviewCategoryGoal = `${string}「${string}」${string}`;
 export const MAX_REVIEW_CATEGORY_GOAL_LENGTH = 400;
+/**
+ * The longest goal any Task Intent holds, in characters (Issue #423, slice 7a): a Task Intent Draft's sentence — which a promoted
+ * Task keeps as its goal — and every kind's own goal. Counted in code points, so it never holds more than as many graphemes.
+ */
+export const MAX_TASK_INTENT_GOAL_LENGTH = 400;
 export function reviewCategoryModeGoal(label: string, mode: ReviewCategoryTaskMode): ReviewCategoryGoal {
   switch (mode) {
     case 'review-first':
@@ -3582,13 +3621,188 @@ export function reviewCategoryExpectedOutcome(label: string): string {
   return `「${label}」审阅结果集修订版（编辑审阅契约 v1）`;
 }
 
+/**
+ * 自定义分析维度 (Issue #922, wave 10 slice 7f; ADR 0090 item 4): an AI7-owned document the editor writes in 知识库 › 工序与规则 —
+ * a title that is only a label, one bounded per-unit question template, and the answer schema and Authority Ceiling AI7 fixes — run
+ * as the analysis kind family `custom-analysis/<dimension-id>` under the one contract `ai7.custom-analysis/1`. It is not a DSH
+ * Skill and carries no prompt of its own beyond the template: AI7's framing around it is fixed. Each dimension is its own kind,
+ * so each keeps its own Result Set (ANALYSIS-009), and its Tasks take the baseline's four modes.
+ */
+export const CUSTOM_ANALYSIS_KIND_PREFIX = 'custom-analysis/' as const;
+export const CUSTOM_ANALYSIS_CONTRACT_VERSION = 'ai7.custom-analysis/1' as const;
+export const CUSTOM_ANALYSIS_DIMENSION_SCHEMA = 'ai7.custom-analysis-dimension/1' as const;
+export type CustomAnalysisKindId = `${typeof CUSTOM_ANALYSIS_KIND_PREFIX}${string}`;
+/** A dimension identity is a lower-case UUID, which the durable kind GLOB `custom-analysis/[a-z0-9-]*` admits. */
+export const CUSTOM_ANALYSIS_DIMENSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+export const MAX_CUSTOM_ANALYSIS_TITLE_GRAPHEMES = 40;
+/** The template bound is the Provider Processing v22/v23 term `EDITOR_AUTHORED_QUESTION_TEMPLATE_MAX_GRAPHEMES` states. */
+export const MAX_CUSTOM_ANALYSIS_TEMPLATE_GRAPHEMES = 400;
+export const MAX_CUSTOM_ANALYSIS_ANSWER_GRAPHEMES = 300;
+export const MAX_CUSTOM_ANALYSIS_QUOTE_GRAPHEMES = 80;
+export const MAX_CUSTOM_ANALYSIS_CONFIDENCE_NOTE_GRAPHEMES = 120;
+/** At most this many answer rows one unit may return; more is a refused unit result, never a cut. */
+export const MAX_CUSTOM_ANALYSIS_ROWS_PER_UNIT = 12;
+/** The one placeholder a template may carry: where the unit's text stands in the question. */
+export const CUSTOM_ANALYSIS_UNIT_PLACEHOLDER = '{本单元}' as const;
+/** At most this many dimensions, versions of one dimension, and answer rows of one revision a projection lists. */
+export const MAX_CUSTOM_ANALYSIS_DIMENSIONS_SHOWN = 40;
+export const MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN = 12;
+export const MAX_CUSTOM_ANALYSIS_ROWS_SHOWN = 120;
+
+export function isCustomAnalysisDimensionId(value: unknown): value is string {
+  return typeof value === 'string' && CUSTOM_ANALYSIS_DIMENSION_ID_PATTERN.test(value);
+}
+
+export function customAnalysisKindId(dimensionId: string): CustomAnalysisKindId {
+  if (!isCustomAnalysisDimensionId(dimensionId)) throw new Error('CUSTOM_ANALYSIS_DIMENSION_ID_INVALID');
+  return `${CUSTOM_ANALYSIS_KIND_PREFIX}${dimensionId}`;
+}
+
+/** The dimension a kind identity of the family names; `null` for every other kind and for a malformed one. */
+export function customAnalysisDimensionIdOfKind(kind: unknown): string | null {
+  if (typeof kind !== 'string' || !kind.startsWith(CUSTOM_ANALYSIS_KIND_PREFIX)) return null;
+  const dimensionId = kind.slice(CUSTOM_ANALYSIS_KIND_PREFIX.length);
+  return isCustomAnalysisDimensionId(dimensionId) ? dimensionId : null;
+}
+
+export function isCustomAnalysisKindId(kind: unknown): kind is CustomAnalysisKindId {
+  return customAnalysisDimensionIdOfKind(kind) !== null;
+}
+
+/** A kind's mode goal stays stable across document versions; the plan separately names its exact dimension version and title. */
+export type CustomAnalysisGoal = `自定义分析：${string}`;
+export function customAnalysisModeGoal(mode: BaselineAnalysisTaskMode): CustomAnalysisGoal {
+  switch (mode) {
+    case 'first-baseline':
+      return '自定义分析：逐单元回答该维度的提问并定位所依据的原文，形成结果集修订版。';
+    case 'sync-current':
+      return '自定义分析：同步到当前稿件，复用内容一致的单元，仅重新回答改动过的单元，追加一个结果集修订版。';
+    case 'reanalyze-range':
+      return '自定义分析：重新回答所选范围及其重叠闭包，复用其余单元，追加一个结果集修订版。';
+    case 'reanalyze-book':
+      return '自定义分析：绕过全部既有单元结果，逐单元重新回答全书，追加一个结果集修订版。';
+  }
+}
+export function customAnalysisExpectedOutcome(title: string): string {
+  return `自定义分析「${title}」结果集修订版（自定义分析契约 v1）`;
+}
+
+/** The AI7-owned dimension document, exactly as one version freezes it and its digest covers it. */
+export interface CustomAnalysisDimensionDocument {
+  schema: typeof CUSTOM_ANALYSIS_DIMENSION_SCHEMA;
+  /** The editor's label for the dimension; shown in AI7 and never sent to a model service. */
+  title: string;
+  /** The editor's per-unit question, bounded, carrying no manuscript text; `{本单元}` at most marks where the unit stands. */
+  questionTemplate: string;
+  /** The answer every unit returns, fixed by AI7 (ADR 0090 item 4): the editor cannot change it. */
+  answerSchema: {
+    unitResultSchema: 'ai7.custom-analysis.unit-result/1';
+    row: { answerMaxGraphemes: 300; anchor: 'block-ordinal-and-verbatim-quote'; quoteMaxGraphemes: 80; confidenceNoteMaxGraphemes: 120; score: 'never' };
+    maxRowsPerUnit: 12;
+  };
+  /** What a Run of the dimension may do, fixed by AI7: read the current Book's run source, change nothing, call no tool, synthesize nothing across units. */
+  authorityCeiling: { runSourceScope: 'current-book'; mutation: 'none'; platformTools: 'none'; localTools: 'none'; crossUnitSynthesis: 'none' };
+}
+
+export type CustomAnalysisDimensionState = 'pending-validation' | 'enabled' | 'stopped';
+export const CUSTOM_ANALYSIS_DIMENSION_STATE_LABELS = {
+  'pending-validation': '待验证',
+  enabled: '已启用',
+  stopped: '已停用',
+} as const satisfies Record<CustomAnalysisDimensionState, string>;
+
+export interface CustomAnalysisDimensionVersionProjection {
+  versionId: string;
+  version: number;
+  title: string;
+  questionTemplate: string;
+  documentDigest: string;
+  /** The version this one supersedes; `null` for version 1. */
+  supersedes: null | { versionId: string; version: number };
+  state: CustomAnalysisDimensionState;
+  stateLabel: string;
+  createdAt: string;
+  stateRecordedAt: string;
+  /** How many Tasks of any Book were prepared under this exact version; historical Runs keep naming it after 停用. */
+  taskCount: number;
+}
+
+/** One answer row of one unit as the reducer kept it: the model's answer and the anchor the service itself located. */
+export interface CustomAnalysisRowProjection {
+  rowId: string;
+  unitOrdinal: number;
+  answer: string;
+  confidenceNote: string;
+  /** The block the model named, by its position in the unit message, and the quotation it gave. */
+  blockOrdinal: number;
+  quote: string;
+  /** Where the quotation stands, located deterministically in that block; `null` when it was not found exactly once. */
+  sourceRange: null | FactualSourceRangeProjection;
+  anchorState: 'located' | 'not-found' | 'ambiguous';
+}
+
+/** The latest Result Set Revision of one dimension on one Book, as ②A's 自定义 tab reads it (ANALYSIS-001, ANALYSIS-009). */
+export interface CustomAnalysisRevisionSummaryProjection {
+  revisionId: string;
+  ordinal: number;
+  createdAt: string;
+  /** The dimension version the revision was read under. */
+  dimensionVersion: { versionId: string; version: number; documentDigest: string };
+  manuscriptRevisionLabel: string;
+  coverage: AnalysisCoverageAxis;
+  freshness: AnalysisFreshnessAxis;
+  gaps: ReadonlyArray<{ unitOrdinal: number; code: AnalysisGapProjection['code']; reason: string }>;
+  rowCounts: { units: number; rows: number; located: number; unlocated: number };
+  rows: ReadonlyArray<CustomAnalysisRowProjection>;
+  rowsTruncated: boolean;
+}
+
+export interface CustomAnalysisDimensionProjection {
+  dimensionId: string;
+  kind: CustomAnalysisKindId;
+  /** The latest version's title. */
+  title: string;
+  /** The newest version in 已启用: what 运行 prepares under; `null` while none is. */
+  enabledVersion: null | { versionId: string; version: number };
+  versions: ReadonlyArray<CustomAnalysisDimensionVersionProjection>;
+  versionsTruncated: boolean;
+  /** Present when the projection was read for a Book: that Book's Task and latest revision of the dimension. */
+  book: null | {
+    taskState: null | { taskIntentId: string; state: BaselineAnalysisProjection['state']; stateLabel: string };
+    latest: null | CustomAnalysisRevisionSummaryProjection;
+    /** Why 运行 is unavailable here; `null` when it can prepare. */
+    unavailableReason: string | null;
+  };
+}
+
+export interface CustomAnalysisDimensionsProjection {
+  bookId: string | null;
+  dimensions: ReadonlyArray<CustomAnalysisDimensionProjection>;
+  truncated: boolean;
+  /** What AI7 fixes for every dimension, as the editor reads it beside the template. */
+  fixed: { answerSchema: CustomAnalysisDimensionDocument['answerSchema']; authorityCeiling: CustomAnalysisDimensionDocument['authorityCeiling'] };
+}
+
+export interface SaveCustomAnalysisDimensionInput {
+  /** `null` saves version 1 of a new dimension; otherwise the next version of that dimension, superseding its latest. */
+  dimensionId: string | null;
+  title: string;
+  questionTemplate: string;
+}
+
+export interface PrepareCustomAnalysisInput {
+  bookId: string;
+  dimensionId: string;
+  update: BaselineAnalysisUpdateRequest | null;
+}
+
 /** Every analysis kind a Book may hold, and every Task mode any of them declares. */
 export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId | typeof INITIAL_EVALUATION_KIND |
-  typeof READERS_REPORT_KIND | typeof EVALUATION_REWRITE_KIND | typeof WRITING_KIND;
+  typeof READERS_REPORT_KIND | typeof EVALUATION_REWRITE_KIND | typeof WRITING_KIND | CustomAnalysisKindId;
 export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode | ReadersReportTaskMode |
   EvaluationRewriteTaskMode | WritingTaskMode;
 export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal | ReadersReportGoal | EvaluationRewriteGoal |
-  WritingGoal;
+  WritingGoal | CustomAnalysisGoal;
 
 /** An explicit editor choice over exact block positions of the Task Input revision (inclusive). */
 export interface BaselineAnalysisSelectedRange {
@@ -4100,6 +4314,7 @@ export interface BaselineAnalysisHistoryProjection {
 export type RunAttemptState = 'dispatched' | 'awaiting-response' | 'retrying';
 
 export interface BaselineAnalysisProjection {
+  readonly historicalMarker?: string;
   bookId: string;
   kind: typeof BASELINE_ANALYSIS_KIND;
   contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
@@ -6444,7 +6659,23 @@ export interface InspectReviewWorkspaceInput extends Partial<ReviewFindingPageRe
   reviewRunId: string | null;
 }
 
+/** Exact authorization-time Series records; membership is prospective, exclusions remain current-read restrictions. */
+export interface FrozenSeriesScope {
+  readonly seriesId: string;
+  readonly title: string;
+  readonly members: ReadonlyArray<{
+    readonly bookId: string;
+    readonly manuscriptId: string | null;
+    readonly revisionId: string | null;
+    readonly revisionDigest: string | null;
+    readonly sourceVersionId: string | null;
+  }>;
+  readonly knowledge: ReadonlyArray<{ readonly itemId: string; readonly revisionId: string; readonly ordinal: number; readonly digest: string }>;
+  readonly exclusions: ReadonlyArray<{ readonly exclusionId: string; readonly revisionId: string; readonly version: number }>;
+}
+
 export interface PrepareReviewRunInput {
+  seriesId?: string | null;
   materialIds?: ReadonlyArray<string>;
   bookId: string;
   categoryIds: ReadonlyArray<string>;
@@ -6831,6 +7062,7 @@ export interface TaskPlanDriftEntryProjection {
  * drawer's authorization bar offers, and only the bar's own activation records anything (Issue #420).
  */
 export interface TaskPlanProjection {
+  readonly seriesScopes?: ReadonlyArray<FrozenSeriesScope>;
   bookId: string;
   kind: TaskPlanKind;
   /** The Task Intent or the Review Run this plan belongs to. */
@@ -6852,6 +7084,11 @@ export interface TaskPlanProjection {
     };
     /** Preparing the Task saved its Task Input revision for acknowledged edits (TASK-039/040). */
     savedForEdits: boolean;
+    /**
+     * The Task Intent Draft this Task was prepared from with 准备计划 (Issue #423, slice 7a): its sentence, which the 目标块 shows
+     * with 修改 back to the composer. Absent for every Task prepared otherwise.
+     */
+    draft?: { draftId: string; sentence: string };
   };
   /** 要处理 · 允许参考 · 可能发送 · 不会读, each stated apart (TASK-030). */
   scope: { process: string; reference: ReadonlyArray<string>; send: string; notRead: string };
@@ -7468,10 +7705,202 @@ export interface KnowledgeProceduresProjection {
   readonly artifacts: ReadonlyArray<KnowledgeArtifactProjection>;
 }
 
+// ADR 0045 / ADR 0090: foreign Skills are retained as inert, inspectable documents, never executors.
+export type ImportedSkillState = 'pending-validation' | 'validated' | 'restricted' | 'rejected' | 'installed-disabled' | 'enabled';
+export interface ImportedSkillFile {
+  readonly path: string;
+  readonly bytes: number;
+  readonly sha256: string;
+  readonly base64: string;
+}
+export interface SkillConversionReport {
+  readonly preserved: readonly string[];
+  readonly mapped: readonly string[];
+  readonly reviewRequired: readonly string[];
+  readonly unsupported: readonly string[];
+}
+export interface ImportedSkillCeiling {
+  readonly requestedCapabilities: readonly string[];
+  readonly executor: false;
+  readonly runSourceScope: 'none';
+  readonly provider: false;
+  readonly effect: false;
+  readonly credentials: false;
+  readonly network: false;
+  readonly backgroundAnalysis: false;
+  readonly apply: false;
+}
+export interface ImportedSkillSummary {
+  readonly skillId: string;
+  readonly revisionId: string;
+  readonly ordinal: number;
+  readonly name: string;
+  readonly sourceRevision: string;
+  readonly kind: 'DSH Skill';
+  readonly state: ImportedSkillState;
+  readonly stateLabel: string;
+}
+export type ImportedSkillSelectionReason = 'import' | 'adopt' | 'rule' | 'rollback';
+export interface ImportedSkillRevisionProjection extends ImportedSkillSummary {
+  readonly snapshotId: string;
+  readonly previousRevisionId: string | null;
+  readonly sourcePath: string;
+  readonly snapshotSha256: string;
+  readonly workingSha256: string;
+  readonly files: readonly ImportedSkillFile[];
+  readonly workingFiles: readonly ImportedSkillFile[];
+  readonly license: string | null;
+  readonly notices: readonly string[];
+  readonly conversion: SkillConversionReport;
+  readonly reasons: readonly string[];
+  readonly enabledBooks: readonly string[];
+  readonly ceiling: ImportedSkillCeiling;
+  /** Exact revision + conversion + ceiling + state, shown before separate explicit installation/enablement. */
+  readonly previewDigest: string;
+  readonly createdAt: string;
+}
+/** One revision in a Skill's history: newest first, the current one marked, and how each came about. */
+export interface ImportedSkillHistoryEntry {
+  readonly revisionId: string;
+  readonly ordinal: number;
+  readonly state: ImportedSkillState;
+  readonly stateLabel: string;
+  readonly sourceRevision: string;
+  readonly previousRevisionId: string | null;
+  readonly createdAt: string;
+  readonly current: boolean;
+  readonly origin: 'import' | 'adopt' | 'rule';
+  /** Why the current revision is current; `null` on every other entry. */
+  readonly selectedReason: ImportedSkillSelectionReason | null;
+}
+export type ImportedSkillUpdateDisposition = 'clean' | 'conflict' | 'validator-failed' | 'authority-change';
+export type ImportedSkillUpdateFileChange = 'unchanged' | 'upstream' | 'local' | 'conflict';
+export interface ImportedSkillUpdateFileReport {
+  readonly path: string;
+  readonly change: ImportedSkillUpdateFileChange;
+  readonly priorSha256: string | null;
+  readonly workingSha256: string | null;
+  readonly incomingSha256: string | null;
+}
+/** One update candidate in the Skill's list: inert until the editor adopts it, or the rule does a clean one (REUSE-032, REUSE-034). */
+export interface ImportedSkillUpdateCandidateSummary {
+  readonly candidateId: string;
+  readonly skillId: string;
+  readonly disposition: ImportedSkillUpdateDisposition;
+  readonly status: 'open' | 'adopted' | 'dismissed';
+  /** An open candidate whose base is no longer the Skill's current revision cannot be adopted; the update is checked again. */
+  readonly stale: boolean;
+  readonly adoptedBy: 'editor' | 'rule' | null;
+  readonly adoptedRevisionId: string | null;
+  readonly incomingName: string;
+  readonly incomingSourceRevision: string;
+  readonly createdAt: string;
+}
+/** The three-way reconciliation behind a candidate: the prior Source Skill Snapshot, the working revision and the incoming snapshot. */
+export interface ImportedSkillUpdateCandidateProjection extends ImportedSkillUpdateCandidateSummary {
+  readonly prior: { readonly snapshotId: string; readonly sha256: string; readonly sourceRevision: string };
+  readonly working: { readonly revisionId: string; readonly ordinal: number; readonly sha256: string };
+  readonly incoming: { readonly snapshotId: string; readonly sha256: string; readonly sourcePath: string };
+  readonly files: readonly ImportedSkillUpdateFileReport[];
+  readonly validator: { readonly state: 'validated' | 'restricted' | 'rejected'; readonly reasons: readonly string[] };
+  readonly authorityChanges: readonly string[];
+  readonly conflicts: readonly string[];
+  /** Every item an explicit adoption of a candidate that is not clean names: validator reasons, authority changes and conflicting files. */
+  readonly acceptItems: readonly string[];
+  readonly reviewDigest: string;
+}
+export interface ImportedSkillUpdateRuleProjection {
+  readonly active: boolean;
+  readonly ruleId: string | null;
+  /** The sentence the editor confirms to create the rule. */
+  readonly confirmation: string;
+  readonly since: string | null;
+  readonly history: ReadonlyArray<{ readonly action: 'create' | 'revoke'; readonly recordedAt: string }>;
+}
+export interface ImportedSkillsProjection {
+  readonly skills: readonly ImportedSkillSummary[];
+  readonly nextBefore: string | null;
+  readonly revision: ImportedSkillRevisionProjection | null;
+  /** Of the Skill `revision` belongs to (empty/`null` when none is selected): its revisions, update candidates and update rule. */
+  readonly history: readonly ImportedSkillHistoryEntry[];
+  readonly candidates: readonly ImportedSkillUpdateCandidateSummary[];
+  readonly rule: ImportedSkillUpdateRuleProjection | null;
+}
+/**
+ * What acquisition discloses before anything is kept (ADR 0090 §2; REUSE-021): exact identity, kind, source revision, provenance,
+ * license and notices, content digest and the conversion it would keep. Nothing of it is written until the editor keeps it.
+ */
+export interface ImportedSkillAcquisitionProjection {
+  /** The disclosed package, held in the service's memory only until it is kept or dropped. */
+  readonly acquisitionId: string;
+  readonly name: string;
+  readonly sourceRevision: string;
+  readonly kind: 'DSH Skill';
+  readonly sourcePath: string;
+  readonly contentSha256: string;
+  readonly license: string | null;
+  readonly notices: readonly string[];
+  readonly files: readonly Omit<ImportedSkillFile, 'base64'>[];
+  readonly conversion: SkillConversionReport;
+  readonly ceiling: ImportedSkillCeiling;
+  readonly problems: readonly string[];
+  /** A package without a SKILL.md is not a Skill: it is disclosed and never kept. */
+  readonly keepable: boolean;
+  /** The working revision already holding exactly this content, when it was kept before: keeping it again adds nothing. */
+  readonly keptRevisionId: string | null;
+}
+/** 导入 Skill…: the disclosure, and the kept working revision once the editor keeps it (`null` until then). */
+export interface ImportedSkillImportProjection {
+  readonly acquisition: ImportedSkillAcquisitionProjection;
+  readonly revision: ImportedSkillRevisionProjection | null;
+}
+/**
+ * 检查更新（从文件）…: the disclosure of one local package for a Skill already kept, and — once the editor keeps it — the inert
+ * candidate it became. The package is the same kind 导入 Skill… takes; nothing is read from any Book and nothing is fetched.
+ */
+export interface ImportedSkillUpdateCheckProjection {
+  readonly skillId: string;
+  readonly acquisition: ImportedSkillAcquisitionProjection;
+  /** Newer than what the Skill is on, the very version it was kept from, or one already in its history (which 回到此版本 returns to). */
+  readonly relation: 'newer' | 'same-as-current' | 'already-kept';
+  readonly candidate: ImportedSkillUpdateCandidateProjection | null;
+}
+export interface ProcedureRecommendationInput {
+  readonly bookId: string;
+  readonly goal: string;
+  readonly taskKind: 'review-run' | 'baseline-analysis' | 'writing' | 'unclassified';
+  readonly scope: CapturedProcedureScopeSlot;
+  readonly categoryIds: readonly string[];
+}
+export interface ProcedureRecommendationCandidate {
+  readonly procedureId: string;
+  readonly versionId: string;
+  readonly version: number;
+  readonly documentSha256: string;
+  readonly purpose: string;
+  readonly kind: '可复用工序';
+  readonly fit: 'all' | 'partial';
+  readonly rationale: readonly string[];
+  readonly requiredInputs: readonly string[];
+  readonly expectedOutcome: string;
+  readonly proposalClasses: readonly string[];
+  readonly effectClasses: readonly string[];
+}
+export interface ProcedureRecommendationProjection {
+  readonly intentDigest: string;
+  readonly status: 'clear' | 'ambiguous' | 'none';
+  readonly candidates: readonly ProcedureRecommendationCandidate[];
+  readonly selectedVersionId: null;
+  readonly note: string;
+  readonly excludedSkillReason: string;
+}
+
 // ---- 可复用工序 (Issue #65, plan slice S30; ADR 0087; V2-UX-REUSE-001 to 020, 029 to 031, 038 to 054, 063 to 066, KB-010) --
 
 /** The one schema a Captured Procedure version's document is written in (ADR 0087 §1). */
 export const CAPTURED_PROCEDURE_SCHEMA = 'ai7.captured-procedure/1' as const;
+/** ADR 0090: additive successor; existing /1 documents and their exact digests never move. */
+export const CAPTURED_PROCEDURE_SCHEMA_V2 = 'ai7.captured-procedure/2' as const;
 /**
  * The one parameter slot a Captured Procedure carries: the review scope kind. The chapters are chosen at each run. `selection`
  * (Issue #423, S77 deferred item a) is the scope a Run pins when the house's procedure runs on the paragraphs 就这段发起任务… handed
@@ -7527,7 +7956,7 @@ export interface CapturedProcedureStepDocument {
  * authorization, receipt, plan digest, Provider, route or model, and no guideline clause or version.
  */
 export interface CapturedProcedureDocument {
-  readonly schema: typeof CAPTURED_PROCEDURE_SCHEMA;
+  readonly schema: typeof CAPTURED_PROCEDURE_SCHEMA | typeof CAPTURED_PROCEDURE_SCHEMA_V2;
   readonly title: string;
   readonly runAs: 'review-run';
   readonly steps: ReadonlyArray<CapturedProcedureStepDocument>;
@@ -7537,7 +7966,7 @@ export interface CapturedProcedureDocument {
    * calls a model or a search engine, and the current-Book Run Source Scope.
    */
   readonly authorityCeiling: {
-    readonly runSourceScope: 'current-book';
+    readonly runSourceScope: 'current-book' | 'series';
     readonly steps: ReadonlyArray<{ readonly categoryId: string; readonly executor: string }>;
     readonly outputs: ReadonlyArray<ReviewCategoryOutputKind>;
     readonly model: boolean;
@@ -7787,6 +8216,7 @@ export interface CapturedProcedureRunProjection {
   readonly procedureId: string;
   readonly title: string;
   readonly resolved: null | {
+    readonly runSourceScope?: 'series';
     readonly versionId: string;
     readonly version: number;
     /** Whether it is the latest eligible version — `false` when the editor chose an older eligible one (REUSE-054). */
@@ -8375,6 +8805,7 @@ export interface EvaluationInitialDraftProjection {
 export interface EvaluationInitialProjection {
   /** The Book's latest 初评 Task, which the Task Drawer opens; `null` before the first is prepared. */
   readonly task: null | {
+    readonly historicalMarker?: string;
     readonly taskIntentId: string;
     readonly state: BaselineAnalysisProjection['state'];
     /** The Task's state in the editor's words. */
@@ -9618,6 +10049,7 @@ export interface SeriesKnowledgeRevisionsProjection {
  * It is not a reader of the member manuscripts.
  */
 export interface SeriesProjection {
+  readonly tasks?: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly taskIntentId: string; readonly kind: string; readonly title: string; readonly runRecordId: string | null }>;
   readonly seriesId: string;
   readonly title: string;
   readonly note: string;
@@ -11624,7 +12056,9 @@ export type GlobalAttentionStateKey =
   | 'dialogue-answered'
   | 'dialogue-stopped'
   | 'dialogue-interrupted'
-  | 'dialogue-failed';
+  | 'dialogue-failed'
+  // An unfinished Task Intent Draft (Issue #423, slice 7a; TASK-004 to 006): in the Book's 等你处理, and in 待我处理 only as this.
+  | 'draft-unfinished';
 
 /**
  * The closed map of safe next steps (V2-UX-ATTN-007): each is an action the item's own record offers, in
@@ -11663,13 +12097,15 @@ export type GlobalAttentionNextStep =
   // 查看索引: the item's card in 资料库, its index layers and 查看分段 (Issue #428, S80a).
   | 'view-material-index'
   // A dialogue Task's 打开对话 (Issue #52, S17a; TASK-044).
-  | 'open-dialogue';
+  | 'open-dialogue'
+  // 继续编辑草稿: a Task Intent Draft in the Task Drawer, on its own Book (Issue #423, slice 7a; TASK-006).
+  | 'continue-draft';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
   'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue', 'view-material-index',
-  'view-unconfirmed', 'view-apply-receipt',
+  'view-unconfirmed', 'view-apply-receipt', 'continue-draft',
 ];
 
 /**
@@ -11697,7 +12133,9 @@ export type GlobalAttentionTarget =
   // A Task kind's plan in the Task Drawer, on the surface that owns it — ②A, 审阅, 评估 for AI7 初评, 审稿意见 and 按我的评分重写评语,
   // 交付物 for a 写作任务: a waiting ledger Task of another kind, named by its Task (Issue #760, S74c), and 结果待确认 a Run left,
   // on the Book's current Task of the kind or, for a review, its latest Review Run (Issue #757).
-  | { kind: 'task-plan'; bookId: string; taskKind: TaskPlanKind; ref: string | null };
+  | { kind: 'task-plan'; bookId: string; taskKind: TaskPlanKind; ref: string | null }
+  // A Task Intent Draft in the Task Drawer beside its own Book's manuscript (Issue #423, slice 7a).
+  | { kind: 'task-intent-draft'; bookId: string; draftId: string };
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
@@ -11721,7 +12159,9 @@ export type GlobalAttentionObjectProjection =
   // holds no turn of it here.
   | { kind: 'dialogue'; question: string | null }
   // 结果待确认 that completed Runs of one Task kind left on the Book (Issue #757): how many ranges, and which steps.
-  | { kind: 'unconfirmed'; taskKind: TaskPlanKind; ranges: number; steps: ReadonlyArray<UnconfirmedStageId> };
+  | { kind: 'unconfirmed'; taskKind: TaskPlanKind; ranges: number; steps: ReadonlyArray<UnconfirmedStageId> }
+  // A Task Intent Draft (Issue #423, slice 7a): the editor's own sentence, where the draft began, and how many ranges it pins.
+  | { kind: 'draft'; goal: string; origin: TaskIntentDraftOrigin; ranges: number };
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
@@ -11930,6 +12370,183 @@ export interface DialogueConversionProjection {
   readonly markId: string;
   readonly completionLabel: string;
   readonly dialogue: DialogueProjection;
+}
+
+// ---- Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b; V2-UX-TASK-001 to 009, 042, 043, DIALOG-013, 016) ----------
+
+/**
+ * Where a Task Intent Draft began: the Context-bound Task Composer on a selection (就这段发起任务…) or on the whole Book
+ * (发起全书任务), or a completed dialogue answer (转为任务意图草稿).
+ */
+export type TaskIntentDraftOrigin = 'composer-selection' | 'composer-book' | 'dialogue-answer';
+/** The intended outcome a draft names (TASK-005): what kind of Task it should become once promoted. */
+export type TaskIntentOutcomeClass = 'analysis' | 'review' | 'factual' | 'writing';
+export const TASK_INTENT_OUTCOME_CLASSES: readonly TaskIntentOutcomeClass[] = ['analysis', 'review', 'factual', 'writing'];
+/** The most Pinned Manuscript Ranges one draft carries (再选一段加入, TASK-046). */
+export const MAX_TASK_INTENT_DRAFT_RANGES = 8;
+/** The most characters of a completed dialogue answer a draft keeps (DIALOG-016), cut at a fragment. */
+export const MAX_TASK_INTENT_DRAFT_ANSWER_CHARACTERS = 2_000;
+
+/** A range the draft carries: one its version already pinned, by identity, or the exact words selected now. */
+export type TaskIntentDraftRangeInput =
+  | { readonly kind: 'kept'; readonly rangeId: string }
+  | { readonly kind: 'new'; readonly span: DialogueSelectionInput };
+
+/** What the draft is about (TASK-005, 007): the whole Book's manuscript, or only the Pinned Manuscript Ranges it carries. */
+export type TaskIntentDraftTargetInput =
+  | { readonly kind: 'book' }
+  | { readonly kind: 'ranges'; readonly ranges: ReadonlyArray<TaskIntentDraftRangeInput> };
+
+/**
+ * 准备任务 in the composer, or 保存修改 on a draft (TASK-004, 005): a new draft — its first version — or a new version of the draft
+ * whose `expectedOrdinal` version the editor edited. Nothing is sent, no Run Record or authorization is made, and the
+ * manuscript is not touched.
+ */
+export interface SaveTaskIntentDraftInput {
+  readonly bookId: string;
+  readonly draftId: string | null;
+  readonly expectedOrdinal: number | null;
+  /** Where a new draft began; a new version keeps its draft's. */
+  readonly origin: 'composer-selection' | 'composer-book';
+  readonly goal: string;
+  readonly target: TaskIntentDraftTargetInput;
+  readonly outcomeClass: TaskIntentOutcomeClass | null;
+  /**
+   * The 工序 the editor picked from the composer's recommendation slot (slice 7c fills it; #423 rev 6): kept by identity in the
+   * version, never resolved, validated or enabled here. Absent or `null` when none is picked.
+   */
+  readonly procedurePin?: TaskIntentDraftProcedurePin | null;
+}
+
+/** A 工序 picked for a draft, by identity (#423 rev 6): selection is never acquisition, enablement or authorization (TASK-013). */
+export interface TaskIntentDraftProcedurePin {
+  readonly procedureId: string;
+  readonly versionId: string;
+}
+
+/** The Book's drafts, or — `draftId` set — one draft with how it would be promoted. */
+export interface InspectTaskIntentDraftsInput {
+  readonly bookId: string;
+  readonly draftId: string | null;
+}
+
+/**
+ * One Pinned Manuscript Range of a draft (TASK-002, 031, 043): the words as pinned, where, and how they stand now — exact on the
+ * revision they were pinned at, `待保存修订版` (pinned on edits newer than that revision), `待核对到任务修订版` (the manuscript has
+ * a newer revision; checked exactly when the Task's own revision is saved), or `任务范围需要重新选择` (the words are no longer
+ * there).
+ */
+export interface TaskIntentDraftRangeProjection {
+  readonly rangeId: string;
+  readonly manuscriptId: string;
+  readonly blockId: string;
+  readonly fromGrapheme: number;
+  readonly toGrapheme: number;
+  readonly text: string;
+  readonly revisionLabel: string;
+  readonly journalSequence: number;
+  readonly state: 'exact' | 'pending-save' | 'awaiting-resolution' | 'reselect';
+  readonly stateLabel: string | null;
+  /** The paragraph's position in the working manuscript, `null` once it is gone. */
+  readonly position: number | null;
+}
+
+/** What a draft promoted from a dialogue answer keeps of it (DIALOG-016): generated content, with its provenance. */
+export interface TaskIntentDraftAnswerProjection {
+  readonly dialogueId: string;
+  readonly attemptId: string;
+  readonly attemptOrdinal: number;
+  readonly selectionSha256: string;
+  readonly text: string;
+  /** The answer's lines when it has more than one — the structured rows its format yields — and none otherwise. */
+  readonly rows: ReadonlyArray<string>;
+  readonly truncated: boolean;
+}
+
+/** How 准备计划 would make a Task of the draft: one exact preparation of an existing kind, with the choice it takes. */
+export type TaskIntentDraftChoice =
+  | { readonly kind: 'baseline'; readonly mode: BaselineAnalysisTaskMode }
+  | { readonly kind: 'review'; readonly categoryId: string }
+  | { readonly kind: 'writing'; readonly typeId: string };
+
+export interface TaskIntentDraftOption {
+  readonly choice: TaskIntentDraftChoice;
+  readonly taskKind: 'baseline-analysis' | 'review-run' | 'writing';
+  readonly label: string;
+  readonly available: boolean;
+  readonly reason: string | null;
+}
+
+/**
+ * The Task a draft becomes, chosen from its target and intended outcome alone — no model is asked: one option when exactly one
+ * fits, the options to choose from when several do, or why none does, the draft staying editable.
+ */
+export type TaskIntentDraftResolution =
+  | { readonly state: 'ready'; readonly option: TaskIntentDraftOption }
+  | { readonly state: 'choose'; readonly options: ReadonlyArray<TaskIntentDraftOption> }
+  | { readonly state: 'unsupported'; readonly reason: string };
+
+export interface TaskIntentDraftProjection {
+  readonly draftId: string;
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly origin: TaskIntentDraftOrigin;
+  readonly createdAt: string;
+  readonly version: {
+    readonly versionId: string;
+    readonly ordinal: number;
+    readonly goal: string;
+    readonly target: 'book' | 'ranges';
+    readonly outcomeClass: TaskIntentOutcomeClass | null;
+    readonly ranges: ReadonlyArray<TaskIntentDraftRangeProjection>;
+    readonly answer: TaskIntentDraftAnswerProjection | null;
+    readonly procedurePin: TaskIntentDraftProcedurePin | null;
+    readonly createdAt: string;
+  };
+  /** The Task the draft became with 准备计划 — a normal prepared Task that still needs 开始任务 — or `null`. */
+  readonly promotion: null | {
+    readonly taskKind: 'baseline-analysis' | 'review-run' | 'writing';
+    /** Every draft promotion creates exactly one Task Intent; model-free baseline leads are excluded. */
+    readonly taskIntentId: string;
+    /** What the Task Drawer opens: the Task Intent, or the Review Run. */
+    readonly planRef: string;
+    readonly promotedAt: string;
+  };
+  /** Only on a read of the one draft, while it is not promoted. */
+  readonly resolution: TaskIntentDraftResolution | null;
+}
+
+export interface TaskIntentDraftsProjection {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  /**
+   * The Book's manuscript as it stands now (TASK-002): its revision, its journal position, and whether the journal holds edits
+   * no revision holds yet — words pinned now are `待保存修订版` until a revision holds them. `null` before it has one.
+   */
+  readonly manuscript: null | { readonly revisionLabel: string; readonly journalSequence: number; readonly pendingSave: boolean };
+  /** The Book's drafts not yet promoted, newest first, then up to ten promoted ones. */
+  readonly drafts: ReadonlyArray<TaskIntentDraftProjection>;
+}
+
+/**
+ * 准备计划 on a draft (decision 1): the draft's exact version made into a prepared Task through the existing preparation of its
+ * kind — the same cooperative job 先看计划 starts — with the draft's sentence as the Task Intent's goal. The plan opens in the Task
+ * Drawer and still needs 开始任务 (AUTH-002); nothing is sent.
+ */
+export interface PromoteTaskIntentDraftInput {
+  readonly bookId: string;
+  readonly draftId: string;
+  readonly versionId: string;
+  readonly choice: TaskIntentDraftChoice;
+  /** A writing Task's audience and channel, which the editor writes when the choice is a writing type. */
+  readonly writing?: { readonly audience: string; readonly channel: string };
+}
+
+/** 转为任务意图草稿 (DIALOG-016): a new draft from a completed answer, which `attemptId` must name as the dialogue's latest. */
+export interface PromoteAnswerToTaskIntentDraftInput {
+  readonly bookId: string;
+  readonly dialogueId: string;
+  readonly attemptId: string;
 }
 
 // ---- ④ 导出 · DOCX (Issue #413, plan slice S64; editor-surfaces §7 导出, V2-UX-EXP-001 to EXP-024) ------
@@ -12755,6 +13372,40 @@ export interface ServiceOperationMap {
   };
   /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): names no Book. */
   inspectCapturedProcedures: { input: Record<string, never>; output: CapturedProceduresProjection };
+  /**
+   * 外部 Skill (ADR 0045, ADR 0090 §2): acquisition from the path the platform picker gave main discloses and keeps nothing
+   * (`path`); keeping the disclosed package is a second, separate call (`keep`, its acquisition id). Exactly one is given.
+   */
+  importSkillPackage: { input: { path: string | null; keep: string | null }; output: ImportedSkillImportProjection };
+  /** A provider-free validation stage over the exact working files; it never installs or enables (REUSE-023, REUSE-024). */
+  validateImportedSkill: { input: { revisionId: string }; output: ImportedSkillRevisionProjection };
+  /** Installation, finished disabled, of a validated revision whose preview the editor confirmed (REUSE-026). */
+  installImportedSkill: { input: { revisionId: string; previewDigest: string }; output: ImportedSkillRevisionProjection };
+  /** Scoped enablement for one Book after the ceiling was shown: no executor, Run scope, Provider or Effect follows (REUSE-028). */
+  enableImportedSkill: { input: { revisionId: string; bookId: string; previewDigest: string }; output: ImportedSkillRevisionProjection };
+  /** The house's imported Skills, newest revision each, a page at a time, and one exact revision when asked. A read. */
+  inspectImportedSkills: { input: { revisionId: string | null; before: string | null }; output: ImportedSkillsProjection };
+  /**
+   * 检查更新（从文件）… (ADR 0090 §3; REUSE-032): the package of the picked path is disclosed against the Skill it would update (`path`),
+   * or the disclosed one is kept (`keep`, its acquisition id) as a new Source Skill Snapshot and one inert update candidate. Exactly one is given.
+   */
+  checkImportedSkillUpdate: { input: { skillId: string; path: string | null; keep: string | null }; output: ImportedSkillUpdateCheckProjection };
+  /** One update candidate with its three-way report. A read. */
+  inspectImportedSkillUpdate: { input: { candidateId: string }; output: ImportedSkillUpdateCandidateProjection };
+  /**
+   * 采纳 (REUSE-033): a new working revision, first at 待验证 and never enabled. `acceptItems` names every item of a candidate that
+   * is not clean; `upstreamPaths` are the conflicting files the editor takes from upstream (the rest keep the local derivation).
+   */
+  adoptImportedSkillUpdate: { input: { candidateId: string; reviewDigest: string; acceptItems: readonly string[]; upstreamPaths: readonly string[] }; output: ImportedSkillUpdateCandidateProjection };
+  /** 忽略: the candidate is marked dismissed; nothing is deleted. */
+  dismissImportedSkillUpdate: { input: { candidateId: string }; output: ImportedSkillUpdateCandidateProjection };
+  /** The Artifact Update Rule of one imported Skill (REUSE-034), created with its confirmation line and revoked by appending a revocation. */
+  createImportedSkillUpdateRule: { input: { skillId: string; confirmation: string }; output: ImportedSkillUpdateRuleProjection };
+  revokeImportedSkillUpdateRule: { input: { skillId: string }; output: ImportedSkillUpdateRuleProjection };
+  /** 回到此版本 (REUSE-035): a new current selection; history is not rewritten and enablement is not restored. */
+  rollbackImportedSkill: { input: { skillId: string; revisionId: string }; output: ImportedSkillRevisionProjection };
+  /** 工序推荐 (ADR 0090 §1; TASK-010 to 016): a deterministic read; it selects, acquires, enables or authorizes nothing. */
+  recommendProcedures: { input: ProcedureRecommendationInput; output: ProcedureRecommendationProjection };
   /** One Captured Procedure with a page of its versions, newest first, below `before` when it is given. */
   inspectCapturedProcedure: { input: { procedureId: string; before: number | null }; output: CapturedProcedureProjection };
   /** One 开发建议 with a page of its versions, newest first, below `before` when it is given. */
@@ -12781,6 +13432,16 @@ export interface ServiceOperationMap {
   inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string; versionId: string | null; scope?: CapturedProcedureScopeSlot | null }; output: CapturedProcedureRunProjection };
   /** The house's enabled Captured Procedures as each applies to one Book: its latest eligible version and its steps there (S31b). */
   inspectCapturedProcedureApplicability: { input: { bookId: string; scope?: CapturedProcedureScopeSlot | null }; output: CapturedProcedureApplicabilityProjection };
+  /** 知识库 › 工序与规则 › 自定义分析维度 (`bookId: null`), or ②A's 自定义 tab over one Book (Issue #922, slice 7f). */
+  inspectCustomAnalysisDimensions: { input: { bookId: string | null }; output: CustomAnalysisDimensionsProjection };
+  /** Version 1 of a new dimension, or the next version of one superseding its latest; always `待验证` (ADR 0090 item 4). */
+  saveCustomAnalysisDimension: { input: SaveCustomAnalysisDimensionInput; output: CustomAnalysisDimensionsProjection };
+  /** `验证并启用`: the version's document is validated again, deterministically, and recorded `已启用` — or refused with its reason. */
+  enableCustomAnalysisDimension: { input: { versionId: string }; output: CustomAnalysisDimensionsProjection };
+  /** `停用`: final for the version; Runs prepared under it keep naming it. */
+  stopCustomAnalysisDimension: { input: { versionId: string }; output: CustomAnalysisDimensionsProjection };
+  /** ②A 自定义 › 运行: the dimension's enabled version prepared as a Task on the Book; its plan opens in the Task Drawer. */
+  prepareCustomAnalysis: { input: PrepareCustomAnalysisInput; output: { taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection } };
   /** 保存开发建议: a new Developer Capability Proposal, or its next version (ADR 0087 §6). */
   saveDeveloperProposal: { input: SaveDeveloperProposalInput; output: DeveloperProposalProjection };
   /** 导出为文件…: the proposal version written to the file the editor chose through the Save dialog (ADR 0087 §6). */
@@ -12899,7 +13560,7 @@ export interface ServiceOperationMap {
    * once one settled. The completed job's result is 评估 with the prepared Task named, whose plan the Task Drawer opens.
    */
   prepareInitialEvaluation: {
-    input: { bookId: string; materialIds?: ReadonlyArray<string> };
+    input: { bookId: string; materialIds?: ReadonlyArray<string>; seriesId?: string | null };
     output: ServiceJobProjection;
   };
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run, admitted at once or waiting for a place. */
@@ -13306,6 +13967,14 @@ export interface ServiceOperationMap {
   regenerateDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
   /** 转为修改建议: an AI7-produced 修改建议 on the dialogue's selected words, from a completed answer; never applied. */
   convertDialogueToChangeSuggestion: { input: ConvertDialogueToChangeSuggestionInput & { bookId: string }; output: DialogueConversionProjection };
+  /** The Book's Task Intent Drafts, or one with the Task 准备计划 would make of it (Issue #423, slice 7a): a read. */
+  inspectTaskIntentDrafts: { input: InspectTaskIntentDraftsInput; output: TaskIntentDraftsProjection };
+  /** 准备任务 in the composer, or 保存修改 on a draft: a new version; nothing is sent and no Task is made. */
+  saveTaskIntentDraft: { input: SaveTaskIntentDraftInput; output: TaskIntentDraftProjection };
+  /** 准备计划 on a draft: the existing preparation of the kind it resolves to, as one cooperative job; still needs 开始任务. */
+  promoteTaskIntentDraft: { input: PromoteTaskIntentDraftInput; output: ServiceJobProjection };
+  /** 转为任务意图草稿 (DIALOG-016): a draft from a completed dialogue answer, with its provenance; nothing is sent. */
+  promoteAnswerToTaskIntentDraft: { input: PromoteAnswerToTaskIntentDraftInput; output: TaskIntentDraftProjection };
   /** Whether 润色这段 and 基于当前稿件重新生成建议 can be asked for the Book under this launch (Issue #842): a read. */
   inspectFastInteractionRoutes: { input: { bookId: string }; output: FastInteractionRoutesProjection };
   /** 润色这段 (Issue #842): the selected words to the Fast Interaction Role; its answer becomes open 修改建议, never applied. */
@@ -13509,6 +14178,21 @@ export interface RendererApi {
   inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection>;
   /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): names no Book. */
   inspectCapturedProcedures(): Promise<CapturedProceduresProjection>;
+  /** `{ kind }` opens the platform picker and discloses what it chose, keeping nothing; `{ keep }` keeps that disclosure. */
+  importSkillPackage(input?: { kind: 'zip' | 'directory' } | { keep: string }): Promise<ImportedSkillImportProjection | null>;
+  validateImportedSkill(input: { revisionId: string }): Promise<ImportedSkillRevisionProjection>;
+  installImportedSkill(input: { revisionId: string; previewDigest: string }): Promise<ImportedSkillRevisionProjection>;
+  enableImportedSkill(input: { revisionId: string; bookId: string; previewDigest: string }): Promise<ImportedSkillRevisionProjection>;
+  inspectImportedSkills(input: { revisionId: string | null; before: string | null }): Promise<ImportedSkillsProjection>;
+  /** 检查更新（从文件）…: the picker opens in main, for the Skill named; `keep` keeps the disclosed package as a candidate. */
+  checkImportedSkillUpdate(input: { skillId: string; kind: 'zip' | 'directory' } | { skillId: string; keep: string }): Promise<ImportedSkillUpdateCheckProjection | null>;
+  inspectImportedSkillUpdate(input: { candidateId: string }): Promise<ImportedSkillUpdateCandidateProjection>;
+  adoptImportedSkillUpdate(input: { candidateId: string; reviewDigest: string; acceptItems: readonly string[]; upstreamPaths: readonly string[] }): Promise<ImportedSkillUpdateCandidateProjection>;
+  dismissImportedSkillUpdate(input: { candidateId: string }): Promise<ImportedSkillUpdateCandidateProjection>;
+  createImportedSkillUpdateRule(input: { skillId: string; confirmation: string }): Promise<ImportedSkillUpdateRuleProjection>;
+  revokeImportedSkillUpdateRule(input: { skillId: string }): Promise<ImportedSkillUpdateRuleProjection>;
+  rollbackImportedSkill(input: { skillId: string; revisionId: string }): Promise<ImportedSkillRevisionProjection>;
+  recommendProcedures(input: Omit<ProcedureRecommendationInput, 'bookId'>): Promise<ProcedureRecommendationProjection>;
   inspectCapturedProcedure(input: { procedureId: string; before: number | null }): Promise<CapturedProcedureProjection>;
   inspectDeveloperProposal(input: { proposalId: string; before: number | null }): Promise<DeveloperProposalProjection>;
   /** The current Book's finished Review Run as a capture's source (ADR 0087 §2). */
@@ -13528,6 +14212,13 @@ export interface RendererApi {
    * or, with `scope: 'selection'`, as each applies to a 当前选区 of it, for the selection menu (Issue #423, S77 deferred item a).
    */
   inspectCapturedProcedureApplicability(input?: { scope?: CapturedProcedureScopeSlot | null }): Promise<CapturedProcedureApplicabilityProjection>;
+  /** 知识库's dimensions (`forBook: false`), or the current Book's 自定义 tab (`forBook: true`) (Issue #922). */
+  inspectCustomAnalysisDimensions(input: { forBook: boolean }): Promise<CustomAnalysisDimensionsProjection>;
+  saveCustomAnalysisDimension(input: SaveCustomAnalysisDimensionInput): Promise<CustomAnalysisDimensionsProjection>;
+  enableCustomAnalysisDimension(input: { versionId: string }): Promise<CustomAnalysisDimensionsProjection>;
+  stopCustomAnalysisDimension(input: { versionId: string }): Promise<CustomAnalysisDimensionsProjection>;
+  /** The current Book's Task of one dimension; the window's route names the Book. */
+  prepareCustomAnalysis(input: Omit<PrepareCustomAnalysisInput, 'bookId'>): Promise<{ taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection }>;
   saveDeveloperProposal(input: SaveDeveloperProposalInput): Promise<DeveloperProposalProjection>;
   /** 导出为文件…: the platform Save dialog, then the file; nothing is written or recorded when the dialog is cancelled. */
   saveDeveloperProposalFile(input: { proposalVersionId: string }): Promise<SaveDeveloperProposalFileOutcome>;
@@ -13567,7 +14258,7 @@ export interface RendererApi {
   startEvaluation(input?: StartEvaluationInput): Promise<EvaluationWorkspaceProjection>;
   saveEvaluation(input: { recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean }): Promise<EvaluationWorkspaceProjection>;
   /** 准备 AI7 初评: an `initial-evaluation-preparation` job, followed with `pollServiceJob`; its plan opens in the Task Drawer. */
-  prepareInitialEvaluation(input?: { materialIds?: ReadonlyArray<string> }): Promise<ServiceJobProjection>;
+  prepareInitialEvaluation(input?: { materialIds?: ReadonlyArray<string>; seriesId?: string | null }): Promise<ServiceJobProjection>;
   /** The Task Drawer bar's 开始任务 for AI7's 初评. */
   authorizeInitialEvaluation(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 起草审稿意见 (Issue #429, S81c): a `readers-report-preparation` job; its plan opens in the Task Drawer. */
@@ -13777,6 +14468,11 @@ export interface RendererApi {
   continueDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
   regenerateDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
   convertDialogueToChangeSuggestion(input: ConvertDialogueToChangeSuggestionInput): Promise<DialogueConversionProjection>;
+  /** The Task Intent Drafts of the Book this window shows (Issue #423, slice 7a): a read. */
+  inspectTaskIntentDrafts(input: Omit<InspectTaskIntentDraftsInput, 'bookId'>): Promise<TaskIntentDraftsProjection>;
+  saveTaskIntentDraft(input: Omit<SaveTaskIntentDraftInput, 'bookId'>): Promise<TaskIntentDraftProjection>;
+  promoteTaskIntentDraft(input: Omit<PromoteTaskIntentDraftInput, 'bookId'>): Promise<ServiceJobProjection>;
+  promoteAnswerToTaskIntentDraft(input: Omit<PromoteAnswerToTaskIntentDraftInput, 'bookId'>): Promise<TaskIntentDraftProjection>;
   /** Whether 润色这段 and 基于当前稿件重新生成建议 can be asked for the Book this window shows (Issue #842): a read. */
   inspectFastInteractionRoutes(): Promise<FastInteractionRoutesProjection>;
   /** 润色这段 on the Book this window shows (Issue #842): only the selected words and their paragraph's context are sent. */
