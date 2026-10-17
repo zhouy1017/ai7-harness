@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { DiagnosticsApi } from './diagnostics.js';
 import {
   IPC_CHANNELS,
   MAIN_EVENTS,
@@ -181,6 +182,9 @@ if (process.platform !== 'win32' && process.platform !== 'darwin') throw new Err
 
 // Local view and input configuration (Issue #934, slice 11a) rides beside the service's members: main-owned, no protocol op.
 const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi = Object.freeze({
+  listCrashRecords: () => invoke<Awaited<ReturnType<DiagnosticsApi['listCrashRecords']>>>('ai7:diagnostics:list-crashes'),
+  exportDiagnosticsBundle: () => invoke<Awaited<ReturnType<DiagnosticsApi['exportDiagnosticsBundle']>>>('ai7:diagnostics:export'),
+  revealDiagnosticsLocation: () => invoke<Awaited<ReturnType<DiagnosticsApi['revealDiagnosticsLocation']>>>('ai7:diagnostics:reveal'),
   platform: process.platform,
   getStartup: () => invoke<ServiceOperationMap['getStartup']['output']>(IPC_CHANNELS.getStartup),
   getRecoveryComparison: (input: ServiceOperationMap['getRecoveryComparison']['input']) =>

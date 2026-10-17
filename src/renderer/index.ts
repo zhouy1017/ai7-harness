@@ -11,6 +11,8 @@ import {
   APPEARANCE_TITLE,
 } from './appearance-labels.js';
 import { renderHouseReviewPreference } from './knowledge-base-memory.js';
+import { mountDiagnostics } from './diagnostics.js';
+import { DIAGNOSTICS_OPENED } from './diagnostics-labels.js';
 import { mountEditQualitySignals } from './quality-learning.js';
 import { mountProposalWorkspace } from './proposal-workspace.js';
 import { renderEvaluationProfiles } from './evaluation-profiles.js';
@@ -5062,6 +5064,13 @@ function renderBookCreationForm(): void {
   queueMicrotask(() => title.focus());
 }
 
+function renderDiagnostics(): void {
+  const content = panel();
+  mountDiagnostics(content, window.ai7, () => void returnToLibrary());
+  replaceScreen('diagnostics', content);
+  setStatus(DIAGNOSTICS_OPENED);
+}
+
 async function renderDataAndStorage(): Promise<void> {
   setStatus('正在读取本机数据位置…', 'busy');
   try {
@@ -6092,6 +6101,7 @@ function renderSettingsHub(): void {
     'evaluation-calibration': () => void renderEvaluationCalibration(null),
     'data-storage': () => void renderDataAndStorage(),
     appearance: renderAppearance,
+    diagnostics: renderDiagnostics,
   };
   for (const group of SETTINGS_HUB_GROUPS) {
     const section = element('section', 'settings-group');

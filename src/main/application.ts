@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { release } from 'node:os';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import {
   app,
@@ -18,6 +18,7 @@ import {
 } from 'electron';
 import {
   IPC_CHANNELS,
+  SERVICE_PROTOCOL_VERSION,
   J04_MODEL_ADAPTER_CONTROL_PATTERN,
   MAIN_EVENTS,
   PROVIDER_CACHE_ROOT_ARGUMENT,
@@ -85,6 +86,8 @@ import {
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
 import { developerProposalFileName } from '../shared/developer-proposal.js';
+import { CrashRecords, crashHook, installCrashHooks } from './crash-records.js';
+import { DIAGNOSTICS_CHANNELS, writeDiagnosticsBundle } from './diagnostics.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
@@ -108,6 +111,7 @@ interface LaunchArguments {
   injectedSavePath: string | undefined;
   /** J-07's answer to the folder dialog of a 图书交付包 export (Issue #416, S67b): single-use, like the Save dialog's. */
   injectedFolderPath: string | undefined;
+  injectedDiagnosticsFolder: string | undefined;
   importControl: J01ImportControl | undefined;
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
@@ -232,6 +236,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j13-picker-path' ||
           key === '--j07-save-path' ||
           key === '--j07-folder-path' ||
+          key === '--j12-diagnostics-folder' ||
           key === '--j04-save-path' ||
           key === '--j12-save-path' ||
           key === '--j11-save-path' ||
@@ -389,6 +394,9 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(applyControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-05' && applyControl !== undefined));
   const observeJ12RevealValue = values.get('--j12-observe-reveal');
   const observeJ12Reveal = observeJ12RevealValue === 'true';
+  const injectedDiagnosticsFolder = values.get('--j12-diagnostics-folder');
+  requireDesktop(injectedDiagnosticsFolder === undefined ||
+    (process.env.AI7_E2E_JOURNEY === 'J-12' && isAbsolute(injectedDiagnosticsFolder)));
   const launcherPid = Number(values.get('--launcher-pid'));
   requireDesktop(
     importControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-01' && importControl !== undefined),
@@ -444,7 +452,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     launchForm.trustedOperationalScope === 'development-ci' ||
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
-        applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && connectivityPath === undefined &&
+        applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && injectedDiagnosticsFolder === undefined && connectivityPath === undefined &&
         unitHoldPath === undefined && answerHoldPath === undefined && backgroundQuietValue === undefined && calibrationMinBooksValue === undefined),
   );
   return {
@@ -453,6 +461,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     injectedPickerPath,
     injectedSavePath,
     injectedFolderPath,
+    injectedDiagnosticsFolder,
     importControl,
     foregroundExecutionControl,
     recoveryControl,
@@ -5994,6 +6003,17 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, earlyUserDataSwitch, app.getPath('userData'));
     app.setPath('userData', shellRoot);
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
+    // Like the service's version owner, read this application's package rather than Electron's fallback app version.
+    const softwareVersion = (JSON.parse(await readFile(resolve(codeRoot, 'package.json'), 'utf8')) as { version: string }).version;
+    const crashFacts = () => ({
+      appVersion: softwareVersion, dataVersion: 83, protocol: SERVICE_PROTOCOL_VERSION,
+      platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
+      uptimeSeconds: process.uptime(),
+    });
+    const crashes = new CrashRecords(shellRoot, crashFacts);
+    crashes.ensureDirectory();
+    const removeCrashHooks = installCrashHooks(crashes, app, process, terminate);
+    app.once('will-quit', removeCrashHooks);
     startupLocation = reachStartup('single-instance');
     if (!app.requestSingleInstanceLock()) {
       process.stderr.write('AI7_STARTUP_FAILED/single-instance-lock\n');
@@ -6031,6 +6051,7 @@ export async function runApplication(): Promise<void> {
       launch.calibrationMinBooks,
     );
     service.onUnexpectedExit(() => {
+      crashHook(crashes, 'service-exit', () => undefined)({ reason: 'abnormal-exit' });
       serviceInterrupted = true;
       if (!productReady) {
         terminate();
@@ -6117,7 +6138,8 @@ export async function runApplication(): Promise<void> {
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       window.webContents.on('will-navigate', (event) => event.preventDefault());
       window.webContents.on('will-attach-webview', (event) => event.preventDefault());
-      window.webContents.on('render-process-gone', terminate);
+      window.webContents.on('render-process-gone', (_event, detail) =>
+        crashHook(crashes, 'render-process-gone', terminate)(detail));
       window.on('close', (event: ElectronEvent) => {
         if (!quitting && owned.closeRisk) {
           event.preventDefault();
@@ -6237,6 +6259,51 @@ export async function runApplication(): Promise<void> {
       shell.showItemInFolder(dataRoot);
       return { state: 'requested', nativeRevealSuppressedForE2e: false };
     };
+    // The preference owner (Issue #934) is the only reader of preferences.json; diagnostics takes its validated projection.
+    const preferenceStore = createPreferenceStore(shellRoot);
+    // Main-only, zero-argument operations: the renderer supplies neither a source nor an output path.
+    const requireDiagnosticsSender = (event: IpcMainInvokeEvent): OwnedRendererWindow => {
+      const owned = getOwnedWindow(event);
+      requireDesktop(!owned.window.isDestroyed() && event.senderFrame === owned.window.webContents.mainFrame,
+        'AI7_RENDERER_BOUNDARY_INVALID');
+      return owned;
+    };
+    let diagnosticsFolderPending = launch.injectedDiagnosticsFolder;
+    ipcMain.handle(DIAGNOSTICS_CHANNELS.listCrashRecords, (event) => envelope(() => {
+      requireDiagnosticsSender(event);
+      return crashes.list();
+    }));
+    ipcMain.handle(DIAGNOSTICS_CHANNELS.revealDiagnosticsLocation, (event) => envelope(() => {
+      requireDiagnosticsSender(event);
+      crashes.ensureDirectory();
+      if (!launch.observeJ12Reveal) shell.showItemInFolder(crashes.directory);
+      return { state: 'requested' as const };
+    }));
+    ipcMain.handle(DIAGNOSTICS_CHANNELS.exportDiagnosticsBundle, (event) => envelope(async () => {
+      const owned = requireDiagnosticsSender(event);
+      let parent = diagnosticsFolderPending;
+      diagnosticsFolderPending = undefined;
+      if (parent === undefined) {
+        const chosen = await dialog.showOpenDialog(owned.window, {
+          title: '选择诊断包保存位置', buttonLabel: '保存到此文件夹', defaultPath: app.getPath('documents'),
+          properties: ['openDirectory', 'createDirectory'],
+        });
+        if (chosen.canceled || chosen.filePaths.length !== 1) return { state: 'cancelled' as const };
+        parent = chosen.filePaths[0];
+      }
+      requireDesktop(parent !== undefined && isAbsolute(parent));
+      // Read the shipped policy set, never infer its version from the source branch or preferences.
+      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v15.json'), 'utf8')) as { version: string };
+      await writeDiagnosticsBundle(parent, {
+        facts: { ...crashFacts(), policySetVersion: policySet.version, node: process.versions.node,
+          locale: app.getLocale(), windowCount: ownedWindows.size },
+        crashes: crashes.list(), preferences: (({ version, values }) => ({ version, values }))(preferenceStore.read()),
+      });
+      return { state: 'exported' as const };
+    }));
+    app.once('will-quit', () => {
+      for (const channel of Object.values(DIAGNOSTICS_CHANNELS)) ipcMain.removeHandler(channel);
+    });
     let protectedSecretStore: ProtectedSecretStore | undefined;
     try {
       protectedSecretStore = await openProtectedSecretStore();
@@ -6535,7 +6602,7 @@ export async function runApplication(): Promise<void> {
         return 'quitting';
       },
       () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
-      createPreferenceStore(shellRoot),
+      preferenceStore,
       () => ownedWindows.values(),
     );
     startupLocation = reachStartup('renderer-first-paint');

@@ -43,6 +43,9 @@ declare module 'electron' {
     show(): void;
   }
   export const app: {
+    // Diagnostics metadata and fatal-hook cleanup (Issue #938).
+    getLocale(): string;
+    once(event: string, listener: (...args: any[]) => void): void;
     commandLine: { getSwitchValue(name: string): string };
     enableSandbox(): void;
     getPath(name: 'userData' | 'documents'): string;
