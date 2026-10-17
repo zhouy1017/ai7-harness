@@ -17,7 +17,7 @@ import {
   IMPORTED_MARKS_RECIPE,
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
-import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, sidebarNavigate } from './controller.mjs';
+import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { classifyBrowserLaunchMiss, classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, observeLaunchStart, probeStalledProduct, readBrowserLog, sampleProductProcesses, waitingForService } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -97,6 +97,9 @@ async function requireTracedReadiness() {
     await new Promise((settle) => setTimeout(settle, 50));
   }
 }
+
+/** The J-14 dark pass runs once per J-01 run, on the first manuscript it opens. */
+let j14DarkPassDone = false;
 
 function at(location) {
   diagnosticLocation = location;
@@ -1761,6 +1764,12 @@ async function runJourney(
   );
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor-screen');
+  // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+  if (!j14DarkPassDone) {
+    j14DarkPassDone = true;
+    await runJ14DarkPass({ renderer, journey: 'J-01', at, representative: '#screen[data-screen="editor"] .editor-window', returnTo: SIDEBAR.section('manuscript') });
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor-screen-after-dark-pass');
+  }
   at('editor');
   await assertRenderer(
     renderer,

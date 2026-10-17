@@ -61,6 +61,18 @@ describe('application appearance', () => {
     } finally { uninstall(); }
   });
 
+  it('runs the J-14 dark pass from every runner exactly once, on a named representative screen', () => {
+    const e2e = new URL('../../e2e/', import.meta.url);
+    const runners = readdirSync(e2e).filter((name) => /^run-j\d\d\.mjs$/u.test(name));
+    expect(runners).toHaveLength(15);
+    for (const runner of runners) {
+      const source = readFileSync(new URL(runner, e2e), 'utf8');
+      const calls = source.match(/await runJ14DarkPass\(\{[^\n]*/gu) ?? [];
+      expect(calls, runner).toHaveLength(1);
+      expect(calls[0], runner).toContain(`journey: 'J-${runner.slice(5, 7)}'`);
+    }
+  });
+
   it('keeps the theme and the preference file out of every service module, so no record, export or model context can read them', () => {
     const service = new URL('../../src/service/', import.meta.url);
     const files = readdirSync(service, { recursive: true, encoding: 'utf8' }).filter((path) => path.endsWith('.ts'));

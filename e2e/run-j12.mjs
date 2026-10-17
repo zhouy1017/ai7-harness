@@ -7,7 +7,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY } from './controller.mjs';
+import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 
@@ -1230,6 +1230,13 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-service-open-settings-hub');
     await click(primary, '模型服务', 'model-service-open');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready');
+    // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .panel', returnToScreen: async () => {
+      await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dark-pass-return-settings');
+      await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dark-pass-return-settings-hub');
+      await click(primary, '模型服务', 'dark-pass-return-model-service');
+    } });
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready-after-dark-pass');
     await assertRenderer(primary, `(() => {
       const roles=Array.from(document.querySelectorAll('[data-model-role]'));
       const ids=roles.map((node)=>node.dataset.modelRole);

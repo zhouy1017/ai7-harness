@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-10 (Issue #422, plan slices S76a to S76d; Issue #51, S16a and S16b): the operations on a Run under way, told apart by
@@ -820,6 +820,9 @@ async function main() {
     at('run-under-way');
     // 开始任务 from the drawer: the drawer follows the Run, two ranges settle, and the third stays in flight.
     await openAnalysisOf(renderer, bookId, 'analysis');
+    // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+    await runJ14DarkPass({ renderer, journey: 'J-10', at, representative: '#screen[data-screen="book-analysis"] > .panel', returnTo: SIDEBAR.section('analysis') });
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookId)}] .baseline-analysis-card')`, 'analysis-after-dark-pass');
     await startFirstBaseline(renderer, 'ready', 'baseline');
     await waitFor(renderer, runningWith(FIRST_HOLD), 'third-range-in-flight', 180_000);
     const executing = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);

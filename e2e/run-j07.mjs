@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { openRemainingPackageExport } from './package-export-readiness.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
@@ -951,6 +951,9 @@ async function main() {
     at('deliverables-before-milestone');
     // Before any milestone 设为发稿版本 is there, unavailable, with its reason in words beside it (PUB-002).
     await openDeliverables(renderer, 'before-milestone');
+    // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+    await runJ14DarkPass({ renderer, journey: 'J-07', at, representative: '#screen[data-screen="book-deliverables"] > .panel', returnTo: SIDEBAR.section('deliverables') });
+    await waitForDeliverables(renderer, 'before-milestone-after-dark-pass');
     await assertRenderer(renderer, `(() => {
       const page = document.querySelector('[data-screen="book-deliverables"] > .book-deliverables');
       const block = window.__j07.block();

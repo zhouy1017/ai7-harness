@@ -6,7 +6,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_ICONS_ONLY, SIDEBAR_LIBRARY_READY, sidebarNavigate } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_ICONS_ONLY, SIDEBAR_LIBRARY_READY, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-09 (Issue #424, plan slice S78): 待我处理 — a cross-Book attention view (editor-surfaces §8.1, V2-UX-ATTN-001
@@ -1036,6 +1036,9 @@ async function main() {
 
     at('attention-groups');
     await openAttention(renderer, 'attention');
+    // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+    await runJ14DarkPass({ renderer, journey: 'J-09', at, representative: '#screen[data-screen="global-attention"] > .panel', returnTo: SIDEBAR.destination('attention') });
+    await waitAttentionPainted(renderer, 'attention-after-dark-pass');
     // The service's answer once nothing is in flight, and the page come to say exactly it: the screen paints
     // the reader's last answer at once and the fresh one as soon as it arrives.
     const service = await readSettledAttention(renderer);

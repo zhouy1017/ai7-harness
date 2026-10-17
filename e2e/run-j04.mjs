@@ -4,7 +4,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // Supported-journey scenario: J-04 covered baseline manuscript analysis (Issue #92, bounded S36 slice)
@@ -1190,6 +1190,9 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(imported.bookId)}] .book-analysis-summary[data-analysis-state="available"] [data-analysis-action="open-analysis"]') && !document.querySelector('.baseline-analysis-card')`, 'book-reopened');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'book-reopened-open-analysis');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-analysis');
+    // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+    await runJ14DarkPass({ renderer, journey: 'J-04', at, representative: '#screen[data-screen="book-analysis"] > .panel', returnTo: SIDEBAR.section('analysis') });
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-analysis-after-dark-pass');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="available"]')`, 'analysis-available');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const goal=card?.querySelector('#j04-analysis-goal'); const start=card?.querySelector('[data-analysis-action="prepare"]'); return goal instanceof HTMLInputElement && goal.readOnly && goal.value===${JSON.stringify(TASK_GOAL)} && start instanceof HTMLButtonElement && !start.disabled && start.textContent==='开始基线稿件分析' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'analysis-available-surface');
 

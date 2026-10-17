@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 
 // J-06 (Issue #57, plan slice S22; ADR 0085): 稿件冲突 of a single 修改建议. An editor types inside the words
 // a suggestion would replace; the suggestion says 原文已变, 接受并应用 is blocked, and 解决冲突… opens 稿件冲突
@@ -356,6 +356,9 @@ async function importAndOpen(renderer, title) {
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'import-acknowledged', 180_000);
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'import-editor');
+  // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+  await runJ14DarkPass({ renderer, journey: 'J-06', at, representative: '#screen[data-screen="editor"] .editor-window', returnTo: SIDEBAR.section('manuscript') });
+  await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'import-editor-after-dark-pass');
 }
 
 /** Wait until nothing typed is waiting for the journal, and no command is in flight. */
