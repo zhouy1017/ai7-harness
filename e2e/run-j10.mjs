@@ -1547,8 +1547,12 @@ async function main() {
     'budget-raised', { ceiling: raisedPlan?.providerResolutionPlan?.runBudgetCeiling ?? null, diff: raisedDiff });
 
     at('budget-redo-completed');
+    // The quiet completion notice (Issue #937; NOTIF-003): a focused window, and a probe that records each showing and hiding
+    // of the one notice, so its six seconds are read from the page and not raced by the steps below.
     await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-    const countBeforeQuietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.actionableCount)`);
+    const beforeQuietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => ({ count: projection.actionableCount, stop: projection.groups.some((group) => ['exceptions', 'decisions'].includes(group.key) && group.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-budget-reached')) }))`);
+    await waitFor(renderer, `document.querySelector('[data-quiet-completion-notice]')?.hidden === true`, 'quiet-completion-idle', 10_000);
+    await assertRenderer(renderer, `(() => { const notice = document.querySelector('[data-quiet-completion-notice]'); if (!notice || !notice.hidden) return false; const probe = { shown: [], hiddenAt: null }; const observer = new MutationObserver(() => { const visible = !notice.hidden; const last = probe.shown.at(-1); if (visible && (last === undefined || last.hiddenAt !== null)) probe.shown.push({ at: performance.now(), hiddenAt: null, noticeClass: notice.dataset.noticeClass ?? null, text: notice.querySelector('[role="status"]')?.textContent ?? null }); if (!visible && last !== undefined && last.hiddenAt === null) last.hiddenAt = performance.now(); }); observer.observe(notice, { attributes: true, childList: true, characterData: true, subtree: true }); globalThis.__j10QuietNotice = { probe, stop: () => observer.disconnect() }; return true; })()`, 'quiet-completion-probe');
     // 开始任务: the redo reads the four ranges left, and the reduction after them, under 20,000 tokens, to its end — the
     // Book's analysis whole again, and 待我处理 no longer naming the stop.
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'budget-redo-start');
@@ -1564,10 +1568,16 @@ async function main() {
     requireJourney(settledAttention?.groups?.every((group) => group.items.every((entry) => entry.state !== 'analysis-budget-reached')) === true, 'budget-left-attention', settledAttention?.groups ?? null);
 
     at('quiet-completion-notice');
-    await waitFor(renderer, `(() => { const notice = document.querySelector('[data-quiet-completion-notice]'); return notice && !notice.hidden && notice.dataset.noticeClass === 'analysis-completed' && notice.querySelector('[role="status"]')?.textContent === '任务结果已记录'; })()`, 'quiet-completion-visible', 30_000);
-    const quietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => ({ count: projection.actionableCount, recent: projection.groups.find((group) => group.key === 'recent')?.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-completed'), visible: [...document.querySelectorAll('[data-quiet-completion-notice]')].filter((notice) => !notice.hidden).length }))`);
-    requireJourney(quietCompletion.visible === 1 && quietCompletion.recent === true && quietCompletion.count === countBeforeQuietCompletion, 'quiet-completion-notice', quietCompletion);
-    await waitFor(renderer, `document.querySelector('[data-quiet-completion-notice]')?.hidden === true`, 'quiet-completion-dismissed', 8_000);
+    // One notice, in Task Outcome words (never 任务已完成), dismissed by itself within its six seconds; the completion stays in
+    // 最近完成 and adds nothing to the count — it falls only by the stop the redo settled, if that was still counted.
+    await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.length > 0`, 'quiet-completion-shown', 30_000);
+    await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.at(-1).hiddenAt !== null`, 'quiet-completion-dismissed', 10_000);
+    const quietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => { const { probe, stop } = globalThis.__j10QuietNotice; stop(); delete globalThis.__j10QuietNotice; return { count: projection.actionableCount, recent: projection.groups.find((group) => group.key === 'recent')?.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-completed') ?? false, notices: document.querySelectorAll('[data-quiet-completion-notice]').length, shown: probe.shown.map((entry) => ({ noticeClass: entry.noticeClass, text: entry.text, ms: Math.round(entry.hiddenAt - entry.at) })) }; })`);
+    const quietShown = quietCompletion.shown[0];
+    requireJourney(quietCompletion.notices === 1 && quietCompletion.shown.length === 1 && quietShown.noticeClass === 'analysis-completed' && quietShown.text === '任务结果已记录' &&
+      quietShown.ms >= 5_500 && quietShown.ms <= 8_000 && quietCompletion.recent === true &&
+      quietCompletion.count === beforeQuietCompletion.count - (beforeQuietCompletion.stop ? 1 : 0),
+    'quiet-completion-notice', { before: beforeQuietCompletion, after: quietCompletion });
     await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
 
     // ---- 模型服务账户限额 (Issue #51, S16b; MODEL-018, RUN-012) -------------------------------------------------------
