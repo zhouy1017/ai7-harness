@@ -89,6 +89,8 @@ const EXPORT_MEMBERS = [
   'reviewBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'approveBookDeliveryPackageExport', 'cancelBookDeliveryPackageExport',
   // Synchronized delta with Issue #434 (S86a): 导出数据库's three, house-wide, and since its review 取消导出, which only stops one.
   'chooseDatabaseExportDestination', 'approveDatabaseExport', 'inspectDatabaseExports', 'cancelDatabaseExport',
+  // Synchronized delta with Issue #938: 诊断's folder export, main-only, of crash records and redacted metadata, never a manuscript.
+  'exportDiagnosticsBundle',
 ];
 // Synchronized delta with Issue #417: 审阅's seven members. None is named like an execution, effect,
 // apply or export member, so the two pins below hold them without an exception.

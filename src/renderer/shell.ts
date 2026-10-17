@@ -65,6 +65,7 @@ const SCREEN_ACTIVE: Readonly<Record<string, ShellActive>> = Object.freeze({
   'model-service': { kind: 'settings' },
   'data-storage': { kind: 'settings' },
   'evaluation-calibration': { kind: 'settings' },
+  diagnostics: { kind: 'settings' },
 });
 
 /** The import steps, which belong to 书库 though no Book is open yet. */

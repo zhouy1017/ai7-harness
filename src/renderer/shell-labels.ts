@@ -72,6 +72,7 @@ export const SETTINGS_PAGE_TITLES: Readonly<Record<string, string>> = Object.fre
   'model-service': '服务 · 模型服务',
   'data-storage': '本机 · 数据与存储',
   'evaluation-calibration': '编辑工作 · 评估校准与预测',
+  diagnostics: '本机 · 诊断',
 });
 
 const SECTION_LABELS: Readonly<Record<ShellBookSection, string>> = Object.freeze(Object.fromEntries(
