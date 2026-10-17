@@ -231,7 +231,7 @@ export interface ReviewWorkspaceSurface {
   destroy(): void;
 }
 
-type ReviewApi = Pick<
+type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries'>> & Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' |
   'inspectTaskPlan' | 'quickStartReviewRun' | 'searchReferableMaterials' |
@@ -317,6 +317,8 @@ interface BatchStrip {
 type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
 
 interface SheetState {
+  seriesId: string | null;
+  readonly seriesChoices: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>;
   readonly recommendation: ProcedureRecommendationSelection;
   readonly materialIds: Set<string>;
   readonly categories: Set<string>;
@@ -1927,9 +1929,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     } catch {
       procedures = [];
     }
+    let seriesChoices: SheetState['seriesChoices'] = [];
+    try { seriesChoices = (await api.inspectBookSeries?.({ bookId: options.bookId, membershipsAfter: null }))?.memberships ?? []; } catch { /* no selection is offered without a reading */ }
     sheetOpening = false;
     if (destroyed || projection === null || sheet.open) return;
     sheetState = {
+      seriesId: null,
+      seriesChoices,
       recommendation: new ProcedureRecommendationSelection(),
       categories: new Set(prefill?.categories ?? []),
       materialIds: new Set(),
@@ -1983,6 +1989,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // The choice settles into the sheet in one composed step (Issue #705 item 3): a reason is announced once, on the sheet's alert
     // line, and the status bar never repeats it (Issue #691).
     const settled = settleProcedureChoice(state, ticket, outcome, versionId !== null);
+    if (state.procedure !== null && state.procedure.resolved?.runSourceScope !== 'series') state.seriesId = null;
     if (settled.status !== null) options.setStatus(settled.status);
     renderSheet(projection, state);
     // Back on the selector the editor used, while the sheet still shows it.
@@ -2150,6 +2157,18 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     scopes.append(range);
 
     const { field: materialField, inputs: materialInputs, items: materialItems } = reviewMaterialsField(workspace.materials, state, updateSheet);
+    if (state.seriesChoices.length > 0 && (state.procedure === null || state.procedure.resolved?.runSourceScope === 'series')) {
+      const row = el('label', 'review-field');
+      row.append(el('span', undefined, '参考什么'));
+      const select = el('select');
+      select.dataset['reviewField'] = 'series-scope';
+      select.append(new Option('仅本书，不参考书系知识', ''));
+      for (const series of state.seriesChoices) select.append(new Option(`允许参考 · 书系《${series.title}》的知识条目`, series.seriesId));
+      select.value = state.seriesId ?? '';
+      select.addEventListener('change', () => { state.seriesId = select.value || null; state.problem = null; updateSheet(); });
+      row.append(select, el('small', 'field-note', '仅供任务明确选用；只有当前策略开放书系知识时才能开始。'));
+      materialField.append(row);
+    }
     materialField.append(similarMaterialsField(api, workspace.bookId, materialItems, state.materialIds, (materialId) => {
       state.materialIds.add(materialId); state.problem = null; updateSheet();
     }));
@@ -2295,6 +2314,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     options.setStatus(REVIEW_STATUS_LINES.preparing, 'busy');
     try {
       const initial = await api.prepareReviewRun({
+        ...(state.seriesId === null ? {} : { seriesId: state.seriesId }),
         categoryIds,
         scope,
         ...(state.materialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(projection.materials?.items ?? [], state.materialIds) }),

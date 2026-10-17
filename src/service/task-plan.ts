@@ -1,4 +1,6 @@
 import { housePreferenceLabel } from './house-review-preference.js';
+import type { FrozenSeriesScope } from '../shared/protocol.js';
+
 import { researchDecisionLine } from '../shared/research-status.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import { materialSettledReason, taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
@@ -43,6 +45,15 @@ import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contrac
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
 import { WRITING_COPY_SIZES, WRITING_COPY_SIZES_V1, WRITING_EXEMPLAR_MOVED, type WritingCopyRules, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
 import type { WritingMaterialSource } from './writing-tasks.js';
+
+export function seriesScopePlan(plan: TaskPlanProjection, scopes?: ReadonlyArray<FrozenSeriesScope>): TaskPlanProjection {
+  if (scopes === undefined || scopes.length === 0) return plan;
+  return { ...plan, seriesScopes: scopes, scope: { ...plan.scope,
+    reference: [...plan.scope.reference, ...scopes.map((scope) => `允许参考 · 书系《${scope.title}》的知识条目`)],
+    notRead: plan.scope.notRead.replace('不读这本书以外的内容', '不读允许参考范围以外的内容'),
+  }, technical: [...plan.technical, ...scopes.map((scope) => ({ key: `series-scope:${scope.seriesId}`, label: '书系参考范围',
+    value: `《${scope.title}》 · ${scope.seriesId} · ${scope.members.length} 本成员图书的主稿件版本：${scope.members.map((member) => `${member.bookId} / ${member.revisionId ?? '暂无主稿件'}`).join('；')} · ${scope.knowledge.length} 个知识版本：${scope.knowledge.map((item) => `${item.itemId} / ${item.revisionId} / ${item.digest}`).join('；')} · ${scope.exclusions.length} 条检索排除版本：${scope.exclusions.map((entry) => `${entry.exclusionId} / ${entry.revisionId} / ${entry.version}`).join('；')}` }))] };
+}
 
 /**
  * The Task Drawer's plan projection (Issue #418, plan slice S72; editor-surfaces §6 ③, V2-UX-PLAN-001 to

@@ -61,7 +61,7 @@ async function withSession(fixtureIdentity: string, body: (session: Session) => 
   });
   const owner = new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
-    readGuard: (runRecordId) => store.seriesReadGuard(runRecordId), ...(capacity === undefined ? {} : { capacity }),
+    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId), ...(capacity === undefined ? {} : { capacity }),
   });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   try {

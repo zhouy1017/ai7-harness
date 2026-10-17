@@ -269,6 +269,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
   root.classList.add('evaluation');
   const initialMaterialIds = new Set<string>();
+  let seriesId: string | null = null;
   const reportMaterialIds = new Set<string>();
   let busy = false;
   let workspace: EvaluationWorkspaceProjection | null = null;
@@ -461,6 +462,20 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     section.append(heading, el('p', 'field-note', EVALUATION_AI7_LEDE));
     const initialBlocked = page.materialReferences?.blocked.initial === true;
     section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked)));
+    if (initial.task?.historicalMarker !== undefined) section.append(el('p', 'field-note', initial.task.historicalMarker));
+    if (page.market.series.length > 0 && initial.prepare.allowed) {
+      const row = el('label', 'evaluation-field');
+      row.append(el('span', undefined, '参考什么'));
+      const select = el('select');
+      select.dataset['evaluationField'] = 'series-scope';
+      select.append(new Option('仅本书，不参考书系知识', ''));
+      for (const series of page.market.series) select.append(new Option(`允许参考 · 书系《${series.title}》的知识条目`, series.seriesId));
+      select.value = seriesId ?? '';
+      select.disabled = busy;
+      select.addEventListener('change', () => { seriesId = select.value || null; });
+      row.append(select);
+      section.append(row);
+    }
     if (initial.task !== null) section.append(el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task)));
     const latest = initial.latest;
     const initialProfile = latest?.profile ?? page.profile;
@@ -894,7 +909,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     setStatus(EVALUATION_AI7_STATUS.preparing, 'busy');
     paint(null, true);
     try {
-      const job = await api.prepareInitialEvaluation(initialMaterialIds.size === 0 ? undefined : { materialIds: taskMaterialSelection(workspace.materials?.items ?? [], initialMaterialIds) });
+      const job = await api.prepareInitialEvaluation({ ...(seriesId === null ? {} : { seriesId }),
+        ...(initialMaterialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(workspace.materials?.items ?? [], initialMaterialIds) }) });
       const completed = await options.awaitServiceJob(job, (next) => setStatus(next.progress.label, 'busy'));
       busy = false;
       if (completed.state === 'cancelled') {

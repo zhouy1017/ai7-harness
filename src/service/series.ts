@@ -198,7 +198,7 @@ export interface StoredMembershipChange {
 export interface SeriesImpactFacts {
   readonly seriesTitle: string;
   readonly bookTitle: string;
-  /** Authorized, queued or running Runs whose frozen scope names this Series: none can yet (S29). */
+  /** Authorized, queued or running Runs whose frozen scope names this Series (Issue #64, 7b). */
   readonly seriesScopedRuns: number;
   readonly learningMaterials: number;
   readonly learningDecided: number;
@@ -288,6 +288,34 @@ export class SeriesLedger {
 
   constructor(db: DatabaseSync) {
     this.#db = db;
+  }
+
+  /** Series-scoped Tasks are a projection of the existing plan records, never another scope ledger. */
+  tasks(seriesId: string): NonNullable<import('../shared/protocol.js').SeriesProjection['tasks']> {
+    return this.#db.prepare(`SELECT DISTINCT t.task_intent_id, t.book_id, b.title book_title, t.kind, t.goal, r.run_record_id
+      FROM analysis_plan_records p JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id
+      JOIN books b ON b.book_id = t.book_id LEFT JOIN analysis_run_records r ON r.task_intent_id = t.task_intent_id
+      JOIN json_each(p.canonical_json, '$.seriesScopes') s ON json_extract(s.value, '$.seriesId') = ?
+      WHERE p.component = 'run-source-scope' AND p.plan_version = (SELECT max(v.plan_version) FROM analysis_plan_records v WHERE v.task_intent_id = p.task_intent_id)
+      ORDER BY t.created_at DESC, t.task_intent_id DESC LIMIT 100`).all(seriesId).map((row) => ({
+      taskIntentId: String(row.task_intent_id), bookId: String(row.book_id), bookTitle: String(row.book_title), kind: String(row.kind), title: String(row.goal),
+      runRecordId: row.run_record_id === null ? null : String(row.run_record_id),
+    }));
+  }
+
+  /**
+   * The Runs whose authorized plan froze this Series and that are still authorized, waiting or running (SER-006): a finished,
+   * failed, stopped or cancelled Run keeps its frozen scope as history and is not counted.
+   */
+  liveTaskRuns(seriesId: string): number {
+    const row = this.#db.prepare(`SELECT count(DISTINCT r.run_record_id) count FROM analysis_run_records r
+      JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
+      JOIN analysis_plan_versions v ON v.task_intent_id = r.task_intent_id AND v.plan_envelope_sha256 = a.plan_envelope_sha256
+      JOIN analysis_plan_records p ON p.task_intent_id = r.task_intent_id AND p.plan_version = v.ordinal AND p.component = 'run-source-scope'
+      JOIN json_each(p.canonical_json, '$.seriesScopes') s ON json_extract(s.value, '$.seriesId') = ?
+      WHERE (SELECT st.state FROM analysis_run_states st WHERE st.run_record_id = r.run_record_id ORDER BY st.sequence DESC LIMIT 1)
+        NOT IN ('completed', 'completed-with-gaps', 'failed', 'interrupted', 'cancelled', 'blocked-before-dispatch')`).get(seriesId) as SqlRow;
+    return Number(row.count);
   }
 
   /** Up to `limit` Series by name after the one named, each verified: a page of 书系, in the database's own order. */

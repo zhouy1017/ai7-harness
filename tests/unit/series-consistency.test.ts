@@ -142,6 +142,6 @@ describe('one Book\'s 书系一致性', () => {
     const entry = entryOf([source('a', '星河三部曲', [['吴', '吴的设定。']])]);
     expect(houseGuidelineRefusal(entry, false)).toBeNull();
     expect(houseGuidelineRefusal(entry, true))
-      .toBe('这一类以书系「星河三部曲」的书系知识审阅；开发者实时模式下，本社的书系知识在获准发给模型之前不会发出，这一类暂不能开始。');
+      .toBe('当前策略未开放书系知识');
   });
 });

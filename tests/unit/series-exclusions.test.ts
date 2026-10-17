@@ -61,6 +61,8 @@ describe('what a Series Retrieval Exclusion reaches', () => {
     expect(seriesExclusionCovers(SERIES, { kind: 'book', id: 'book-1' }, material())).toBe(true);
     expect(seriesExclusionCovers(SERIES, { kind: 'book', id: 'book-1' }, material({ sourceBookId: null }))).toBe(false);
     expect(seriesExclusionCovers(SERIES, { kind: 'source-version', id: 'item-1' }, material())).toBe(false);
+    expect(seriesExclusionCovers(SERIES, { kind: 'source-version', id: 'source-1' }, material({ sourceVersionId: 'source-1' }))).toBe(true);
+    expect(seriesExclusionCovers(SERIES, { kind: 'source-version', id: 'source-2' }, material({ sourceVersionId: 'source-1' }))).toBe(false);
     // An exclusion restricts its own Series' retrieval only (SER-029).
     expect(seriesExclusionCovers('series-b', { kind: 'knowledge-item', id: 'item-1' }, material())).toBe(false);
   });
@@ -93,7 +95,7 @@ describe('an exclusion as recorded', () => {
     expect(seriesExclusionTarget('knowledge-class', 'characters', {}).label).toBe('知识类别「人物」');
     expect(seriesExclusionTarget('book', 'b', { bookTitle: '星河之一' }).label).toBe('成员图书《星河之一》');
     expect(seriesExclusionTarget('source-version', 's', { displayName: '星河之一.docx', bookTitle: '星河之一' }))
-      .toMatchObject({ label: '来源版本「星河之一.docx」（《星河之一》）', read: false });
+      .toMatchObject({ label: '来源版本「星河之一.docx」（《星河之一》）', read: true });
     expect(SERIES_EXCLUSION_CONTINUING['knowledge-class']).toContain('以后新纳入的同类条目都一并排除');
   });
 });
@@ -117,7 +119,7 @@ describe('书系检索排除影响预览', () => {
     expect(many[1]!.changes[0]).toContain('：甲、乙等 7 个。');
     expect(seriesExclusionImpact('add', facts({ itemsNamed: [], itemCount: 0 }))[0]!.changes[1]).toBe('现在还没有书系知识条目属于书系知识条目「海边小城」（地点）；以后纳入的也会被排除。');
     const source = seriesExclusionTarget('source-version', 's', { displayName: 'a.docx', bookTitle: '甲' });
-    expect(seriesExclusionImpact('add', facts({ target: source, itemsNamed: [], itemCount: 0 }))[0]!.changes[1]).toContain('现在还没有哪项书系检索读取');
+    expect(seriesExclusionImpact('add', facts({ target: source, itemsNamed: [], itemCount: 0 }))[0]!.changes[1]).toContain('现在还没有书系知识条目属于');
   });
 
   it('says that 修改 changes the reason alone and that 停止 restores nothing it stopped', () => {

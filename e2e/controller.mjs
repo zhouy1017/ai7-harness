@@ -1415,6 +1415,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-credential-removed',
     'consistency-offered',
     'consistency-review-run',
+    'series-scope-review-run',
     'consistency-marks-on-manuscript',
     'consistency-member-reviewed',
     // Issue #64 (S29b): 书系检索排除 — a held 书系一致性 Run, the four-part impact preview, the exclusion in force, the guard
@@ -1424,6 +1425,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'exclusion-preview',
     'exclusion-recorded',
     'exclusion-held-run-stopped',
+    'series-exclusion-payload-refused',
     'exclusion-plan-leaves-out',
     'exclusion-marker',
     'j14-exclusions-keyboard',

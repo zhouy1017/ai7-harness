@@ -246,6 +246,7 @@ export interface ResearchDeclaration {
 }
 
 export interface AnalysisKindDefinition {
+  readonly seriesScopes?: ReadonlyArray<import('../../shared/protocol.js').FrozenSeriesScope>;
   readonly researchDeclaration?: ResearchDeclaration;
   /**
    * The Evidence Assurance Level a factual-review definition executes (Issue #901). Absent on every other kind, and on the two

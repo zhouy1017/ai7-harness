@@ -52,7 +52,7 @@ const LIVE: LaunchBinding = {
     runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
   },
 };
-const WITHHELD = `这一类以书系「${J13_SERIES_TITLE}」的书系知识审阅；开发者实时模式下，本社的书系知识在获准发给模型之前不会发出，这一类暂不能开始。`;
+const WITHHELD = '当前策略未开放书系知识';
 
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
@@ -79,7 +79,7 @@ async function withSession(body: (session: Session, bookId: string) => Promise<v
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId) });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   try {
     let bookId = existingBookId;

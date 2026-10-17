@@ -861,7 +861,7 @@ async function openLayered(): Promise<Session> {
   });
   const owner = new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
-    readGuard: (runRecordId) => store.seriesReadGuard(runRecordId),
+    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
   });
   return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, owner) };
 }

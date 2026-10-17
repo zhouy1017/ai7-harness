@@ -61,6 +61,7 @@ export interface ReviewGuidelineDocument {
 }
 
 export interface ReviewCategoryConfigurationEntry {
+  readonly seriesScopes?: ReadonlyArray<import('../../shared/protocol.js').FrozenSeriesScope>;
   readonly researchDeclaration?: ResearchDeclaration;
   readonly categoryId: string;
   readonly label: string;
@@ -334,5 +335,6 @@ export function reviewCategoryBasisStatement(entry: ReviewCategoryConfigurationE
   }
   const documents = entry.guidelineDocuments.map((document) => `${document.issuer} · ${document.title}（第 ${document.version} 版）`).join('、');
   const search = entry.searchEngine ? '使用用户所选的联网检索后端；是否完成以本次运行的核查状态为准' : '不使用搜索引擎 · 未联网核查';
-  return `依据：${documents} · ${procedure} · ${search}`;
+  const series = entry.seriesScopes?.map((scope) => `允许参考 · 书系《${scope.title}》的知识条目`).join('；');
+  return `依据：${documents} · ${procedure} · ${search}${series === undefined ? '' : `；${series}`}`;
 }

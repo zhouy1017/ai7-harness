@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 148 as const;
+export const SERVICE_PROTOCOL_VERSION = 149 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -2348,6 +2348,8 @@ export type OutboundDataCategoryId =
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
 export interface AdmittedProviderRule {
+  /** `true` on the v22/v23 review rule alone (`source.seriesKnowledgeAllowed`); absent on every other rule and policy, which refuses Series knowledge. */
+  readonly seriesKnowledgeAllowed?: boolean;
   readonly ruleId: string;
   readonly taskKinds: readonly string[];
   readonly modelRole: string;
@@ -2703,7 +2705,8 @@ export interface TaskAuthorizationProjection {
     bookId: string;
     manuscriptId: string;
     taskInputRevision: { revisionId: string; revisionDigest: string };
-    readableScopeKinds: readonly ['current-book-primary-manuscript-revision'];
+    readableScopeKinds: ReadonlyArray<'current-book-primary-manuscript-revision' | 'series'>;
+    seriesScopes?: ReadonlyArray<FrozenSeriesScope>;
     sourceVersionEvidence: { sourceVersionId: string; readable: false };
   };
   artifactPin: null | {
@@ -4119,6 +4122,7 @@ export interface BaselineAnalysisHistoryProjection {
 export type RunAttemptState = 'dispatched' | 'awaiting-response' | 'retrying';
 
 export interface BaselineAnalysisProjection {
+  readonly historicalMarker?: string;
   bookId: string;
   kind: typeof BASELINE_ANALYSIS_KIND;
   contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
@@ -6463,7 +6467,23 @@ export interface InspectReviewWorkspaceInput extends Partial<ReviewFindingPageRe
   reviewRunId: string | null;
 }
 
+/** Exact authorization-time Series records; membership is prospective, exclusions remain current-read restrictions. */
+export interface FrozenSeriesScope {
+  readonly seriesId: string;
+  readonly title: string;
+  readonly members: ReadonlyArray<{
+    readonly bookId: string;
+    readonly manuscriptId: string | null;
+    readonly revisionId: string | null;
+    readonly revisionDigest: string | null;
+    readonly sourceVersionId: string | null;
+  }>;
+  readonly knowledge: ReadonlyArray<{ readonly itemId: string; readonly revisionId: string; readonly ordinal: number; readonly digest: string }>;
+  readonly exclusions: ReadonlyArray<{ readonly exclusionId: string; readonly revisionId: string; readonly version: number }>;
+}
+
 export interface PrepareReviewRunInput {
+  seriesId?: string | null;
   materialIds?: ReadonlyArray<string>;
   bookId: string;
   categoryIds: ReadonlyArray<string>;
@@ -6850,6 +6870,7 @@ export interface TaskPlanDriftEntryProjection {
  * drawer's authorization bar offers, and only the bar's own activation records anything (Issue #420).
  */
 export interface TaskPlanProjection {
+  readonly seriesScopes?: ReadonlyArray<FrozenSeriesScope>;
   bookId: string;
   kind: TaskPlanKind;
   /** The Task Intent or the Review Run this plan belongs to. */
@@ -7929,6 +7950,7 @@ export interface CapturedProcedureRunProjection {
   readonly procedureId: string;
   readonly title: string;
   readonly resolved: null | {
+    readonly runSourceScope?: 'series';
     readonly versionId: string;
     readonly version: number;
     /** Whether it is the latest eligible version — `false` when the editor chose an older eligible one (REUSE-054). */
@@ -8517,6 +8539,7 @@ export interface EvaluationInitialDraftProjection {
 export interface EvaluationInitialProjection {
   /** The Book's latest 初评 Task, which the Task Drawer opens; `null` before the first is prepared. */
   readonly task: null | {
+    readonly historicalMarker?: string;
     readonly taskIntentId: string;
     readonly state: BaselineAnalysisProjection['state'];
     /** The Task's state in the editor's words. */
@@ -9760,6 +9783,7 @@ export interface SeriesKnowledgeRevisionsProjection {
  * It is not a reader of the member manuscripts.
  */
 export interface SeriesProjection {
+  readonly tasks?: ReadonlyArray<{ readonly bookId: string; readonly bookTitle: string; readonly taskIntentId: string; readonly kind: string; readonly title: string; readonly runRecordId: string | null }>;
   readonly seriesId: string;
   readonly title: string;
   readonly note: string;
@@ -13241,7 +13265,7 @@ export interface ServiceOperationMap {
    * once one settled. The completed job's result is 评估 with the prepared Task named, whose plan the Task Drawer opens.
    */
   prepareInitialEvaluation: {
-    input: { bookId: string; materialIds?: ReadonlyArray<string> };
+    input: { bookId: string; materialIds?: ReadonlyArray<string>; seriesId?: string | null };
     output: ServiceJobProjection;
   };
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run, admitted at once or waiting for a place. */
@@ -13924,7 +13948,7 @@ export interface RendererApi {
   startEvaluation(input?: StartEvaluationInput): Promise<EvaluationWorkspaceProjection>;
   saveEvaluation(input: { recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean }): Promise<EvaluationWorkspaceProjection>;
   /** 准备 AI7 初评: an `initial-evaluation-preparation` job, followed with `pollServiceJob`; its plan opens in the Task Drawer. */
-  prepareInitialEvaluation(input?: { materialIds?: ReadonlyArray<string> }): Promise<ServiceJobProjection>;
+  prepareInitialEvaluation(input?: { materialIds?: ReadonlyArray<string>; seriesId?: string | null }): Promise<ServiceJobProjection>;
   /** The Task Drawer bar's 开始任务 for AI7's 初评. */
   authorizeInitialEvaluation(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 起草审稿意见 (Issue #429, S81c): a `readers-report-preparation` job; its plan opens in the Task Drawer. */

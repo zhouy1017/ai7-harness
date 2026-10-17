@@ -1292,6 +1292,15 @@ async function main() {
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'consistency-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'consistency-drawer-closed');
 
+    at('series-scope-review-run');
+    const seriesPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'review-run', ref: ${JSON.stringify(prepared.reviewRunId)} })`);
+    const exactScope = seriesPlan?.seriesScopes?.[0];
+    requireJourney(seriesPlan?.seriesScopes?.length === 1 && exactScope.seriesId === seriesId && exactScope.title === SERIES &&
+      exactScope.members.some((pin) => pin.bookId === member && UUID_PATTERN.test(pin.revisionId) && /^[0-9a-f]{64}$/.test(pin.revisionDigest)) &&
+      exactScope.knowledge.length === 1 && exactScope.knowledge[0].itemId === itemId && exactScope.knowledge[0].ordinal === 2 &&
+      UUID_PATTERN.test(exactScope.knowledge[0].revisionId) && /^[0-9a-f]{64}$/.test(exactScope.knowledge[0].digest) && exactScope.exclusions.length === 0 &&
+      seriesPlan.scope.reference.includes(`允许参考 · 书系《${SERIES}》的知识条目`), 'series-scope-pins');
+
     at('consistency-marks-on-manuscript');
     // A finding is the mark on the manuscript: 回到原文 opens the text at it, its card naming the category.
     await clickSelector(renderer, `article.review-finding[data-finding-id="${findings[0].findingId}"] [data-review-action="go-to-text"]`, 'consistency-go-to-text');
@@ -1388,6 +1397,14 @@ async function main() {
       stoppedRun.categories[0]?.state === 'interrupted' && stoppedRun.categories[0]?.stateLabel === SCOPE_CHANGED && stoppedRun.findings.length === 0,
     'exclusion-stopped-run', { state: stoppedRun?.state, categories: stoppedRun?.categories?.map((category) => [category.state, category.stateLabel]) });
     await assertRenderer(renderer, `document.querySelector('[data-review-action="continue"]') === null && document.querySelector('.review-scope-stop [data-review-action="scope-redo"]')?.textContent === '修改计划并重新授权' && document.querySelector('.review-scope-stop [data-review-action="scope-cancel"]')?.textContent === '取消任务'`, 'exclusion-stopped-actions');
+
+    at('series-exclusion-payload-refused');
+    // This fixture hold proves the observable stop before further use. Async assembly itself is covered provider-free by
+    // the final-gate service/unit tests; no runtime test-policy seam is added here.
+    const stoppedPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'review-run', ref: ${JSON.stringify(heldRun.reviewRunId)} })`);
+    requireJourney(stoppedPlan?.state?.label === SCOPE_CHANGED && stoppedPlan.seriesScopes?.[0]?.knowledge?.[0]?.itemId === itemId &&
+      stoppedPlan.seriesScopes[0].exclusions.length === 0 && stoppedRun.categories[0]?.detail?.includes(SCOPE_CHANGED) &&
+      stoppedPlan.technical.some((line) => line.key === 'series-read-counts' && line.value === '1 个阅读范围 · 1 次模型请求'), 'series-exclusion-stopped-frozen-plan');
 
     at('exclusion-plan-leaves-out');
     // 修改计划并重新授权 opens 新建审阅 with the Run's own choices; the plan it would make leaves the excluded item out, and here

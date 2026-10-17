@@ -914,7 +914,7 @@ async function dispatch(
     // AI7 初评 (Issue #429, S81b1): prepared as a cooperative job whose plan the Task Drawer opens, and started from its bar
     // through the governor exactly as the baseline analysis is — admitted while a place is free, else waiting for one.
     case 'prepareInitialEvaluation':
-      return { id: request.id, ok: true, op: request.op, result: jobs.startInitialEvaluationPreparation(request.input.bookId, launchPolicy, request.input.materialIds) };
+      return { id: request.id, ok: true, op: request.op, result: jobs.startInitialEvaluationPreparation(request.input.bookId, launchPolicy, request.input.materialIds, null, request.input.seriesId ?? null) };
     case 'authorizeInitialEvaluation': {
       const authorized = store.authorizeInitialEvaluation(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
       if (authorized.dispatchRunRecordId !== null) {
@@ -1067,7 +1067,7 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: jobs.startReviewRunPreparation(request.input.bookId, request.input.categoryIds, request.input.scope, launchPolicy,
-          request.input.capturedProcedure ?? null, request.input.materialIds ?? []),
+          request.input.capturedProcedure ?? null, request.input.materialIds ?? [], null, null, request.input.seriesId ?? null),
       };
     case 'authorizeReviewRun':
       // The one approval, then the drive loop at once: an approved Run nobody drives reads `partial`, so
@@ -1997,7 +1997,7 @@ async function run(): Promise<void> {
       productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', binding),
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
       // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
-      readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
+      seriesScopeGuard: (runRecordId) => guardedStore.seriesScopeGuard(runRecordId),
       // The current-read guard over 本社审阅偏好 (Issue #912; LAUD-008): a withdrawn material stops a Run that read it.
       influenceGuard: (runRecordId) => guardedStore.learningInfluenceGuard(runRecordId),
       materialGuard: (runRecordId, ledger) => guardedStore.materialGuard(runRecordId, ledger),
