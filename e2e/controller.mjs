@@ -102,6 +102,32 @@ export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 
 // after it is admitted there.
 export const GATE_JOURNEYS = Object.freeze(['J-08', 'J-12', 'J-15', 'J-03', 'J-04']);
 
+// The shell's sidebar (Issue #934, wave 11 slice 11a): every Journey reaches a global destination, 设置 and a Book's
+// sections through it, by its data attributes; each row's text is exactly its Chinese name. The library keeps its
+// screen state `landing`, so a Journey still waits for that.
+export const SIDEBAR = Object.freeze({
+  destination: (key) => `#app-sidebar [data-nav-destination="${key}"]`,
+  section: (key) => `#app-sidebar [data-nav-book-section="${key}"]`,
+  settings: '#app-sidebar [data-nav-settings]',
+});
+
+/** An expression that follows one sidebar row, `false` while that row is missing, hidden or unavailable. */
+export function sidebarNavigate(selector) {
+  return `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.closest('[hidden]')||node.getAttribute('aria-disabled')==='true'||(node instanceof HTMLButtonElement&&node.disabled))return false; node.click(); return true; })()`;
+}
+
+/** The sidebar on the library: the five destinations in their order with their exact names, 书库 current, 设置 at the foot. */
+export const SIDEBAR_LIBRARY_READY = `(() => { const rows=Array.from(document.querySelectorAll('#app-sidebar .sidebar-destinations [data-nav-destination]')); const names=rows.map((row)=>row.dataset.navDestination+':'+(row.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')); return JSON.stringify(names)===${JSON.stringify(JSON.stringify(['attention:待我处理', 'library:书库', 'series:书系', 'knowledge:知识库', 'quality:质量与学习']))} && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.getAttribute('aria-current')==='page' && document.querySelector('#app-sidebar [data-nav-settings]')?.textContent==='设置' && document.querySelector('#context-title')?.textContent==='书库'; })()`;
+
+/** The current Book's groups in the sidebar — for that Book, or any when `bookId` is null — with one section marked current. */
+export function sidebarBookCurrent(bookId, section) {
+  const book = bookId === null ? 'true' : `group.dataset.bookId===${JSON.stringify(bookId)}`;
+  return `(() => { const group=document.querySelector('#app-sidebar .sidebar-book'); return group instanceof HTMLElement && !group.hidden && ${book} && group.querySelector('[data-nav-book-section="${section}"]')?.getAttribute('aria-current')==='page'; })()`;
+}
+
+/** At the 200% reflow width (640 CSS px) the sidebar shows icons only, every row keeping its name, and fits its column. */
+export const SIDEBAR_ICONS_ONLY = `(() => { const bar=document.querySelector('#app-sidebar'); if(!(bar instanceof HTMLElement)||document.documentElement.dataset.sidebar!=='icons')return false; const box=bar.getBoundingClientRect(); const rows=Array.from(bar.querySelectorAll('.sidebar-link')); return box.width<=64 && bar.scrollWidth<=bar.clientWidth+2 && rows.length>=6 && rows.every((row)=>(row.getAttribute('aria-label')??row.textContent??'').trim().length>0 && row.getBoundingClientRect().width<=box.width); })()`;
+
 const J01_COMMON_COMPLETION_PHASES = Object.freeze([
   'imported-transition',
   'content-contract',

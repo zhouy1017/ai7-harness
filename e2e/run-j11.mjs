@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-11 (Issue #431, plan slice S83): a Book's 作者, 责编 and 相关人 — the attribution dimensions later feedback and learning
@@ -335,6 +335,7 @@ const peopleSection = '[data-screen="book-overview"] .book-people-slot > section
 /** 新建图书 with a title, through its review, onto the new Book's 工作概览; the Book's identity. */
 async function createBook(renderer, title, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+  await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '新建图书', `${name}-open`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, `${name}-form`);
   await fill(renderer, '#empty-book-title', title, `${name}-title`);
@@ -1532,6 +1533,8 @@ async function main() {
     at('j14-evaluation-reflow-forced-colors');
     // At 200% the version, its items and risks reflow into the width; under forced colours each keeps its border.
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const root = document.documentElement; const parts = [document.querySelector('.evaluation-record'), ...document.querySelectorAll('.evaluation-item, .evaluation-risk, .evaluation-conclusion')]; return parts.length === 9 && parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2; })()`, 'evaluation-reflow', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
@@ -1550,7 +1553,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'editing' && document.querySelector('.book-evaluation-summary p')?.textContent === '第 2 版 · 编辑评分中 · 修订版 r1 · 总分 67.5 / 80 · 优秀（1 项不评）'`, 'evaluation-overview-line');
     await click(renderer, '返回图书列表', 'evaluation-profile-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-profile-landing');
-    await click(renderer, '知识库', 'evaluation-profile-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'evaluation-profile-knowledge');
     await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .knowledge-base')`, 'evaluation-profile-knowledge-open');
     await click(renderer, '评估方案', 'evaluation-profile-tab');
     await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab === 'evaluation' && document.querySelector('.evaluation-profile') !== null`, 'evaluation-profile-painted');
@@ -1579,6 +1582,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'feedback-artifact-enabled');
     await click(renderer, '返回图书列表', 'feedback-model-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'feedback-model-landing');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'feedback-model-open-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'feedback-model-open-settings-hub');
     await click(renderer, '模型服务', 'feedback-model-open');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'feedback-model-ready');
     cancellation.throwIfRequested();
@@ -1727,6 +1732,8 @@ async function main() {
     await tick(renderer, `${feedbackItem('events/0')} .analysis-feedback-judgments input[value="incomplete"]`, 'feedback-reflow-incomplete');
     await readFeedback(renderer, (page) => Array.isArray(page.card?.reasons), 'feedback-reflow-reasons');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const root = document.documentElement; const parts = [document.querySelector('.analysis-feedback-card'), ...document.querySelectorAll('.analysis-feedback-card fieldset'), document.querySelector('.analysis-feedback-correction')]; return parts.length === 4 && parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2; })()`, 'feedback-reflow', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
@@ -1916,6 +1923,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'initial-evaluation-overview-ready');
     await click(renderer, '返回图书列表', 'initial-evaluation-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'initial-evaluation-landing');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'initial-evaluation-calibration-open-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'initial-evaluation-calibration-open-settings-hub');
     await click(renderer, '评估校准与预测', 'initial-evaluation-calibration-open');
     // The gate reads 2 here: this launch lowers it with `--j11-calibration-min-books 2` (EVAL-011a); the product's own is ten.
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 1 / 2 本 · 满 2 本后生效'`, 'initial-evaluation-calibration-count');
@@ -2328,6 +2337,8 @@ async function main() {
     await readLearning(renderer, (page) => page.card?.material === 'proposal-decision', 'learning-reflow-card');
     await tick(renderer, `${learningRow('proposal-decision')} .learning-choices input[value="house"]`, 'learning-reflow-house');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const root = document.documentElement; const parts = [document.querySelector('.learning-book'), document.querySelector('.learning-card'), document.querySelector('.learning-facts'), document.querySelector('.learning-choices')]; return parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2; })()`, 'learning-reflow', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
@@ -2349,7 +2360,7 @@ async function main() {
     cancellation.throwIfRequested();
     await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'learning-restart-ready');
-    await click(renderer, '质量与学习', 'learning-restart-open');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-restart-open');
     // Synchronized delta with S26c: the landing opens 质量与学习 at 反馈历史, and 学习准入 is its second tab.
     await clickSelector(renderer, '#quality-tab-learning', 'learning-restart-tab');
     const learningAfterPage = await readLearning(renderer, (page) => page.books.length === 1, 'learning-restart-page');
@@ -2459,7 +2470,7 @@ async function main() {
     await waitFor(renderer, `${status} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'attribution-saved');
     await click(renderer, '返回图书列表', 'attribution-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'attribution-landing-again');
-    await click(renderer, '质量与学习', 'attribution-quality');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'attribution-quality');
     const attributed = await readHistory(renderer, (page) => page.books[0]?.[1] === `作者：${THIRD_PEOPLE.authors} · 责编：${THIRD_PEOPLE.editors}`, 'attribution-history');
     requireJourney(JSON.stringify(attributed.filters.author) === JSON.stringify(['', ['全部', THIRD_PEOPLE.authors]]) &&
       JSON.stringify(attributed.filters.editor) === JSON.stringify(['', ['全部', THIRD_PEOPLE.editors]]), 'attribution-filters', attributed.filters);
@@ -2485,7 +2496,7 @@ async function main() {
     await waitFor(renderer, `${status} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '2'`, 'later-saved');
     await click(renderer, '返回图书列表', 'later-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'later-landing-again');
-    await click(renderer, '质量与学习', 'later-quality');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'later-quality');
     const later = await readHistory(renderer, (page) => page.books[0]?.[1] === `作者：${THIRD_PEOPLE.authors} · 责编：${THIRD_PEOPLE.laterEditors}`, 'later-history');
     const firstPeople = `当时的人员 · 作者：${THIRD_PEOPLE.authors} · 责编：${THIRD_PEOPLE.editors}`;
     requireJourney(JSON.stringify(later.filters.editor) === JSON.stringify(['', ['全部', THIRD_PEOPLE.editors]]) &&
@@ -2516,7 +2527,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector(${JSON.stringify(peopleSection)}) !== null`, 'open-overview-shown');
     await click(renderer, '返回图书列表', 'open-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'open-landing');
-    await click(renderer, '质量与学习', 'open-quality');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'open-quality');
     const revisedHistory = await readHistory(renderer, (page) => page.entries.length === 4, 'open-history-again');
     requireJourney(revisedHistory.entries[0]?.[2] === '原因：交接后的新说明' && revisedHistory.people.filter((line) => line !== null).length === 3 &&
       revisedHistory.people.every((line) => line === null || line === firstPeople), 'history-revised-attribution');
@@ -2563,7 +2574,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector(${JSON.stringify(peopleSection)}) !== null`, 'history-pages-overview-ready');
     await click(renderer, '返回图书列表', 'history-pages-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'history-pages-landing');
-    await click(renderer, '质量与学习', 'history-pages-quality');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'history-pages-quality');
     await readHistory(renderer, (page) => page.entries.length === 300 && page.entries.every((entry) => entry[0] === 'proposal-decision'), 'history-pages-first');
     // Origin filtering happens before the page bound, so old analysis is reachable immediately.
     await choose(renderer, '#feedback-filter-origin', 'analysis-feedback', 'history-pages-analysis');
@@ -2610,7 +2621,7 @@ async function main() {
     await waitFor(otherRenderer, `document.querySelector('[data-screen="book-overview"]')`, 'history-other-ready', 120_000);
     await click(otherRenderer, '返回图书列表', 'history-other-books');
     await waitFor(otherRenderer, `document.querySelector('[data-screen="landing"]')`, 'history-other-landing');
-    await click(otherRenderer, '质量与学习', 'history-other-quality');
+    await assertRenderer(otherRenderer, sidebarNavigate(SIDEBAR.destination('quality')), 'history-other-quality');
     await readHistory(otherRenderer, (page) => page.entries.length === 300, 'history-other-page');
     await choose(otherRenderer, '#feedback-filter-origin', 'analysis-feedback', 'history-other-analysis');
     await readHistory(otherRenderer, (page) => page.entries.length === 2, 'history-other-analysis-ready');
@@ -2629,7 +2640,7 @@ async function main() {
     cancellation.throwIfRequested();
     await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'learning-source-restart-ready');
-    await click(renderer, '质量与学习', 'learning-source-quality');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-source-quality');
     await clickSelector(renderer, '#quality-tab-learning', 'learning-source-tab');
     await readLearning(renderer, (page) => page.books.length === 1, 'learning-source-page');
     at('learning-source-records');
@@ -2642,7 +2653,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'learning-source-overview-ready');
     await click(renderer, '返回图书列表', 'learning-source-books');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'learning-source-landing');
-    await click(renderer, '质量与学习', 'learning-source-learning');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-source-learning');
     await clickSelector(renderer, '#quality-tab-learning', 'learning-source-learning-tab');
     await readLearning(renderer, (page) => page.books.length === 1, 'learning-source-page');
     await clickSelector(renderer, `${learningRow('analysis-feedback')} [data-learning-action="open"]`, 'learning-source-analysis-card');
@@ -2662,7 +2673,7 @@ async function main() {
     await waitFor(learningOtherRenderer, `document.querySelector('[data-screen="book-overview"]')`, 'learning-source-other-ready', 120_000);
     await click(learningOtherRenderer, '返回图书列表', 'learning-source-other-books');
     await waitFor(learningOtherRenderer, `document.querySelector('[data-screen="landing"]')`, 'learning-source-other-landing');
-    await click(learningOtherRenderer, '质量与学习', 'learning-source-other-learning');
+    await assertRenderer(learningOtherRenderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-source-other-learning');
     await clickSelector(learningOtherRenderer, '#quality-tab-learning', 'learning-source-other-learning-tab');
     await readLearning(learningOtherRenderer, (page) => page.books.length === 1, 'learning-source-other-page');
     await clickSelector(learningOtherRenderer, `${learningRow('proposal-decision')} [data-learning-action="open"]`, 'learning-source-other-card');
@@ -2701,7 +2712,7 @@ async function main() {
     await clickSelector(learningOtherRenderer, '[data-learning-action="cancel"]', 'learning-pages-close-draft');
     await click(learningOtherRenderer, '返回', 'learning-pages-back');
     await waitFor(learningOtherRenderer, `document.querySelector('[data-screen="landing"]')`, 'learning-pages-landing');
-    await click(learningOtherRenderer, '质量与学习', 'learning-pages-open');
+    await assertRenderer(learningOtherRenderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-pages-open');
     await clickSelector(learningOtherRenderer, '#quality-tab-learning', 'learning-pages-open-tab');
     await waitFor(learningOtherRenderer, `document.querySelectorAll('.learning-material').length === 40`, 'learning-pages-first');
     await clickSelector(learningOtherRenderer, '[data-learning-action="open"]', 'learning-pages-card');
@@ -2805,7 +2816,7 @@ async function main() {
     cancellation.throwIfRequested();
     await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'learning-audit-ready');
-    await click(renderer, '质量与学习', 'learning-audit-quality');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-audit-quality');
     await clickSelector(renderer, '#quality-tab-audit', 'learning-audit-tab');
     const auditAll = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 40, 'learning-audit-all');
     requireJourney(auditAll.note === '学习回溯只是记录：每条学习材料从哪里来、准入怎样决定、后来影响了什么。停止今后使用不会删除任何历史，这里也不授予任何权限。' &&
@@ -2966,7 +2977,7 @@ async function main() {
     cancellation.throwIfRequested();
     await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'learning-audit-restart-ready');
-    await click(renderer, '质量与学习', 'learning-audit-restart-quality');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-audit-restart-quality');
     await clickSelector(renderer, '#quality-tab-audit', 'learning-audit-restart-tab');
     await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 40, 'learning-audit-restart-list');
     await clickSelector(renderer, `${auditRow(auditFirst)} [data-learning-audit-action="open"]`, 'learning-audit-restart-open');
@@ -2998,6 +3009,8 @@ async function main() {
     await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-reflow-stop');
     await readAudit(renderer, (page) => page.preview !== null, 'learning-audit-reflow-preview');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const root = document.documentElement; const parts = [document.querySelector('.learning-lineage'), document.querySelector('.learning-lineage-steps'), document.querySelector('.learning-lineage-forward'), document.querySelector('.learning-remediation-preview')]; return parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2; })()`, 'learning-audit-reflow', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
@@ -3140,6 +3153,8 @@ async function main() {
     // 设置 › 评估校准与预测 reads 已生效 with the basis and each item's offset as computed now; 停用 is recorded, says what it does,
     // and the next version from AI7's 初评 starts raw; on again — recorded too — the offset applies again, computed all along.
     await toLanding('calibration-disclosed');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'calibration-disclosed-open-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'calibration-disclosed-open-settings-hub');
     await click(renderer, '评估校准与预测', 'calibration-disclosed-open');
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已生效'`, 'calibration-disclosed-active');
     const disclosed = await renderer.evaluate(`JSON.stringify((() => { const root = document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration'); return [root.querySelector('.calibration-offset')?.dataset.calibrationOffset ?? null, root.querySelector('.calibration-offset-basis')?.textContent ?? null, Array.from(root.querySelectorAll('.calibration-offset-list li'), (line) => [line.dataset.itemId, line.dataset.offset, line.textContent]), root.querySelector('.calibration-off-effect')?.textContent ?? null, root.querySelector('.calibration-offset-without-basis')?.textContent ?? null]; })())`);
@@ -3171,7 +3186,7 @@ async function main() {
     // Last, after every authored-fixture turn: changing the house profile must never reinterpret an existing Record or 初评.
     const profileSnapshots = await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then((page)=>JSON.stringify([page.record.profile,page.initial.latest.profile]))`);
     await toLanding('profile-editing');
-    await click(renderer, '知识库', 'profile-editing-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'profile-editing-knowledge');
     await click(renderer, '评估方案', 'profile-editing-tab');
     await waitFor(renderer, `document.querySelector('[data-profile-action="new-version"]')`, 'profile-editing-ready');
     await clickSelector(renderer, '[data-profile-action="new-version"]', 'profile-editing-new');

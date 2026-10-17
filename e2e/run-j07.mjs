@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY } from './controller.mjs';
 import { openRemainingPackageExport } from './package-export-readiness.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
@@ -539,6 +539,7 @@ async function exportAct(renderer, action, name) {
 /** After a relaunch: the Book from 最近的工作, then 交付物 from its manuscript. */
 async function reopenDeliverables(renderer, name) {
   await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]') && document.querySelector('.recent-work-item button')`, `${name}-prior-work`);
+  await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await assertRenderer(renderer, PAGE_HELPERS, `${name}-page-helpers`);
   await assertRenderer(renderer, `(() => { document.querySelector('.recent-work-item button').click(); return true; })()`, `${name}-open-book`);
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] > [data-block-id]')`, `${name}-editor`);
@@ -2387,7 +2388,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]')`, 'exemplars-attention-screen');
     await click(renderer, '返回图书列表', 'exemplars-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'exemplars-landing');
-    await click(renderer, '知识库', 'exemplars-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'exemplars-knowledge');
     await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .knowledge-base')`, 'exemplars-knowledge-page');
     await click(renderer, '范例', 'exemplars-tab');
     await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab === 'exemplars' && document.querySelector('.knowledge-panel')?.dataset.exemplarBooks === '1'`, 'exemplars-painted');
@@ -2494,7 +2495,7 @@ async function main() {
     await close();
     renderer = await launch();
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'exemplars-pages-landing');
-    await click(renderer, '知识库', 'exemplars-pages-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'exemplars-pages-knowledge');
     await click(renderer, '范例', 'exemplars-pages-tab');
     await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 20`, 'exemplars-first-page');
     for (let repetition = 0; repetition < 2; repetition += 1) {
@@ -2526,6 +2527,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision === '2'`, 'writing-artifact-enabled');
     await click(renderer, '返回图书列表', 'writing-model-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'writing-model-landing');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'writing-model-open-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'writing-model-open-settings-hub');
     await click(renderer, '模型服务', 'writing-model-open');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'writing-model-ready');
     cancellation.throwIfRequested();
@@ -2729,7 +2732,7 @@ async function main() {
     renderer = await launch({ picker: libraryPath, adapter: WRITING_FIXTURE });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'writing-library-landing');
     await assertRenderer(renderer, PAGE_HELPERS, 'writing-library-page-helpers');
-    await click(renderer, '知识库', 'writing-library-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'writing-library-knowledge');
     await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .knowledge-base')`, 'writing-library-knowledge-page');
     await click(renderer, '资料库', 'writing-library-tab');
     await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .library-materials')?.dataset.library === 'ready' && document.querySelectorAll('article.library-material').length === 0`, 'writing-library-empty');

@@ -7,7 +7,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY } from './controller.mjs';
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 
@@ -687,6 +687,7 @@ async function main() {
     let manager = await launch(syntheticDocx);
     let [primary] = await waitForRendererCount(manager, 1, 'initial-window');
     await waitFor(primary, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'initial-ready');
+    await assertRenderer(primary, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
     await primary.send('Page.setBypassCSP', { enabled: true });
     const fetchRejected = await primary.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
     await primary.send('Page.setBypassCSP', { enabled: false });
@@ -1203,6 +1204,8 @@ async function main() {
     })()`, 'overview-leads-with-the-manuscript-anchor');
     await click(primary, '返回图书列表', 'restart-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'restart-library');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'data-storage-open-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'data-storage-open-settings-hub');
     await click(primary, '数据与存储', 'data-storage-open');
     await waitFor(primary, `document.querySelector('[data-screen="data-storage"]')`, 'data-storage-ready');
     await assertRenderer(primary, `(() => { const view=document.querySelector('.data-storage-summary'); return view?.dataset.platform===${JSON.stringify(process.platform === 'win32' ? 'windows' : 'macos')} && view.dataset.runtimeForm==='source-checkout' && view.dataset.footprintMaximumEntries==='128' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(dataRoot)} && view.textContent.includes('产品数据位置') && view.textContent.includes('凭据与产品数据分开') && view.textContent.includes(${JSON.stringify(process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串')}) && !Object.keys(window.ai7).some((key)=>key.toLowerCase().includes('path')); })()`, 'truthful-data-location');
@@ -1223,6 +1226,8 @@ async function main() {
     at('model-service-first-save');
     await click(primary, '返回', 'data-storage-return');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-service-landing');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-service-open-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-service-open-settings-hub');
     await click(primary, '模型服务', 'model-service-open');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready');
     await assertRenderer(primary, `(() => {
@@ -1349,6 +1354,8 @@ async function main() {
         restartedConnection.connection?.credentialOperationState === 'ready',
       'model-credential-restart-ready-same-reference',
     );
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-replace-open-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-replace-open-settings-hub');
     await click(primary, '模型服务', 'model-replace-open');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-replace-ready');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-restart-no-redisplay');
@@ -1372,6 +1379,8 @@ async function main() {
     manager = await launch(undefined, databaseExportPath);
     [primary] = await waitForRendererCount(manager, 1, 'database-export-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-export-landing');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'database-export-open-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'database-export-open-settings-hub');
     await click(primary, '数据与存储', 'database-export-open');
     await waitFor(primary, `document.querySelector('.database-export [data-database-export-action="choose"]') && document.querySelector('.database-export-records summary')`, 'database-export-ready');
     await click(primary, '导出数据库…', 'database-export-choose');
@@ -1440,6 +1449,8 @@ async function main() {
     };
     const bookTitles = async () => JSON.parse(await primary.evaluate(`window.ai7.listBooks({ after: null }).then((page) => JSON.stringify(page.items.map((book) => book.title).sort()))`));
     const openDataAndStorage = async (name) => {
+      await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), `${name}-open-settings`);
+      await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, `${name}-open-settings-hub`);
       await click(primary, '数据与存储', `${name}-open`);
       await waitFor(primary, `document.querySelector('.database-import [data-database-import-action="choose"]') && document.querySelector('.database-import')?.dataset.pending === 'false'`, `${name}-ready`);
     };
@@ -1584,6 +1595,8 @@ async function main() {
     manager = await launch();
     [primary] = await waitForRendererCount(manager, 1, 'model-remove-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-remove-landing');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-remove-open-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-remove-open-settings-hub');
     await click(primary, '模型服务', 'model-remove-open');
     await waitFor(primary, `document.querySelector('[data-credential-state="ready"]')`, 'model-remove-ready');
     await click(primary, '移除', 'model-remove');
@@ -1613,6 +1626,8 @@ async function main() {
     // of the editor's adjustments and touches only AI7's starting scores; turning it off is recorded and reads back, and on
     // again; the prediction switch stays closed until thirty published Books carry actuals; and with no Book yet published
     // the central entry says where the actuals come from.
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'calibration-open-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'calibration-open-settings-hub');
     await click(primary, '评估校准与预测', 'calibration-open');
     const calibrationPage = await readCalibration(primary, () => true, 'calibration-page');
     requireJourney(calibrationPage.calibration === '调分记录 0 / 10 本 · 满 10 本后生效' &&

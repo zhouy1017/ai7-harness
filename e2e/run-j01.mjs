@@ -17,7 +17,7 @@ import {
   IMPORTED_MARKS_RECIPE,
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
-import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, sidebarNavigate } from './controller.mjs';
 import { classifyBrowserLaunchMiss, classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, observeLaunchStart, probeStalledProduct, readBrowserLog, sampleProductProcesses, waitingForService } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -1836,6 +1836,8 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     'empty-book-landing',
   );
   await requireTracedReadiness();
+  // The shell (Issue #934): the library is 书库 in the sidebar, the five destinations in their order.
+  await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'empty-book-sidebar-library');
   await clickExactButton(renderer, '新建图书', 'empty-book-create-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-book-form');
   await clickExactButton(renderer, '复核创建', 'empty-book-missing-title');
@@ -1876,6 +1878,8 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   );
   const bookId = await renderer.evaluate(`document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId`);
   requireJourney(typeof bookId === 'string' && /^[0-9a-f-]{36}$/i.test(bookId), 'empty-book-id');
+  // A Book with no Manuscript is entered at 工作概览, which the sidebar marks under the Book's 资料与记录 (ADR 0076).
+  await waitFor(renderer, sidebarBookCurrent(bookId, 'overview'), 'empty-book-sidebar-overview');
   await clickExactButton(renderer, '图书', 'empty-book-record-open');
   const beforeIdentity = await renderer.evaluate(`(() => {
     const values = Array.from(document.querySelectorAll('.record-detail dd'), (item) => item.textContent);
@@ -1890,6 +1894,14 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
 
   await clickExactButton(renderer, '返回图书列表', 'empty-book-return-library');
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'empty-book-library');
+  // Back in 书库 the window holds no Book: its groups go, and it is 最近打开 with where it was last seen. Pinning it and
+  // unpinning it again move the row and change nothing else (IA-009).
+  const recentRow = `document.querySelector('#app-sidebar [data-nav-books="recent"] [data-nav-book=${JSON.stringify(bookId)}]')`;
+  await waitFor(renderer, `document.querySelector('#app-sidebar .sidebar-book')?.hidden === true && ${recentRow}?.querySelector('.nav-label')?.textContent === ${JSON.stringify(title)} && ${recentRow}?.querySelector('.nav-state')?.textContent === '上次在「工作概览」'`, 'empty-book-sidebar-recent');
+  await assertRenderer(renderer, sidebarNavigate(`#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]`), 'empty-book-sidebar-pin');
+  await waitFor(renderer, `document.querySelector('#app-sidebar [data-nav-books="pinned"] [data-nav-pin=${JSON.stringify(bookId)}]')?.getAttribute('aria-pressed') === 'true' && !${recentRow}`, 'empty-book-sidebar-pinned');
+  await assertRenderer(renderer, sidebarNavigate(`#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]`), 'empty-book-sidebar-unpin');
+  await waitFor(renderer, `${recentRow}?.parentElement?.querySelector('[data-nav-pin]')?.getAttribute('aria-pressed') === 'false' && !document.querySelector('#app-sidebar [data-nav-books="pinned"]')`, 'empty-book-sidebar-unpinned');
   await assertRenderer(
     renderer,
     `(() => { const row = document.querySelector('[data-screen="landing"] [data-book-id=${JSON.stringify(bookId)}]')?.closest('.book-summary-item'); return row?.textContent.includes(${JSON.stringify(title)}) && row.textContent.includes('尚无稿件') && row.textContent.includes(${JSON.stringify(internalNumber)}) && row.textContent.includes(${JSON.stringify(bookId)}) && row.textContent.includes(${JSON.stringify(`book:${bookId}`)}) && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '加载更多图书'); })()`,
@@ -1916,6 +1928,12 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     'compact-book-summary-open-exact',
   );
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(bookId)}]')`, 'empty-book-reopened-from-summary');
+  await waitFor(renderer, sidebarBookCurrent(bookId, 'overview'), 'empty-book-reopened-sidebar-overview');
+  // The Book's own sections through the sidebar: 历史与恢复 is 工作概览's records, its heading taken into focus; 工作概览 again.
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('history')), 'empty-book-sidebar-history');
+  await waitFor(renderer, `${sidebarBookCurrent(bookId, 'history')} && document.activeElement === document.querySelector('[data-screen="book-overview"] .record-navigation h3')`, 'empty-book-sidebar-history-records');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'empty-book-sidebar-overview-again');
+  await waitFor(renderer, `${sidebarBookCurrent(bookId, 'overview')} && document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-overview-again-ready');
 
   await clickExactButton(renderer, '导入首份稿件', 'empty-book-import-first');
   await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'existing-book-target-selected');
