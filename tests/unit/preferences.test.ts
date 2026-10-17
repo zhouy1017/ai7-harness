@@ -46,9 +46,18 @@ function refusal(operation: () => unknown): PreferenceError {
 }
 
 describe('the preferences registry', () => {
+  it('persists every notification switch in the existing preference file across restart', () => {
+    const store = createPreferenceStore(sandbox);
+    const keys = ['notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName'] as const;
+    for (const key of keys) store.save({ key, value: true });
+    const restarted = createPreferenceStore(sandbox);
+    for (const key of keys) expect(restarted.read().values[key]).toBe(true);
+  });
   it('declares the shell keys with their defaults, and each default passes its own validator', () => {
-    expect(Object.keys(PREFERENCE_KEYS)).toEqual(['usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme']);
-    expect(preferenceDefaults()).toEqual({ 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system' });
+    expect(Object.keys(PREFERENCE_KEYS)).toEqual(['usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme',
+      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName']);
+    expect(preferenceDefaults()).toEqual({ 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
+      'notifications.enabled': false, 'notifications.completions': false, 'notifications.sound': false, 'notifications.bookName': false });
     for (const definition of Object.values(PREFERENCE_KEYS)) expect(definition.validate(definition.default)).toBe(true);
   });
 

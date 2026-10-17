@@ -77,6 +77,7 @@ export const SETTINGS_PAGE_TITLES: Readonly<Record<string, string>> = Object.fre
   usage: '服务 · 用量',
   'usage-run': '服务 · 用量 · 运行详情',
   keyboard: '本机 · 键盘与无障碍',
+  notifications: '本机 · 通知',
 });
 
 const SECTION_LABELS: Readonly<Record<ShellBookSection, string>> = Object.freeze(Object.fromEntries(

@@ -1,3 +1,5 @@
+import type { GlobalAttentionTarget } from './protocol.js';
+
 // Local view and input configuration (Issue #934, wave 11 slice 11a; seam map §2, decision T0-1): how this machine shows
 // the workbench — the sidebar's collapsed state, the pinned and recently opened Books, and what later slices of the wave
 // add (appearance, shortcut remaps, notification switches, usage unit prices). It is not a business record: the main
@@ -173,6 +175,11 @@ export const PREFERENCE_KEYS = Object.freeze({
   'shell.recentBooks': preference(isBookList(MAX_RECENT_BOOKS, isRecentEntry), [] as ReadonlyArray<ShellRecentBookEntry>),
   // 11b: 外观 — 跟随系统 (default) / 浅色 / 深色 (VIS-004); decoration only, read by no record, export or model context (VIS-009).
   'appearance.theme': preference(isThemePreference, 'system' as ThemePreference),
+  // 11d: 设置 › 本机 › 通知 — four switches, all off by default (decision 16; NOTIF-005 to 007).
+  'notifications.enabled': preference(isBoolean, false),
+  'notifications.completions': preference(isBoolean, false),
+  'notifications.sound': preference(isBoolean, false),
+  'notifications.bookName': preference(isBoolean, false),
 });
 
 export type PreferenceKey = keyof typeof PREFERENCE_KEYS;
@@ -204,6 +211,19 @@ export interface SavePreferenceInput<Key extends PreferenceKey = PreferenceKey> 
 export interface PreferencesRendererApi {
   getPreferences(): Promise<PreferencesProjection>;
   savePreference<Key extends PreferenceKey>(input: SavePreferenceInput<Key>): Promise<PreferencesProjection>;
+}
+
+/** Main-only notification navigation; no service protocol operation or record mutation. */
+export interface NotificationsRendererApi {
+  notify(input: { bookId: string | null; eventId: string }): Promise<void>;
+  onNotificationNavigate(listener: (target: NotificationNavigation) => void): () => void;
+}
+
+export interface NotificationNavigation {
+  readonly bookId: string | null;
+  readonly eventId: string | null;
+  /** Captured from the authoritative projection, so a single record still opens after leaving recent attention. */
+  readonly target?: GlobalAttentionTarget;
 }
 
 /** The main process's IPC channels for the two members; they are not service operations and carry no protocol number. */

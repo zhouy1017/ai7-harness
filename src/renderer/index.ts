@@ -52,6 +52,7 @@ import type {
   EditorialWorkspaceProfileProjection,
   ForegroundExecutionBoundaryProjection,
   GlobalAttentionItemProjection,
+  GlobalAttentionProjection,
   GlobalAttentionTarget,
   ImportCommitProjection,
   ManuscriptReimportCommitProjection,
@@ -85,8 +86,11 @@ import type {
   TaskPlanKind,
   TaskPlanProjection,
 } from '../shared/protocol.js';
+import { createNotificationObserver, mountQuietNotice } from './notifications.js';
+import { NOTIFICATION_BOOK_LIST_LINE, NOTIFICATION_SETTINGS_WORDS } from './notification-labels.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
+  GLOBAL_ATTENTION_COUNTED_GROUPS,
   J03_TASK_GOAL,
   MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
@@ -366,6 +370,9 @@ const taskDrawer = mountTaskDrawer({
   onOpen: () => closeNavigation?.(),
   onRecorded: (kind, bookId, ref) => {
     taskSurfaceRefresh[kind]?.();
+    // A Run started or changed here is read at once, so 待我处理 follows it in flight to its outcome and the quiet completion
+    // notice hears it without the editor leaving the screen (Issue #937; NOTIF-003).
+    globalAttentionReader.refresh();
     if (kind === 'review-run') followReviewMarks(bookId, ref);
   },
   openRunSurface: (plan) => void leaveThen(() => openTaskRunSurface(plan)),
@@ -939,6 +946,27 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
   return node;
 })();
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
+const showQuietNotice = mountQuietNotice((item) => void leaveThen(() => openGlobalAttentionItem(item)));
+const observeNotifications = createNotificationObserver({
+  api: window.ai7,
+  focused: () => document.hasFocus(),
+  completed: showQuietNotice,
+});
+globalAttentionReader.subscribe((reading) => {
+  if (reading.kind === 'projection') observeNotifications(reading.projection);
+});
+window.ai7.onNotificationNavigate((target) => {
+  void leaveThen(async () => {
+    if (target.eventId !== null && target.target !== undefined) {
+      await openGlobalAttentionTarget(target.target);
+      return;
+    }
+    const projection = await window.ai7.inspectGlobalAttention();
+    const item = projection.groups.flatMap((group) => group.items).find((entry) => entry.itemId === target.eventId && entry.book.bookId === target.bookId);
+    if (item) await openGlobalAttentionItem(item);
+    else await openGlobalAttention(target.bookId);
+  });
+});
 window.addEventListener('focus', () => globalAttentionReader.refresh());
 
 /**
@@ -1177,7 +1205,7 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
  * 待我处理 from the header (Issue #424): the screen opens in the library state — the window leaves the Book it
  * showed, as 返回图书列表 does — after the surface on screen has settled what it must first.
  */
-async function openGlobalAttention(): Promise<void> {
+async function openGlobalAttention(bookId?: string | null): Promise<void> {
   if (authorityInterrupted) return;
   const guard = leaveGuard;
   if (guard !== null) {
@@ -1196,19 +1224,32 @@ async function openGlobalAttention(): Promise<void> {
   try {
     await window.ai7.leaveBookWorkbench();
     shell.leaveBook();
-    renderGlobalAttention();
+    renderGlobalAttention(bookId);
   } catch (error) {
     setStatus(rendererErrorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable), 'error');
   }
 }
 
 /** 待我处理's screen (editor-surfaces §8.1): the surface is `global-attention.ts`; this gives it its way out. */
-function renderGlobalAttention(): void {
+function renderGlobalAttention(bookId?: string | null): void {
   const content = panel();
   content.classList.add('global-attention');
+  // A notice for several events of one Book opens the list of that Book alone (NOTIF-008), its own count beside it.
+  const bookOnly = (projection: GlobalAttentionProjection): GlobalAttentionProjection => {
+    const groups = projection.groups.map((group) => {
+      const items = group.items.filter((item) => item.book.bookId === bookId);
+      return { ...group, items, total: items.length };
+    });
+    const actionableCount = groups.reduce((count, group) => count + (GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key) ? group.total : 0), 0);
+    return { ...projection, groups, actionableCount };
+  };
   const surface = mountGlobalAttention({
     root: content,
-    reader: globalAttentionReader,
+    reader: bookId === undefined ? globalAttentionReader : {
+      ...globalAttentionReader,
+      subscribe: (listener) => globalAttentionReader.subscribe((reading) =>
+        listener(reading.kind === 'projection' ? { kind: 'projection', projection: bookOnly(reading.projection) } : reading)),
+    },
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,
@@ -1220,7 +1261,7 @@ function renderGlobalAttention(): void {
   replaceScreen('global-attention', content);
   globalAttentionSurface = surface;
   surface.start();
-  setStatus(GLOBAL_ATTENTION_STATUS_LINES.opened);
+  setStatus(bookId === undefined ? GLOBAL_ATTENTION_STATUS_LINES.opened : NOTIFICATION_BOOK_LIST_LINE);
 }
 
 /**
@@ -6178,6 +6219,54 @@ async function renderEvaluationCalibration(focusBookId: string | null): Promise<
   }
 }
 
+/** 设置 › 本机 › 通知 (Issue #937; NOTIF-005 to 007): four local switches, all off by default; none grants authority. */
+async function renderNotificationSettings(): Promise<void> {
+  const preferences = await window.ai7.getPreferences();
+  let values = preferences.values;
+  const content = panel();
+  content.dataset['notificationSettings'] = 'true';
+  content.append(element('h2', undefined, NOTIFICATION_SETTINGS_WORDS.title), element('p', 'field-note', NOTIFICATION_SETTINGS_WORDS.note));
+  if (preferences.notice) content.append(element('p', 'attention-note', preferences.notice));
+  const rows = [
+    ['notifications.enabled', NOTIFICATION_SETTINGS_WORDS.enabled],
+    ['notifications.completions', NOTIFICATION_SETTINGS_WORDS.completions],
+    ['notifications.sound', NOTIFICATION_SETTINGS_WORDS.sound],
+    ['notifications.bookName', NOTIFICATION_SETTINGS_WORDS.bookName],
+  ] as const;
+  const controls = new Map<string, HTMLInputElement>();
+  const paint = (): void => {
+    for (const [key] of rows) {
+      const control = controls.get(key)!;
+      control.checked = values[key];
+      control.disabled = key === 'notifications.completions' && !values['notifications.enabled'];
+    }
+  };
+  for (const [key, label] of rows) {
+    const row = element('label', 'field');
+    const control = document.createElement('input');
+    control.type = 'checkbox';
+    control.dataset['notificationPreference'] = key;
+    controls.set(key, control);
+    control.addEventListener('change', () => {
+      const value = control.checked;
+      control.disabled = true;
+      void window.ai7.savePreference({ key, value }).then((saved) => {
+        values = saved.values;
+        setStatus(NOTIFICATION_SETTINGS_WORDS.saved, 'success');
+      }).catch((error: unknown) => setStatus(rendererErrorMessage(error, NOTIFICATION_SETTINGS_WORDS.unsaved), 'error')).finally(() => {
+        control.disabled = false;
+        paint();
+      });
+    });
+    row.append(control, document.createTextNode(label));
+    content.append(row);
+  }
+  paint();
+  content.append(button(NOTIFICATION_SETTINGS_WORDS.back, 'secondary', renderSettingsHub));
+  replaceScreen('notifications', content);
+  setStatus(NOTIFICATION_SETTINGS_WORDS.opened);
+}
+
 /**
  * The exact persisted report of one historical Run, using the existing read-only report renderer (brief revision 2).
  * No current-plan lookup can redirect this link to another Run or make an old Run inaccessible.
@@ -6245,6 +6334,7 @@ function renderKeyboardSettings(): void {
  * 设置 (Issue #934; editor-surfaces §8.6): 服务 · 编辑工作 · 本机, one row per page. A page that exists keeps its own render
  * function and its `data-settings-route`; a row whose page a later slice of the wave brings is unavailable, 即将提供.
  */
+
 function renderSettingsHub(): void {
   const content = panel();
   content.classList.add('settings-hub');
@@ -6261,6 +6351,7 @@ function renderSettingsHub(): void {
     diagnostics: renderDiagnostics,
     usage: renderUsage,
     keyboard: renderKeyboardSettings,
+    notifications: () => void renderNotificationSettings(),
   };
   for (const group of SETTINGS_HUB_GROUPS) {
     const section = element('section', 'settings-group');

@@ -18,6 +18,8 @@ import {
   PREFERENCE_IPC_CHANNELS,
   type PreferencesProjection,
   type PreferencesRendererApi,
+  type NotificationsRendererApi,
+  type NotificationNavigation,
   type SavePreferenceInput,
 } from '../shared/preferences.js';
 import { APPEARANCE_IPC_CHANNEL, type AppearanceRendererApi, type AppearanceState } from '../shared/appearance.js';
@@ -181,7 +183,7 @@ async function invoke<Result>(channel: string, input?: unknown): Promise<Result>
 if (process.platform !== 'win32' && process.platform !== 'darwin') throw new Error('Unsupported renderer platform.');
 
 // Local view and input configuration (Issue #934, slice 11a) rides beside the service's members: main-owned, no protocol op.
-const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi = Object.freeze({
+const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & NotificationsRendererApi = Object.freeze({
   listCrashRecords: () => invoke<Awaited<ReturnType<DiagnosticsApi['listCrashRecords']>>>('ai7:diagnostics:list-crashes'),
   exportDiagnosticsBundle: () => invoke<Awaited<ReturnType<DiagnosticsApi['exportDiagnosticsBundle']>>>('ai7:diagnostics:export'),
   revealDiagnosticsLocation: () => invoke<Awaited<ReturnType<DiagnosticsApi['revealDiagnosticsLocation']>>>('ai7:diagnostics:reveal'),
@@ -723,6 +725,12 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi = Object
   getProductDataLocation: () =>
     invoke<Awaited<ReturnType<RendererApi['getProductDataLocation']>>>(IPC_CHANNELS.getProductDataLocation),
   getPreferences: () => invoke<PreferencesProjection>(PREFERENCE_IPC_CHANNELS.getPreferences),
+  notify: (input: { bookId: string | null; eventId: string }) => invoke<void>('ai7:notify', input),
+  onNotificationNavigate: (listener: (target: NotificationNavigation) => void) => {
+    const receive = (_event: unknown, target: NotificationNavigation): void => listener(target);
+    ipcRenderer.on('ai7:notification-navigate', receive);
+    return () => { ipcRenderer.removeListener('ai7:notification-navigate', receive); };
+  },
   savePreference: (input: SavePreferenceInput) => invoke<PreferencesProjection>(PREFERENCE_IPC_CHANNELS.savePreference, input),
   // Issue #935: the initial main-process appearance state, then every change; a push that arrives first wins over the read.
   onAppearanceChanged: (listener: (state: AppearanceState) => void) => {

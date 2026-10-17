@@ -17,6 +17,7 @@ declare module 'electron' {
     on(event: 'will-download', listener: (event: Event) => void): void;
   };
   export class BrowserWindow {
+    static getAllWindows(): BrowserWindow[];
     constructor(options: Record<string, unknown>);
     readonly webContents: {
       id: number;
@@ -36,6 +37,7 @@ declare module 'electron' {
     isDestroyed(): boolean;
     isMinimized(): boolean;
     isVisible(): boolean;
+    isFocused(): boolean;
     loadFile(path: string): Promise<void>;
     on(event: string, listener: (...args: any[]) => void): void;
     once(event: 'ready-to-show', listener: () => void): void;
@@ -80,6 +82,12 @@ declare module 'electron' {
     removeListener(channel: string, listener: (event: unknown, payload: any) => void): void;
     send(channel: string, input?: unknown): void;
   };
+  export class Notification {
+    constructor(options: { title: string; body: string; silent: boolean });
+    show(): void;
+    close(): void;
+    on(event: 'click', listener: () => void): this;
+  }
   export const Menu: { setApplicationMenu(menu: null): void };
   export const nativeTheme: {
     readonly shouldUseDarkColors: boolean;

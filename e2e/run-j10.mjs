@@ -318,6 +318,10 @@ async function click(renderer, label, name) {
 async function clickSelector(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
+/** A checkbox is an input, not a button; use its native click so checked/change follow the product path. */
+async function clickNotificationSwitch(renderer, key, name) {
+  await assertRenderer(renderer, `(() => { const input = document.querySelector('[data-notification-preference="' + ${JSON.stringify(key)} + '"]'); if (!(input instanceof HTMLInputElement) || input.type !== 'checkbox' || input.disabled) return false; input.click(); return true; })()`, name);
+}
 async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); return input.value === ${JSON.stringify(value)}; })()`, name);
 }
@@ -780,6 +784,19 @@ async function main() {
     } finally {
       await renderer.send('Page.setBypassCSP', { enabled: false });
     }
+
+    at('notification-settings');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'notification-settings-hub');
+    await clickSelector(renderer, '[data-settings-route="notifications"]', 'notification-settings-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="notifications"] [data-notification-settings]')`, 'notification-settings-shown');
+    await assertRenderer(renderer, `document.querySelector('#context-title')?.textContent==='设置' && document.querySelector('#context-position')?.textContent==='本机 · 通知'`, 'notification-settings-place');
+    await assertRenderer(renderer, `(() => { const switches = [...document.querySelectorAll('[data-notification-preference]')]; return switches.length === 4 && switches.every((control) => !control.checked) && document.querySelector('[data-notification-preference="notifications.completions"]').disabled && document.querySelector('[data-nav-settings="hub"]')?.getAttribute('aria-current') === 'page'; })()`, 'notification-settings-defaults');
+    await clickNotificationSwitch(renderer, 'notifications.enabled', 'notification-settings-enable');
+    await waitFor(renderer, `document.querySelector('[data-notification-preference="notifications.completions"]')?.disabled === false`, 'notification-completions-enabled');
+    await assertRenderer(renderer, `window.ai7.getPreferences().then((preferences) => preferences.values['notifications.enabled'] === true)`, 'notification-settings-saved');
+    await clickNotificationSwitch(renderer, 'notifications.enabled', 'notification-settings-disable');
+    await waitFor(renderer, `document.querySelector('[data-notification-preference="notifications.completions"]')?.disabled === true`, 'notification-completions-disabled');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'notification-return-library');
 
     at('book-import');
     const bookId = await importSample1(renderer, BOOK.title, false, 'import');
@@ -1534,6 +1551,12 @@ async function main() {
     'budget-raised', { ceiling: raisedPlan?.providerResolutionPlan?.runBudgetCeiling ?? null, diff: raisedDiff });
 
     at('budget-redo-completed');
+    // The quiet completion notice (Issue #937; NOTIF-003): a focused window, and a probe that records each showing and hiding
+    // of the one notice, so its six seconds are read from the page and not raced by the steps below.
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    const beforeQuietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => ({ count: projection.actionableCount, stop: projection.groups.some((group) => ['exceptions', 'decisions'].includes(group.key) && group.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-budget-reached')) }))`);
+    await waitFor(renderer, `document.querySelector('[data-quiet-completion-notice]')?.hidden === true`, 'quiet-completion-idle', 10_000);
+    await assertRenderer(renderer, `(() => { const notice = document.querySelector('[data-quiet-completion-notice]'); if (!notice || !notice.hidden) return false; const probe = { shown: [], hiddenAt: null }; const observer = new MutationObserver(() => { const visible = !notice.hidden; const last = probe.shown.at(-1); if (visible && (last === undefined || last.hiddenAt !== null)) probe.shown.push({ at: performance.now(), hiddenAt: null, noticeClass: notice.dataset.noticeClass ?? null, text: notice.querySelector('[role="status"]')?.textContent ?? null }); if (!visible && last !== undefined && last.hiddenAt === null) last.hiddenAt = performance.now(); }); observer.observe(notice, { attributes: true, childList: true, characterData: true, subtree: true }); globalThis.__j10QuietNotice = { probe, stop: () => observer.disconnect() }; return true; })()`, 'quiet-completion-probe');
     // 开始任务: the redo reads the four ranges left, and the reduction after them, under 20,000 tokens, to its end — the
     // Book's analysis whole again, and 待我处理 no longer naming the stop.
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'budget-redo-start');
@@ -1547,6 +1570,19 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`, 'budget-redo-shown-settled', 30_000);
     const settledAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
     requireJourney(settledAttention?.groups?.every((group) => group.items.every((entry) => entry.state !== 'analysis-budget-reached')) === true, 'budget-left-attention', settledAttention?.groups ?? null);
+
+    at('quiet-completion-notice');
+    // One notice, in Task Outcome words (never 任务已完成), dismissed by itself within its six seconds; the completion stays in
+    // 最近完成 and adds nothing to the count — it falls only by the stop the redo settled, if that was still counted.
+    await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.length > 0`, 'quiet-completion-shown', 30_000);
+    await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.at(-1).hiddenAt !== null`, 'quiet-completion-dismissed', 10_000);
+    const quietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => { const { probe, stop } = globalThis.__j10QuietNotice; stop(); delete globalThis.__j10QuietNotice; return { count: projection.actionableCount, recent: projection.groups.find((group) => group.key === 'recent')?.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-completed') ?? false, notices: document.querySelectorAll('[data-quiet-completion-notice]').length, shown: probe.shown.map((entry) => ({ noticeClass: entry.noticeClass, text: entry.text, ms: Math.round(entry.hiddenAt - entry.at) })) }; })`);
+    const quietShown = quietCompletion.shown[0];
+    requireJourney(quietCompletion.notices === 1 && quietCompletion.shown.length === 1 && quietShown.noticeClass === 'analysis-completed' && quietShown.text === '任务结果已记录' &&
+      quietShown.ms >= 5_500 && quietShown.ms <= 8_000 && quietCompletion.recent === true &&
+      quietCompletion.count === beforeQuietCompletion.count - (beforeQuietCompletion.stop ? 1 : 0),
+    'quiet-completion-notice', { before: beforeQuietCompletion, after: quietCompletion });
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
 
     // ---- 模型服务账户限额 (Issue #51, S16b; MODEL-018, RUN-012) -------------------------------------------------------
     at('relaunch-for-account-limit');

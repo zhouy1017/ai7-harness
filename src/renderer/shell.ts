@@ -70,6 +70,7 @@ const SCREEN_ACTIVE: Readonly<Record<string, ShellActive>> = Object.freeze({
   usage: { kind: 'settings' },
   'usage-run': { kind: 'settings' },
   keyboard: { kind: 'settings' },
+  notifications: { kind: 'settings' },
 });
 
 /** The import steps, which belong to 书库 though no Book is open yet. */
