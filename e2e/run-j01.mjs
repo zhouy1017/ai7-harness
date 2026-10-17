@@ -1131,7 +1131,7 @@ async function assertCommittedManuscriptReimport(renderer, expectation) {
   requireJourney(/^[0-9a-f-]{36}$/i.test(recordIdentity?.sourceVersionId ?? ''), `${scenario}-source-version`);
   // The Book's records are one step away, through the manuscript's 资料与记录 group.
   at('reimport-history');
-  await clickExactButton(renderer, '返回图书工作概览', `${scenario}-to-overview`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), `${scenario}-to-overview`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(identities.bookId)}]')`, `${scenario}-overview`);
   await assertBoundedHistoryGraph(renderer, expectedRevisionCount, expectedRecordCount, scenario);
   return { ...identities, ...recordIdentity };
@@ -1239,7 +1239,7 @@ async function resolveAndCommitManuscriptReimport(renderer, expectation) {
 }
 
 async function createDurableJournalEdit(renderer) {
-  await clickExactButton(renderer, '打开稿件', 'reimport-dirty-open-editor');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'reimport-dirty-open-editor');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'reimport-dirty-editor');
   await assertRenderer(
     renderer,
@@ -1284,7 +1284,7 @@ async function importInitialManuscriptForReimport(renderer, sourceSha256, source
 
 async function collectEditorBlockIdentities(renderer, scenario, openEditor = true) {
   if (openEditor) {
-    await clickExactButton(renderer, '打开稿件', `${scenario}-open-editor`);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), `${scenario}-open-editor`);
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, `${scenario}-editor`);
   } else {
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, `${scenario}-editor-already-open`);
@@ -1308,7 +1308,7 @@ async function collectEditorBlockIdentities(renderer, scenario, openEditor = tru
 }
 
 async function collectEditorBlockIdentitySequence(renderer, scenario) {
-  await clickExactButton(renderer, '打开稿件', `${scenario}-open-editor`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), `${scenario}-open-editor`);
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, `${scenario}-editor`);
   const identities = [];
   for (;;) {
@@ -1744,7 +1744,7 @@ async function runJourney(
     `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const buttons = Array.from(document.querySelectorAll('.record-navigation button'), (button) => button.textContent); const exact = ['图书','主稿件','修订版 r1','来源版本与来源记录','工作流实例与精确 Profile 绑定','稿件导入记录']; const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); const values = Object.fromEntries(Array.from(record?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); return record?.textContent.includes('稿件导入记录 ID') && record.textContent.includes('导入保真审阅 ID') && values['导入降级决定 ID'] === '—' && values['保真结果'] === '完整保留 · 原文件随来源版本保留' && record.textContent.includes('查看导入保真审阅 · 9 类与预计往返') && record.textContent.includes('完整保留（随文件保留）') && !record.textContent.includes('查看受影响类别、示例与导出后果') && items.length === 0 && buttons.length === exact.length && buttons.every((label, index) => label === exact[index]); })()`,
     'exact-record-navigation',
   );
-  await clickExactButton(renderer, '打开稿件', 'editor-open');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor-screen');
   at('editor');
   await assertRenderer(
@@ -1897,16 +1897,17 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     'empty-book-exact-identity',
   );
 
-  await clickExactButton(renderer, '返回图书列表', 'empty-book-return-library');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'empty-book-return-library');
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'empty-book-library');
   // Back in 书库 the window holds no Book: its groups go, and it is 最近打开 with where it was last seen. Pinning it and
   // unpinning it again move the row and change nothing else (IA-009).
   const recentRow = `document.querySelector('#app-sidebar [data-nav-books="recent"] [data-nav-book=${JSON.stringify(bookId)}]')`;
   await waitFor(renderer, `document.querySelector('#app-sidebar .sidebar-book')?.hidden === true && ${recentRow}?.querySelector('.nav-label')?.textContent === ${JSON.stringify(title)} && ${recentRow}?.querySelector('.nav-state')?.textContent === '上次在「工作概览」'`, 'empty-book-sidebar-recent');
+  await assertRenderer(renderer, `(() => { const pin=document.querySelector('#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]'); if(!(pin instanceof HTMLButtonElement))return false; pin.focus(); return document.activeElement===pin; })()`, 'empty-book-sidebar-pin-focus');
   await assertRenderer(renderer, sidebarNavigate(`#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]`), 'empty-book-sidebar-pin');
-  await waitFor(renderer, `document.querySelector('#app-sidebar [data-nav-books="pinned"] [data-nav-pin=${JSON.stringify(bookId)}]')?.getAttribute('aria-pressed') === 'true' && !${recentRow}`, 'empty-book-sidebar-pinned');
+  await waitFor(renderer, `document.querySelector('#app-sidebar [data-nav-books="pinned"] [data-nav-pin=${JSON.stringify(bookId)}]')?.getAttribute('aria-pressed') === 'true' && !${recentRow} && document.activeElement === document.querySelector('#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-pinned');
   await assertRenderer(renderer, sidebarNavigate(`#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]`), 'empty-book-sidebar-unpin');
-  await waitFor(renderer, `${recentRow}?.parentElement?.querySelector('[data-nav-pin]')?.getAttribute('aria-pressed') === 'false' && !document.querySelector('#app-sidebar [data-nav-books="pinned"]')`, 'empty-book-sidebar-unpinned');
+  await waitFor(renderer, `${recentRow}?.parentElement?.querySelector('[data-nav-pin]')?.getAttribute('aria-pressed') === 'false' && !document.querySelector('#app-sidebar [data-nav-books="pinned"]') && document.activeElement === document.querySelector('#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-unpinned');
   await assertRenderer(
     renderer,
     `(() => { const row = document.querySelector('[data-screen="landing"] [data-book-id=${JSON.stringify(bookId)}]')?.closest('.book-summary-item'); return row?.textContent.includes(${JSON.stringify(title)}) && row.textContent.includes('尚无稿件') && row.textContent.includes(${JSON.stringify(internalNumber)}) && row.textContent.includes(${JSON.stringify(bookId)}) && row.textContent.includes(${JSON.stringify(`book:${bookId}`)}) && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '加载更多图书'); })()`,
@@ -2666,7 +2667,7 @@ async function main() {
     // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(populatedBookId)}]')`, 'populated-book-manuscript-before-source');
-    await clickExactButton(renderer, '返回图书工作概览', 'populated-book-to-overview-before-source');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'populated-book-to-overview-before-source');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'populated-book-overview-before-source');
     const populatedBefore = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);
     const populatedSourceVersionId = populatedBefore.find((record) => record.kind === 'source')?.id;
@@ -2680,7 +2681,7 @@ async function main() {
       'populated-source-record-before',
     );
     const populatedProvenanceBefore = await renderer.evaluate(`(() => { const labels = Array.from(document.querySelectorAll('.record-detail dt')); return labels.find((item) => item.textContent === '来源记录 ID')?.nextElementSibling?.textContent; })()`);
-    await clickExactButton(renderer, '返回图书列表', 'populated-book-return-before-source');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'populated-book-return-before-source');
     const populatedReview = await prepareSourceImportReview(renderer, {
       ...sample1Expectation,
       targetBookId: populatedBookId,
@@ -2763,7 +2764,7 @@ async function main() {
         `retention-text-box-${disposition}-record-choice`,
       );
       // Merged, the box's two paragraphs are blocks of r1 beside the six of the body; kept, they are not.
-      await clickExactButton(renderer, '打开稿件', `retention-text-box-${disposition}-editor-open`);
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), `retention-text-box-${disposition}-editor-open`);
       await waitFor(
         renderer,
         `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === ${blocks}`,
@@ -2791,7 +2792,7 @@ async function main() {
       'imported-marks-record-row',
     );
     at('imported-marks-editor');
-    await clickExactButton(renderer, '打开稿件', 'imported-marks-editor-open');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'imported-marks-editor-open');
     await waitFor(
       renderer,
       `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === ${IMPORTED_MARKS_REJECTED_BLOCKS.length}`,
@@ -3141,7 +3142,7 @@ async function main() {
         sameBookKinds.filter((kind) => kind === 'source-import-record').length === 2,
       'source-same-book-record-counts',
     );
-    await clickExactButton(renderer, '返回图书列表', 'source-return-for-empty-book');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'source-return-for-empty-book');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'source-returned-for-empty-book');
     await clickExactButton(renderer, '新建图书', 'source-create-empty-book');
     await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'source-empty-book-form');
@@ -3417,7 +3418,7 @@ async function main() {
     // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(reimportBookId)}]')`, 'reimport-no-change-lineage-restart-manuscript');
-    await clickExactButton(renderer, '返回图书工作概览', 'reimport-no-change-lineage-restart-to-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'reimport-no-change-lineage-restart-to-overview');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'reimport-no-change-lineage-restart-overview');
     await assertRenderer(
       renderer,

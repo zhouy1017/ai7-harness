@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -704,7 +704,7 @@ async function importAndOpen(renderer, dataRoot) {
   await clickButton(renderer, '新建图书并导入稿件', 'commit-click');
   await waitForImportCommitted(renderer, dataRoot);
   at('import-editor-open');
-  await clickButton(renderer, '打开稿件', 'editor-open');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
   await openNavigation(renderer, 'editor-navigation-open');
 }

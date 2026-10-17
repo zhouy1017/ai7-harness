@@ -57,6 +57,21 @@ export const SHELL_LABELS = Object.freeze({
   bookRowName: (title: string, state: string) => `《${title}》 · ${state}`,
   global: '全局',
   importing: '导入稿件',
+  untitledBook: '未命名图书',
+  bookIcon: '书',
+  openingBook: '正在打开图书工作台…',
+  bookUnavailable: '无法打开精确图书工作台。',
+  preferenceWriteFailed: '本机界面设置未能保存，界面仍按原来的设置显示。',
+  preferenceReadFailed: '本机界面设置无法读取，已按默认设置显示。',
+  library: '书库',
+  libraryTitle: '图书与稿件',
+  allBooks: '全部图书',
+});
+
+export const SETTINGS_PAGE_TITLES: Readonly<Record<string, string>> = Object.freeze({
+  'model-service': '服务 · 模型服务',
+  'data-storage': '本机 · 数据与存储',
+  'evaluation-calibration': '编辑工作 · 评估校准与预测',
 });
 
 const SECTION_LABELS: Readonly<Record<ShellBookSection, string>> = Object.freeze(Object.fromEntries(

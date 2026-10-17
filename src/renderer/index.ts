@@ -292,7 +292,7 @@ import {
 } from './plan-preview-labels.js';
 import { MAX_PINNED_BOOKS, type ShellBookEntry, type ShellBookSection } from '../shared/preferences.js';
 import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
-import { PREFERENCES_LOCAL_LINE, SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, type SettingsRoute } from './shell-labels.js';
+import { PREFERENCES_LOCAL_LINE, SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
 
 function requiredElement(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -855,6 +855,7 @@ const shell = mountShell({
   title: requiredElement('#context-title'),
   position: requiredElement('#context-position'),
   actions: requiredElement('#context-actions'),
+  preferenceNotice: requiredElement('#preferences-notice'),
   preferences: shellPreferences,
   pinLimit: MAX_PINNED_BOOKS,
   setStatus,
@@ -864,8 +865,7 @@ const shell = mountShell({
     if (destination === 'library') void leaveThen(() => returnToLibrary());
     else if (destination === 'series') void leaveThen(() => renderSeriesList(null));
     else if (destination === 'knowledge') void leaveThen(() => renderKnowledgeBase('guidelines'));
-    // 质量与学习 opens at 反馈历史, its first tab, as the landing's entry did (synchronized with S26c).
-    else void leaveThen(() => renderQualityLearning('feedback', null));
+    else void leaveThen(() => renderQualityLearning('learning', null));
   },
   openSection: (book, section) => {
     if (authorityInterrupted) return;
@@ -874,11 +874,11 @@ const shell = mountShell({
   openBook: (bookId) => {
     if (authorityInterrupted) return;
     void leaveThen(async () => {
-      setStatus('正在打开精确图书工作台…', 'busy');
+      setStatus(SHELL_LABELS.openingBook, 'busy');
       try {
         await requestBookWorkbenchRoute({ kind: 'book', bookId });
       } catch (error) {
-        setStatus(rendererErrorMessage(error, '无法打开精确图书工作台。'), 'error');
+        setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
       }
     });
   },
@@ -891,7 +891,7 @@ const shell = mountShell({
 window.addEventListener('focus', () => void shellPreferences.load().catch(() => undefined));
 void shellPreferences.load().then(
   (notice) => { if (notice !== null) setStatus(notice, 'error'); },
-  (error: unknown) => setStatus(rendererErrorMessage(error, '本机界面设置无法读取，已按默认设置显示。'), 'error'),
+  (error: unknown) => setStatus(rendererErrorMessage(error, SHELL_LABELS.preferenceReadFailed), 'error'),
 );
 
 interface RecoveryReturnContext {
@@ -5373,7 +5373,7 @@ function readersReportExemplars(book: ExemplarBookProjection): HTMLElement {
 
 /**
  * 质量与学习 (Issue #61, plan slices S26b and S26c; LEARN-002, FDBK-009, FDBK-010): a house-wide destination beside 知识库 with
- * three tabs — 反馈历史, the passive history it opens at from the landing; 学习准入, where a Book's 学习准入待处理 in
+ * three tabs — 反馈历史, the passive history; 学习准入, the sidebar's entry (Issue #934), where a Book's 学习准入待处理 in
  * 待我处理 opens it, for that Book, with the way to every Book one step away; and 学习回溯 (Issue #62, S27a), the learning
  * audit of every material's lineage and 停止今后使用.
  */
@@ -6101,7 +6101,7 @@ function renderSettingsHub(): void {
  * 发现 is ②A's judged items until the Book-level aggregate exists (IA-013, a follow-up); 历史与恢复 is 工作概览's records.
  */
 async function openBookSection(book: ShellBookEntry, section: ShellBookSection): Promise<void> {
-  setStatus('正在打开图书工作台…', 'busy');
+  setStatus(SHELL_LABELS.openingBook, 'busy');
   try {
     await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) => {
       const { bookId, bookTitle } = route;
@@ -6128,7 +6128,7 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
       }
     });
   } catch (error) {
-    setStatus(rendererErrorMessage(error, '无法打开精确图书工作台。'), 'error');
+    setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
   }
 }
 
@@ -6260,8 +6260,8 @@ function renderLanding(
   content.classList.add('library-home');
   const copy = element('div');
   copy.append(
-    element('p', 'section-label', '书库'),
-    element('h2', undefined, '图书与稿件'),
+    element('p', 'section-label', SHELL_LABELS.library),
+    element('h2', undefined, SHELL_LABELS.libraryTitle),
     element('p', 'lede', '可以先创建空图书，也可以从本地 DOCX 开始一次导入。两项操作彼此独立。'),
   );
   const createBook = button('新建图书', 'secondary', renderBookCreationForm);
@@ -6291,7 +6291,7 @@ function renderLanding(
   if (books.items.length > 0 || filter !== null) {
     const library = element('section', 'recent-work');
     library.dataset['bookFilter'] = filter === null ? 'none' : filter.field;
-    library.append(element('p', 'section-label', '图书'), element('h3', undefined, '全部图书'));
+    library.append(element('p', 'section-label', '图书'), element('h3', undefined, SHELL_LABELS.allBooks));
     library.append(renderBookFilter(priorWork, activeRecoveryReturn, filter));
     if (filter !== null) library.append(element('p', 'field-note book-filter-line', bookFilterLine(filter)));
     if (books.items.length === 0) library.append(element('p', 'field-note book-filter-none', BOOK_FILTER_NONE));

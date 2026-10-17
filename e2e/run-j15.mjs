@@ -924,7 +924,7 @@ async function main() {
         exactPins[0].includes(${JSON.stringify(SIDECAR_REVISION_1_DIGEST)}) &&
         exactPins[1].includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)});
     })()`, 'book-a-sidecar-history-after-restart');
-    await click(renderer, '返回图书列表', 'return-after-book-a');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'return-after-book-a');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'landing-before-book-b');
 
     at('second-book-disabled');
@@ -956,7 +956,7 @@ async function main() {
     at('knowledge-guidelines');
     // 知识库 from 书库: its seven classes as tabs, opening at 审阅规范文件 — every guideline document the review categories apply,
     // at AI7's built-in first version, with its numbered clauses and a version no review has used yet.
-    await click(renderer, '返回图书列表', 'knowledge-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'knowledge-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'knowledge-landing');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-open');
     const opened = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready');
@@ -1165,7 +1165,7 @@ async function main() {
     // decision in focus.
     const libraryItem = `library-material:${materialId}`;
     const itemSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(libraryItem)}]`;
-    await clickSelector(renderer, '#global-attention-entry', 'library-attention-entry');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'library-attention-entry');
     await waitFor(renderer, `document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4 && document.querySelector(${JSON.stringify(itemSelector)}) !== null`, 'library-attention-listed', 30_000);
     const libraryListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(itemSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, state: item.dataset.attentionState, book: item.querySelector('.global-attention-book')?.textContent ?? null, object: item.querySelector('button.global-attention-open')?.textContent ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null, count: document.querySelector('#global-attention-entry')?.dataset.attentionCount ?? null }; })()`);
     requireJourney(libraryListed.group === 'decisions' && libraryListed.state === 'library-attribution-pending' && libraryListed.book === '尚未定归属' &&
@@ -1254,7 +1254,7 @@ async function main() {
     const indexSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(indexItem)}]`;
     const indexAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection)=>{ const group=projection.groups.find((entry)=>entry.items.some((item)=>item.itemId===${JSON.stringify(indexItem)})); const item=group?.items.find((entry)=>entry.itemId===${JSON.stringify(indexItem)}); return [group?.key ?? null, item?.state ?? null, item?.nextStep ?? null, item?.object.kind ?? null, item?.object.outcome ?? null, projection.actionableCount]; })`);
     requireJourney(JSON.stringify(indexAttention) === JSON.stringify(['recent', 'indexing-completed', 'view-material-index', 'library-index', 'complete', 0]), 'library-index-attention', indexAttention);
-    await clickSelector(renderer, '#global-attention-entry', 'library-index-attention-entry');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'library-index-attention-entry');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(indexSelector)}) !== null`, 'library-index-attention-listed', 30_000);
     const indexListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(indexSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, object: item.querySelector('button.global-attention-open')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null }; })()`);
     requireJourney(indexListed.group === 'recent' && indexListed.pill === '索引完成' && indexListed.object === `资料索引 · 图书「${LIBRARY_TITLE}」` &&
@@ -1437,7 +1437,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'library-books-landed');
     for (let index = 0; index < 19; index += 1) {
       await createEmptyBook(renderer, `J15 分页图书${String(index).padStart(2, '0')}`);
-      await click(renderer, '返回图书列表', 'library-books-return');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'library-books-return');
       await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'library-books-returned');
     }
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'library-books-knowledge');

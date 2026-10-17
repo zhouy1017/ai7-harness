@@ -16,6 +16,7 @@ import {
   SHELL_DESTINATIONS,
   SHELL_LABELS,
   SHELL_SETTINGS,
+  SETTINGS_PAGE_TITLES,
   shellDestinationLabel,
   shellRecentStateLine,
   shellSectionGroupLabel,
@@ -66,13 +67,6 @@ const SCREEN_ACTIVE: Readonly<Record<string, ShellActive>> = Object.freeze({
   'evaluation-calibration': { kind: 'settings' },
 });
 
-/** The setting page a screen state shows, for the context header's position. */
-const SETTINGS_PAGE_TITLES: Readonly<Record<string, string>> = Object.freeze({
-  'model-service': '服务 · 模型服务',
-  'data-storage': '本机 · 数据与存储',
-  'evaluation-calibration': '编辑工作 · 评估校准与预测',
-});
-
 /** The import steps, which belong to 书库 though no Book is open yet. */
 const IMPORT_STATES = new Set(['target', 'relationship', 'title', 'review', 'book-create', 'book-create-review']);
 
@@ -97,7 +91,9 @@ export function contextHeading(state: string, active: ShellActive, book: ShellBo
 
 /** A title kept within what a preference holds; the service's titles are already bounded, this only guards the file. */
 function boundedTitle(title: string): string {
-  return [...title].slice(0, MAX_SHELL_BOOK_TITLE_CHARACTERS).join('') || '未命名图书';
+  // The shared validator bounds UTF-16 length; never split a supplementary character at that boundary.
+  const bounded = title.slice(0, MAX_SHELL_BOOK_TITLE_CHARACTERS).replace(/[\uD800-\uDBFF]$/u, '');
+  return bounded || SHELL_LABELS.untitledBook;
 }
 
 /** 最近打开 after a visit: the Book first with the section it was seen in, then the others, at most eight. */
@@ -140,7 +136,7 @@ export function sidebarBookRows(
 
 /** The first character a collapsed row shows for a Book: its title's, as the editor reads it. */
 export function bookIcon(title: string): string {
-  return [...title.trim()][0] ?? '书';
+  return [...title.trim()][0] ?? SHELL_LABELS.bookIcon;
 }
 
 /**
@@ -151,6 +147,7 @@ export function bookIcon(title: string): string {
  */
 export class ShellPreferences {
   private values: PreferenceValues = preferenceDefaults();
+  private storedNotice: string | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly listeners = new Set<(values: PreferenceValues) => void>();
 
@@ -160,15 +157,25 @@ export class ShellPreferences {
     return this.values;
   }
 
+  get notice(): string | null {
+    return this.storedNotice;
+  }
+
   subscribe(listener: (values: PreferenceValues) => void): void {
     this.listeners.add(listener);
   }
 
   /** Read the stored values again; the notice is the line to disclose when the stored file was not usable. */
   async load(): Promise<string | null> {
-    const projection = await this.api.getPreferences();
-    this.accept(projection);
-    return projection.notice;
+    try {
+      const projection = await this.api.getPreferences();
+      this.accept(projection);
+      return this.storedNotice;
+    } catch (error) {
+      this.storedNotice = SHELL_LABELS.preferenceReadFailed;
+      for (const listener of this.listeners) listener(this.values);
+      throw error;
+    }
   }
 
   setCollapsed(collapsed: boolean): Promise<void> {
@@ -184,20 +191,22 @@ export class ShellPreferences {
     if (front !== undefined && front.bookId === place.bookId && front.section === place.section && front.title === boundedTitle(place.title)) {
       return Promise.resolve();
     }
-    return this.write('shell.recentBooks', (latest) => rememberRecentBook(latest['shell.recentBooks'], place), true);
+    return this.write('shell.recentBooks', (latest) => rememberRecentBook(latest['shell.recentBooks'], place), true, false);
   }
 
-  private write<Key extends PreferenceKey>(key: Key, next: (latest: PreferenceValues) => PreferenceValue<Key>, fromLatest: boolean): Promise<void> {
+  private write<Key extends PreferenceKey>(key: Key, next: (latest: PreferenceValues) => PreferenceValue<Key>, fromLatest: boolean, clearNotice = true): Promise<void> {
     const run = this.queue.then(async () => {
       const latest = fromLatest ? (await this.api.getPreferences()).values : this.values;
-      this.accept(await this.api.savePreference({ key, value: next(latest) }));
+      this.accept(await this.api.savePreference({ key, value: next(latest) }), clearNotice);
     });
     this.queue = run.catch(() => undefined);
     return run;
   }
 
-  private accept(projection: PreferencesProjection): void {
+  private accept(projection: PreferencesProjection, clearNotice = false): void {
     this.values = projection.values;
+    // A visit may repair the file automatically during startup. Keep the disclosure until an explicit settings change.
+    if (projection.notice !== null || clearNotice) this.storedNotice = projection.notice;
     for (const listener of this.listeners) listener(this.values);
   }
 }
@@ -225,6 +234,7 @@ export interface MountShellOptions {
   readonly title: HTMLElement;
   readonly position: HTMLElement;
   readonly actions: HTMLElement;
+  readonly preferenceNotice: HTMLElement;
   readonly preferences: ShellPreferences;
   readonly pinLimit: number;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
@@ -234,8 +244,6 @@ export interface MountShellOptions {
   openBook(bookId: string): void;
   openSettings(): void;
 }
-
-const PREFERENCE_WRITE_FAILED = '本机界面设置未能保存，界面仍按原来的设置显示。';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -335,6 +343,11 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   const allLinks = (): ReadonlyArray<HTMLElement> => [...sidebar.querySelectorAll<HTMLElement>('a.sidebar-link, button.sidebar-pin')];
 
   const paintBooks = (values: PreferenceValues): void => {
+    const focused = document.activeElement instanceof HTMLElement && books.contains(document.activeElement) ? document.activeElement : null;
+    const focusKind = focused?.dataset['navPin'] !== undefined ? 'navPin' : 'navBook';
+    const focusBook = focused?.dataset[focusKind];
+    options.preferenceNotice.textContent = preferences.notice ?? '';
+    options.preferenceNotice.hidden = preferences.notice === null;
     const rows = sidebarBookRows(values['shell.pinnedBooks'], values['shell.recentBooks'], book?.bookId ?? null);
     const list = (heading: string, entries: ReadonlyArray<SidebarBookRow>, kind: 'pinned' | 'recent'): HTMLElement | null => {
       if (entries.length === 0) return null;
@@ -358,7 +371,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
         pin.addEventListener('click', () => {
           if (interrupted) return;
           void preferences.togglePin({ bookId: row.bookId, title: row.title }, options.pinLimit).catch((error: unknown) => {
-            options.setStatus(options.errorMessage(error, PREFERENCE_WRITE_FAILED), 'error');
+            options.setStatus(options.errorMessage(error, SHELL_LABELS.preferenceWriteFailed), 'error');
           });
         });
         item.append(link, pin);
@@ -371,6 +384,12 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     if (blocks.length === 0) blocks.push(el('p', 'sidebar-empty field-note', SHELL_LABELS.noBooks));
     books.replaceChildren(...blocks);
     applyMode();
+    // Pin/unpin moves the row between lists. Keep keyboard focus on that same control after painting it.
+    if (focusBook !== undefined) {
+      const replacement = [...books.querySelectorAll<HTMLElement>('[data-nav-pin], [data-nav-book]')]
+        .find((node) => node.dataset[focusKind] === focusBook);
+      replacement?.focus({ preventScroll: true });
+    }
   };
 
   const applyMode = (): void => {
@@ -424,7 +443,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
 
   options.toggle.addEventListener('click', () => {
     void preferences.setCollapsed(!preferences.current['shell.sidebarCollapsed']).catch((error: unknown) => {
-      options.setStatus(options.errorMessage(error, PREFERENCE_WRITE_FAILED), 'error');
+      options.setStatus(options.errorMessage(error, SHELL_LABELS.preferenceWriteFailed), 'error');
     });
   });
   narrowQuery.addEventListener('change', applyMode);
@@ -434,7 +453,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
 
   const visit = (place: ShellPlace): void => {
     void preferences.visit(place).catch((error: unknown) => {
-      options.setStatus(options.errorMessage(error, PREFERENCE_WRITE_FAILED), 'error');
+      options.setStatus(options.errorMessage(error, SHELL_LABELS.preferenceWriteFailed), 'error');
     });
   };
 

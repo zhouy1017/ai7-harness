@@ -265,7 +265,7 @@ async function createEmptyBook(renderer, title, name) {
 }
 
 async function backToLibrary(renderer, name) {
-  await click(renderer, '返回图书列表', `${name}-back`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), `${name}-back`);
   await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, `${name}-library`);
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
 }
@@ -560,13 +560,13 @@ async function openFoundBook(renderer, title, bookId, name) {
 /** A Book's ②B 审阅 from 书库: its manuscript first, then 工作 › 审阅, as the editor reaches it. */
 async function openBookReview(renderer, title, bookId, name) {
   await openFoundBook(renderer, title, bookId, name);
-  await assertRenderer(renderer, `(() => { const button=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"] button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, `${name}-entry`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), `${name}-entry`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, `${name}-card`, 60_000);
 }
 
 /** From ②B 审阅 back to 书库: its 工作概览, then the library. */
 async function leaveReviewToLibrary(renderer, name) {
-  await click(renderer, '工作概览', `${name}-overview`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), `${name}-overview`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')`, `${name}-overview-ready`);
   await backToLibrary(renderer, name);
 }
@@ -1070,7 +1070,7 @@ async function main() {
     // A fourth Book from exact sample1 through the product's own import, then 加入书系 for it like the others.
     await leaveSeries(renderer, 'knowledge-leave');
     const member = await importSample1(renderer, MEMBER, sample1, 'knowledge-import');
-    await click(renderer, '返回图书列表', 'knowledge-import-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'knowledge-import-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, 'knowledge-import-library');
     await openSeries(renderer, seriesId, 'knowledge-series');
     await clickSelector(renderer, '[data-series-action="add-open"]', 'knowledge-add-open');
@@ -1111,9 +1111,9 @@ async function main() {
     // On the Series page the candidate waits with where it came from; the editor's own candidate for the same name — however
     // it is spaced — discloses a conflict on both.
     // The manuscript leaves for 书库 through the header's 待我处理, as J-07 does.
-    await clickSelector(renderer, '#global-attention-entry', 'knowledge-editor-attention');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'knowledge-editor-attention');
     await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]')`, 'knowledge-editor-attention-screen');
-    await click(renderer, '返回图书列表', 'knowledge-editor-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'knowledge-editor-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, 'knowledge-editor-library');
     await openSeries(renderer, seriesId, 'knowledge-candidates');
     const waiting = await readKnowledge(renderer, (read) => read.candidates.length === 1, 'knowledge-candidate-listed');
@@ -1224,7 +1224,7 @@ async function main() {
     await leaveSeries(renderer, 'consistency-leave');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'consistency-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-manuscript', 120_000);
-    await click(renderer, '返回图书工作概览', 'consistency-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'consistency-overview');
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'consistency-artifact-install-ready');
     await click(renderer, '获取并安装（保持停用）', 'consistency-artifact-install');
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'consistency-artifact-enable-ready');
@@ -1264,7 +1264,7 @@ async function main() {
     await leaveSeries(renderer, 'consistency-series-leave');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'consistency-review-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-review-manuscript', 120_000);
-    await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const button=group?.querySelector('button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled||button.textContent!=='审阅')return false; button.click(); return true; })()`, 'consistency-review-entry');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'consistency-review-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'consistency-review-card');
     await assertRenderer(renderer, `document.querySelector('table.review-coverage tbody tr[data-review-category="series-consistency"]')?.dataset.coverage==='never'`, 'consistency-coverage-never');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'consistency-new-review');
@@ -1313,7 +1313,7 @@ async function main() {
 
     at('consistency-member-reviewed');
     // The Series page's 书系一致性审阅 column says when the member's findings reached its manuscript.
-    await click(renderer, '返回图书工作概览', 'consistency-reviewed-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'consistency-reviewed-overview');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId===${JSON.stringify(member)}`, 'consistency-reviewed-overview-ready');
     await backToLibrary(renderer, 'consistency-reviewed');
     await openSeries(renderer, seriesId, 'consistency-reviewed-series');
@@ -1330,11 +1330,11 @@ async function main() {
     const openMemberReview = async () => {
       await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'exclusion-review-book');
       await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'exclusion-review-manuscript', 120_000);
-      await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const button=group?.querySelector('button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'exclusion-review-entry');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'exclusion-review-entry');
       await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'exclusion-review-card');
     };
     const leaveMemberReview = async () => {
-      await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-review"] .workbench-actions button')).find((button) => button.textContent === '工作概览'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'exclusion-review-overview');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'exclusion-review-overview');
       await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId===${JSON.stringify(member)}`, 'exclusion-review-overview-ready');
       await backToLibrary(renderer, 'exclusion-review-library');
     };
@@ -2149,7 +2149,7 @@ async function main() {
     await waitFor(renderer, `(() => { const anchor = getSelection()?.anchorNode ?? null; const block = document.querySelector(${JSON.stringify(`[data-testid="manuscript-editor"] [data-block-id="${selectionBlock}"]`)}); return block !== null && anchor !== null && block.contains(anchor) && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'; })()`, 'selection-procedure-jumped', 30_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-procedure-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'selection-procedure-drawer-closed');
-    await click(renderer, '返回图书工作概览', 'selection-procedure-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'selection-procedure-overview');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId===${JSON.stringify(member)}`, 'selection-procedure-overview-ready');
     await backToLibrary(renderer, 'selection-procedure-leave');
 

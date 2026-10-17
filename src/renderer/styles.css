@@ -115,6 +115,7 @@ body { padding-left: var(--sidebar-width); }
 .context-title[data-context-book="true"] { font-family: "Noto Serif CJK SC", "Songti SC", serif; }
 .context-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
 .context-actions:empty { display: none; }
+.preferences-notice { flex: 1 1 100%; margin: 0; }
 .locality { margin: 0; color: #385947; font-size: .9rem; white-space: nowrap; }
 .locality span { color: #3f7955; }
 

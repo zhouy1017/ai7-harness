@@ -310,7 +310,7 @@ async function createEmptyBook(renderer, cancellation) {
   await waitFor(renderer, `document.querySelector('.book-overview[data-manuscript-state="empty"]')`, 'cross-book-created');
   const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId`);
   requireJourney(UUID_PATTERN.test(bookId), 'cross-book-id');
-  await click(renderer, '返回图书列表', 'cross-book-return');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'cross-book-return');
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'cross-book-returned');
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   return bookId;
@@ -318,7 +318,7 @@ async function createEmptyBook(renderer, cancellation) {
 
 async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation) {
   cancellation.throwIfRequested();
-  await click(renderer, '打开稿件', 'edit-open');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'edit-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, 'edit-ready');
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, 'edit-inserted');
@@ -329,7 +329,7 @@ async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes(${JSON.stringify(`修订日志序号 ${expectedSequence}`)})`, 'edit-sequence');
-  await click(renderer, '返回图书工作概览', 'edit-return');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'edit-return');
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'edit-returned');
 }
 
@@ -631,7 +631,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.native-artifact-card'); return card?.dataset.nativeArtifactState==='enabled-for-book' && card.textContent.includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}); })()`, 'artifact-exact-revision2');
 
     at('model-setup-remove');
-    await click(renderer, '返回图书列表', 'model-return-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
@@ -668,7 +668,7 @@ async function main() {
     // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
-    await click(renderer, '返回图书工作概览', 'book-reopened-to-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'book-reopened-to-overview');
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened');
 
     at('acknowledged-edit');
@@ -877,7 +877,7 @@ async function main() {
     // The drawer stays beside the manuscript of the same Book (D3); 导航 opening takes the one side slot
     // and closes it (IA). The manuscript's 任务 entry waits for the 任务 panel (S77).
     cancellation.throwIfRequested();
-    await click(renderer, '打开稿件', 'drawer-manuscript-open');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'drawer-manuscript-open');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]') && document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanKind==='fixed-task' && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready' && document.querySelector('#manuscript-navigation-panel')?.hidden===true`, 'drawer-beside-manuscript');
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'drawer-navigation-open');
     await waitFor(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden===false && document.querySelector('#task-drawer')?.hidden===true && document.body.dataset.taskDrawer==='closed'`, 'drawer-one-slot');
@@ -887,7 +887,7 @@ async function main() {
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.hidden === false && drawer.dataset.taskDrawerView === 'panel' && drawer.querySelector('.task-panel')?.dataset.taskPanel === 'ready' && document.querySelector('#manuscript-navigation-panel')?.hidden === true; })()`, 'drawer-tasks-panel-one-slot');
     await clickSelector(renderer, '[data-edge-entry="tasks"]', 'drawer-tasks-entry-close');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true && document.body.dataset.taskDrawer === 'closed'`, 'drawer-tasks-panel-closed');
-    await click(renderer, '返回图书工作概览', 'drawer-manuscript-return');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'drawer-manuscript-return');
     await waitFor(renderer, `document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='prepared' && document.querySelector('#task-drawer')?.hidden===true`, 'drawer-manuscript-returned');
 
     at('cross-book-route-guard');
@@ -1002,7 +1002,7 @@ async function main() {
     // Synchronized delta with Issue #405: the Book route enters the manuscript now
     // (V2-UX-RET-002); this card lives on 工作概览, reached back through 资料与记录 (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'restart-open-book-manuscript');
-    await click(renderer, '返回图书工作概览', 'restart-open-book-to-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'restart-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='authorized'`, 'restart-record-visible');
     const restarted = await renderer.evaluate(`window.ai7.inspectTaskAuthorization()`);
     requireJourney(restarted?.taskIntent?.taskIntentId === authorized.taskIntent.taskIntentId &&
@@ -1051,7 +1051,7 @@ async function main() {
     // Synchronized delta with Issue #405: the Book route enters the manuscript now
     // (V2-UX-RET-002); this card lives on 工作概览, reached back through 资料与记录 (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'interruption-open-book-manuscript');
-    await click(renderer, '返回图书工作概览', 'interruption-open-book-to-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'interruption-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='authorized'`, 'interruption-record-visible');
     await clickSelector(renderer, '[data-task-plan-open="fixed-task"]', 'interruption-drawer-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='recorded'`, 'interruption-drawer-ready');

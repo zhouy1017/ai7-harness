@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { SHELL_BOOK_SECTIONS } from '../../src/shared/preferences.js';
+import { PREFERENCE_KEYS, SHELL_BOOK_SECTIONS } from '../../src/shared/preferences.js';
 import {
   bookIcon,
   contextHeading,
@@ -21,9 +21,9 @@ import {
 } from '../../src/renderer/shell-labels.js';
 
 // Unit suite for the shell's model (Issue #934, wave 11 slice 11a; editor-surfaces §0.3, §8.6; IA-006 to IA-013). The
-// renderer suite has no DOM, so the sidebar is checked through what it is built from: the destinations and groups in their
+// model checks the sidebar through what it is built from: the destinations and groups in their
 // fixed order with their exact labels, the icon each collapsed row keeps beside its name, the Book rows, what each screen
-// marks as current, the context header's words, and the 设置 hub's rows. The DOM itself is the Journeys' to check.
+// marks as current, the context header's words, and the 设置 hub's rows. shell-dom.test.ts mounts it; Journeys check layout.
 
 describe('the sidebar', () => {
   it('lists the five global destinations in their fixed order, each with a one-character icon of its own name', () => {
@@ -77,6 +77,15 @@ describe('pinned and recent Books', () => {
   const a = { bookId: 'a', title: '甲书' };
   const b = { bookId: 'b', title: '乙书' };
   const c = { bookId: 'c', title: '丙书' };
+
+  it('keeps supplementary-character titles inside the preference validator limit', () => {
+    const title = '𠀋'.repeat(200);
+    const pinned = togglePinnedBook([], { bookId: 'a', title }, 20);
+    const recent = rememberRecentBook([], { bookId: 'a', title, section: 'manuscript' });
+    expect(PREFERENCE_KEYS['shell.pinnedBooks'].validate(pinned)).toBe(true);
+    expect(PREFERENCE_KEYS['shell.recentBooks'].validate(recent)).toBe(true);
+    expect(pinned[0]!.title).toBe('𠀋'.repeat(100));
+  });
 
   it('puts the visited Book first with its section, once, and keeps at most eight', () => {
     let recent = rememberRecentBook([], { ...a, section: 'manuscript' });

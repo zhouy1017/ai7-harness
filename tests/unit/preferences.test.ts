@@ -123,6 +123,13 @@ describe('createPreferenceStore', () => {
     expect(await stored()).toEqual({ version: 1, values: { ...preferenceDefaults(), 'shell.sidebarCollapsed': true } });
   });
 
+  it('discloses unknown stored keys and never returns them to the renderer', async () => {
+    await writeFile(join(sandbox, PREFERENCES_FILE_NAME), JSON.stringify({ version: 1, values: { 'unknown.setting': true } }), 'utf8');
+    const reading = createPreferenceStore(sandbox).read();
+    expect(reading.values).toEqual(preferenceDefaults());
+    expect(reading.notice).toBe(PREFERENCES_NOTICES.partlyInvalid);
+  });
+
   it('reads an envelope of another version as defaults, and keeps the valid keys of a partly invalid one', async () => {
     await writeFile(join(sandbox, PREFERENCES_FILE_NAME), JSON.stringify({ version: 2, values: { 'shell.sidebarCollapsed': true } }), 'utf8');
     expect(createPreferenceStore(sandbox).read()).toEqual({ version: 1, values: preferenceDefaults(), notice: PREFERENCES_NOTICES.unreadable });

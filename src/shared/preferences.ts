@@ -119,17 +119,7 @@ export const PREFERENCE_IPC_CHANNELS = Object.freeze({
   savePreference: 'ai7:preferences:save',
 });
 
-export const PREFERENCE_ERRORS = Object.freeze({
-  unknownKey: { code: 'AI7_PREFERENCE_KEY_UNKNOWN', message: '这项本机设置不存在，未保存。' },
-  invalidValue: { code: 'AI7_PREFERENCE_VALUE_INVALID', message: '这项本机设置的值无效，未保存。' },
-  writeFailed: { code: 'AI7_PREFERENCE_WRITE_FAILED', message: '本机界面设置未能写入，界面仍按原来的设置显示。' },
-});
-
-/** Disclosed once the stored file could not be used in whole or in part; the next change rewrites it whole. */
-export const PREFERENCES_NOTICES = Object.freeze({
-  unreadable: '本机界面设置文件无法读取，已按默认设置显示；下次更改设置时会重新写入。',
-  partlyInvalid: '本机界面设置中有几项无法读取，这几项已按默认设置显示；下次更改设置时会重新写入。',
-});
+export { PREFERENCE_ERRORS, PREFERENCES_NOTICES } from './preferences-labels.js';
 
 export function isPreferenceKey(key: unknown): key is PreferenceKey {
   return typeof key === 'string' && Object.hasOwn(PREFERENCE_KEYS, key);
@@ -149,7 +139,7 @@ export function readPreferenceEnvelope(stored: unknown): { values: PreferenceVal
     return { values: values as unknown as PreferenceValues, damaged: true };
   }
   const held = stored['values'];
-  let damaged = false;
+  let damaged = Object.keys(held).some((key) => !isPreferenceKey(key));
   for (const [key, definition] of Object.entries(PREFERENCE_KEYS) as Array<[PreferenceKey, PreferenceDefinition<unknown>]>) {
     if (!Object.hasOwn(held, key)) continue;
     if (definition.validate(held[key])) values[key] = held[key];

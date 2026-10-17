@@ -1,4 +1,4 @@
-import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   isPreferenceKey,
@@ -46,7 +46,7 @@ const NODE_FILE_SYSTEM: PreferenceFileSystem = {
   writeDurably: (path, text) => {
     const descriptor = openSync(path, 'wx');
     try {
-      writeSync(descriptor, text);
+      writeFileSync(descriptor, text, 'utf8');
       fsyncSync(descriptor);
     } finally {
       closeSync(descriptor);

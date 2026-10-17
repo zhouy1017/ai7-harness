@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -264,7 +264,7 @@ async function importBook(renderer, title, token, openEditor = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, `${token}-committed`, 180_000);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, `${token}-acknowledged`, 180_000);
   if (openEditor) {
-    await click(renderer, '打开稿件', `${token}-open`);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), `${token}-open`);
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, `${token}-editor`);
   }
 }
@@ -478,7 +478,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'lower-import-committed', 180_000);
     await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'lower-import-acknowledged', 180_000);
     await assertRenderer(renderer, `document.querySelector('[data-recovery-return]')`, 'return-route-completion');
-    await click(renderer, '打开稿件', 'lower-import-open');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'lower-import-open');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'lower-import-editor');
     await assertRenderer(renderer, `Array.from(document.querySelectorAll('button')).some((item)=>item.textContent==='返回恢复待确认')`, 'return-route-imported-editor');
     await click(renderer, '返回恢复待确认', 'return-from-imported-editor');

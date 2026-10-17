@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate } from './controller.mjs';
 
 // J-06 (Issue #57, plan slice S22; ADR 0085): 稿件冲突 of a single 修改建议. An editor types inside the words
 // a suggestion would replace; the suggestion says 原文已变, 接受并应用 is blocked, and 解决冲突… opens 稿件冲突
@@ -354,7 +354,7 @@ async function importAndOpen(renderer, title) {
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'import-committed', 180_000);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'import-acknowledged', 180_000);
-  await click(renderer, '打开稿件', 'import-open');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'import-editor');
 }
 
@@ -1020,7 +1020,7 @@ async function main() {
     at('attention-conflict-row');
     // 待我处理 (Issue #424; V2-UX-ATTN-002): the conflict put aside is 异常与结果待确认's — blocking, from the moment 暂不处理
     // was recorded — and its 解决冲突… opens 稿件冲突 of exactly that suggestion.
-    await assertRenderer(renderer, `(() => { const entry = document.querySelector('#global-attention-entry'); if (!(entry instanceof HTMLButtonElement) || entry.disabled) return false; entry.click(); return true; })()`, 'attention-entry');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'attention-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host')?.dataset.attentionCount !== undefined && document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4`, 'attention-painted');
     const conflictRow = await renderer.evaluate(`(() => {
       const item = document.querySelector('[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(`conflict:${secondId}`)}]');

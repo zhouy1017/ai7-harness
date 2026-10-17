@@ -113,7 +113,8 @@ export const SIDEBAR = Object.freeze({
 
 /** An expression that follows one sidebar row, `false` while that row is missing, hidden or unavailable. */
 export function sidebarNavigate(selector) {
-  return `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.closest('[hidden]')||node.getAttribute('aria-disabled')==='true'||(node instanceof HTMLButtonElement&&node.disabled))return false; node.click(); return true; })()`;
+  const labels = { attention: '待我处理', library: '书库', series: '书系', knowledge: '知识库', quality: '质量与学习', manuscript: '稿件', review: '审阅', evaluation: '评估', deliverables: '交付物', findings: '发现', analysis: '分析', sources: '来源与证据', overview: '工作概览', history: '历史与恢复', hub: '设置' };
+  return `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.closest('[hidden]')||node.getAttribute('aria-disabled')==='true'||(node instanceof HTMLButtonElement&&node.disabled))return false; const key=node.dataset.navDestination??node.dataset.navBookSection??node.dataset.navSettings; const labels=${JSON.stringify(labels)}; if(key && (node.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')!==labels[key])return false; node.click(); return true; })()`;
 }
 
 /** The sidebar on the library: the five destinations in their order with their exact names, 书库 current, 设置 at the foot. */
@@ -122,7 +123,8 @@ export const SIDEBAR_LIBRARY_READY = `(() => { const rows=Array.from(document.qu
 /** The current Book's groups in the sidebar — for that Book, or any when `bookId` is null — with one section marked current. */
 export function sidebarBookCurrent(bookId, section) {
   const book = bookId === null ? 'true' : `group.dataset.bookId===${JSON.stringify(bookId)}`;
-  return `(() => { const group=document.querySelector('#app-sidebar .sidebar-book'); return group instanceof HTMLElement && !group.hidden && ${book} && group.querySelector('[data-nav-book-section="${section}"]')?.getAttribute('aria-current')==='page'; })()`;
+  const groups = [['工作', ['稿件', '审阅', '评估', '交付物']], ['处理', ['发现']], ['资料与记录', ['分析', '来源与证据', '工作概览', '历史与恢复']]];
+  return `(() => { const group=document.querySelector('#app-sidebar .sidebar-book'); const groups=Array.from(group?.querySelectorAll('[data-nav-book-group]')??[], node=>[node.getAttribute('aria-label'),Array.from(node.querySelectorAll('[data-nav-book-section] .nav-label'),item=>item.textContent)]); return group instanceof HTMLElement && !group.hidden && ${book} && JSON.stringify(groups)===${JSON.stringify(JSON.stringify(groups))} && group.querySelector('[data-nav-book-section="${section}"]')?.getAttribute('aria-current')==='page'; })()`;
 }
 
 /** At the 200% reflow width (640 CSS px) the sidebar shows icons only, every row keeping its name, and fits its column. */
@@ -1080,7 +1082,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'controller-imports',
     'exact-sample1',
     'renderer-api-boundary',
-    'entry-in-the-header',
+    'entry-in-the-sidebar',
     'first-book-import',
     'first-book-prerequisites',
     'model-credential-saved',

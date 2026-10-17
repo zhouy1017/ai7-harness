@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate } from './controller.mjs';
 
 // J-05, first slice (Issue #407): Editorial Marks on the manuscript. An editor marks exact text with a
 // highlight, a 批注, a 备注 and a 修改建议, reads each on its Mark Card with its source, previews a
@@ -304,7 +304,7 @@ async function importAndOpen(renderer, title) {
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'import-committed', 180_000);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'import-acknowledged', 180_000);
-  await click(renderer, '打开稿件', 'import-open');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'import-editor');
 }
 
