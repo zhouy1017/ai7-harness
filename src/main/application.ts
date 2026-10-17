@@ -1227,8 +1227,11 @@ function registerRendererHandlers(
   const preferences = new Preferences(app.getPath('userData'));
   const appearanceState = async (): Promise<AppearanceState> => {
     const values = await preferences.get();
-    const preference = values['appearance.theme'];
-    return { preference: PREFERENCE_KEYS['appearance.theme'].validate(preference) ? preference : 'system', systemDark: nativeTheme.shouldUseDarkColors };
+    const stored = values['appearance.theme'];
+    const preference = PREFERENCE_KEYS['appearance.theme'].validate(stored) ? stored : 'system';
+    // Native frames, menus and dialogs follow the same choice (VIS-004); under 'system' the reading below is the OS state.
+    if (nativeTheme.themeSource !== preference) nativeTheme.themeSource = preference;
+    return { preference, systemDark: nativeTheme.shouldUseDarkColors };
   };
   const broadcastAppearance = async (): Promise<void> => {
     const state = await appearanceState();
@@ -1238,6 +1241,7 @@ function registerRendererHandlers(
   };
   const appearanceUpdated = (): void => { void broadcastAppearance().catch(() => undefined); };
   nativeTheme.on('updated', appearanceUpdated);
+  appearanceUpdated();
   ipcMain.handle(PREFERENCE_CHANNELS.get, (event) => envelope(async () => { requireSender(event); return preferences.get(); }));
   ipcMain.handle(PREFERENCE_CHANNELS.save, (event, input: { key: string; value: unknown }) => envelope(async () => {
     requireSender(event);

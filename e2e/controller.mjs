@@ -2168,5 +2168,6 @@ export async function runJ14DarkPass({ renderer, journey, at, representative = '
   }
   at('j14-dark-pass-restored');
   await choose('system');
+  await wait(`document.documentElement.dataset.theme === (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')`, 'j14-dark-pass-restored');
   check(await renderer.evaluate(`window.ai7.getPreferences().then((values) => values['appearance.theme'] === 'system')`), 'j14-dark-pass-restored');
 }

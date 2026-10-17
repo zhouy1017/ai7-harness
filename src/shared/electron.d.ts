@@ -80,6 +80,7 @@ declare module 'electron' {
   export const Menu: { setApplicationMenu(menu: null): void };
   export const nativeTheme: {
     readonly shouldUseDarkColors: boolean;
+    themeSource: 'system' | 'light' | 'dark';
     on(event: 'updated', listener: () => void): void;
     removeListener(event: 'updated', listener: () => void): void;
   };
