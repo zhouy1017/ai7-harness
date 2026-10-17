@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNotifier } from '../../src/main/notifications.js';
 import { createNotificationObserver, mountQuietNotice } from '../../src/renderer/notifications.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
-import { completionLabel, NOTIFICATION_LABELS } from '../../src/renderer/notification-labels.js';
+import { completionLabel, NOTIFICATION_LABELS, notificationClass, systemNoticeText } from '../../src/renderer/notification-labels.js';
 import { preferenceDefaults } from '../../src/shared/preferences.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '../../src/shared/protocol.js';
 
@@ -78,7 +78,7 @@ describe('privacy-safe main notifications', () => {
     test.notices[1]?.click();
     expect(test.navigate).toHaveBeenCalledWith({ bookId: 'synthetic-book', eventId: null });
     test.notifier.accept(item({ itemId: 'other', book: { bookId: 'other-book', title: 'Other' } }));
-    expect(test.notices[2]?.input.body).toBe(NOTIFICATION_LABELS.decision);
+    expect(test.notices[2]?.input.body).toBe(systemNoticeText('pending'));
   });
   it('does not replay an old or malformed timestamp at restart or reconnect', () => {
     const test = setup();
@@ -91,10 +91,10 @@ describe('privacy-safe main notifications', () => {
     test.notifier.accept(first, [first]);
     const changed = item({ state: 'analysis-plan-revision', at: new Date(START + 2_000).toISOString() });
     test.notifier.accept(changed, [changed]);
-    expect(test.notices[1]?.input.body).toBe(NOTIFICATION_LABELS.decision);
+    expect(test.notices[1]?.input.body).toBe(systemNoticeText('pending'));
     const second = item({ itemId: 'second', group: 'exceptions', state: 'analysis-failed' });
     test.notifier.accept(second, [second]);
-    expect(test.notices[2]?.input.body).toBe(NOTIFICATION_LABELS.abnormal);
+    expect(test.notices[2]?.input.body).toBe(systemNoticeText('failure'));
     test.notices[2]?.click();
     expect(test.navigate).toHaveBeenCalledWith({ bookId: second.book.bookId, eventId: second.itemId, target: second.target });
   });
@@ -102,7 +102,33 @@ describe('privacy-safe main notifications', () => {
     for (const [key, value] of Object.entries(preferenceDefaults())) if (key.startsWith('notifications.')) expect(value).toBe(false);
     expect(new Set(Object.values(NOTIFICATION_LABELS)).size).toBe(Object.values(NOTIFICATION_LABELS).length);
     for (const label of Object.values(NOTIFICATION_LABELS)) expect(label).not.toMatch(/Synthetic|\$\{|\{.*\}|书稿|任务已完成/u);
-    expect(completionLabel(item({ state: 'review-completed' }))).toBe('审阅结果已可查看');
+    expect(completionLabel(item({ group: 'recent', state: 'review-completed' }))).toBe('审阅结果已可查看');
+  });
+  it('tells 结果待确认 from a failure and a pending decision, and a coalesced notice names the most pressing class', () => {
+    const classes = [
+      notificationClass(item()),
+      notificationClass(item({ group: 'exceptions', state: 'analysis-failed' })),
+      notificationClass(item({ group: 'exceptions', state: 'apply-outcome-unresolved' })),
+      notificationClass(item({ group: 'recent', state: 'review-completed' })),
+      notificationClass(item({ group: 'recent', state: 'analysis-completed' })),
+    ];
+    expect(classes).toEqual(['pending', 'failure', 'ambiguous', 'candidate', 'outcome']);
+    const test = setup();
+    const ambiguous = item({ itemId: 'unresolved', group: 'exceptions', state: 'analysis-outcome-unknown' });
+    test.notifier.accept(ambiguous);
+    expect(test.notices[0]?.input.body).toBe('AI7：有一项结果待确认');
+    test.notifier.accept(item());
+    expect(test.notices[1]?.input.body).toBe('AI7：有一项结果待确认 · 共 2 项');
+    test.notifier.accept(item({ itemId: 'failed', group: 'exceptions', state: 'analysis-failed' }));
+    expect(test.notices[2]?.input.body).toBe('AI7：一项任务出现异常 · 共 3 项');
+  });
+  it('a click on a notice another one replaced keeps the newer notice current', () => {
+    const test = setup();
+    test.notifier.accept(item());
+    test.notifier.accept(item({ itemId: 'second' }));
+    test.notices[0]?.click();
+    test.notifier.accept(item({ itemId: 'third' }));
+    expect(test.notices[2]?.input.body).toBe('AI7：有一项需要你处理 · 共 3 项');
   });
 });
 

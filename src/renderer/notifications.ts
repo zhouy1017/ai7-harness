@@ -1,6 +1,6 @@
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '../shared/protocol.js';
 import type { NotificationsRendererApi } from '../shared/preferences.js';
-import { completionLabel, isOrdinaryOutcome } from './notification-labels.js';
+import { completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notification-labels.js';
 
 export const QUIET_NOTICE_MS = 6_000;
 
@@ -33,16 +33,16 @@ export function createNotificationObserver(options: {
 export function mountQuietNotice(open: (item: GlobalAttentionItemProjection) => void): (item: GlobalAttentionItemProjection) => void {
   const host = document.createElement('aside');
   host.dataset['quietCompletionNotice'] = 'true';
-  host.setAttribute('aria-label', '最近完成提示');
+  host.setAttribute('aria-label', QUIET_NOTICE_WORDS.region);
   host.hidden = true;
   const status = document.createElement('span');
   status.setAttribute('role', 'status');
   const view = document.createElement('button');
   view.type = 'button';
-  view.textContent = '查看结果';
+  view.textContent = QUIET_NOTICE_WORDS.view;
   const close = document.createElement('button');
   close.type = 'button';
-  close.textContent = '关闭提示';
+  close.textContent = QUIET_NOTICE_WORDS.close;
   host.append(status, view, close);
   // Reuse shell surface roles without adding another styling owner.
   host.className = 'panel button-row quiet-completion-notice';

@@ -1,6 +1,6 @@
 import type { GlobalAttentionItemProjection } from '../shared/protocol.js';
 import type { NotificationNavigation, PreferenceValues } from '../shared/preferences.js';
-import { completionLabel, NOTIFICATION_LABELS } from '../renderer/notification-labels.js';
+import { notificationClass, systemNoticeSuffix, systemNoticeText } from '../renderer/notification-labels.js';
 
 export const NOTIFICATION_CHANNELS = Object.freeze({ notify: 'ai7:notify', navigate: 'ai7:notification-navigate' });
 
@@ -37,14 +37,14 @@ export function createNotifier(options: {
         .filter((entry) => ['exceptions', 'decisions', 'recent'].includes(entry.group)).map((entry) => entry.itemId));
       const items = new Map([...(previous?.items ?? [])].filter(([id]) => currentIds === null || currentIds.has(id)));
       items.set(item.itemId, item);
-      const abnormal = [...items.values()].some((entry) => entry.group === 'exceptions');
-      const decision = [...items.values()].some((entry) => entry.group === 'decisions');
-      let body = abnormal ? NOTIFICATION_LABELS.abnormal : decision ? NOTIFICATION_LABELS.decision : `AI7：${completionLabel(item)}`;
-      if (prefs['notifications.bookName'] && item.book.title) body += ` · ${item.book.title}`;
-      if (items.size > 1) body += ` · 共 ${items.size} 项`;
+      // A coalesced notice names its most pressing class: failure, then 结果待确认, then a pending decision.
+      const classes = new Set([...items.values()].map(notificationClass));
+      const lead = (['failure', 'ambiguous', 'pending'] as const).find((key) => classes.has(key));
+      const body = systemNoticeText(lead ?? notificationClass(item)) +
+        systemNoticeSuffix(prefs['notifications.bookName'] ? item.book.title || null : null, items.size);
       const notice = options.factory({ title: 'AI7', body, silent: !prefs['notifications.sound'] });
       notice.on('click', () => {
-        books.delete(item.book.bookId);
+        if (books.get(item.book.bookId)?.notice === notice) books.delete(item.book.bookId);
         options.navigate({
           bookId: item.book.bookId,
           eventId: items.size === 1 ? item.itemId : null,

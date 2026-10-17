@@ -38,6 +38,7 @@ import type {
   EditorialWorkspaceProfileProjection,
   ForegroundExecutionBoundaryProjection,
   GlobalAttentionItemProjection,
+  GlobalAttentionProjection,
   GlobalAttentionTarget,
   ImportCommitProjection,
   ManuscriptReimportCommitProjection,
@@ -72,8 +73,10 @@ import type {
   TaskPlanProjection,
 } from '../shared/protocol.js';
 import { createNotificationObserver, mountQuietNotice } from './notifications.js';
+import { NOTIFICATION_BOOK_LIST_LINE, NOTIFICATION_SETTINGS_WORDS } from './notification-labels.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
+  GLOBAL_ATTENTION_COUNTED_GROUPS,
   J03_TASK_GOAL,
   MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
@@ -1120,20 +1123,21 @@ async function openGlobalAttention(bookId?: string | null): Promise<void> {
 function renderGlobalAttention(bookId?: string | null): void {
   const content = panel();
   content.classList.add('global-attention');
+  // A notice for several events of one Book opens the list of that Book alone (NOTIF-008), its own count beside it.
+  const bookOnly = (projection: GlobalAttentionProjection): GlobalAttentionProjection => {
+    const groups = projection.groups.map((group) => {
+      const items = group.items.filter((item) => item.book.bookId === bookId);
+      return { ...group, items, total: items.length };
+    });
+    const actionableCount = groups.reduce((count, group) => count + (GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key) ? group.total : 0), 0);
+    return { ...projection, groups, actionableCount };
+  };
   const surface = mountGlobalAttention({
     root: content,
     reader: bookId === undefined ? globalAttentionReader : {
       ...globalAttentionReader,
-      subscribe: (listener) => globalAttentionReader.subscribe((reading) => listener(reading.kind !== 'projection' ? reading : {
-        kind: 'projection',
-        projection: {
-          ...reading.projection,
-          groups: reading.projection.groups.map((group) => {
-            const items = group.items.filter((item) => item.book.bookId === bookId);
-            return { ...group, items, total: items.length };
-          }),
-        },
-      })),
+      subscribe: (listener) => globalAttentionReader.subscribe((reading) =>
+        listener(reading.kind === 'projection' ? { kind: 'projection', projection: bookOnly(reading.projection) } : reading)),
     },
     technicalDetails,
     setStatus,
@@ -1146,7 +1150,7 @@ function renderGlobalAttention(bookId?: string | null): void {
   replaceScreen('global-attention', content);
   globalAttentionSurface = surface;
   surface.start();
-  setStatus(GLOBAL_ATTENTION_STATUS_LINES.opened);
+  setStatus(bookId === undefined ? GLOBAL_ATTENTION_STATUS_LINES.opened : NOTIFICATION_BOOK_LIST_LINE);
 }
 
 /**
@@ -6097,22 +6101,19 @@ async function renderEvaluationCalibration(focusBookId: string | null): Promise<
   }
 }
 
-/**
- * 设置 (Issue #934; editor-surfaces §8.6): 服务 · 编辑工作 · 本机, one row per page. A page that exists keeps its own render
- * function and its `data-settings-route`; a row whose page a later slice of the wave brings is unavailable, 即将提供.
- */
+/** 设置 › 本机 › 通知 (Issue #937; NOTIF-005 to 007): four local switches, all off by default; none grants authority. */
 async function renderNotificationSettings(): Promise<void> {
   const preferences = await window.ai7.getPreferences();
   let values = preferences.values;
   const content = panel();
   content.dataset['notificationSettings'] = 'true';
-  content.append(element('h2', undefined, '通知'), element('p', 'field-note', '系统通知仅在 AI7 所有窗口都不在前台时发送。默认只用通用措辞；这些开关不授予任何处理或发布权限。'));
+  content.append(element('h2', undefined, NOTIFICATION_SETTINGS_WORDS.title), element('p', 'field-note', NOTIFICATION_SETTINGS_WORDS.note));
   if (preferences.notice) content.append(element('p', 'attention-note', preferences.notice));
   const rows = [
-    ['notifications.enabled', '系统通知'],
-    ['notifications.completions', '普通完成提示也发系统通知'],
-    ['notifications.sound', '通知声音'],
-    ['notifications.bookName', '在通知中显示图书名'],
+    ['notifications.enabled', NOTIFICATION_SETTINGS_WORDS.enabled],
+    ['notifications.completions', NOTIFICATION_SETTINGS_WORDS.completions],
+    ['notifications.sound', NOTIFICATION_SETTINGS_WORDS.sound],
+    ['notifications.bookName', NOTIFICATION_SETTINGS_WORDS.bookName],
   ] as const;
   const controls = new Map<string, HTMLInputElement>();
   const paint = (): void => {
@@ -6133,8 +6134,8 @@ async function renderNotificationSettings(): Promise<void> {
       control.disabled = true;
       void window.ai7.savePreference({ key, value }).then((saved) => {
         values = saved.values;
-        setStatus('通知设置已保存在本机。', 'success');
-      }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '通知设置未保存。'), 'error')).finally(() => {
+        setStatus(NOTIFICATION_SETTINGS_WORDS.saved, 'success');
+      }).catch((error: unknown) => setStatus(rendererErrorMessage(error, NOTIFICATION_SETTINGS_WORDS.unsaved), 'error')).finally(() => {
         control.disabled = false;
         paint();
       });
@@ -6143,10 +6144,15 @@ async function renderNotificationSettings(): Promise<void> {
     content.append(row);
   }
   paint();
-  content.append(button('返回设置', 'secondary', renderSettingsHub));
+  content.append(button(NOTIFICATION_SETTINGS_WORDS.back, 'secondary', renderSettingsHub));
   replaceScreen('settings', content);
-  setStatus('通知设置');
+  setStatus(NOTIFICATION_SETTINGS_WORDS.opened);
 }
+
+/**
+ * 设置 (Issue #934; editor-surfaces §8.6): 服务 · 编辑工作 · 本机, one row per page. A page that exists keeps its own render
+ * function and its `data-settings-route`; a row whose page a later slice of the wave brings is unavailable, 即将提供.
+ */
 
 function renderSettingsHub(): void {
   const content = panel();
