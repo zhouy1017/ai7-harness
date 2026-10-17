@@ -42,9 +42,11 @@ export const BOOK_SECTION_COMMANDS = [
   ['nav.book.review', COMMAND_NAMES['nav.book.review'], 'review'],
   ['nav.book.evaluation', COMMAND_NAMES['nav.book.evaluation'], 'evaluation'],
   ['nav.book.deliverables', COMMAND_NAMES['nav.book.deliverables'], 'deliverables'],
+  ['nav.book.findings', COMMAND_NAMES['nav.book.findings'], 'findings'],
   ['nav.book.analysis', COMMAND_NAMES['nav.book.analysis'], 'analysis'],
   ['nav.book.sources', COMMAND_NAMES['nav.book.sources'], 'sources'],
   ['nav.book.overview', COMMAND_NAMES['nav.book.overview'], 'overview'],
+  ['nav.book.history', COMMAND_NAMES['nav.book.history'], 'history'],
 ] as const;
 
 /** The remappable commands, in the order the settings table lists them. */
@@ -58,6 +60,8 @@ export const COMMANDS: readonly CommandDefinition[] = [
     id, name, group: 'navigation', context: 'book',
     defaults: { win32: `Alt+Shift+${index + 1}`, darwin: `Mod+Alt+Shift+${index + 1}` },
   })),
+  { id: 'nav.settings', name: COMMAND_NAMES['nav.settings'], group: 'navigation', context: 'application', defaults: both('Mod+Comma') },
+  { id: 'view.toggleSidebar', name: COMMAND_NAMES['view.toggleSidebar'], group: 'view', context: 'application', defaults: both('Mod+Shift+B') },
   { id: 'nav.back', name: COMMAND_NAMES['nav.back'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+ArrowLeft', darwin: 'Mod+BracketLeft' } },
   { id: 'search.find', name: COMMAND_NAMES['search.find'], group: 'search', context: 'manuscript', defaults: both('Mod+F') },
   { id: 'search.next', name: COMMAND_NAMES['search.next'], group: 'search', context: 'manuscript', defaults: { win32: 'F3', darwin: 'Mod+G' } },

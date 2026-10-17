@@ -28,6 +28,7 @@ export const COMMAND_NAMES = {
   'nav.attention': '待我处理', 'nav.library': '书库', 'nav.series': '书系', 'nav.knowledge': '知识库', 'nav.quality': '质量与学习',
   'nav.book.manuscript': '稿件', 'nav.book.review': '审阅', 'nav.book.evaluation': '评估', 'nav.book.deliverables': '交付物',
   'nav.book.analysis': '分析', 'nav.book.sources': '来源与证据', 'nav.book.overview': '工作概览',
+  'nav.settings': '设置', 'nav.book.findings': '发现', 'nav.book.history': '历史与恢复', 'view.toggleSidebar': '切换侧栏',
   'nav.back': '返回', 'search.find': '查找', 'search.next': '下一组查找结果', 'search.previous': '上一组查找结果',
   'view.focusManuscript': '聚焦稿件', 'view.openTasks': '打开任务面板',
   'edit.save': '保存', 'edit.undo': '撤销', 'edit.redo': '重做', 'edit.replace': '替换', 'edit.previousWindow': '上一页', 'edit.nextWindow': '下一页',
@@ -58,3 +59,5 @@ export function bindingRefusalLabel(reason: BindingRefusalReason, withName: stri
       return '没有这条命令。';
   }
 }
+
+export const BACK_COMMAND_ENTRIES = ['返回', '返回图书列表'] as const;

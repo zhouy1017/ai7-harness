@@ -5,7 +5,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-13 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012): 书系 as a stable global destination. Three empty Books; 新建书系
@@ -265,8 +265,9 @@ async function createEmptyBook(renderer, title, name) {
 }
 
 async function backToLibrary(renderer, name) {
-  await click(renderer, '返回图书列表', `${name}-back`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), `${name}-back`);
   await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, `${name}-library`);
+  await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
 }
 
 /** Where focus stands inside a page: an action by name, a field by its id or name, or the preview's heading. */
@@ -361,7 +362,7 @@ const readBookSeries = (renderer, predicate, name) => readUntil(renderer, READ_B
 
 /** From the landing, 书系 and then one Series' page. */
 async function openSeries(renderer, seriesId, name) {
-  await click(renderer, '书系', `${name}-list`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('series')), `${name}-list`);
   await readSeriesList(renderer, (page) => page.items.some(([id]) => id === seriesId), `${name}-listed`);
   await clickSelector(renderer, `[data-screen="series-list"] [data-series-id="${seriesId}"] [data-series-action="open"]`, `${name}-open`);
   return readSeries(renderer, (page) => page.seriesId === seriesId, `${name}-page`);
@@ -559,13 +560,13 @@ async function openFoundBook(renderer, title, bookId, name) {
 /** A Book's ②B 审阅 from 书库: its manuscript first, then 工作 › 审阅, as the editor reaches it. */
 async function openBookReview(renderer, title, bookId, name) {
   await openFoundBook(renderer, title, bookId, name);
-  await assertRenderer(renderer, `(() => { const button=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"] button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, `${name}-entry`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), `${name}-entry`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, `${name}-card`, 60_000);
 }
 
 /** From ②B 审阅 back to 书库: its 工作概览, then the library. */
 async function leaveReviewToLibrary(renderer, name) {
-  await click(renderer, '工作概览', `${name}-overview`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), `${name}-overview`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')`, `${name}-overview-ready`);
   await backToLibrary(renderer, name);
 }
@@ -682,7 +683,7 @@ const READ_SHEET_PROCEDURE = `(() => {
 
 /** 知识库 › 工序与规则 from 书库. */
 async function openProcedures(renderer, name) {
-  await click(renderer, '知识库', `${name}-knowledge`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `${name}-knowledge`);
   await waitFor(renderer, `document.querySelector('.review-guidelines')?.dataset.guidelines==='ready'`, `${name}-knowledge-ready`);
   await click(renderer, '工序与规则', `${name}-rules`);
   await waitFor(renderer, `document.querySelector('.knowledge-captured-procedures')`, `${name}-rules-ready`);
@@ -851,7 +852,7 @@ async function main() {
 
     at('series-empty');
     // 书系 is one of the landing's destinations; before any Series it says so and offers 新建书系….
-    await click(renderer, '书系', 'series-destination');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('series')), 'series-destination');
     const empty = await readSeriesList(renderer, () => true, 'series-empty-page');
     requireJourney(empty.lede === SERIES_LEDE && empty.empty === '还没有书系。' && empty.items.length === 0 && !empty.form, 'series-empty-words', empty);
     requireJourney(JSON.stringify(await renderer.evaluate('window.ai7.inspectSeriesList()')) === JSON.stringify({ series: [], nextCursor: null }), 'series-empty-service');
@@ -1048,6 +1049,8 @@ async function main() {
     await clickSelector(renderer, `tr[data-book-id="${second}"] [data-series-action="remove-open"]`, 'reflow-preview-open');
     await readSeries(renderer, (read) => read.preview?.kind === 'remove' && read.preview.heading !== null, 'reflow-preview');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('.series-preview'), document.querySelector('table.series-member-table'), document.querySelector('ol.series-history')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && getComputedStyle(document.querySelector('table.series-member-table tbody tr')).display==='block'; })()`, 'series-reflow', 10_000);
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
@@ -1067,7 +1070,7 @@ async function main() {
     // A fourth Book from exact sample1 through the product's own import, then 加入书系 for it like the others.
     await leaveSeries(renderer, 'knowledge-leave');
     const member = await importSample1(renderer, MEMBER, sample1, 'knowledge-import');
-    await click(renderer, '返回图书列表', 'knowledge-import-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'knowledge-import-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, 'knowledge-import-library');
     await openSeries(renderer, seriesId, 'knowledge-series');
     await clickSelector(renderer, '[data-series-action="add-open"]', 'knowledge-add-open');
@@ -1108,9 +1111,9 @@ async function main() {
     // On the Series page the candidate waits with where it came from; the editor's own candidate for the same name — however
     // it is spaced — discloses a conflict on both.
     // The manuscript leaves for 书库 through the header's 待我处理, as J-07 does.
-    await clickSelector(renderer, '#global-attention-entry', 'knowledge-editor-attention');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'knowledge-editor-attention');
     await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]')`, 'knowledge-editor-attention-screen');
-    await click(renderer, '返回图书列表', 'knowledge-editor-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'knowledge-editor-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, 'knowledge-editor-library');
     await openSeries(renderer, seriesId, 'knowledge-candidates');
     const waiting = await readKnowledge(renderer, (read) => read.candidates.length === 1, 'knowledge-candidate-listed');
@@ -1221,13 +1224,15 @@ async function main() {
     await leaveSeries(renderer, 'consistency-leave');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'consistency-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-manuscript', 120_000);
-    await click(renderer, '返回图书工作概览', 'consistency-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'consistency-overview');
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'consistency-artifact-install-ready');
     await click(renderer, '获取并安装（保持停用）', 'consistency-artifact-install');
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'consistency-artifact-enable-ready');
     await click(renderer, '审阅并为本图书启用 Revision 2', 'consistency-artifact-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'consistency-artifact-enabled');
     await backToLibrary(renderer, 'consistency-model');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'consistency-model-open-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'consistency-model-open-settings-hub');
     await click(renderer, '模型服务', 'consistency-model-open');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'consistency-model-ready');
     cancellation.throwIfRequested();
@@ -1259,7 +1264,7 @@ async function main() {
     await leaveSeries(renderer, 'consistency-series-leave');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'consistency-review-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-review-manuscript', 120_000);
-    await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const button=group?.querySelector('button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled||button.textContent!=='审阅')return false; button.click(); return true; })()`, 'consistency-review-entry');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'consistency-review-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'consistency-review-card');
     await assertRenderer(renderer, `document.querySelector('table.review-coverage tbody tr[data-review-category="series-consistency"]')?.dataset.coverage==='never'`, 'consistency-coverage-never');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'consistency-new-review');
@@ -1308,7 +1313,7 @@ async function main() {
 
     at('consistency-member-reviewed');
     // The Series page's 书系一致性审阅 column says when the member's findings reached its manuscript.
-    await click(renderer, '返回图书工作概览', 'consistency-reviewed-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'consistency-reviewed-overview');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId===${JSON.stringify(member)}`, 'consistency-reviewed-overview-ready');
     await backToLibrary(renderer, 'consistency-reviewed');
     await openSeries(renderer, seriesId, 'consistency-reviewed-series');
@@ -1325,11 +1330,11 @@ async function main() {
     const openMemberReview = async () => {
       await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'exclusion-review-book');
       await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'exclusion-review-manuscript', 120_000);
-      await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const button=group?.querySelector('button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'exclusion-review-entry');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'exclusion-review-entry');
       await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'exclusion-review-card');
     };
     const leaveMemberReview = async () => {
-      await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-review"] .workbench-actions button')).find((button) => button.textContent === '工作概览'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'exclusion-review-overview');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'exclusion-review-overview');
       await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId===${JSON.stringify(member)}`, 'exclusion-review-overview-ready');
       await backToLibrary(renderer, 'exclusion-review-library');
     };
@@ -1448,6 +1453,8 @@ async function main() {
     await clickSelector(renderer, 'li.series-exclusion [data-exclusion-action="end-open"]', 'exclusion-reflow-preview-open');
     await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='end'`, 'exclusion-reflow-preview');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const parts=[document.querySelector('.series-exclusion-preview'), document.querySelector('ul.series-exclusion-list'), document.querySelector('ol.series-exclusion-revisions')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2); })()`, 'exclusion-reflow-200', 10_000);
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
@@ -1483,6 +1490,8 @@ async function main() {
     await press(renderer, 'Escape');
     await waitFor(renderer, `document.activeElement?.dataset.reviewAction === 'scope-cancel' && document.querySelector('[data-review-action="scope-cancel-confirm"]') === null && document.querySelector('.review-workspace-card')?.dataset.reviewState==='scope-changed'`, 'scope-keyboard-kept', 10_000);
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const stop=document.querySelector('.review-scope-stop'); const marker=document.querySelector('ol.review-runs li[data-review-run="1"]'); return stop instanceof HTMLElement && stop.scrollWidth<=stop.clientWidth+2 && marker instanceof HTMLElement && marker.scrollWidth<=marker.clientWidth+2; })()`, 'scope-reflow-200', 10_000);
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
@@ -1666,7 +1675,7 @@ async function main() {
     }
     requireJourney(pageBooks.length === 51 && new Set(pageBooks).size === 51 && pageBooks.every((id) => UUID_PATTERN.test(id)), 'page-books-created');
     at('series-bounded-navigation');
-    await click(renderer, '书系', 'paged-series-list');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('series')), 'paged-series-list');
     await readSeriesList(renderer, (page) => page.items.length === 50, 'list-first-page');
     for (let repeat = 0; repeat < 2; repeat += 1) {
       await clickSelector(renderer, '[data-series-action="list-more"]', 'list-next');
@@ -2140,7 +2149,7 @@ async function main() {
     await waitFor(renderer, `(() => { const anchor = getSelection()?.anchorNode ?? null; const block = document.querySelector(${JSON.stringify(`[data-testid="manuscript-editor"] [data-block-id="${selectionBlock}"]`)}); return block !== null && anchor !== null && block.contains(anchor) && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'; })()`, 'selection-procedure-jumped', 30_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-procedure-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'selection-procedure-drawer-closed');
-    await click(renderer, '返回图书工作概览', 'selection-procedure-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'selection-procedure-overview');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId===${JSON.stringify(member)}`, 'selection-procedure-overview-ready');
     await backToLibrary(renderer, 'selection-procedure-leave');
 
@@ -2199,6 +2208,8 @@ async function main() {
     await activateFocused(renderer, 'Enter');
     await waitFor(renderer, `document.activeElement === document.querySelector('.developer-proposal-form [data-proposal-field="title"]')`, 'capture-keyboard-form', 10_000);
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[...document.querySelectorAll('article.captured-procedure, article.developer-proposal, li.developer-proposal-version, form.developer-proposal-form')]; return parts.length===5 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2; })()`, 'capture-reflow', 10_000);
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });

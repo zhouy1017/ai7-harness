@@ -1,3 +1,4 @@
+import type { PreferencesRendererApi } from '../shared/preferences.js';
 import {
   MODEL_SERVICE_ROUTES,
   USAGE_GROUPINGS,
@@ -55,7 +56,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
 
 export interface MountUsageOptions {
   readonly root: HTMLElement;
-  readonly api: Pick<RendererApi, 'inspectUsage' | 'exportUsageCsv' | 'getPreferences' | 'savePreference'>;
+  readonly api: Pick<RendererApi & PreferencesRendererApi, 'inspectUsage' | 'exportUsageCsv' | 'getPreferences' | 'savePreference'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly instant: (iso: string) => string;

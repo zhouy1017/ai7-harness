@@ -50,27 +50,84 @@ button:focus-visible, input:focus-visible, .ProseMirror:focus-visible {
   outline-offset: 3px;
 }
 
-.app-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: .75rem 2rem;
-  padding: 2.1rem clamp(2rem, 5vw, 5rem) 1.5rem;
-  border-bottom: 1px solid rgba(53, 64, 51, 0.2);
-}
-/* The shell's global destinations (IA-007): 待我处理 with its number, in the header of every window. */
-.app-destinations { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-left: auto; }
 .global-attention-entry { display: inline-flex; align-items: center; gap: .5rem; min-height: 44px; padding: .55rem 1rem; border: 1px solid #6f796d; border-radius: 999px; background: #fffdf8; color: #2c463b; font-weight: 800; cursor: pointer; }
 .global-attention-entry:hover:not(:disabled) { background: #f1f4ec; }
 /* The number is a word inside its own outline, never a coloured dot alone. */
 .global-attention-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 1.7em; height: 1.7em; padding: 0 .45em; border: 2px solid currentColor; border-radius: 999px; background: #fff0cf; color: #76530f; font-size: .85rem; font-weight: 800; }
 .global-attention-badge[hidden] { display: none; }
 
-.app-header h1 { margin: .15rem 0 0; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: clamp(1.75rem, 3vw, 2.7rem); font-weight: 650; }
-.eyebrow { margin: 0; color: #566457; font-size: .78rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
-.locality { margin: 0 0 .35rem; color: #385947; font-size: .9rem; white-space: nowrap; }
+/* The shell (Issue #934, wave 11 slice 11a; editor-surfaces §0.3): a two-level sidebar fixed on the left, the context
+   header above the screen. The page makes room for the sidebar as it does for the Task Drawer on the right; below 760 px,
+   or when the editor collapses it, the sidebar shows icons only — each row's icon is one character of its own name, and
+   the name stays the row's accessible name. */
+:root { --sidebar-width: 14rem; --sidebar-icons-width: 3.6rem; }
+:root[data-sidebar="icons"] { --sidebar-width: var(--sidebar-icons-width); }
+body { padding-left: var(--sidebar-width); }
+.app-sidebar { position: fixed; z-index: 25; top: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: .9rem; width: var(--sidebar-width); padding: .8rem .55rem 4rem; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; border-right: 1px solid #d3d8d1; background: #eef0ea; color: #2c3a33; }
+.app-sidebar ul { margin: 0; padding: 0; list-style: none; }
+.app-sidebar li + li { margin-top: .1rem; }
+.sidebar-link { position: relative; display: flex; align-items: center; gap: .55rem; width: 100%; min-height: 40px; padding: .35rem .5rem; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #2c3a33; font: inherit; font-weight: 700; text-align: left; text-decoration: none; cursor: pointer; }
+.sidebar-link::before { content: attr(data-nav-icon); display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border: 1px solid #a8b2a6; border-radius: 7px; background: #fffdf8; color: #2f5d8a; font-size: .95rem; font-weight: 800; }
+.sidebar-link:hover:not([aria-disabled="true"]):not(:disabled) { background: #e2e7df; }
+.sidebar-link[aria-current="page"] { border-color: #2f5d8a; background: #e3ecf6; color: #1f2a24; box-shadow: inset 3px 0 0 #2f5d8a; }
+.sidebar-link[aria-current="true"] { border-color: #a8b2a6; }
+.sidebar-link[aria-disabled="true"] { cursor: not-allowed; opacity: .5; }
+.sidebar-link:focus-visible, .sidebar-pin:focus-visible, .sidebar-toggle:focus-visible { outline: 3px solid #416458; outline-offset: 1px; }
+.nav-label { min-width: 0; overflow-wrap: anywhere; }
+/* 待我处理's entry keeps its own label and number (global-attention.ts) and takes the row's shape here. */
+.app-sidebar .global-attention-entry { min-height: 40px; padding: .35rem .5rem; border-radius: 8px; border-color: transparent; background: transparent; }
+.app-sidebar .global-attention-entry .global-attention-badge { margin-left: auto; }
+.sidebar-group-label { margin: 0 0 .25rem .5rem; color: #5d665b; font-size: .74rem; font-weight: 800; letter-spacing: .08em; }
+.sidebar-books, .sidebar-book { display: grid; gap: .55rem; padding-top: .7rem; border-top: 1px solid #d3d8d1; }
+.sidebar-book[hidden] { display: none; }
+.sidebar-book-row { display: flex; align-items: center; gap: .2rem; }
+.sidebar-book-row .sidebar-link { flex: 1 1 auto; flex-wrap: wrap; min-width: 0; row-gap: 0; }
+.sidebar-book-row .nav-label { flex: 1 1 calc(100% - 2.6rem); font-family: "Noto Serif CJK SC", "Songti SC", serif; }
+.nav-state { flex: 1 1 100%; padding-left: 2.45rem; color: #5d665b; font-size: .78rem; font-weight: 400; }
+.sidebar-pin { flex: 0 0 auto; min-width: 32px; min-height: 32px; border: 0; border-radius: 6px; background: transparent; color: #6a5a1a; font-size: 1rem; cursor: pointer; }
+.sidebar-pin:hover:not(:disabled) { background: #e2e7df; }
+.sidebar-empty { margin: 0 .5rem; font-size: .82rem; }
+.sidebar-book-title { display: flex; align-items: center; gap: .55rem; margin: 0; padding: 0 .5rem; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.02rem; font-weight: 700; overflow-wrap: anywhere; }
+.sidebar-book-title::before { content: attr(data-nav-icon); display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: 7px; background: #2f5d8a; color: #fff; font-size: .95rem; }
+.sidebar-group + .sidebar-group { margin-top: .35rem; }
+.sidebar-foot { display: grid; gap: .2rem; margin-top: auto; padding-top: .7rem; border-top: 1px solid #d3d8d1; }
+.sidebar-help-slot:empty { display: none; }
+/* Icons only: the names leave the row's box but not the accessibility tree. */
+/* A thin scrollbar and a narrow inset keep the icon column inside the rail when the Book's groups make it scroll. */
+:root[data-sidebar="icons"] .app-sidebar { padding-inline: .15rem; }
+:root[data-sidebar="icons"] .sidebar-link { justify-content: center; padding-inline: 0; }
+:root[data-sidebar="icons"] .nav-label, :root[data-sidebar="icons"] .nav-state, :root[data-sidebar="icons"] .sidebar-group-label,
+:root[data-sidebar="icons"] .app-sidebar .global-attention-entry-label, :root[data-sidebar="icons"] .sidebar-empty {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+:root[data-sidebar="icons"] .sidebar-pin { display: none; }
+:root[data-sidebar="icons"] .sidebar-book-title { justify-content: center; padding: 0; font-size: 0; }
+:root[data-sidebar="icons"] .sidebar-book-title::before { font-size: .95rem; }
+:root[data-sidebar="icons"] .app-sidebar .global-attention-entry { gap: 0; }
+:root[data-sidebar="icons"] .app-sidebar .global-attention-entry .global-attention-badge { position: absolute; top: -2px; right: -2px; min-width: 1.35em; height: 1.35em; font-size: .7rem; }
+
+.context-header { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.2rem; padding: .75rem clamp(1rem, 3vw, 2.5rem); border-bottom: 1px solid rgba(53, 64, 51, 0.2); background: #f2f4f7; }
+.sidebar-toggle { flex: 0 0 auto; min-width: 40px; min-height: 40px; border: 1px solid #90998d; border-radius: 8px; background: #fffdf8; color: #2c463b; font-size: 1.05rem; cursor: pointer; }
+.sidebar-toggle:disabled { cursor: default; opacity: .55; }
+.context-identity { flex: 1 1 14rem; min-width: 0; }
+.context-position { margin: 0; color: #566457; font-size: .78rem; font-weight: 700; letter-spacing: .08em; }
+.context-title { margin: .05rem 0 0; font-size: 1.3rem; font-weight: 700; overflow-wrap: anywhere; }
+.context-title[data-context-book="true"] { font-family: "Noto Serif CJK SC", "Songti SC", serif; }
+.context-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.context-actions:empty { display: none; }
+.preferences-notice { flex: 1 1 100%; margin: 0; }
+.locality { margin: 0; color: #385947; font-size: .9rem; white-space: nowrap; }
 .locality span { color: #3f7955; }
+
+/* 设置 (editor-surfaces §8.6): the three groups, one row per page; a row not yet available says 即将提供. */
+.settings-group { margin-top: 1.3rem; }
+.settings-group h3 { margin: 0 0 .5rem; }
+.settings-rows { display: grid; gap: .6rem; margin: 0; padding: 0; list-style: none; }
+.settings-row { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .9rem; padding: .7rem .8rem; border: 1px solid #ded9cd; border-radius: 10px; background: #fffdf8; }
+.settings-row .secondary { min-width: 10rem; text-align: left; }
+.settings-row .field-note { flex: 1 1 16rem; margin: 0; }
+.settings-coming-soon { padding: .1rem .55rem; border: 1px dashed #8a8f84; border-radius: 999px; color: #50574e; font-size: .82rem; font-weight: 700; }
+.library-home { display: grid; grid-template-columns: 1.3fr .7fr; gap: 1.5rem 3rem; align-items: center; }
 
 .screen { width: min(1280px, calc(100% - 4rem)); margin: 2rem auto 5rem; }
 .panel { background: rgba(255, 253, 248, .94); border: 1px solid #d9d4c7; border-radius: 16px; box-shadow: 0 14px 40px rgba(45, 43, 33, .08); padding: clamp(1.5rem, 3vw, 2.5rem); }
@@ -1467,17 +1524,18 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .editor-identities summary { cursor: pointer; font-weight: 700; }
 
 .status-bar { position: fixed; left: 1.2rem; right: 1.2rem; bottom: 1rem; z-index: 20; width: fit-content; max-width: calc(100% - 2.4rem); margin: auto; padding: .55rem .9rem; border: 1px solid #c5c8bc; border-radius: 999px; background: rgba(255, 254, 250, .96); color: #4e564c; box-shadow: 0 5px 20px rgba(33, 39, 31, .12); font-size: .86rem; }
+.status-bar { left: calc(var(--sidebar-width) + 1.2rem); }
 .status-bar[data-tone="busy"] { color: #76530f; }
 .status-bar[data-tone="success"] { color: #28533a; }
 .status-bar[data-tone="error"] { color: #8a3029; }
 .error-panel { border-color: #ddb7b1; background: #fff7f5; }
 
 @media (max-width: 960px) {
-  .hero, .review-grid, .recovery-candidate-grid, .model-role-grid { grid-template-columns: 1fr; }
+  .hero, .library-home, .review-grid, .recovery-candidate-grid, .model-role-grid { grid-template-columns: 1fr; }
   .fidelity-row { grid-template-columns: 1fr; }
   .export-fidelity-row { grid-template-columns: 1fr; }
   .screen { width: min(100% - 1.25rem, 900px); margin-top: .75rem; }
-  .app-header { align-items: flex-start; padding: 1rem; }
+  .context-header { padding: .6rem 1rem; }
   .editor-toolbar { align-items: flex-start; flex-direction: column; }
   .editor-workspace { grid-template-columns: minmax(0, 1fr) 3.4rem; }
   .editor-workspace.document-workspace { grid-template-columns: minmax(0, 1fr) 3.4rem; }
@@ -1526,8 +1584,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 }
 
 @media (max-width: 560px) {
-  .app-header { display: block; }
-  .locality { white-space: normal; margin-top: .5rem; }
+  .locality { white-space: normal; }
   .panel { padding: 1rem; }
   .editor-shell { padding: 0; }
   .editor-toolbar .button-row { width: 100%; }
@@ -1588,6 +1645,13 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   /* Without colour 待我处理's number keeps its outline, blocked work its heavier left rule, and an item's way
      to its record its underline. */
   .global-attention-entry { color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; forced-color-adjust: auto; }
+  /* Without colour the sidebar keeps its edge, each icon its outline, and the current row a heavier outline of its own. */
+  .app-sidebar, .context-header { color: CanvasText; background: Canvas; border-color: CanvasText; }
+  .app-sidebar .global-attention-entry, .sidebar-link { color: LinkText; background: Canvas; border-color: transparent; forced-color-adjust: none; }
+  .sidebar-link::before, .sidebar-book-title::before { color: CanvasText; background: Canvas; border: 1px solid CanvasText; forced-color-adjust: none; }
+  .sidebar-link[aria-current="page"] { outline: 2px solid Highlight; outline-offset: -2px; border-color: CanvasText; box-shadow: none; }
+  .sidebar-pin, .sidebar-toggle { color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; forced-color-adjust: auto; }
+  .settings-row, .settings-coming-soon { color: CanvasText; background: Canvas; border-color: CanvasText; }
   .global-attention-badge { color: CanvasText; background: Canvas; border: 2px solid CanvasText; forced-color-adjust: none; }
   .global-attention-item { border-left: 2px solid CanvasText; }
   .global-attention-item[data-attention-blocked="true"] { border-left: 6px solid CanvasText; }

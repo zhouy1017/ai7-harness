@@ -1,3 +1,4 @@
+import type { PreferencesRendererApi } from '../shared/preferences.js';
 import type { KeyboardBindings } from '../shared/preferences.js';
 import type { RendererApi } from '../shared/protocol.js';
 import {
@@ -63,7 +64,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
 
 export interface MountKeyboardSettingsOptions {
   readonly root: HTMLElement;
-  readonly api: Pick<RendererApi, 'getPreferences' | 'savePreference'>;
+  readonly api: Pick<RendererApi & PreferencesRendererApi, 'getPreferences' | 'savePreference'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   /** Called with the bindings the preference now holds, so every label and the dispatcher follow at once. */

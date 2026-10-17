@@ -102,6 +102,34 @@ export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 
 // after it is admitted there.
 export const GATE_JOURNEYS = Object.freeze(['J-08', 'J-12', 'J-15', 'J-03', 'J-04']);
 
+// The shell's sidebar (Issue #934, wave 11 slice 11a): every Journey reaches a global destination, 设置 and a Book's
+// sections through it, by its data attributes; each row's text is exactly its Chinese name. The library keeps its
+// screen state `landing`, so a Journey still waits for that.
+export const SIDEBAR = Object.freeze({
+  destination: (key) => `#app-sidebar [data-nav-destination="${key}"]`,
+  section: (key) => `#app-sidebar [data-nav-book-section="${key}"]`,
+  settings: '#app-sidebar [data-nav-settings]',
+});
+
+/** An expression that follows one sidebar row, `false` while that row is missing, hidden or unavailable. */
+export function sidebarNavigate(selector) {
+  const labels = { attention: '待我处理', library: '书库', series: '书系', knowledge: '知识库', quality: '质量与学习', manuscript: '稿件', review: '审阅', evaluation: '评估', deliverables: '交付物', findings: '发现', analysis: '分析', sources: '来源与证据', overview: '工作概览', history: '历史与恢复', hub: '设置' };
+  return `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.closest('[hidden]')||node.getAttribute('aria-disabled')==='true'||(node instanceof HTMLButtonElement&&node.disabled))return false; const key=node.dataset.navDestination??node.dataset.navBookSection??node.dataset.navSettings; const labels=${JSON.stringify(labels)}; if(key && (node.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')!==labels[key])return false; node.click(); return true; })()`;
+}
+
+/** The sidebar on the library: the five destinations in their order with their exact names, 书库 current, 设置 at the foot. */
+export const SIDEBAR_LIBRARY_READY = `(() => { const rows=Array.from(document.querySelectorAll('#app-sidebar .sidebar-destinations [data-nav-destination]')); const names=rows.map((row)=>row.dataset.navDestination+':'+(row.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')); return JSON.stringify(names)===${JSON.stringify(JSON.stringify(['attention:待我处理', 'library:书库', 'series:书系', 'knowledge:知识库', 'quality:质量与学习']))} && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.getAttribute('aria-current')==='page' && document.querySelector('#app-sidebar [data-nav-settings]')?.textContent==='设置' && document.querySelector('#context-title')?.textContent==='书库'; })()`;
+
+/** The current Book's groups in the sidebar — for that Book, or any when `bookId` is null — with one section marked current. */
+export function sidebarBookCurrent(bookId, section) {
+  const book = bookId === null ? 'true' : `group.dataset.bookId===${JSON.stringify(bookId)}`;
+  const groups = [['工作', ['稿件', '审阅', '评估', '交付物']], ['处理', ['发现']], ['资料与记录', ['分析', '来源与证据', '工作概览', '历史与恢复']]];
+  return `(() => { const group=document.querySelector('#app-sidebar .sidebar-book'); const groups=Array.from(group?.querySelectorAll('[data-nav-book-group]')??[], node=>[node.getAttribute('aria-label'),Array.from(node.querySelectorAll('[data-nav-book-section] .nav-label'),item=>item.textContent)]); return group instanceof HTMLElement && !group.hidden && ${book} && JSON.stringify(groups)===${JSON.stringify(JSON.stringify(groups))} && group.querySelector('[data-nav-book-section="${section}"]')?.getAttribute('aria-current')==='page'; })()`;
+}
+
+/** At the 200% reflow width (640 CSS px) the sidebar shows icons only, every row keeping its name, and fits its column. */
+export const SIDEBAR_ICONS_ONLY = `(() => { const bar=document.querySelector('#app-sidebar'); if(!(bar instanceof HTMLElement)||document.documentElement.dataset.sidebar!=='icons')return false; const box=bar.getBoundingClientRect(); const rows=Array.from(bar.querySelectorAll('.sidebar-link')); return box.width<=64 && bar.scrollWidth<=bar.clientWidth+2 && rows.length>=6 && rows.every((row)=>(row.getAttribute('aria-label')??row.textContent??'').trim().length>0 && row.getBoundingClientRect().width<=box.width); })()`;
+
 const J01_COMMON_COMPLETION_PHASES = Object.freeze([
   'imported-transition',
   'content-contract',
@@ -618,6 +646,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'effect-before-route-arrival-order',
     'existing-book-source-commit-preflight',
     'restart-and-data-location',
+    'diagnostics-bundle-export',
     'model-service-first-save',
     'model-service-search-backends',
     'model-service-restart-and-replace',
@@ -1063,7 +1092,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'controller-imports',
     'exact-sample1',
     'renderer-api-boundary',
-    'entry-in-the-header',
+    'entry-in-the-sidebar',
     'first-book-import',
     'first-book-prerequisites',
     'model-credential-saved',

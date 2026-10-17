@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY } from './controller.mjs';
 import { openRemainingPackageExport } from './package-export-readiness.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
@@ -145,8 +145,9 @@ const ACTUALS_PROMPT = '录入定价与首印 · 尚未录入';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
 // Issue #416 (S67b): a 图书交付包 version's export adds its own three, and nothing else that exports, publishes or sends.
+// Issue #938: 诊断's local folder export adds exportDiagnosticsBundle; it carries no manuscript and neither publishes nor sends.
 const EXPORT_MEMBERS = Object.freeze([
-  'approveBookDeliveryPackageExport', 'approveDatabaseExport', 'approveManuscriptExport', 'cancelBookDeliveryPackageExport', 'cancelDatabaseExport', 'chooseBookDeliveryPackageExportFolder', 'chooseDatabaseExportDestination', 'chooseManuscriptExportDestination', 'inspectDatabaseExports', 'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
+  'approveBookDeliveryPackageExport', 'approveDatabaseExport', 'approveManuscriptExport', 'cancelBookDeliveryPackageExport', 'cancelDatabaseExport', 'chooseBookDeliveryPackageExportFolder', 'chooseDatabaseExportDestination', 'chooseManuscriptExportDestination', 'exportDiagnosticsBundle', 'inspectDatabaseExports', 'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
 ]);
 // Issue #415 (S66a): a 新闻稿's draft, composed at run time from exact sample1's paragraphs after the manuscript's own,
 // imported as source material and made the Book's 新闻稿; the house's five types in its order; and the document's edit.
@@ -539,6 +540,7 @@ async function exportAct(renderer, action, name) {
 /** After a relaunch: the Book from 最近的工作, then 交付物 from its manuscript. */
 async function reopenDeliverables(renderer, name) {
   await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]') && document.querySelector('.recent-work-item button')`, `${name}-prior-work`);
+  await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await assertRenderer(renderer, PAGE_HELPERS, `${name}-page-helpers`);
   await assertRenderer(renderer, `(() => { document.querySelector('.recent-work-item button').click(); return true; })()`, `${name}-open-book`);
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] > [data-block-id]')`, `${name}-editor`);
@@ -646,7 +648,7 @@ async function importAndOpen(renderer, title, distinct = false) {
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'import-committed', 180_000);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'import-acknowledged', 180_000);
-  await click(renderer, '打开稿件', 'import-open');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'import-editor');
 }
 
@@ -672,7 +674,8 @@ async function importDraftAsSource(renderer, bookId) {
 
 /** 交付物 from the manuscript: the 工作 group holds 审阅 and then 交付物, and leaving settles the manuscript first. */
 async function openDeliverables(renderer, name) {
-  await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="deliverables"]'); if (entries.join('|') !== 'review:审阅|evaluation:评估|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, `${name}-entry`);
+  await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="deliverables"]'); if (entries.join('|') !== 'review:审阅|evaluation:评估|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; return true; })()`, `${name}-entry`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('deliverables')), `${name}-entry`);
   await waitForDeliverables(renderer, name);
 }
 async function waitForDeliverables(renderer, name) {
@@ -681,7 +684,7 @@ async function waitForDeliverables(renderer, name) {
 }
 /** The destination's own way back: 打开稿件 in its persistent actions. */
 async function openManuscript(renderer, name) {
-  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('[data-screen="book-deliverables"] .workbench-actions button')).find((item) => item.textContent === '打开稿件'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, `${name}-open-manuscript`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), `${name}-open-manuscript`);
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] > [data-block-id]') && document.querySelector('[data-testid="manuscript-editor"]')?.getAttribute('contenteditable') === 'true'`, `${name}-editor`);
 }
 
@@ -1344,10 +1347,10 @@ async function main() {
     await assertRenderer(renderer, PAGE_HELPERS, 'restart-page-helpers');
     await assertRenderer(renderer, `(() => { document.querySelector('.recent-work-item button').click(); return true; })()`, 'restart-open');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] > [data-block-id]')`, 'restart-editor');
-    await click(renderer, '返回图书工作概览', 'restart-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'restart-overview');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-deliverables-summary[data-deliverables-state="designated"] [data-deliverables-action="open"]')`, 'restart-overview-line');
     await assertRenderer(renderer, `(() => { const line = document.querySelector('[data-screen="book-overview"] .book-deliverables-summary'); const open = line.querySelector('[data-deliverables-action="open"]'); return line.dataset.deliverablesBookId === ${JSON.stringify(bookId)} && line.querySelector('h3')?.textContent === '交付物' && line.querySelector('p')?.textContent === ${JSON.stringify(`发稿 · 里程碑版本 2 个 · 发稿版本「${FIRST.label}」 · r1 · ${EBOOK.scope} · 自发稿版本后有修改`)} && open instanceof HTMLButtonElement && open.textContent === '打开交付物'; })()`, 'overview-line-reads-the-publication');
-    await clickSelector(renderer, '[data-screen="book-overview"] .book-deliverables-summary [data-deliverables-action="open"]', 'overview-opens-deliverables');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('deliverables')), 'overview-opens-deliverables');
     await waitForDeliverables(renderer, 'restart');
     const afterRestart = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => JSON.stringify(deliverables))`);
     requireJourney(afterRestart === beforeRestart, 'restart-moved-nothing');
@@ -1571,7 +1574,7 @@ async function main() {
     at('documents-cards');
     // 交付物 shows 交付 · 生产文档 apart from 发稿: one card per house type in the house's order, none made yet, each
     // offering 从来源材料创建… and 本书不做, and nothing that reads as progress.
-    await clickSelector(renderer, '[data-screen="imported"] .book-deliverables-summary [data-deliverables-action="open"]', 'documents-open-deliverables');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('deliverables')), 'documents-open-deliverables');
     await waitForDeliverables(renderer, 'documents');
     await waitFor(renderer, `window.__j07.documents()?.querySelectorAll('li.production-document-card').length === ${DOCUMENT_TYPES.length}`, 'documents-block');
     await assertRenderer(renderer, `(() => {
@@ -1706,7 +1709,7 @@ async function main() {
 
     at('document-card-after-version');
     // 返回交付物: the 新闻稿's card names its latest version and the material it came from, and offers 打开.
-    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] nav.book-work-group [data-work-destination="deliverables"]', 'document-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('deliverables')), 'document-back');
     await waitForDeliverables(renderer, 'document-back');
     await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document'`, 'document-card-ready');
     // Its workflow at a glance (WORK-005): the summary, the first 下一项 and a chip per phase in its state.
@@ -1838,7 +1841,7 @@ async function main() {
         section.querySelector('.document-workflow-summary')?.textContent === '2 个阶段进行中 · 1 项等待处理' &&
         JSON.stringify(Array.from(section.querySelectorAll('ol.document-workflow-next > li'), (item) => item.textContent)) === '["交付 · 有修改尚未保存为版本","起草 · 已重新打开"]';
     })()`, 'changed-edit-workflow-repaints');
-    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] nav.book-work-group [data-work-destination="deliverables"]', 'changed-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('deliverables')), 'changed-back');
     await waitForDeliverables(renderer, 'changed-back');
     await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentChangedSinceDelivery === 'true'`, 'changed-card');
     await assertRenderer(renderer, `(() => {
@@ -2248,7 +2251,7 @@ async function main() {
     // 维护事项待处理 (Issue #426, S68b; MAINT-012). A 替代 on the first designation waits for a later one: 待我处理 counts it
     // under 等待你的决定, names it by the case and its 发稿版本, and opening it returns to 交付物 with the case open. The
     // concluded 勘误 and the 撤回 never come there, and an 归档 of that designation closes the 替代's wait for good.
-    const attentionEntry = '#global-attention-entry';
+    const attentionEntry = SIDEBAR.destination('attention');
     // Whatever else this Book's records ask of the editor stays as it is; only the 替代 comes and goes.
     const attentionBefore = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((attention) => attention.actionableCount)`);
     requireJourney(Number.isSafeInteger(attentionBefore) && attentionBefore >= 0, 'maintenance-attention-before', attentionBefore);
@@ -2383,11 +2386,11 @@ async function main() {
     // `inspectExemplars()` answers. Both deliveries came before the current designation's withdrawal above, so
     // they stay; the card names that designation by its ordinal and says it is withdrawn, and what the Book delivers from
     // then on waits for another 发稿版本 (ADR 0040).
-    await clickSelector(renderer, '#global-attention-entry', 'exemplars-attention');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'exemplars-attention');
     await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]')`, 'exemplars-attention-screen');
-    await click(renderer, '返回图书列表', 'exemplars-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'exemplars-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'exemplars-landing');
-    await click(renderer, '知识库', 'exemplars-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'exemplars-knowledge');
     await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .knowledge-base')`, 'exemplars-knowledge-page');
     await click(renderer, '范例', 'exemplars-tab');
     await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab === 'exemplars' && document.querySelector('.knowledge-panel')?.dataset.exemplarBooks === '1'`, 'exemplars-painted');
@@ -2494,7 +2497,7 @@ async function main() {
     await close();
     renderer = await launch();
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'exemplars-pages-landing');
-    await click(renderer, '知识库', 'exemplars-pages-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'exemplars-pages-knowledge');
     await click(renderer, '范例', 'exemplars-pages-tab');
     await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 20`, 'exemplars-first-page');
     for (let repetition = 0; repetition < 2; repetition += 1) {
@@ -2518,14 +2521,16 @@ async function main() {
     requireJourney(UUID_PATTERN.test(writingBookId ?? ''), 'writing-book-identity');
 
     at('writing-prerequisites');
-    await click(renderer, '返回图书工作概览', 'writing-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'writing-overview');
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"], [data-native-artifact-action="enable-current-book"]')`, 'writing-artifact-ready');
     await assertRenderer(renderer, `(() => { const install = document.querySelector('[data-native-artifact-action="install-disabled"]'); if (install instanceof HTMLButtonElement) install.click(); return true; })()`, 'writing-artifact-install');
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'writing-artifact-enable-ready');
     await click(renderer, '审阅并为本图书启用 Revision 2', 'writing-artifact-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision === '2'`, 'writing-artifact-enabled');
-    await click(renderer, '返回图书列表', 'writing-model-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'writing-model-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'writing-model-landing');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'writing-model-open-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'writing-model-open-settings-hub');
     await click(renderer, '模型服务', 'writing-model-open');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'writing-model-ready');
     cancellation.throwIfRequested();
@@ -2709,7 +2714,7 @@ async function main() {
     at('writing-card');
     // Back on 交付物 the 宣传文章's card names the document as drafted by the writing Task, its 起草 under way; nothing is left to
     // open, and nothing on the page or in the records says it was delivered or sent.
-    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] nav.book-work-group button[data-work-destination="deliverables"]', 'writing-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('deliverables')), 'writing-back');
     await waitForDeliverables(renderer, 'writing-card');
     await waitFor(renderer, `window.__j07.card('promotion-article')?.dataset.documentState === 'document'`, 'writing-card-document');
     await assertRenderer(renderer, `(() => { const card = window.__j07.card('promotion-article'); return card?.querySelector('.document-card-line')?.textContent === '版本 1 · 由写作任务起草（范例只参照，不复制）' && card.querySelector('.document-workflow-summary')?.textContent === '1 个阶段进行中 · 0 项等待处理'; })()`, 'writing-card-words');
@@ -2729,7 +2734,7 @@ async function main() {
     renderer = await launch({ picker: libraryPath, adapter: WRITING_FIXTURE });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'writing-library-landing');
     await assertRenderer(renderer, PAGE_HELPERS, 'writing-library-page-helpers');
-    await click(renderer, '知识库', 'writing-library-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'writing-library-knowledge');
     await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .knowledge-base')`, 'writing-library-knowledge-page');
     await click(renderer, '资料库', 'writing-library-tab');
     await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .library-materials')?.dataset.library === 'ready' && document.querySelectorAll('article.library-material').length === 0`, 'writing-library-empty');

@@ -22,6 +22,8 @@ import {
   type KeyEventLike,
 } from '../../src/renderer/commands.js';
 import { IME_DEFERRED_ANNOUNCEMENT } from '../../src/renderer/commands-labels.js';
+import { SHELL_BOOK_SECTIONS } from '../../src/shared/preferences.js';
+import { BOOK_SECTION_COMMANDS } from '../../src/renderer/commands.js';
 
 // Unit suite for the command registry (Issue #936, plan slice 11c; V2-UX-KEY-002, KEY-003, KEY-004, KEY-006, KEY-011).
 
@@ -46,6 +48,11 @@ function press(platform: CommandPlatform, code: string, held: { mod?: boolean; c
 }
 
 describe('the command registry', () => {
+  it('covers the complete sidebar Book sections, settings and toggle without replacing shell navigation', () => {
+    expect(BOOK_SECTION_COMMANDS.map((entry) => entry[2])).toEqual(SHELL_BOOK_SECTIONS);
+    expect(COMMANDS.some((entry) => entry.id === 'nav.settings')).toBe(true);
+    expect(COMMANDS.some((entry) => entry.id === 'view.toggleSidebar')).toBe(true);
+  });
   it('declares only navigation, search and view commands, each with a Chinese name and a default per platform', () => {
     expect(new Set(COMMANDS.map((command) => command.id)).size).toBe(COMMANDS.length);
     for (const command of COMMANDS) {

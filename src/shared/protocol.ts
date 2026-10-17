@@ -1,7 +1,6 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
-import type { PreferencesProjection, SavePreferenceInput } from './preferences.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
@@ -250,8 +249,6 @@ export const IPC_CHANNELS = {
   approveDatabaseExport: 'ai7:j12:approve-database-export',
   inspectDatabaseExports: 'ai7:j12:inspect-database-exports',
   inspectScheduledBackups: 'ai7:j12:inspect-scheduled-backups',
-  getPreferences: 'ai7:w11:get-preferences',
-  savePreference: 'ai7:w11:save-preference',
   inspectUsage: 'ai7:w11:inspect-usage',
   exportUsageCsv: 'ai7:w11:export-usage-csv',
   setScheduledBackup: 'ai7:j12:set-scheduled-backup',
@@ -14462,9 +14459,6 @@ export interface RendererApi {
   approveDatabaseExport(input: { preparationId: string }): Promise<DatabaseExportActivityProjection>;
   inspectDatabaseExports(): Promise<DatabaseExportsProjection>;
   inspectScheduledBackups(): Promise<ScheduledBackupsProjection>;
-  /** Local view/input preferences, kept by the main process (wave 11 seam map §2). */
-  getPreferences(): Promise<PreferencesProjection>;
-  savePreference(input: SavePreferenceInput): Promise<PreferencesProjection>;
   /** 用量 (Issue #936): the Runs already recorded, summed by Book, Task kind or period. */
   inspectUsage(input: InspectUsageInput): Promise<UsageProjection>;
   /** 导出为 CSV… (Issue #936): the platform's Save dialog, then the table as numbers and ids only. */

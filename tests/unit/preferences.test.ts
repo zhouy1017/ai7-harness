@@ -1,90 +1,202 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { PreferencesError, PreferencesStore } from '../../src/main/preferences.js';
-import { PREFERENCE_DEFAULTS, parseKeyboardBindings, parseUnitPrices } from '../../src/shared/preferences.js';
+import { createPreferenceStore, PreferenceError, type PreferenceFileSystem } from '../../src/main/preferences.js';
+import {
+  MAX_RECENT_BOOKS,
+  PREFERENCE_ERRORS,
+  PREFERENCE_KEYS,
+  PREFERENCES_FILE_NAME,
+  PREFERENCES_NOTICES,
+  preferenceDefaults,
+  type PreferencesRendererApi,
+} from '../../src/shared/preferences.js';
+import { ShellPreferences } from '../../src/renderer/shell.js';
 
-// Unit suite for the local preferences owner and its two slice-11c keys (Issue #936; wave 11 seam map §2): a versioned
-// envelope written atomically, values validated on the way in and on the way out, a damaged file read as the defaults.
+// Unit suite for the local preferences owner (Issue #934, wave 11 slice 11a; seam map §2): one file, written whole and
+// atomically, keys and values validated against the shared registry, a damaged file read as defaults with a line to
+// disclose — and pinning a Book reaching that file and nothing else: no service operation, no database byte.
 
-let root: string;
-let path: string;
+let sandbox: string;
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'ai7-preferences-'));
-  path = join(root, 'preferences.json');
+  sandbox = await mkdtemp(join(tmpdir(), 'ai7-preferences-test-'));
 });
 
 afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
+  await rm(sandbox, { recursive: true, force: true });
 });
 
-const price = { inputPerMillion: 2, outputPerMillion: 8, currency: 'CNY', enteredAt: '2026-10-17' };
+const BOOK = { bookId: '6f1c2c1e-0f9f-4a63-9a43-0a4d0d5c1b11', title: 'sample1' } as const;
 
-describe('PreferencesStore', () => {
-  it('reads the defaults before anything was saved', async () => {
-    expect(await new PreferencesStore(path).read()).toEqual({ values: PREFERENCE_DEFAULTS });
+async function stored(): Promise<unknown> {
+  return JSON.parse(await readFile(join(sandbox, PREFERENCES_FILE_NAME), 'utf8'));
+}
+
+function refusal(operation: () => unknown): PreferenceError {
+  try {
+    operation();
+  } catch (error) {
+    if (error instanceof PreferenceError) return error;
+    throw error;
+  }
+  throw new Error('expected a refusal');
+}
+
+describe('the preferences registry', () => {
+  it('declares the shell keys with their defaults, and each default passes its own validator', () => {
+    expect(Object.keys(PREFERENCE_KEYS)).toEqual(['usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks']);
+    expect(preferenceDefaults()).toEqual({ 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [] });
+    for (const definition of Object.values(PREFERENCE_KEYS)) expect(definition.validate(definition.default)).toBe(true);
   });
 
-  it('saves one key at a time into a versioned envelope and reads it back after a restart', async () => {
-    const store = new PreferencesStore(path);
-    await store.save({ key: 'usage.unitPrices', value: { 'opencode-go': price } });
-    const saved = await store.save({ key: 'keyboard.bindings', value: { 'nav.library': 'Mod+Shift+L' } });
-    expect(saved.values).toEqual({ 'usage.unitPrices': { 'opencode-go': price }, 'keyboard.bindings': { 'nav.library': 'Mod+Shift+L' } });
-    const file = JSON.parse(await readFile(path, 'utf8')) as { version: number; values: unknown };
-    expect(file).toEqual({ version: 1, values: saved.values });
-    expect((await new PreferencesStore(path).read()).values).toEqual(saved.values);
-  });
-
-  it('refuses an unknown key and a value that does not fit its key, leaving the file as it was', async () => {
-    const store = new PreferencesStore(path);
-    await store.save({ key: 'keyboard.bindings', value: { 'nav.library': 'Mod+Shift+L' } });
-    const before = await readFile(path, 'utf8');
-    await expect(store.save({ key: 'appearance' as never, value: 'dark' as never })).rejects.toMatchObject({ code: 'PREFERENCE_KEY_UNKNOWN' });
-    await expect(store.save({ key: 'usage.unitPrices', value: { 'opencode-go': { ...price, outputPerMillion: -1 } } })).rejects.toBeInstanceOf(PreferencesError);
-    await expect(store.save({ key: 'keyboard.bindings', value: { 'nav.library': 'not a chord' } })).rejects.toMatchObject({ code: 'PREFERENCE_VALUE_INVALID' });
-    expect(await readFile(path, 'utf8')).toBe(before);
-  });
-
-  it('reads a damaged file, a foreign version and an invalid value as the defaults', async () => {
-    await writeFile(path, '{not json', 'utf8');
-    expect((await new PreferencesStore(path).read()).values).toEqual(PREFERENCE_DEFAULTS);
-    await writeFile(path, JSON.stringify({ version: 2, values: { 'keyboard.bindings': { 'nav.library': 'Mod+L' } } }), 'utf8');
-    expect((await new PreferencesStore(path).read()).values).toEqual(PREFERENCE_DEFAULTS);
-    await writeFile(path, JSON.stringify({ version: 1, values: { 'keyboard.bindings': { 'nav.library': 'x y z' }, 'usage.unitPrices': { 'opencode-go': price } } }), 'utf8');
-    expect((await new PreferencesStore(path).read()).values).toEqual({ ...PREFERENCE_DEFAULTS, 'usage.unitPrices': { 'opencode-go': price } });
-  });
-
-  it('applies concurrent saves one after another without losing a key', async () => {
-    const store = new PreferencesStore(path);
-    await Promise.all([
-      store.save({ key: 'usage.unitPrices', value: { 'opencode-go': price } }),
-      store.save({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+U' } }),
-    ]);
-    expect((await store.read()).values).toEqual({ 'usage.unitPrices': { 'opencode-go': price }, 'keyboard.bindings': { 'nav.series': 'Mod+Shift+U' } });
+  it('refuses malformed Book lists: extra fields, duplicates, unknown sections and too many recent Books', () => {
+    const pinned = PREFERENCE_KEYS['shell.pinnedBooks'];
+    const recent = PREFERENCE_KEYS['shell.recentBooks'];
+    expect(pinned.validate([BOOK])).toBe(true);
+    expect(pinned.validate([{ ...BOOK, extra: 1 }])).toBe(false);
+    expect(pinned.validate([BOOK, BOOK])).toBe(false);
+    expect(pinned.validate([{ bookId: '', title: 'x' }])).toBe(false);
+    expect(recent.validate([{ ...BOOK, section: 'manuscript' }])).toBe(true);
+    expect(recent.validate([{ ...BOOK, section: 'elsewhere' }])).toBe(false);
+    const many = Array.from({ length: MAX_RECENT_BOOKS + 1 }, (_, index) => ({ bookId: `book-${index}`, title: `第 ${index} 本`, section: 'overview' }));
+    expect(recent.validate(many)).toBe(false);
+    expect(recent.validate(many.slice(0, MAX_RECENT_BOOKS))).toBe(true);
   });
 });
 
-describe('the slice-11c preference values', () => {
-  it('accepts only exact unit-price entries: non-negative bounded numbers, an ISO currency and a real day', () => {
-    expect(parseUnitPrices({ 'opencode-go': price })).toEqual({ 'opencode-go': price });
-    expect(parseUnitPrices({})).toEqual({});
-    for (const bad of [
-      { ...price, currency: 'cny' }, { ...price, currency: 'RMB1' }, { ...price, inputPerMillion: Number.NaN },
-      { ...price, inputPerMillion: 1_000_001 }, { ...price, enteredAt: '2026-02-30' }, { ...price, enteredAt: '2026-10-17T00:00:00Z' },
-      { ...price, extra: 1 }, { inputPerMillion: 1, outputPerMillion: 1, currency: 'CNY' },
-    ]) expect(parseUnitPrices({ 'opencode-go': bad }), JSON.stringify(bad)).toBeNull();
-    expect(parseUnitPrices({ 'Bad Route': price })).toBeNull();
-    expect(parseUnitPrices([price])).toBeNull();
+describe('createPreferenceStore', () => {
+  it('reads defaults with nothing to disclose before the first save', () => {
+    const store = createPreferenceStore(sandbox);
+    expect(store.read()).toEqual({ version: 1, values: preferenceDefaults(), notice: null });
   });
 
-  it('accepts only chord sequences of one or two steps, keyed by a command id', () => {
-    expect(parseKeyboardBindings({ 'nav.library': 'Mod+Alt+Shift+L', 'search.next': 'F3', 'nav.series': 'Mod+K Mod+B' })).not.toBeNull();
-    for (const bad of ['', 'Mod+', 'Shift+Mod+L', 'Mod+L Mod+K Mod+B', 'Mod+L+K', 'mod+l ']) {
-      expect(parseKeyboardBindings({ 'nav.library': bad }), bad).toBeNull();
-    }
-    expect(parseKeyboardBindings({ 'Nav Library': 'Mod+L' })).toBeNull();
-    expect(parseKeyboardBindings({ 'nav.library': 5 })).toBeNull();
+  it('writes the versioned envelope whole, through a staged file renamed over the file', async () => {
+    const store = createPreferenceStore(sandbox);
+    const saved = store.save({ key: 'shell.sidebarCollapsed', value: true });
+    expect(saved.values['shell.sidebarCollapsed']).toBe(true);
+    expect(await stored()).toEqual({ version: 1, values: { ...preferenceDefaults(), 'shell.sidebarCollapsed': true } });
+    // Nothing staged is left beside it.
+    expect(await readdir(sandbox)).toEqual([PREFERENCES_FILE_NAME]);
+    // A second store over the same directory reads what the first wrote.
+    expect(createPreferenceStore(sandbox).read().values['shell.sidebarCollapsed']).toBe(true);
+  });
+
+  it('keeps the old file whole when the write fails before the rename', async () => {
+    const store = createPreferenceStore(sandbox);
+    store.save({ key: 'shell.pinnedBooks', value: [BOOK] });
+    const before = await readFile(join(sandbox, PREFERENCES_FILE_NAME), 'utf8');
+    const removed: string[] = [];
+    const failing: PreferenceFileSystem = {
+      readFile: (path) => { throw Object.assign(new Error(path), { code: 'ENOENT' }); },
+      writeDurably: () => { throw new Error('disk full'); },
+      rename: () => { throw new Error('never reached'); },
+      remove: (path) => removed.push(path),
+    };
+    const broken = createPreferenceStore(sandbox, failing);
+    const error = refusal(() => broken.save({ key: 'shell.sidebarCollapsed', value: true }));
+    expect(error.code).toBe(PREFERENCE_ERRORS.writeFailed.code);
+    expect(removed).toHaveLength(1);
+    expect(await readFile(join(sandbox, PREFERENCES_FILE_NAME), 'utf8')).toBe(before);
+    expect(broken.read().values['shell.sidebarCollapsed']).toBe(false);
+  });
+
+  it('refuses an unknown key and an invalid value, and writes nothing for either', async () => {
+    const store = createPreferenceStore(sandbox);
+    expect(refusal(() => store.save({ key: 'shell.unknown', value: true })).code).toBe(PREFERENCE_ERRORS.unknownKey.code);
+    expect(refusal(() => store.save({ key: 'toString', value: true })).code).toBe(PREFERENCE_ERRORS.unknownKey.code);
+    expect(refusal(() => store.save({ key: 'shell.sidebarCollapsed', value: 'yes' })).code).toBe(PREFERENCE_ERRORS.invalidValue.code);
+    expect(refusal(() => store.save({ key: 'shell.pinnedBooks', value: [{ bookId: BOOK.bookId }] })).code).toBe(PREFERENCE_ERRORS.invalidValue.code);
+    expect(refusal(() => store.save(null)).code).toBe(PREFERENCE_ERRORS.unknownKey.code);
+    expect(await readdir(sandbox)).toEqual([]);
+    expect(store.read().values).toEqual(preferenceDefaults());
+  });
+
+  it('reads a corrupted file as defaults and discloses it, until the next save rewrites it', async () => {
+    await writeFile(join(sandbox, PREFERENCES_FILE_NAME), '{"version": 1, "values": {', 'utf8');
+    const store = createPreferenceStore(sandbox);
+    expect(store.read()).toEqual({ version: 1, values: preferenceDefaults(), notice: PREFERENCES_NOTICES.unreadable });
+    const saved = store.save({ key: 'shell.sidebarCollapsed', value: true });
+    expect(saved.notice).toBeNull();
+    expect(await stored()).toEqual({ version: 1, values: { ...preferenceDefaults(), 'shell.sidebarCollapsed': true } });
+  });
+
+  it('discloses unknown stored keys and never returns them to the renderer', async () => {
+    await writeFile(join(sandbox, PREFERENCES_FILE_NAME), JSON.stringify({ version: 1, values: { 'unknown.setting': true } }), 'utf8');
+    const reading = createPreferenceStore(sandbox).read();
+    expect(reading.values).toEqual(preferenceDefaults());
+    expect(reading.notice).toBe(PREFERENCES_NOTICES.partlyInvalid);
+  });
+
+  it('reads an envelope of another version as defaults, and keeps the valid keys of a partly invalid one', async () => {
+    await writeFile(join(sandbox, PREFERENCES_FILE_NAME), JSON.stringify({ version: 2, values: { 'shell.sidebarCollapsed': true } }), 'utf8');
+    expect(createPreferenceStore(sandbox).read()).toEqual({ version: 1, values: preferenceDefaults(), notice: PREFERENCES_NOTICES.unreadable });
+    await writeFile(join(sandbox, PREFERENCES_FILE_NAME), JSON.stringify({
+      version: 1,
+      values: { 'shell.sidebarCollapsed': true, 'shell.pinnedBooks': 'not a list', 'later.slice': { kept: false } },
+    }), 'utf8');
+    const reading = createPreferenceStore(sandbox).read();
+    expect(reading.values).toEqual({ ...preferenceDefaults(), 'shell.sidebarCollapsed': true });
+    expect(reading.notice).toBe(PREFERENCES_NOTICES.partlyInvalid);
+  });
+});
+
+describe('pinning and recency through ShellPreferences', () => {
+  it('reach only the two preference members: the database is byte-identical and no service operation is called', async () => {
+    const shellDirectory = join(sandbox, 'shell');
+    await (await import('node:fs/promises')).mkdir(shellDirectory);
+    const databasePath = join(sandbox, 'ai7.sqlite');
+    const database = new DatabaseSync(databasePath);
+    database.exec("CREATE TABLE books (book_id TEXT PRIMARY KEY, title TEXT NOT NULL); INSERT INTO books VALUES ('6f1c2c1e-0f9f-4a63-9a43-0a4d0d5c1b11', 'sample1');");
+    database.close();
+    const before = await readFile(databasePath);
+
+    const store = createPreferenceStore(shellDirectory);
+    const called: string[] = [];
+    const preferencesApi: PreferencesRendererApi = {
+      getPreferences: async () => { called.push('getPreferences'); return store.read(); },
+      savePreference: async (input) => { called.push('savePreference'); return store.save(input); },
+    };
+    // Every other member of the renderer API is a service operation; touching any one of them fails the case.
+    const api = new Proxy(preferencesApi, {
+      get: (target, property) => {
+        if (property === 'getPreferences' || property === 'savePreference' || property === 'then') return Reflect.get(target, property);
+        throw new Error(`service operation called: ${String(property)}`);
+      },
+    });
+    const shell = new ShellPreferences(api);
+    await shell.load();
+    await shell.togglePin(BOOK, 20);
+    await shell.visit({ ...BOOK, section: 'manuscript' });
+    await shell.visit({ ...BOOK, section: 'manuscript' });
+    await shell.togglePin(BOOK, 20);
+    await shell.togglePin(BOOK, 20);
+    await shell.setCollapsed(true);
+
+    expect(new Set(called)).toEqual(new Set(['getPreferences', 'savePreference']));
+    expect(await readFile(databasePath)).toEqual(before);
+    expect(shell.current).toEqual({
+      ...preferenceDefaults(),
+      'shell.sidebarCollapsed': true,
+      'shell.pinnedBooks': [BOOK],
+      'shell.recentBooks': [{ ...BOOK, section: 'manuscript' }],
+    });
+    expect(store.read().values).toEqual(shell.current);
+    // The repeated visit to the same place wrote nothing more: five saves for five changes.
+    expect(called.filter((name) => name === 'savePreference')).toHaveLength(5);
+  });
+
+  it('writes a list from the latest stored list, so another window\'s visit is kept', async () => {
+    const store = createPreferenceStore(sandbox);
+    const api: PreferencesRendererApi = { getPreferences: async () => store.read(), savePreference: async (input) => store.save(input) };
+    const first = new ShellPreferences(api);
+    const second = new ShellPreferences(api);
+    await first.load();
+    await second.load();
+    await first.visit({ bookId: 'book-a', title: '甲', section: 'review' });
+    await second.visit({ bookId: 'book-b', title: '乙', section: 'overview' });
+    expect(store.read().values['shell.recentBooks'].map((entry) => entry.bookId)).toEqual(['book-b', 'book-a']);
   });
 });
