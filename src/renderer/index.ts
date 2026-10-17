@@ -248,6 +248,8 @@ import type { ComposerRange } from './task-panel.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
+import { mountImportedSkills } from './imported-skills.js';
+import { mountProcedureRecommendationSlots } from './procedure-choice.js';
 import { mountTaskDrawer } from './task-drawer.js';
 import {
   TASK_DRAWER_TITLE,
@@ -368,6 +370,9 @@ const taskDrawer = mountTaskDrawer({
     resume();
   }),
 });
+
+const procedureRecommendationSlots = mountProcedureRecommendationSlots(document.body, window.ai7, () => void renderKnowledgeBase('rules'));
+window.addEventListener('unload', () => procedureRecommendationSlots.disconnect(), { once: true });
 
 /** One range the composer carries, from the words selected now (Issue #423, slice 7a). */
 function composerRangeOf(reading: SelectionSpanReading): ComposerRange {
@@ -5504,7 +5509,11 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
         }
       },
     });
-    panelNode.append(section, captured, element('h3', undefined, RULES_HEADING));
+    const imported = element('section', 'knowledge-imported-skills');
+    panelNode.append(section, captured, imported, element('h3', undefined, RULES_HEADING));
+    void mountImportedSkills({ root: imported, api: window.ai7, setStatus, errorMessage: rendererErrorMessage }).load().catch((error: unknown) => {
+      if (imported.isConnected) imported.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取外部 Skill。')));
+    });
     void surface.load().catch((error: unknown) => {
       if (captured.isConnected) captured.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取可复用工序。')));
     });

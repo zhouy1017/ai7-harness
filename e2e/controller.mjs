@@ -1449,12 +1449,15 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Issue #66 (S31b): a 书系一致性 procedure whose Series step the editor chooses apart, and how it fits a Book in no Series.
     'procedure-series-capture',
     'procedure-series-chosen-apart',
+    'procedure-recommendation',
+    'procedure-series-step-optin',
     // Issue #423 (S77 deferred items a and d): the house's procedure on a selection from the menu, and the card's 跳到所选文字.
     'procedure-selection-run',
     'procedure-series-mismatch',
     'capture-proposal-file',
     'capture-restart',
     'j14-capture-keyboard-reflow-forced-colors',
+    'skill-import-validate-enable',
     'zero-activity',
   ]),
 });

@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 147 as const;
+export const SERVICE_PROTOCOL_VERSION = 148 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -109,6 +109,12 @@ export const IPC_CHANNELS = {
   admitReadersReportExemplar: 'ai7:j07:admit-readers-report-exemplar',
   inspectKnowledgeProcedures: 'ai7:j15:inspect-knowledge-procedures',
   inspectCapturedProcedures: 'ai7:j15:inspect-captured-procedures',
+  importSkillPackage: 'ai7:kb:import-skill-package',
+  validateImportedSkill: 'ai7:kb:validate-imported-skill',
+  installImportedSkill: 'ai7:kb:install-imported-skill',
+  enableImportedSkill: 'ai7:kb:enable-imported-skill',
+  inspectImportedSkills: 'ai7:kb:inspect-imported-skills',
+  recommendProcedures: 'ai7:task:recommend-procedures',
   inspectCapturedProcedure: 'ai7:j15:inspect-captured-procedure',
   inspectDeveloperProposal: 'ai7:j15:inspect-developer-proposal',
   inspectProcedureCapture: 'ai7:j15:inspect-procedure-capture',
@@ -7486,10 +7492,128 @@ export interface KnowledgeProceduresProjection {
   readonly artifacts: ReadonlyArray<KnowledgeArtifactProjection>;
 }
 
+// ADR 0045 / ADR 0090: foreign Skills are retained as inert, inspectable documents, never executors.
+export type ImportedSkillState = 'pending-validation' | 'validated' | 'restricted' | 'rejected' | 'installed-disabled' | 'enabled';
+export interface ImportedSkillFile {
+  readonly path: string;
+  readonly bytes: number;
+  readonly sha256: string;
+  readonly base64: string;
+}
+export interface SkillConversionReport {
+  readonly preserved: readonly string[];
+  readonly mapped: readonly string[];
+  readonly reviewRequired: readonly string[];
+  readonly unsupported: readonly string[];
+}
+export interface ImportedSkillCeiling {
+  readonly requestedCapabilities: readonly string[];
+  readonly executor: false;
+  readonly runSourceScope: 'none';
+  readonly provider: false;
+  readonly effect: false;
+  readonly credentials: false;
+  readonly network: false;
+  readonly backgroundAnalysis: false;
+  readonly apply: false;
+}
+export interface ImportedSkillSummary {
+  readonly skillId: string;
+  readonly revisionId: string;
+  readonly ordinal: number;
+  readonly name: string;
+  readonly sourceRevision: string;
+  readonly kind: 'DSH Skill';
+  readonly state: ImportedSkillState;
+  readonly stateLabel: string;
+}
+export interface ImportedSkillRevisionProjection extends ImportedSkillSummary {
+  readonly snapshotId: string;
+  readonly previousRevisionId: string | null;
+  readonly sourcePath: string;
+  readonly snapshotSha256: string;
+  readonly workingSha256: string;
+  readonly files: readonly ImportedSkillFile[];
+  readonly workingFiles: readonly ImportedSkillFile[];
+  readonly license: string | null;
+  readonly notices: readonly string[];
+  readonly conversion: SkillConversionReport;
+  readonly reasons: readonly string[];
+  readonly enabledBooks: readonly string[];
+  readonly ceiling: ImportedSkillCeiling;
+  /** Exact revision + conversion + ceiling + state, shown before separate explicit installation/enablement. */
+  readonly previewDigest: string;
+  readonly createdAt: string;
+}
+export interface ImportedSkillsProjection {
+  readonly skills: readonly ImportedSkillSummary[];
+  readonly nextBefore: string | null;
+  readonly revision: ImportedSkillRevisionProjection | null;
+}
+/**
+ * What acquisition discloses before anything is kept (ADR 0090 §2; REUSE-021): exact identity, kind, source revision, provenance,
+ * license and notices, content digest and the conversion it would keep. Nothing of it is written until the editor keeps it.
+ */
+export interface ImportedSkillAcquisitionProjection {
+  /** The disclosed package, held in the service's memory only until it is kept or dropped. */
+  readonly acquisitionId: string;
+  readonly name: string;
+  readonly sourceRevision: string;
+  readonly kind: 'DSH Skill';
+  readonly sourcePath: string;
+  readonly contentSha256: string;
+  readonly license: string | null;
+  readonly notices: readonly string[];
+  readonly files: readonly Omit<ImportedSkillFile, 'base64'>[];
+  readonly conversion: SkillConversionReport;
+  readonly ceiling: ImportedSkillCeiling;
+  readonly problems: readonly string[];
+  /** A package without a SKILL.md is not a Skill: it is disclosed and never kept. */
+  readonly keepable: boolean;
+  /** The working revision already holding exactly this content, when it was kept before: keeping it again adds nothing. */
+  readonly keptRevisionId: string | null;
+}
+/** 导入 Skill…: the disclosure, and the kept working revision once the editor keeps it (`null` until then). */
+export interface ImportedSkillImportProjection {
+  readonly acquisition: ImportedSkillAcquisitionProjection;
+  readonly revision: ImportedSkillRevisionProjection | null;
+}
+export interface ProcedureRecommendationInput {
+  readonly bookId: string;
+  readonly goal: string;
+  readonly taskKind: 'review-run' | 'baseline-analysis' | 'writing' | 'unclassified';
+  readonly scope: CapturedProcedureScopeSlot;
+  readonly categoryIds: readonly string[];
+}
+export interface ProcedureRecommendationCandidate {
+  readonly procedureId: string;
+  readonly versionId: string;
+  readonly version: number;
+  readonly documentSha256: string;
+  readonly purpose: string;
+  readonly kind: '可复用工序';
+  readonly fit: 'all' | 'partial';
+  readonly rationale: readonly string[];
+  readonly requiredInputs: readonly string[];
+  readonly expectedOutcome: string;
+  readonly proposalClasses: readonly string[];
+  readonly effectClasses: readonly string[];
+}
+export interface ProcedureRecommendationProjection {
+  readonly intentDigest: string;
+  readonly status: 'clear' | 'ambiguous' | 'none';
+  readonly candidates: readonly ProcedureRecommendationCandidate[];
+  readonly selectedVersionId: null;
+  readonly note: string;
+  readonly excludedSkillReason: string;
+}
+
 // ---- 可复用工序 (Issue #65, plan slice S30; ADR 0087; V2-UX-REUSE-001 to 020, 029 to 031, 038 to 054, 063 to 066, KB-010) --
 
 /** The one schema a Captured Procedure version's document is written in (ADR 0087 §1). */
 export const CAPTURED_PROCEDURE_SCHEMA = 'ai7.captured-procedure/1' as const;
+/** ADR 0090: additive successor; existing /1 documents and their exact digests never move. */
+export const CAPTURED_PROCEDURE_SCHEMA_V2 = 'ai7.captured-procedure/2' as const;
 /**
  * The one parameter slot a Captured Procedure carries: the review scope kind. The chapters are chosen at each run. `selection`
  * (Issue #423, S77 deferred item a) is the scope a Run pins when the house's procedure runs on the paragraphs 就这段发起任务… handed
@@ -7545,7 +7669,7 @@ export interface CapturedProcedureStepDocument {
  * authorization, receipt, plan digest, Provider, route or model, and no guideline clause or version.
  */
 export interface CapturedProcedureDocument {
-  readonly schema: typeof CAPTURED_PROCEDURE_SCHEMA;
+  readonly schema: typeof CAPTURED_PROCEDURE_SCHEMA | typeof CAPTURED_PROCEDURE_SCHEMA_V2;
   readonly title: string;
   readonly runAs: 'review-run';
   readonly steps: ReadonlyArray<CapturedProcedureStepDocument>;
@@ -7555,7 +7679,7 @@ export interface CapturedProcedureDocument {
    * calls a model or a search engine, and the current-Book Run Source Scope.
    */
   readonly authorityCeiling: {
-    readonly runSourceScope: 'current-book';
+    readonly runSourceScope: 'current-book' | 'series';
     readonly steps: ReadonlyArray<{ readonly categoryId: string; readonly executor: string }>;
     readonly outputs: ReadonlyArray<ReviewCategoryOutputKind>;
     readonly model: boolean;
@@ -12958,6 +13082,21 @@ export interface ServiceOperationMap {
   };
   /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): names no Book. */
   inspectCapturedProcedures: { input: Record<string, never>; output: CapturedProceduresProjection };
+  /**
+   * 外部 Skill (ADR 0045, ADR 0090 §2): acquisition from the path the platform picker gave main discloses and keeps nothing
+   * (`path`); keeping the disclosed package is a second, separate call (`keep`, its acquisition id). Exactly one is given.
+   */
+  importSkillPackage: { input: { path: string | null; keep: string | null }; output: ImportedSkillImportProjection };
+  /** A provider-free validation stage over the exact working files; it never installs or enables (REUSE-023, REUSE-024). */
+  validateImportedSkill: { input: { revisionId: string }; output: ImportedSkillRevisionProjection };
+  /** Installation, finished disabled, of a validated revision whose preview the editor confirmed (REUSE-026). */
+  installImportedSkill: { input: { revisionId: string; previewDigest: string }; output: ImportedSkillRevisionProjection };
+  /** Scoped enablement for one Book after the ceiling was shown: no executor, Run scope, Provider or Effect follows (REUSE-028). */
+  enableImportedSkill: { input: { revisionId: string; bookId: string; previewDigest: string }; output: ImportedSkillRevisionProjection };
+  /** The house's imported Skills, newest revision each, a page at a time, and one exact revision when asked. A read. */
+  inspectImportedSkills: { input: { revisionId: string | null; before: string | null }; output: ImportedSkillsProjection };
+  /** 工序推荐 (ADR 0090 §1; TASK-010 to 016): a deterministic read; it selects, acquires, enables or authorizes nothing. */
+  recommendProcedures: { input: ProcedureRecommendationInput; output: ProcedureRecommendationProjection };
   /** One Captured Procedure with a page of its versions, newest first, below `before` when it is given. */
   inspectCapturedProcedure: { input: { procedureId: string; before: number | null }; output: CapturedProcedureProjection };
   /** One 开发建议 with a page of its versions, newest first, below `before` when it is given. */
@@ -13720,6 +13859,13 @@ export interface RendererApi {
   inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection>;
   /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): names no Book. */
   inspectCapturedProcedures(): Promise<CapturedProceduresProjection>;
+  /** `{ kind }` opens the platform picker and discloses what it chose, keeping nothing; `{ keep }` keeps that disclosure. */
+  importSkillPackage(input?: { kind: 'zip' | 'directory' } | { keep: string }): Promise<ImportedSkillImportProjection | null>;
+  validateImportedSkill(input: { revisionId: string }): Promise<ImportedSkillRevisionProjection>;
+  installImportedSkill(input: { revisionId: string; previewDigest: string }): Promise<ImportedSkillRevisionProjection>;
+  enableImportedSkill(input: { revisionId: string; bookId: string; previewDigest: string }): Promise<ImportedSkillRevisionProjection>;
+  inspectImportedSkills(input: { revisionId: string | null; before: string | null }): Promise<ImportedSkillsProjection>;
+  recommendProcedures(input: Omit<ProcedureRecommendationInput, 'bookId'>): Promise<ProcedureRecommendationProjection>;
   inspectCapturedProcedure(input: { procedureId: string; before: number | null }): Promise<CapturedProcedureProjection>;
   inspectDeveloperProposal(input: { proposalId: string; before: number | null }): Promise<DeveloperProposalProjection>;
   /** The current Book's finished Review Run as a capture's source (ADR 0087 §2). */

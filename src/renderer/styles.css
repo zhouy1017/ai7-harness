@@ -1781,3 +1781,27 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .proposal-region { margin-block: 16px; overflow-wrap: anywhere; }
 .proposal-receipt { padding: 16px; border: 1px solid #2f5d8a; flex-basis: 100%; }
 @media (max-width: 760px) { .proposal-layout, .proposal-side-by-side { grid-template-columns: 1fr; } }
+
+/* External Skill documents stay inert; long paths, digests and original files reflow without widening the page. */
+.knowledge-imported-skills, .imported-skill-detail, [data-procedure-recommendation] {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.imported-skill-detail, [data-procedure-recommendation] {
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  margin-block: 0.75rem;
+}
+.imported-skill-detail pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85em;
+}
+.imported-skill-list li, [data-procedure-recommendation] li {
+  margin-block: 0.75rem;
+}
+[data-recommendation-state="stale"] {
+  border-style: dashed;
+}

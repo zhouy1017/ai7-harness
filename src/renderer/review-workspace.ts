@@ -65,6 +65,8 @@ import {
   procedureSheetCloseStatus,
   settleProcedureChoice,
   procedurePreparationPin,
+  ProcedureRecommendationSelection,
+  mountProcedureRecommendation,
   type ProcedureChoiceOutcome,
 } from './procedure-choice.js';
 import {
@@ -237,7 +239,7 @@ type ReviewApi = Pick<
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
-  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' |
+  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' | 'recommendProcedures' |
   // 事实核查's retained sources on its finding cards (Issue #425, S70).
   'inspectProposalWorkspace' | 'inspectResearchEvidence' |
   // The Fact-check Lens and the Evidence Workspace (Issue #901).
@@ -315,6 +317,7 @@ interface BatchStrip {
 type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
 
 interface SheetState {
+  readonly recommendation: ProcedureRecommendationSelection;
   readonly materialIds: Set<string>;
   readonly categories: Set<string>;
   /**
@@ -1927,6 +1930,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     sheetOpening = false;
     if (destroyed || projection === null || sheet.open) return;
     sheetState = {
+      recommendation: new ProcedureRecommendationSelection(),
       categories: new Set(prefill?.categories ?? []),
       materialIds: new Set(),
       selection: prefill?.selection ?? null,
@@ -2032,6 +2036,23 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       for (const line of sheetProcedureLines(state.procedure)) procedureField.append(el('p', 'field-note review-sheet-procedure-line', line));
     }
     form.append(procedureField);
+    const recommendationSlot = el('section', 'review-procedure-recommendation');
+    recommendationSlot.dataset['procedureRecommendation'] = '';
+    form.append(recommendationSlot);
+    const recommendations = mountProcedureRecommendation({
+      root: recommendationSlot, api, state: state.recommendation,
+      input: () => ({ goal: '审阅当前稿件', taskKind: 'review-run', scope: state.scope === 'selection' ? 'selection' : state.scope === 'chapters' ? 'chapters' : 'whole', categoryIds: [...state.categories] }),
+      choose: async (candidate) => {
+        await chooseProcedure(state, candidate.procedureId, candidate.versionId);
+        if (state.procedure?.resolved?.versionId !== candidate.versionId) throw new Error('PROCEDURE_CHOICE_UNAVAILABLE');
+        state.recommendation.adopt(candidate);
+        if (projection !== null && sheetState === state) renderSheet(projection, state);
+      },
+      edit: () => sheet.querySelector<HTMLElement>('[data-review-field="scope"], input[name="review-category"]')?.focus(),
+      browse: () => procedureSelect.focus(),
+    });
+    form.addEventListener('change', () => recommendations.refreshIntent());
+    if (state.recommendation.projection === null) void recommendations.load();
 
     const categories = el('fieldset', 'review-category-options');
     categories.append(el('legend', undefined, REVIEW_CATEGORY_LEGEND));

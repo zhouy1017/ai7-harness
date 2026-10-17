@@ -3186,6 +3186,62 @@ function registerRendererHandlers(
       return service.call('inspectCapturedProcedures', {});
     }),
   );
+  // ADR 0090 §2: the path comes only from the platform picker; the renderer cannot select an arbitrary path. Picking discloses
+  // and keeps nothing; `keep` names the disclosed acquisition the service holds, never a path.
+  ipcMain.handle(IPC_CHANNELS.importSkillPackage, (event, input: Parameters<RendererApi['importSkillPackage']>[0]) => envelope(async () => {
+    const owned = requireSender(event);
+    requireDesktop(input === undefined || (input !== null && typeof input === 'object' && (
+      ('kind' in input && (input.kind === 'zip' || input.kind === 'directory')) || ('keep' in input && typeof input.keep === 'string' && UUID_PATTERN.test(input.keep)))));
+    return serializeEffect(async () => {
+      requireAuthority();
+      if (input !== undefined && 'keep' in input) return service.call('importSkillPackage', { path: null, keep: input.keep });
+      const kind = input?.kind;
+      let path = owned.injectedPickerPath;
+      owned.injectedPickerPath = undefined;
+      if (path === undefined) {
+        const picked = await dialog.showOpenDialog(owned.window, {
+          title: '选择要导入的 Skill', buttonLabel: '查看 Skill', properties: kind === 'directory' ? ['openDirectory'] : ['openFile'],
+          ...(kind === 'directory' ? {} : { filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }] }),
+        });
+        if (picked.canceled || picked.filePaths.length !== 1) return null;
+        path = picked.filePaths[0];
+      }
+      requireDesktop(path !== undefined && isAbsolute(path));
+      return service.call('importSkillPackage', { path, keep: null });
+    });
+  }));
+  ipcMain.handle(IPC_CHANNELS.inspectImportedSkills, (event, input: Parameters<RendererApi['inspectImportedSkills']>[0]) => envelope(async () => {
+    requireSender(event); requireAuthority();
+    requireDesktop(input !== null && typeof input === 'object');
+    return service.call('inspectImportedSkills', { revisionId: input.revisionId, before: input.before });
+  }));
+  ipcMain.handle(IPC_CHANNELS.validateImportedSkill, (event, input: Parameters<RendererApi['validateImportedSkill']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('validateImportedSkill', { revisionId: input.revisionId }); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.installImportedSkill, (event, input: Parameters<RendererApi['installImportedSkill']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('installImportedSkill', { revisionId: input.revisionId, previewDigest: input.previewDigest }); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.enableImportedSkill, (event, input: Parameters<RendererApi['enableImportedSkill']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => {
+      requireAuthority();
+      return service.call('enableImportedSkill', { revisionId: input.revisionId, bookId: input.bookId, previewDigest: input.previewDigest });
+    });
+  }));
+  ipcMain.handle(IPC_CHANNELS.recommendProcedures, (event, input: Parameters<RendererApi['recommendProcedures']>[0]) => envelope(async () => {
+    const owned = requireSender(event); requireAuthority();
+    requireDesktop(input !== null && typeof input === 'object');
+    const route = requireCurrentBookRoute(owned);
+    const generation = owned.routeGeneration;
+    const sequence = owned.routeRequestSequence;
+    const result = await service.call('recommendProcedures', {
+      bookId: route.bookId, goal: input.goal, taskKind: input.taskKind, scope: input.scope, categoryIds: input.categoryIds,
+    });
+    requireCurrentRouteReadEpoch(owned, generation, sequence);
+    return result;
+  }));
   ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedure, (event, input: Parameters<RendererApi['inspectCapturedProcedure']>[0]) =>
     envelope(async () => {
       requireSender(event);

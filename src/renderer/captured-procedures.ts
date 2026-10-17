@@ -299,7 +299,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       item.append(list);
     }
     for (const problem of version.validationProblems) item.append(el('p', 'attention-note captured-procedure-problem', problem));
-    if (version.state === 'stopped') item.append(el('p', 'field-note', '已停用：不会再被选用；按它运行过的审阅仍然记着它。'));
+    if (version.state === 'stopped') item.append(el('p', 'field-note', `已停用：编辑确认停用；${version.stateRecordedAt === null ? '' : `${options.localInstantLabel(version.stateRecordedAt)}；`}不会再被选用；按它运行过的审阅仍然记着它。`));
     const actions = el('div', 'button-row captured-procedure-version-actions');
     if (version.state === 'pending-validation') {
       actions.append(button(PROCEDURE_ACTIONS.validate, 'primary', 'validate', () => act('正在验证…', '无法验证这一版。', async () => {

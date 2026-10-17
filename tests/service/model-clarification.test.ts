@@ -95,8 +95,8 @@ describe('one model question per Run unit', () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const read = new DatabaseSync(resolve(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
-      // Synchronized delta with Issue #423 (slice 7a): revision 80 (Task Intent Drafts) is the terminal version.
-      expect(read.prepare('PRAGMA user_version').get()!.user_version).toBe(80);
+      // Synchronized delta with #66: revision 81 (imported Skill relations) follows revision 80 (Task Intent Drafts).
+      expect(read.prepare('PRAGMA user_version').get()!.user_version).toBe(81);
       expect(read.prepare('SELECT request_id, canonical_json, sha256 FROM analysis_clarification_requests').all()).toEqual(before);
       expect(read.prepare('SELECT model_question_json FROM analysis_clarification_requests').get()!.model_question_json).toBeNull();
     } finally { read.close(); }

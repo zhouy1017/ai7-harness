@@ -1,3 +1,4 @@
+import { IMPORTED_SKILL_SCHEMA_SQL, IMPORTED_SKILL_TRIGGER_SQL } from '../../src/service/imported-skill-schema.js';
 import { HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from '../../src/service/house-review-preference.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, WEB_TOOLS_PLAN_RECORDS_SQL } from '../../src/service/task-authorization.js';
@@ -9,6 +10,7 @@ import { FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } fro
 import { EDITORIAL_MARK_SCHEMA_SQL, PROPOSAL_ITEM_DECISIONS_PRE77_SQL, PROPOSAL_REVIEW_SCHEMA_SQL, PROPOSAL_REVIEW_TRIGGER_SQL } from '../../src/service/editorial-marks.js';
 
 export const HOUSE_REVIEW_PREFERENCE_RELATIONS = Object.keys(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL);
+export const IMPORTED_SKILL_RELATIONS = Object.keys(IMPORTED_SKILL_SCHEMA_SQL);
 /** Revision 80's three relations (Issue #423, slice 7a), which a planted predecessor gains empty. */
 export const TASK_INTENT_DRAFT_RELATIONS = Object.keys(TASK_INTENT_DRAFT_SCHEMA_SQL);
 export const FACTUAL_VERIFICATION_SCHEMA_NAMES = [...Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL), ...Object.keys(FACTUAL_VERIFICATION_TRIGGER_SQL)];
@@ -30,6 +32,10 @@ export function pre77SchemaRows<T extends { name: string; sql: unknown }>(rows: 
 /** Plant an actual predecessor, including revision 74's newly widened component CHECK and house settings. */
 export function execPre74Fixture(db: DatabaseSync, sql: string): void {
   const version = /PRAGMA user_version\s*=\s*(\d+)/iu.exec(sql)?.[1];
+  if (version !== undefined && Number(version) < 81) {
+    for (const trigger of Object.keys(IMPORTED_SKILL_TRIGGER_SQL)) db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
+    for (const table of Object.keys(IMPORTED_SKILL_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE IF EXISTS ${table}`);
+  }
   // Revisions 15 and 16 are validated against the terminal Task Intents text, as they always were; only 17 to 79 are narrowed.
   if (version !== undefined && Number(version) < 80) restoreTaskIntentDraftPredecessor(db, Number(version) >= 17);
   if (version !== undefined && Number(version) < 79) dropHouseReviewPreferenceRelations(db);
@@ -60,6 +66,7 @@ export function execPre74Fixture(db: DatabaseSync, sql: string): void {
 export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]): Array<{ name: string; sql: unknown }> {
   const materialIndex = rows.some((row) => row.name === 'material_index_builds');
   return [
+    ...Object.entries({ ...IMPORTED_SKILL_SCHEMA_SQL, ...IMPORTED_SKILL_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...Object.entries({ ...HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, ...HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...Object.entries({ ...TASK_INTENT_DRAFT_SCHEMA_SQL, ...TASK_INTENT_DRAFT_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...rows.map((row) => row.name === 'analysis_plan_records' ? { ...row, sql: WEB_TOOLS_PLAN_RECORDS_SQL }

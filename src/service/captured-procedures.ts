@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   CAPTURED_PROCEDURE_SCHEMA,
+  CAPTURED_PROCEDURE_SCHEMA_V2,
   CAPTURED_PROCEDURE_CAPTURE_SLOTS,
   CAPTURED_PROCEDURE_STATE_LABELS,
   MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN,
@@ -239,13 +240,14 @@ export function capturedProcedureDocument(
     searchEngine: entry.searchEngine,
   }));
   return {
-    schema: CAPTURED_PROCEDURE_SCHEMA,
+    schema: entries.some((entry) => houseExecutor(entry) === 'series-knowledge') ? CAPTURED_PROCEDURE_SCHEMA_V2 : CAPTURED_PROCEDURE_SCHEMA,
     title,
     runAs: 'review-run',
     steps,
     parameters: { scope },
     authorityCeiling: {
-      runSourceScope: 'current-book',
+      // ADR 0090: /2 publishes Series eligibility; choosing its material remains a per-Run opt-in.
+      runSourceScope: entries.some((entry) => houseExecutor(entry) === 'series-knowledge') ? 'series' : 'current-book',
       steps: entries.map((entry) => ({ categoryId: entry.categoryId, executor: houseExecutor(entry) })),
       outputs: Array.from(new Set(steps.map((step) => step.output))).sort(),
       model: steps.some((step) => step.model),
@@ -274,7 +276,7 @@ export function readCapturedProcedureDocument(json: string, digest: string): Cap
 
 export function isCapturedProcedureDocument(value: unknown): value is CapturedProcedureDocument {
   if (!isRecord(value) || !hasExactKeys(value, ['schema', 'title', 'runAs', 'steps', 'parameters', 'authorityCeiling'])) return false;
-  if (value.schema !== CAPTURED_PROCEDURE_SCHEMA || value.runAs !== 'review-run' || !validCapturedProcedureTitle(value.title)) return false;
+  if ((value.schema !== CAPTURED_PROCEDURE_SCHEMA && value.schema !== CAPTURED_PROCEDURE_SCHEMA_V2) || value.runAs !== 'review-run' || !validCapturedProcedureTitle(value.title)) return false;
   // A document carries a capture slot — 全书 or 选定章节 — never `selection`, which is a per-Run handover on the pin (Issue #423).
   if (!isRecord(value.parameters) || !hasExactKeys(value.parameters, ['scope']) ||
       !(CAPTURED_PROCEDURE_CAPTURE_SLOTS as readonly unknown[]).includes(value.parameters.scope)) return false;
@@ -292,9 +294,12 @@ export function isCapturedProcedureDocument(value: unknown): value is CapturedPr
   }
   const ceiling = value.authorityCeiling;
   if (!isRecord(ceiling) || !hasExactKeys(ceiling, ['runSourceScope', 'steps', 'outputs', 'model', 'searchEngine']) ||
-      ceiling.runSourceScope !== 'current-book' || !Array.isArray(ceiling.steps) || !Array.isArray(ceiling.outputs) ||
+      !(ceiling.runSourceScope === 'current-book' || (value.schema === CAPTURED_PROCEDURE_SCHEMA_V2 && ceiling.runSourceScope === 'series')) || !Array.isArray(ceiling.steps) || !Array.isArray(ceiling.outputs) ||
       typeof ceiling.model !== 'boolean' || typeof ceiling.searchEngine !== 'boolean') return false;
   const typed = steps as CapturedProcedureStepDocument[];
+  // /2's run-source scope is its steps' sum like the rest of its ceiling (ADR 0090 §5); /1 keeps `current-book` whatever it holds.
+  const seriesStep = (ceiling.steps as unknown[]).some((entry) => isRecord(entry) && entry.executor === 'series-knowledge');
+  if (ceiling.runSourceScope === 'series' ? !seriesStep : value.schema === CAPTURED_PROCEDURE_SCHEMA_V2 && seriesStep) return false;
   if (ceiling.steps.length !== typed.length) return false;
   for (const [index, entry] of (ceiling.steps as unknown[]).entries()) {
     if (!isRecord(entry) || !hasExactKeys(entry, ['categoryId', 'executor']) || entry.categoryId !== typed[index]!.categoryId ||
