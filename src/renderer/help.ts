@@ -117,6 +117,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
       el('span', 'help-license-name', license.name),
       el('span', 'help-license-version', license.version),
       el('span', 'help-license-id', `${HELP_LICENSE_FIELD_LICENSE} ${license.license}`),
+      el('span', 'field-note help-license-hint', HELP_LICENSE_TEXT_SUMMARY),
     );
     const source = [license.repository, license.homepage].filter((value): value is string => value !== null).join(' · ');
     details.append(
@@ -124,7 +125,6 @@ export function mountHelp(options: HelpSurfaceOptions): void {
       el('p', 'field-note help-license-source', `${HELP_LICENSE_FIELD_SOURCE}：${source.length > 0 ? source : HELP_LICENSE_NO_SOURCE}`),
       el('pre', 'help-license-text', license.licenseText),
     );
-    details.dataset['licenseTextSummary'] = HELP_LICENSE_TEXT_SUMMARY;
     item.append(details);
     list.append(item);
     return item;
