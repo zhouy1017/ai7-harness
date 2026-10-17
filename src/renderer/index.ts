@@ -1,5 +1,6 @@
 import { renderHouseReviewPreference } from './knowledge-base-memory.js';
 import { mountDiagnostics } from './diagnostics.js';
+import { DIAGNOSTICS_OPENED } from './diagnostics-labels.js';
 import { mountEditQualitySignals } from './quality-learning.js';
 import { mountProposalWorkspace } from './proposal-workspace.js';
 import { renderEvaluationProfiles } from './evaluation-profiles.js';
@@ -5055,7 +5056,7 @@ function renderDiagnostics(): void {
   const content = panel();
   mountDiagnostics(content, window.ai7, () => void returnToLibrary());
   replaceScreen('diagnostics', content);
-  setStatus('本机诊断已打开');
+  setStatus(DIAGNOSTICS_OPENED);
 }
 
 async function renderDataAndStorage(): Promise<void> {
