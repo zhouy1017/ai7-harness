@@ -1838,6 +1838,11 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await requireTracedReadiness();
   // The shell (Issue #934): the library is 书库 in the sidebar, the five destinations in their order.
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'empty-book-sidebar-library');
+  // 收起侧栏 at the context header's left end leaves icons, each row keeping its name; 展开侧栏 brings the names back.
+  await assertRenderer(renderer, sidebarNavigate('#sidebar-toggle'), 'empty-book-sidebar-collapse');
+  await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons' && document.documentElement.dataset.sidebarCollapsed === 'true' && document.querySelector('#sidebar-toggle')?.getAttribute('aria-expanded') === 'false' && document.querySelector('#sidebar-toggle')?.getAttribute('aria-label') === '展开侧栏' && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.title === '书库'`, 'empty-book-sidebar-collapsed');
+  await assertRenderer(renderer, sidebarNavigate('#sidebar-toggle'), 'empty-book-sidebar-expand');
+  await waitFor(renderer, `document.documentElement.dataset.sidebar === 'full' && document.documentElement.dataset.sidebarCollapsed === 'false' && document.querySelector('#sidebar-toggle')?.getAttribute('aria-expanded') === 'true'`, 'empty-book-sidebar-expanded');
   await clickExactButton(renderer, '新建图书', 'empty-book-create-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-book-form');
   await clickExactButton(renderer, '复核创建', 'empty-book-missing-title');
