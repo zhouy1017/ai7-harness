@@ -17,6 +17,7 @@ import {
 } from 'electron';
 import {
   IPC_CHANNELS,
+  SERVICE_PROTOCOL_VERSION,
   J04_MODEL_ADAPTER_CONTROL_PATTERN,
   MAIN_EVENTS,
   PROVIDER_CACHE_ROOT_ARGUMENT,
@@ -5975,7 +5976,7 @@ export async function runApplication(): Promise<void> {
     // Like the service's version owner, read this application's package rather than Electron's fallback app version.
     const softwareVersion = (JSON.parse(await readFile(resolve(codeRoot, 'package.json'), 'utf8')) as { version: string }).version;
     const crashFacts = () => ({
-      appVersion: softwareVersion, dataVersion: 83, protocol: 151,
+      appVersion: softwareVersion, dataVersion: 83, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });

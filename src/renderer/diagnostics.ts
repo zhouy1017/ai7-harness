@@ -29,7 +29,8 @@ export function mountDiagnostics(root: HTMLElement, api: DiagnosticsApi, back: (
     root.dataset['exportState'] = result.state;
     status.textContent = result.state === 'exported' ? '诊断包已保存到所选文件夹。' : '已取消保存诊断包。';
   }), action('查看诊断位置', async () => {
-    await api.revealDiagnosticsLocation();
+    const result = await api.revealDiagnosticsLocation();
+    root.dataset['revealState'] = result.state;
     status.textContent = '已请求系统显示本机崩溃记录位置。';
   }), action('返回', back));
   const heading = el('h3', CRASH_LIST_HEADING);

@@ -1,6 +1,6 @@
 import { createWriteStream, existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -661,6 +661,12 @@ async function main() {
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const diagnosticsDestination = resolve(runRoot, 'diagnostics-export');
     await mkdir(diagnosticsDestination);
+    await mkdir(resolve(shellRoot, 'crashes'));
+    await writeFile(resolve(shellRoot, 'crashes', '2026-10-17T00-00-00.000Z-render-process-gone.json'), JSON.stringify({
+      instant: '2026-10-17T00:00:00.000Z', kind: 'render-process-gone', reason: 'crashed', exitCode: 1,
+      appVersion: '0.1.0', dataVersion: 83, protocol: 151, platform: process.platform, arch: process.arch,
+      electron: '43.4.1', uptimeSeconds: 1, stack: '    at <redacted-path>:12:3',
+    }), { flag: 'wx' });
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
     const launch = async (picker, savePath) => {
@@ -1232,6 +1238,9 @@ async function main() {
     await click(primary, '诊断', 'diagnostics-open');
     await waitFor(primary, `document.querySelector('[data-screen="diagnostics"] [data-crash-list-ready="true"]')`, 'diagnostics-ready');
     await assertRenderer(primary, `document.querySelector('[data-screen="diagnostics"]')?.textContent.includes('本机崩溃记录')`, 'diagnostics-crash-heading');
+    await assertRenderer(primary, `document.querySelector('[data-crash-list]')?.textContent.includes('2026-10-17T00:00:00.000Z') && document.querySelector('[data-crash-list]')?.textContent.includes('界面进程退出')`, 'diagnostics-crash-record');
+    await primary.evaluate(`Array.from(document.querySelectorAll('[data-crash-list] .source-card')).find((item) => item.textContent.includes('2026-10-17T00:00:00.000Z')).querySelector('details').open = true`);
+    await assertRenderer(primary, `document.querySelector('[data-crash-list] details[open] pre')?.textContent.includes('<redacted-path>') && !document.querySelector('[data-crash-list] [contenteditable]')`, 'diagnostics-read-only-record');
     await click(primary, '导出诊断包…', 'diagnostics-export');
     await waitFor(primary, `document.querySelector('[data-export-state="exported"]')`, 'diagnostics-exported');
     const diagnosticsFolders = await readdir(diagnosticsDestination);
@@ -1244,6 +1253,7 @@ async function main() {
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
+    await waitFor(primary, `document.querySelector('[data-reveal-state="requested"]')`, 'diagnostics-revealed');
     await click(primary, '返回', 'diagnostics-return');
 
     at('model-service-first-save');
