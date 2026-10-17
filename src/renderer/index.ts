@@ -123,6 +123,20 @@ import {
 import { mountDatabaseExport } from './database-export.js';
 import { mountDatabaseImport } from './database-import.js';
 import { mountScheduledBackup } from './scheduled-backup.js';
+import {
+  activeCommandBindings,
+  BOOK_SECTION_COMMANDS,
+  configureCommandLabels,
+  createCommandDispatcher,
+  refreshShortcutLabels,
+  shortcutHint,
+  type CommandPlatform,
+} from './commands.js';
+import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
+import { mountKeyboardSettings } from './keyboard-settings.js';
+import { KEYBOARD_SECTION_LABEL, KEYBOARD_TITLE } from './keyboard-labels.js';
+import { mountUsage } from './usage.js';
+import { USAGE_RETURN, USAGE_SECTION_LABEL, USAGE_TITLE, USAGE_RUN_TITLE, USAGE_RUN_REPORT_ABSENT, usageRunIdentity } from './usage-labels.js';
 import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_LEDE, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
 import {
@@ -827,6 +841,81 @@ async function leaveThen(open: () => Promise<void>): Promise<void> {
 }
 
 /**
+ * The remappable navigation, search and view commands (Issue #936, plan slice 11c; V2-UX-KEY-002, KEY-006): one dispatcher on the
+ * window, the IME-safe Command Guard in front of every command. Each command only moves to a place or focuses a control, through
+ * the surface's own ways out; none starts, adopts, designates or deletes anything (KEY-004). The commands of the manuscript on
+ * screen register with it and leave with it.
+ */
+const commandPlatformInUse: CommandPlatform = window.ai7.platform;
+let windowComposing = false;
+window.addEventListener('compositionstart', () => { windowComposing = true; }, true);
+window.addEventListener('compositionend', () => { windowComposing = false; }, true);
+window.addEventListener('blur', () => { windowComposing = false; });
+const commandDispatcher = createCommandDispatcher({
+  platform: commandPlatformInUse,
+  bindings: activeCommandBindings,
+  // A press made during a composition says so itself (`isComposing`); the manuscript's own composition is asked as well.
+  composing: () => windowComposing || editor?.isComposing() === true,
+  announce: (message) => setStatus(message, 'busy'),
+});
+window.addEventListener('keydown', (event) => commandDispatcher.handle(event));
+/** The commands of the manuscript on screen, removed with it. */
+let editorCommandsOff: (() => void) | undefined;
+let keyboardSettingsOff: (() => void) | undefined;
+
+/** Use the shell's discoverable entries so keyboard and pointer navigation share the same guards and exact targets. */
+function clickCommandEntry(selector: string): void {
+  if (authorityInterrupted) return;
+  const entry = document.querySelector<HTMLElement>(selector);
+  if (entry !== null && !entry.hasAttribute('disabled') && entry.getAttribute('aria-disabled') !== 'true') entry.click();
+}
+
+commandDispatcher.register({
+  ...Object.fromEntries(['attention', 'library', 'series', 'knowledge', 'quality'].map((destination) =>
+    [`nav.${destination}`, () => clickCommandEntry(`[data-nav-destination="${destination}"]`)])),
+  ...Object.fromEntries(BOOK_SECTION_COMMANDS.map(([id, , section]) =>
+    [id, () => clickCommandEntry(`[data-nav-book-section="${section}"]`)])),
+  'nav.settings': () => clickCommandEntry('[data-nav-settings]'),
+  'nav.back': () => {
+    const back = screen.querySelector<HTMLElement>('[data-shortcut-command="nav.back"]');
+    if (back !== null) clickCommandEntry('[data-shortcut-command="nav.back"]');
+    else clickCommandEntry('[data-nav-destination="library"]');
+  },
+  'view.toggleSidebar': () => clickCommandEntry('#sidebar-toggle'),
+  'view.openTasks': () => {
+    const bookId = (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'];
+    if (bookId !== undefined && !authorityInterrupted) taskDrawer.openPanel(bookId, () => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
+  },
+});
+
+/**
+ * The preference the shortcut labels and the dispatcher read (KEY-012: local view/input configuration). Until it arrives the
+ * defaults stand; a remap reaches every shown chord at once.
+ */
+function applyKeyboardBindings(bindings: Parameters<typeof configureCommandLabels>[1]): void {
+  configureCommandLabels(commandPlatformInUse, bindings);
+  refreshShortcutLabels(document);
+}
+void window.ai7.getPreferences().then((preferences) => applyKeyboardBindings(preferences.values['keyboard.bindings']), () => undefined);
+
+/** Each shortcut hint is derived from the same registry that dispatches it (KEY-011). */
+function refreshCommandEntries(): void {
+  for (const entry of document.querySelectorAll<HTMLElement>('[data-nav-destination]')) entry.dataset['shortcutCommand'] = `nav.${entry.dataset['navDestination']}`;
+  for (const [id, , section] of BOOK_SECTION_COMMANDS) {
+    const entry = document.querySelector<HTMLElement>(`[data-nav-book-section="${section}"]`);
+    if (entry !== null) entry.dataset['shortcutCommand'] = id;
+  }
+  const settings = document.querySelector<HTMLElement>('[data-nav-settings]');
+  if (settings !== null) settings.dataset['shortcutCommand'] = 'nav.settings';
+  requiredElement('#sidebar-toggle').dataset['shortcutCommand'] = 'view.toggleSidebar';
+  for (const entry of screen.querySelectorAll<HTMLButtonElement>('button')) {
+    if ((BACK_COMMAND_ENTRIES as readonly string[]).includes(entry.textContent?.trim() ?? '')) entry.dataset['shortcutCommand'] = 'nav.back';
+  }
+  refreshShortcutLabels(document);
+}
+
+
+/**
  * 待我处理 (Issue #424, plan slice S78): one reader for the whole window, read on every screen change and
  * whenever the window gains focus, and slowly on its own while a Run is in flight; the header's entry and the
  * screen paint the same answer (global-attention.ts).
@@ -1049,6 +1138,10 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   globalAttentionSurface = undefined;
   editor?.destroy();
   editor = undefined;
+  editorCommandsOff?.();
+  editorCommandsOff = undefined;
+  keyboardSettingsOff?.();
+  keyboardSettingsOff = undefined;
   closeNavigation = null;
   leaveGuard = null;
   taskSurfaceRefresh = {};
@@ -1065,6 +1158,7 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   globalAttentionReader.refresh();
   // The sidebar marks where the window is, and a Book screen makes its Book current and recent (Issue #934).
   shell.follow(state, place);
+  refreshCommandEntries();
 }
 
 /**
@@ -6073,6 +6167,69 @@ async function renderEvaluationCalibration(focusBookId: string | null): Promise<
 }
 
 /**
+ * The exact persisted report of one historical Run, using the existing read-only report renderer (brief revision 2).
+ * No current-plan lookup can redirect this link to another Run or make an old Run inaccessible.
+ */
+async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkProjection): Promise<void> {
+  const origin = screen.firstElementChild;
+  try {
+    const usage = await window.ai7.inspectUsage({ range: 'all', groupBy: 'book', runRecordId: run.runRecordId });
+    if (screen.firstElementChild !== origin) return;
+    if (usage.detail === null || usage.detail === undefined) throw new Error('USAGE_RUN_UNAVAILABLE');
+    run = usage.detail;
+    const content = panel();
+    content.dataset['usageRunDetail'] = run.runRecordId;
+    content.append(element('p', 'section-label', USAGE_SECTION_LABEL), element('h2', undefined, USAGE_RUN_TITLE),
+      element('p', undefined, run.bookTitle), element('p', 'technical-identity', usageRunIdentity(run.runRecordId)));
+    if (run.report === null) content.append(element('p', 'field-note', USAGE_RUN_REPORT_ABSENT));
+    else {
+      const report = renderRunReport(run.report);
+      report.setAttribute('open', '');
+      content.append(report);
+    }
+    content.append(button(USAGE_RETURN, 'quiet', () => renderUsage()));
+    replaceScreen('usage-run', content);
+    setStatus(USAGE_RUN_TITLE, 'success');
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, USAGE_RUN_REPORT_ABSENT), 'error');
+  }
+}
+
+/** 设置 › 服务 › 用量 (Issue #936, plan slice 11c; V2-UX-MSET-010). */
+function renderUsage(): void {
+  const content = panel();
+  content.classList.add('usage-screen');
+  content.append(element('p', 'section-label', USAGE_SECTION_LABEL), element('h2', undefined, USAGE_TITLE));
+  const body = element('div');
+  mountUsage({
+    root: body, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel,
+    openRun: (run) => void openUsageRun(run),
+  });
+  const actions = element('div', 'button-row');
+  actions.append(button(USAGE_RETURN, 'quiet', () => renderSettingsHub()));
+  content.append(body, actions);
+  replaceScreen('usage', content);
+  setStatus(USAGE_TITLE, 'success');
+}
+
+/** 设置 › 本机 › 键盘与无障碍 › 快捷键 (Issue #936, plan slice 11c; V2-UX-KEY-002, KEY-003, KEY-011). */
+function renderKeyboardSettings(): void {
+  const content = panel();
+  content.classList.add('keyboard-screen');
+  content.append(element('p', 'section-label', KEYBOARD_SECTION_LABEL), element('h2', undefined, KEYBOARD_TITLE));
+  const body = element('div');
+  const unmount = mountKeyboardSettings({
+    root: body, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, onChanged: applyKeyboardBindings,
+  });
+  const actions = element('div', 'button-row');
+  actions.append(button(USAGE_RETURN, 'quiet', () => renderSettingsHub()));
+  content.append(body, actions);
+  replaceScreen('keyboard', content);
+  keyboardSettingsOff = unmount;
+  setStatus(KEYBOARD_TITLE, 'success');
+}
+
+/**
  * 设置 (Issue #934; editor-surfaces §8.6): 服务 · 编辑工作 · 本机, one row per page. A page that exists keeps its own render
  * function and its `data-settings-route`; a row whose page a later slice of the wave brings is unavailable, 即将提供.
  */
@@ -6089,6 +6246,8 @@ function renderSettingsHub(): void {
     'evaluation-calibration': () => void renderEvaluationCalibration(null),
     'data-storage': () => void renderDataAndStorage(),
     diagnostics: renderDiagnostics,
+    usage: renderUsage,
+    keyboard: renderKeyboardSettings,
   };
   for (const group of SETTINGS_HUB_GROUPS) {
     const section = element('section', 'settings-group');
@@ -7903,7 +8062,9 @@ function renderEditorWindow(
   title.append(meta, chipHost);
   const save = button('保存当前编辑', 'primary', () => editor?.flush());
   save.disabled = true;
-  save.title = window.ai7.platform === 'darwin' ? '快捷键 Command+S' : '快捷键 Ctrl+S';
+  // The chord comes from the one label source and follows a remap (KEY-011); 保存 keeps its chord, the words are the window's own.
+  save.dataset['shortcutCommand'] = 'edit.save';
+  save.title = shortcutHint('edit.save') ?? '';
   const undo = button('撤销', 'quiet', () => void runHistory('undo'));
   const redo = button('重做', 'quiet', () => void runHistory('redo'));
   const retryAuthoritativeRefreshButton = button('重试权威刷新', 'quiet', () => void retryAuthoritativeRefresh());
@@ -8236,7 +8397,9 @@ function renderEditorWindow(
   navigationEntry.dataset['edgeEntry'] = 'navigation';
   navigationEntry.setAttribute('aria-controls', navigator.id);
   navigationEntry.setAttribute('aria-expanded', 'false');
-  navigationEntry.title = '大纲与全稿查找';
+  navigationEntry.dataset['shortcutCommand'] = 'search.find';
+  navigationEntry.dataset['shortcutBase'] = '大纲与全稿查找';
+  navigationEntry.title = `大纲与全稿查找（${shortcutHint('search.find') ?? ''}）`;
   const analysisEntry = button('分析', 'quiet', () => openAnalysis.click());
   analysisEntry.dataset['edgeEntry'] = 'analysis';
   analysisEntry.title = '打开这本书的分析';
@@ -8251,7 +8414,9 @@ function renderEditorWindow(
   });
   tasksEntry.dataset['edgeEntry'] = 'tasks';
   tasksEntry.setAttribute('aria-controls', 'task-drawer');
-  tasksEntry.title = '这本书的任务';
+  tasksEntry.dataset['shortcutCommand'] = 'view.openTasks';
+  tasksEntry.dataset['shortcutBase'] = '这本书的任务';
+  tasksEntry.title = `这本书的任务（${shortcutHint('view.openTasks') ?? ''}）`;
   const edgeEntries = element('div', 'edge-entries');
   edgeEntries.append(navigationEntry, ...(isDocument ? [] : [analysisEntry, tasksEntry]));
   const railTrack = element('div', 'rail-track');
@@ -9458,6 +9623,22 @@ function renderEditorWindow(
       const loads = [...(editorHost.dataset['windowLoads'] ?? '').split(',').filter((entry) => entry.length > 0), windowLoadCause].slice(-12);
       editorHost.dataset['windowLoads'] = loads.join(',');
     },
+  });
+  // 查找, 查找结果 and 聚焦稿件 (Issue #936, plan slice 11c; KEY-002): the remappable commands of the manuscript on screen. The
+  // dispatcher's Command Guard holds each back while an input method composes; they leave with the screen.
+  editorCommandsOff?.();
+  editorCommandsOff = commandDispatcher.register({
+    'search.find': () => {
+      setNavigationOpen(true);
+      searchInput.focus();
+    },
+    'search.next': () => {
+      if (!nextResults.hidden) nextResults.click();
+    },
+    'search.previous': () => {
+      if (!previousResults.hidden) previousResults.click();
+    },
+    'view.focusManuscript': () => editor?.focus(),
   });
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
   // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.

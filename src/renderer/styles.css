@@ -1908,3 +1908,35 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 [data-recommendation-state="stale"] {
   border-style: dashed;
 }
+
+/* 用量 and 键盘与无障碍 (Issue #936, plan slice 11c). Tables reflow to stacked rows at high zoom; focus and forced colours inherit. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.usage-controls { display: flex; flex-wrap: wrap; gap: 1.2rem; margin: .8rem 0; }
+.usage-choice { border: 1px solid currentColor; border-radius: .4rem; padding: .4rem .8rem; min-width: 0; }
+.usage-choice legend { font-weight: 600; padding: 0 .3rem; }
+.usage-choice-option { display: inline-flex; align-items: center; gap: .3rem; margin-right: .8rem; }
+.usage-table, .keyboard-table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.usage-table th, .usage-table td, .keyboard-table th, .keyboard-table td { text-align: left; vertical-align: top; padding: .4rem .5rem; border-bottom: 1px solid rgba(127, 127, 127, .35); overflow-wrap: anywhere; }
+.usage-cost { max-width: 22rem; }
+.usage-runs summary { cursor: pointer; }
+.usage-runs ul { margin: .3rem 0 0; padding-left: 1.2rem; }
+.usage-runs li { margin-block: .25rem; overflow-wrap: anywhere; }
+.usage-totals { font-weight: 600; margin-top: .6rem; overflow-wrap: anywhere; }
+.usage-prices { margin-top: 1rem; }
+.usage-price { display: flex; flex-wrap: wrap; align-items: end; gap: .6rem 1rem; padding: .6rem 0; border-top: 1px solid rgba(127, 127, 127, .35); }
+.usage-price h4 { flex: 1 1 100%; margin: 0; }
+.usage-price-field { display: flex; flex-direction: column; gap: .2rem; min-width: 0; }
+.usage-price .button-row { margin-top: 0; }
+.usage-price-note { flex: 1 1 100%; margin: 0; }
+.keyboard-group th { background: rgba(127, 127, 127, .14); }
+.keyboard-chord kbd { font-family: inherit; border: 1px solid currentColor; border-radius: .3rem; padding: .05rem .4rem; white-space: nowrap; }
+.keyboard-capture { margin-top: .5rem; padding: .6rem; border: 1px dashed currentColor; border-radius: .4rem; }
+.keyboard-capture-target { min-height: 2rem; padding: .4rem .6rem; border: 1px solid currentColor; border-radius: .3rem; }
+.keyboard-capture-target:focus-visible { outline: 3px solid Highlight; outline-offset: 2px; }
+.keyboard-refusal { margin: .4rem 0 0; }
+.keyboard-fixed ul { margin: .3rem 0 0; padding-left: 1.2rem; }
+@media (max-width: 760px) {
+  .usage-table thead, .keyboard-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .usage-table tr, .keyboard-table tr { display: block; margin-bottom: .6rem; }
+  .usage-table th, .usage-table td, .keyboard-table th, .keyboard-table td { display: block; border-bottom: 0; }
+}

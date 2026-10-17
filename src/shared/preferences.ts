@@ -73,7 +73,96 @@ const isPinnedEntry = (value: unknown): value is ShellBookEntry => isBookEntry(v
 const isRecentEntry = (value: unknown): value is ShellRecentBookEntry =>
   isBookEntry(value, ['bookId', 'title', 'section']) && (SHELL_BOOK_SECTIONS as ReadonlyArray<unknown>).includes((value as { section?: unknown }).section);
 
+/** One model route's price, as the editor typed it: never fetched from a Provider (Owner decision 15). */
+export interface UnitPriceEntry {
+  /** Currency units per one million input tokens. */
+  inputPerMillion: number;
+  /** Currency units per one million output tokens. */
+  outputPerMillion: number;
+  /** ISO 4217 code, upper case. */
+  currency: string;
+  /** The day the editor entered the price, `YYYY-MM-DD`. */
+  enteredAt: string;
+}
+
+/** Route id → the editor's unit price for it. */
+export type UnitPrices = Readonly<Record<string, UnitPriceEntry>>;
+
+/** Command id → the chord sequence the editor chose instead of the default; absent means the default stands. */
+export type KeyboardBindings = Readonly<Record<string, string>>;
+
+
+export const MAX_UNIT_PRICE_ROUTES = 16;
+export const MAX_UNIT_PRICE_PER_MILLION = 1_000_000;
+export const MAX_KEYBOARD_BINDINGS = 64;
+
+const ROUTE_ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u;
+const CURRENCY_PATTERN = /^[A-Z]{3}$/u;
+const ENTERED_ON_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const COMMAND_ID_PATTERN = /^[a-z][a-z0-9.-]{0,63}$/u;
+/** One to two chords: modifiers `Mod`, `Ctrl`, `Alt`, `Shift` in that order, then a key name. */
+const CHORD_STEP = '(?:Mod\\+)?(?:Ctrl\\+)?(?:Alt\\+)?(?:Shift\\+)?[A-Za-z0-9]{1,16}';
+const CHORD_SEQUENCE_PATTERN = new RegExp(`^${CHORD_STEP}(?: ${CHORD_STEP})?$`, 'u');
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validDay(value: unknown): value is string {
+  if (typeof value !== 'string' || !ENTERED_ON_PATTERN.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value);
+}
+
+function validPrice(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_UNIT_PRICE_PER_MILLION;
+}
+
+/** `usage.unitPrices` as stored: a bounded table of exact entries, or `null` when anything is off. */
+export function parseUnitPrices(value: unknown): UnitPrices | null {
+  if (!isRecord(value)) return null;
+  const routes = Object.keys(value);
+  if (routes.length > MAX_UNIT_PRICE_ROUTES) return null;
+  const parsed: Record<string, UnitPriceEntry> = {};
+  for (const route of routes) {
+    const entry = value[route];
+    if (!ROUTE_ID_PATTERN.test(route) || !isRecord(entry)) return null;
+    const keys = Object.keys(entry).sort().join(',');
+    if (keys !== 'currency,enteredAt,inputPerMillion,outputPerMillion') return null;
+    if (!validPrice(entry['inputPerMillion']) || !validPrice(entry['outputPerMillion'])) return null;
+    if (typeof entry['currency'] !== 'string' || !CURRENCY_PATTERN.test(entry['currency'])) return null;
+    if (!validDay(entry['enteredAt'])) return null;
+    parsed[route] = {
+      inputPerMillion: entry['inputPerMillion'],
+      outputPerMillion: entry['outputPerMillion'],
+      currency: entry['currency'],
+      enteredAt: entry['enteredAt'],
+    };
+  }
+  return parsed;
+}
+
+/** `keyboard.bindings` as stored: command id → a one- or two-step chord sequence. Whether a command exists is the registry's to say. */
+export function parseKeyboardBindings(value: unknown): KeyboardBindings | null {
+  if (!isRecord(value)) return null;
+  const commands = Object.keys(value);
+  if (commands.length > MAX_KEYBOARD_BINDINGS) return null;
+  const parsed: Record<string, string> = {};
+  for (const command of commands) {
+    const chord = value[command];
+    if (!COMMAND_ID_PATTERN.test(command) || typeof chord !== 'string' || !CHORD_SEQUENCE_PATTERN.test(chord)) return null;
+    parsed[command] = chord;
+  }
+  return parsed;
+}
+
+
+const isUnitPrices = (value: unknown): value is UnitPrices => parseUnitPrices(value) !== null;
+const isKeyboardBindings = (value: unknown): value is KeyboardBindings => parseKeyboardBindings(value) !== null;
+
 export const PREFERENCE_KEYS = Object.freeze({
+  'usage.unitPrices': preference(isUnitPrices, {} as UnitPrices),
+  'keyboard.bindings': preference(isKeyboardBindings, {} as KeyboardBindings),
   // 11a: the sidebar shows icons only while collapsed (IA-010); remembered across sessions.
   'shell.sidebarCollapsed': preference(isBoolean, false),
   // 11a: 置顶 Books, in the order they were pinned (IA-009); pinning changes no business record.

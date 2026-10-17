@@ -531,6 +531,10 @@ const api: RendererApi & PreferencesRendererApi = Object.freeze({
     invoke<ServiceOperationMap['approveDatabaseExport']['output']>(IPC_CHANNELS.approveDatabaseExport, input),
   inspectDatabaseExports: () => invoke<ServiceOperationMap['inspectDatabaseExports']['output']>(IPC_CHANNELS.inspectDatabaseExports, {}),
   inspectScheduledBackups: () => invoke<ServiceOperationMap['inspectScheduledBackups']['output']>(IPC_CHANNELS.inspectScheduledBackups, {}),
+  inspectUsage: (input: Parameters<RendererApi['inspectUsage']>[0]) =>
+    invoke<ServiceOperationMap['inspectUsage']['output']>(IPC_CHANNELS.inspectUsage, input),
+  exportUsageCsv: (input: Parameters<RendererApi['exportUsageCsv']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['exportUsageCsv']>>>(IPC_CHANNELS.exportUsageCsv, input),
   setScheduledBackup: (input: Parameters<RendererApi['setScheduledBackup']>[0]) =>
     invoke<ServiceOperationMap['setScheduledBackup']['output']>(IPC_CHANNELS.setScheduledBackup, input),
   chooseDatabaseImportFile: () =>
