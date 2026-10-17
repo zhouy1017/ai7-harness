@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -61,6 +61,15 @@ describe('application appearance', () => {
     } finally { uninstall(); }
   });
 
+  it('keeps the theme and the preference file out of every service module, so no record, export or model context can read them', () => {
+    const service = new URL('../../src/service/', import.meta.url);
+    const files = readdirSync(service, { recursive: true, encoding: 'utf8' }).filter((path) => path.endsWith('.ts'));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      expect(readFileSync(new URL(file.replaceAll('\\', '/'), service), 'utf8'), file).not.toMatch(/shared\/preferences|preferences\.json|appearance\.theme|data-theme|dataset\.theme|nativeTheme/u);
+    }
+  });
+
   it('keeps DOCX, Markdown and PDF-page export digests identical across light and dark decoration', () => {
     const root = { dataset: {}, style: { colorScheme: '' } } as unknown as HTMLElement;
     const block = { blockId: 'blk_' + 'a'.repeat(24), position: 1, kind: 'paragraph' as const, level: null, text: '合成外观回归内容。' };
@@ -112,13 +121,31 @@ describe('application appearance', () => {
         const l1 = luminance(tokens[`--${foreground}`]!), l2 = luminance(tokens[`--${background}`]!);
         expect((Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05), `${foreground} on ${background}`).toBeGreaterThanOrEqual(4.5);
       }
+      // Non-text contrast (3:1) for the boundaries that identify a control or a chosen/current item.
+      for (const boundary of ['boundary-strong', 'selection-boundary']) {
+        for (const surface of ['surface', 'surface-subdued', 'manuscript', 'shell']) {
+          const l1 = luminance(tokens[`--${boundary}`]!), l2 = luminance(tokens[`--${surface}`]!);
+          expect((Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05), `${boundary} on ${surface}`).toBeGreaterThanOrEqual(3);
+        }
+      }
     }
     const components = withoutComments.replace(/:root(?:\[data-theme="dark"\])?\s*\{[^}]+\}/gu, '');
     expect(components).not.toMatch(/#[a-f\d]{3,8}\b|rgba?\(|:\s*(?:white|black)\b/iu);
-    const start = css.indexOf('@media (forced-colors: active)');
-    let depth = 1; let end = css.indexOf('{', start) + 1;
-    for (; depth > 0; end += 1) { if (css[end] === '{') depth += 1; if (css[end] === '}') depth -= 1; }
-    expect(css.slice(start, end)).not.toMatch(/var\(--|data-theme/gu);
-    expect(css.slice(start, end)).toContain('background: Canvas');
+    // A checked, current, selected or pressed item marked by a line keeps a visible one, never only the faint boundary or shadow.
+    for (const [, selector, body] of components.matchAll(/([^{}]*(?::checked|aria-current|aria-selected|aria-pressed)[^{}]*)\{([^}]*)\}/gu)) {
+      const lines = body!.split(';').filter((item) => /^\s*(?:border|box-shadow)/u.test(item));
+      if (!lines.some((line) => line.includes('var(--'))) continue; // none, or forced system colours
+      expect(lines.join(';'), selector!.trim()).not.toMatch(/box-shadow:[^;]*var\(--shadow\)/u);
+      expect(lines.some((line) => /var\(--(?!boundary\)|shadow\))[\w-]+\)/u.test(line)), selector!.trim()).toBe(true);
+    }
+    let blocks = 0;
+    for (let start = css.indexOf('@media (forced-colors: active)'); start >= 0; start = css.indexOf('@media (forced-colors: active)', start + 1)) {
+      let depth = 1; let end = css.indexOf('{', start) + 1;
+      for (; depth > 0; end += 1) { if (css[end] === '{') depth += 1; if (css[end] === '}') depth -= 1; }
+      expect(css.slice(start, end)).not.toMatch(/var\(--|data-theme/gu);
+      blocks += 1;
+    }
+    expect(blocks).toBeGreaterThan(0);
+    expect(css.slice(css.indexOf('@media (forced-colors: active)'))).toContain('background: Canvas');
   });
 });
