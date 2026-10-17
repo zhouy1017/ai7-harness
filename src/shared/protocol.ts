@@ -4,7 +4,7 @@ import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-con
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 153 as const;
+export const SERVICE_PROTOCOL_VERSION = 154 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
