@@ -5,8 +5,8 @@ import type {
 import {
   importedSkillCeilingLines, importedSkillDisclosureLines, importedSkillHistoryLine, importedSkillIdentityLine, importedSkillRuleActiveLine, importedSkillRuleConfirmLine,
   importedSkillThreeWayLines, importedSkillUpdateCandidateLine, importedSkillUpdateCheckTitle, importedSkillUpdateDispositionLine, importedSkillUpdateFileLine,
-  importedSkillUpdateRelationLine, importedSkillUpdateStatusLine, importedSkillUpdateValidatorLine, IMPORTED_SKILLS_HEADING, IMPORTED_SKILLS_NO_EXECUTOR, IMPORTED_SKILL_HISTORY_HEADING,
-  IMPORTED_SKILL_HISTORY_NOT_RESTORED, IMPORTED_SKILL_NOT_CURRENT_NOTE, IMPORTED_SKILL_RULE_CREATE_LABEL, IMPORTED_SKILL_RULE_HEADING, IMPORTED_SKILL_RULE_INACTIVE,
+  importedSkillUpdateRelationLine, importedSkillUpdateSourceFileLine, importedSkillUpdateSourceLines, importedSkillUpdateStatusLine, importedSkillUpdateValidatorLine, IMPORTED_SKILLS_HEADING, IMPORTED_SKILLS_NO_EXECUTOR, IMPORTED_SKILL_HISTORY_HEADING,
+  IMPORTED_SKILL_HISTORY_NOT_RESTORED, IMPORTED_SKILL_NOT_CURRENT_NOTE, IMPORTED_SKILL_REPAIR_NOTE, IMPORTED_SKILL_RULE_CREATE_LABEL, IMPORTED_SKILL_RULE_HEADING, IMPORTED_SKILL_RULE_INACTIVE,
   IMPORTED_SKILL_RULE_REVOKE_LABEL, IMPORTED_SKILL_RULE_SCOPE, IMPORTED_SKILL_UPDATE_ACCEPT_LABEL, IMPORTED_SKILL_UPDATE_ACTIONS, IMPORTED_SKILL_UPDATE_BOUNDARY,
   IMPORTED_SKILL_UPDATE_CHECK_DIRECTORY_LABEL, IMPORTED_SKILL_UPDATE_CHECK_LABEL, IMPORTED_SKILL_UPDATE_CONFLICT_NOTE, IMPORTED_SKILL_UPDATE_HEADING,
   IMPORTED_SKILL_UPDATE_HEADINGS, IMPORTED_SKILL_UPDATE_NONE, IMPORTED_SKILL_UPDATE_NOT_ENABLED, IMPORTED_SKILL_UPDATE_STATUS, IMPORTED_SKILL_UPDATE_UPSTREAM_LABEL,
@@ -86,10 +86,10 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     const panel = el('article'); panel.className = 'imported-skill-detail'; panel.dataset['skillUpdateCheck'] = read.acquisition.acquisitionId;
     const disclosed = read.acquisition;
     const title = el('h4', importedSkillUpdateCheckTitle(read)); title.tabIndex = -1;
-    panel.append(title, el('p', importedSkillUpdateRelationLine(read.relation)), el('p', `来源：${disclosed.sourcePath}`), el('p', `许可：${disclosed.license ?? '未提供'}`),
-      el('p', `内容 SHA-256 ${disclosed.contentSha256}`));
+    panel.append(title, el('p', importedSkillUpdateRelationLine(read.relation)));
+    for (const line of importedSkillUpdateSourceLines(disclosed)) panel.append(el('p', line));
     const files = el('ul');
-    for (const file of disclosed.files) files.append(el('li', `${file.path} · ${file.bytes} 字节 · SHA-256 ${file.sha256}`));
+    for (const file of disclosed.files) files.append(el('li', importedSkillUpdateSourceFileLine(file)));
     panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.files), files);
     panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.conversion));
     for (const line of importedSkillDisclosureLines(disclosed)) panel.append(el('p', line));
@@ -275,7 +275,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     if (!isCurrent) detail.append(el('p', IMPORTED_SKILL_NOT_CURRENT_NOTE));
     if (isCurrent && revision.state === 'pending-validation') detail.append(button('验证 Skill', 'validate', async () => changed(await api.validateImportedSkill({ revisionId: revision.revisionId }))));
     if (isCurrent && revision.state === 'validated') detail.append(button('安装（暂不启用）', 'install', async () => changed(await api.installImportedSkill({ revisionId: revision.revisionId, previewDigest: revision.previewDigest }))));
-    if (revision.state === 'restricted' || revision.state === 'rejected') detail.append(el('p', '这一修订保持可查看。请在原目录修复后重新导入，生成后继修订；旧记录不改写。'));
+    if (revision.state === 'restricted' || revision.state === 'rejected') detail.append(el('p', IMPORTED_SKILL_REPAIR_NOTE));
     if (isCurrent && (revision.state === 'installed-disabled' || revision.state === 'enabled')) {
       const label = el('label', '为图书启用：');
       const select = el('select'); select.dataset['skillField'] = 'book'; select.disabled = busy;

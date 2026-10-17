@@ -95,6 +95,13 @@ export const IMPORTED_SKILL_UPDATE_STATUS = {
   rolledBack: '已回到所选修订；没有恢复它之前的启用',
 } as const;
 export const IMPORTED_SKILL_NOT_CURRENT_NOTE = '这不是当前修订：先在修订历史里「回到此版本」，才能继续验证、安装或启用。';
+export const IMPORTED_SKILL_REPAIR_NOTE = '这一修订保持可查看。修复后请用「检查更新（从文件）…」；若原包未声明 Skill 名称，请在原目录修复后重新导入。旧记录不改写。';
+export function importedSkillUpdateSourceLines(read: ImportedSkillAcquisitionProjection): string[] {
+  return [`来源：${read.sourcePath}`, `许可：${read.license ?? '未提供'}`, `内容 SHA-256 ${read.contentSha256}`];
+}
+export function importedSkillUpdateSourceFileLine(file: ImportedSkillAcquisitionProjection['files'][number]): string {
+  return `${file.path} · ${file.bytes} 字节 · SHA-256 ${file.sha256}`;
+}
 export function importedSkillUpdateCheckTitle(read: ImportedSkillUpdateCheckProjection): string {
   return `${read.acquisition.name} · ${read.acquisition.kind} · 来源 ${read.acquisition.sourceRevision} · 尚未保留`;
 }
