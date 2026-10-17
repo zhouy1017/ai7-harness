@@ -75,7 +75,7 @@ describe('隐私说明', () => {
     const text = HELP_PRIVACY_SECTIONS.map((section) => section.paragraphs.join('')).join('\n');
     expect(text).toContain('本机');
     expect(text).toContain('不联网');
-    expect(text).toContain('授权并开始任务');
+    expect(text).toContain('开始任务');
     expect(text).toContain('模型处理策略');
     expect(text).toContain('凭据');
     expect(text).toContain('诊断包');
