@@ -150,7 +150,7 @@ function outcomeSummary(runRecordId: string): string {
 }
 
 describe('a Series Retrieval Exclusion over Review Runs', () => {
-  it('keeps an enabled /1 consistency procedure offered with fit=all after knowledge moves beyond the earlier Run pins', async () => {
+  it('keeps an enabled consistency procedure offered with fit=all after knowledge moves beyond the earlier Run pins', async () => {
     await withSession(async ({ store, driver, seriesId }, bookId) => {
       const prepared = prepare(store, bookId);
       approve(store, bookId, prepared);
@@ -164,7 +164,8 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       const offered = store.inspectCapturedProcedureApplicability(bookId).procedures;
       expect([[ '', SHEET_PROCEDURE_NONE, null ], ...offered.map((entry) => [entry.procedureId, sheetProcedureOption(entry), entry.fit])])
         .toEqual([[ '', '不按工序（自己选类别）', null ], [saved.procedureId, '《书系复核》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选', 'all']]);
-      expect(store.inspectCapturedProcedureRun(bookId, saved.procedureId).resolved?.runSourceScope).toBeUndefined();
+      // Since ADR 0090 (#66) the save writes the /2 successor, whose Series ceiling the resolved Run reads; /1 never widens (unit).
+      expect(store.inspectCapturedProcedureRun(bookId, saved.procedureId).resolved?.runSourceScope).toBe('series');
     });
   }, 300_000);
   it('pins an opt-in category and an evaluation in the existing plan records, retaining membership pins after removal', async () => {
