@@ -50,6 +50,13 @@ const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL'
 const CJK_BASE = 0x4e00;
 const CJK_SPAN = 0x1000;
 const RENDERER_TARGET_QUERY_ABANDONED = new Error('renderer-target query abandoned after the browser disconnected');
+// Editing Protection Mode (Issue #951, wave 12 slice 12a): the product's exact words, and the journal's one-edit bound
+// (src/shared/protocol.ts MAX_EDIT_GRAPHEMES) that says how many entries a buffered run of text lands as.
+const PROTECTION_HEADLINE = '本地写入中断 · 当前更改尚未持久保存';
+const PROTECTION_READ_ONLY_HEADLINE = '保护性只读 · 当前更改尚未持久保存';
+const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
+const JOURNAL_EDIT_GRAPHEMES = 256;
+const PROTECTION_CJK_BASE = 0x7000;
 const STARTUP_FAILURE_MARKERS = Object.freeze([
   Object.freeze(['AI7_STARTUP_FAILED/runtime', 'launch-restart-renderer-target-query-startup-runtime']),
   Object.freeze(['AI7_STARTUP_FAILED/arguments', 'launch-restart-renderer-target-query-startup-arguments']),
@@ -317,9 +324,26 @@ async function attachRendererTarget(browser, launchScenario) {
     }
     throw journeyCheckFailure('J-02', 'preload-ipc-observation');
   };
+  // Issue #951 (T0-1): the Edit Journal write-failure injection, set through the preload's J-02-only global.
+  const setJournalFault = async (mode) => {
+    for (const contextId of executionContexts) {
+      try {
+        const response = await send('Runtime.evaluate', {
+          expression: `globalThis.__ai7J02JournalFault?.set(${JSON.stringify(mode)})`,
+          contextId,
+          awaitPromise: true,
+          returnByValue: true,
+        });
+        if (!response.exceptionDetails && response.result?.value?.mode === mode) return response.result.value;
+      } catch {
+        executionContexts.delete(contextId);
+      }
+    }
+    throw journeyCheckFailure('J-02', 'preload-journal-fault');
+  };
   at(`launch-${launchScenario}-renderer-runtime-enable`);
   await send('Runtime.enable');
-  return { evaluate, observeIpc, send };
+  return { evaluate, observeIpc, setJournalFault, send };
 }
 
 async function waitFor(renderer, expression, location, timeout = 60_000) {
@@ -1451,6 +1475,144 @@ async function runAccessibilityJourney(renderer) {
   await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.editor-shell')).boxShadow === 'none' && getComputedStyle(document.querySelector('button')).borderStyle !== 'none'`, 'forced-colors');
 }
 
+/** Synthetic fullwidth characters (Issue #951): never manuscript text; distinct from the fixture's own blocks. */
+function protectionText(length, offset = 0) {
+  return Array.from({ length }, (_, index) => String.fromCodePoint(PROTECTION_CJK_BASE + ((offset + index) * 13) % 0x800)).join('');
+}
+
+const JOURNAL_SEQUENCE_PROBE = `Number(Array.from(document.querySelectorAll('.editor-meta > span')).find((item) => item.textContent?.startsWith('修订日志序号 '))?.textContent.slice(7))`;
+
+/** Type at the end of the window's last block through the editor's own input path, as a hand would. */
+async function typeAtWindowEnd(renderer, text, location) {
+  const typed = await renderer.evaluate(`(async () => {
+    const editor = document.querySelector('[data-testid="manuscript-editor"]');
+    const block = editor?.lastElementChild;
+    if (!(editor instanceof HTMLElement) || !(block instanceof HTMLElement)) return false;
+    editor.focus({ preventScroll: true });
+    const range = document.createRange();
+    range.selectNodeContents(block);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const inserted = document.execCommand('insertText', false, ${JSON.stringify(text)});
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return inserted;
+  })()`);
+  requireJourney(typed === true, location);
+}
+
+const PROTECTION_PROBE = `(() => {
+  const banner = document.querySelector('#editing-protection');
+  const fact = (name) => banner?.querySelector('[data-protection-fact="' + name + '"]');
+  const editor = document.querySelector('[data-testid="manuscript-editor"]');
+  return {
+    shown: banner instanceof HTMLElement && !banner.hidden,
+    headline: banner?.querySelector('.editing-protection-headline')?.textContent ?? null,
+    readOnly: banner?.dataset.protectionReadOnly ?? null,
+    lastDurable: fact('last-durable')?.textContent ?? null,
+    atRisk: Number(fact('at-risk')?.dataset.atRiskCharacters ?? -1),
+    retry: fact('retry')?.textContent ?? null,
+    attempts: Number(fact('retry')?.dataset.retryAttempts ?? -1),
+    softLimit: Number(banner?.dataset.bufferSoftLimit ?? -1),
+    capacity: Number(banner?.dataset.bufferCapacity ?? -1),
+    document: document.documentElement.dataset.editingProtection ?? null,
+    writable: editor?.getAttribute('contenteditable') === 'true' && editor.getAttribute('aria-readonly') === 'false',
+    composing: editor?.dataset.composing ?? null,
+    closeRisk: document.documentElement.dataset.ai7CloseRisk ?? null,
+    journal: ${JOURNAL_SEQUENCE_PROBE},
+    screen: document.querySelector('#screen')?.dataset.screen ?? null,
+  };
+})()`;
+
+async function protectionChecks(renderer, checks, location, timeout = 30_000) {
+  await waitForChecks(renderer, `(() => { const p = ${PROTECTION_PROBE}; return ${checks}; })()`, location, timeout);
+}
+
+/**
+ * Issue #951 (ED-004, ED-058, VIEW-005): 专注模式 from the context header hides the sidebar, the supporting surfaces and the
+ * task entries while the manuscript, the persistence status and a visible restore control stay, and Esc leaves it; the
+ * manuscript is set in the editing preset's reading typography.
+ */
+async function runEditorModesJourney(renderer) {
+  at('view-emulation-reset');
+  await renderer.send('Emulation.setEmulatedMedia', { features: [] });
+  await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
+  await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  at('typography-defaults');
+  await waitForChecks(renderer, `(() => { const text = document.querySelector('[data-testid="manuscript-editor"]'); const style = text ? getComputedStyle(text) : null; return { fontSize: style?.fontSize === '17px', lineHeight: Math.abs(parseFloat(style?.lineHeight ?? '0') - 17 * 1.9) < 0.6, column: Math.abs(parseFloat(style?.maxWidth ?? '0') - (38 * 17 + 16)) < 1.5, preset: document.documentElement.dataset.readingPreset === 'editing', density: document.documentElement.dataset.density === 'standard' }; })()`, 'typography-defaults', 15_000);
+  at('focus-mode-enter');
+  await assertRenderer(renderer, `(() => { const toggle = document.querySelector('[data-view-command="focus-mode"]'); if (!(toggle instanceof HTMLButtonElement) || toggle.getAttribute('aria-pressed') !== 'false') return false; toggle.focus(); toggle.click(); return true; })()`, 'focus-mode-toggle');
+  await waitForChecks(renderer, `(() => { const hidden = (selector) => { const node = document.querySelector(selector); return node === null || getComputedStyle(node).display === 'none'; }; const status = document.querySelector('#persistence-status'); const toggle = document.querySelector('[data-view-command="focus-mode"]'); return { modeOn: document.documentElement.dataset.focusMode === 'on', sidebarHidden: hidden('#app-sidebar'), navigationHidden: hidden('#manuscript-navigation-panel'), edgeEntriesHidden: hidden('.edge-entries'), drawerHidden: hidden('#task-drawer'), manuscriptShown: (document.querySelector('[data-testid="manuscript-editor"]')?.getBoundingClientRect().width ?? 0) > 0, statusShown: status instanceof HTMLElement && getComputedStyle(status).display !== 'none', restoreControl: toggle?.getAttribute('aria-pressed') === 'true' && toggle.textContent === '退出专注（Esc）' && toggle.getBoundingClientRect().width > 0 }; })()`, 'focus-mode-entered', 15_000);
+  at('focus-mode-esc');
+  await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]')?.focus({ preventScroll: true })`);
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await waitForChecks(renderer, `({ modeOff: document.documentElement.dataset.focusMode === 'off', sidebarShown: getComputedStyle(document.querySelector('#app-sidebar')).display !== 'none', edgeShown: getComputedStyle(document.querySelector('.edge-entries')).display !== 'none' })`, 'focus-mode-left', 15_000);
+}
+
+/**
+ * Issue #951 (DUR-001 to DUR-012, ED-055, ED-056; T0-1): with the journal's acknowledgement made unavailable, the context
+ * header says so with the Last Durable Edit Boundary, the At-risk Edit Extent and the automatic retry; leaving and closing
+ * are refused with the reason; automatic retries add no entry; 重试写入 lands the exact buffered sequence and clears the mode;
+ * and the buffer keeps room for an input-method composition, then enters the Protective Read-only State.
+ */
+async function runProtectionJourney(renderer) {
+  at('protection-arm');
+  await protectionChecks(renderer, `({ idle: !p.shown && p.document === null && p.writable && p.closeRisk === 'false', journal: Number.isSafeInteger(p.journal) })`, 'protection-idle');
+  const durable = await renderer.evaluate(JOURNAL_SEQUENCE_PROBE);
+  requireJourney((await renderer.setJournalFault('fail-all'))?.mode === 'fail-all', 'protection-arm');
+  at('protection-enter');
+  await typeAtWindowEnd(renderer, protectionText(12), 'protection-enter-type');
+  await protectionChecks(renderer, `({ shown: p.shown, headline: p.headline === ${JSON.stringify(PROTECTION_HEADLINE)}, boundary: p.lastDurable?.startsWith(${JSON.stringify(`最后确认写入：修订日志序号 ${durable.toLocaleString('zh-CN')} · `)}) === true, atRisk: p.atRisk === 12, retry: p.retry?.startsWith('自动重试：') === true, active: p.document === 'active' && p.readOnly === 'none', writable: p.writable, closeRisk: p.closeRisk === 'true', noEntry: p.journal === ${durable} })`, 'protection-entered');
+  at('protection-blocked-action');
+  await assertRenderer(renderer, `(() => { const back = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '返回图书工作概览'); if (!(back instanceof HTMLButtonElement) || back.disabled) return false; back.focus(); back.click(); return true; })()`, 'protection-blocked-action-click');
+  await waitForChecks(renderer, `(() => { const back = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '返回图书工作概览'); const note = back?.nextElementSibling; return { stayed: document.querySelector('#screen')?.dataset.screen === 'editor', reason: note instanceof HTMLElement && note.dataset.protectionBlocked === '返回图书工作概览' && note.textContent.includes('暂不能执行「返回图书工作概览」'), noEntry: ${JOURNAL_SEQUENCE_PROBE} === ${durable} }; })()`, 'protection-blocked-action', 30_000);
+  at('protection-blocked-close');
+  await renderer.evaluate(`(() => { window.close(); return true; })()`);
+  await waitForChecks(renderer, `(() => { const options = document.querySelector('#editing-protection-options'); return { stayed: document.querySelector('#screen')?.dataset.screen === 'editor', optionsOpen: options instanceof HTMLElement && !options.hidden, reason: options?.querySelector('.editing-protection-reason')?.textContent === ${JSON.stringify(PROTECTION_CLOSE_BLOCKED)}, retryOffered: options?.querySelector('[data-protection-action="retry"]')?.textContent === '重试写入', copyOffered: options?.querySelector('[data-protection-action="copy"]')?.textContent === '复制受影响内容', closeStateConsumed: document.documentElement.dataset.ai7CloseState === undefined }; })()`, 'protection-blocked-close', 30_000);
+  at('protection-auto-retry');
+  await protectionChecks(renderer, `({ retried: p.attempts >= 1, stillProtected: p.shown && p.document === 'active', noEntry: p.journal === ${durable}, atRisk: p.atRisk === 12 })`, 'protection-auto-retry', 45_000);
+  at('protection-retry-recovery');
+  requireJourney((await renderer.setJournalFault('off'))?.mode === 'off', 'protection-fault-off');
+  await assertRenderer(renderer, `(() => { const retry = document.querySelector('#editing-protection-options [data-protection-action="retry"]'); if (!(retry instanceof HTMLButtonElement)) return false; if (retry.disabled) return true; retry.click(); return true; })()`, 'protection-retry-click');
+  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, oneEntry: p.journal === ${durable + 1}, writable: p.writable, closeRisk: p.closeRisk === 'false', status: document.querySelector('#persistence-status')?.textContent === '已写入修订日志', optionsClosed: document.querySelector('#editing-protection-options')?.hidden === true, reasonsGone: document.querySelector('.editing-protection-blocked') === null })`, 'protection-retry-recovered', 60_000);
+  at('protection-capacity-fill');
+  const softLimit = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferSoftLimit)`);
+  const capacity = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferCapacity)`);
+  requireJourney(Number.isSafeInteger(softLimit) && Number.isSafeInteger(capacity) && softLimit > 200 && capacity - softLimit >= 100, 'protection-buffer-limits');
+  requireJourney((await renderer.setJournalFault('fail-all'))?.mode === 'fail-all', 'protection-rearm');
+  const filled = softLimit - 60;
+  await typeAtWindowEnd(renderer, protectionText(10, 100), 'protection-capacity-first');
+  await protectionChecks(renderer, `({ shown: p.shown && p.document === 'active', atRisk: p.atRisk === 10 })`, 'protection-capacity-entered');
+  for (let typed = 10; typed < filled;) {
+    const chunk = Math.min(240, filled - typed);
+    await typeAtWindowEnd(renderer, protectionText(chunk, 200 + typed), 'protection-capacity-type');
+    typed += chunk;
+  }
+  await protectionChecks(renderer, `({ atRisk: p.atRisk === ${filled}, writable: p.writable, readOnly: p.readOnly === 'none', noEntry: p.journal === ${durable + 1} })`, 'protection-capacity-filled');
+  at('protection-ime-reserve');
+  // A composition that crosses the soft limit is taken into the reserve and never cut short (DUR-008).
+  const composition = protectionText(100, 4_000);
+  await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.lastElementChild; editor?.focus({ preventScroll: true }); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return true; })()`);
+  await renderer.send('Input.imeSetComposition', { text: composition, selectionStart: composition.length, selectionEnd: composition.length });
+  await protectionChecks(renderer, `({ composing: p.composing === 'true', notReadOnly: p.readOnly === 'none', writable: p.writable })`, 'protection-ime-composing', 15_000);
+  await renderer.send('Input.insertText', { text: composition });
+  at('protection-read-only');
+  await protectionChecks(renderer, `({ ended: p.composing === 'false', kept: p.atRisk === ${filled + 100}, readOnly: p.readOnly === 'capacity' && p.document === 'read-only', headline: p.headline === ${JSON.stringify(PROTECTION_READ_ONLY_HEADLINE)}, refused: !p.writable, withinCapacity: p.atRisk <= p.capacity, noEntry: p.journal === ${durable + 1} })`, 'protection-read-only', 30_000);
+  // The read-only text takes nothing more, and its options still offer 重试写入 and 复制受影响内容 (DUR-009).
+  await renderer.evaluate(`(async () => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); editor?.focus({ preventScroll: true }); document.execCommand('insertText', false, ${JSON.stringify(protectionText(5, 9_000))}); await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); document.querySelector('#editing-protection [data-protection-action="options"]')?.click(); return true; })()`);
+  await waitForChecks(renderer, `(() => { const p = ${PROTECTION_PROBE}; const options = document.querySelector('#editing-protection-options'); return { unchanged: p.atRisk === ${filled + 100}, optionsOpen: options instanceof HTMLElement && !options.hidden, retryOffered: options?.querySelector('[data-protection-action="retry"]') instanceof HTMLButtonElement, copyOffered: options?.querySelector('[data-protection-action="copy"]') instanceof HTMLButtonElement, readOnlyReason: options?.querySelector('.editing-protection-read-only')?.hidden === false }; })()`, 'protection-read-only-options', 15_000);
+  at('protection-read-only-recovery');
+  requireJourney((await renderer.setJournalFault('off'))?.mode === 'off', 'protection-fault-off-again');
+  await assertRenderer(renderer, `(() => { const retry = document.querySelector('#editing-protection-options [data-protection-action="retry"]'); if (!(retry instanceof HTMLButtonElement)) return false; if (!retry.disabled) retry.click(); return true; })()`, 'protection-read-only-retry-click');
+  // The exact buffered sequence lands in order, one entry per bounded edit, and nothing more (DUR-006, DUR-012).
+  // The first ten characters are the edit the retries hold; what was typed after lands as bounded edits behind it.
+  const entries = 1 + Math.ceil((filled - 10 + 100) / JOURNAL_EDIT_GRAPHEMES);
+  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, exactEntries: p.journal === ${durable + 1 + entries}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`, 'protection-read-only-recovered', 90_000);
+}
+
 async function main() {
   parseJourney();
   const networkDenialEntry = resolve(ROOT, 'dist', 'shared', 'network-denial.mjs');
@@ -1500,6 +1662,8 @@ async function main() {
       '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
       '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
       resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid), '--j02-picker-path', docx,
+      // Issue #951 (T0-1): arms the Edit Journal write-failure injection, which every other launch refuses.
+      '--j02-journal-fault-control', 'armed',
     ];
     requireJourney(isAbsolute(dataRoot) && isAbsolute(docx) && !productArgs.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     const launch = async (launchScenario) => {
@@ -1522,6 +1686,9 @@ async function main() {
     renderer = await launch('restart');
     await runRestartJourney(renderer);
     await runAccessibilityJourney(renderer);
+    // Issue #951: 专注模式, the reading typography and Editing Protection Mode, after every pinned stage above.
+    await runEditorModesJourney(renderer);
+    await runProtectionJourney(renderer);
     // The close and what follows it are their own stages: left under the last j14 step, a failure to
     // shut the product down or to clear the run root would read as an accessibility failure (#474).
     at('completion-browser-close');

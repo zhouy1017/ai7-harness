@@ -21,15 +21,16 @@ export const PROTECTION_CLEARED = '已写入修订日志';
 export const PROTECTION_RESTART_PROMISE = '如果 AI7 被强制关闭，重新打开后只能恢复到「最后确认写入」处；之后的内容只在本窗口中，无法保证保留。';
 /** DUR-009: exact local salvage export appears only when the service can reconstruct and receipt the payload. */
 export const PROTECTION_SALVAGE_UNAVAILABLE = '本地业务服务目前无法重建并出具回执，暂不提供导出受影响内容；请先复制受影响内容。';
+/** An input that would take the buffer past its safe capacity is not taken (DUR-002). */
+export const PROTECTION_BUFFER_REFUSED = '未确认内容已接近安全上限，这次输入未被接收；请先重试写入，或复制受影响内容。';
 /** The marker shape beside the words (ED-058): text and shape, never colour alone. */
 export const PROTECTION_MARKER = '⚠';
 
 export type ProtectionCause = 'journal-unavailable' | 'service-stopped' | 'drift';
 export type ProtectionReadOnlyReason = 'capacity' | 'service-stopped' | 'drift';
 
-export function lastDurableLine(sequence: number, durableAt: string | null): string {
-  const when = durableAt === null ? '打开稿件时' : new Date(durableAt).toLocaleString('zh-CN', { hour12: false });
-  return `最后确认写入：修订日志序号 ${sequence.toLocaleString('zh-CN')} · ${when}`;
+export function lastDurableLine(sequence: number, durableAt: string): string {
+  return `最后确认写入：修订日志序号 ${sequence.toLocaleString('zh-CN')} · ${new Date(durableAt).toLocaleString('zh-CN', { hour12: false })}`;
 }
 
 /** DUR-004: editor-readable location and character count, never bytes or process detail. */

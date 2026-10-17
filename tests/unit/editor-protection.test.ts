@@ -42,7 +42,7 @@ function view(overrides: Partial<ProtectionView> = {}): ProtectionView {
   return {
     cause: 'journal-unavailable',
     readOnly: null,
-    lastDurable: { sequence: 7, durableAt: null },
+    lastDurable: { sequence: 7, durableAt: '2026-10-18T02:00:00.000Z' },
     atRisk: { characters: 3, blocks: 1, firstBlockPosition: 12, location: '第 12 段' },
     retrying: false,
     attempts: 0,
@@ -117,7 +117,8 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
   });
 
   it('states the Last Durable Edit Boundary, the At-risk Edit Extent and the retry state in editor terms', () => {
-    expect(lastDurableLine(1234, null)).toBe('最后确认写入：修订日志序号 1,234 · 打开稿件时');
+    const at = '2026-10-18T02:00:00.000Z';
+    expect(lastDurableLine(1234, at)).toBe(`最后确认写入：修订日志序号 1,234 · ${new Date(at).toLocaleString('zh-CN', { hour12: false })}`);
     expect(atRiskLocation(null, 12, 1)).toBe('第 12 段');
     expect(atRiskLocation('第三章', 1200, 3)).toBe('第三章 · 第 1,200 段起 3 段');
     expect(atRiskLine('第 12 段', 1500)).toBe('未确认内容：第 12 段，约 1,500 字');

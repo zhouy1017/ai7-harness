@@ -1185,6 +1185,20 @@ async function copyPlainText(text: string): Promise<void> {
   }
 }
 
+/**
+ * The button or link the editor activated last, for a refusal said beside it (Issue #951; DUR-005). Read at activation, before
+ * the control's own handler disables it, and only for a moment: a refusal much later names no control.
+ */
+let lastActivatedControl: { control: HTMLElement; at: number } | null = null;
+document.addEventListener('click', (event) => {
+  const control = event.target instanceof Element ? event.target.closest<HTMLElement>('button, a') : null;
+  lastActivatedControl = control === null ? null : { control, at: performance.now() };
+}, true);
+function recentlyActivatedControl(): HTMLElement | null {
+  const recent = lastActivatedControl;
+  return recent !== null && recent.control.isConnected && performance.now() - recent.at < 3_000 ? recent.control : null;
+}
+
 function setCloseRisk(risk: boolean): void {
   document.documentElement.dataset['ai7CloseRisk'] = risk ? 'true' : 'false';
 }
@@ -8865,7 +8879,7 @@ function renderEditorWindow(
 
   async function settleLocalEdit(): Promise<boolean> {
     // The action the editor just used: under Editing Protection Mode its refusal is said beside it (DUR-005).
-    const attempted = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+    const attempted = recentlyActivatedControl();
     if (editor?.isComposing()) {
       setStatus('请先完成当前输入法组合。', 'busy');
       return false;

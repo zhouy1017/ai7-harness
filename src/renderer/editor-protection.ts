@@ -103,7 +103,7 @@ export interface AtRiskExtent {
 export interface ProtectionView {
   readonly cause: ProtectionCause;
   readonly readOnly: ProtectionReadOnlyReason | null;
-  readonly lastDurable: { readonly sequence: number; readonly durableAt: string | null };
+  readonly lastDurable: { readonly sequence: number; readonly durableAt: string };
   readonly atRisk: AtRiskExtent;
   readonly retrying: boolean;
   readonly attempts: number;
@@ -165,6 +165,9 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
   banner.setAttribute('role', 'alert');
   banner.setAttribute('aria-label', PROTECTION_HEADLINE);
   banner.hidden = true;
+  // The buffer's declared limits, stated where a Journey or an assistive reading can find them.
+  banner.dataset['bufferSoftLimit'] = String(SAFETY_BUFFER_SOFT_LIMIT);
+  banner.dataset['bufferCapacity'] = String(SAFETY_BUFFER_CAPACITY);
   const marker = el('span', 'editing-protection-marker', PROTECTION_MARKER);
   marker.setAttribute('aria-hidden', 'true');
   const headline = el('strong', 'editing-protection-headline', PROTECTION_HEADLINE);

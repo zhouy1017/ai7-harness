@@ -14,7 +14,7 @@ import {
   type AtRiskExtent,
   type ProtectionView,
 } from './editor-protection.js';
-import { atRiskLocation, type ProtectionCause, type ProtectionReadOnlyReason } from './editor-protection-labels.js';
+import { PROTECTION_BUFFER_REFUSED, atRiskLocation, type ProtectionCause, type ProtectionReadOnlyReason } from './editor-protection-labels.js';
 import {
   MAX_BLOCK_CODE_UNITS,
   MAX_BLOCK_GRAPHEMES,
@@ -357,8 +357,12 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     nextRetryAt: number | null;
   } | undefined;
   let retryTimer: number | undefined;
-  // The Last Durable Edit Boundary (DUR-003, DUR-011): the journal position the service last acknowledged, and when.
-  let lastDurable: { sequence: number; durableAt: string | null } = { sequence: windowProjection.journalSequence, durableAt: null };
+  // The Last Durable Edit Boundary (DUR-003, DUR-011): the journal position the service last acknowledged, and when — an
+  // acknowledgement's own instant, or the moment a window the service read was shown, which is durable at least by then.
+  let lastDurable: { sequence: number; durableAt: string } = { sequence: windowProjection.journalSequence, durableAt: new Date().toISOString() };
+  const windowIsDurable = (shown: ManuscriptWindowProjection): void => {
+    if (shown.journalSequence !== lastDurable.sequence) lastDurable = { sequence: shown.journalSequence, durableAt: new Date().toISOString() };
+  };
 
   const isEditable = (): boolean =>
     !interrupted && !operationLocked && deferredNavigationContinuity === undefined &&
@@ -425,7 +429,9 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     if (!valid) return false;
     if (!isEditable()) return false;
     // In Editing Protection Mode the buffer is bounded: a composition may use the reserve, nothing else may (DUR-002, DUR-008).
-    return protection === undefined || bufferAdmits(atRiskOf(candidate).characters, composing || view.composing);
+    if (protection === undefined || bufferAdmits(atRiskOf(candidate).characters, composing || view.composing)) return true;
+    queueMicrotask(() => options.onAnnouncement(PROTECTION_BUFFER_REFUSED, 'error'));
+    return false;
   };
 
   const transactionFilter = new Plugin({ filterTransaction: candidateIsBounded });
@@ -719,10 +725,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     }, delay);
   };
 
-  /** Input pauses at the buffer's soft limit once no composition is open: the Protective Read-only State (DUR-008). */
+  /**
+   * Input pauses at the buffer's soft limit once no composition is open: the Protective Read-only State (DUR-008). The editor's
+   * own composition flag decides, since the view's lags a composition's end by the input method's last DOM change.
+   */
   const checkBufferLimit = (): void => {
     if (!protection || protection.readOnly !== null) return;
-    if (!bufferReachedLimit(atRiskOf(view.state.doc).characters, composing || view.composing)) return;
+    if (!bufferReachedLimit(atRiskOf(view.state.doc).characters, composing)) return;
     protection.readOnly = 'capacity';
     applyEditableState();
   };
@@ -970,11 +979,15 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         const waiting = compositionWaiters;
         compositionWaiters = [];
         for (const resolve of waiting) resolve();
-        // A composition that ended past the soft limit was never cut short; input pauses now (DUR-008).
-        queueMicrotask(() => {
+        // A composition that ended past the soft limit was never cut short; input pauses now (DUR-008), and again once the
+        // input method's last change has reached the document.
+        const settleComposition = (): void => {
+          if (destroyed) return;
           checkBufferLimit();
           announceState();
-        });
+        };
+        queueMicrotask(settleComposition);
+        window.setTimeout(settleComposition, 120);
         scheduleAutomaticFlush();
         return false;
       },
@@ -1004,6 +1017,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       windowProjection = nextWindow;
       baselines = baselineMap(nextWindow);
       retryPrepared = undefined;
+      windowIsDurable(nextWindow);
       restoreContinuity(
         makeState(),
         continuity,
@@ -1021,6 +1035,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       windowProjection = nextWindow;
       baselines = baselineMap(nextWindow);
       retryPrepared = undefined;
+      windowIsDurable(nextWindow);
       restoreContinuity(makeState(), continuity, nextWindow.focusBlockId, nextWindow.focusGrapheme, true);
       announceState();
       options.onWindowLoaded?.();
