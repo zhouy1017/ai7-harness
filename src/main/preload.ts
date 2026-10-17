@@ -13,6 +13,12 @@ import {
   type RendererCallResult,
   type ServiceOperationMap,
 } from '../shared/protocol.js';
+import {
+  PREFERENCE_IPC_CHANNELS,
+  type PreferencesProjection,
+  type PreferencesRendererApi,
+  type SavePreferenceInput,
+} from '../shared/preferences.js';
 
 function markServiceInterrupted(): void {
   const mark = (): void => {
@@ -172,7 +178,8 @@ async function invoke<Result>(channel: string, input?: unknown): Promise<Result>
 
 if (process.platform !== 'win32' && process.platform !== 'darwin') throw new Error('Unsupported renderer platform.');
 
-const api: RendererApi = Object.freeze({
+// Local view and input configuration (Issue #934, slice 11a) rides beside the service's members: main-owned, no protocol op.
+const api: RendererApi & PreferencesRendererApi = Object.freeze({
   platform: process.platform,
   getStartup: () => invoke<ServiceOperationMap['getStartup']['output']>(IPC_CHANNELS.getStartup),
   getRecoveryComparison: (input: ServiceOperationMap['getRecoveryComparison']['input']) =>
@@ -706,6 +713,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['getHistoricalRevision']['output']>(IPC_CHANNELS.getHistoricalRevision, input),
   getProductDataLocation: () =>
     invoke<Awaited<ReturnType<RendererApi['getProductDataLocation']>>>(IPC_CHANNELS.getProductDataLocation),
+  getPreferences: () => invoke<PreferencesProjection>(PREFERENCE_IPC_CHANNELS.getPreferences),
+  savePreference: (input: SavePreferenceInput) => invoke<PreferencesProjection>(PREFERENCE_IPC_CHANNELS.savePreference, input),
   revealProductDataLocation: () =>
     invoke<Awaited<ReturnType<RendererApi['revealProductDataLocation']>>>(IPC_CHANNELS.revealProductDataLocation),
   selectSearchBackend: (input: Parameters<RendererApi['selectSearchBackend']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectSearchBackend']>>>(IPC_CHANNELS.selectSearchBackend, input),
