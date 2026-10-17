@@ -2173,7 +2173,14 @@ export async function runJ14DarkPass({ renderer, journey, at, representative = '
     await back();
     await wait(node, 'j14-dark-pass-representative');
   };
-  const forcedColors = (value) => renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value }] });
+  const forcedColors = async (value) => {
+    if (typeof renderer.send !== 'function') throw journeyCheckFailure(journey, 'j14-dark-pass-renderer-send');
+    try {
+      await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value }] });
+    } catch (error) {
+      throw journeyCheckFailure(journey, `j14-dark-pass-emulate-${value}`, { cause: error });
+    }
+  };
   at('j14-dark-pass');
   await choose('dark');
   at('j14-dark-pass-theme-applied');

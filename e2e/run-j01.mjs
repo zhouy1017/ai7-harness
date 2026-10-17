@@ -603,6 +603,8 @@ async function createRendererManager(browser) {
       };
       const renderer = {
         targetId: target.targetId,
+        // The shared J-14 dark pass (#935) emulates forced colours through the same session.
+        send: (method, params) => send(method, params),
         evaluate: async (expression) => {
           const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
           requireJourney(!response.exceptionDetails, 'renderer-evaluate', response.exceptionDetails);
