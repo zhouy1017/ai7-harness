@@ -141,6 +141,20 @@ if (j02ObservationEnabled) {
   });
 }
 
+// J-02's Edit Journal write-failure injection (Issue #951, T0-1): a J-02-only global of this isolated world, never a `window.ai7`
+// member, so no other launch's page can reach it; main and the service refuse it anyway unless the launch armed it.
+if (j02ObservationEnabled) {
+  Object.defineProperty(globalThis, '__ai7J02JournalFault', {
+    value: Object.freeze({
+      set: (mode: ServiceOperationMap['setEditJournalFault']['input']['mode']) =>
+        invoke<ServiceOperationMap['setEditJournalFault']['output']>(IPC_CHANNELS.setEditJournalFault, { mode }),
+    }),
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
+}
+
 ipcRenderer.on(MAIN_EVENTS.serviceInterrupted, markServiceInterrupted);
 ipcRenderer.on(MAIN_EVENTS.closeBlocked, markCloseBlocked);
 ipcRenderer.on(MAIN_EVENTS.productReady, markProductReady);
@@ -237,6 +251,10 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['authorizeTaskAuthorization']['output']>(IPC_CHANNELS.authorizeTaskAuthorization, input),
   inspectBaselineAnalysis: (input?: Omit<ServiceOperationMap['inspectBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectBaselineAnalysis']['output']>(IPC_CHANNELS.inspectBaselineAnalysis, input ?? { revisionId: null }),
+  inspectBookFindings: (input?: { offset: number }) =>
+    invoke<ServiceOperationMap['inspectBookFindings']['output']>(IPC_CHANNELS.inspectBookFindings, input ?? { offset: 0 }),
+  inspectParagraphAnalysis: (input: Omit<ServiceOperationMap['inspectParagraphAnalysis']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['inspectParagraphAnalysis']['output']>(IPC_CHANNELS.inspectParagraphAnalysis, input),
   prepareBaselineAnalysis: (input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['prepareBaselineAnalysis']['output']>(IPC_CHANNELS.prepareBaselineAnalysis, input),
   authorizeBaselineAnalysis: (input: Omit<ServiceOperationMap['authorizeBaselineAnalysis']['input'], 'bookId'>) =>
@@ -676,6 +694,12 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<Awaited<ReturnType<RendererApi['reviewBookDeliveryPackageExport']>>>(IPC_CHANNELS.reviewBookDeliveryPackageExport, input),
   chooseBookDeliveryPackageExportFolder: (input: Parameters<RendererApi['chooseBookDeliveryPackageExportFolder']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageExportFolder']>>>(IPC_CHANNELS.chooseBookDeliveryPackageExportFolder, input),
+  chooseBookDeliveryPackageArchiveDestination: (input: Parameters<RendererApi['chooseBookDeliveryPackageArchiveDestination']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageArchiveDestination']>>>(IPC_CHANNELS.chooseBookDeliveryPackageArchiveDestination, input),
+  approveBookDeliveryPackageArchiveExport: (input: Parameters<RendererApi['approveBookDeliveryPackageArchiveExport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['approveBookDeliveryPackageArchiveExport']>>>(IPC_CHANNELS.approveBookDeliveryPackageArchiveExport, input),
+  cancelBookDeliveryPackageArchiveExport: (input: Parameters<RendererApi['cancelBookDeliveryPackageArchiveExport']>[0]) =>
+    invoke<boolean>(IPC_CHANNELS.cancelBookDeliveryPackageArchiveExport, input),
   cancelBookDeliveryPackageExport: (input: Parameters<RendererApi['cancelBookDeliveryPackageExport']>[0]) =>
     invoke<boolean>(IPC_CHANNELS.cancelBookDeliveryPackageExport, input),
   approveBookDeliveryPackageExport: (input: Parameters<RendererApi['approveBookDeliveryPackageExport']>[0]) =>

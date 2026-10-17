@@ -27,6 +27,9 @@ import {
   RUN_BUDGET_CEILING_ARGUMENT,
   BACKGROUND_QUIET_ARGUMENT,
   CALIBRATION_MIN_BOOKS_ARGUMENT,
+  EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT,
+  EDIT_JOURNAL_FAULT_REFUSED_CODE,
+  editJournalFaultControlAdmitted,
   calibrationMinBooksForLaunch,
   parseBackgroundQuietMs,
   TRUSTED_SCOPE_ARGUMENT,
@@ -136,6 +139,8 @@ interface LaunchArguments {
   applyControl: 'lose-first-acknowledgement' | undefined;
   observeJ12Reveal: boolean;
   launcherPid: number;
+  /** J-02 only (Issue #951, T0-1): the Edit Journal write-failure injection may be set; every other launch refuses it. */
+  journalFaultArmed: boolean;
 }
 
 type ImportMutationKind = 'manuscript-import' | 'source-import' | 'manuscript-reimport';
@@ -250,6 +255,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
+          key === EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT ||
           key === '--j04-model-adapter' ||
           key === '--j04-connectivity-path' ||
           key === '--j10-unit-hold-path' ||
@@ -414,6 +420,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     recoveryControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && recoveryControl !== undefined),
   );
+  // J-02's Edit Journal write-failure injection (Issue #951, T0-1): `armed`, J-02's own, development-ci only.
+  const journalFaultArmed = editJournalFaultControlAdmitted(values.get(EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT), process.env.AI7_E2E_JOURNEY,
+    launchForm.trustedOperationalScope);
+  requireDesktop(journalFaultArmed !== null);
   // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成 (Issue #424),
   // J-10's cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94), and J-13's 书系一致性
   // (Issue #64) and the Review Runs a Captured Procedure is captured from and run as (Issue #65), and J-07's 写作任务 (Issue #432).
@@ -480,6 +490,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     applyControl,
     observeJ12Reveal,
     launcherPid,
+    journalFaultArmed: journalFaultArmed === true,
   };
 }
 
@@ -605,6 +616,7 @@ function registerRendererHandlers(
   preferences: PreferenceStore,
   appearanceWindows: () => Iterable<OwnedRendererWindow>,
   notificationWindows: () => ReadonlyArray<OwnedRendererWindow>,
+  journalFaultArmed: boolean,
 ): () => void {
   const notifier = createNotifier({
     preferences: () => preferences.read().values,
@@ -1491,6 +1503,20 @@ function registerRendererHandlers(
     return folder;
   };
 
+  const choosePackageArchiveFile = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+    const injected = consumeInjectedSavePath();
+    if (injected !== undefined) { requireDesktop(isAbsolute(injected)); return injected; }
+    const chosen = await dialog.showSaveDialog(owned.window, {
+      title: '选择导出图书交付包压缩包的位置', buttonLabel: '选择此位置',
+      defaultPath: resolve(app.getPath('documents'), '图书交付包.zip'),
+      filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (chosen.canceled || !chosen.filePath) return undefined;
+    requireDesktop(isAbsolute(chosen.filePath));
+    return chosen.filePath;
+  };
+
   ipcMain.on(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
 
   ipcMain.handle(IPC_CHANNELS.getStartup, (event) =>
@@ -2078,6 +2104,15 @@ function registerRendererHandlers(
         rememberManuscriptCapability(owned, result.window, input, owned.routeGeneration);
         return result;
       });
+    }),
+  );
+  // J-02's Edit Journal write-failure injection (Issue #951, T0-1): refused here unless the launch armed it, and refused again by the
+  // service. It is serialized with the journal writes it governs, so a mode takes effect between two writes, never inside one.
+  ipcMain.handle(IPC_CHANNELS.setEditJournalFault, (event, input: ServiceOperationMap['setEditJournalFault']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      if (!journalFaultArmed) throw new ServiceCallError(EDIT_JOURNAL_FAULT_REFUSED_CODE, '写入故障注入只在开发测试启动中可用。');
+      return serializeEffect(async () => service.call('setEditJournalFault', input));
     }),
   );
   // Editorial Marks (Issue #407) are records about one manuscript, so each command is gated exactly
@@ -2754,6 +2789,32 @@ function registerRendererHandlers(
           return result;
         });
       }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectBookFindings, (event, input?: { offset: number }) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('inspectBookFindings', { bookId: route.bookId, offset: input?.offset ?? 0 });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '发现不属于当前图书。');
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectParagraphAnalysis, (event, input: Omit<ServiceOperationMap['inspectParagraphAnalysis']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('inspectParagraphAnalysis', { manuscriptId: input?.manuscriptId, blockId: input?.blockId, radius: input?.radius, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      if (result.bookId !== route.bookId || result.manuscriptId !== input.manuscriptId || result.blockId !== input.blockId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '段落分析不属于当前稿件。');
+      return result;
+    }),
   );
   ipcMain.handle(IPC_CHANNELS.inspectBaselineAnalysis, (event, input?: Omit<ServiceOperationMap['inspectBaselineAnalysis']['input'], 'bookId'>) =>
     envelope(async () => {
@@ -5314,6 +5375,7 @@ function registerRendererHandlers(
             bookId: route.bookId,
             packageVersionId: input.packageVersionId,
             options: input.options,
+            ...(input.route === 'archive' ? { route: 'archive' as const } : {}),
             ...(input.offset === undefined ? {} : { offset: input.offset }),
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
@@ -5349,10 +5411,31 @@ function registerRendererHandlers(
         });
       }),
   );
+  ipcMain.handle(IPC_CHANNELS.chooseBookDeliveryPackageArchiveDestination,
+    (event, input: Parameters<RendererApi['chooseBookDeliveryPackageArchiveDestination']>[0]) => envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageArchiveDestination']>>> => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const destination = await choosePackageArchiveFile(owned);
+        if (destination === undefined) return { outcome: 'cancelled' };
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        const prepared = await service.call('prepareBookDeliveryPackageArchiveExport', {
+          bookId: route.bookId, packageVersionId: input.packageVersionId, options: input.options,
+          ...(input.offset === undefined ? {} : { offset: input.offset }),
+          reviewDigest: input.reviewDigest, memberKeys: input.memberKeys, destination,
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return { outcome: 'prepared', export: prepared };
+      });
+    }),
+  );
   // The effect lock stays held while a package job runs. Only its owning window's cancellation bypasses it.
   let packageExportInFlight: { owned: OwnedRendererWindow; bookId: string; exportId: string; job: Promise<ServiceJobProjection> } | null = null;
+  for (const operation of ['approveBookDeliveryPackageExport', 'approveBookDeliveryPackageArchiveExport'] as const) {
   ipcMain.handle(
-    IPC_CHANNELS.approveBookDeliveryPackageExport,
+    IPC_CHANNELS[operation],
     (event, input: Parameters<RendererApi['approveBookDeliveryPackageExport']>[0]) =>
       envelope(async () => {
         const owned = requireSender(event);
@@ -5361,7 +5444,7 @@ function registerRendererHandlers(
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
           const active = { owned, bookId: route.bookId, exportId: input.exportId,
-            job: service.call('approveBookDeliveryPackageExport', { bookId: route.bookId, exportId: input.exportId }) };
+            job: service.call(operation, { bookId: route.bookId, exportId: input.exportId }) };
           packageExportInFlight = active;
           try {
             let job = await active.job;
@@ -5385,8 +5468,10 @@ function registerRendererHandlers(
         });
       }),
   );
+  }
+  for (const operation of ['cancelBookDeliveryPackageExport', 'cancelBookDeliveryPackageArchiveExport'] as const) {
   ipcMain.handle(
-    IPC_CHANNELS.cancelBookDeliveryPackageExport,
+    IPC_CHANNELS[operation],
     (event, input: Parameters<RendererApi['cancelBookDeliveryPackageExport']>[0]) =>
       envelope(async () => {
         const owned = requireSender(event);
@@ -5396,13 +5481,14 @@ function registerRendererHandlers(
         if (active === null || active.owned !== owned || active.bookId !== route.bookId || active.exportId !== input.exportId) return false;
         const job = await active.job;
         if (packageExportInFlight !== active) return false;
-        try { return await service.call('cancelBookDeliveryPackageExport', { jobId: job.jobId }); }
+        try { return await service.call(operation, { jobId: job.jobId }); }
         catch (error) {
           if (error instanceof ServiceCallError && error.code === 'JOB_NOT_FOUND') return false;
           throw error;
         }
       }),
   );
+  }
   ipcMain.handle(
     IPC_CHANNELS.createProductionDocument,
     (event, input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>
@@ -6126,6 +6212,7 @@ export async function runApplication(): Promise<void> {
       journeyStartupRelay(process.env, (line) => void process.stderr.write(line)),
       launch.backgroundQuietMs,
       launch.calibrationMinBooks,
+      launch.journalFaultArmed,
     );
     service.onUnexpectedExit(() => {
       crashHook(crashes, 'service-exit', () => undefined)({ reason: 'abnormal-exit' });
@@ -6682,6 +6769,7 @@ export async function runApplication(): Promise<void> {
       preferenceStore,
       () => ownedWindows.values(),
       () => [...ownedWindows.values()],
+      launch.journalFaultArmed,
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

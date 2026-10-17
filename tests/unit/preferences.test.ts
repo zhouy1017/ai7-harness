@@ -55,9 +55,12 @@ describe('the preferences registry', () => {
   });
   it('declares the shell keys with their defaults, and each default passes its own validator', () => {
     expect(Object.keys(PREFERENCE_KEYS)).toEqual(['usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme',
-      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName']);
+      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName', 'editor.density', 'editor.typography', 'layout.regions', 'analysis.lastViewedRevision']);
     expect(preferenceDefaults()).toEqual({ 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
-      'notifications.enabled': false, 'notifications.completions': false, 'notifications.sound': false, 'notifications.bookName': false });
+      'notifications.enabled': false, 'notifications.completions': false, 'notifications.sound': false, 'notifications.bookName': false,
+      'editor.density': 'standard',
+      'editor.typography': { preset: 'editing', fontFamily: 'serif', fontSize: 17, lineHeight: 1.9, columnWidth: 38, alignment: 'start' },
+      'layout.regions': { supportingWidth: null, drawerWidth: null, hidden: [] }, 'analysis.lastViewedRevision': {} });
     for (const definition of Object.values(PREFERENCE_KEYS)) expect(definition.validate(definition.default)).toBe(true);
   });
 
@@ -208,5 +211,21 @@ describe('pinning and recency through ShellPreferences', () => {
     await first.visit({ bookId: 'book-a', title: '甲', section: 'review' });
     await second.visit({ bookId: 'book-b', title: '乙', section: 'overview' });
     expect(store.read().values['shell.recentBooks'].map((entry) => entry.bookId)).toEqual(['book-b', 'book-a']);
+  });
+
+  it('remembers only an actually viewed analysis revision, keeps other Books and never moves backwards', async () => {
+    const store = createPreferenceStore(sandbox);
+    const api: PreferencesRendererApi = { getPreferences: async () => store.read(), savePreference: async (input) => store.save(input) };
+    const first = new ShellPreferences(api);
+    const second = new ShellPreferences(api);
+    await first.load(); await second.load();
+    await first.viewAnalysis('book-a', { revisionId: 'revision-2', ordinal: 2 });
+    await second.viewAnalysis('book-b', { revisionId: 'revision-1', ordinal: 1 });
+    await second.viewAnalysis('book-a', { revisionId: 'revision-1', ordinal: 1 });
+    expect(store.read().values['analysis.lastViewedRevision']).toEqual({
+      'book-a': { revisionId: 'revision-2', ordinal: 2 }, 'book-b': { revisionId: 'revision-1', ordinal: 1 },
+    });
+    const restarted = new ShellPreferences(api); await restarted.load();
+    expect(restarted.current['analysis.lastViewedRevision']).toEqual(store.read().values['analysis.lastViewedRevision']);
   });
 });

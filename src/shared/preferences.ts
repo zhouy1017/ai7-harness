@@ -161,8 +161,102 @@ export function parseKeyboardBindings(value: unknown): KeyboardBindings | null {
 }
 
 
+// View-only presentation (Issue #951, wave 12 slice 12a; V2-UX-VIEW-001 to VIEW-012): how the workspace is spaced, how the
+// manuscript is set for reading, and how wide the supporting regions are. Local rendering only: no value here is written into
+// a manuscript, an export or a model context, and none changes what an action does (VIEW-006, VIEW-009).
+
+/** Workspace Density Mode (VIEW-001): `standard` first; `compact` tightens navigation, tables, queues, filters and metadata only. */
+export type WorkspaceDensity = 'standard' | 'compact';
+/** Manuscript Reading Presets (VIEW-003): an editing rhythm and a reading rhythm, independent of density. */
+export type ReadingPreset = 'editing' | 'reading';
+/** The supported manuscript faces, each with a stable CJK fallback chain (VIEW-004). */
+export type ManuscriptFontFamily = 'serif' | 'kai' | 'fangsong' | 'sans';
+export type ManuscriptAlignment = 'start' | 'justify';
+
+export interface ManuscriptTypography {
+  readonly preset: ReadingPreset;
+  readonly fontFamily: ManuscriptFontFamily;
+  /** CSS pixels. */
+  readonly fontSize: number;
+  readonly lineHeight: number;
+  /** Fullwidth characters per line. */
+  readonly columnWidth: number;
+  readonly alignment: ManuscriptAlignment;
+}
+
+/** The readable supported bounds of each adjustment (VIEW-004); a stored value outside them is not read. */
+export const TYPOGRAPHY_BOUNDS = Object.freeze({
+  fontSize: Object.freeze({ min: 14, max: 24, step: 1 }),
+  lineHeight: Object.freeze({ min: 1.5, max: 2.4, step: 0.05 }),
+  columnWidth: Object.freeze({ min: 24, max: 48, step: 1 }),
+});
+
+/** The two presets' starting values (VIEW-005: a Chinese serif around 17 px, line height 1.9–2.0, 30–38 characters a line). */
+export const READING_PRESETS: Readonly<Record<ReadingPreset, Omit<ManuscriptTypography, 'preset'>>> = Object.freeze({
+  editing: Object.freeze({ fontFamily: 'serif', fontSize: 17, lineHeight: 1.9, columnWidth: 38, alignment: 'start' }),
+  reading: Object.freeze({ fontFamily: 'serif', fontSize: 18, lineHeight: 2, columnWidth: 32, alignment: 'justify' }),
+});
+
+export const DEFAULT_TYPOGRAPHY: ManuscriptTypography = Object.freeze({ preset: 'editing', ...READING_PRESETS.editing });
+
+/** A supporting region that may be hidden and restored from `视图` (VIEW-010, VIEW-012); identity and status never are. */
+export type OptionalRegion = 'position-rail';
+export const OPTIONAL_REGIONS: ReadonlyArray<OptionalRegion> = Object.freeze(['position-rail']);
+
+/** Region sizes in CSS pixels; `null` is the layout's own default, which follows the window as it always has. */
+export interface LayoutRegions {
+  readonly supportingWidth: number | null;
+  readonly drawerWidth: number | null;
+  readonly hidden: ReadonlyArray<OptionalRegion>;
+}
+
+/** Safe minimum and maximum of each resizable region (VIEW-007), the keyboard step, and the size a first drag starts from. */
+export const REGION_BOUNDS = Object.freeze({
+  supportingWidth: Object.freeze({ min: 256, max: 560, step: 16, initial: 336 }),
+  drawerWidth: Object.freeze({ min: 320, max: 640, step: 16, initial: 416 }),
+});
+
+export const DEFAULT_LAYOUT_REGIONS: LayoutRegions = Object.freeze({ supportingWidth: null, drawerWidth: null, hidden: Object.freeze([]) });
+
+function within(value: unknown, bounds: { readonly min: number; readonly max: number }): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= bounds.min && value <= bounds.max;
+}
+
+function exactKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>): boolean {
+  return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+export function isWorkspaceDensity(value: unknown): value is WorkspaceDensity {
+  return value === 'standard' || value === 'compact';
+}
+
+export function isManuscriptTypography(value: unknown): value is ManuscriptTypography {
+  if (!isPlainObject(value) || !exactKeys(value, ['preset', 'fontFamily', 'fontSize', 'lineHeight', 'columnWidth', 'alignment'])) return false;
+  return (value['preset'] === 'editing' || value['preset'] === 'reading') &&
+    (value['fontFamily'] === 'serif' || value['fontFamily'] === 'kai' || value['fontFamily'] === 'fangsong' || value['fontFamily'] === 'sans') &&
+    within(value['fontSize'], TYPOGRAPHY_BOUNDS.fontSize) && Number.isInteger(value['fontSize']) &&
+    within(value['lineHeight'], TYPOGRAPHY_BOUNDS.lineHeight) &&
+    within(value['columnWidth'], TYPOGRAPHY_BOUNDS.columnWidth) && Number.isInteger(value['columnWidth']) &&
+    (value['alignment'] === 'start' || value['alignment'] === 'justify');
+}
+
+export function isLayoutRegions(value: unknown): value is LayoutRegions {
+  if (!isPlainObject(value) || !exactKeys(value, ['supportingWidth', 'drawerWidth', 'hidden'])) return false;
+  const hidden = value['hidden'];
+  return (value['supportingWidth'] === null || (within(value['supportingWidth'], REGION_BOUNDS.supportingWidth) && Number.isInteger(value['supportingWidth']))) &&
+    (value['drawerWidth'] === null || (within(value['drawerWidth'], REGION_BOUNDS.drawerWidth) && Number.isInteger(value['drawerWidth']))) &&
+    Array.isArray(hidden) && hidden.length <= OPTIONAL_REGIONS.length && new Set(hidden).size === hidden.length &&
+    hidden.every((region) => (OPTIONAL_REGIONS as ReadonlyArray<unknown>).includes(region));
+}
+
 const isUnitPrices = (value: unknown): value is UnitPrices => parseUnitPrices(value) !== null;
 const isKeyboardBindings = (value: unknown): value is KeyboardBindings => parseKeyboardBindings(value) !== null;
+
+export type AnalysisLastViewed = Readonly<Record<string, { revisionId: string; ordinal: number }>>;
+const isAnalysisLastViewed = (value: unknown): value is AnalysisLastViewed => isPlainObject(value) && Object.keys(value).length <= 256 &&
+  Object.entries(value).every(([bookId, revision]) => bookId.length > 0 && bookId.length <= MAX_SHELL_BOOK_ID_CHARACTERS && isPlainObject(revision) &&
+    Object.keys(revision).length === 2 && typeof revision['revisionId'] === 'string' && revision['revisionId'].length > 0 && revision['revisionId'].length <= 64 &&
+    Number.isSafeInteger(revision['ordinal']) && (revision['ordinal'] as number) > 0);
 
 export const PREFERENCE_KEYS = Object.freeze({
   'usage.unitPrices': preference(isUnitPrices, {} as UnitPrices),
@@ -180,6 +274,14 @@ export const PREFERENCE_KEYS = Object.freeze({
   'notifications.completions': preference(isBoolean, false),
   'notifications.sound': preference(isBoolean, false),
   'notifications.bookName': preference(isBoolean, false),
+  // 12a: 设置 › 本机 › 外观 — Workspace Density Mode, 标准 by default (VIEW-001/002); spacing only, never content or authority.
+  'editor.density': preference(isWorkspaceDensity, 'standard' as WorkspaceDensity),
+  // 12a: the manuscript's reading preset and typography (VIEW-003 to VIEW-006); local rendering only.
+  'editor.typography': preference(isManuscriptTypography, DEFAULT_TYPOGRAPHY),
+  // 12a: Resizable Workspace Regions and Optional Surface Visibility (VIEW-007 to VIEW-012); 恢复默认布局 returns these defaults.
+  'layout.regions': preference(isLayoutRegions, DEFAULT_LAYOUT_REGIONS),
+  // 12b: the last analysis panel actually viewed for each Book, local UI state only.
+  'analysis.lastViewedRevision': preference(isAnalysisLastViewed, {} as AnalysisLastViewed),
 });
 
 export type PreferenceKey = keyof typeof PREFERENCE_KEYS;

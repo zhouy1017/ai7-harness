@@ -17,6 +17,13 @@ import {
 } from '../shared/protocol.js';
 import {
   LinkedPackageVersionFocus,
+  PACKAGE_ARCHIVE_DESTINATION_UNCHOSEN,
+  PACKAGE_ARCHIVE_FILES_LABEL,
+  PACKAGE_ARCHIVE_FILES_TRUNCATED,
+  PACKAGE_ARCHIVE_NOTE,
+  PACKAGE_ARCHIVE_PAGES_NOTE,
+  PACKAGE_ARCHIVE_REVEAL,
+  PACKAGE_ARCHIVE_STATUS_LINES,
   PACKAGE_CONDITION_STATE,
   PACKAGE_CONDITIONS_HEADING,
   PACKAGE_CURRENT_MARK,
@@ -27,6 +34,8 @@ import {
   PACKAGE_EXPORT_FILES_TRUNCATED,
   PACKAGE_EXPORT_FOLDER_UNCHOSEN,
   PACKAGE_EXPORT_OPTIONS_NOTE,
+  PACKAGE_EXPORT_ROUTE_LABELS,
+  PACKAGE_EXPORT_ROUTES_LEGEND,
   PACKAGE_EXPORT_STATUS_LINES,
   PACKAGE_EXPORTS_TRUNCATED,
   PACKAGE_HEADING,
@@ -42,6 +51,7 @@ import {
   PACKAGE_STATUS_LINES,
   PACKAGE_VERSIONS_HEADING,
   PACKAGE_VERSIONS_TRUNCATED,
+  packageArchiveStoppedLine,
   packageChangedLine,
   packageExportFidelitySummary,
   packageExportFileName,
@@ -77,6 +87,7 @@ export interface MountBookDeliveryPackageOptions {
   root: HTMLElement;
   bookId: string;
   api: Pick<RendererApi, 'inspectBookDeliveryPackage' | 'prepareBookDeliveryPackage' | 'reviewBookDeliveryPackageExport' |
+    'chooseBookDeliveryPackageArchiveDestination' | 'approveBookDeliveryPackageArchiveExport' | 'cancelBookDeliveryPackageArchiveExport' |
     'chooseBookDeliveryPackageExportFolder' | 'approveBookDeliveryPackageExport' | 'cancelBookDeliveryPackageExport' | 'revealManuscriptExport'>;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
@@ -117,6 +128,7 @@ function fact(term: string, value: string): HTMLElement[] {
 type ExportPhase = 'reviewing' | 'ready' | 'choosing' | 'prepared' | 'writing' | 'done';
 
 interface ExportState {
+  route: 'folder' | 'archive';
   packageVersionId: string;
   versionLabel: string;
   /** The switches as the editor left them; the review answers for the ones it was asked with. */
@@ -434,13 +446,14 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const item = el('li');
     item.dataset['packageExportId'] = entry.exportId;
     item.dataset['packageExportState'] = entry.state;
+    item.dataset['packageExportKind'] = entry.kind ?? 'folder';
     item.append(
       el('p', 'package-export-line', packageExportHistoryLine(entry.summary, localInstantLabel(entry.exportedAt))),
       el('p', 'field-note package-export-folder', entry.folder),
     );
     if (entry.revealPreparationId !== null) {
       const preparationId = entry.revealPreparationId;
-      const reveal = el('button', 'quiet', PACKAGE_EXPORT_ACTION_LABELS.reveal);
+      const reveal = el('button', 'quiet', entry.kind === 'archive' ? PACKAGE_ARCHIVE_REVEAL : PACKAGE_EXPORT_ACTION_LABELS.reveal);
       reveal.type = 'button';
       reveal.dataset['packageAction'] = 'reveal-export';
       reveal.addEventListener('click', () => void revealExport(preparationId));
@@ -460,13 +473,33 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     heading.tabIndex = -1;
     panel.setAttribute('aria-labelledby', heading.id);
     panel.append(heading);
+    const routes = el('fieldset', 'package-export-routes');
+    routes.append(el('legend', undefined, PACKAGE_EXPORT_ROUTES_LEGEND));
+    for (const value of ['folder', 'archive'] as const) {
+      const title = PACKAGE_EXPORT_ROUTE_LABELS[value];
+      const label = el('label');
+      const radio = el('input');
+      radio.type = 'radio'; radio.name = 'package-export-route'; radio.value = value;
+      radio.checked = current.route === value;
+      radio.disabled = inFlight || current.result !== null;
+      radio.addEventListener('change', () => {
+        if (!radio.checked || inFlight || current.result !== null) return;
+        current.route = value; current.prepared = null; current.phase = 'reviewing'; current.problem = null;
+        current.offset = 0; current.selected.clear();
+        draw('keep');
+        reviewExport(current, 'keep');
+      });
+      label.append(radio, document.createTextNode(title)); routes.append(label);
+    }
+    panel.append(routes);
+    if (current.route === 'archive') panel.append(el('p', 'field-note', PACKAGE_ARCHIVE_NOTE));
     const shown = current.result ?? current.prepared;
     if (current.review !== null) panel.append(el('p', 'export-local-line', current.review.statement));
     panel.append(renderExportOptions(current));
     if (current.review !== null) {
       const review = current.review;
       panel.dataset['packageExportDegraded'] = String(review.degraded);
-      const label = el('p', 'package-export-files-label', PACKAGE_EXPORT_FILES_LABEL);
+      const label = el('p', 'package-export-files-label', current.route === 'archive' ? PACKAGE_ARCHIVE_FILES_LABEL : PACKAGE_EXPORT_FILES_LABEL);
       label.id = uid('export-files');
       const list = el('ol', 'package-export-files');
       list.setAttribute('aria-labelledby', label.id);
@@ -475,7 +508,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       }
       panel.append(label, list);
       if (shown === null) {
-        panel.append(el('p', 'field-note', '勾选本次要导出的文件，每次最多选择本页的 40 个。翻页会清除选择；其他文件不会一并导出。'));
+        panel.append(el('p', 'field-note', current.route === 'archive'
+          ? PACKAGE_ARCHIVE_PAGES_NOTE
+          : '勾选本次要导出的文件，每次最多选择本页的 40 个。翻页会清除选择；其他文件不会一并导出。'));
         const pages = el('div', 'button-row');
         for (const [name, offset] of [['上一页', review.offset > 0 ? Math.max(0, review.offset - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED) : null], ['下一页', review.nextOffset]] as const) {
           const button = el('button', 'quiet', name);
@@ -496,17 +531,20 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         }
         panel.append(pages);
       }
-      if ((shown?.filesTruncated ?? review.filesTruncated) === true) panel.append(el('p', 'field-note', PACKAGE_EXPORT_FILES_TRUNCATED));
+      if ((shown?.filesTruncated ?? review.filesTruncated) === true) panel.append(el('p', 'field-note', current.route === 'archive'
+        ? PACKAGE_ARCHIVE_FILES_TRUNCATED : PACKAGE_EXPORT_FILES_TRUNCATED));
       // EXP-008: what is degraded or cannot be written is said above; the approval accepts it for this export only.
       if (review.degraded) panel.append(el('p', 'export-degraded-note attention-note', EXPORT_DEGRADED_NOTE));
     }
     const folder = el('div', 'package-export-folder-choice');
     folder.dataset['packageExportFolder'] = current.prepared === null ? 'unchosen' : 'chosen';
-    folder.append(el('p', 'package-export-folder-line', current.prepared === null ? PACKAGE_EXPORT_FOLDER_UNCHOSEN : packageExportFolderLine(current.prepared.folder)));
+    folder.append(el('p', 'package-export-folder-line', current.prepared === null
+      ? current.route === 'archive' ? PACKAGE_ARCHIVE_DESTINATION_UNCHOSEN : PACKAGE_EXPORT_FOLDER_UNCHOSEN
+      : packageExportFolderLine(current.prepared.folder)));
     if (current.result === null) {
       const choose = exportButton(current.prepared === null ? 'choose' : 'chooseAgain', 'secondary', () => void chooseFolder());
       choose.dataset['packageAction'] = 'export-choose';
-      choose.disabled = inFlight || current.review === null || current.selected.size === 0;
+      choose.disabled = inFlight || current.review === null || (current.route === 'folder' && current.selected.size === 0);
       folder.append(choose);
     }
     panel.append(folder);
@@ -559,7 +597,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const item = el('li');
     item.dataset['packageExportFile'] = file.key;
     item.dataset['packageExportFormat'] = file.format;
-    if (current.prepared === null && current.result === null) {
+    if (current.route === 'folder' && current.prepared === null && current.result === null) {
       const label = el('label');
       const box = el('input');
       box.type = 'checkbox';
@@ -615,10 +653,15 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     block.dataset['packageExportState'] = result.state;
     block.setAttribute('role', 'status');
     block.append(el('strong', 'package-export-summary', result.summary));
-    if (result.stopped !== null) block.append(el('p', 'attention-note package-export-stopped', packageExportStoppedLine(result.stopped)));
+    if (result.stopped !== null) block.append(el('p', 'attention-note package-export-stopped', result.kind === 'archive'
+      ? packageArchiveStoppedLine(result.stopped) : packageExportStoppedLine(result.stopped)));
     const row = el('div', 'button-row');
     const shown = result.files.find((file) => file.revealAvailable);
-    if (shown !== undefined) row.append(exportButton('reveal', 'secondary', () => void revealExport(shown.preparationId)));
+    if (shown !== undefined) {
+      const reveal = exportButton('reveal', 'secondary', () => void revealExport(shown.preparationId));
+      if (result.kind === 'archive') reveal.textContent = PACKAGE_ARCHIVE_REVEAL;
+      row.append(reveal);
+    }
     row.append(exportButton('close', 'quiet', () => closeExport(false)));
     block.append(row);
     return block;
@@ -629,6 +672,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   function openExport(version: BookDeliveryPackageVersionProjection): void {
     if (destroyed || busy()) return;
     exporting = {
+      route: 'folder',
       packageVersionId: version.packageVersionId,
       versionLabel: version.label,
       options: { includeAnnotations: true, includeSuggestions: true },
@@ -661,7 +705,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const request = ++exportTicket;
     const asked = current.options;
     options.setStatus(PACKAGE_EXPORT_STATUS_LINES.reviewing, 'busy');
-    void api.reviewBookDeliveryPackageExport({ packageVersionId: current.packageVersionId, options: asked, offset: current.offset }).then(
+    void api.reviewBookDeliveryPackageExport({ packageVersionId: current.packageVersionId, options: asked, offset: current.offset,
+      ...(current.route === 'archive' ? { route: 'archive' as const } : {}) }).then(
       (next) => {
         if (destroyed || exporting !== current || request !== exportTicket) return;
         current.phase = 'ready';
@@ -693,15 +738,16 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   async function chooseFolder(): Promise<void> {
     const current = exporting;
     if (destroyed || current === null || busy() || current.review === null || current.result !== null) return;
-    if (current.selected.size === 0) return;
+    if (current.route === 'folder' && current.selected.size === 0) return;
     const reviewed = current.review;
     const request = ++exportTicket;
     current.phase = 'choosing';
     current.problem = null;
     draw('keep');
-    options.setStatus(PACKAGE_EXPORT_STATUS_LINES.choosing, 'busy');
+    options.setStatus(current.route === 'archive' ? PACKAGE_ARCHIVE_STATUS_LINES.choosing : PACKAGE_EXPORT_STATUS_LINES.choosing, 'busy');
     try {
-      const chosen = await api.chooseBookDeliveryPackageExportFolder({
+      const choose = current.route === 'archive' ? api.chooseBookDeliveryPackageArchiveDestination : api.chooseBookDeliveryPackageExportFolder;
+      const chosen = await choose({
         packageVersionId: current.packageVersionId,
         options: reviewed.options,
         reviewDigest: reviewed.reviewDigest,
@@ -738,9 +784,10 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     current.phase = 'writing';
     current.problem = null;
     draw('keep');
-    options.setStatus(PACKAGE_EXPORT_STATUS_LINES.writing, 'busy');
+    options.setStatus(current.route === 'archive' ? PACKAGE_ARCHIVE_STATUS_LINES.writing : PACKAGE_EXPORT_STATUS_LINES.writing, 'busy');
     try {
-      const outcome = await api.approveBookDeliveryPackageExport({ exportId: prepared.exportId });
+      const approve = current.route === 'archive' ? api.approveBookDeliveryPackageArchiveExport : api.approveBookDeliveryPackageExport;
+      const outcome = await approve({ exportId: prepared.exportId });
       if (destroyed || exporting !== current || request !== exportTicket) return;
       if (outcome.bookId !== bookId || outcome.package.bookId !== bookId || outcome.export.exportId !== prepared.exportId) {
         throw new Error(PACKAGE_EXPORT_STATUS_LINES.approveFailed);
@@ -767,7 +814,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const current = exporting;
     if (current === null) return;
     if (current.phase === 'writing' && current.prepared !== null) {
-      void api.cancelBookDeliveryPackageExport({ exportId: current.prepared.exportId }).then((accepted) => {
+      const cancel = current.route === 'archive' ? api.cancelBookDeliveryPackageArchiveExport : api.cancelBookDeliveryPackageExport;
+      void cancel({ exportId: current.prepared.exportId }).then((accepted) => {
         if (destroyed || exporting !== current) return;
         if (accepted) {
           exporting = null;

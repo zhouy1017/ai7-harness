@@ -8,6 +8,7 @@ import {
   RUN_BUDGET_CEILING_ARGUMENT,
   BACKGROUND_QUIET_ARGUMENT,
   CALIBRATION_MIN_BOOKS_ARGUMENT,
+  EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
   VALIDATION_CASE_ARGUMENT,
   VALIDATION_DELTA_ARGUMENT,
@@ -77,7 +78,8 @@ export function requestTimeoutMs(operation: ServiceOperation): number {
     operation === 'prepareManuscriptExport' || operation === 'approveManuscriptExport' ||
     // A 图书交付包 export (Issue #416, S67b) does the same for every file of the version, one after another.
     operation === 'reviewBookDeliveryPackageExport' || operation === 'prepareBookDeliveryPackageExport' ||
-    operation === 'approveBookDeliveryPackageExport' ||
+    operation === 'approveBookDeliveryPackageExport' || operation === 'prepareBookDeliveryPackageArchiveExport' ||
+    operation === 'approveBookDeliveryPackageArchiveExport' ||
     // 资料库 (Issue #427, S79c) reads a file of up to 1 GiB whole to digest it, and 放入资料库 copies, syncs and checks
     // it; from a slow disk or share that takes minutes, and a timeout would stop the service mid-copy.
     operation === 'previewLibraryMaterial' || operation === 'addLibraryMaterial' ||
@@ -131,8 +133,11 @@ function serviceEnvironment(
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined,
   recoveryControl: J08RecoveryControl | undefined,
   modelAdapterControl: J04ModelAdapterControl | undefined,
+  journalFaultArmed = false,
 ): NodeJS.ProcessEnv {
   const selected: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: '1' };
+  // J-02's Edit Journal write-failure injection (Issue #951, T0-1): the service admits its argument only as J-02's.
+  if (journalFaultArmed) selected.AI7_E2E_JOURNEY = 'J-02';
   if (importControl) selected.AI7_E2E_JOURNEY = 'J-01';
   if (foregroundExecutionControl) selected.AI7_E2E_JOURNEY = 'J-03';
   if (recoveryControl) selected.AI7_E2E_JOURNEY = 'J-08';
@@ -162,7 +167,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 152 &&
+    value.protocolVersion === 155 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -228,6 +233,8 @@ export class ServiceClient {
     backgroundQuietMs?: number,
     /** J-11 only (Issue #429, EVAL-011a): the calibration gate in Books, so the Journey proves the house offset with two Books. */
     calibrationMinBooks?: number,
+    /** J-02 only (Issue #951, T0-1): arm the Edit Journal write-failure injection, which every other launch refuses. */
+    journalFaultArmed?: boolean,
   ): Promise<ServiceClient> {
     if (!isAbsolute(executable) || !isAbsolute(serviceEntry) || !isAbsolute(dataRoot)) {
       throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
@@ -258,12 +265,14 @@ export class ServiceClient {
     if (backgroundQuietMs !== undefined) args.push(BACKGROUND_QUIET_ARGUMENT, String(backgroundQuietMs));
     // J-11's calibration gate (Issue #429, EVAL-011a): the Books the house offset waits on, beside the adapter.
     if (calibrationMinBooks !== undefined) args.push(CALIBRATION_MIN_BOOKS_ARGUMENT, String(calibrationMinBooks));
+    // J-02's Edit Journal write-failure injection (Issue #951, T0-1): the service decides it again by the same rule.
+    if (journalFaultArmed === true) args.push(EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT, 'armed');
     const child = spawn(
       executable,
       args,
       {
         cwd: dirname(serviceEntry),
-        env: serviceEnvironment(executable, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl),
+        env: serviceEnvironment(executable, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, journalFaultArmed === true),
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       },

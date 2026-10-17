@@ -57,6 +57,7 @@ export function sidebarMode(collapsed: boolean, narrow: boolean): SidebarMode {
 
 /** The screen states that are global destinations or 设置 pages; a Book screen says its own place instead. */
 const SCREEN_ACTIVE: Readonly<Record<string, ShellActive>> = Object.freeze({
+  'book-findings': { kind: 'section', section: 'findings' },
   landing: { kind: 'destination', destination: 'library' },
   'global-attention': { kind: 'destination', destination: 'attention' },
   'series-list': { kind: 'destination', destination: 'series' },
@@ -192,6 +193,16 @@ export class ShellPreferences {
     return this.write('shell.sidebarCollapsed', () => collapsed, false);
   }
 
+  viewAnalysis(bookId: string, revision: { revisionId: string; ordinal: number }): Promise<void> {
+    const previous = this.values['analysis.lastViewedRevision'][bookId];
+    if (previous !== undefined && previous.ordinal >= revision.ordinal) return Promise.resolve();
+    return this.write('analysis.lastViewedRevision', (latest) => {
+      const held = latest['analysis.lastViewedRevision'];
+      if ((held[bookId]?.ordinal ?? 0) >= revision.ordinal) return held;
+      return Object.fromEntries([...Object.entries(held).filter(([id]) => id !== bookId), [bookId, { revisionId: revision.revisionId, ordinal: revision.ordinal }]].slice(-256));
+    }, true, false);
+  }
+
   togglePin(book: ShellBookEntry, limit: number): Promise<void> {
     return this.write('shell.pinnedBooks', (latest) => togglePinnedBook(latest['shell.pinnedBooks'], book, limit), true);
   }
@@ -224,7 +235,7 @@ export class ShellPreferences {
 export interface ShellSurface {
   /** A screen is on `#screen`: mark it, and when it belongs to a Book, make that Book current and recent. */
   follow(state: string, place: ShellPlace | null): void;
-  /** The screen on `#screen` is shown for another section of its Book than its own (发现 on ②A, 历史与恢复 on 工作概览). */
+  /** The screen on `#screen` is shown for another section of its Book than its own (历史与恢复 on 工作概览). */
   markSection(section: ShellBookSection): void;
   /** The window left its Book (书库, 待我处理): the current-Book groups go. */
   leaveBook(): void;

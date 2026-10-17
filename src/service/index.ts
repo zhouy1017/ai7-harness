@@ -11,7 +11,10 @@ import {
   VALIDATION_DELTA_ARGUMENT,
   BACKGROUND_QUIET_ARGUMENT,
   CALIBRATION_MIN_BOOKS_ARGUMENT,
+  EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT,
+  EDIT_JOURNAL_FAULT_REFUSED_CODE,
   calibrationMinBooksForLaunch,
+  editJournalFaultControlAdmitted,
   parseBackgroundQuietMs,
   parseTrustedLaunchForm,
   type J01ImportControl,
@@ -444,6 +447,10 @@ async function dispatch(
         op: request.op,
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress, request.input.revisionId),
       };
+    case 'inspectBookFindings':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBookFindings(request.input.bookId, request.input.offset) };
+    case 'inspectParagraphAnalysis':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectParagraphAnalysis(request.input.bookId, request.input.manuscriptId, request.input.blockId, request.input.radius) };
     case 'prepareBaselineAnalysis':
       return {
         id: request.id,
@@ -1287,7 +1294,14 @@ async function dispatch(
         result: store.getManuscriptWindow(request.input.manuscriptId, request.input.branchId, request.input.cursor),
       };
     case 'flushJournalEdit':
+      // A write the injection refuses never reaches the store (Issue #951, T0-1).
+      journalFaultCall(() => editJournalFault?.beforeJournalWrite());
       return { id: request.id, ok: true, op: request.op, result: store.flushJournalEdit(request.input) };
+    case 'setEditJournalFault': {
+      const fault = editJournalFault;
+      if (fault === undefined) throw new StoreErrorClass(EDIT_JOURNAL_FAULT_REFUSED_CODE, '写入故障注入只在开发测试启动中可用。');
+      return { id: request.id, ok: true, op: request.op, result: journalFaultCall(() => fault.set(request.input.mode)) };
+    }
     case 'createEditorialMark':
       return { id: request.id, ok: true, op: request.op, result: store.createEditorialMark(request.input) };
     case 'getEditorialMarkCard':
@@ -1449,13 +1463,18 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await store.reviewBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
+    case 'prepareBookDeliveryPackageArchiveExport':
+      return { id: request.id, ok: true, op: request.op,
+        result: await store.prepareBookDeliveryPackageArchiveExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable) };
     case 'prepareBookDeliveryPackageExport':
       return {
         id: request.id, ok: true, op: request.op,
         result: await store.prepareBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
+    case 'cancelBookDeliveryPackageArchiveExport':
     case 'cancelBookDeliveryPackageExport':
       return { id: request.id, ok: true, op: request.op, result: jobs.cancelPackageExport(request.input.jobId) };
+    case 'approveBookDeliveryPackageArchiveExport':
     case 'approveBookDeliveryPackageExport':
       return {
         id: request.id, ok: true, op: request.op,
@@ -1635,6 +1654,8 @@ function parseArguments(argv: string[]): {
   backgroundQuietMs: number | undefined;
   /** J-11 only (Issue #429, EVAL-011a): the calibration gate in Books, 2–10. */
   calibrationMinBooks: number | undefined;
+  /** J-02 only (Issue #951, T0-1): whether `setEditJournalFault` may arm the write-failure injection. */
+  journalFaultArmed: boolean;
 } {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
@@ -1645,7 +1666,7 @@ function parseArguments(argv: string[]): {
       !value ||
       values.has(key) ||
       (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control' &&
-        key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control' &&
+        key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control' && key !== EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT &&
         key !== '--j04-model-adapter' && key !== '--j04-connectivity-path' && key !== '--j10-unit-hold-path' && key !== '--j16-answer-hold-path' &&
         key !== BACKGROUND_QUIET_ARGUMENT && key !== CALIBRATION_MIN_BOOKS_ARGUMENT && key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
         key !== PROVIDER_CACHE_ROOT_ARGUMENT && key !== VALIDATION_CASE_ARGUMENT && key !== VALIDATION_DELTA_ARGUMENT)
@@ -1687,6 +1708,9 @@ function parseArguments(argv: string[]): {
   const recoveryControl = recoveryControlValue === 'interrupt-after-journal-ack'
     ? recoveryControlValue
     : undefined;
+  // J-02's Edit Journal write-failure injection (Issue #951, T0-1): decided by the same rule main decides it by.
+  const journalFaultArmed = editJournalFaultControlAdmitted(values.get(EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT), process.env.AI7_E2E_JOURNEY,
+    launchForm.trustedOperationalScope);
   const modelAdapterControlValue = values.get('--j04-model-adapter');
   const modelAdapterControl = modelAdapterControlValue !== undefined && J04_MODEL_ADAPTER_CONTROL_PATTERN.test(modelAdapterControlValue)
     ? modelAdapterControlValue
@@ -1718,6 +1742,7 @@ function parseArguments(argv: string[]): {
       (foregroundExecutionControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-03')) ||
     (recoveryControlValue !== undefined &&
       (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
+    journalFaultArmed === null ||
     // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成, J-10's
     // cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94) and J-13's 书系一致性 (Issue #64)
     // and the Review Runs a Captured Procedure is captured from and run as (Issue #65), and J-07's 写作任务 (Issue #432).
@@ -1746,7 +1771,7 @@ function parseArguments(argv: string[]): {
   }
   return {
     dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath,
-    answerHoldPath, backgroundQuietMs: backgroundQuietMs ?? undefined, calibrationMinBooks: calibrationMinBooks ?? undefined,
+    answerHoldPath, backgroundQuietMs: backgroundQuietMs ?? undefined, calibrationMinBooks: calibrationMinBooks ?? undefined, journalFaultArmed,
   };
 }
 
@@ -1796,6 +1821,20 @@ function parentIsAlive(parentPid: number): boolean {
 }
 
 let StoreErrorClass: typeof import('./store.js').StoreError;
+/** The Edit Journal write-failure injection (Issue #951, T0-1); unarmed unless J-02's armed launch made it. */
+let editJournalFault: import('./bounded-manuscript.js').EditJournalFaultInjection | undefined;
+
+/** A refusal of the injection, said as the store says its own refusals. */
+function journalFaultCall<T>(call: () => T): T {
+  try {
+    return call();
+  } catch (error) {
+    if (error instanceof Error && error.name === 'BoundedStoreError' && 'code' in error && typeof error.code === 'string') {
+      throw new StoreErrorClass(error.code, error.message);
+    }
+    throw error;
+  }
+}
 /** The fast-role routes' reading (Issue #842), loaded with the owners after network denial is installed. */
 let fastInteractionRoutesOf: typeof import('./fast-role/fast-role-suggestions.js').fastInteractionRoutes;
 
@@ -1816,7 +1855,7 @@ async function run(): Promise<void> {
   // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
   const nativeFetch: typeof fetch = globalThis.fetch;
   const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath,
-    backgroundQuietMs, calibrationMinBooks } = parseArguments(process.argv.slice(2));
+    backgroundQuietMs, calibrationMinBooks, journalFaultArmed } = parseArguments(process.argv.slice(2));
   if (launchForm.trustedOperationalScope === 'developer-live') {
     // The single-host allowance (settlement l): armed before the denial so its gates admit exactly the
     // policy's endpoint host and port; Node's own fetch resolves `tls.connect` and `dns.lookup` at call time.
@@ -1866,6 +1905,9 @@ async function run(): Promise<void> {
       import('./fast-role/material-translation-contract.js'),
     ]);
   StoreErrorClass = StoreError;
+  // The Edit Journal write-failure injection (Issue #951, T0-1): armed only by J-02's armed launch, refused everywhere else.
+  const { EditJournalFaultInjection } = await import('./bounded-manuscript.js');
+  editJournalFault = new EditJournalFaultInjection(journalFaultArmed);
   fastInteractionRoutesOf = fastInteractionRoutes;
   let stopping = false;
   const stop = (): void => {

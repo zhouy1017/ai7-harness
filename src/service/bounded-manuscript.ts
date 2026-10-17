@@ -50,6 +50,11 @@ import {
   type SearchMatchProjection,
   type SearchResultsProjection,
   type SearchSummaryProjection,
+  EDIT_JOURNAL_FAULT_CODE,
+  EDIT_JOURNAL_FAULT_REFUSED_CODE,
+  isEditJournalFaultMode,
+  type EditJournalFaultMode,
+  type EditJournalFaultProjection,
 } from '../shared/protocol.js';
 import { DOCX_PARSER_IDENTITY_V1, deriveImportFidelityPlan, type FidelityConversionIdentity } from './docx.js';
 import type { BuiltInWorkflowProfile } from './native-workflow-profile.js';
@@ -2268,6 +2273,42 @@ export class BoundedStoreFatalError extends Error {
     super('Bounded SQLite transaction rollback failed.', { cause });
     this.name = 'BoundedStoreFatalError';
   }
+}
+
+/**
+ * The Edit Journal write-failure injection (Issue #951, wave 12 slice 12a; T0-1): process-local, so a restart starts it
+ * `off`. Unarmed — every launch but J-02's armed one — it refuses to change and never fires. Armed, `fail-next` refuses the
+ * next journal write and returns to `off`, `fail-all` refuses every write until set `off`. A refused write starts nothing:
+ * the store is never reached, so a retry with the same client edit id is the one write, never a second entry.
+ */
+export class EditJournalFaultInjection {
+  #mode: EditJournalFaultMode = 'off';
+
+  constructor(readonly armed: boolean) {}
+
+  set(mode: unknown): EditJournalFaultProjection {
+    requireBounded(this.armed, EDIT_JOURNAL_FAULT_REFUSED_CODE, '写入故障注入只在开发测试启动中可用。');
+    requireBounded(isEditJournalFaultMode(mode), 'EDIT_JOURNAL_FAULT_INVALID', '写入故障模式无效。');
+    this.#mode = mode;
+    return { mode };
+  }
+
+  get mode(): EditJournalFaultMode {
+    return this.#mode;
+  }
+
+  /** Called before a journal write: refuses it while a mode is in force. */
+  beforeJournalWrite(): void {
+    if (!this.armed || this.#mode === 'off') return;
+    if (this.#mode === 'fail-next') this.#mode = 'off';
+    throw new BoundedStoreError(EDIT_JOURNAL_FAULT_CODE, '修订日志暂时无法确认写入。');
+  }
+}
+
+/** One journal write under the injection: the write runs only when no fault is in force. */
+export function journalWriteUnderFault<T>(fault: EditJournalFaultInjection, write: () => T): T {
+  fault.beforeJournalWrite();
+  return write();
 }
 
 function requireBounded(condition: unknown, code: string, message: string): asserts condition {
