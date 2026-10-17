@@ -1,6 +1,6 @@
 import type {
-  ImportedSkillCeiling, ImportedSkillHistoryEntry, ImportedSkillRevisionProjection, ImportedSkillUpdateCandidateSummary, ImportedSkillUpdateCheckProjection,
-  ImportedSkillUpdateDisposition, ImportedSkillUpdateFileChange,
+  ImportedSkillCeiling, ImportedSkillHistoryEntry, ImportedSkillRevisionProjection, ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCandidateSummary,
+  ImportedSkillUpdateCheckProjection, ImportedSkillUpdateDisposition, ImportedSkillUpdateFileChange,
 } from '../shared/protocol.js';
 
 export const IMPORTED_SKILLS_HEADING = '外部 Skill';
@@ -63,4 +63,44 @@ export const IMPORTED_SKILL_HISTORY_NOT_RESTORED = '回到此版本只把它设�
 export function importedSkillHistoryLine(entry: ImportedSkillHistoryEntry): string {
   const origin = entry.origin === 'rule' ? '由更新规则采纳' : entry.origin === 'adopt' ? '由你采纳' : '导入';
   return `本地修订 ${entry.ordinal} · 来源 ${entry.sourceRevision} · ${entry.stateLabel} · ${origin}${entry.current ? ' · 当前' : ''}`;
+}
+
+// The update card's own words: actions, headings, the status line each act answers, and the sentences built from a candidate.
+export const IMPORTED_SKILL_UPDATE_HEADING = '检查更新';
+export const IMPORTED_SKILL_UPDATE_ACTIONS = {
+  keep: '保留此更新', discard: '不保留', open: '查看更新', adopt: '采纳', dismiss: '忽略', close: '关闭', inspectRevision: '查看此修订', rollback: '回到此版本',
+} as const;
+export const IMPORTED_SKILL_UPDATE_HEADINGS = {
+  files: '所选文件', threeWay: '三方对照', perFile: '逐个文件', validation: '校验', authority: '新增的要求', conflicts: '冲突',
+} as const;
+export const IMPORTED_SKILL_UPDATE_STATUS = {
+  disclosed: '已读取所选更新，尚未保留',
+  keptOpen: '已保留更新，等你处理；没有改动任何现有修订',
+  keptAdopted: '已保留更新，并由更新规则采纳为新修订（尚未验证、未启用）',
+  discarded: '已放弃所选更新，没有保留任何内容',
+  adopted: '已采纳为新的待验证修订；没有安装或启用',
+  dismissed: '已忽略这个更新；记录仍然保留',
+  ruleCreated: '已创建自动采纳规则',
+  ruleRevoked: '已撤销自动采纳规则；记录仍然保留',
+  rolledBack: '已回到所选修订；没有恢复它之前的启用',
+} as const;
+export const IMPORTED_SKILL_NOT_CURRENT_NOTE = '这不是当前修订：先在修订历史里「回到此版本」，才能继续验证、安装或启用。';
+export function importedSkillUpdateCheckTitle(read: ImportedSkillUpdateCheckProjection): string {
+  return `${read.acquisition.name} · ${read.acquisition.kind} · 来源 ${read.acquisition.sourceRevision} · 尚未保留`;
+}
+export function importedSkillThreeWayLines(read: ImportedSkillUpdateCandidateProjection): string[] {
+  return [
+    `之前的来源快照：来源 ${read.prior.sourceRevision} · SHA-256 ${read.prior.sha256}`,
+    `当前工作修订：本地修订 ${read.working.ordinal} · SHA-256 ${read.working.sha256}`,
+    `新的来源快照：来源 ${read.incomingSourceRevision} · SHA-256 ${read.incoming.sha256}`,
+  ];
+}
+export function importedSkillUpdateFileLine(path: string, change: ImportedSkillUpdateFileChange): string {
+  return `${path} · ${IMPORTED_SKILL_UPDATE_FILE_LABELS[change]}`;
+}
+export function importedSkillUpdateDispositionLine(disposition: ImportedSkillUpdateDisposition): string {
+  return `结论：${IMPORTED_SKILL_UPDATE_DISPOSITION_LABELS[disposition]}`;
+}
+export function importedSkillRuleConfirmLine(confirmation: string): string {
+  return ` 我确认：${confirmation}`;
 }

@@ -3,13 +3,13 @@ import type {
   ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCheckProjection, RendererApi,
 } from '../shared/protocol.js';
 import {
-  importedSkillCeilingLines, importedSkillHistoryLine, importedSkillIdentityLine, importedSkillRuleActiveLine, importedSkillUpdateCandidateLine,
+  importedSkillCeilingLines, importedSkillHistoryLine, importedSkillIdentityLine, importedSkillRuleActiveLine, importedSkillRuleConfirmLine,
+  importedSkillThreeWayLines, importedSkillUpdateCandidateLine, importedSkillUpdateCheckTitle, importedSkillUpdateDispositionLine, importedSkillUpdateFileLine,
   importedSkillUpdateRelationLine, importedSkillUpdateStatusLine, IMPORTED_SKILLS_HEADING, IMPORTED_SKILLS_NO_EXECUTOR, IMPORTED_SKILL_HISTORY_HEADING,
-  IMPORTED_SKILL_HISTORY_NOT_RESTORED, IMPORTED_SKILL_RULE_CREATE_LABEL, IMPORTED_SKILL_RULE_HEADING, IMPORTED_SKILL_RULE_INACTIVE,
-  IMPORTED_SKILL_RULE_REVOKE_LABEL, IMPORTED_SKILL_RULE_SCOPE, IMPORTED_SKILL_UPDATE_ACCEPT_LABEL, IMPORTED_SKILL_UPDATE_BOUNDARY,
-  IMPORTED_SKILL_UPDATE_CHECK_DIRECTORY_LABEL, IMPORTED_SKILL_UPDATE_CHECK_LABEL, IMPORTED_SKILL_UPDATE_CONFLICT_NOTE,
-  IMPORTED_SKILL_UPDATE_DISPOSITION_LABELS, IMPORTED_SKILL_UPDATE_FILE_LABELS, IMPORTED_SKILL_UPDATE_NONE, IMPORTED_SKILL_UPDATE_NOT_ENABLED,
-  IMPORTED_SKILL_UPDATE_UPSTREAM_LABEL,
+  IMPORTED_SKILL_HISTORY_NOT_RESTORED, IMPORTED_SKILL_NOT_CURRENT_NOTE, IMPORTED_SKILL_RULE_CREATE_LABEL, IMPORTED_SKILL_RULE_HEADING, IMPORTED_SKILL_RULE_INACTIVE,
+  IMPORTED_SKILL_RULE_REVOKE_LABEL, IMPORTED_SKILL_RULE_SCOPE, IMPORTED_SKILL_UPDATE_ACCEPT_LABEL, IMPORTED_SKILL_UPDATE_ACTIONS, IMPORTED_SKILL_UPDATE_BOUNDARY,
+  IMPORTED_SKILL_UPDATE_CHECK_DIRECTORY_LABEL, IMPORTED_SKILL_UPDATE_CHECK_LABEL, IMPORTED_SKILL_UPDATE_CONFLICT_NOTE, IMPORTED_SKILL_UPDATE_HEADING,
+  IMPORTED_SKILL_UPDATE_HEADINGS, IMPORTED_SKILL_UPDATE_NONE, IMPORTED_SKILL_UPDATE_NOT_ENABLED, IMPORTED_SKILL_UPDATE_STATUS, IMPORTED_SKILL_UPDATE_UPSTREAM_LABEL,
 } from './imported-skill-labels.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
@@ -85,24 +85,24 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
   function updateCheckPanel(read: ImportedSkillUpdateCheckProjection): HTMLElement {
     const panel = el('article'); panel.className = 'imported-skill-detail'; panel.dataset['skillUpdateCheck'] = read.acquisition.acquisitionId;
     const disclosed = read.acquisition;
-    const title = el('h4', `${disclosed.name} · ${disclosed.kind} · 来源 ${disclosed.sourceRevision} · 尚未保留`); title.tabIndex = -1;
+    const title = el('h4', importedSkillUpdateCheckTitle(read)); title.tabIndex = -1;
     panel.append(title, el('p', importedSkillUpdateRelationLine(read.relation)), el('p', `来源：${disclosed.sourcePath}`), el('p', `许可：${disclosed.license ?? '未提供'}`),
       el('p', `内容 SHA-256 ${disclosed.contentSha256}`));
     const files = el('ul');
     for (const file of disclosed.files) files.append(el('li', `${file.path} · ${file.bytes} 字节 · SHA-256 ${file.sha256}`));
-    panel.append(el('h5', '所选文件'), files);
+    panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.files), files);
     for (const problem of disclosed.problems) panel.append(el('p', problem));
     for (const line of importedSkillCeilingLines(disclosed.ceiling)) panel.append(el('p', line));
-    const keep = button('保留此更新', 'keep-update', async () => {
+    const keep = button(IMPORTED_SKILL_UPDATE_ACTIONS.keep, 'keep-update', async () => {
       const kept = await api.checkImportedSkillUpdate({ skillId: read.skillId, keep: disclosed.acquisitionId });
       updateCheck = null;
       if (kept?.candidate == null || !root.isConnected) return null;
       candidate = kept.candidate; upstream = new Set(); accepted = false;
       await inspect(kept.candidate.adoptedRevisionId ?? projection.revision?.revisionId ?? null);
-      return kept.candidate.status === 'adopted' ? '已保留更新，并由更新规则采纳为新修订（尚未验证、未启用）' : '已保留更新，等你处理；没有改动任何现有修订';
+      return kept.candidate.status === 'adopted' ? IMPORTED_SKILL_UPDATE_STATUS.keptAdopted : IMPORTED_SKILL_UPDATE_STATUS.keptOpen;
     });
     keep.disabled ||= read.relation !== 'newer' || !disclosed.keepable;
-    panel.append(keep, button('不保留', 'discard-update', async () => { updateCheck = null; return '已放弃所选更新，没有保留任何内容'; }));
+    panel.append(keep, button(IMPORTED_SKILL_UPDATE_ACTIONS.discard, 'discard-update', async () => { updateCheck = null; return IMPORTED_SKILL_UPDATE_STATUS.discarded; }));
     return panel;
   }
   /** The three-way reconciliation of one candidate, its findings, and the editor's choices (REUSE-033). */
@@ -112,14 +112,12 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     const title = el('h4', importedSkillUpdateCandidateLine(read)); title.tabIndex = -1;
     panel.append(title);
     const summary = el('ul'); summary.className = 'imported-skill-three-way';
-    summary.append(el('li', `之前的来源快照：来源 ${read.prior.sourceRevision} · SHA-256 ${read.prior.sha256}`),
-      el('li', `当前工作修订：本地修订 ${read.working.ordinal} · SHA-256 ${read.working.sha256}`),
-      el('li', `新的来源快照：来源 ${read.incomingSourceRevision} · SHA-256 ${read.incoming.sha256}`));
-    panel.append(el('h5', '三方对照'), summary);
+    for (const line of importedSkillThreeWayLines(read)) summary.append(el('li', line));
+    panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.threeWay), summary);
     const files = el('ul'); files.className = 'imported-skill-update-files';
     for (const file of read.files) {
       const item = el('li'); item.dataset['skillFile'] = file.path; item.dataset['skillFileChange'] = file.change;
-      item.append(el('span', `${file.path} · ${IMPORTED_SKILL_UPDATE_FILE_LABELS[file.change]}`));
+      item.append(el('span', importedSkillUpdateFileLine(file.path, file.change)));
       if (file.change === 'conflict' && read.status === 'open' && !read.stale) {
         const label = el('label'); const box = el('input'); box.type = 'checkbox'; box.dataset['skillField'] = 'upstream'; box.dataset['skillPath'] = file.path;
         box.checked = upstream.has(file.path); box.disabled = busy;
@@ -128,10 +126,10 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
       }
       files.append(item);
     }
-    panel.append(el('h5', '逐个文件'), files);
-    const disposition = el('p', `结论：${IMPORTED_SKILL_UPDATE_DISPOSITION_LABELS[read.disposition]}`); disposition.dataset['skillDispositionLine'] = read.disposition;
+    panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.perFile), files);
+    const disposition = el('p', importedSkillUpdateDispositionLine(read.disposition)); disposition.dataset['skillDispositionLine'] = read.disposition;
     panel.append(disposition);
-    for (const [heading, lines] of [['校验', read.validator.state === 'validated' ? [] : read.validator.reasons], ['新增的要求', read.authorityChanges], ['冲突', read.conflicts]] as const) {
+    for (const [heading, lines] of [[IMPORTED_SKILL_UPDATE_HEADINGS.validation, read.validator.state === 'validated' ? [] : read.validator.reasons], [IMPORTED_SKILL_UPDATE_HEADINGS.authority, read.authorityChanges], [IMPORTED_SKILL_UPDATE_HEADINGS.conflicts, read.conflicts]] as const) {
       if (lines.length === 0) continue;
       const list = el('ul'); for (const line of lines) list.append(el('li', line));
       panel.append(el('h5', heading), list);
@@ -145,18 +143,18 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
         confirm.addEventListener('change', () => { accepted = confirm!.checked; render(); });
         label.append(confirm, ` ${IMPORTED_SKILL_UPDATE_ACCEPT_LABEL}`); panel.append(label);
       }
-      const adopt = button('采纳', 'adopt', async () => {
+      const adopt = button(IMPORTED_SKILL_UPDATE_ACTIONS.adopt, 'adopt', async () => {
         const next = await api.adoptImportedSkillUpdate({
           candidateId: read.candidateId, reviewDigest: read.reviewDigest, acceptItems: read.acceptItems, upstreamPaths: read.conflicts.filter((path) => upstream.has(path)),
         });
         candidate = next; upstream = new Set(); accepted = false;
         if (next.adoptedRevisionId !== null) await inspect(next.adoptedRevisionId);
-        return '已采纳为新的待验证修订；没有安装或启用';
+        return IMPORTED_SKILL_UPDATE_STATUS.adopted;
       });
       adopt.disabled ||= read.acceptItems.length > 0 && !accepted;
-      panel.append(adopt, button('忽略', 'dismiss', async () => { candidate = await api.dismissImportedSkillUpdate({ candidateId: read.candidateId }); await inspect(revision.revisionId); return '已忽略这个更新；记录仍然保留'; }));
+      panel.append(adopt, button(IMPORTED_SKILL_UPDATE_ACTIONS.dismiss, 'dismiss', async () => { candidate = await api.dismissImportedSkillUpdate({ candidateId: read.candidateId }); await inspect(revision.revisionId); return IMPORTED_SKILL_UPDATE_STATUS.dismissed; }));
     }
-    panel.append(button('关闭', 'close-candidate', async () => { candidate = null; return null; }));
+    panel.append(button(IMPORTED_SKILL_UPDATE_ACTIONS.close, 'close-candidate', async () => { candidate = null; return null; }));
     return panel;
   }
   /** REUSE-034: one revocable rule per Skill, created with its confirmation line. */
@@ -167,16 +165,16 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     if (rule === null) return section;
     if (rule.active) {
       section.append(el('p', importedSkillRuleActiveLine(rule.since)),
-        button(IMPORTED_SKILL_RULE_REVOKE_LABEL, 'rule-revoke', async () => { await api.revokeImportedSkillUpdateRule({ skillId: revision.skillId }); await inspect(revision.revisionId); return '已撤销自动采纳规则；记录仍然保留'; }));
+        button(IMPORTED_SKILL_RULE_REVOKE_LABEL, 'rule-revoke', async () => { await api.revokeImportedSkillUpdateRule({ skillId: revision.skillId }); await inspect(revision.revisionId); return IMPORTED_SKILL_UPDATE_STATUS.ruleRevoked; }));
       return section;
     }
     section.append(el('p', IMPORTED_SKILL_RULE_INACTIVE));
     const label = el('label'); const box = el('input'); box.type = 'checkbox'; box.dataset['skillField'] = 'rule-confirm'; box.checked = ruleConfirmed; box.disabled = busy;
     box.addEventListener('change', () => { ruleConfirmed = box.checked; render(); });
-    label.append(box, ` 我确认：${rule.confirmation}`); section.append(label);
+    label.append(box, importedSkillRuleConfirmLine(rule.confirmation)); section.append(label);
     const create = button(IMPORTED_SKILL_RULE_CREATE_LABEL, 'rule-create', async () => {
       await api.createImportedSkillUpdateRule({ skillId: revision.skillId, confirmation: rule.confirmation });
-      ruleConfirmed = false; await inspect(revision.revisionId); return '已创建自动采纳规则';
+      ruleConfirmed = false; await inspect(revision.revisionId); return IMPORTED_SKILL_UPDATE_STATUS.ruleCreated;
     });
     create.disabled ||= !ruleConfirmed;
     section.append(create);
@@ -189,9 +187,9 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     for (const entry of projection.history) {
       const item = el('li'); item.dataset['skillRevision'] = entry.revisionId; item.dataset['skillCurrent'] = String(entry.current);
       item.append(el('span', importedSkillHistoryLine(entry)));
-      if (entry.revisionId !== revision.revisionId) item.append(button('查看此修订', 'inspect-revision', () => inspect(entry.revisionId)));
+      if (entry.revisionId !== revision.revisionId) item.append(button(IMPORTED_SKILL_UPDATE_ACTIONS.inspectRevision, 'inspect-revision', () => inspect(entry.revisionId)));
       if (!entry.current) {
-        item.append(button('回到此版本', 'rollback', async () => { const back = await api.rollbackImportedSkill({ skillId: revision.skillId, revisionId: entry.revisionId }); await inspect(back.revisionId); return '已回到所选修订；没有恢复它之前的启用'; }));
+        item.append(button(IMPORTED_SKILL_UPDATE_ACTIONS.rollback, 'rollback', async () => { const back = await api.rollbackImportedSkill({ skillId: revision.skillId, revisionId: entry.revisionId }); await inspect(back.revisionId); return IMPORTED_SKILL_UPDATE_STATUS.rolledBack; }));
       }
       list.append(item);
     }
@@ -271,7 +269,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     for (const line of importedSkillCeilingLines(revision.ceiling)) detail.append(el('p', line));
     for (const reason of revision.reasons) detail.append(el('p', reason));
     if (revision.previousRevisionId !== null) detail.append(button('查看上一修订', 'previous', () => inspect(revision.previousRevisionId)));
-    if (!isCurrent) detail.append(el('p', '这不是当前修订：先在修订历史里「回到此版本」，才能继续验证、安装或启用。'));
+    if (!isCurrent) detail.append(el('p', IMPORTED_SKILL_NOT_CURRENT_NOTE));
     if (isCurrent && revision.state === 'pending-validation') detail.append(button('验证 Skill', 'validate', async () => changed(await api.validateImportedSkill({ revisionId: revision.revisionId }))));
     if (isCurrent && revision.state === 'validated') detail.append(button('安装（暂不启用）', 'install', async () => changed(await api.installImportedSkill({ revisionId: revision.revisionId, previewDigest: revision.previewDigest }))));
     if (revision.state === 'restricted' || revision.state === 'rejected') detail.append(el('p', '这一修订保持可查看。请在原目录修复后重新导入，生成后继修订；旧记录不改写。'));
@@ -291,24 +289,24 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     root.append(detail);
     // 外部 Skill 的更新 (Issue #89): the check, its candidates, the rule, and the way back.
     const updates = el('section'); updates.dataset['skillUpdates'] = revision.skillId;
-    updates.append(el('h5', '检查更新'), el('p', IMPORTED_SKILL_UPDATE_BOUNDARY),
+    updates.append(el('h5', IMPORTED_SKILL_UPDATE_HEADING), el('p', IMPORTED_SKILL_UPDATE_BOUNDARY),
       button(IMPORTED_SKILL_UPDATE_CHECK_LABEL, 'check-update', async () => {
         const read = await api.checkImportedSkillUpdate({ skillId: revision.skillId, kind: 'zip' });
         if (read === null || !root.isConnected) return null;
         updateCheck = read;
-        return '已读取所选更新，尚未保留';
+        return IMPORTED_SKILL_UPDATE_STATUS.disclosed;
       }),
       button(IMPORTED_SKILL_UPDATE_CHECK_DIRECTORY_LABEL, 'check-update-directory', async () => {
         const read = await api.checkImportedSkillUpdate({ skillId: revision.skillId, kind: 'directory' });
         if (read === null || !root.isConnected) return null;
         updateCheck = read;
-        return '已读取所选更新，尚未保留';
+        return IMPORTED_SKILL_UPDATE_STATUS.disclosed;
       }));
     if (projection.candidates.length === 0) updates.append(el('p', IMPORTED_SKILL_UPDATE_NONE));
     const candidates = el('ul'); candidates.className = 'imported-skill-candidates';
     for (const summary of projection.candidates) {
       const item = el('li'); item.dataset['skillCandidateId'] = summary.candidateId; item.dataset['skillDisposition'] = summary.disposition; item.dataset['skillCandidateStatus'] = summary.status;
-      item.append(el('span', importedSkillUpdateCandidateLine(summary)), button('查看更新', 'open-candidate', () => openCandidate(summary.candidateId)));
+      item.append(el('span', importedSkillUpdateCandidateLine(summary)), button(IMPORTED_SKILL_UPDATE_ACTIONS.open, 'open-candidate', () => openCandidate(summary.candidateId)));
       candidates.append(item);
     }
     updates.append(candidates);
