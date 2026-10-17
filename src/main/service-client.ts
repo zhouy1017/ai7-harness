@@ -132,8 +132,11 @@ function serviceEnvironment(
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined,
   recoveryControl: J08RecoveryControl | undefined,
   modelAdapterControl: J04ModelAdapterControl | undefined,
+  journalFaultArmed = false,
 ): NodeJS.ProcessEnv {
   const selected: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: '1' };
+  // J-02's Edit Journal write-failure injection (Issue #951, T0-1): the service admits its argument only as J-02's.
+  if (journalFaultArmed) selected.AI7_E2E_JOURNEY = 'J-02';
   if (importControl) selected.AI7_E2E_JOURNEY = 'J-01';
   if (foregroundExecutionControl) selected.AI7_E2E_JOURNEY = 'J-03';
   if (recoveryControl) selected.AI7_E2E_JOURNEY = 'J-08';
@@ -268,7 +271,7 @@ export class ServiceClient {
       args,
       {
         cwd: dirname(serviceEntry),
-        env: serviceEnvironment(executable, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl),
+        env: serviceEnvironment(executable, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, journalFaultArmed === true),
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       },
