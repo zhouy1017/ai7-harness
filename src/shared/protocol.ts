@@ -4,7 +4,7 @@ import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-con
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 152 as const;
+export const SERVICE_PROTOCOL_VERSION = 153 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -42,6 +42,44 @@ export type J01ImportControl =
 export type J03ForegroundExecutionControl = 'interrupt-before-foreground-boundary-response';
 
 export type J08RecoveryControl = 'interrupt-after-journal-ack';
+
+/**
+ * The Edit Journal write-failure injection (Issue #951, wave 12 slice 12a; T0-1): the one way a Journey makes the journal
+ * acknowledgement unavailable, so Editing Protection Mode and its Protective Read-only State can be shown end to end. It is
+ * armed only by this launch argument with the value `armed`, only under `AI7_E2E_JOURNEY=J-02` and the `development-ci`
+ * scope — main and the service each decide it with `editJournalFaultControlAdmitted` — and every other launch refuses
+ * `setEditJournalFault`. It writes nothing and changes no journal semantics: while a mode is in force a journal write is
+ * refused before it starts, exactly as an unavailable acknowledgement would leave it.
+ */
+export const EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT = '--j02-journal-fault-control';
+export type EditJournalFaultMode = 'off' | 'fail-next' | 'fail-all';
+export const EDIT_JOURNAL_FAULT_MODES: ReadonlyArray<EditJournalFaultMode> = ['off', 'fail-next', 'fail-all'];
+/** The code a journal write refused by the injection answers with; the renderer reads it as an unavailable acknowledgement. */
+export const EDIT_JOURNAL_FAULT_CODE = 'JOURNAL_WRITE_UNAVAILABLE';
+/** The code `setEditJournalFault` answers with outside the armed launch. */
+export const EDIT_JOURNAL_FAULT_REFUSED_CODE = 'EDIT_JOURNAL_FAULT_REFUSED';
+
+export function isEditJournalFaultMode(value: unknown): value is EditJournalFaultMode {
+  return value === 'off' || value === 'fail-next' || value === 'fail-all';
+}
+
+/**
+ * Whether a launch may arm the injection: absent stays unarmed and is always admitted; present must be exactly `armed`, under
+ * J-02, in the `development-ci` scope. `null` is a launch to refuse outright (a present control anywhere else).
+ */
+export function editJournalFaultControlAdmitted(
+  value: string | undefined,
+  journey: string | undefined,
+  scope: TrustedOperationalScope,
+): boolean | null {
+  if (value === undefined) return false;
+  return value === 'armed' && journey === 'J-02' && scope === 'development-ci' ? true : null;
+}
+
+/** What `setEditJournalFault` answers: the mode now in force. */
+export interface EditJournalFaultProjection {
+  readonly mode: EditJournalFaultMode;
+}
 
 /**
  * The J-04 launch control: the identity of a hand-written synthetic deterministic fixture under
@@ -202,6 +240,8 @@ export const IPC_CHANNELS = {
   acknowledgeImportCompletion: 'ai7:j01:acknowledge-import-completion',
   getManuscriptWindow: 'ai7:j01:get-manuscript-window',
   flushJournalEdit: 'ai7:j01:flush-journal-edit',
+  // J-02 only (Issue #951, T0-1): the preload exposes it as a J-02 global, never as a `window.ai7` member.
+  setEditJournalFault: 'ai7:j02:set-edit-journal-fault',
   recordManuscriptEntryPosition: 'ai7:j12:record-manuscript-entry-position',
   createEditorialMark: 'ai7:j05:create-editorial-mark',
   getEditorialMarkCard: 'ai7:j05:get-editorial-mark-card',
@@ -13831,6 +13871,8 @@ export interface ServiceOperationMap {
     output: ManuscriptWindowProjection;
   };
   flushJournalEdit: { input: JournalEditInput; output: JournalAcknowledgement };
+  /** Test-only (Issue #951, T0-1): refused unless the launch armed it; see `EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT`. */
+  setEditJournalFault: { input: { mode: EditJournalFaultMode }; output: EditJournalFaultProjection };
   /**
    * Editorial Marks (Issue #407). A mark is made on text the working state holds now, bound to the
    * Revision, journal position and block digest the editor saw; every command answers with the marks

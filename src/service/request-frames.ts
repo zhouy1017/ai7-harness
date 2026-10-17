@@ -2206,6 +2206,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // J-02's Edit Journal write-failure injection (Issue #951, T0-1): only the mode; the service refuses it outside the armed launch.
+    case 'setEditJournalFault': {
+      const input = requireInput(value.input, ['mode'], tentativeId);
+      if (input.mode !== 'off' && input.mode !== 'fail-next' && input.mode !== 'fail-all') throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'flushJournalEdit': {
       const input = requireInput(
         value.input,

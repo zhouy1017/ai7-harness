@@ -27,6 +27,9 @@ import {
   RUN_BUDGET_CEILING_ARGUMENT,
   BACKGROUND_QUIET_ARGUMENT,
   CALIBRATION_MIN_BOOKS_ARGUMENT,
+  EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT,
+  EDIT_JOURNAL_FAULT_REFUSED_CODE,
+  editJournalFaultControlAdmitted,
   calibrationMinBooksForLaunch,
   parseBackgroundQuietMs,
   TRUSTED_SCOPE_ARGUMENT,
@@ -136,6 +139,8 @@ interface LaunchArguments {
   applyControl: 'lose-first-acknowledgement' | undefined;
   observeJ12Reveal: boolean;
   launcherPid: number;
+  /** J-02 only (Issue #951, T0-1): the Edit Journal write-failure injection may be set; every other launch refuses it. */
+  journalFaultArmed: boolean;
 }
 
 type ImportMutationKind = 'manuscript-import' | 'source-import' | 'manuscript-reimport';
@@ -250,6 +255,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
+          key === EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT ||
           key === '--j04-model-adapter' ||
           key === '--j04-connectivity-path' ||
           key === '--j10-unit-hold-path' ||
@@ -414,6 +420,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     recoveryControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && recoveryControl !== undefined),
   );
+  // J-02's Edit Journal write-failure injection (Issue #951, T0-1): `armed`, J-02's own, development-ci only.
+  const journalFaultArmed = editJournalFaultControlAdmitted(values.get(EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT), process.env.AI7_E2E_JOURNEY,
+    launchForm.trustedOperationalScope);
+  requireDesktop(journalFaultArmed !== null);
   // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成 (Issue #424),
   // J-10's cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94), and J-13's 书系一致性
   // (Issue #64) and the Review Runs a Captured Procedure is captured from and run as (Issue #65), and J-07's 写作任务 (Issue #432).
@@ -480,6 +490,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     applyControl,
     observeJ12Reveal,
     launcherPid,
+    journalFaultArmed: journalFaultArmed === true,
   };
 }
 
@@ -605,6 +616,7 @@ function registerRendererHandlers(
   preferences: PreferenceStore,
   appearanceWindows: () => Iterable<OwnedRendererWindow>,
   notificationWindows: () => ReadonlyArray<OwnedRendererWindow>,
+  journalFaultArmed: boolean,
 ): () => void {
   const notifier = createNotifier({
     preferences: () => preferences.read().values,
@@ -2078,6 +2090,15 @@ function registerRendererHandlers(
         rememberManuscriptCapability(owned, result.window, input, owned.routeGeneration);
         return result;
       });
+    }),
+  );
+  // J-02's Edit Journal write-failure injection (Issue #951, T0-1): refused here unless the launch armed it, and refused again by the
+  // service. It is serialized with the journal writes it governs, so a mode takes effect between two writes, never inside one.
+  ipcMain.handle(IPC_CHANNELS.setEditJournalFault, (event, input: ServiceOperationMap['setEditJournalFault']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      if (!journalFaultArmed) throw new ServiceCallError(EDIT_JOURNAL_FAULT_REFUSED_CODE, '写入故障注入只在开发测试启动中可用。');
+      return serializeEffect(async () => service.call('setEditJournalFault', input));
     }),
   );
   // Editorial Marks (Issue #407) are records about one manuscript, so each command is gated exactly
@@ -6126,6 +6147,7 @@ export async function runApplication(): Promise<void> {
       journeyStartupRelay(process.env, (line) => void process.stderr.write(line)),
       launch.backgroundQuietMs,
       launch.calibrationMinBooks,
+      launch.journalFaultArmed,
     );
     service.onUnexpectedExit(() => {
       crashHook(crashes, 'service-exit', () => undefined)({ reason: 'abnormal-exit' });
@@ -6682,6 +6704,7 @@ export async function runApplication(): Promise<void> {
       preferenceStore,
       () => ownedWindows.values(),
       () => [...ownedWindows.values()],
+      launch.journalFaultArmed,
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

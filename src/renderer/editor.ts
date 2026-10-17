@@ -6,6 +6,16 @@ import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
 import { deriveSpanEdit, followSpanEdit } from '../shared/mark-anchor.js';
 import { markPointKind, markPointLabel } from './editorial-mark-labels.js';
 import {
+  bufferAdmits,
+  bufferReachedLimit,
+  changedCharacters,
+  classifyJournalFailure,
+  retryDelayMs,
+  type AtRiskExtent,
+  type ProtectionView,
+} from './editor-protection.js';
+import { atRiskLocation, type ProtectionCause, type ProtectionReadOnlyReason } from './editor-protection-labels.js';
+import {
   MAX_BLOCK_CODE_UNITS,
   MAX_BLOCK_GRAPHEMES,
   MAX_EDIT_CODE_UNITS,
@@ -29,6 +39,8 @@ interface EditorUiState {
   workingDigest: string;
   composing: boolean;
   operationLocked: boolean;
+  /** Editing Protection Mode (Issue #951; DUR-001 to DUR-012): `null` while every change is acknowledged. */
+  protection: ProtectionView | null;
 }
 
 export interface BoundedEditor {
@@ -62,6 +74,12 @@ export interface BoundedEditor {
    */
   selectedRange(): EditorSelectedRange;
   setOperationLocked(locked: boolean): void;
+  /** Editing Protection Mode as it stands, or `null` (Issue #951). */
+  protection(): ProtectionView | null;
+  /** 重试写入 (DUR-009): the same exact buffered edits again, at once; never a new or duplicate journal entry. */
+  retryWrite(): void;
+  /** 复制受影响内容 (DUR-009): the current text of every block holding unacknowledged input, in order. */
+  affectedContent(): string;
   interrupt(): void;
   destroy(): void;
 }
@@ -160,6 +178,11 @@ const MARK_LINE_PRIORITY: ReadonlyArray<EditorialMarkKind> = ['change-suggestion
 
 function requireEditor(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+/** The acknowledgement binds the exact edit sent, or it is a moved target (DUR-007): never an unavailable write to retry. */
+function requireAcknowledgement(condition: boolean): asserts condition {
+  if (!condition) throw Object.assign(new Error('修订日志确认与当前编辑不匹配。'), { code: 'EDITOR_ACK_MISMATCH' });
 }
 
 function validateText(text: string): void {
@@ -323,9 +346,43 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let activeMark: { markId: string; previewText: string | null } | undefined;
   // Focus has just entered the text and the browser's caret reveal, if it makes one, is still to be heard.
   let focusReveal: object | undefined;
+  // Editing Protection Mode (Issue #951; DUR-001 to DUR-012): entered when a journal write is not acknowledged, left only when
+  // the service has acknowledged the exact buffered sequence. While it holds, input continues into the bounded safety buffer —
+  // the window's own unacknowledged text — until the buffer's soft limit, and then the Protective Read-only State begins.
+  let protection: {
+    cause: ProtectionCause;
+    readOnly: ProtectionReadOnlyReason | null;
+    attempts: number;
+    retrying: boolean;
+    nextRetryAt: number | null;
+  } | undefined;
+  let retryTimer: number | undefined;
+  // The Last Durable Edit Boundary (DUR-003, DUR-011): the journal position the service last acknowledged, and when.
+  let lastDurable: { sequence: number; durableAt: string | null } = { sequence: windowProjection.journalSequence, durableAt: null };
 
   const isEditable = (): boolean =>
-    !retryRequired && !interrupted && !operationLocked && deferredNavigationContinuity === undefined;
+    !interrupted && !operationLocked && deferredNavigationContinuity === undefined &&
+    (protection === undefined ? !retryRequired : protection.readOnly === null);
+
+  /** The At-risk Edit Extent of a document state: work bounded by the window, never by the manuscript (DUR-002, DUR-004). */
+  const atRiskOf = (document: ProseMirrorNode): AtRiskExtent => {
+    let characters = 0;
+    let blocks = 0;
+    let firstBlockPosition: number | null = null;
+    document.forEach((node) => {
+      const baseline = baselines.get(String(node.attrs['blockId']));
+      if (!baseline || node.textContent === baseline.text) return;
+      characters += changedCharacters(graphemes(baseline.text), graphemes(node.textContent));
+      blocks += 1;
+      firstBlockPosition ??= baseline.position;
+    });
+    return {
+      characters,
+      blocks,
+      firstBlockPosition,
+      location: firstBlockPosition === null ? null : atRiskLocation(windowProjection.position.structureLabel, firstBlockPosition, blocks),
+    };
+  };
 
   const changedBlocks = (document: ProseMirrorNode): string[] => {
     const changed: string[] = [];
@@ -366,7 +423,9 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       }
     });
     if (!valid) return false;
-    return isEditable();
+    if (!isEditable()) return false;
+    // In Editing Protection Mode the buffer is bounded: a composition may use the reserve, nothing else may (DUR-002, DUR-008).
+    return protection === undefined || bufferAdmits(atRiskOf(candidate).characters, composing || view.composing);
   };
 
   const transactionFilter = new Plugin({ filterTransaction: candidateIsBounded });
@@ -617,6 +676,18 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     await new Promise<void>((resolve) => compositionWaiters.push(resolve));
   };
 
+  const protectionView = (): ProtectionView | null => protection === undefined ? null : {
+    cause: protection.cause,
+    readOnly: protection.readOnly,
+    lastDurable: { ...lastDurable },
+    atRisk: atRiskOf(view.state.doc),
+    retrying: protection.retrying,
+    attempts: protection.attempts,
+    nextRetryAt: protection.nextRetryAt,
+    // No service operation can reconstruct and receipt the buffered payload while the journal is unavailable (DUR-009).
+    salvageExport: 'unavailable',
+  };
+
   const announceState = (): void =>
     options.onStateChange({
       dirty: changedBlocks(view.state.doc).length > 0,
@@ -627,7 +698,67 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       workingDigest: windowProjection.workingDigest,
       composing,
       operationLocked,
+      protection: protectionView(),
     });
+
+  const clearRetryTimer = (): void => {
+    if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    retryTimer = undefined;
+    if (protection) protection.nextRetryAt = null;
+  };
+
+  /** The automatic retry (DUR-006): the same prepared edit, so the service's idempotency makes it one entry however often it runs. */
+  const scheduleRetry = (): void => {
+    clearRetryTimer();
+    if (!protection || protection.cause !== 'journal-unavailable' || destroyed) return;
+    const delay = retryDelayMs(protection.attempts);
+    protection.nextRetryAt = Date.now() + delay;
+    retryTimer = window.setTimeout(() => {
+      retryTimer = undefined;
+      void runRetry();
+    }, delay);
+  };
+
+  /** Input pauses at the buffer's soft limit once no composition is open: the Protective Read-only State (DUR-008). */
+  const checkBufferLimit = (): void => {
+    if (!protection || protection.readOnly !== null) return;
+    if (!bufferReachedLimit(atRiskOf(view.state.doc).characters, composing || view.composing)) return;
+    protection.readOnly = 'capacity';
+    applyEditableState();
+  };
+
+  const enterProtection = (cause: ProtectionCause): void => {
+    const readOnly: ProtectionReadOnlyReason | null = cause === 'drift' ? 'drift' : cause === 'service-stopped' ? 'service-stopped' : protection?.readOnly ?? null;
+    protection = { cause, readOnly, attempts: protection?.attempts ?? 0, retrying: false, nextRetryAt: null };
+    if (cause === 'journal-unavailable') scheduleRetry();
+    else clearRetryTimer();
+    checkBufferLimit();
+    applyEditableState();
+  };
+
+  /** Normal state returns only when the exact buffered sequence is acknowledged; nothing is recorded for it (DUR-006, DUR-012). */
+  const settleProtection = (): void => {
+    if (!protection) return;
+    if (!retryRequired && changedBlocks(view.state.doc).length === 0) {
+      clearRetryTimer();
+      protection = undefined;
+      applyEditableState();
+      return;
+    }
+    protection.retrying = false;
+    if (protection.cause === 'journal-unavailable' && retryTimer === undefined) scheduleRetry();
+  };
+
+  const runRetry = async (): Promise<void> => {
+    if (!protection || destroyed) return;
+    clearRetryTimer();
+    protection.retrying = true;
+    protection.attempts += 1;
+    announceState();
+    await flush();
+    settleProtection();
+    announceState();
+  };
 
   const flush = (): Promise<void> => {
     if (destroyed || interrupted) return Promise.resolve();
@@ -667,7 +798,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         options.onAnnouncement('正在自动写入修订日志；可继续编辑当前窗口。', 'busy');
         try {
           const ack = await options.flushJournalEdit(prepared.input);
-          requireEditor(
+          requireAcknowledgement(
             ack.clientEditId === prepared.input.clientEditId &&
               ack.branchId === windowProjection.branchId &&
               ack.baseRevisionId === windowProjection.revisionId &&
@@ -677,7 +808,6 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
               ack.resultingWorkingDigest === ack.window.workingDigest &&
               ack.window.journalSequence === ack.sequence &&
               ack.window.blocks[0]?.blockId === prepared.input.windowStartBlockId,
-            '修订日志确认与当前编辑不匹配。',
           );
           await waitForComposition();
           const continuity = captureRenderedContinuity();
@@ -689,13 +819,15 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           restoreContinuity(makeState(visibleBlocks), continuity, null, null, false);
           retryPrepared = undefined;
           retryRequired = false;
+          lastDurable = { sequence: ack.sequence, durableAt: ack.durableAt };
           applyEditableState();
           lastCompletion = ack.completionLabel;
           announceState();
         } catch (error) {
           retryPrepared = prepared;
           retryRequired = true;
-          applyEditableState();
+          // The journal did not acknowledge: Editing Protection Mode (DUR-001). A moved target stops replay (DUR-007).
+          enterProtection(interrupted ? 'service-stopped' : classifyJournalFailure(error) === 'drift' ? 'drift' : 'journal-unavailable');
           options.onAnnouncement(
             interrupted
               ? '本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。'
@@ -708,6 +840,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         }
       }
       saving = false;
+      settleProtection();
       announceState();
       if (lastCompletion && !retryRequired && changedBlocks(view.state.doc).length === 0) {
         options.onAnnouncement(lastCompletion, 'success');
@@ -715,7 +848,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     })().catch((error: unknown) => {
       saving = false;
       retryRequired = true;
-      applyEditableState();
+      // Nothing the editor can bind exactly: input pauses, and the content stays for 复制受影响内容 (DUR-007).
+      enterProtection(interrupted ? 'service-stopped' : 'drift');
       announceState();
       options.onAnnouncement(
         error instanceof Error
@@ -731,6 +865,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
 
   const scheduleAutomaticFlush = (): void => {
     if (autoFlushTimer !== undefined) window.clearTimeout(autoFlushTimer);
+    // Under protection the automatic retry's own pace writes, never a write per pause in typing (DUR-006).
+    if (protection !== undefined) return;
     autoFlushTimer = window.setTimeout(() => {
       autoFlushTimer = undefined;
       void flush();
@@ -744,6 +880,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       const nextState = view.state.apply(transaction);
       if (nextState === view.state) return;
       view.updateState(nextState);
+      if (transaction.docChanged) checkBufferLimit();
       announceState();
       if (transaction.docChanged) scheduleAutomaticFlush();
     },
@@ -833,8 +970,12 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         const waiting = compositionWaiters;
         compositionWaiters = [];
         for (const resolve of waiting) resolve();
+        // A composition that ended past the soft limit was never cut short; input pauses now (DUR-008).
+        queueMicrotask(() => {
+          checkBufferLimit();
+          announceState();
+        });
         scheduleAutomaticFlush();
-        queueMicrotask(announceState);
         return false;
       },
     },
@@ -938,6 +1079,17 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         text: graphemes(baseline.text).slice(anchor.grapheme, head.grapheme).join(''),
       };
     },
+    protection: protectionView,
+    retryWrite: () => {
+      if (protection && !protection.retrying) void runRetry();
+    },
+    affectedContent: () => {
+      const affected: string[] = [];
+      view.state.doc.forEach((node) => {
+        if (node.textContent !== baselines.get(String(node.attrs['blockId']))?.text) affected.push(node.textContent);
+      });
+      return affected.join('\n\n');
+    },
     setOperationLocked: (locked) => {
       if (locked) {
         requireEditor(!saving && !retryRequired && !composing && changedBlocks(view.state.doc).length === 0, '无法在未确认本地编辑时锁定稿件。');
@@ -952,6 +1104,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       const waiting = compositionWaiters;
       compositionWaiters = [];
       for (const resolve of waiting) resolve();
+      // The local service is gone: unacknowledged input stays visible and protected, and no more is taken (DUR-001).
+      if (retryRequired || changedBlocks(view.state.doc).length > 0) enterProtection('service-stopped');
       applyEditableState();
       announceState();
       options.onAnnouncement('本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。', 'error');
@@ -961,6 +1115,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       if (pendingRestore) cancelAnimationFrame(pendingRestore.frame);
       pendingRestore = undefined;
       if (autoFlushTimer !== undefined) window.clearTimeout(autoFlushTimer);
+      clearRetryTimer();
       const waiting = compositionWaiters;
       compositionWaiters = [];
       for (const resolve of waiting) resolve();
