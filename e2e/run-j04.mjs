@@ -3311,7 +3311,8 @@ async function main() {
       JSON.stringify(customTab.anchors) === JSON.stringify([['1', 'located'], ['2', 'located'], ['3', 'located'], ['3', 'not-found'], ['4', 'located'], ['5', 'located'], ['6', 'located'], ['7', 'located'], ['8', 'located']]) &&
       customTab.counts === '8 个单元作答 · 9 条回答 · 8 条已定位原文 · 1 条未能定位' && customTab.feedback === '自定义维度的回答暂不提供分析反馈。' &&
       customTab.judged === 0 && customTab.state === 'settled', 'custom-tab-result', customTab);
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return ${ONLY_ANALYSIS_ACTIONS}; })()`, 'custom-tab-actions');
+    // The hidden history panel still offers the Book's first baseline; constrain this assertion to the custom result surface.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card [data-analysis-panel="custom"]'); return card!==null && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'custom-tab-actions');
     // A quotation link opens the manuscript at its paragraph.
     const jumpBlock = await renderer.evaluate(`document.querySelector(${JSON.stringify(`${dimensionCard} .custom-row [data-analysis-action="custom-jump"]`)})?.dataset.blockId ?? null`);
     await reviewAction(renderer, `${dimensionCard} .custom-row [data-analysis-action="custom-jump"]`, 'custom-jump');
