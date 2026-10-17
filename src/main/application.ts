@@ -87,6 +87,8 @@ import { developerProposalFileName } from '../shared/developer-proposal.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
+import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
+import { PREFERENCE_IPC_CHANNELS } from '../shared/preferences.js';
 import {
   createCanonicalExternalDataRoot,
   createCanonicalProductionDataRoot,
@@ -583,6 +585,7 @@ function registerRendererHandlers(
   consumeInjectedFolderPath: () => string | undefined,
   quitApplication: () => 'quitting' | 'blocked',
   unsavedWindows: () => boolean,
+  preferences: PreferenceStore,
 ): () => void {
   const requireNothingUnsaved = (): void => {
     if (unsavedWindows()) throw new ServiceCallError('DATABASE_REPLACEMENT_UNSAVED', '还有窗口里的修改没有保存；请先保存或关闭那个窗口，再替换本机数据。');
@@ -2379,6 +2382,28 @@ function registerRendererHandlers(
     envelope(async () => {
       requireSender(event);
       return getProductDataLocation();
+    }),
+  );
+  // Local view and input configuration (Issue #934, slice 11a): main's own file, read and written without the service, so
+  // it answers while the service is interrupted as well; a refusal keeps its own words.
+  const preferenceCall = <Result>(operation: () => Result): Result => {
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof PreferenceError) throw new ServiceCallError(error.code, error.message);
+      throw error;
+    }
+  };
+  ipcMain.handle(PREFERENCE_IPC_CHANNELS.getPreferences, (event) =>
+    envelope(() => {
+      requireSender(event);
+      return preferenceCall(() => preferences.read());
+    }),
+  );
+  ipcMain.handle(PREFERENCE_IPC_CHANNELS.savePreference, (event, input: unknown) =>
+    envelope(() => {
+      requireSender(event);
+      return preferenceCall(() => preferences.save(input));
     }),
   );
   ipcMain.handle(IPC_CHANNELS.revealProductDataLocation, (event) =>
@@ -5712,6 +5737,7 @@ function registerRendererHandlers(
 
   return () => {
     for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel);
+    for (const channel of Object.values(PREFERENCE_IPC_CHANNELS)) ipcMain.removeHandler(channel);
     ipcMain.removeListener(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
   };
 }
@@ -6479,6 +6505,7 @@ export async function runApplication(): Promise<void> {
         return 'quitting';
       },
       () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
+      createPreferenceStore(shellRoot),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

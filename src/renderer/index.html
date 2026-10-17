@@ -12,18 +12,23 @@
     <script src="./renderer.js" defer></script>
   </head>
   <body>
-    <header class="app-header">
-      <div>
-        <p class="eyebrow">AI7 · 本地编辑工作台</p>
-        <h1>把来源变成可工作的稿件</h1>
+    <!-- The shell (Issue #934): the context header, the screen, the Task Drawer, then the sidebar, which the stylesheet
+         places on the left. The sidebar comes after the page in the keyboard order, so a screen's own Tab order is as it was. -->
+    <header class="context-header" id="context-header">
+      <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-controls="app-sidebar" aria-expanded="true" aria-label="收起侧栏" data-shell-control="sidebar-toggle"><span aria-hidden="true">☰</span></button>
+      <div class="context-identity">
+        <p class="context-position" id="context-position">全局</p>
+        <h1 class="context-title" id="context-title">AI7 编辑工作台</h1>
       </div>
-      <nav class="app-destinations" aria-label="全局">
-        <button type="button" id="global-attention-entry" class="global-attention-entry">待我处理</button>
-      </nav>
-      <p class="locality" aria-label="处理方式：本地处理，未联网"><span aria-hidden="true">●</span> 本地处理 · 未联网</p>
+      <p class="locality context-status" aria-label="处理方式：本地处理，未联网"><span aria-hidden="true">●</span> 本地处理 · 未联网</p>
+      <div class="context-actions" id="context-actions"></div>
+      <p id="preferences-notice" class="field-note preferences-notice" role="status" hidden></p>
     </header>
     <main id="screen" class="screen" aria-live="off"></main>
     <aside id="task-drawer" hidden></aside>
+    <nav id="app-sidebar" class="app-sidebar" aria-label="主导航">
+      <button type="button" id="global-attention-entry" class="global-attention-entry">待我处理</button>
+    </nav>
     <div id="persistence-status" class="status-bar" role="status" aria-live="polite">准备就绪</div>
   </body>
 </html>

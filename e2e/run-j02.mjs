@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -682,6 +682,7 @@ async function waitForImportCommitted(renderer, dataRoot) {
 async function importAndOpen(renderer, dataRoot) {
   at('renderer-ready');
   await waitForRendererReady(renderer);
+  await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined'`, 'renderer-isolation');
   requireJourney(await renderer.evaluate(`(async () => { try { await fetch('http://127.0.0.1:9/j02-denial'); return false; } catch { return true; } })()`), 'renderer-network-denial');
   // The import is three long waits over a ten-million-character file; under the one name
@@ -703,7 +704,7 @@ async function importAndOpen(renderer, dataRoot) {
   await clickButton(renderer, '新建图书并导入稿件', 'commit-click');
   await waitForImportCommitted(renderer, dataRoot);
   at('import-editor-open');
-  await clickButton(renderer, '打开稿件', 'editor-open');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
   await openNavigation(renderer, 'editor-navigation-open');
 }
@@ -1251,6 +1252,8 @@ async function runRestartJourney(renderer) {
   await assertRenderer(renderer, `document.querySelector('.recent-work-item')?.textContent.includes('10,000,303 字符') && document.querySelector('.recent-work-item')?.textContent.includes('结构复核完成')`, 'prior-work-exact');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.recent-work-item button'); if (!open) return false; open.click(); return true; })()`, 'prior-work-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'reopened-r2');
+  // A Book with a primary Manuscript is entered at 稿件, which the sidebar marks under the Book's 工作 (RET-002).
+  await assertRenderer(renderer, sidebarBookCurrent(null, 'manuscript'), 'reopened-sidebar-manuscript');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32`, 'restart-window-bounded');
   await clickButton(renderer, '重做', 'restart-redo');
   await waitForChecks(

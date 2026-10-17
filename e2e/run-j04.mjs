@@ -4,7 +4,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // Supported-journey scenario: J-04 covered baseline manuscript analysis (Issue #92, bounded S36 slice)
@@ -346,7 +346,7 @@ async function assertRenderer(renderer, expression, name) {
  * group (editor-surfaces §3); 工作概览 no longer hosts the card, it names the analysis in one line.
  */
 async function openAnalysisDestination(renderer, name) {
-  await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-records-group'); const open=group?.querySelector('button[data-records-destination="analysis"]'); if(!(open instanceof HTMLButtonElement)||open.disabled||open.textContent!=='分析')return false; open.click(); return true; })()`, name);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), name);
   await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis .baseline-analysis-card')`, `${name}-destination`);
 }
 
@@ -421,7 +421,7 @@ async function readDefaultRule(renderer) {
  * workspace has been read.
  */
 async function openReviewDestination(renderer, name) {
-  await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const button=group?.querySelector('button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled||button.textContent!=='审阅')return false; button.click(); return true; })()`, `${name}-entry`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), `${name}-entry`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, `${name}-card`);
 }
 
@@ -641,7 +641,7 @@ async function importSample1(renderer, cancellation, distinct = false) {
 
 async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation) {
   cancellation.throwIfRequested();
-  await click(renderer, '打开稿件', 'edit-open');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'edit-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, 'edit-ready');
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, 'edit-inserted');
@@ -1071,6 +1071,7 @@ async function main() {
 
     at('renderer-ready');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'ready');
+    await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
     at('renderer-api-boundary');
     await assertRenderer(renderer, `typeof globalThis.process==='undefined' && typeof globalThis.require==='undefined'`, 'renderer-isolation');
     at('renderer-analysis-api');
@@ -1146,8 +1147,10 @@ async function main() {
     })()`, 'artifact-card-layer-surface');
 
     at('model-setup-remove');
-    await click(renderer, '返回图书列表', 'model-return-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
     await click(renderer, '模型服务', 'model-open');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     at('model-settings-ready');
@@ -1183,15 +1186,17 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
     // Synchronized delta (#406): 工作概览 still opens from 资料与记录 and now names the analysis in one
     // line that leads to its destination; the card itself is reached through 分析.
-    await click(renderer, '返回图书工作概览', 'book-reopened-to-overview');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'book-reopened-to-overview');
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(imported.bookId)}] .book-analysis-summary[data-analysis-state="available"] [data-analysis-action="open-analysis"]') && !document.querySelector('.baseline-analysis-card')`, 'book-reopened');
-    await click(renderer, '打开分析', 'book-reopened-open-analysis');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'book-reopened-open-analysis');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-analysis');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="available"]')`, 'analysis-available');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const goal=card?.querySelector('#j04-analysis-goal'); const start=card?.querySelector('[data-analysis-action="prepare"]'); return goal instanceof HTMLInputElement && goal.readOnly && goal.value===${JSON.stringify(TASK_GOAL)} && start instanceof HTMLButtonElement && !start.disabled && start.textContent==='开始基线稿件分析' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'analysis-available-surface');
 
     at('j14-reflow-forced-colors');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(renderer, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.baseline-analysis-card')).overflowX!=='scroll'`, 'zoom-reflow');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
@@ -3081,23 +3086,24 @@ async function main() {
     // 部分对应 or 未能对应, 来源仅片段, 可能已过期 and 保存为来源材料 — is proven over the real store, owner, harness and gate on a
     // socket-free transport by tests/service/research-evidence-run.test.ts.
     at('research-evidence-source-view');
-    await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll('[data-screen="book-review"] .workbench-actions button')).find((item)=>item.textContent==='打开稿件'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'sources-open-manuscript');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'sources-open-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'sources-manuscript');
-    await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-records-group'); const order=Array.from(group?.querySelectorAll('button') ?? []).map((item)=>item.textContent); const open=group?.querySelector('button[data-records-destination="sources"]'); if(JSON.stringify(order)!==JSON.stringify(['分析','来源与证据','返回图书工作概览'])||!(open instanceof HTMLButtonElement)||open.disabled)return false; open.click(); return true; })()`, 'sources-entry');
+    await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-records-group'); const order=Array.from(group?.querySelectorAll('button') ?? []).map((item)=>item.textContent); const open=group?.querySelector('button[data-records-destination="sources"]'); if(JSON.stringify(order)!==JSON.stringify(['分析','来源与证据','返回图书工作概览'])||!(open instanceof HTMLButtonElement)||open.disabled)return false; return true; })()`, 'sources-entry');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('sources')), 'sources-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="book-sources"] .research-evidence')?.dataset.evidenceCount==='0'`, 'sources-view');
     const sources = await renderer.evaluate(`window.ai7.inspectResearchEvidence({ bookId: ${JSON.stringify(imported.bookId)} })`);
     requireJourney(sources?.bookId === imported.bookId && sources.staleAfterDays === 90 && sources.records.length === 0 && sources.next === null &&
       sources.units.length === 0 && sources.findings.length === 0 && sources.statement === '这本书还没有留存的外部来源：外部来源只在联网核查的运行中留存。',
     'sources-provider-free-reading', sources);
     await assertRenderer(renderer, `(() => { const view=document.querySelector('[data-screen="book-sources"]'); return view?.querySelector('.research-evidence-statement')?.textContent===${JSON.stringify(sources.statement)} && view.querySelectorAll('.research-evidence-card, [data-evidence-action="save-as-material"]').length===0 && JSON.stringify(Array.from(view.querySelectorAll('.workbench-actions button')).map((item)=>item.textContent))===JSON.stringify(['打开稿件','工作概览']); })()`, 'sources-nothing-to-save');
-    await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll('[data-screen="book-sources"] .workbench-actions button')).find((item)=>item.textContent==='打开稿件'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'sources-back-to-manuscript');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'sources-back-to-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'sources-back-manuscript');
     await openReviewDestination(renderer, 'sources-back-to-review');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'sources-back-to-review-settled');
     cancellation.throwIfRequested();
 
     at('review-return-to-analysis');
-    await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll('[data-screen="book-review"] .workbench-actions button')).find((item)=>item.textContent==='打开稿件'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'review-open-manuscript');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'review-open-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'review-manuscript');
     await openAnalysisDestination(renderer, 'review-return-analysis');
     cancellation.throwIfRequested();
@@ -3130,7 +3136,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'factual-artifact-ready');
     await click(renderer, '审阅并为本图书启用 Revision 2', 'factual-artifact-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'factual-artifact-enabled');
-    await click(renderer, '返回图书列表', 'factual-return-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'factual-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'factual-library');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(factualBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'factual-open-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(factualBook.bookId)}]')`, 'factual-manuscript-ready');
@@ -3245,9 +3251,9 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'custom-artifact-ready');
     await click(renderer, '审阅并为本图书启用 Revision 2', 'custom-artifact-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'custom-artifact-enabled');
-    await click(renderer, '返回图书列表', 'custom-return-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'custom-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'custom-library');
-    await click(renderer, '知识库', 'custom-knowledge-open');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'custom-knowledge-open');
     await click(renderer, '工序与规则', 'custom-knowledge-rules');
     await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='0' && document.querySelector('.knowledge-custom-dimensions .custom-dimensions-empty')?.textContent==='还没有自定义分析维度。'`, 'custom-knowledge-empty');
     // AI7's fixed answer schema and Authority Ceiling are stated beside the template the editor writes.
@@ -3342,7 +3348,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'recorded-artifact-ready');
     await click(renderer, '审阅并为本图书启用 Revision 2', 'recorded-artifact-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'recorded-artifact-enabled');
-    await click(renderer, '返回图书列表', 'recorded-return-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-library');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'recorded-open-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'recorded-manuscript-ready');
