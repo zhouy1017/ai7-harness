@@ -839,14 +839,12 @@ async function leaveThen(open: () => Promise<void>): Promise<void> {
  * the surface's own ways out; none starts, adopts, designates or deletes anything (KEY-004). The commands of the manuscript on
  * screen register with it and leave with it.
  */
-let compositionOpen = false;
-document.addEventListener('compositionstart', () => { compositionOpen = true; }, true);
-document.addEventListener('compositionend', () => { compositionOpen = false; }, true);
 const commandPlatformInUse: CommandPlatform = window.ai7.platform;
 const commandDispatcher = createCommandDispatcher({
   platform: commandPlatformInUse,
   bindings: activeCommandBindings,
-  composing: () => compositionOpen || editor?.isComposing() === true,
+  // A press made during a composition says so itself (`isComposing`); the manuscript's own composition is asked as well.
+  composing: () => editor?.isComposing() === true,
   announce: (message) => setStatus(message, 'busy'),
 });
 window.addEventListener('keydown', (event) => commandDispatcher.handle(event));

@@ -296,6 +296,8 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): vo
     setStatus(KEYBOARD_STATUS_LINES.loading, 'busy');
     try {
       bindings = (await api.getPreferences()).values['keyboard.bindings'];
+      // What the preference holds is what every label and the dispatcher read from here on.
+      onChanged(bindings);
       paint();
       setStatus(KEYBOARD_STATUS_LINES.loaded, 'success');
     } catch (error) {

@@ -153,6 +153,19 @@ export function keyOfCode(code: string): string | null {
 
 const MODIFIER_CODES = /^(?:Control|Shift|Alt|Meta|OS|AltGraph)(?:Left|Right)?$/u;
 
+/**
+ * The key a press names: its physical `code`, or — for a synthesized event that carries none, as the Journeys' key events do —
+ * the `key` it typed. A real keyboard always supplies the code.
+ */
+function keyOfEvent(event: KeyEventLike): string | null {
+  if (event.code !== '') return keyOfCode(event.code);
+  if (/^[A-Za-z]$/u.test(event.key)) return event.key.toUpperCase();
+  if (/^[0-9]$/u.test(event.key)) return event.key;
+  if (event.key === ' ') return 'Space';
+  if (/^F(?:[1-9]|1[0-2])$/u.test(event.key)) return event.key;
+  return NAMED_KEYS[event.key] ?? null;
+}
+
 /** The slice of a keyboard event a chord is read from; a DOM `KeyboardEvent` satisfies it. */
 export interface KeyEventLike {
   readonly code: string;
@@ -174,8 +187,8 @@ export type CapturedChord = { readonly chord: Chord } | { readonly refused: Bind
  * this registry has no name for, and AltGr are refused with their reason.
  */
 export function captureChord(event: KeyEventLike, platform: CommandPlatform): CapturedChord | null {
-  if (MODIFIER_CODES.test(event.code)) return null;
-  const key = keyOfCode(event.code);
+  if (MODIFIER_CODES.test(event.code) || (event.code === '' && MODIFIER_CODES.test(event.key))) return null;
+  const key = keyOfEvent(event);
   if (platform === 'win32' && event.metaKey) return { refused: 'os-reserved' };
   if (key === null) return { refused: 'unsupported-key' };
   const mod = platform === 'darwin' ? event.metaKey : event.ctrlKey;
