@@ -726,6 +726,21 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.enableImportedSkill(request.input.revisionId, request.input.bookId, request.input.previewDigest) };
     case 'inspectImportedSkills':
       return { id: request.id, ok: true, op: request.op, result: store.inspectImportedSkills(request.input.revisionId, request.input.before) };
+    // 外部 Skill updates (Issue #89; ADR 0045, ADR 0090 §3): local package, inert candidate, explicit adoption; no network, nothing executed.
+    case 'checkImportedSkillUpdate':
+      return { id: request.id, ok: true, op: request.op, result: await store.checkImportedSkillUpdate(request.input) };
+    case 'inspectImportedSkillUpdate':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectImportedSkillUpdate(request.input.candidateId) };
+    case 'adoptImportedSkillUpdate':
+      return { id: request.id, ok: true, op: request.op, result: store.adoptImportedSkillUpdate(request.input) };
+    case 'dismissImportedSkillUpdate':
+      return { id: request.id, ok: true, op: request.op, result: store.dismissImportedSkillUpdate(request.input.candidateId) };
+    case 'createImportedSkillUpdateRule':
+      return { id: request.id, ok: true, op: request.op, result: store.createImportedSkillUpdateRule(request.input.skillId, request.input.confirmation) };
+    case 'revokeImportedSkillUpdateRule':
+      return { id: request.id, ok: true, op: request.op, result: store.revokeImportedSkillUpdateRule(request.input.skillId) };
+    case 'rollbackImportedSkill':
+      return { id: request.id, ok: true, op: request.op, result: store.rollbackImportedSkill(request.input.skillId, request.input.revisionId) };
     case 'recommendProcedures':
       return { id: request.id, ok: true, op: request.op, result: store.recommendProcedures(request.input) };
     case 'inspectCapturedProcedure':

@@ -1583,6 +1583,41 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if ((input.revisionId !== null && !validUuid(input.revisionId)) || (input.before !== null && !validUuid(input.before))) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'checkImportedSkillUpdate': {
+      // Exactly one: the picked path to disclose against the Skill, or the acquisition the editor keeps.
+      const input = requireInput(value.input, ['skillId', 'path', 'keep'], tentativeId);
+      const disclose = input.keep === null && isBoundedString(input.path, 2048) && input.path.length > 0;
+      if (!validUuid(input.skillId) || (!disclose && !(input.path === null && validUuid(input.keep)))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectImportedSkillUpdate':
+    case 'dismissImportedSkillUpdate': {
+      const input = requireInput(value.input, ['candidateId'], tentativeId);
+      if (!validUuid(input.candidateId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'adoptImportedSkillUpdate': {
+      const input = requireInput(value.input, ['candidateId', 'reviewDigest', 'acceptItems', 'upstreamPaths'], tentativeId);
+      const texts = (list: unknown, limit: number): boolean => Array.isArray(list) && list.length <= 64 && list.every((item) => isBoundedString(item, limit));
+      if (!validUuid(input.candidateId) || !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
+        !texts(input.acceptItems, 600) || !texts(input.upstreamPaths, 240)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'createImportedSkillUpdateRule': {
+      const input = requireInput(value.input, ['skillId', 'confirmation'], tentativeId);
+      if (!validUuid(input.skillId) || !isBoundedString(input.confirmation, 200)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'revokeImportedSkillUpdateRule': {
+      const input = requireInput(value.input, ['skillId'], tentativeId);
+      if (!validUuid(input.skillId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'rollbackImportedSkill': {
+      const input = requireInput(value.input, ['skillId', 'revisionId'], tentativeId);
+      if (!validUuid(input.skillId) || !validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'recommendProcedures': {
       const input = requireInput(value.input, ['bookId', 'goal', 'taskKind', 'scope', 'categoryIds'], tentativeId);
       if (!validUuid(input.bookId) || !isBoundedString(input.goal, 2000) || !['review-run', 'baseline-analysis', 'writing', 'unclassified'].includes(String(input.taskKind)) ||

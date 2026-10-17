@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 150 as const;
+export const SERVICE_PROTOCOL_VERSION = 151 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -114,6 +114,13 @@ export const IPC_CHANNELS = {
   installImportedSkill: 'ai7:kb:install-imported-skill',
   enableImportedSkill: 'ai7:kb:enable-imported-skill',
   inspectImportedSkills: 'ai7:kb:inspect-imported-skills',
+  checkImportedSkillUpdate: 'ai7:kb:check-imported-skill-update',
+  inspectImportedSkillUpdate: 'ai7:kb:inspect-imported-skill-update',
+  adoptImportedSkillUpdate: 'ai7:kb:adopt-imported-skill-update',
+  dismissImportedSkillUpdate: 'ai7:kb:dismiss-imported-skill-update',
+  createImportedSkillUpdateRule: 'ai7:kb:create-imported-skill-update-rule',
+  revokeImportedSkillUpdateRule: 'ai7:kb:revoke-imported-skill-update-rule',
+  rollbackImportedSkill: 'ai7:kb:rollback-imported-skill',
   recommendProcedures: 'ai7:task:recommend-procedures',
   inspectCapturedProcedure: 'ai7:j15:inspect-captured-procedure',
   inspectDeveloperProposal: 'ai7:j15:inspect-developer-proposal',
@@ -7733,6 +7740,7 @@ export interface ImportedSkillSummary {
   readonly state: ImportedSkillState;
   readonly stateLabel: string;
 }
+export type ImportedSkillSelectionReason = 'import' | 'adopt' | 'rule' | 'rollback';
 export interface ImportedSkillRevisionProjection extends ImportedSkillSummary {
   readonly snapshotId: string;
   readonly previousRevisionId: string | null;
@@ -7751,10 +7759,72 @@ export interface ImportedSkillRevisionProjection extends ImportedSkillSummary {
   readonly previewDigest: string;
   readonly createdAt: string;
 }
+/** One revision in a Skill's history: newest first, the current one marked, and how each came about. */
+export interface ImportedSkillHistoryEntry {
+  readonly revisionId: string;
+  readonly ordinal: number;
+  readonly state: ImportedSkillState;
+  readonly stateLabel: string;
+  readonly sourceRevision: string;
+  readonly previousRevisionId: string | null;
+  readonly createdAt: string;
+  readonly current: boolean;
+  readonly origin: 'import' | 'adopt' | 'rule';
+  /** Why the current revision is current; `null` on every other entry. */
+  readonly selectedReason: ImportedSkillSelectionReason | null;
+}
+export type ImportedSkillUpdateDisposition = 'clean' | 'conflict' | 'validator-failed' | 'authority-change';
+export type ImportedSkillUpdateFileChange = 'unchanged' | 'upstream' | 'local' | 'conflict';
+export interface ImportedSkillUpdateFileReport {
+  readonly path: string;
+  readonly change: ImportedSkillUpdateFileChange;
+  readonly priorSha256: string | null;
+  readonly workingSha256: string | null;
+  readonly incomingSha256: string | null;
+}
+/** One update candidate in the Skill's list: inert until the editor adopts it, or the rule does a clean one (REUSE-032, REUSE-034). */
+export interface ImportedSkillUpdateCandidateSummary {
+  readonly candidateId: string;
+  readonly skillId: string;
+  readonly disposition: ImportedSkillUpdateDisposition;
+  readonly status: 'open' | 'adopted' | 'dismissed';
+  /** An open candidate whose base is no longer the Skill's current revision cannot be adopted; the update is checked again. */
+  readonly stale: boolean;
+  readonly adoptedBy: 'editor' | 'rule' | null;
+  readonly adoptedRevisionId: string | null;
+  readonly incomingName: string;
+  readonly incomingSourceRevision: string;
+  readonly createdAt: string;
+}
+/** The three-way reconciliation behind a candidate: the prior Source Skill Snapshot, the working revision and the incoming snapshot. */
+export interface ImportedSkillUpdateCandidateProjection extends ImportedSkillUpdateCandidateSummary {
+  readonly prior: { readonly snapshotId: string; readonly sha256: string; readonly sourceRevision: string };
+  readonly working: { readonly revisionId: string; readonly ordinal: number; readonly sha256: string };
+  readonly incoming: { readonly snapshotId: string; readonly sha256: string; readonly sourcePath: string };
+  readonly files: readonly ImportedSkillUpdateFileReport[];
+  readonly validator: { readonly state: 'validated' | 'restricted' | 'rejected'; readonly reasons: readonly string[] };
+  readonly authorityChanges: readonly string[];
+  readonly conflicts: readonly string[];
+  /** Every item an explicit adoption of a candidate that is not clean names: validator reasons, authority changes and conflicting files. */
+  readonly acceptItems: readonly string[];
+  readonly reviewDigest: string;
+}
+export interface ImportedSkillUpdateRuleProjection {
+  readonly active: boolean;
+  readonly ruleId: string | null;
+  /** The sentence the editor confirms to create the rule. */
+  readonly confirmation: string;
+  readonly since: string | null;
+  readonly history: ReadonlyArray<{ readonly action: 'create' | 'revoke'; readonly recordedAt: string }>;
+}
 export interface ImportedSkillsProjection {
   readonly skills: readonly ImportedSkillSummary[];
   readonly nextBefore: string | null;
   readonly revision: ImportedSkillRevisionProjection | null;
+  /** Of the Skill `revision` belongs to (empty/`null` when none is selected): its revisions, update candidates and update rule. */
+  readonly history: readonly ImportedSkillHistoryEntry[];
+  readonly candidates: readonly ImportedSkillUpdateCandidateSummary[];
+  readonly rule: ImportedSkillUpdateRuleProjection | null;
 }
 /**
  * What acquisition discloses before anything is kept (ADR 0090 §2; REUSE-021): exact identity, kind, source revision, provenance,
@@ -7783,6 +7853,17 @@ export interface ImportedSkillAcquisitionProjection {
 export interface ImportedSkillImportProjection {
   readonly acquisition: ImportedSkillAcquisitionProjection;
   readonly revision: ImportedSkillRevisionProjection | null;
+}
+/**
+ * 检查更新（从文件）…: the disclosure of one local package for a Skill already kept, and — once the editor keeps it — the inert
+ * candidate it became. The package is the same kind 导入 Skill… takes; nothing is read from any Book and nothing is fetched.
+ */
+export interface ImportedSkillUpdateCheckProjection {
+  readonly skillId: string;
+  readonly acquisition: ImportedSkillAcquisitionProjection;
+  /** Newer than what the Skill is on, the very version it was kept from, or one already in its history (which 回到此版本 returns to). */
+  readonly relation: 'newer' | 'same-as-current' | 'already-kept';
+  readonly candidate: ImportedSkillUpdateCandidateProjection | null;
 }
 export interface ProcedureRecommendationInput {
   readonly bookId: string;
@@ -13304,6 +13385,25 @@ export interface ServiceOperationMap {
   enableImportedSkill: { input: { revisionId: string; bookId: string; previewDigest: string }; output: ImportedSkillRevisionProjection };
   /** The house's imported Skills, newest revision each, a page at a time, and one exact revision when asked. A read. */
   inspectImportedSkills: { input: { revisionId: string | null; before: string | null }; output: ImportedSkillsProjection };
+  /**
+   * 检查更新（从文件）… (ADR 0090 §3; REUSE-032): the package of the picked path is disclosed against the Skill it would update (`path`),
+   * or the disclosed one is kept (`keep`, its acquisition id) as a new Source Skill Snapshot and one inert update candidate. Exactly one is given.
+   */
+  checkImportedSkillUpdate: { input: { skillId: string; path: string | null; keep: string | null }; output: ImportedSkillUpdateCheckProjection };
+  /** One update candidate with its three-way report. A read. */
+  inspectImportedSkillUpdate: { input: { candidateId: string }; output: ImportedSkillUpdateCandidateProjection };
+  /**
+   * 采纳 (REUSE-033): a new working revision, first at 待验证 and never enabled. `acceptItems` names every item of a candidate that
+   * is not clean; `upstreamPaths` are the conflicting files the editor takes from upstream (the rest keep the local derivation).
+   */
+  adoptImportedSkillUpdate: { input: { candidateId: string; reviewDigest: string; acceptItems: readonly string[]; upstreamPaths: readonly string[] }; output: ImportedSkillUpdateCandidateProjection };
+  /** 忽略: the candidate is marked dismissed; nothing is deleted. */
+  dismissImportedSkillUpdate: { input: { candidateId: string }; output: ImportedSkillUpdateCandidateProjection };
+  /** The Artifact Update Rule of one imported Skill (REUSE-034), created with its confirmation line and revoked by appending a revocation. */
+  createImportedSkillUpdateRule: { input: { skillId: string; confirmation: string }; output: ImportedSkillUpdateRuleProjection };
+  revokeImportedSkillUpdateRule: { input: { skillId: string }; output: ImportedSkillUpdateRuleProjection };
+  /** 回到此版本 (REUSE-035): a new current selection; history is not rewritten and enablement is not restored. */
+  rollbackImportedSkill: { input: { skillId: string; revisionId: string }; output: ImportedSkillRevisionProjection };
   /** 工序推荐 (ADR 0090 §1; TASK-010 to 016): a deterministic read; it selects, acquires, enables or authorizes nothing. */
   recommendProcedures: { input: ProcedureRecommendationInput; output: ProcedureRecommendationProjection };
   /** One Captured Procedure with a page of its versions, newest first, below `before` when it is given. */
@@ -14084,6 +14184,14 @@ export interface RendererApi {
   installImportedSkill(input: { revisionId: string; previewDigest: string }): Promise<ImportedSkillRevisionProjection>;
   enableImportedSkill(input: { revisionId: string; bookId: string; previewDigest: string }): Promise<ImportedSkillRevisionProjection>;
   inspectImportedSkills(input: { revisionId: string | null; before: string | null }): Promise<ImportedSkillsProjection>;
+  /** 检查更新（从文件）…: the picker opens in main, for the Skill named; `keep` keeps the disclosed package as a candidate. */
+  checkImportedSkillUpdate(input: { skillId: string; kind: 'zip' | 'directory' } | { skillId: string; keep: string }): Promise<ImportedSkillUpdateCheckProjection | null>;
+  inspectImportedSkillUpdate(input: { candidateId: string }): Promise<ImportedSkillUpdateCandidateProjection>;
+  adoptImportedSkillUpdate(input: { candidateId: string; reviewDigest: string; acceptItems: readonly string[]; upstreamPaths: readonly string[] }): Promise<ImportedSkillUpdateCandidateProjection>;
+  dismissImportedSkillUpdate(input: { candidateId: string }): Promise<ImportedSkillUpdateCandidateProjection>;
+  createImportedSkillUpdateRule(input: { skillId: string; confirmation: string }): Promise<ImportedSkillUpdateRuleProjection>;
+  revokeImportedSkillUpdateRule(input: { skillId: string }): Promise<ImportedSkillUpdateRuleProjection>;
+  rollbackImportedSkill(input: { skillId: string; revisionId: string }): Promise<ImportedSkillRevisionProjection>;
   recommendProcedures(input: Omit<ProcedureRecommendationInput, 'bookId'>): Promise<ProcedureRecommendationProjection>;
   inspectCapturedProcedure(input: { procedureId: string; before: number | null }): Promise<CapturedProcedureProjection>;
   inspectDeveloperProposal(input: { proposalId: string; before: number | null }): Promise<DeveloperProposalProjection>;

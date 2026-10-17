@@ -295,6 +295,14 @@ const api: RendererApi = Object.freeze({
   installImportedSkill: (input: Parameters<RendererApi['installImportedSkill']>[0]) => invoke<ServiceOperationMap['installImportedSkill']['output']>(IPC_CHANNELS.installImportedSkill, input),
   enableImportedSkill: (input: Parameters<RendererApi['enableImportedSkill']>[0]) => invoke<ServiceOperationMap['enableImportedSkill']['output']>(IPC_CHANNELS.enableImportedSkill, input),
   inspectImportedSkills: (input: Parameters<RendererApi['inspectImportedSkills']>[0]) => invoke<ServiceOperationMap['inspectImportedSkills']['output']>(IPC_CHANNELS.inspectImportedSkills, input),
+  // 外部 Skill updates (Issue #89; ADR 0090 §3): the picker opens in main; nothing here names a path.
+  checkImportedSkillUpdate: (input: Parameters<RendererApi['checkImportedSkillUpdate']>[0]) => invoke<Awaited<ReturnType<RendererApi['checkImportedSkillUpdate']>>>(IPC_CHANNELS.checkImportedSkillUpdate, input),
+  inspectImportedSkillUpdate: (input: Parameters<RendererApi['inspectImportedSkillUpdate']>[0]) => invoke<ServiceOperationMap['inspectImportedSkillUpdate']['output']>(IPC_CHANNELS.inspectImportedSkillUpdate, input),
+  adoptImportedSkillUpdate: (input: Parameters<RendererApi['adoptImportedSkillUpdate']>[0]) => invoke<ServiceOperationMap['adoptImportedSkillUpdate']['output']>(IPC_CHANNELS.adoptImportedSkillUpdate, input),
+  dismissImportedSkillUpdate: (input: Parameters<RendererApi['dismissImportedSkillUpdate']>[0]) => invoke<ServiceOperationMap['dismissImportedSkillUpdate']['output']>(IPC_CHANNELS.dismissImportedSkillUpdate, input),
+  createImportedSkillUpdateRule: (input: Parameters<RendererApi['createImportedSkillUpdateRule']>[0]) => invoke<ServiceOperationMap['createImportedSkillUpdateRule']['output']>(IPC_CHANNELS.createImportedSkillUpdateRule, input),
+  revokeImportedSkillUpdateRule: (input: Parameters<RendererApi['revokeImportedSkillUpdateRule']>[0]) => invoke<ServiceOperationMap['revokeImportedSkillUpdateRule']['output']>(IPC_CHANNELS.revokeImportedSkillUpdateRule, input),
+  rollbackImportedSkill: (input: Parameters<RendererApi['rollbackImportedSkill']>[0]) => invoke<ServiceOperationMap['rollbackImportedSkill']['output']>(IPC_CHANNELS.rollbackImportedSkill, input),
   recommendProcedures: (input: Parameters<RendererApi['recommendProcedures']>[0]) => invoke<ServiceOperationMap['recommendProcedures']['output']>(IPC_CHANNELS.recommendProcedures, input),
   inspectCapturedProcedure: (input: Parameters<RendererApi['inspectCapturedProcedure']>[0]) =>
     invoke<ServiceOperationMap['inspectCapturedProcedure']['output']>(IPC_CHANNELS.inspectCapturedProcedure, input),
