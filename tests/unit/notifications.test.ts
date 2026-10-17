@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { createGlobalAttentionReader } from '../../src/renderer/global-attention.js';
 import { createNotifier } from '../../src/main/notifications.js';
 import { createNotificationObserver, mountQuietNotice } from '../../src/renderer/notifications.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
@@ -213,5 +216,44 @@ describe('quiet notice lifetime', () => {
       vi.unstubAllGlobals();
       restore();
     }
+  });
+});
+
+describe('a Run started from the Task Drawer reaches the observer', () => {
+  it('a read at the start follows the Run in flight to its outcome; without it the outcome is never heard', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('window', { setTimeout, clearTimeout });
+    try {
+      const running = { ...projection([item({ group: 'active', state: 'analysis-running', itemId: 'run' })]), running: true };
+      const settled = projection([item({ group: 'recent', state: 'analysis-completed', itemId: 'outcome' })]);
+      let current = projection([]);
+      const reader = createGlobalAttentionReader({ inspectGlobalAttention: async () => current });
+      const completed = vi.fn();
+      const observe = createNotificationObserver({ api: { notify: vi.fn(async () => {}) }, focused: () => true, completed, startedAt: START });
+      reader.subscribe((reading) => { if (reading.kind === 'projection') observe(reading.projection); });
+      reader.refresh();
+      await vi.advanceTimersByTimeAsync(0);
+      // Started on the same screen: nothing reads again, so the outcome stays unheard however long the Run takes.
+      current = running;
+      current = settled;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(completed).not.toHaveBeenCalled();
+      // The drawer's record of the start reads at once; the slow poll then follows the Run to its outcome.
+      current = running;
+      reader.refresh();
+      await vi.advanceTimersByTimeAsync(0);
+      current = settled;
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(completed).toHaveBeenCalledOnce();
+      reader.interrupt();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+  it('the shell refreshes 待我处理 whenever the Task Drawer records a change', () => {
+    const renderer = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts', import.meta.url)), 'utf8');
+    const recorded = renderer.slice(renderer.indexOf('  onRecorded: (kind, bookId, ref) => {'), renderer.indexOf('  openRunSurface: (plan) =>'));
+    expect(recorded).toContain('globalAttentionReader.refresh();');
   });
 });
