@@ -1,5 +1,6 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { unzipSync } from 'fflate';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -444,6 +445,23 @@ describe('审稿意见 over the real store on exact sample1', () => {
       expect(manifest).toContain(`- 评估记录 · 第 2 版定稿（定稿于 ${finalized.finalized!.at}）`);
       expect(manifest).toContain('- 审稿意见 · 给作者的修改意见 · 版本 2（设为发稿版本时的最新一版）');
       expect(manifest).not.toContain('本书没有');
+
+      // #953: the same pinned 审稿意见 Editorial Artifact and finalized record stream through the archive route.
+      const archiveReview = await book.store.reviewBookDeliveryPackageExport({ bookId, packageVersionId: version.packageVersionId,
+        options: ALL, route: 'archive' }, true);
+      const archivePath = join(roots.inputRoot, '审稿意见交付包.zip');
+      const archivePreparation = await book.store.prepareBookDeliveryPackageArchiveExport({ bookId, packageVersionId: version.packageVersionId,
+        options: ALL, memberKeys: [], reviewDigest: archiveReview.reviewDigest, destination: archivePath }, true);
+      const archiveExport = await book.store.approveBookDeliveryPackageExport({ bookId, exportId: archivePreparation.exportId }, true);
+      const archive = unzipSync(await readFile(archivePath));
+      expect(archiveExport.export.files.map((file) => [file.key, file.outcome])).toEqual([
+        ['publication', 'created'], ['evaluation-record', 'created'], ['readers-report:author', 'created'],
+      ]);
+      expect(archiveExport.export.archiveReceipt?.metadata.map((item) => item.path)).toEqual(['交付包清单.md', 'checksums.txt']);
+      for (const file of review.files) {
+        expect(createHash('sha256').update(archive[file.fileName]!).digest('hex'))
+          .toBe(createHash('sha256').update(await readFile(join(folder, file.fileName))).digest('hex'));
+      }
 
       // 范例 offers the same version under 仅本社, and only the editor admits it — at exactly that version, once.
       const offered = book.store.inspectExemplars(null).books[0]!;

@@ -1172,7 +1172,7 @@ async function main() {
     at('analysis-jump-chip');
     // A jump from another screen leaves the same way back: ②A's 回到稿件范围 on the seventh range opens the manuscript there,
     // and 回到<位置> goes back to where the editor last read it.
-    await clickSelector(renderer, '[data-edge-entry="analysis"]', 'analysis-open');
+    await clickSelector(renderer, '[data-records-destination="analysis"]', 'analysis-open');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'analysis-screen', 60_000);
     await clickSelector(renderer, '[data-screen="book-analysis"] [data-analysis-tab="chapters"]', 'analysis-chapters');
     const rangeBlock = await renderer.evaluate(`document.querySelector('[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="7"] [data-analysis-action="return-to-range"]')?.dataset.analysisBlockId ?? null`);
@@ -1450,7 +1450,7 @@ async function main() {
     requireJourney(Array.isArray(leadAnchors) && leadAnchors.length > 0, 'selection-task-lead-anchors', leadAnchors);
     let taskBlock = null;
     for (const anchor of leadAnchors.slice(0, 6)) {
-      await clickSelector(renderer, '[data-edge-entry="analysis"]', 'selection-task-analysis-open');
+      await clickSelector(renderer, '[data-records-destination="analysis"]', 'selection-task-analysis-open');
       await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'selection-task-analysis-screen', 60_000);
       await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] button[data-analysis-tab="chapters"]') instanceof HTMLButtonElement`, 'selection-task-analysis-chapters-ready', 60_000);
       await clickSelector(renderer, '[data-screen="book-analysis"] button[data-analysis-tab="chapters"]', 'selection-task-analysis-chapters');

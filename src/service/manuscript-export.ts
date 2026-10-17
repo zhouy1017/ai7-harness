@@ -897,6 +897,81 @@ export class ManuscriptExportStore {
     return this.#prepare(input.bookId, input.target, requireOptions(input.options), input.format, input.revisionId, input.reviewDigest, destination);
   }
 
+  /** A member names the selected archive plus its exact entry, never a fictitious standalone file. */
+  async preparePackageArchiveMember(
+    input: Parameters<ManuscriptExportStore['preparePackageFile']>[0] & { exportId: string; memberPath: string },
+    available: boolean,
+  ): Promise<ManuscriptExportPreparationProjection> {
+    this.#requireAvailable(available);
+    requireExport(UUID_PATTERN.test(input.exportId) && input.memberPath.length > 0 && input.memberPath.length <= 255 &&
+      !/[\\/\u0000]/u.test(input.memberPath), 'EXPORT_DESTINATION_INVALID', '压缩包内的文件名无效。');
+    const destination = await resolveExportDestination(input.destination, '.zip', this.#environment.dataRoot);
+    return this.#prepare(input.bookId, input.target, requireOptions(input.options), input.format, input.revisionId,
+      input.reviewDigest, { ...destination, fileName: input.memberPath },
+      { exportId: input.exportId, destination: destination.path, memberPath: input.memberPath });
+  }
+
+  /** One exact member's bytes, verified as prepared, for the archive writer to stage; nothing is recorded (EXP-011). */
+  async readPackageArchiveMember(bookId: string, preparationId: string, exportId: string, available: boolean): Promise<Uint8Array> {
+    this.#requireAvailable(available);
+    const row = this.#preparationRow(bookId, preparationId);
+    this.#requireArchiveMember(row, exportId);
+    requireExport(this.#outcomeRow(preparationId) === undefined, 'EXPORT_ALREADY_APPROVED', '这次导出已经批准过。');
+    return this.#requireAsPrepared(bookId, row, this.#preparationProjection(row));
+  }
+
+  /**
+   * Approve one staged member at the archive's single commit boundary, as `approve` does before its one write; the
+   * archive owner calls it inside the transaction that approves every member, so a cancelled staging approves none.
+   */
+  approvePackageArchiveMember(bookId: string, preparationId: string, exportId: string): void {
+    const row = this.#preparationRow(bookId, preparationId);
+    this.#requireArchiveMember(row, exportId);
+    requireExport(this.#outcomeRow(preparationId) === undefined, 'EXPORT_ALREADY_APPROVED', '这次导出已经批准过。');
+    const preparation = this.#preparationProjection(row);
+    const approvalId = randomUUID();
+    const approvedAt = new Date().toISOString();
+    const approval = canonicalRecord({ schema: APPROVAL_SCHEMA, approvalId, preparationId,
+      effectIntentId: preparation.technical.effectIntentId, payloadSha256: preparation.technical.payloadDigest,
+      actor: ACTOR, interaction: 'export-as-stated', approvedAt });
+    this.#db.prepare(`INSERT INTO export_approvals(approval_id, preparation_id, effect_intent_id, payload_sha256,
+      actor, interaction, approved_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, 'export-as-stated', ?, ?, ?)`)
+      .run(approvalId, preparationId, preparation.technical.effectIntentId, preparation.technical.payloadDigest,
+        ACTOR, approvedAt, approval.json, approval.digest);
+  }
+
+  #requireArchiveMember(row: SqlRow, exportId: string): void {
+    const record = parseCanonicalJson(text(row.canonical_json));
+    requireExport(isRecord(record) && isRecord(record.archive) && record.archive.exportId === exportId &&
+      record.archive.destination === text(row.destination) && record.archive.memberPath === text(row.file_name),
+    'EXPORT_RECORD_INVALID', '压缩包成员与导出准备不一致。');
+  }
+
+  /** Only the archive owner settles a streamed member, after the single file commit's classified outcome. */
+  settlePackageArchiveMember(bookId: string, preparationId: string, exportId: string, outcome: WriteOutcome): void {
+    const row = this.#preparationRow(bookId, preparationId);
+    const preparation = this.#preparationProjection(row);
+    const record = parseCanonicalJson(text(row.canonical_json));
+    requireExport(isRecord(record) && isRecord(record.archive) && record.archive.exportId === exportId,
+      'EXPORT_RECORD_INVALID', '压缩包成员与导出准备不一致。');
+    const approval = this.#outcomeRow(preparationId);
+    requireExport(approval !== undefined && approval.receipt_id === null, 'EXPORT_ALREADY_APPROVED', '这次导出已经记录过。');
+    const receiptId = randomUUID();
+    const approvalId = text(approval.approval_id);
+    const recordedAt = new Date().toISOString();
+    const success = outcome.outcome === 'created' || outcome.outcome === 'replaced';
+    const byteLength = success ? preparation.payloadBytes : null;
+    const fileSha256 = success ? preparation.technical.payloadDigest : null;
+    const failureCode = success ? null : ('code' in outcome ? outcome.code : 'EXPORT_COMMIT_UNCERTAIN');
+    const receipt = canonicalRecord({ schema: RECEIPT_SCHEMA, receiptId, preparationId, approvalId,
+      effectIntentId: preparation.technical.effectIntentId, outcome: success ? 'created' : outcome.outcome,
+      finalPath: preparation.destination, byteLength, fileSha256, failureCode, recordedAt, archive: record.archive });
+    this.#db.prepare(`INSERT INTO export_receipts(receipt_id, preparation_id, approval_id, outcome, final_path,
+      byte_length, file_sha256, failure_code, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(receiptId, preparationId, approvalId, success ? 'created' : outcome.outcome, preparation.destination,
+        byteLength, fileSha256, failureCode, recordedAt, receipt.json, receipt.digest);
+  }
+
   /**
    * What `按上述方式导出` checks before it records anything, alone (Issue #416 review): the payload written again is the
    * prepared one, and the destination is still what the dialog resolved. A package export checks every file so before it
@@ -938,6 +1013,7 @@ export class ManuscriptExportStore {
     revisionId: string,
     reviewDigest: string,
     destination: { path: string; fileName: string; disposition: ManuscriptExportDisposition; replaces: ReplacedFileIdentity | null },
+    archive?: { exportId: string; destination: string; memberPath: string },
   ): Promise<ManuscriptExportPreparationProjection> {
     const input = { bookId, revisionId, reviewDigest };
     const resolved = await this.#resolve(input.bookId, target, false);
@@ -988,6 +1064,7 @@ export class ManuscriptExportStore {
       policyId: POLICY.id,
       policyVersion: POLICY.version,
       writer: writerOf(resolved, format),
+      ...(archive === undefined ? {} : { archive }),
       createdAt,
     });
     transact(this.#db, () => {
@@ -1023,6 +1100,8 @@ export class ManuscriptExportStore {
       '导出批准请求无效。',
     );
     const row = this.#preparationRow(input.bookId, input.preparationId);
+    const record = parseCanonicalJson(text(row.canonical_json));
+    requireExport(!isRecord(record) || record.archive === undefined, 'EXPORT_APPROVAL_INVALID', '请从交付包压缩包导出批准这些文件。');
     const preparation = this.#preparationProjection(row);
     const prior = this.#outcomeRow(input.preparationId);
     if (prior !== undefined) return this.#receiptProjection(row, prior);
@@ -1798,6 +1877,12 @@ export class ManuscriptExportStore {
       ? text((this.#db.prepare('SELECT label FROM milestone_versions WHERE milestone_id = ?').get(text(row.target_id)) as SqlRow | undefined)?.label)
       : null;
     const disposition = text(row.disposition) as ManuscriptExportDisposition;
+    const stored = parseCanonicalJson(text(row.canonical_json));
+    if (isRecord(stored) && stored.archive !== undefined) {
+      requireExport(isRecord(stored.archive) && typeof stored.archive.exportId === 'string' && UUID_PATTERN.test(stored.archive.exportId) &&
+        stored.archive.destination === text(row.destination) && stored.archive.memberPath === text(row.file_name),
+      'EXPORT_RECORD_INVALID', '压缩包成员与导出准备不一致。');
+    }
     const recordDigest = requireRecord(row.canonical_json, row.sha256, {
       schema: PREPARATION_SCHEMA,
       preparationId,
@@ -1951,12 +2036,20 @@ export class ManuscriptExportStore {
     requireExport(text(outcome.receipt_approval_id) === approvalId && text(outcome.final_path) === preparation.destination,
       'EXPORT_RECORD_INVALID', '导出回执与其批准不一致。');
     const exported = kind === 'created' || kind === 'replaced';
+    const preparedRecord = parseCanonicalJson(text(preparationRow.canonical_json));
+    const archive = isRecord(preparedRecord) ? preparedRecord.archive : undefined;
+    if (archive !== undefined) {
+      const receiptRecord = parseCanonicalJson(text(outcome.receipt_json));
+      requireExport(isRecord(receiptRecord) && canonicalJson(receiptRecord.archive) === canonicalJson(archive),
+        'EXPORT_RECORD_INVALID', '压缩包成员收据与导出准备不一致。');
+    }
     return {
       ...base,
       outcome: kind,
       outcomeLabel: exported ? EXPORT_OUTCOME_LABELS.exported : kind === 'ambiguous' ? EXPORT_OUTCOME_LABELS.ambiguous : EXPORT_OUTCOME_LABELS.failed,
       detail: exported
-        ? kind === 'created' ? `已新建「${preparation.fileName}」。` : `已替换所选位置的「${preparation.fileName}」。`
+        ? archive !== undefined ? `已写入所选压缩包：「${preparation.fileName}」。`
+          : kind === 'created' ? `已新建「${preparation.fileName}」。` : `已替换所选位置的「${preparation.fileName}」。`
         : EXPORT_FAILURE_DETAILS[failureCode ?? ''] ?? EXPORT_FAILURE_DETAILS.EXPORT_COMMIT_UNCERTAIN!,
       byteLength,
       recordedAt: text(outcome.recorded_at),

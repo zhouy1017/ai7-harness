@@ -1,3 +1,4 @@
+import { MAX_BLOCK_GRAPHEMES } from '../shared/protocol.js';
 import {
   PROTECTION_CLOSE_OPTIONS,
   PROTECTION_COPIED,
@@ -26,12 +27,12 @@ import {
 // context header shows. The buffer is the editor's own unacknowledged text in the window: process-local, never an Edit
 // Journal, Recovery Snapshot or durability guarantee (DUR-002), and bounded by a constant, never by the manuscript's length.
 
-/** The safe capacity of the Bounded Edit Safety Buffer, in characters (graphemes): a constant, whatever the manuscript's size. */
-export const SAFETY_BUFFER_CAPACITY = 2_000;
-/** Room kept back so an active Chinese IME composition always finishes under the input method's control (DUR-008). */
-export const IME_COMPOSITION_RESERVE = 256;
 /** Past this, no new input is taken outside a composition, and the Protective Read-only State begins once none is open. */
-export const SAFETY_BUFFER_SOFT_LIMIT = SAFETY_BUFFER_CAPACITY - IME_COMPOSITION_RESERVE;
+export const SAFETY_BUFFER_SOFT_LIMIT = 1_744;
+/** A composition can replace a whole admitted block: reserve both its removed and inserted graphemes (DUR-008). */
+export const IME_COMPOSITION_RESERVE = 2 * MAX_BLOCK_GRAPHEMES;
+/** Constant process-local capacity, independent of manuscript length, including the full admitted composition reserve. */
+export const SAFETY_BUFFER_CAPACITY = SAFETY_BUFFER_SOFT_LIMIT + IME_COMPOSITION_RESERVE;
 /** The automatic retry's waits, in milliseconds; the last repeats (DUR-006). */
 export const PROTECTION_RETRY_DELAYS_MS: ReadonlyArray<number> = Object.freeze([1_000, 2_000, 4_000, 8_000]);
 

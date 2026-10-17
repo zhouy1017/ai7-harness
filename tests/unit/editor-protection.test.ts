@@ -29,6 +29,7 @@ import {
 import { decodeRequest } from '../../src/service/request-frames.js';
 import {
   EDIT_JOURNAL_FAULT_CODE,
+  MAX_BLOCK_GRAPHEMES,
   editJournalFaultControlAdmitted,
   isEditJournalFaultMode,
   SERVICE_PROTOCOL_VERSION,
@@ -56,7 +57,7 @@ function view(overrides: Partial<ProtectionView> = {}): ProtectionView {
 
 describe('the Bounded Edit Safety Buffer', () => {
   it('has a declared capacity that is a constant, with an input-method reserve inside it (DUR-002, DUR-008)', () => {
-    expect(SAFETY_BUFFER_CAPACITY).toBe(2_000);
+    expect(SAFETY_BUFFER_CAPACITY).toBe(5_840);
     expect(IME_COMPOSITION_RESERVE).toBeGreaterThan(0);
     expect(SAFETY_BUFFER_SOFT_LIMIT).toBe(SAFETY_BUFFER_CAPACITY - IME_COMPOSITION_RESERVE);
     // The limits take no manuscript size: a ten-million-character manuscript and a one-paragraph one share them.
@@ -70,6 +71,12 @@ describe('the Bounded Edit Safety Buffer', () => {
     expect(bufferAdmits(SAFETY_BUFFER_SOFT_LIMIT + 1, true)).toBe(true);
     expect(bufferAdmits(SAFETY_BUFFER_CAPACITY, true)).toBe(true);
     expect(bufferAdmits(SAFETY_BUFFER_CAPACITY + 1, true)).toBe(false);
+  });
+
+  it('reserves a full admitted block replacement even when earlier pending edits fill the soft limit', () => {
+    const replacement = changedCharacters(Array(MAX_BLOCK_GRAPHEMES).fill('甲'), Array(MAX_BLOCK_GRAPHEMES).fill('乙'));
+    expect(bufferAdmits(SAFETY_BUFFER_SOFT_LIMIT + replacement, true)).toBe(true);
+    expect(bufferAdmits(SAFETY_BUFFER_SOFT_LIMIT + replacement, false)).toBe(false);
   });
 
   it('pauses input at the soft limit only once no composition is open, so a composition is never cut short', () => {
@@ -154,8 +161,8 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
 });
 
 describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
-  it('is protocol 154, the number the Commander assigned at the merge slot', () => {
-    expect(SERVICE_PROTOCOL_VERSION).toBe(154);
+  it('is protocol 155, the number the Commander assigned at the merge slot', () => {
+    expect(SERVICE_PROTOCOL_VERSION).toBe(155);
   });
 
   it('arms only J-02\'s `armed` launch in the development-ci scope and refuses every other present control', () => {

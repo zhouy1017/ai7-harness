@@ -26,6 +26,49 @@ import type { ServiceOperation, ServiceOperationMap, ServiceRequest } from '../.
 
 const encoder = new TextEncoder();
 
+describe('whole package archive frames (#953)', () => {
+  it('accepts the archive review, exact destination, approval and cancellation through the real decoder', () => {
+    const bookId = randomUUID();
+    const packageVersionId = randomUUID();
+    const options = { includeAnnotations: true, includeSuggestions: false };
+    for (const body of [
+      { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId, options, route: 'archive', offset: 40 } },
+      { op: 'prepareBookDeliveryPackageArchiveExport', input: { bookId, packageVersionId, options, reviewDigest: 'a'.repeat(64), memberKeys: [], destination: resolve('package.zip') } },
+      { op: 'approveBookDeliveryPackageArchiveExport', input: { bookId, exportId: randomUUID() } },
+      { op: 'cancelBookDeliveryPackageArchiveExport', input: { jobId: randomUUID() } },
+    ]) {
+      const frame = { id: randomUUID(), ...body };
+      expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    }
+  });
+
+  it('refuses an unknown route or a relative archive destination before dispatch', () => {
+    const base = { bookId: randomUUID(), packageVersionId: randomUUID(), options: { includeAnnotations: true, includeSuggestions: true } };
+    for (const body of [
+      { op: 'reviewBookDeliveryPackageExport', input: { ...base, route: 'network' } },
+      { op: 'prepareBookDeliveryPackageArchiveExport', input: { ...base, memberKeys: [], reviewDigest: 'a'.repeat(64), destination: 'package.zip' } },
+      { op: 'approveBookDeliveryPackageArchiveExport', input: { bookId: base.bookId, exportId: 'not-an-id' } },
+    ]) expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), ...body })))).toThrow(ProtocolError);
+  });
+});
+
+describe('Book findings and paragraph analysis read boundaries (#952)', () => {
+  it('accepts exact bounded read inputs and refuses forged actions, identities, offsets and radii', () => {
+    const bookId = randomUUID();
+    const input = { bookId, manuscriptId: randomUUID(), blockId: `blk_${'a'.repeat(24)}`, radius: 1 };
+    for (const frame of [
+      { id: randomUUID(), op: 'inspectBookFindings', input: { bookId, offset: 40 } },
+      { id: randomUUID(), op: 'inspectParagraphAnalysis', input },
+    ]) expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    for (const invalid of [{ offset: -1 }, { offset: 0.5 }, { offset: 0, dispose: true }, { offset: 0, bookId: 'invalid' }]) {
+      expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), op: 'inspectBookFindings', input: { bookId, ...invalid } })))).toThrow(ProtocolError);
+    }
+    for (const invalid of [{ radius: 5 }, { radius: -1 }, { radius: 1.5 }, { blockId: '' }, { manuscriptId: 'invalid' }, { write: true }]) {
+      expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), op: 'inspectParagraphAnalysis', input: { ...input, ...invalid } })))).toThrow(ProtocolError);
+    }
+  });
+});
+
 // Issue #936: historical Run detail and link paging stay reads of the existing usage op.
 describe('usage input bounds', () => {
   it('accepts closed filters, a safe link offset and an exact Run id only', () => {
