@@ -876,7 +876,7 @@ const shell = mountShell({
     void leaveThen(async () => {
       setStatus(SHELL_LABELS.openingBook, 'busy');
       try {
-        await requestBookWorkbenchRoute({ kind: 'book', bookId });
+        await requestBookWorkbenchRoute({ kind: 'book', bookId }, undefined, currentRecoveryReturn());
       } catch (error) {
         setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
       }
@@ -898,6 +898,14 @@ interface RecoveryReturnContext {
   attentionId: string;
   attentionVersion: number;
   bookTitle: string;
+}
+
+// A recovery return belongs to its surface, never to preferences; implicit inheritance stays within one Book.
+const recoveryReturnContexts = new WeakMap<HTMLElement, RecoveryReturnContext>();
+
+function currentRecoveryReturn(): RecoveryReturnContext | undefined {
+  const content = screen.firstElementChild;
+  return content instanceof HTMLElement ? recoveryReturnContexts.get(content) : undefined;
 }
 
 function recoveryTone(access: ImportDraftRecoveryProjection['originalFileAccess']['state']): string {
@@ -1012,6 +1020,12 @@ function applyAuthorityInterruption(): void {
 }
 
 function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | null = null): void {
+  const previous = screen.firstElementChild;
+  const recoveryReturn = currentRecoveryReturn();
+  if (recoveryReturn && previous instanceof HTMLElement && previous.dataset['bookId'] !== undefined &&
+      previous.dataset['bookId'] === content.dataset['bookId'] && !recoveryReturnContexts.has(content)) {
+    recoveryReturnContexts.set(content, recoveryReturn);
+  }
   // Where the manuscript was read as it is left (Issue #423, S77a): a jump back into it from another screen returns there.
   const reading = manuscriptOnScreen?.readingPlace() ?? null;
   if (reading !== null) lastReadingPlace = reading;
@@ -1281,6 +1295,7 @@ async function returnToRecoveryComparison(attentionId: string): Promise<void> {
 
 function appendRecoveryReturnAction(content: HTMLElement, context: RecoveryReturnContext | undefined): void {
   if (!context) return;
+  recoveryReturnContexts.set(content, context);
   const actions = element('div', 'button-row recovery-return-actions');
   const returnButton = button(`返回 ${context.bookTitle} 的恢复待确认`, 'secondary', async () => {
     returnButton.disabled = true;
@@ -1350,6 +1365,10 @@ async function renderResolvedBookWorkbenchRoute(
       recoveryReturn?.attentionId,
       manuscriptEntryNotice(anchor),
     );
+    const content = screen.firstElementChild;
+    if (recoveryReturn && content instanceof HTMLElement && content.dataset['bookId'] === route.bookId) {
+      recoveryReturnContexts.set(content, recoveryReturn);
+    }
     return;
   }
   renderHistoricalRevision(await window.ai7.getHistoricalRevision({ revisionId: route.revisionId, cursor: null }));
@@ -6101,11 +6120,12 @@ function renderSettingsHub(): void {
  * 发现 is ②A's judged items until the Book-level aggregate exists (IA-013, a follow-up); 历史与恢复 is 工作概览's records.
  */
 async function openBookSection(book: ShellBookEntry, section: ShellBookSection): Promise<void> {
+  const recoveryReturn = currentRecoveryReturn();
   setStatus(SHELL_LABELS.openingBook, 'busy');
   try {
     await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) => {
       const { bookId, bookTitle } = route;
-      if (section === 'manuscript') await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
+      if (section === 'manuscript') await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle }, recoveryReturn);
       else if (section === 'review') renderBookReview(bookId, bookTitle);
       else if (section === 'evaluation') renderBookEvaluation(bookId, bookTitle);
       else if (section === 'deliverables') renderBookDeliverables(bookId, bookTitle);
@@ -6114,7 +6134,7 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
         if (section === 'findings') shell.markSection('findings');
       } else if (section === 'sources') renderBookSources(bookId, bookTitle);
       else {
-        renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
+        renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }), undefined, recoveryReturn);
         if (section === 'history') {
           shell.markSection('history');
           const records = screen.querySelector<HTMLElement>('.record-navigation');

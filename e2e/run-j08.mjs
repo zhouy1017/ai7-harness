@@ -481,6 +481,11 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'lower-import-open');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'lower-import-editor');
     await assertRenderer(renderer, `Array.from(document.querySelectorAll('button')).some((item)=>item.textContent==='返回恢复待确认')`, 'return-route-imported-editor');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'return-route-sidebar-overview');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] [data-recovery-return]')`, 'return-route-sidebar-overview-ready');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'return-route-sidebar-editor');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'return-route-sidebar-editor-ready');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('button')).some((item)=>item.textContent==='返回恢复待确认')`, 'return-route-sidebar-editor-preserved');
     await click(renderer, '返回恢复待确认', 'return-from-imported-editor');
     await assertRecoveryScreen(renderer, 'eligible');
     await click(renderer, '稍后处理', 'defer-after-import');
