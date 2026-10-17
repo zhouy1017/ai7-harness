@@ -1282,6 +1282,19 @@ async function importInitialManuscriptForReimport(renderer, sourceSha256, source
   return { bookId, lineageSourceVersionId };
 }
 
+// Sidebar 稿件 restores the last reading position (RET-002). Whole-document identity scans explicitly go to the start
+// through the manuscript's paging controls; opening a Book must not be changed back into an implicit rewind.
+async function rewindEditorPages(renderer, scenario) {
+  for (;;) {
+    const atStart = await renderer.evaluate(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向前浏览')?.disabled !== false`);
+    if (atStart) return;
+    const firstBlockId = await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId`);
+    await clickExactButton(renderer, '向前浏览', `${scenario}-previous-editor-page`);
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId !== ${JSON.stringify(firstBlockId)}`, `${scenario}-previous-editor-page-ready`);
+    await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  }
+}
+
 async function collectEditorBlockIdentities(renderer, scenario, openEditor = true) {
   if (openEditor) {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), `${scenario}-open-editor`);
@@ -1289,6 +1302,7 @@ async function collectEditorBlockIdentities(renderer, scenario, openEditor = tru
   } else {
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, `${scenario}-editor-already-open`);
   }
+  await rewindEditorPages(renderer, scenario);
   const identities = {};
   for (;;) {
     const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => ({ id: block.dataset.blockId, text: block.textContent }))`);
@@ -1310,6 +1324,7 @@ async function collectEditorBlockIdentities(renderer, scenario, openEditor = tru
 async function collectEditorBlockIdentitySequence(renderer, scenario) {
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), `${scenario}-open-editor`);
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, `${scenario}-editor`);
+  await rewindEditorPages(renderer, scenario);
   const identities = [];
   for (;;) {
     const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => ({ id: block.dataset.blockId, text: block.textContent }))`);
