@@ -5,8 +5,9 @@ import { EditorialStore } from '../../src/service/store.js';
 import { IMPORTED_SKILL_SCHEMA_SQL, IMPORTED_SKILL_TRIGGER_SQL } from '../../src/service/imported-skill-schema.js';
 import { NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL } from '../../src/service/editorial-workspace-profile.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
-import { IMPORTED_SKILL_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { execPre74Fixture, pre82SchemaRows } from '../support/pre74-schema.js';
 
 let roots: ServiceTestRoots | undefined;
 afterEach(async () => { await roots?.dispose(); roots = undefined; });
@@ -24,7 +25,8 @@ describe('imported Skill store boundary', () => {
     try {
       for (const trigger of Object.keys(IMPORTED_SKILL_TRIGGER_SQL)) prior.exec(`DROP TRIGGER ${trigger}`);
       for (const table of Object.keys(IMPORTED_SKILL_SCHEMA_SQL).reverse()) prior.exec(`DROP TABLE ${table}`);
-      prior.exec('PRAGMA user_version = 80');
+      // Synchronized with #922: plant the pre-82 Result Set shapes as well as the pre-81 imported-Skill relations.
+      execPre74Fixture(prior, 'PRAGMA user_version = 80');
       before = prior.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
       expect(String(prior.prepare("SELECT sql FROM sqlite_schema WHERE name = 'native_artifact_installations'").get()?.sql)).toBe(NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL);
     } finally { prior.close(); }
@@ -32,9 +34,9 @@ describe('imported Skill store boundary', () => {
     try {
       const after = new DatabaseSync(path, { readOnly: true });
       try {
-        expect(Number(after.prepare('PRAGMA user_version').get()?.user_version)).toBe(IMPORTED_SKILL_SCHEMA_VERSION);
+        expect(Number(after.prepare('PRAGMA user_version').get()?.user_version)).toBe(LATEST_SCHEMA_VERSION);
         const added = new Set([...Object.keys(IMPORTED_SKILL_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_TRIGGER_SQL)]);
-        expect(after.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all().filter((row) => !added.has(String(row.name)))).toEqual(before!);
+        expect(pre82SchemaRows(after.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all() as Array<{ type: string; name: string; sql: string }>).filter((row) => !added.has(String(row.name)))).toEqual(before!);
         for (const table of Object.keys(IMPORTED_SKILL_SCHEMA_SQL)) expect(MERGE_TABLE_POLICY[table as keyof typeof MERGE_TABLE_POLICY]).toBe('house');
       } finally { after.close(); }
       // Acquisition discloses and keeps nothing; keeping is the editor's separate act (ADR 0090 §2).
@@ -65,14 +67,15 @@ describe('imported Skill store boundary', () => {
     } finally { store.markCleanShutdown(); store.close(); }
   });
 
-  it('refuses a revision-81 store without its four relations rather than giving them anew (Reviewer, #66)', async () => {
+  it('refuses a terminal store without its four relations rather than giving them anew (Reviewer, #66)', async () => {
     roots = await createServiceTestRoots('ai7-imported-skill-refusal-');
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     store.markCleanShutdown(); store.close();
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const planted = new DatabaseSync(path);
     try {
-      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(81);
+      // Synchronized with #922: this remains a terminal-store refusal after the schema advances.
+      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(LATEST_SCHEMA_VERSION);
       for (const trigger of Object.keys(IMPORTED_SKILL_TRIGGER_SQL)) planted.exec(`DROP TRIGGER ${trigger}`);
       for (const table of Object.keys(IMPORTED_SKILL_SCHEMA_SQL).reverse()) planted.exec(`DROP TABLE ${table}`);
     } finally { planted.close(); }

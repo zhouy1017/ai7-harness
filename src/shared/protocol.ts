@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 149 as const;
+export const SERVICE_PROTOCOL_VERSION = 150 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -125,6 +125,12 @@ export const IPC_CHANNELS = {
   stopCapturedProcedure: 'ai7:j15:stop-captured-procedure',
   inspectCapturedProcedureRun: 'ai7:j15:inspect-captured-procedure-run',
   inspectCapturedProcedureApplicability: 'ai7:j15:inspect-captured-procedure-applicability',
+  // 自定义分析维度 (Issue #922, slice 7f): the house's dimensions in 知识库 › 工序与规则, and ②A's 自定义 tab over one Book.
+  inspectCustomAnalysisDimensions: 'ai7:kb:inspect-custom-analysis-dimensions',
+  saveCustomAnalysisDimension: 'ai7:kb:save-custom-analysis-dimension',
+  enableCustomAnalysisDimension: 'ai7:kb:enable-custom-analysis-dimension',
+  stopCustomAnalysisDimension: 'ai7:kb:stop-custom-analysis-dimension',
+  prepareCustomAnalysis: 'ai7:j04:prepare-custom-analysis',
   saveDeveloperProposal: 'ai7:j15:save-developer-proposal',
   saveDeveloperProposalFile: 'ai7:j15:save-developer-proposal-file',
   inspectLibraryMaterials: 'ai7:j15:inspect-library-materials',
@@ -3270,8 +3276,12 @@ export const EVALUATION_REWRITE_ASSURANCE_STATEMENT =
 /** 写作任务 (Issue #432, S84a): a document draft the editor edits, with an exemplar only referenced (V2-UX-DELIV-007, KB-004). */
 export const WRITING_ASSURANCE_STATEMENT =
   '写作草稿是模型依据本书的稿件与所列参考材料写成的文档草稿，由编辑在稿件编辑面上修改；范例只作参照，不照抄；草稿不会交付或发送。' as const;
+/** 自定义分析维度 (Issue #922, slice 7f): per-unit answers to the editor's own question, located and never concluded across units. */
+export const CUSTOM_ANALYSIS_ASSURANCE_STATEMENT =
+  '仅为模型就编辑自拟的提问逐单元给出的回答与其精确引文位置；不跨单元归纳，不打分，不构成事实判定、编辑评审或稿件变更。' as const;
 export type AnalysisAssuranceStatement =
   | typeof WRITING_ASSURANCE_STATEMENT
+  | typeof CUSTOM_ANALYSIS_ASSURANCE_STATEMENT
   | typeof BASELINE_ANALYSIS_ASSURANCE_STATEMENT
   | typeof FACTUAL_REVIEW_ASSURANCE_STATEMENT
   | typeof REVIEW_CATEGORY_ASSURANCE_STATEMENT
@@ -3604,13 +3614,188 @@ export function reviewCategoryExpectedOutcome(label: string): string {
   return `「${label}」审阅结果集修订版（编辑审阅契约 v1）`;
 }
 
+/**
+ * 自定义分析维度 (Issue #922, wave 10 slice 7f; ADR 0090 item 4): an AI7-owned document the editor writes in 知识库 › 工序与规则 —
+ * a title that is only a label, one bounded per-unit question template, and the answer schema and Authority Ceiling AI7 fixes — run
+ * as the analysis kind family `custom-analysis/<dimension-id>` under the one contract `ai7.custom-analysis/1`. It is not a DSH
+ * Skill and carries no prompt of its own beyond the template: AI7's framing around it is fixed. Each dimension is its own kind,
+ * so each keeps its own Result Set (ANALYSIS-009), and its Tasks take the baseline's four modes.
+ */
+export const CUSTOM_ANALYSIS_KIND_PREFIX = 'custom-analysis/' as const;
+export const CUSTOM_ANALYSIS_CONTRACT_VERSION = 'ai7.custom-analysis/1' as const;
+export const CUSTOM_ANALYSIS_DIMENSION_SCHEMA = 'ai7.custom-analysis-dimension/1' as const;
+export type CustomAnalysisKindId = `${typeof CUSTOM_ANALYSIS_KIND_PREFIX}${string}`;
+/** A dimension identity is a lower-case UUID, which the durable kind GLOB `custom-analysis/[a-z0-9-]*` admits. */
+export const CUSTOM_ANALYSIS_DIMENSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+export const MAX_CUSTOM_ANALYSIS_TITLE_GRAPHEMES = 40;
+/** The template bound is the Provider Processing v22/v23 term `EDITOR_AUTHORED_QUESTION_TEMPLATE_MAX_GRAPHEMES` states. */
+export const MAX_CUSTOM_ANALYSIS_TEMPLATE_GRAPHEMES = 400;
+export const MAX_CUSTOM_ANALYSIS_ANSWER_GRAPHEMES = 300;
+export const MAX_CUSTOM_ANALYSIS_QUOTE_GRAPHEMES = 80;
+export const MAX_CUSTOM_ANALYSIS_CONFIDENCE_NOTE_GRAPHEMES = 120;
+/** At most this many answer rows one unit may return; more is a refused unit result, never a cut. */
+export const MAX_CUSTOM_ANALYSIS_ROWS_PER_UNIT = 12;
+/** The one placeholder a template may carry: where the unit's text stands in the question. */
+export const CUSTOM_ANALYSIS_UNIT_PLACEHOLDER = '{本单元}' as const;
+/** At most this many dimensions, versions of one dimension, and answer rows of one revision a projection lists. */
+export const MAX_CUSTOM_ANALYSIS_DIMENSIONS_SHOWN = 40;
+export const MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN = 12;
+export const MAX_CUSTOM_ANALYSIS_ROWS_SHOWN = 120;
+
+export function isCustomAnalysisDimensionId(value: unknown): value is string {
+  return typeof value === 'string' && CUSTOM_ANALYSIS_DIMENSION_ID_PATTERN.test(value);
+}
+
+export function customAnalysisKindId(dimensionId: string): CustomAnalysisKindId {
+  if (!isCustomAnalysisDimensionId(dimensionId)) throw new Error('CUSTOM_ANALYSIS_DIMENSION_ID_INVALID');
+  return `${CUSTOM_ANALYSIS_KIND_PREFIX}${dimensionId}`;
+}
+
+/** The dimension a kind identity of the family names; `null` for every other kind and for a malformed one. */
+export function customAnalysisDimensionIdOfKind(kind: unknown): string | null {
+  if (typeof kind !== 'string' || !kind.startsWith(CUSTOM_ANALYSIS_KIND_PREFIX)) return null;
+  const dimensionId = kind.slice(CUSTOM_ANALYSIS_KIND_PREFIX.length);
+  return isCustomAnalysisDimensionId(dimensionId) ? dimensionId : null;
+}
+
+export function isCustomAnalysisKindId(kind: unknown): kind is CustomAnalysisKindId {
+  return customAnalysisDimensionIdOfKind(kind) !== null;
+}
+
+/** A kind's mode goal stays stable across document versions; the plan separately names its exact dimension version and title. */
+export type CustomAnalysisGoal = `自定义分析：${string}`;
+export function customAnalysisModeGoal(mode: BaselineAnalysisTaskMode): CustomAnalysisGoal {
+  switch (mode) {
+    case 'first-baseline':
+      return '自定义分析：逐单元回答该维度的提问并定位所依据的原文，形成结果集修订版。';
+    case 'sync-current':
+      return '自定义分析：同步到当前稿件，复用内容一致的单元，仅重新回答改动过的单元，追加一个结果集修订版。';
+    case 'reanalyze-range':
+      return '自定义分析：重新回答所选范围及其重叠闭包，复用其余单元，追加一个结果集修订版。';
+    case 'reanalyze-book':
+      return '自定义分析：绕过全部既有单元结果，逐单元重新回答全书，追加一个结果集修订版。';
+  }
+}
+export function customAnalysisExpectedOutcome(title: string): string {
+  return `自定义分析「${title}」结果集修订版（自定义分析契约 v1）`;
+}
+
+/** The AI7-owned dimension document, exactly as one version freezes it and its digest covers it. */
+export interface CustomAnalysisDimensionDocument {
+  schema: typeof CUSTOM_ANALYSIS_DIMENSION_SCHEMA;
+  /** The editor's label for the dimension; shown in AI7 and never sent to a model service. */
+  title: string;
+  /** The editor's per-unit question, bounded, carrying no manuscript text; `{本单元}` at most marks where the unit stands. */
+  questionTemplate: string;
+  /** The answer every unit returns, fixed by AI7 (ADR 0090 item 4): the editor cannot change it. */
+  answerSchema: {
+    unitResultSchema: 'ai7.custom-analysis.unit-result/1';
+    row: { answerMaxGraphemes: 300; anchor: 'block-ordinal-and-verbatim-quote'; quoteMaxGraphemes: 80; confidenceNoteMaxGraphemes: 120; score: 'never' };
+    maxRowsPerUnit: 12;
+  };
+  /** What a Run of the dimension may do, fixed by AI7: read the current Book's run source, change nothing, call no tool, synthesize nothing across units. */
+  authorityCeiling: { runSourceScope: 'current-book'; mutation: 'none'; platformTools: 'none'; localTools: 'none'; crossUnitSynthesis: 'none' };
+}
+
+export type CustomAnalysisDimensionState = 'pending-validation' | 'enabled' | 'stopped';
+export const CUSTOM_ANALYSIS_DIMENSION_STATE_LABELS = {
+  'pending-validation': '待验证',
+  enabled: '已启用',
+  stopped: '已停用',
+} as const satisfies Record<CustomAnalysisDimensionState, string>;
+
+export interface CustomAnalysisDimensionVersionProjection {
+  versionId: string;
+  version: number;
+  title: string;
+  questionTemplate: string;
+  documentDigest: string;
+  /** The version this one supersedes; `null` for version 1. */
+  supersedes: null | { versionId: string; version: number };
+  state: CustomAnalysisDimensionState;
+  stateLabel: string;
+  createdAt: string;
+  stateRecordedAt: string;
+  /** How many Tasks of any Book were prepared under this exact version; historical Runs keep naming it after 停用. */
+  taskCount: number;
+}
+
+/** One answer row of one unit as the reducer kept it: the model's answer and the anchor the service itself located. */
+export interface CustomAnalysisRowProjection {
+  rowId: string;
+  unitOrdinal: number;
+  answer: string;
+  confidenceNote: string;
+  /** The block the model named, by its position in the unit message, and the quotation it gave. */
+  blockOrdinal: number;
+  quote: string;
+  /** Where the quotation stands, located deterministically in that block; `null` when it was not found exactly once. */
+  sourceRange: null | FactualSourceRangeProjection;
+  anchorState: 'located' | 'not-found' | 'ambiguous';
+}
+
+/** The latest Result Set Revision of one dimension on one Book, as ②A's 自定义 tab reads it (ANALYSIS-001, ANALYSIS-009). */
+export interface CustomAnalysisRevisionSummaryProjection {
+  revisionId: string;
+  ordinal: number;
+  createdAt: string;
+  /** The dimension version the revision was read under. */
+  dimensionVersion: { versionId: string; version: number; documentDigest: string };
+  manuscriptRevisionLabel: string;
+  coverage: AnalysisCoverageAxis;
+  freshness: AnalysisFreshnessAxis;
+  gaps: ReadonlyArray<{ unitOrdinal: number; code: AnalysisGapProjection['code']; reason: string }>;
+  rowCounts: { units: number; rows: number; located: number; unlocated: number };
+  rows: ReadonlyArray<CustomAnalysisRowProjection>;
+  rowsTruncated: boolean;
+}
+
+export interface CustomAnalysisDimensionProjection {
+  dimensionId: string;
+  kind: CustomAnalysisKindId;
+  /** The latest version's title. */
+  title: string;
+  /** The newest version in 已启用: what 运行 prepares under; `null` while none is. */
+  enabledVersion: null | { versionId: string; version: number };
+  versions: ReadonlyArray<CustomAnalysisDimensionVersionProjection>;
+  versionsTruncated: boolean;
+  /** Present when the projection was read for a Book: that Book's Task and latest revision of the dimension. */
+  book: null | {
+    taskState: null | { taskIntentId: string; state: BaselineAnalysisProjection['state']; stateLabel: string };
+    latest: null | CustomAnalysisRevisionSummaryProjection;
+    /** Why 运行 is unavailable here; `null` when it can prepare. */
+    unavailableReason: string | null;
+  };
+}
+
+export interface CustomAnalysisDimensionsProjection {
+  bookId: string | null;
+  dimensions: ReadonlyArray<CustomAnalysisDimensionProjection>;
+  truncated: boolean;
+  /** What AI7 fixes for every dimension, as the editor reads it beside the template. */
+  fixed: { answerSchema: CustomAnalysisDimensionDocument['answerSchema']; authorityCeiling: CustomAnalysisDimensionDocument['authorityCeiling'] };
+}
+
+export interface SaveCustomAnalysisDimensionInput {
+  /** `null` saves version 1 of a new dimension; otherwise the next version of that dimension, superseding its latest. */
+  dimensionId: string | null;
+  title: string;
+  questionTemplate: string;
+}
+
+export interface PrepareCustomAnalysisInput {
+  bookId: string;
+  dimensionId: string;
+  update: BaselineAnalysisUpdateRequest | null;
+}
+
 /** Every analysis kind a Book may hold, and every Task mode any of them declares. */
 export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId | typeof INITIAL_EVALUATION_KIND |
-  typeof READERS_REPORT_KIND | typeof EVALUATION_REWRITE_KIND | typeof WRITING_KIND;
+  typeof READERS_REPORT_KIND | typeof EVALUATION_REWRITE_KIND | typeof WRITING_KIND | CustomAnalysisKindId;
 export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode | ReadersReportTaskMode |
   EvaluationRewriteTaskMode | WritingTaskMode;
 export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal | ReadersReportGoal | EvaluationRewriteGoal |
-  WritingGoal;
+  WritingGoal | CustomAnalysisGoal;
 
 /** An explicit editor choice over exact block positions of the Task Input revision (inclusive). */
 export interface BaselineAnalysisSelectedRange {
@@ -13147,6 +13332,16 @@ export interface ServiceOperationMap {
   inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string; versionId: string | null; scope?: CapturedProcedureScopeSlot | null }; output: CapturedProcedureRunProjection };
   /** The house's enabled Captured Procedures as each applies to one Book: its latest eligible version and its steps there (S31b). */
   inspectCapturedProcedureApplicability: { input: { bookId: string; scope?: CapturedProcedureScopeSlot | null }; output: CapturedProcedureApplicabilityProjection };
+  /** 知识库 › 工序与规则 › 自定义分析维度 (`bookId: null`), or ②A's 自定义 tab over one Book (Issue #922, slice 7f). */
+  inspectCustomAnalysisDimensions: { input: { bookId: string | null }; output: CustomAnalysisDimensionsProjection };
+  /** Version 1 of a new dimension, or the next version of one superseding its latest; always `待验证` (ADR 0090 item 4). */
+  saveCustomAnalysisDimension: { input: SaveCustomAnalysisDimensionInput; output: CustomAnalysisDimensionsProjection };
+  /** `验证并启用`: the version's document is validated again, deterministically, and recorded `已启用` — or refused with its reason. */
+  enableCustomAnalysisDimension: { input: { versionId: string }; output: CustomAnalysisDimensionsProjection };
+  /** `停用`: final for the version; Runs prepared under it keep naming it. */
+  stopCustomAnalysisDimension: { input: { versionId: string }; output: CustomAnalysisDimensionsProjection };
+  /** ②A 自定义 › 运行: the dimension's enabled version prepared as a Task on the Book; its plan opens in the Task Drawer. */
+  prepareCustomAnalysis: { input: PrepareCustomAnalysisInput; output: { taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection } };
   /** 保存开发建议: a new Developer Capability Proposal, or its next version (ADR 0087 §6). */
   saveDeveloperProposal: { input: SaveDeveloperProposalInput; output: DeveloperProposalProjection };
   /** 导出为文件…: the proposal version written to the file the editor chose through the Save dialog (ADR 0087 §6). */
@@ -13909,6 +14104,13 @@ export interface RendererApi {
    * or, with `scope: 'selection'`, as each applies to a 当前选区 of it, for the selection menu (Issue #423, S77 deferred item a).
    */
   inspectCapturedProcedureApplicability(input?: { scope?: CapturedProcedureScopeSlot | null }): Promise<CapturedProcedureApplicabilityProjection>;
+  /** 知识库's dimensions (`forBook: false`), or the current Book's 自定义 tab (`forBook: true`) (Issue #922). */
+  inspectCustomAnalysisDimensions(input: { forBook: boolean }): Promise<CustomAnalysisDimensionsProjection>;
+  saveCustomAnalysisDimension(input: SaveCustomAnalysisDimensionInput): Promise<CustomAnalysisDimensionsProjection>;
+  enableCustomAnalysisDimension(input: { versionId: string }): Promise<CustomAnalysisDimensionsProjection>;
+  stopCustomAnalysisDimension(input: { versionId: string }): Promise<CustomAnalysisDimensionsProjection>;
+  /** The current Book's Task of one dimension; the window's route names the Book. */
+  prepareCustomAnalysis(input: Omit<PrepareCustomAnalysisInput, 'bookId'>): Promise<{ taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection }>;
   saveDeveloperProposal(input: SaveDeveloperProposalInput): Promise<DeveloperProposalProjection>;
   /** 导出为文件…: the platform Save dialog, then the file; nothing is written or recorded when the dialog is cancelled. */
   saveDeveloperProposalFile(input: { proposalVersionId: string }): Promise<SaveDeveloperProposalFileOutcome>;

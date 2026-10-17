@@ -462,7 +462,8 @@ async function dispatch(
       );
       if (authorized.dispatchRunRecordId !== null) {
         try {
-          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId);
+          // The Task's own ledger: the Book's baseline, or a 自定义分析维度 version's (Issue #922).
+          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, authorized.ledger);
         } catch (error) {
           const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
           throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
@@ -517,7 +518,7 @@ async function dispatch(
     }
     case 'cancelWaitingBaselineAnalysis': {
       // A Run waiting on the governor leaves its queue as it is cancelled (Issue #49, S14): nothing of it ran.
-      const waiting = store.inspectBaselineAnalysis(request.input.bookId, analysisProgress).run;
+      const waiting = store.inspectAnalysisTask(request.input.bookId, request.input.taskIntentId, analysisProgress).run;
       store.cancelWaitingBaselineAnalysis(request.input.bookId, request.input.taskIntentId);
       if (waiting !== null && waiting.state === 'authorized') analysisExecution.dequeue(waiting.runRecordId);
       return {
@@ -606,7 +607,7 @@ async function dispatch(
     // or, holding no execution of it, settles it `paused` at once.
     case 'pauseBaselineAnalysisRun': {
       const runRecordId = store.requestBaselineAnalysisPause(request.input.bookId, request.input.taskIntentId);
-      if (runRecordId !== null) analysisExecution.pauseRun(runRecordId, store.baselineAnalysisLedger);
+      if (runRecordId !== null) analysisExecution.pauseRun(runRecordId, store.executionLedgerForRun(runRecordId));
       return {
         id: request.id,
         ok: true,
@@ -627,7 +628,7 @@ async function dispatch(
       const reason = plan.runControl?.resume?.reason ?? '这项任务现在不能续行。';
       if (plan.runControl?.resume?.reason !== null) throw new StoreErrorClass('ANALYSIS_RESUME_BLOCKED', reason);
       try {
-        analysisExecution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true });
+        analysisExecution.admitAndDispatch(runRecordId, store.executionLedgerForRun(runRecordId), { resume: true });
       } catch (error) {
         const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
         throw new StoreErrorClass(code, error instanceof Error ? error.message : '续行未能进入调度。');
@@ -643,7 +644,7 @@ async function dispatch(
     // boundary — or, holding no execution of it, settles it at once.
     case 'cancelBaselineAnalysisRun': {
       const runRecordId = store.requestBaselineAnalysisCancel(request.input.bookId, request.input.taskIntentId);
-      if (runRecordId !== null) analysisExecution.cancelRun(runRecordId, store.baselineAnalysisLedger);
+      if (runRecordId !== null) analysisExecution.cancelRun(runRecordId, store.executionLedgerForRun(runRecordId));
       return {
         id: request.id,
         ok: true,
@@ -745,6 +746,18 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.previewCapturedProcedureStop(request.input.procedureId, request.input.versionId) };
     case 'stopCapturedProcedure':
       return { id: request.id, ok: true, op: request.op, result: store.stopCapturedProcedure(request.input.procedureId, request.input.versionId, request.input.previewDigest) };
+    // 自定义分析维度 (Issue #922, slice 7f): the house's documents in 知识库 › 工序与规则, and ②A's 自定义 tab over one Book. 运行
+    // prepares the dimension's Task through the ordinary ②A path; its plan opens in the Task Drawer, whose 开始任务 authorizes it.
+    case 'inspectCustomAnalysisDimensions':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectCustomAnalysisDimensions(request.input.bookId, analysisProgress) };
+    case 'saveCustomAnalysisDimension':
+      return { id: request.id, ok: true, op: request.op, result: store.saveCustomAnalysisDimension(request.input) };
+    case 'enableCustomAnalysisDimension':
+      return { id: request.id, ok: true, op: request.op, result: store.enableCustomAnalysisDimension(request.input.versionId) };
+    case 'stopCustomAnalysisDimension':
+      return { id: request.id, ok: true, op: request.op, result: store.stopCustomAnalysisDimension(request.input.versionId) };
+    case 'prepareCustomAnalysis':
+      return { id: request.id, ok: true, op: request.op, result: store.prepareCustomAnalysis(request.input, launchPolicy) };
     case 'inspectCapturedProcedureApplicability':
       return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureApplicability(request.input.bookId, request.input.scope ?? null) };
     case 'inspectCapturedProcedureRun':
@@ -2044,6 +2057,11 @@ async function run(): Promise<void> {
       store.reconcileStoppedWritingRuns();
     } catch {
       // Reported where 交付物 reads the writing Task.
+    }
+    try {
+      store.reconcileStoppedCustomAnalysisRuns();
+    } catch {
+      // Reported where ②A's 自定义 tab reads the dimension.
     }
     for (const runRecordId of store.cancellingLedgerRuns()) {
       try {

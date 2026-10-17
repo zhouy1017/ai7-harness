@@ -1,0 +1,119 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-custom-analysis-authored",
+  "description": "自定义分析契约 v1 的人工撰写夹具：为一个合成的自定义分析维度「单元开篇」（每个单元从哪里开始写）逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）的开篇段落后写成，回答该维度第 1 版在未经编辑的 sample1 上的首次运行。每条引文都是其所声明段落的逐字子串，另有一条故意找不到，用来证明未定位的回答仍被保留并标明。unitOrdinal 为 0 的条目回答这次运行发起的运行反思。本夹具叠加在 sample1-baseline-happy 之上：「自定义」分页与运行无需先完成基线分析；两者的请求摘要互不相同，叠加不改变任何条目的键。",
+  "basedOn": "sample1-baseline-happy",
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "654a4bef6c2796e89cd7ade17146b3fae7c81505b3c1995449e37ffde8737cbb",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.custom-analysis.unit-result/1\",\"unitOrdinal\":1,\"rows\":[{\"answer\":\"本单元先列出书名、丛书序次与作者，再以章节序号「壹」进入正文。\",\"blockOrdinal\":2,\"quote\":\"《青铜重器》之一\",\"confidenceNote\":\"开篇几段是署名与序号，判断明确。\"}]}",
+        "usage": {
+          "inputTokens": 1325,
+          "outputTokens": 140
+        }
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "0a8e4ad0ead0947a1955f8484acd9c9dc3c2794ef97c01f1a0c0c64e780cd74a",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.custom-analysis.unit-result/1\",\"unitOrdinal\":2,\"rows\":[{\"answer\":\"本单元从曾本之收到一封信写起，先交代他坚持用书信与人往来的习惯。\",\"blockOrdinal\":3,\"quote\":\"曾本之刚刚收到一封信。\",\"confidenceNote\":\"开篇直接点出收信一事，依据充分。\"}]}",
+        "usage": {
+          "inputTokens": 1350,
+          "outputTokens": 140
+        }
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "9e435e94dfca916d3d6f7a3c22496cae77cd20609089f14bec3db1a0f9ca9aed",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.custom-analysis.unit-result/1\",\"unitOrdinal\":3,\"rows\":[{\"answer\":\"本单元从湖边一声春雷写起，转入曾本之反复梦见甲骨文的情形。\",\"blockOrdinal\":2,\"quote\":\"湖面上刚刚响过一声春雷\",\"confidenceNote\":\"雷声与梦境在开篇两段相继出现，依据充分。\"},{\"answer\":\"开篇的雷声与梦中的雷声前后呼应。\",\"blockOrdinal\":2,\"quote\":\"湖心岛上雷雨大作\",\"confidenceNote\":\"这条引文是概括性的改写，原文中可能找不到逐字对应。\"}]}",
+        "usage": {
+          "inputTokens": 1375,
+          "outputTokens": 200
+        }
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "63f9354d92caba440f3088fef77bfd6ed965bba4acc0f9e703faa0957205f1b3",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.custom-analysis.unit-result/1\",\"unitOrdinal\":4,\"rows\":[{\"answer\":\"本单元从曾本之琢磨那封甲骨文书信写起，信上只写了四个字。\",\"blockOrdinal\":3,\"quote\":\"甲骨文书信上只竖着写了四个字。\",\"confidenceNote\":\"开篇两段都在写这封信，依据充分。\"}]}",
+        "usage": {
+          "inputTokens": 1400,
+          "outputTokens": 140
+        }
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "d47bfff9bfabbd72784f20c86a6bf5707d956889466dcc39bf80a8793a9a23fc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.custom-analysis.unit-result/1\",\"unitOrdinal\":5,\"rows\":[{\"answer\":\"本单元从马跃之与安静的电话玩笑写起，引出曾、马两家的旧交。\",\"blockOrdinal\":4,\"quote\":\"曾本之在电话这边笑，马跃之在电话那边笑。\",\"confidenceNote\":\"电话场景贯穿开篇几段，依据充分。\"}]}",
+        "usage": {
+          "inputTokens": 1425,
+          "outputTokens": 140
+        }
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "ca5f76e4e632b5008ab882036f7739de4721d352539817c789b3e83544830267",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.custom-analysis.unit-result/1\",\"unitOrdinal\":6,\"rows\":[{\"answer\":\"本单元从马跃之转述下午的会议写起，郑雄在会上恭维新上任的省长。\",\"blockOrdinal\":2,\"quote\":\"这是新省长上任后的第一个会\",\"confidenceNote\":\"开篇交代了会议的由来，依据充分。\"}]}",
+        "usage": {
+          "inputTokens": 1450,
+          "outputTokens": 140
+        }
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "b0ba6c5991a6ae0c1e3c2acf9b5d7ddd975e1c7df9eae3586bcd31e2d39d8820",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.custom-analysis.unit-result/1\",\"unitOrdinal\":7,\"rows\":[{\"answer\":\"本单元从曾本之对着尊盘照片出神写起，随后女儿和外孙到家。\",\"blockOrdinal\":2,\"quote\":\"对着墙上那幅精心装饰的曾侯乙尊盘照片呆坐了一阵\",\"confidenceNote\":\"开篇一段写照片，下一段转入家人到来，判断明确。\"}]}",
+        "usage": {
+          "inputTokens": 1475,
+          "outputTokens": 140
+        }
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "b0be3eb261108987ac47fae5499cb138c3a4e7c29e6bcb9a92781a608da38bdf",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.custom-analysis.unit-result/1\",\"unitOrdinal\":8,\"rows\":[{\"answer\":\"本单元从深夜的书房写起，曾本之放下照片，端详一片刻有甲骨文的龟甲。\",\"blockOrdinal\":2,\"quote\":\"盯着一片半个巴掌大小、上面有一串甲骨文的龟甲\",\"confidenceNote\":\"开篇一段写书房里的龟甲，依据充分。\"}]}",
+        "usage": {
+          "inputTokens": 1500,
+          "outputTokens": 140
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "6379514fc2e402d45209e691cdee00be5fe3f9f794b0ccd8879b7a41c26b2326",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能定位的回答下一轮可要求模型给出更短、在所指段落中唯一的引文。\",\"basis\":\"账目按引文是否定位分别记录了回答条数。\"},{\"suggestion\":\"稿件变化后优先同步到当前稿件，未改动的单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交与复用的单元数，复用单元不产生模型用量。\"}]}",
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 200
+        }
+      }
+    }
+  ]
+}

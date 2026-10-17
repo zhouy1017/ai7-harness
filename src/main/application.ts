@@ -3343,6 +3343,66 @@ function registerRendererHandlers(
       return result;
     }),
   );
+  // 自定义分析维度 (Issue #922, slice 7f): 知识库's house documents name no Book; ②A's 自定义 tab and 运行 read and prepare on the
+  // route's Book, which the renderer never names.
+  ipcMain.handle(IPC_CHANNELS.inspectCustomAnalysisDimensions, (event, input: Parameters<RendererApi['inspectCustomAnalysisDimensions']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && typeof input.forBook === 'boolean', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      if (!input.forBook) return service.call('inspectCustomAnalysisDimensions', { bookId: null });
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectCustomAnalysisDimensions', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '自定义分析维度不属于当前图书工作台。');
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveCustomAnalysisDimension, (event, input: Parameters<RendererApi['saveCustomAnalysisDimension']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('saveCustomAnalysisDimension', { dimensionId: input.dimensionId, title: input.title, questionTemplate: input.questionTemplate });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.enableCustomAnalysisDimension, (event, input: Parameters<RendererApi['enableCustomAnalysisDimension']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('enableCustomAnalysisDimension', { versionId: input.versionId });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.stopCustomAnalysisDimension, (event, input: Parameters<RendererApi['stopCustomAnalysisDimension']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('stopCustomAnalysisDimension', { versionId: input.versionId });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.prepareCustomAnalysis, (event, input: Parameters<RendererApi['prepareCustomAnalysis']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const result = await service.call('prepareCustomAnalysis', { bookId: route.bookId, dimensionId: input.dimensionId, update: input.update });
+        if (result.dimensions.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '自定义分析任务不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
   // 按已保存的工序 (Issue #66, S31b): the house's enabled procedures as each applies to the route's Book, which the renderer never names;
   // with `scope: 'selection'`, as each applies to a 当前选区 of it, for the selection menu (Issue #423, S77 deferred item a).
   ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedureApplicability, (event, input?: Parameters<RendererApi['inspectCapturedProcedureApplicability']>[0]) =>

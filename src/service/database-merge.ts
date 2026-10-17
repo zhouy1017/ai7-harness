@@ -322,6 +322,11 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   captured_procedure_states: 'house',
   developer_capability_proposals: 'house',
   developer_capability_proposal_exports: 'house',
+  // The house's 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4): the editor's documents, no Book material in them. A merged
+  // Book's Tasks keep naming the version they ran under through their frozen contracts.
+  custom_analysis_dimensions: 'house',
+  custom_analysis_dimension_versions: 'house',
+  custom_analysis_dimension_states: 'house',
   series_knowledge_items: 'house',
   series_knowledge_promotions: 'house',
   series_knowledge_conflicts: 'house',

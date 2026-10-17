@@ -1637,6 +1637,44 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // 自定义分析维度 (Issue #922, slice 7f): the house's dimensions, or one Book's 自定义 tab; a title and a template bounded by the
+    // document's own rules, which the store checks again; a version by its identity; a Book's Task of one dimension.
+    case 'inspectCustomAnalysisDimensions': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (input.bookId !== null && !validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'saveCustomAnalysisDimension': {
+      const input = requireInput(value.input, ['dimensionId', 'title', 'questionTemplate'], tentativeId);
+      if ((input.dimensionId !== null && !validUuid(input.dimensionId)) || !isBoundedString(input.title, 160) ||
+          !isBoundedString(input.questionTemplate, 1600)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'enableCustomAnalysisDimension':
+    case 'stopCustomAnalysisDimension': {
+      const input = requireInput(value.input, ['versionId'], tentativeId);
+      if (!validUuid(input.versionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'prepareCustomAnalysis': {
+      // `update` is null for the dimension's first Run on the Book, and otherwise one of the baseline's three update modes, with a
+      // block range exactly for 重新分析所选范围 — the same shape `prepareBaselineAnalysis` carries, with no goal: the store derives it.
+      const input = requireInput(value.input, ['bookId', 'dimensionId', 'update'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.dimensionId)) throw new ProtocolError(tentativeId);
+      const update = input.update;
+      if (update === null) break;
+      if (!isRecord(update) || !hasExactKeys(update, ['mode', 'selectedRange']) ||
+          !BASELINE_ANALYSIS_UPDATE_MODES.includes(update.mode as BaselineAnalysisUpdateMode)) {
+        throw new ProtocolError(tentativeId);
+      }
+      const range = update.selectedRange;
+      const validRange = isRecord(range) && hasExactKeys(range, ['startPosition', 'endPosition']) &&
+        isSafeInteger(range.startPosition, 1) && isSafeInteger(range.endPosition, 1) && range.endPosition >= range.startPosition;
+      if ((update.mode === 'reanalyze-range') !== validRange || (update.mode !== 'reanalyze-range' && range !== null)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'inspectCapturedProcedureApplicability': {
       // The house's enabled procedures as each applies to the route's Book (Issue #66, S31b) — or to a 当前选区 of it (Issue #423).
       const input = requireInputWithOptional(value.input, ['bookId'], ['scope'], tentativeId);

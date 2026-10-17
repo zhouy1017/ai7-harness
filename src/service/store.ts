@@ -3,6 +3,12 @@ import { recommendProcedures, type RecommendationReading } from './procedure-rec
 import type { ImportedSkillImportProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection, ProcedureRecommendationInput, ProcedureRecommendationProjection } from '../shared/protocol.js';
 import { initializeImportedSkillSchema } from './imported-skill-schema.js';
 import { HOUSE_REVIEW_PREFERENCE_CATEGORY } from './launch-policy.js';
+import { CustomAnalysisDimensionError, CustomAnalysisDimensions, customAnalysisVersionInput, initializeCustomAnalysisDimensionSchema, type CustomAnalysisDimensionVersionRecord } from './custom-analysis-dimensions.js';
+import { CUSTOM_ANALYSIS_FIXED_TERMS, CustomAnalysisDocumentError, customAnalysisTextRefusal } from './analysis/custom-analysis-contract.js';
+import { customAnalysisKindDefinition, customAnalysisPlan } from './analysis/custom-analysis-kind.js';
+import { withModelClarification } from './provider/clarification-contract.js';
+import { CUSTOM_ANALYSIS_DIMENSION_STATE_LABELS, CUSTOM_ANALYSIS_UNIT_PLACEHOLDER, MAX_CUSTOM_ANALYSIS_ROWS_SHOWN, customAnalysisKindId, MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN, customAnalysisDimensionIdOfKind, customAnalysisModeGoal, isCustomAnalysisDimensionId, isCustomAnalysisKindId } from '../shared/protocol.js';
+import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, CustomAnalysisRevisionSummaryProjection, CustomAnalysisRowProjection, PrepareCustomAnalysisInput, SaveCustomAnalysisDimensionInput } from '../shared/protocol.js';
 import { HousePreferenceInfluence, HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, withdrawalOf, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
 import { inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
 import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
@@ -349,7 +355,7 @@ import {
   WRITING_MODE_GOALS,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
-import { EVALUATION_PAYLOAD_CATEGORIES, liveKindRule, liveMaterialRule } from './analysis/live-kind-admission.js';
+import { EVALUATION_PAYLOAD_CATEGORIES, liveKindAdmission, liveKindRule, liveMaterialRule } from './analysis/live-kind-admission.js';
 import { reviewCategoryKindId } from '../shared/protocol.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
 import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
@@ -1109,7 +1115,7 @@ import {
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   MODEL_CLARIFICATION_SCHEMA_VERSION,
-  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION,
+  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -1718,7 +1724,8 @@ function canonicalJson(value: unknown): string {
 
 /** Which Task kind's plan a kind's 结果待确认 is listed on (Issue #757): a review category's is its Review Run's. */
 function unconfirmedSurfaceOf(kind: string): TaskPlanKind | null {
-  if (kind === BASELINE_ANALYSIS_KIND) return 'baseline-analysis';
+  // A 自定义分析维度's Task is planned and started from ②A as the baseline's is (Issue #922).
+  if (kind === BASELINE_ANALYSIS_KIND || isCustomAnalysisKindId(kind)) return 'baseline-analysis';
   if (kind === FACTUAL_REVIEW_KIND || isReviewCategoryKindId(kind)) return 'review-run';
   if (kind === INITIAL_EVALUATION_KIND) return 'initial-evaluation';
   if (kind === READERS_REPORT_KIND) return 'readers-report';
@@ -2400,7 +2407,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2464,7 +2471,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2842,7 +2849,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2895,7 +2902,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -3040,7 +3047,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3092,7 +3099,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3589,7 +3596,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3641,7 +3648,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4453,6 +4460,16 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
  */
 export const REVIEW_CATEGORY_CACHE_CAPACITY = 16;
 
+/**
+ * 自定义分析维度 (Issue #922, slice 7f): a template echoes manuscript text when this many consecutive graphemes of it, whitespace
+ * aside, stand in a Book's text — a phrase, not a shared word. The words of each refusal the store gives for the family.
+ */
+const CUSTOM_ANALYSIS_ECHO_GRAPHEMES = 12;
+const CUSTOM_ANALYSIS_GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
+export const CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON = '提问模板里有一段文字与书稿原文相同；模板只能写提问，不能包含稿件正文。' as const;
+export const CUSTOM_ANALYSIS_NOT_ADMITTED_REASON = '当前策略未开放自定义分析。' as const;
+const CUSTOM_ANALYSIS_NOT_ENABLED_REASON = '这个维度没有已启用的版本；在「知识库 › 工序与规则 › 自定义分析维度」中启用一个版本后才能运行。';
+
 export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
   '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新建图书导入。';
 
@@ -4590,6 +4607,10 @@ export class EditorialStore {
   readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
   readonly #reviewCategoryDefinitions = new RecentCache<AnalysisKindDefinition>(REVIEW_CATEGORY_CACHE_CAPACITY);
+  /** One ledger per 自定义分析维度 version (Issue #922, slice 7f), kept as the review categories' are. */
+  readonly #customAnalysisLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
+  readonly #customAnalysisDefinitions = new RecentCache<AnalysisKindDefinition>(REVIEW_CATEGORY_CACHE_CAPACITY);
+  readonly #customAnalysisDimensions: CustomAnalysisDimensions;
   // 资料库 reference texts of the 审阅 workspace, by pin: at most four items per Run, a few Runs recent.
   readonly #taskMaterialTexts = new RecentCache<ReadonlyArray<string>>(REVIEW_CATEGORY_CACHE_CAPACITY);
   /**
@@ -4827,6 +4848,7 @@ export class EditorialStore {
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#outcomeResolutions = new OutcomeResolutionLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);
+    this.#customAnalysisDimensions = new CustomAnalysisDimensions(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       ledgerOf: (entry, materials, digest, bookId, preference) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference),
       housePreference: (bookId, categoryId, kind, policy) => {
@@ -5113,6 +5135,9 @@ export class EditorialStore {
       initializeTaskIntentDraftSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       // Revision 81 (Issue #66; ADR 0090): the inert imported-Skill ledgers beside the native artifact's.
       initializeImportedSkillSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
+      // Revision 82 (Issue #922, slice 7f): the house's 自定义分析维度; `initializeTaskAuthorizationSchema` rebuilds the Result Set
+      // relations for the custom analysis family and stamps the version.
+      initializeCustomAnalysisDimensionSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -5438,6 +5463,292 @@ export class EditorialStore {
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
     return this.reviewCategoryLedger(finish(definition), readings.every((reading) => reading.refusal === null));
+  }
+
+  // ---- 自定义分析维度 (Issue #922, wave 10 slice 7f; ADR 0090 item 4) ---------------------------------------------------
+
+  #customAnalysisCall<T>(operation: () => T): T {
+    return this.#analysisCall(() => {
+      try {
+        return operation();
+      } catch (error) {
+        if (error instanceof CustomAnalysisDimensionError || error instanceof CustomAnalysisDocumentError) throw new StoreError(error.code, error.message);
+        throw error;
+      }
+    });
+  }
+
+  /** One version's kind definition, built once per version: its frozen contract is a pure function of the version. */
+  #customAnalysisDefinition(version: CustomAnalysisDimensionVersionRecord): AnalysisKindDefinition {
+    return this.#customAnalysisDefinitions.obtain(version.versionId, () => this.#customAnalysisCall(() => customAnalysisKindDefinition(customAnalysisVersionInput(version))));
+  }
+
+  /**
+   * The append-only ledger of one dimension version: the same ledger class over the same Book database, constructed with that
+   * version's kind definition and bound to the launch the baseline ledger was bound to, so every plan it freezes names the binding
+   * this launch bound. Kept per kind and frozen contract, as a review category's ledger is: one holds the preparations in flight.
+   */
+  customAnalysisLedger(definition: AnalysisKindDefinition): BaselineAnalysisStore {
+    this.#assertAvailable();
+    requireStore(isCustomAnalysisKindId(definition.kind), 'CUSTOM_ANALYSIS_KIND_INVALID', '该分析种类不是自定义分析维度。');
+    return this.#customAnalysisLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}`, () => {
+      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+      ledger.bindLaunch(this.#baselineAnalysis.launch);
+      return ledger;
+    });
+  }
+
+  /**
+   * The exact version a Task of the family was prepared under: the one whose frozen contract — as this launch's ledger wraps it, or
+   * unwrapped — its latest plan names. A later version or a 停用 never moves it. `null` for a Task of no family kind, one whose plan
+   * never froze, or one whose dimension this store does not hold.
+   */
+  #customAnalysisVersionOfTask(taskIntentId: string): CustomAnalysisDimensionVersionRecord | null {
+    const row = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId) as SqlRow | undefined;
+    const dimensionId = customAnalysisDimensionIdOfKind(row?.kind);
+    if (dimensionId === null) return null;
+    const envelope = this.#authority.prepare(`SELECT canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'plan-envelope'
+      ORDER BY plan_version DESC LIMIT 1`).get(taskIntentId) as SqlRow | undefined;
+    if (envelope === undefined) return null;
+    const json = asString(envelope.canonical_json);
+    requireStore(sha256(json) === envelope.sha256, 'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
+    const frozen = (JSON.parse(json) as Record<string, unknown>).promptContractDigest;
+    const dimension = this.#customAnalysisCall(() => this.#customAnalysisDimensions.dimension(dimensionId));
+    return dimension?.versions.find((version) => {
+      const definition = this.#customAnalysisDefinition(version);
+      return definition.promptContractDigest === frozen || withModelClarification(definition).promptContractDigest === frozen;
+    }) ?? null;
+  }
+
+  /**
+   * ②A's ledger of one Task (Issue #922): a 自定义分析维度 Task's own, on the exact version its plan froze, or the Book's baseline
+   * ledger for any other — so the plan in the Task Drawer, 开始任务 and the Run's controls reach the ledger of the Task they name.
+   */
+  #analysisLedgerOfTask(bookId: string, taskIntentId: string | null): BaselineAnalysisStore {
+    if (taskIntentId === null) return this.#baselineAnalysis;
+    const row = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE book_id = ? AND task_intent_id = ?').get(bookId, taskIntentId) as SqlRow | undefined;
+    if (row === undefined || !isCustomAnalysisKindId(row.kind)) return this.#baselineAnalysis;
+    const version = this.#customAnalysisVersionOfTask(taskIntentId);
+    requireStore(version !== null, 'CUSTOM_ANALYSIS_VERSION_UNKNOWN', '这项自定义分析任务所依据的维度版本已无法读取。');
+    return this.customAnalysisLedger(this.#customAnalysisDefinition(version));
+  }
+
+  /** The dimension version of a custom Task, for the plan the Task Drawer shows; `null` for any other Task. */
+  #customAnalysisPlanVersion(taskIntentId: string | null): CustomAnalysisDimensionVersionRecord | null {
+    return taskIntentId === null ? null : this.#customAnalysisVersionOfTask(taskIntentId);
+  }
+
+  /**
+   * Whether a template carries manuscript text (ADR 0090 item 4; Provider Processing v22/v23: never manuscript text): any
+   * `CUSTOM_ANALYSIS_ECHO_GRAPHEMES` consecutive graphemes of it, whitespace aside, standing in a block of a Book's latest primary
+   * revision — every Book's when a version is saved or enabled, and the Book's own again when a Run of it is prepared.
+   */
+  #templateEchoesManuscript(template: string, bookId: string | null): boolean {
+    const graphemes = Array.from(CUSTOM_ANALYSIS_GRAPHEMES.segment(template.replace(CUSTOM_ANALYSIS_UNIT_PLACEHOLDER, '')), (part) => part.segment)
+      .filter((part) => part.trim() !== '');
+    if (graphemes.length < CUSTOM_ANALYSIS_ECHO_GRAPHEMES) return false;
+    const windows = new Set<string>();
+    for (let index = 0; index + CUSTOM_ANALYSIS_ECHO_GRAPHEMES <= graphemes.length; index += 1) {
+      windows.add(graphemes.slice(index, index + CUSTOM_ANALYSIS_ECHO_GRAPHEMES).join(''));
+    }
+    const revisions = this.#authority.prepare(`SELECT m.manuscript_id, mr.revision_id FROM manuscripts m
+      JOIN manuscript_revisions mr ON mr.manuscript_id = m.manuscript_id
+      WHERE m.role = 'primary' AND (? IS NULL OR m.book_id = ?)
+        AND mr.ordinal = (SELECT max(latest.ordinal) FROM manuscript_revisions latest WHERE latest.manuscript_id = m.manuscript_id)`)
+      .all(bookId, bookId) as SqlRow[];
+    return revisions.some((revision) => this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(asString(revision.manuscript_id), asString(revision.revision_id)))
+      .some((block) => {
+        const compact = block.text.replace(/\s+/gu, '');
+        for (const window of windows) if (compact.includes(window)) return true;
+        return false;
+      }));
+  }
+
+  /** How many Tasks of any Book each version of a dimension was prepared under, by the contract each Task's plans froze. */
+  #customAnalysisTaskCounts(dimensionId: string, versions: ReadonlyArray<CustomAnalysisDimensionVersionRecord>): Map<string, number> {
+    const rows = this.#authority.prepare(`SELECT DISTINCT p.task_intent_id, json_extract(p.canonical_json, '$.promptContractDigest') AS digest
+      FROM analysis_plan_records p JOIN analysis_task_intents i ON i.task_intent_id = p.task_intent_id
+      WHERE i.kind = ? AND p.component = 'plan-envelope'`).all(customAnalysisKindId(dimensionId)) as SqlRow[];
+    const byDigest = new Map<string, string>();
+    for (const version of versions) {
+      const definition = this.#customAnalysisDefinition(version);
+      byDigest.set(definition.promptContractDigest, version.versionId);
+      byDigest.set(withModelClarification(definition).promptContractDigest, version.versionId);
+    }
+    const tasks = new Map<string, Set<string>>();
+    for (const row of rows) {
+      const versionId = byDigest.get(String(row.digest));
+      if (versionId !== undefined) tasks.set(versionId, (tasks.get(versionId) ?? new Set()).add(asString(row.task_intent_id)));
+    }
+    return new Map([...tasks].map(([versionId, ids]) => [versionId, ids.size] as const));
+  }
+
+  /** The latest revision of one dimension on one Book, as ②A's 自定义 tab reads it. */
+  #customAnalysisRevisionSummary(revision: Readonly<Record<string, unknown>>): CustomAnalysisRevisionSummaryProjection {
+    const typed = revision as unknown as NonNullable<BaselineAnalysisProjection['resultSetRevision']> & {
+      dimension: { versionId: string; version: number; documentDigest: string };
+      rows: ReadonlyArray<CustomAnalysisRowProjection>;
+      rowCounts: CustomAnalysisRevisionSummaryProjection['rowCounts'];
+    };
+    return {
+      revisionId: typed.revisionId,
+      ordinal: typed.ordinal,
+      createdAt: typed.createdAt,
+      dimensionVersion: { versionId: typed.dimension.versionId, version: typed.dimension.version, documentDigest: typed.dimension.documentDigest },
+      manuscriptRevisionLabel: typed.manuscriptPin.revisionLabel,
+      coverage: typed.coverage,
+      freshness: typed.freshness,
+      gaps: typed.gaps.map((gap) => ({ unitOrdinal: gap.unitOrdinal, code: gap.code, reason: gap.reason })),
+      rowCounts: { units: typed.rowCounts.units, rows: typed.rowCounts.rows, located: typed.rowCounts.located, unlocated: typed.rowCounts.unlocated },
+      rows: typed.rows.slice(0, MAX_CUSTOM_ANALYSIS_ROWS_SHOWN),
+      rowsTruncated: typed.rows.length > MAX_CUSTOM_ANALYSIS_ROWS_SHOWN,
+    };
+  }
+
+  /** One dimension on one Book: its latest Task's state, its latest revision, and whether 运行 can prepare now. */
+  #customAnalysisBook(
+    dimensionId: string,
+    enabled: CustomAnalysisDimensionVersionRecord | null,
+    bookId: string,
+    progress?: ProgressReader,
+  ): NonNullable<CustomAnalysisDimensionProjection['book']> {
+    const latestTask = this.#authority.prepare('SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1')
+      .get(bookId, customAnalysisKindId(dimensionId)) as SqlRow | undefined;
+    const version = (latestTask === undefined ? null : this.#customAnalysisVersionOfTask(asString(latestTask.task_intent_id))) ?? enabled;
+    if (version === null) return { taskState: null, latest: null, unavailableReason: CUSTOM_ANALYSIS_NOT_ENABLED_REASON };
+    const projection = this.#analysisCall(() => this.customAnalysisLedger(this.#customAnalysisDefinition(version)).inspect(bookId, progress)) as unknown as BaselineAnalysisProjection;
+    const active = runIsActive(projection.run?.state ?? null);
+    return {
+      taskState: projection.taskIntent === null ? null : { taskIntentId: projection.taskIntent.taskIntentId, state: projection.state, stateLabel: projection.stateLabel },
+      latest: projection.resultSetRevision === null ? null : this.#customAnalysisRevisionSummary(projection.resultSetRevision as unknown as Record<string, unknown>),
+      unavailableReason: enabled === null ? CUSTOM_ANALYSIS_NOT_ENABLED_REASON : active ? '这个维度的上一项任务还在运行；它结束后才能再运行。' : null,
+    };
+  }
+
+  /**
+   * 知识库 › 工序与规则 › 自定义分析维度 (`bookId: null`), or ②A's 自定义 tab over one Book (Issue #922; ANALYSIS-001, ANALYSIS-009):
+   * the house's dimensions, each with its versions and states, and for a Book each dimension with an enabled version or a Task
+   * there, with that Book's latest Result Set Revision of it. Each dimension is its own kind, so each keeps its own Result Set.
+   */
+  inspectCustomAnalysisDimensions(bookId: string | null, progress?: ProgressReader): CustomAnalysisDimensionsProjection {
+    this.#assertAvailable();
+    requireStore(bookId === null || (typeof bookId === 'string' && UUID_PATTERN.test(bookId)), 'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析维度请求无效。');
+    if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '这本书不存在。');
+    const listed = this.#customAnalysisCall(() => this.#customAnalysisDimensions.list());
+    const dimensions = listed.dimensions.flatMap((dimension): CustomAnalysisDimensionProjection[] => {
+      const enabled = dimension.versions.find((version) => version.state === 'enabled') ?? null;
+      const counts = this.#customAnalysisTaskCounts(dimension.dimensionId, dimension.versions);
+      const book = bookId === null ? null : this.#customAnalysisBook(dimension.dimensionId, enabled, bookId, progress);
+      // ②A lists what can run on the Book and what already ran there; a dimension with neither is the house's alone.
+      if (book !== null && enabled === null && book.taskState === null) return [];
+      return [{
+        dimensionId: dimension.dimensionId,
+        kind: customAnalysisKindId(dimension.dimensionId),
+        title: dimension.versions[0]!.document.title,
+        enabledVersion: enabled === null ? null : { versionId: enabled.versionId, version: enabled.version },
+        versions: dimension.versions.slice(0, MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN).map((version) => ({
+          versionId: version.versionId,
+          version: version.version,
+          title: version.document.title,
+          questionTemplate: version.document.questionTemplate,
+          documentDigest: version.documentDigest,
+          supersedes: version.supersedes,
+          state: version.state,
+          stateLabel: CUSTOM_ANALYSIS_DIMENSION_STATE_LABELS[version.state],
+          createdAt: version.createdAt,
+          stateRecordedAt: version.stateRecordedAt,
+          taskCount: counts.get(version.versionId) ?? 0,
+        })),
+        versionsTruncated: dimension.versions.length > MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN,
+        book,
+      }];
+    });
+    return { bookId, dimensions, truncated: listed.truncated, fixed: structuredClone(CUSTOM_ANALYSIS_FIXED_TERMS) as CustomAnalysisDimensionsProjection['fixed'] };
+  }
+
+  /** The validation 保存 and 验证并启用 share: the document's own rules, and no manuscript text of any Book in its template. */
+  #requireCustomAnalysisTexts(title: unknown, questionTemplate: unknown): void {
+    const refusal = customAnalysisTextRefusal(title, questionTemplate);
+    requireStore(refusal === null, 'CUSTOM_ANALYSIS_DIMENSION_INVALID', refusal ?? '');
+    requireStore(!this.#templateEchoesManuscript(questionTemplate as string, null), 'CUSTOM_ANALYSIS_TEMPLATE_MANUSCRIPT_TEXT', CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON);
+  }
+
+  /** 保存: version 1 of a new dimension, or the next version superseding the latest; `待验证` until 验证并启用. */
+  saveCustomAnalysisDimension(input: SaveCustomAnalysisDimensionInput): CustomAnalysisDimensionsProjection {
+    this.#assertAvailable();
+    requireStore(typeof input === 'object' && input !== null && (input.dimensionId === null || isCustomAnalysisDimensionId(input.dimensionId)),
+      'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析维度请求无效。');
+    this.#requireCustomAnalysisTexts(input.title, input.questionTemplate);
+    this.#customAnalysisCall(() => this.#customAnalysisDimensions.save(
+      { dimensionId: input.dimensionId, title: input.title, questionTemplate: input.questionTemplate }, new Date().toISOString()));
+    return this.inspectCustomAnalysisDimensions(null);
+  }
+
+  /** 验证并启用: the version's document validated again, deterministically — its rules, its contract, the Books' text — then `已启用`. */
+  enableCustomAnalysisDimension(versionId: string): CustomAnalysisDimensionsProjection {
+    this.#assertAvailable();
+    const version = isCustomAnalysisDimensionId(versionId) ? this.#customAnalysisCall(() => this.#customAnalysisDimensions.version(versionId)) : null;
+    requireStore(version !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度版本不存在。');
+    this.#requireCustomAnalysisTexts(version.document.title, version.document.questionTemplate);
+    this.#customAnalysisDefinition(version);
+    this.#customAnalysisCall(() => this.#customAnalysisDimensions.enable(versionId, new Date().toISOString()));
+    return this.inspectCustomAnalysisDimensions(null);
+  }
+
+  /** 停用: final for the version; a Run prepared under it keeps naming it, and no new Run can be prepared under it. */
+  stopCustomAnalysisDimension(versionId: string): CustomAnalysisDimensionsProjection {
+    this.#assertAvailable();
+    requireStore(isCustomAnalysisDimensionId(versionId), 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度版本不存在。');
+    this.#customAnalysisCall(() => this.#customAnalysisDimensions.stop(versionId, new Date().toISOString()));
+    return this.inspectCustomAnalysisDimensions(null);
+  }
+
+  /**
+   * ②A 自定义 › 运行 (Issue #922): the dimension's newest enabled version prepared on the Book through the ordinary ②A path — Task
+   * Intent, input checkpoint, Coverage Manifest, Plan Envelope — its plan then opened in the Task Drawer, where 开始任务 records the
+   * standard Run Authorization. Under a live scope the selected policy must admit the family (`custom-analysis/*`, v22/v23); the
+   * local deterministic route needs no policy. The preparation is a few local steps and runs to its end in this one call.
+   */
+  prepareCustomAnalysis(input: PrepareCustomAnalysisInput, launchPolicy: LaunchPolicyProjection): { taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection } {
+    this.#assertAvailable();
+    requireStore(typeof input === 'object' && input !== null && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
+      isCustomAnalysisDimensionId(input.dimensionId), 'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析请求无效。');
+    const dimension = this.#customAnalysisCall(() => this.#customAnalysisDimensions.dimension(input.dimensionId));
+    requireStore(dimension !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度不存在。');
+    const version = dimension.versions.find((entry) => entry.state === 'enabled') ?? null;
+    requireStore(version !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_ENABLED', '这个维度没有已启用的版本；已停用的版本不能再运行。');
+    requireStore(!this.#templateEchoesManuscript(version.document.questionTemplate, input.bookId), 'CUSTOM_ANALYSIS_TEMPLATE_MANUSCRIPT_TEXT', CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON);
+    const definition = this.#customAnalysisDefinition(version);
+    const live = this.#baselineAnalysis.launch.live;
+    requireStore(live === null || liveKindAdmission(launchPolicy, definition, live) !== null, 'CUSTOM_ANALYSIS_NOT_ADMITTED', CUSTOM_ANALYSIS_NOT_ADMITTED_REASON);
+    const ledger = this.customAnalysisLedger(definition);
+    const mode = input.update?.mode ?? 'first-baseline';
+    let progress = this.#analysisCall(() => ledger.prepare({
+      phase: 'start', bookId: input.bookId, goal: customAnalysisModeGoal(mode), update: input.update ?? null, reconfirm: false, launchPolicy,
+    }));
+    while (!progress.done) {
+      const workId = progress.workId;
+      requireStore(workId !== null, 'ANALYSIS_PREPARATION_INCOMPLETE', '自定义分析的任务计划没有准备完成。');
+      progress = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
+    }
+    const prepared = progress.projection as unknown as BaselineAnalysisProjection | null;
+    requireStore(prepared !== null && prepared.taskIntent !== null && prepared.planEnvelope !== null, 'ANALYSIS_PREPARATION_INCOMPLETE', '自定义分析的任务计划没有准备完成。');
+    return { taskIntentId: prepared.taskIntent.taskIntentId, dimensions: this.inspectCustomAnalysisDimensions(input.bookId) };
+  }
+
+  /** Startup reconciliation of every dimension's Runs a stopped service left under way, as each other kind's is. */
+  reconcileStoppedCustomAnalysisRuns(): { settled: number } {
+    this.#assertAvailable();
+    // Each dimension's latest Task: only it can have left a Run under way, since a kind holds one active Run at a time.
+    const tasks = this.#authority.prepare(`SELECT t.task_intent_id FROM analysis_task_intents t WHERE t.kind GLOB 'custom-analysis/*'
+      AND t.rowid = (SELECT max(latest.rowid) FROM analysis_task_intents latest WHERE latest.kind = t.kind)`).all() as SqlRow[];
+    let settled = 0;
+    for (const task of tasks) {
+      const version = this.#customAnalysisVersionOfTask(asString(task.task_intent_id));
+      if (version === null) continue;
+      settled += this.#analysisCall(() => this.customAnalysisLedger(this.#customAnalysisDefinition(version)).reconcileStoppedRuns()).settled;
+    }
+    return { settled };
   }
 
   #taskMaterialReadings(boundary: TaskMaterialBoundary, surface: '审阅' | '评估' = '审阅'): ReadonlyArray<TaskMaterialReading> {
@@ -5796,19 +6107,29 @@ export class EditorialStore {
       return { plan: this.#taskPlanCall(() => fixedTaskPlan({ projection, bookTitle, blocks })), routeKind: null };
     }
     if (input.kind === 'baseline-analysis') {
+      // A 自定义分析维度 Task's plan is read on the ledger of the exact version it froze, the Book's baseline otherwise (Issue #922).
+      const ledger = this.#analysisLedgerOfTask(input.bookId, input.ref);
+      const custom = ledger === this.#baselineAnalysis ? null : this.#customAnalysisPlanVersion(input.ref);
       // The execution owner's progress feeds the activity card of a Run under way (Issue #422, AUTH-011).
-      const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(input.bookId, progress)) as BaselineAnalysisProjection;
+      const inspected = this.#analysisCall(() => ledger.inspect(input.bookId, progress)) as BaselineAnalysisProjection;
+      // The ledger names a redo only on the baseline's Tasks; a dimension's Task is read as one that redoes nothing.
+      const projection: BaselineAnalysisProjection = custom === null || inspected.taskIntent === null ? inspected
+        : { ...inspected, taskIntent: { ...inspected.taskIntent, redoOf: inspected.taskIntent.redoOf ?? null } };
       const checkpoint = projection.checkpoint;
       requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '这项分析还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
-      const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      const defaultRule = this.#baselineDefaultRule(projection);
-      const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun);
+      const blocks = this.#analysisCall(() => ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
+      // 快速开始 rules are the baseline's own; a dimension's plan offers none.
+      const defaultRule = custom === null ? this.#baselineDefaultRule(projection) : undefined;
+      const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun, ledger);
       // What the Run asked the editor, and the answers (Issue #422, S76d).
-      const clarifications = projection.run === null ? [] : this.#analysisCall(() => this.#baselineAnalysis.clarificationsOf(projection.run!.runRecordId));
+      const clarifications = projection.run === null ? [] : this.#analysisCall(() => ledger.clarificationsOf(projection.run!.runRecordId));
       // 结果待确认 (Issue #51, S16c): the ranges this Task would send again whose earlier result could not be known.
-      const resendUnits = this.#analysisCall(() => this.#baselineAnalysis.resendUnitsOf(projection));
-      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, resendUnits, ...(stopped === null ? {} : { stopped }) }));
+      const resendUnits = this.#analysisCall(() => ledger.resendUnitsOf(projection));
+      const baseline = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, ...(defaultRule === undefined ? {} : { defaultRule }), clarifications, resendUnits, ...(stopped === null ? {} : { stopped }) }));
+      const routeKind = projection.providerResolutionPlan?.executionRoute.kind ?? null;
+      const plan = custom === null ? baseline : customAnalysisPlan(baseline, { ...customAnalysisVersionInput(custom), version: custom.version },
+        routeKind === 'opencode-go' || routeKind === 'deepseek-open-platform');
       return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     if (input.kind === 'readers-report') {
@@ -6036,9 +6357,26 @@ export class EditorialStore {
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-  ): { projection: BaselineAnalysisProjection; dispatchRunRecordId: string | null } {
-    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest));
-    return { projection: authorized.projection as BaselineAnalysisProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
+  ): { projection: BaselineAnalysisProjection; dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
+    // A 自定义分析维度 Task (Issue #922) is authorized on its own version's ledger, the same ②A Plan → Run Authorization path.
+    const ledger = this.#analysisLedgerOfTask(bookId, taskIntentId);
+    this.#requireCustomAnalysisStartable(ledger, taskIntentId);
+    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    return { projection: authorized.projection as BaselineAnalysisProjection, dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
+  }
+
+  /** ②A's reading of one Task on its own ledger: the Book's baseline Task, or a 自定义分析维度's (Issue #922). */
+  inspectAnalysisTask(bookId: string, taskIntentId: string, progress?: ProgressReader): BaselineAnalysisProjection {
+    const ledger = this.#analysisLedgerOfTask(bookId, taskIntentId);
+    return this.#analysisCall(() => ledger.inspect(bookId, progress)) as unknown as BaselineAnalysisProjection;
+  }
+
+  /** A stopped version starts no new Run (ADR 0090 item 4): its prepared Tasks stay readable and keep naming it. */
+  #requireCustomAnalysisStartable(ledger: BaselineAnalysisStore, taskIntentId: string): void {
+    if (!isCustomAnalysisKindId(ledger.kind)) return;
+    const version = this.#customAnalysisVersionOfTask(taskIntentId);
+    requireStore(version !== null && version.state !== 'stopped', 'CUSTOM_ANALYSIS_DIMENSION_STOPPED',
+      `这项任务所依据的维度版本${version === null ? '' : `第 ${version.version} 版`}已停用，不能再开始；请在「分析 › 自定义」中按已启用的版本重新运行。`);
   }
 
   /**
@@ -6046,12 +6384,15 @@ export class EditorialStore {
    * authorize it, and its Run waits in Connectivity Wait — nothing sent, no usage, nothing begun.
    */
   startBaselineAnalysisWhenOnline(bookId: string, taskIntentId: string, planEnvelopeDigest: string): BaselineAnalysisProjection {
-    return this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, 'when-online')).projection as BaselineAnalysisProjection;
+    const ledger = this.#analysisLedgerOfTask(bookId, taskIntentId);
+    this.#requireCustomAnalysisStartable(ledger, taskIntentId);
+    return this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, 'when-online')).projection as BaselineAnalysisProjection;
   }
 
   /** 取消 while the Book's baseline Run waits (OFF-010): terminal, before any dispatch, without provider work. */
   cancelWaitingBaselineAnalysis(bookId: string, taskIntentId: string): BaselineAnalysisProjection {
-    return this.#analysisCall(() => this.#baselineAnalysis.cancelWaiting(bookId, taskIntentId)) as BaselineAnalysisProjection;
+    const ledger = this.#analysisLedgerOfTask(bookId, taskIntentId);
+    return this.#analysisCall(() => ledger.cancelWaiting(bookId, taskIntentId)) as BaselineAnalysisProjection;
   }
 
   /**
@@ -6061,7 +6402,8 @@ export class EditorialStore {
    */
   requestBaselineAnalysisCancel(bookId: string, taskIntentId: string): string | null {
     this.#assertAvailable();
-    return this.#analysisCall(() => this.#baselineAnalysis.requestCancel(bookId, taskIntentId)).runRecordId;
+    const ledger = this.#analysisLedgerOfTask(bookId, taskIntentId);
+    return this.#analysisCall(() => ledger.requestCancel(bookId, taskIntentId)).runRecordId;
   }
 
   /** The existing execution owner receives the actual kind ledger, including frozen contract variants. */
@@ -6088,6 +6430,7 @@ export class EditorialStore {
     requireStore(row !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
     const kind = asString(row.kind);
     if (kind === BASELINE_ANALYSIS_KIND) return this.#baselineAnalysis;
+    if (isCustomAnalysisKindId(kind)) return this.#analysisLedgerOfTask(asString(row.book_id), asString(row.task_intent_id));
     if (kind === INITIAL_EVALUATION_KIND) return this.#initialLedgerForTask(asString(row.task_intent_id));
     const mapped = kind === READERS_REPORT_KIND ? 'readers-report' : kind === EVALUATION_REWRITE_KIND ? 'evaluation-rewrite'
       : kind === WRITING_KIND ? 'writing' : null;
@@ -6177,8 +6520,9 @@ export class EditorialStore {
     progress?: ProgressReader,
   ): BaselineAnalysisProjection {
     this.#assertAvailable();
-    this.#analysisCall(() => this.#baselineAnalysis.editPlan(input.bookId, input));
-    return this.inspectBaselineAnalysis(input.bookId, progress);
+    const ledger = this.#analysisLedgerOfTask(input.bookId, input.taskIntentId);
+    this.#analysisCall(() => ledger.editPlan(input.bookId, input));
+    return this.inspectAnalysisTask(input.bookId, input.taskIntentId, progress);
   }
 
   /**
@@ -6203,6 +6547,7 @@ export class EditorialStore {
     requireStore(row !== undefined, 'ANALYSIS_CLARIFICATION_STALE', '这个问题不是这本书当前任务提的。');
     const kind = asString(row.kind);
     if (kind === BASELINE_ANALYSIS_KIND) return this.#baselineAnalysis;
+    if (isCustomAnalysisKindId(kind)) return this.#analysisLedgerOfTask(bookId, taskIntentId);
     if (kind === FACTUAL_REVIEW_KIND) return this.#factualReview;
     if (isReviewCategoryKindId(kind)) {
       const entry = reviewCategoryEntry(kind.slice(kind.indexOf('/') + 1));
@@ -6250,13 +6595,15 @@ export class EditorialStore {
    */
   requestBaselineAnalysisPause(bookId: string, taskIntentId: string): string | null {
     this.#assertAvailable();
-    return this.#analysisCall(() => this.#baselineAnalysis.requestPause(bookId, taskIntentId)).runRecordId;
+    const ledger = this.#analysisLedgerOfTask(bookId, taskIntentId);
+    return this.#analysisCall(() => ledger.requestPause(bookId, taskIntentId)).runRecordId;
   }
 
   /** The Book's paused or 可续行 baseline Run, which 续行 would continue (CONT-015). */
   continuableBaselineAnalysisRun(bookId: string, taskIntentId: string): string {
     this.#assertAvailable();
-    return this.#analysisCall(() => this.#baselineAnalysis.continuableRun(bookId, taskIntentId));
+    const ledger = this.#analysisLedgerOfTask(bookId, taskIntentId);
+    return this.#analysisCall(() => ledger.continuableRun(bookId, taskIntentId));
   }
 
   /**
@@ -6360,7 +6707,7 @@ export class EditorialStore {
   /** Reconnect Preflight's local half for one waiting Run: the labels of the material inputs that moved, or none. */
   baselineAnalysisPreflightDrift(runRecordId: string): ReadonlyArray<string> {
     this.#assertAvailable();
-    return this.#analysisCall(() => this.#baselineAnalysis.preflightDrift(runRecordId));
+    return this.#analysisCall(() => this.executionLedgerForRun(runRecordId).preflightDrift(runRecordId));
   }
 
   /** A waiting Run that can never dispatch as authorized is blocked with its reasons (OFF-008). */
@@ -6439,6 +6786,14 @@ export class EditorialStore {
       }
     };
     ofLedger('baseline-analysis', this.#baselineAnalysis);
+    // A custom dimension uses the same drawer/Connectivity Wait path, on the contract its own Task froze.
+    const customKinds = this.#authority.prepare(`SELECT t.task_intent_id FROM analysis_task_intents t
+      WHERE t.kind GLOB 'custom-analysis/*' AND t.rowid =
+        (SELECT max(latest.rowid) FROM analysis_task_intents latest WHERE latest.kind = t.kind)`).all() as SqlRow[];
+    for (const row of customKinds) {
+      const version = this.#customAnalysisVersionOfTask(asString(row.task_intent_id));
+      if (version !== null) ofLedger('baseline-analysis', this.customAnalysisLedger(this.#customAnalysisDefinition(version)));
+    }
     // A kind whose records no longer read is said where its own surface reads it: it never keeps another kind's Run waiting.
     for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
       try {
@@ -6498,7 +6853,7 @@ export class EditorialStore {
    */
   waitingRunLedger(run: WaitingTaskRun & { kind: Exclude<WaitingTaskRun['kind'], 'review-run'> }): BaselineAnalysisStore {
     this.#assertAvailable();
-    if (run.kind === 'baseline-analysis') return this.#baselineAnalysis;
+    if (run.kind === 'baseline-analysis') return this.#analysisLedgerOfTask(run.bookId, run.ref);
     this.#requireLedgerKindScope(run.kind, run.bookId, run.ref);
     return this.#ledgerTaskOf(run.kind, run.bookId, run.ref);
   }

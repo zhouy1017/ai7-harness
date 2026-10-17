@@ -606,6 +606,30 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .captured-procedure-run-links, .captured-procedure-package-links { margin: 0; padding-left: 1.2rem; }
 .captured-procedure-state-enabled { border: 1px solid currentColor; }
 .captured-procedure-state-pending-validation { border: 1px dashed currentColor; }
+/* 自定义分析维度 (Issue #922): the house's dimensions in 工序与规则, and ②A's 自定义 tab. */
+.knowledge-custom-dimensions { display: grid; gap: .7rem; margin-block: 1rem; }
+.knowledge-custom-dimensions h3, .knowledge-custom-dimensions h4 { margin: 0; }
+.custom-dimension-fixed { margin: 0; padding-left: 1.2rem; }
+.custom-dimension-card { display: grid; gap: .5rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; overflow-wrap: anywhere; }
+.custom-dimension-heading { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; }
+.custom-dimension-heading h3 { margin: 0; }
+.custom-dimension-versions { display: grid; gap: .6rem; margin: 0; padding-left: 0; list-style: none; }
+.custom-dimension-version { display: grid; gap: .35rem; min-width: 0; padding: .7rem; border: 1px solid #e4dfd3; border-radius: 9px; background: white; }
+.custom-dimension-template { margin: 0; white-space: pre-wrap; }
+.custom-dimension-state-enabled { border: 1px solid currentColor; }
+.custom-dimension-state-pending-validation { border: 1px dashed currentColor; }
+.custom-dimension-form { display: grid; gap: .5rem; }
+.custom-dimension-form label { display: grid; gap: .3rem; }
+.custom-dimension-form textarea { width: 100%; min-width: 0; resize: vertical; }
+.custom-revision { display: grid; gap: .35rem; }
+.custom-revision p { margin: 0; }
+.custom-gaps { margin: 0; padding-left: 0; list-style: none; }
+.custom-rows { display: grid; gap: .6rem; margin: .3rem 0 0; padding-left: 0; list-style: none; }
+.custom-row { display: grid; gap: .25rem; min-width: 0; padding-top: .5rem; border-top: 1px solid #e4dfd3; }
+.custom-row p { margin: 0; }
+.custom-row-unit { font-size: .85em; opacity: .75; }
+.custom-anchor { justify-self: start; text-align: start; }
+.custom-anchor-unlocated { opacity: .75; }
 .captured-procedure-state-stopped { border: 1px dotted currentColor; }
 .captured-procedure-validation { display: grid; gap: .45rem; padding: .8rem; border: 2px solid #2c463b; border-radius: 10px; background: #f6f8f2; }
 .captured-procedure-validation h5, .captured-procedure-validation h6 { margin: 0; }
