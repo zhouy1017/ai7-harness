@@ -2144,39 +2144,42 @@ export function classifyJourneyResult(result, journey) {
  * `returnToScreen`. Neither touches a record: only the local appearance preference changes, and it ends at 跟随系统.
  */
 export async function runJ14DarkPass({ renderer, journey, at, representative = '[data-screen="landing"] .panel', returnTo = SIDEBAR.destination('library'), returnToScreen }) {
-  const check = (ok, stage) => { if (!ok) throw journeyCheckFailure(journey, stage); };
-  const wait = async (expression, stage) => {
+  // Every check polls: a screen the sidebar opens may paint more than once, and a read between two paints sees no node.
+  const wait = async (expression, label) => {
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
-      if (await renderer.evaluate(`Boolean(${expression})`)) return;
+      try {
+        if (await renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`)) return;
+      } catch {
+        // A read during a repaint answers on the next poll.
+      }
       await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     }
-    check(false, stage);
+    throw journeyCheckFailure(journey, label);
   };
+  const node = `document.querySelector(${JSON.stringify(representative)})`;
   const open = async () => {
-    await wait(sidebarNavigate(SIDEBAR.settings), 'j14-dark-pass');
-    await wait(`document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]:not(:disabled)')`, 'j14-dark-pass');
-    check(await renderer.evaluate(`(() => { const button = document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]'); if (!button || button.disabled) return false; button.click(); return true; })()`), 'j14-dark-pass');
-    await wait(`document.querySelector('#screen[data-screen="appearance"]')`, 'j14-dark-pass');
+    await wait(sidebarNavigate(SIDEBAR.settings), 'j14-dark-pass-open-settings');
+    await wait(`(() => { const button = document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]'); if (!button || button.disabled) return false; button.click(); return true; })()`, 'j14-dark-pass-open-appearance');
+    await wait(`document.querySelector('#screen[data-screen="appearance"]')`, 'j14-dark-pass-appearance');
   };
   const back = returnToScreen ?? (async () => {
-    await wait(sidebarNavigate(returnTo), 'j14-dark-pass');
+    await wait(sidebarNavigate(returnTo), 'j14-dark-pass-return');
   });
   const choose = async (theme) => {
     await open();
-    await wait(`document.querySelector('[data-appearance-theme="${theme}"]')`, 'j14-dark-pass');
-    check(await renderer.evaluate(`(() => { const input = document.querySelector('[data-appearance-theme="${theme}"]'); if (!input || input.disabled) return false; input.click(); return true; })()`), 'j14-dark-pass');
-    await wait(`document.querySelector('[data-appearance-theme="${theme}"]:checked')`, 'j14-dark-pass');
+    await wait(`(() => { const input = document.querySelector('[data-appearance-theme="${theme}"]'); if (!input || input.disabled) return false; if (!input.checked) input.click(); return input.checked; })()`, `j14-dark-pass-choose-${theme}`);
+    await wait(`window.ai7.getPreferences().then((preferences) => preferences.values['appearance.theme'] === '${theme}')`, `j14-dark-pass-saved-${theme}`);
     await back();
-    await wait(`document.querySelector(${JSON.stringify(representative)})`, 'j14-dark-pass');
+    await wait(node, 'j14-dark-pass-representative');
   };
+  const forcedColors = (value) => renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value }] });
   at('j14-dark-pass');
   await choose('dark');
   at('j14-dark-pass-theme-applied');
-  await wait(`document.documentElement.dataset.theme === 'dark'`, 'j14-dark-pass-theme-applied');
-  check(await renderer.evaluate(`(() => {
-    const root = getComputedStyle(document.documentElement), screen = document.querySelector(${JSON.stringify(representative)});
-    if (!screen || document.documentElement.style.colorScheme !== 'dark') return false;
+  await wait(`(() => {
+    const root = getComputedStyle(document.documentElement), screen = ${node};
+    if (!screen || document.documentElement.dataset.theme !== 'dark' || document.documentElement.style.colorScheme !== 'dark') return false;
     const style = getComputedStyle(screen);
     const rgb = (value) => (value.match(/[\\d.]+/g) ?? []).slice(0, 3).map(Number);
     const luminance = (values) => values.map((n) => { const s = n / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4; }).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0);
@@ -2186,20 +2189,23 @@ export async function runJ14DarkPass({ renderer, journey, at, representative = '
     return hex(color) === root.getPropertyValue('--text').trim() &&
       [root.getPropertyValue('--surface').trim(), root.getPropertyValue('--manuscript').trim()].includes(hex(background)) &&
       (Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05) >= 4.5;
-  })()`), 'j14-dark-pass-theme-applied');
+  })()`, 'j14-dark-pass-theme-applied');
   at('j14-dark-pass-forced-colors-wins');
   for (const theme of ['dark', 'light']) {
     if (theme === 'light') await choose('light');
-    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
-    check(await renderer.evaluate(`(() => {
-      if (!matchMedia('(forced-colors: active)').matches) return false;
-      const root = getComputedStyle(document.documentElement), screen = getComputedStyle(document.querySelector(${JSON.stringify(representative)}));
-      return screen.backgroundColor === root.backgroundColor && screen.color === root.color && screen.color !== screen.backgroundColor;
-    })()`), 'j14-dark-pass-forced-colors-wins');
-    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await forcedColors('active');
+    try {
+      await wait(`(() => {
+        const screen = ${node};
+        if (!screen || !matchMedia('(forced-colors: active)').matches || document.documentElement.dataset.theme !== ${JSON.stringify(theme)}) return false;
+        const root = getComputedStyle(document.documentElement), style = getComputedStyle(screen);
+        return style.backgroundColor === root.backgroundColor && style.color === root.color && style.color !== style.backgroundColor;
+      })()`, `j14-dark-pass-forced-colors-${theme}`);
+    } finally {
+      await forcedColors('none');
+    }
   }
   at('j14-dark-pass-restored');
   await choose('system');
   await wait(`document.documentElement.dataset.theme === (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')`, 'j14-dark-pass-restored');
-  check(await renderer.evaluate(`window.ai7.getPreferences().then((preferences) => preferences.values['appearance.theme'] === 'system')`), 'j14-dark-pass-restored');
 }
