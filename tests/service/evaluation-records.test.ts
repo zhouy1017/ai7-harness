@@ -106,6 +106,7 @@ describe('②C 评估 over the real store', () => {
       // A Book without a manuscript has nothing to evaluate.
       const creation = store.prepareBookCreation('评估空书', null);
       const empty = store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+      expect(store.inspectBookFindings(empty)).toMatchObject({ total: 0, groups: [], items: [], next: null });
       expect(store.inspectEvaluation(empty, null)).toMatchObject({
         manuscript: null, records: [], record: null, start: { allowed: false, reason: '这本书还没有稿件，没有可以评估的内容。' },
       });
@@ -129,6 +130,7 @@ describe('②C 评估 over the real store', () => {
         total: { score: 0, fullMarks: 100, notRated: 0, unscored: 5 }, conclusion: null, recommendationBlocked: false, comparison: null,
       });
       expect(first.content).toEqual(emptyEvaluationContent(BUILTIN_EVALUATION_PROFILE));
+      expect(store.inspectBookFindings(book.bookId).items.filter((item) => item.target.kind === 'risk')).toHaveLength(0);
       expect(await refusal(() => store.startEvaluation(book.bookId))).toBe('EVALUATION_OPEN:第 1 版还没有定稿；定稿后才能重新评估。');
 
       const save = (expectedEntries: number, content: EvaluationContent, finalize = false): EvaluationWorkspaceProjection =>
@@ -149,6 +151,9 @@ describe('②C 评估 over the real store', () => {
       expect(saved).toMatchObject({ state: 'editing', entries: 2, total: { score: 66.5, fullMarks: 80, notRated: 1, unscored: 0 }, conclusion: 'revise', recommendationBlocked: true });
       expect(saved.content.readiness).toEqual(['第三章结尾需要重写']);
       expect(saved.content.risks[0]?.statement).toBeNull();
+      const risks = store.inspectBookFindings(book.bookId).items.filter((item) => item.target.kind === 'risk');
+      expect(risks.length).toBe(saved.content.risks.filter((risk) => !risk.reviewed && (risk.level !== null || risk.statement !== null)).length);
+      expect(risks.every((item) => item.target.kind === 'risk' && item.target.recordId === saved.recordId && item.target.revisionId === book.revisionId)).toBe(true);
       expect(await refusal(() => save(2, saved.content))).toBe('EVALUATION_UNCHANGED:评估没有变化。');
       expect(await refusal(() => save(1, scored([18])))).toBe('EVALUATION_MOVED:这一版评估刚在另一个窗口保存过；请看过最新的再改。');
       // A version belongs to its Book.

@@ -2993,6 +2993,15 @@ async function main() {
       settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'run-link:查看审阅:enabled',
       'review-drawer-settled-plan', settledReviewDrawer);
 
+    at('book-findings-center');
+    const centerBeforeDisposition = await renderer.evaluate(`window.ai7.inspectBookFindings()`);
+    const centerReview = centerBeforeDisposition?.items?.find((item) => item.target.kind === 'review');
+    requireJourney(centerBeforeDisposition.total > 0 && centerReview !== undefined && centerBeforeDisposition.groups.some((group) => group.category.startsWith('review:')), 'book-findings-source-counts');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-open');
+    await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'book-findings-ready');
+    await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); const row=root?.querySelector('[data-finding-id='+CSS.escape(${JSON.stringify(centerReview.id)})+']'); const open=row?.querySelector('button'); if(root?.dataset.findingsTotal!==${JSON.stringify(String(centerBeforeDisposition.total))} || !(open instanceof HTMLButtonElement))return false; open.click(); return true; })()`, 'book-findings-record-link');
+    await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${centerReview.target.findingId}"]')`, 'book-findings-exact-review');
+
     at('review-marks-on-manuscript');
     // A finding of 审阅 is the mark on the manuscript: 回到原文 opens the text at it with its card, which
     // names the category that produced it (MARK-008, MARK-010).
@@ -3031,6 +3040,22 @@ async function main() {
     const afterIgnore = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     const ignored = afterIgnore?.run?.findings?.find((finding) => finding.findingId === ignorable.findingId);
     requireJourney(ignored?.status === 'ignored' && ignored.ignoreReason === ignoreReason && ignored.markStatus === 'removed', 'review-ignored-recorded', { status: ignored?.status, markStatus: ignored?.markStatus });
+
+    at('book-findings-disposition');
+    const remainingFindings = [];
+    let findingsOffset = 0;
+    for (;;) {
+      const page = await renderer.evaluate(`window.ai7.inspectBookFindings({offset:${findingsOffset}})`);
+      remainingFindings.push(...page.items);
+      if (page.next === null) break;
+      findingsOffset = page.next;
+    }
+    requireJourney(!remainingFindings.some((item) => item.id === ignorable.findingId) && remainingFindings.some((item) => item.target.kind === 'review'), 'book-findings-disposition-reflected');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-reopen');
+    await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'book-findings-reread');
+    await assertRenderer(renderer, `!document.querySelector('.findings-center [data-finding-id="${ignorable.findingId}"]')`, 'book-findings-disposed-absent');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'book-findings-return-review');
+    await waitFor(renderer, `document.querySelector('section.review-run')`, 'book-findings-review-ready');
 
     at('review-report');
     // The versioned 审阅报告 with its four parts, and 导出… of the version on show (V2-UX-REV-009; Issue #500).

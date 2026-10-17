@@ -693,8 +693,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'inspectParagraphAnalysis': {
       const input = requireInput(value.input, ['bookId', 'manuscriptId', 'blockId', 'radius'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.manuscriptId) || !isBoundedString(input.blockId, 80) ||
-          !/^[a-zA-Z0-9_-]+$/u.test(input.blockId) || !isSafeInteger(input.radius, 0) || input.radius > 4) throw new ProtocolError(tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.manuscriptId) || !isBoundedString(input.blockId, 28) ||
+          !MARK_BLOCK_PATTERN.test(input.blockId) || !isSafeInteger(input.radius, 0) || input.radius > 4) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectForegroundExecutionBoundary': {

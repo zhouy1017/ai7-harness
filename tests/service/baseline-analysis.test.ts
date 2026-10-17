@@ -478,6 +478,17 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.units.every((unit) => !JSON.stringify(unit).includes('crossUnit'))).toBe(true);
       // The exact gap: unit 2, the adapter failure, with its exact block range.
       const unit2 = manifest.units[1]!;
+      const findings = store.inspectBookFindings(imported.bookId);
+      expect(findings.items.some((item) => item.target.kind === 'gap' && item.target.revisionId === revision.revisionId && item.target.unitOrdinal === 2 && item.target.blockId === unit2.blockIds[0])).toBe(true);
+      expect(findings.groups.find((group) => group.category === 'analysis-gaps')?.count).toBe(revision.gaps.length);
+      const anchor = manifest.units[0]!.blockIds[0]!;
+      const nearby = store.inspectParagraphAnalysis(imported.bookId, imported.manuscriptId, anchor, 0);
+      expect(nearby.revision?.revisionId).toBe(revision.revisionId);
+      expect(nearby.items.length).toBeGreaterThan(0);
+      expect(nearby.items.every((item) => item.blockId === anchor)).toBe(true);
+      expect(nearby.items.length).toBeLessThanOrEqual(40);
+      expect(nearby.revision?.freshness.currentRevisionId).toBe(revision.freshness.currentRevisionId);
+      expect(() => store.inspectParagraphAnalysis(imported.bookId, imported.manuscriptId, 'missing', 0)).toThrow();
       expect(revision.gaps).toEqual([{
         unitOrdinal: 2, code: 'adapter-failure', reason: expect.stringContaining('SYNTHETIC_ADAPTER_FAILURE'),
         startPosition: unit2.startPosition, endPosition: unit2.endPosition, blockIds: [...unit2.blockIds],

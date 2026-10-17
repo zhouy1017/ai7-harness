@@ -872,6 +872,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-online-dispatch',
     'review-authorize',
     'review-marks-on-manuscript',
+    'book-findings-center',
+    'book-findings-disposition',
     'review-batch-apply',
     'review-ignore-with-reason',
     'review-report',

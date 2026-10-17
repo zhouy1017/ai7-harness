@@ -1198,7 +1198,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'true'`, 'milestone-stale-preview-ready');
 
   at('milestone-form');
-  await assertRenderer(renderer, `(() => { const details = document.querySelector('.milestone-section'); details.open = true; return true; })()`, 'milestone-open');
+  await assertRenderer(renderer, `(() => { const menu = document.querySelector('#context-actions details[data-save-menu="manuscript"]'); const details = menu?.querySelector('.milestone-section'); const status = document.querySelector('#persistence-status'); if (!(menu instanceof HTMLDetailsElement) || !(details instanceof HTMLDetailsElement) || status?.getAttribute('role') !== 'button' || document.querySelector('#manuscript-navigation-panel .milestone-section')) return false; status.click(); details.open = true; return menu.open && details.open; })()`, 'milestone-open');
   await fill(renderer, '#milestone-label', '结构复核完成', 'milestone-label');
   // Synchronized delta with Issue #414: a purpose is chosen from the cards, not typed.
   await choosePurpose(renderer, 'stage-archive', 'milestone-purpose');

@@ -5295,7 +5295,7 @@ export class EditorialStore {
     this.#evaluationBookTitle(bookId);
     const store = this;
     function* findings(): Generator<BookFindingProjection> {
-      const revision = store.inspectBaselineAnalysis(bookId).resultSetRevision;
+      const revision = store.#baselineAnalysis.analysisFreshnessOf(bookId) === 'absent' ? null : store.inspectBaselineAnalysis(bookId).resultSetRevision;
       if (revision !== null) for (const gap of revision.gaps) {
         yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未覆盖', severity: '注意', status: '未覆盖', summary: gap.reason,
           target: { kind: 'gap', revisionId: revision.revisionId, unitOrdinal: gap.unitOrdinal, blockId: gap.blockIds[0] ?? null } };
@@ -5339,7 +5339,8 @@ export class EditorialStore {
     requireStore(block !== undefined, 'ANALYSIS_BLOCK_UNAVAILABLE', '这段文字已不在当前稿件中。');
     const nearby = this.#authority.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? AND position BETWEEN ? AND ?')
       .all(asString(block.branch_id), asNumber(block.position) - radius, asNumber(block.position) + radius) as SqlRow[];
-    return paragraphAnalysis(bookId, manuscriptId, blockId, new Set(nearby.map((row) => asString(row.block_id))), this.inspectBaselineAnalysis(bookId).resultSetRevision);
+    const revision = this.#baselineAnalysis.analysisFreshnessOf(bookId) === 'absent' ? null : this.inspectBaselineAnalysis(bookId).resultSetRevision;
+    return paragraphAnalysis(bookId, manuscriptId, blockId, new Set(nearby.map((row) => asString(row.block_id))), revision);
   }
 
   // ---- J-04 factual review (Issue #53, plan slice S18a) -------------------------------------------

@@ -26,6 +26,23 @@ import type { ServiceOperation, ServiceOperationMap, ServiceRequest } from '../.
 
 const encoder = new TextEncoder();
 
+describe('Book findings and paragraph analysis read boundaries (#952)', () => {
+  it('accepts exact bounded read inputs and refuses forged actions, identities, offsets and radii', () => {
+    const bookId = randomUUID();
+    const input = { bookId, manuscriptId: randomUUID(), blockId: `blk_${'a'.repeat(24)}`, radius: 1 };
+    for (const frame of [
+      { id: randomUUID(), op: 'inspectBookFindings', input: { bookId, offset: 40 } },
+      { id: randomUUID(), op: 'inspectParagraphAnalysis', input },
+    ]) expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    for (const invalid of [{ offset: -1 }, { offset: 0.5 }, { offset: 0, dispose: true }, { offset: 0, bookId: 'invalid' }]) {
+      expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), op: 'inspectBookFindings', input: { bookId, ...invalid } })))).toThrow(ProtocolError);
+    }
+    for (const invalid of [{ radius: 5 }, { radius: -1 }, { radius: 1.5 }, { blockId: '' }, { manuscriptId: 'invalid' }, { write: true }]) {
+      expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), op: 'inspectParagraphAnalysis', input: { ...input, ...invalid } })))).toThrow(ProtocolError);
+    }
+  });
+});
+
 // Issue #936: historical Run detail and link paging stay reads of the existing usage op.
 describe('usage input bounds', () => {
   it('accepts closed filters, a safe link offset and an exact Run id only', () => {
