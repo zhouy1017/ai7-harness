@@ -370,6 +370,9 @@ const taskDrawer = mountTaskDrawer({
   onOpen: () => closeNavigation?.(),
   onRecorded: (kind, bookId, ref) => {
     taskSurfaceRefresh[kind]?.();
+    // A Run started or changed here is read at once, so 待我处理 follows it in flight to its outcome and the quiet completion
+    // notice hears it without the editor leaving the screen (Issue #937; NOTIF-003).
+    globalAttentionReader.refresh();
     if (kind === 'review-run') followReviewMarks(bookId, ref);
   },
   openRunSurface: (plan) => void leaveThen(() => openTaskRunSurface(plan)),
