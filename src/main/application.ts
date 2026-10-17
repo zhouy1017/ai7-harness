@@ -85,6 +85,7 @@ import {
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
 import { usageCsv } from '../shared/usage.js';
+import { USAGE_CSV_DIALOG, usageCsvFileName } from '../shared/usage-labels.js';
 import { PreferencesStore } from './preferences.js';
 import { developerProposalFileName } from '../shared/developer-proposal.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
@@ -1389,10 +1390,10 @@ function registerRendererHandlers(
     const today = new Date();
     const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const chosen = await dialog.showSaveDialog(owned.window, {
-      title: '选择用量表的保存位置',
-      buttonLabel: '保存到此位置',
-      defaultPath: resolve(app.getPath('documents'), `AI7 用量 ${date}.csv`),
-      filters: [{ name: 'CSV 表格', extensions: ['csv'] }],
+      title: USAGE_CSV_DIALOG.title,
+      buttonLabel: USAGE_CSV_DIALOG.button,
+      defaultPath: resolve(app.getPath('documents'), usageCsvFileName(date)),
+      filters: [{ name: USAGE_CSV_DIALOG.filter, extensions: ['csv'] }],
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
@@ -4309,7 +4310,10 @@ function registerRendererHandlers(
       requireSender(event);
       requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
       requireAuthority();
-      return service.call('inspectUsage', { range: input.range, groupBy: input.groupBy });
+      return service.call('inspectUsage', { range: input.range, groupBy: input.groupBy,
+        ...(input.runOffset === undefined ? {} : { runOffset: input.runOffset }),
+        ...(input.runRecordId === undefined ? {} : { runRecordId: input.runRecordId }),
+        ...(input.asOf === undefined ? {} : { asOf: input.asOf }) });
     }),
   );
   ipcMain.handle(IPC_CHANNELS.exportUsageCsv, (event, input: Parameters<RendererApi['exportUsageCsv']>[0]) =>

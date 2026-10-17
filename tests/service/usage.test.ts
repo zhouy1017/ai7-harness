@@ -164,6 +164,11 @@ describe('用量 over the real store', () => {
       expect(tokensOf(rowB)).toBe(baselineB.tokens);
       // Exact Run links: the Run record ids the Runs were authorized under, newest first, each with its own tokens and route.
       expect(rowA.runs.map((run) => run.runRecordId).sort()).toEqual([baselineA.runRecordId, factualA.runRecordId].sort());
+      for (const run of [...rowA.runs, ...rowB.runs]) {
+        const detail = store.inspectUsage({ range: 'all', groupBy: 'book', runRecordId: run.runRecordId }).detail;
+        expect(detail?.report?.runRecordId).toBe(run.runRecordId);
+        expect(detail?.report?.taskIntentId).toBe(run.taskIntentId);
+      }
       expect(rowA.runs.find((run) => run.runRecordId === factualA.runRecordId)).toMatchObject({
         bookId: baselineA.bookId, bookTitle: '用量甲', taskKind: FACTUAL_REVIEW_KIND, route: 'ai7-local-deterministic', reviewRunId: null,
       });

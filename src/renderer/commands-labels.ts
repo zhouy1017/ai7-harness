@@ -24,6 +24,17 @@ export const COMMAND_GROUP_NAMES = {
   view: '视图',
 } as const;
 
+export const COMMAND_NAMES = {
+  'nav.attention': '待我处理', 'nav.library': '书库', 'nav.series': '书系', 'nav.knowledge': '知识库', 'nav.quality': '质量与学习',
+  'nav.book.manuscript': '稿件', 'nav.book.review': '审阅', 'nav.book.evaluation': '评估', 'nav.book.deliverables': '交付物',
+  'nav.book.analysis': '分析', 'nav.book.sources': '来源与证据', 'nav.book.overview': '工作概览',
+  'nav.back': '返回', 'search.find': '查找', 'search.next': '下一组查找结果', 'search.previous': '上一组查找结果',
+  'view.focusManuscript': '聚焦稿件', 'view.openTasks': '打开任务面板',
+  'edit.save': '保存', 'edit.undo': '撤销', 'edit.redo': '重做', 'edit.replace': '替换', 'edit.previousWindow': '上一页', 'edit.nextWindow': '下一页',
+} as const;
+
+export const shortcutHintLabel = (label: string): string => `快捷键 ${label}`;
+
 /** Announced when a command key is pressed while an input method's composition is open (KEY-006). */
 export const IME_DEFERRED_ANNOUNCEMENT = '输入法组合尚未结束，命令已暂缓。';
 

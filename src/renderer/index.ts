@@ -132,7 +132,7 @@ import {
 import { mountKeyboardSettings } from './keyboard-settings.js';
 import { KEYBOARD_SECTION_LABEL, KEYBOARD_TITLE } from './keyboard-labels.js';
 import { mountUsage } from './usage.js';
-import { USAGE_RETURN, USAGE_SECTION_LABEL, USAGE_TITLE } from './usage-labels.js';
+import { USAGE_RETURN, USAGE_SECTION_LABEL, USAGE_TITLE, USAGE_RUN_TITLE, USAGE_RUN_REPORT_ABSENT, usageRunIdentity } from './usage-labels.js';
 import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_LEDE, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
 import {
@@ -840,16 +840,21 @@ async function leaveThen(open: () => Promise<void>): Promise<void> {
  * screen register with it and leave with it.
  */
 const commandPlatformInUse: CommandPlatform = window.ai7.platform;
+let windowComposing = false;
+window.addEventListener('compositionstart', () => { windowComposing = true; }, true);
+window.addEventListener('compositionend', () => { windowComposing = false; }, true);
+window.addEventListener('blur', () => { windowComposing = false; });
 const commandDispatcher = createCommandDispatcher({
   platform: commandPlatformInUse,
   bindings: activeCommandBindings,
   // A press made during a composition says so itself (`isComposing`); the manuscript's own composition is asked as well.
-  composing: () => editor?.isComposing() === true,
+  composing: () => windowComposing || editor?.isComposing() === true,
   announce: (message) => setStatus(message, 'busy'),
 });
 window.addEventListener('keydown', (event) => commandDispatcher.handle(event));
 /** The commands of the manuscript on screen, removed with it. */
 let editorCommandsOff: (() => void) | undefined;
+let keyboardSettingsOff: (() => void) | undefined;
 
 /** A Book's section, opened in the Book this window shows. */
 function bookSectionCommand(open: (route: { bookId: string; bookTitle: string }) => Promise<void>): () => Promise<void> {
@@ -1049,6 +1054,8 @@ function replaceScreen(state: string, content: HTMLElement): void {
   editor = undefined;
   editorCommandsOff?.();
   editorCommandsOff = undefined;
+  keyboardSettingsOff?.();
+  keyboardSettingsOff = undefined;
   closeNavigation = null;
   leaveGuard = null;
   taskSurfaceRefresh = {};
@@ -6054,30 +6061,31 @@ async function renderEvaluationCalibration(focusBookId: string | null): Promise<
 }
 
 /**
- * The existing surface of one Run a 用量 row lists (Issue #936): a Review Run's own page, a Task's plan in the Task Drawer where
- * its kind owns one, otherwise the Book it ran on. The drawer names a Task that is no longer the Book's current one as such.
+ * The exact persisted report of one historical Run, using the existing read-only report renderer (brief revision 2).
+ * No current-plan lookup can redirect this link to another Run or make an old Run inaccessible.
  */
-async function openUsageRun(run: { bookId: string; taskIntentId: string; taskKind: string; reviewRunId: string | null }): Promise<void> {
-  const taskKinds: Readonly<Record<string, TaskPlanKind>> = {
-    'baseline-manuscript-analysis': 'baseline-analysis',
-    evaluation: 'initial-evaluation',
-    'readers-report': 'readers-report',
-    'evaluation-rewrite': 'evaluation-rewrite',
-    writing: 'writing',
-  };
-  const taskKind = taskKinds[run.taskKind];
+async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkProjection): Promise<void> {
+  const origin = screen.firstElementChild;
   try {
-    await leaveThen(async () => {
-      if (run.reviewRunId !== null) {
-        await openGlobalAttentionTarget({ kind: 'review', bookId: run.bookId, reviewRunId: run.reviewRunId });
-      } else if (taskKind !== undefined) {
-        await openGlobalAttentionTarget({ kind: 'task-plan', bookId: run.bookId, taskKind, ref: run.taskIntentId });
-      } else {
-        await requestBookWorkbenchRoute({ kind: 'book', bookId: run.bookId });
-      }
-    });
+    const usage = await window.ai7.inspectUsage({ range: 'all', groupBy: 'book', runRecordId: run.runRecordId });
+    if (screen.firstElementChild !== origin) return;
+    if (usage.detail === null || usage.detail === undefined) throw new Error('USAGE_RUN_UNAVAILABLE');
+    run = usage.detail;
+    const content = panel();
+    content.dataset['usageRunDetail'] = run.runRecordId;
+    content.append(element('p', 'section-label', USAGE_SECTION_LABEL), element('h2', undefined, USAGE_RUN_TITLE),
+      element('p', undefined, run.bookTitle), element('p', 'technical-identity', usageRunIdentity(run.runRecordId)));
+    if (run.report === null) content.append(element('p', 'field-note', USAGE_RUN_REPORT_ABSENT));
+    else {
+      const report = renderRunReport(run.report);
+      report.setAttribute('open', '');
+      content.append(report);
+    }
+    content.append(button(USAGE_RETURN, 'quiet', () => renderUsage()));
+    replaceScreen('usage-run', content);
+    setStatus(USAGE_RUN_TITLE, 'success');
   } catch (error) {
-    setStatus(rendererErrorMessage(error, '无法打开运行所在的页面。'), 'error');
+    setStatus(rendererErrorMessage(error, USAGE_RUN_REPORT_ABSENT), 'error');
   }
 }
 
@@ -6095,7 +6103,7 @@ function renderUsage(): void {
   actions.append(button(USAGE_RETURN, 'quiet', () => void initializeStartup()));
   content.append(body, actions);
   replaceScreen('usage', content);
-  setStatus('用量', 'success');
+  setStatus(USAGE_TITLE, 'success');
 }
 
 /** 设置 › 本机 › 键盘与无障碍 › 快捷键 (Issue #936, plan slice 11c; V2-UX-KEY-002, KEY-003, KEY-011). */
@@ -6104,14 +6112,15 @@ function renderKeyboardSettings(): void {
   content.classList.add('keyboard-screen');
   content.append(element('p', 'section-label', KEYBOARD_SECTION_LABEL), element('h2', undefined, KEYBOARD_TITLE));
   const body = element('div');
-  mountKeyboardSettings({
+  const unmount = mountKeyboardSettings({
     root: body, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, onChanged: applyKeyboardBindings,
   });
   const actions = element('div', 'button-row');
   actions.append(button(USAGE_RETURN, 'quiet', () => void initializeStartup()));
   content.append(body, actions);
   replaceScreen('keyboard', content);
-  setStatus('键盘与无障碍', 'success');
+  keyboardSettingsOff = unmount;
+  setStatus(KEYBOARD_TITLE, 'success');
 }
 
 async function renderModelServiceSettings(): Promise<void> {

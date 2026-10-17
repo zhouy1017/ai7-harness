@@ -12,14 +12,13 @@ export type UsageCostEstimate =
   | { state: 'estimated'; amounts: ReadonlyArray<{ currency: string; amount: number }>; enteredOn: ReadonlyArray<string> };
 
 /** The route a Run ran on, or the word for a Run that never bound one. */
-export const UNBOUND_ROUTE_LABEL = '未绑定模型服务';
+export { UNBOUND_ROUTE_LABEL } from './usage-labels.js';
 
 export function estimateUsageCost(byRoute: ReadonlyArray<UsageRouteTokensProjection>, prices: UnitPrices): UsageCostEstimate {
   const missing: Array<string | null> = [];
   const amounts = new Map<string, number>();
   const enteredOn = new Set<string>();
   for (const entry of byRoute) {
-    if (entry.inputTokens === 0 && entry.outputTokens === 0) continue;
     const price = entry.route === null ? undefined : prices[entry.route];
     if (price === undefined) {
       missing.push(entry.route);

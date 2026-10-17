@@ -16,6 +16,7 @@ import {
   shortcutLabel,
   withBinding,
   withoutBinding,
+  validatedBindings,
   type Chord,
   type CommandDefinition,
 } from './commands.js';
@@ -26,6 +27,7 @@ import {
   KEYBOARD_CAPTURE_APPLY,
   KEYBOARD_CAPTURE_CANCEL,
   KEYBOARD_CAPTURE_PROMPT,
+  KEYBOARD_CAPTURE_SECOND,
   KEYBOARD_CHANGE,
   KEYBOARD_COLUMNS,
   KEYBOARD_CUSTOM_MARK,
@@ -38,6 +40,9 @@ import {
   keyboardCapturedLine,
   keyboardResetLine,
   keyboardSavedLine,
+  keyboardCaptureName,
+  keyboardChangeName,
+  keyboardResetName,
 } from './keyboard-labels.js';
 
 /**
@@ -65,7 +70,7 @@ export interface MountKeyboardSettingsOptions {
   readonly onChanged: (bindings: KeyboardBindings) => void;
 }
 
-export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): void {
+export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): () => void {
   const { root, api, setStatus, errorMessage, onChanged } = options;
   const platform = commandPlatform();
   root.classList.add('keyboard-settings');
@@ -112,7 +117,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): vo
     target.tabIndex = 0;
     target.setAttribute('role', 'textbox');
     target.setAttribute('aria-readonly', 'true');
-    target.setAttribute('aria-label', `「${command.name}」的新快捷键`);
+    target.setAttribute('aria-label', keyboardCaptureName(command.name));
     const shown = el('p', 'keyboard-capture-chords');
     shown.setAttribute('aria-live', 'polite');
     const refusal = el('p', 'attention-note keyboard-refusal');
@@ -144,8 +149,12 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): vo
       addStep.disabled = chords.length === 0 || chords.length >= 2;
     };
     const listener = (event: KeyboardEvent): void => {
-      if (!panel.contains(document.activeElement) && document.activeElement !== target) return;
+      if (document.activeElement !== target) return;
       if (event.key === 'Tab' && !event.ctrlKey && !event.altKey && !event.metaKey) return;
+      if (event.isComposing || event.keyCode === 229) {
+        showRefusal(bindingRefusalLabel('ime-reserved', null, []));
+        return;
+      }
       event.preventDefault();
       event.stopImmediatePropagation();
       if (event.key === 'Escape' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
@@ -194,14 +203,17 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): vo
         return;
       }
       void save(withBinding(bindings, command.id, text, platform), keyboardSavedLine(command.name, sequenceLabel(text, platform))).then((saved) => {
-        if (saved) finish(true);
+        if (saved) {
+          finish(true);
+          root.querySelector<HTMLButtonElement>(`[data-keyboard-change="${command.id}"]`)?.focus();
+        }
         else target.focus();
       });
     });
     addStep.addEventListener('click', () => {
       addStepPending = true;
       showRefusal(null);
-      shown.textContent = `${shown.textContent ?? ''} · 请按第二步`;
+      shown.textContent = `${shown.textContent ?? ''} · ${KEYBOARD_CAPTURE_SECOND}`;
       target.focus();
     });
     cancel.addEventListener('click', () => finish(false));
@@ -233,17 +245,22 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): vo
       const change = el('button', 'secondary', KEYBOARD_CHANGE);
       change.type = 'button';
       change.dataset['keyboardChange'] = command.id;
-      change.setAttribute('aria-label', `修改「${command.name}」的快捷键`);
+      change.setAttribute('aria-label', keyboardChangeName(command.name));
       const reset = el('button', 'quiet', KEYBOARD_RESET_ONE);
       reset.type = 'button';
       reset.dataset['keyboardReset'] = command.id;
-      reset.setAttribute('aria-label', `恢复「${command.name}」的默认快捷键`);
+      reset.setAttribute('aria-label', keyboardResetName(command.name));
       reset.disabled = !isCustomized(command.id, bindings, platform);
       const captureHost = el('div', 'keyboard-capture-host');
       change.addEventListener('click', () => beginCapture(command, captureHost, change));
       reset.addEventListener('click', () => {
         endCapture();
         const next = withoutBinding(bindings, command.id);
+        const check = checkBinding(command.id, command.defaults[platform], next, platform);
+        if (!check.ok) {
+          setStatus(check.message, 'error');
+          return;
+        }
         void save(next, keyboardResetLine(command.name, sequenceLabel(command.defaults[platform], platform)));
       });
       actions.append(change, reset, captureHost);
@@ -295,7 +312,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): vo
   void (async () => {
     setStatus(KEYBOARD_STATUS_LINES.loading, 'busy');
     try {
-      bindings = (await api.getPreferences()).values['keyboard.bindings'];
+      bindings = validatedBindings((await api.getPreferences()).values['keyboard.bindings'], platform);
       // What the preference holds is what every label and the dispatcher read from here on.
       onChanged(bindings);
       paint();
@@ -304,4 +321,5 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): vo
       setStatus(errorMessage(error, KEYBOARD_STATUS_LINES.loadFailed), 'error');
     }
   })();
+  return endCapture;
 }

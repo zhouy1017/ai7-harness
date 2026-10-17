@@ -17,6 +17,7 @@ import {
   shortcutLabel,
   withBinding,
   withoutBinding,
+  validatedBindings,
   type CommandPlatform,
   type KeyEventLike,
 } from '../../src/renderer/commands.js';
@@ -171,6 +172,22 @@ describe('conflicts', () => {
 });
 
 describe('恢复默认', () => {
+  it('refuses restoring a default that another remap now uses, including as a prefix', () => {
+    for (const platform of PLATFORMS) {
+      const original = COMMANDS.find((command) => command.id === 'nav.library')!.defaults[platform];
+      const moved = withBinding({}, 'nav.library', 'Mod+Shift+L', platform);
+      const stolen = withBinding(moved, 'nav.series', original, platform);
+      expect(checkBinding('nav.library', original, withoutBinding(stolen, 'nav.library'), platform)).toMatchObject({ ok: false, reason: 'exact-conflict', with: '书系' });
+      const prefix = withBinding(moved, 'nav.series', `${original} Mod+B`, platform);
+      expect(checkBinding('nav.library', original, withoutBinding(prefix, 'nav.library'), platform)).toMatchObject({ ok: false, reason: 'prefix-conflict', with: '书系' });
+    }
+  });
+
+  it('drops stored reserved, unsupported and conflicting overrides before dispatch and labelling', () => {
+    expect(validatedBindings({ 'nav.library': 'Mod+C', 'nav.series': 'Alt+2', 'nav.knowledge': 'Mod+Unreal' }, 'win32')).toEqual({});
+    expect(checkBinding('nav.series', 'Ctrl+K', {}, 'win32')).toMatchObject({ ok: false, reason: 'unsupported-key' });
+    expect(checkBinding('nav.series', 'Ctrl+A', {}, 'darwin')).toMatchObject({ ok: false, reason: 'editable-text' });
+  });
   it('restores one command, and the whole section', () => {
     let bindings = withBinding({}, 'nav.library', 'Mod+Shift+L', 'win32');
     bindings = withBinding(bindings, 'nav.series', 'Mod+Shift+U', 'win32');
@@ -293,6 +310,24 @@ describe('dispatch', () => {
     const { dispatcher } = dispatcherWith({ current: {} }, { current: false });
     dispatcher.register({ 'nav.library': ran });
     dispatcher.handle({ ...press('win32', 'Digit2', { alt: true }), defaultPrevented: true });
+    expect(ran).not.toHaveBeenCalled();
+  });
+
+  it('clears a pending sequence when another handler consumes a key or the IME interrupts it', () => {
+    const ran = vi.fn();
+    const bindings = { current: { 'nav.series': 'Mod+Shift+K Mod+B' } };
+    const composing = { current: false };
+    const { dispatcher } = dispatcherWith(bindings, composing);
+    dispatcher.register({ 'nav.series': ran });
+    dispatcher.handle(press('win32', 'KeyK', { mod: true, shift: true }));
+    dispatcher.handle({ ...press('win32', 'KeyX'), defaultPrevented: true });
+    dispatcher.handle(press('win32', 'KeyB', { mod: true }));
+    expect(ran).not.toHaveBeenCalled();
+    dispatcher.handle(press('win32', 'KeyK', { mod: true, shift: true }));
+    composing.current = true;
+    dispatcher.handle(press('win32', 'KeyB', { mod: true }));
+    composing.current = false;
+    dispatcher.handle(press('win32', 'KeyB', { mod: true }));
     expect(ran).not.toHaveBeenCalled();
   });
 

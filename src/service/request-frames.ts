@@ -1084,8 +1084,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     // 用量 (Issue #936, S11c): one of the closed ranges and one of the closed groupings.
     case 'inspectUsage': {
-      const input = requireInput(value.input, ['range', 'groupBy'], tentativeId);
-      if (!(USAGE_RANGES as readonly unknown[]).includes(input.range) || !(USAGE_GROUPINGS as readonly unknown[]).includes(input.groupBy)) {
+      const input = requireInputWithOptional(value.input, ['range', 'groupBy'], ['runOffset', 'runRecordId', 'asOf'], tentativeId);
+      const validAsOf = !('asOf' in input) || (typeof input.asOf === 'string' && input.asOf.length === 24 &&
+        Number.isFinite(Date.parse(input.asOf)) && new Date(input.asOf).toISOString() === input.asOf);
+      if (!(USAGE_RANGES as readonly unknown[]).includes(input.range) || !(USAGE_GROUPINGS as readonly unknown[]).includes(input.groupBy) ||
+          ('runOffset' in input && !isSafeInteger(input.runOffset, 0)) ||
+          ('runRecordId' in input && !validUuid(input.runRecordId)) || !validAsOf) {
         throw new ProtocolError(tentativeId);
       }
       break;

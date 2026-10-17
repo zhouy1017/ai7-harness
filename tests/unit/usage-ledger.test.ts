@@ -46,7 +46,7 @@ function run(seed: RunSeed = {}): { runRecordId: string; taskIntentId: string } 
   const runRecordId = `run-${counter}`;
   db.prepare('INSERT INTO analysis_task_intents(task_intent_id, book_id, kind) VALUES (?, ?, ?)').run(taskIntentId, bookId, seed.kind ?? 'baseline-manuscript-analysis');
   const usage = seed.usage ?? { units: stage(100, 20), 'cross-unit-reduction': stage(10, 2), 'assurance-sampling': stage(5, 1), 'run-report-reflection': stage(3, 1) };
-  const report = seed.report === false ? {} : { report: seed.report === 'null' ? null : { usagePerStage: usage } };
+  const report = seed.report === false ? {} : { report: seed.report === 'null' ? null : { runRecordId, taskIntentId, usagePerStage: usage } };
   db.prepare('INSERT INTO analysis_task_outcomes(outcome_id, task_intent_id, run_record_id, recorded_at, canonical_json) VALUES (?, ?, ?, ?, ?)')
     .run(`outcome-${counter}`, taskIntentId, runRecordId, seed.at ?? '2026-10-10T12:00:00.000Z', JSON.stringify(report));
   if (seed.route !== null) {
@@ -160,7 +160,7 @@ describe('UsageLedger', () => {
     expect(links.find((link) => link.taskKind === 'baseline-manuscript-analysis')?.reviewRunId).toBeNull();
   });
 
-  it('lists at most the newest Runs of a row while counting them all', () => {
+  it('pages every exact Run, including persisted reports, without changing the aggregate', () => {
     for (let index = 0; index < USAGE_ROW_RUN_LINKS + 5; index += 1) {
       run({ at: `2026-10-${String(1 + Math.floor(index / 24)).padStart(2, '0')}T${String(index % 24).padStart(2, '0')}:00:00.000Z` });
     }
@@ -168,6 +168,18 @@ describe('UsageLedger', () => {
     expect(row.runCount).toBe(USAGE_ROW_RUN_LINKS + 5);
     expect(row.runs).toHaveLength(USAGE_ROW_RUN_LINKS);
     expect(row.runs[0]!.recordedAt >= row.runs.at(-1)!.recordedAt).toBe(true);
+    const next = ledger.inspect('all', 'book', NOW, USAGE_ROW_RUN_LINKS).rows[0]!;
+    expect(next.runCount).toBe(row.runCount);
+    expect(next.inputTokens).toBe(row.inputTokens);
+    expect(next.runs).toHaveLength(5);
+    const all = [...row.runs, ...next.runs];
+    expect(new Set(all.map((link) => link.runRecordId)).size).toBe(row.runCount);
+    for (const link of all) {
+      expect(link.report).toBeNull();
+      const detail = ledger.inspect('all', 'book', NOW, 0, link.runRecordId).detail;
+      expect(detail?.report).toMatchObject({ runRecordId: link.runRecordId, taskIntentId: link.taskIntentId });
+    }
+    expect(ledger.inspect('all', 'book', NOW, row.runCount).rows[0]!.runs).toEqual([]);
   });
 
   it('writes nothing', () => {
@@ -175,5 +187,15 @@ describe('UsageLedger', () => {
     const before = db.prepare('SELECT count(*) count FROM analysis_task_outcomes').get() as { count: number };
     ledger.inspect('all', 'taskKind', NOW);
     expect((db.prepare('SELECT count(*) count FROM analysis_task_outcomes').get() as { count: number }).count).toBe(before.count);
+  });
+
+  it('pins later link pages and range totals to the original asOf boundary', () => {
+    run({ at: '2026-10-17T11:00:00.000Z' });
+    const first = ledger.inspect('day', 'book', NOW);
+    run({ at: '2026-10-17T13:00:00.000Z' });
+    const pinned = ledger.inspect('day', 'book', new Date(first.asOf), 1);
+    expect(pinned.totals).toEqual(first.totals);
+    expect(pinned.rows[0]!.runs).toEqual([]);
+    expect(ledger.inspect('day', 'book', new Date('2026-10-17T14:00:00.000Z')).totals.runCount).toBe(2);
   });
 });

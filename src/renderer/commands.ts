@@ -2,6 +2,8 @@ import type { KeyboardBindings } from '../shared/preferences.js';
 import {
   COMMAND_CONTEXT_NAMES,
   COMMAND_GROUP_NAMES,
+  COMMAND_NAMES,
+  shortcutHintLabel,
   IME_DEFERRED_ANNOUNCEMENT,
   bindingRefusalLabel,
   type BindingRefusalReason,
@@ -36,32 +38,32 @@ const both = (chord: string): Readonly<Record<CommandPlatform, string>> => ({ wi
 
 /** The Book sections a Book's window can move between; the order is the order of their default digits. */
 export const BOOK_SECTION_COMMANDS = [
-  ['nav.book.manuscript', '稿件', 'manuscript'],
-  ['nav.book.review', '审阅', 'review'],
-  ['nav.book.evaluation', '评估', 'evaluation'],
-  ['nav.book.deliverables', '交付物', 'deliverables'],
-  ['nav.book.analysis', '分析', 'analysis'],
-  ['nav.book.sources', '来源与证据', 'sources'],
-  ['nav.book.overview', '工作概览', 'overview'],
+  ['nav.book.manuscript', COMMAND_NAMES['nav.book.manuscript'], 'manuscript'],
+  ['nav.book.review', COMMAND_NAMES['nav.book.review'], 'review'],
+  ['nav.book.evaluation', COMMAND_NAMES['nav.book.evaluation'], 'evaluation'],
+  ['nav.book.deliverables', COMMAND_NAMES['nav.book.deliverables'], 'deliverables'],
+  ['nav.book.analysis', COMMAND_NAMES['nav.book.analysis'], 'analysis'],
+  ['nav.book.sources', COMMAND_NAMES['nav.book.sources'], 'sources'],
+  ['nav.book.overview', COMMAND_NAMES['nav.book.overview'], 'overview'],
 ] as const;
 
 /** The remappable commands, in the order the settings table lists them. */
 export const COMMANDS: readonly CommandDefinition[] = [
-  { id: 'nav.attention', name: '待我处理', group: 'navigation', context: 'application', defaults: { win32: 'Alt+1', darwin: 'Mod+Alt+1' } },
-  { id: 'nav.library', name: '书库', group: 'navigation', context: 'application', defaults: { win32: 'Alt+2', darwin: 'Mod+Alt+2' } },
-  { id: 'nav.series', name: '书系', group: 'navigation', context: 'application', defaults: { win32: 'Alt+3', darwin: 'Mod+Alt+3' } },
-  { id: 'nav.knowledge', name: '知识库', group: 'navigation', context: 'application', defaults: { win32: 'Alt+4', darwin: 'Mod+Alt+4' } },
-  { id: 'nav.quality', name: '质量与学习', group: 'navigation', context: 'application', defaults: { win32: 'Alt+5', darwin: 'Mod+Alt+5' } },
+  { id: 'nav.attention', name: COMMAND_NAMES['nav.attention'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+1', darwin: 'Mod+Alt+1' } },
+  { id: 'nav.library', name: COMMAND_NAMES['nav.library'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+2', darwin: 'Mod+Alt+2' } },
+  { id: 'nav.series', name: COMMAND_NAMES['nav.series'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+3', darwin: 'Mod+Alt+3' } },
+  { id: 'nav.knowledge', name: COMMAND_NAMES['nav.knowledge'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+4', darwin: 'Mod+Alt+4' } },
+  { id: 'nav.quality', name: COMMAND_NAMES['nav.quality'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+5', darwin: 'Mod+Alt+5' } },
   ...BOOK_SECTION_COMMANDS.map(([id, name], index): CommandDefinition => ({
     id, name, group: 'navigation', context: 'book',
     defaults: { win32: `Alt+Shift+${index + 1}`, darwin: `Mod+Alt+Shift+${index + 1}` },
   })),
-  { id: 'nav.back', name: '返回', group: 'navigation', context: 'application', defaults: { win32: 'Alt+ArrowLeft', darwin: 'Mod+BracketLeft' } },
-  { id: 'search.find', name: '查找', group: 'search', context: 'manuscript', defaults: both('Mod+F') },
-  { id: 'search.next', name: '下一组查找结果', group: 'search', context: 'manuscript', defaults: { win32: 'F3', darwin: 'Mod+G' } },
-  { id: 'search.previous', name: '上一组查找结果', group: 'search', context: 'manuscript', defaults: { win32: 'Shift+F3', darwin: 'Mod+Shift+G' } },
-  { id: 'view.focusManuscript', name: '聚焦稿件', group: 'view', context: 'manuscript', defaults: both('Mod+Shift+M') },
-  { id: 'view.openTasks', name: '打开任务面板', group: 'view', context: 'book', defaults: both('Mod+Shift+T') },
+  { id: 'nav.back', name: COMMAND_NAMES['nav.back'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+ArrowLeft', darwin: 'Mod+BracketLeft' } },
+  { id: 'search.find', name: COMMAND_NAMES['search.find'], group: 'search', context: 'manuscript', defaults: both('Mod+F') },
+  { id: 'search.next', name: COMMAND_NAMES['search.next'], group: 'search', context: 'manuscript', defaults: { win32: 'F3', darwin: 'Mod+G' } },
+  { id: 'search.previous', name: COMMAND_NAMES['search.previous'], group: 'search', context: 'manuscript', defaults: { win32: 'Shift+F3', darwin: 'Mod+Shift+G' } },
+  { id: 'view.focusManuscript', name: COMMAND_NAMES['view.focusManuscript'], group: 'view', context: 'manuscript', defaults: both('Mod+Shift+M') },
+  { id: 'view.openTasks', name: COMMAND_NAMES['view.openTasks'], group: 'view', context: 'book', defaults: both('Mod+Shift+T') },
 ];
 
 /**
@@ -69,12 +71,12 @@ export const COMMANDS: readonly CommandDefinition[] = [
  * detection but are never remapped (KEY-001, KEY-002).
  */
 export const FIXED_COMMANDS: readonly { readonly id: string; readonly name: string; readonly chord: Readonly<Record<CommandPlatform, string>> }[] = [
-  { id: 'edit.save', name: '保存', chord: both('Mod+S') },
-  { id: 'edit.undo', name: '撤销', chord: both('Mod+Z') },
-  { id: 'edit.redo', name: '重做', chord: { win32: 'Mod+Shift+Z', darwin: 'Mod+Shift+Z' } },
-  { id: 'edit.replace', name: '替换', chord: both('Mod+H') },
-  { id: 'edit.previousWindow', name: '上一页', chord: both('PageUp') },
-  { id: 'edit.nextWindow', name: '下一页', chord: both('PageDown') },
+  { id: 'edit.save', name: COMMAND_NAMES['edit.save'], chord: both('Mod+S') },
+  { id: 'edit.undo', name: COMMAND_NAMES['edit.undo'], chord: both('Mod+Z') },
+  { id: 'edit.redo', name: COMMAND_NAMES['edit.redo'], chord: { win32: 'Mod+Shift+Z', darwin: 'Mod+Shift+Z' } },
+  { id: 'edit.replace', name: COMMAND_NAMES['edit.replace'], chord: both('Mod+H') },
+  { id: 'edit.previousWindow', name: COMMAND_NAMES['edit.previousWindow'], chord: both('PageUp') },
+  { id: 'edit.nextWindow', name: COMMAND_NAMES['edit.nextWindow'], chord: both('PageDown') },
 ];
 
 const COMMAND_BY_ID = new Map(COMMANDS.map((command) => [command.id, command] as const));
@@ -104,6 +106,7 @@ export function parseChord(text: string): Chord | null {
   const parts = text.split('+');
   const key = parts.pop();
   if (key === undefined || !/^[A-Za-z0-9]{1,16}$/u.test(key)) return null;
+  if (!/^[A-Z0-9]$/u.test(key) && !/^F(?:[1-9]|1[0-2])$/u.test(key) && !Object.values(NAMED_KEYS).includes(key)) return null;
   const order = ['Mod', 'Ctrl', 'Alt', 'Shift'];
   let last = -1;
   const held = new Set<string>();
@@ -243,6 +246,21 @@ export function normalizedBindings(bindings: KeyboardBindings, platform: Command
   return kept;
 }
 
+/** A stored preference cannot bypass key reservations or introduce ambiguous dispatch, including after defaults return. */
+export function validatedBindings(bindings: KeyboardBindings, platform: CommandPlatform): KeyboardBindings {
+  const kept = { ...normalizedBindings(bindings, platform) };
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const invalid = Object.entries(kept).filter(([id, chord]) => !checkBinding(id, chord, kept, platform).ok).map(([id]) => id);
+    for (const id of invalid) {
+      delete kept[id];
+      changed = true;
+    }
+  }
+  return kept;
+}
+
 /** The label state every chord shown in the window is read from. */
 let activePlatform: CommandPlatform = 'win32';
 let activeBindings: KeyboardBindings = {};
@@ -250,7 +268,7 @@ const labelListeners = new Set<() => void>();
 
 export function configureCommandLabels(platform: CommandPlatform, bindings: KeyboardBindings): void {
   activePlatform = platform;
-  activeBindings = normalizedBindings(bindings, platform);
+  activeBindings = validatedBindings(bindings, platform);
   for (const listener of labelListeners) listener();
 }
 
@@ -276,7 +294,7 @@ export function shortcutLabel(commandId: string, platform: CommandPlatform = act
 /** A control's own words with its shortcut in the form the window has always used: `快捷键 Ctrl+S`. */
 export function shortcutHint(commandId: string): string | null {
   const label = shortcutLabel(commandId);
-  return label === null ? null : `快捷键 ${label}`;
+  return label === null ? null : shortcutHintLabel(label);
 }
 
 /**
@@ -316,6 +334,10 @@ export function reservedReason(chord: Chord, platform: CommandPlatform): Binding
   const { mod, ctrl, alt, shift, key } = chord;
   const functionKey = /^F(?:[1-9]|1[0-2])$/u.test(key);
   const letter = key.length === 1 ? key.toUpperCase() : key;
+  if (platform === 'win32' && ctrl) return 'unsupported-key';
+  if (platform === 'win32' && alt && ['Tab', 'Escape', 'Space'].includes(key)) return 'os-reserved';
+  if (platform === 'win32' && mod && key === 'Escape') return 'os-reserved';
+  if (platform === 'darwin' && mod && (key === 'Tab' || (alt && key === 'Escape'))) return 'os-reserved';
   // Input-method keys decide how text is composed, whatever else is held.
   if (key === 'Space' && (mod || ctrl || shift)) return 'ime-reserved';
   if (platform === 'win32' && mod && key === 'Period') return 'ime-reserved';
@@ -329,6 +351,7 @@ export function reservedReason(chord: Chord, platform: CommandPlatform): Binding
   if (!mod && !ctrl && !alt) return 'editable-text';
   if (TYPING_KEYS.has(key) && !alt) return 'editable-text';
   if (mod && !alt && TEXT_EDITING_KEYS.has(letter)) return 'editable-text';
+  if (platform === 'darwin' && ctrl && !mod && !alt && ['A', 'B', 'D', 'E', 'F', 'H', 'K', 'N', 'O', 'P', 'T', 'U', 'V', 'W', 'Y'].includes(letter)) return 'editable-text';
   // Ctrl+Alt is AltGr on many Windows keyboards, and Option alone types special characters on macOS.
   if (platform === 'win32' && mod && alt) return 'editable-text';
   if (platform === 'darwin' && alt && !mod && !ctrl && key !== 'Tab' && key !== 'Escape') return 'editable-text';
@@ -471,7 +494,7 @@ export function createCommandDispatcher(options: CommandDispatcherOptions): Comm
   };
 
   const candidates = (): Array<{ id: string; sequence: Chord[] }> => {
-    const bindings = options.bindings();
+    const bindings = validatedBindings(options.bindings(), options.platform);
     const found: Array<{ id: string; sequence: Chord[] }> = [];
     for (const command of COMMANDS) {
       if (!handlers.has(command.id)) continue;
@@ -490,7 +513,7 @@ export function createCommandDispatcher(options: CommandDispatcherOptions): Comm
       };
     },
     handle(event) {
-      if (event.defaultPrevented === true) return;
+      if (event.defaultPrevented === true) { pending = null; return; }
       const captured = captureChord(event, options.platform);
       if (captured === null || 'refused' in captured) return;
       const text = chordText(captured.chord);

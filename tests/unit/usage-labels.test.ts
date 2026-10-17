@@ -17,6 +17,11 @@ import { bindingRefusalLabel } from '../../src/renderer/commands-labels.js';
 const price = { inputPerMillion: 2, outputPerMillion: 8, currency: 'CNY', enteredAt: '2026-10-17' };
 
 describe('the estimate', () => {
+  it('estimates zero tokens as zero when a unit price is entered', () => {
+    const routes = [{ route: 'opencode-go', runCount: 1, inputTokens: 0, outputTokens: 0 }];
+    expect(estimateUsageCost(routes, { 'opencode-go': price })).toEqual({ state: 'estimated', amounts: [{ currency: 'CNY', amount: 0 }], enteredOn: ['2026-10-17'] });
+    expect(estimateUsageCost(routes, {}).state).toBe('unpriced');
+  });
   it('is tokens times the entered unit price per route, summed per currency', () => {
     const estimate = estimateUsageCost(
       [{ route: 'opencode-go', runCount: 2, inputTokens: 1_500_000, outputTokens: 500_000 }, { route: 'deepseek-open-platform', runCount: 1, inputTokens: 1_000_000, outputTokens: 0 }],

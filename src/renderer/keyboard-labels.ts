@@ -19,6 +19,10 @@ export const KEYBOARD_CAPTURE_PROMPT = '请按下新的快捷键；按 Esc 取�
 export const KEYBOARD_CAPTURE_ADD_STEP = '再录一步';
 export const KEYBOARD_CAPTURE_APPLY = '设为快捷键';
 export const KEYBOARD_CAPTURE_CANCEL = '取消';
+export const KEYBOARD_CAPTURE_SECOND = '请按第二步';
+export const keyboardCaptureName = (name: string): string => `「${name}」的新快捷键`;
+export const keyboardChangeName = (name: string): string => `修改「${name}」的快捷键`;
+export const keyboardResetName = (name: string): string => `恢复「${name}」的默认快捷键`;
 export const KEYBOARD_STATUS_LINES = {
   loading: '正在读取快捷键…',
   loaded: '已读取快捷键。',

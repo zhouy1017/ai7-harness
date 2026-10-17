@@ -2,6 +2,8 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 import type { PreferencesProjection, SavePreferenceInput } from './preferences.js';
+import { USAGE_EMPTY_LABEL } from './usage-labels.js';
+export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
 export const SERVICE_PROTOCOL_VERSION = 152 as const;
 
@@ -13068,9 +13070,19 @@ export const USAGE_RANGES = ['day', 'week', 'month', 'all'] as const;
 export type UsageRange = (typeof USAGE_RANGES)[number];
 export const USAGE_GROUPINGS = ['book', 'taskKind', 'time'] as const;
 export type UsageGrouping = (typeof USAGE_GROUPINGS)[number];
-export const USAGE_EMPTY_LABEL = '尚无用量' as const;
-/** The most Runs one row lists; `runCount` is always whole. */
+/** Run links per page; `runCount` is always whole. */
 export const USAGE_ROW_RUN_LINKS = 50;
+
+export interface InspectUsageInput {
+  range: UsageRange;
+  groupBy: UsageGrouping;
+  /** Offset into each row's newest-first Run links; totals always cover the full range. */
+  runOffset?: number;
+  /** Resolve one exact Run report on demand, keeping aggregate replies within the existing frame bound. */
+  runRecordId?: string;
+  /** Keep a paged read pinned to the original aggregate's time boundary. */
+  asOf?: string;
+}
 
 /** One Run of a row: the exact record the editor can open. */
 export interface UsageRunLinkProjection {
@@ -13087,6 +13099,8 @@ export interface UsageRunLinkProjection {
   recordedAt: string;
   inputTokens: number;
   outputTokens: number;
+  /** The persisted report for this exact Run, independent of the Book's current plan. */
+  report: RunReportProjection | null;
 }
 
 export interface UsageRouteTokensProjection {
@@ -13105,7 +13119,7 @@ export interface UsageRowProjection {
   inputTokens: number;
   outputTokens: number;
   byRoute: ReadonlyArray<UsageRouteTokensProjection>;
-  /** Newest first, at most `USAGE_ROW_RUN_LINKS`. */
+  /** Newest first, one page of `USAGE_ROW_RUN_LINKS`; `runCount` discloses the full total. */
   runs: ReadonlyArray<UsageRunLinkProjection>;
 }
 
@@ -13121,6 +13135,8 @@ export interface UsageProjection {
   unrecordedRuns: number;
   /** `尚无用量` when no row exists. */
   emptyLabel: typeof USAGE_EMPTY_LABEL | null;
+  /** Present only when one exact report was requested; no current-plan lookup. */
+  detail?: UsageRunLinkProjection | null;
 }
 
 /** The result of 导出为 CSV…: a file of numbers and ids, written where the editor chose. */
@@ -13885,7 +13901,7 @@ export interface ServiceOperationMap {
   /** 定期自动备份 (Issue #434, S86b): the switch and the backups kept. */
   inspectScheduledBackups: { input: Record<string, never>; output: ScheduledBackupsProjection };
   /** 用量 (Issue #936, S11c): read-only aggregate of the Runs already recorded; writes nothing and calls no Provider. */
-  inspectUsage: { input: { range: UsageRange; groupBy: UsageGrouping }; output: UsageProjection };
+  inspectUsage: { input: InspectUsageInput; output: UsageProjection };
   /** Turn the switch from the state the editor saw; turning it on backs up at once when none was made in the day before. */
   setScheduledBackup: { input: SetScheduledBackupInput; output: ScheduledBackupsProjection };
   /** 导入数据库 (Issue #434, S86c): the file the Open dialog answered, read and verified whole; nothing is taken from it. */
@@ -14450,7 +14466,7 @@ export interface RendererApi {
   getPreferences(): Promise<PreferencesProjection>;
   savePreference(input: SavePreferenceInput): Promise<PreferencesProjection>;
   /** 用量 (Issue #936): the Runs already recorded, summed by Book, Task kind or period. */
-  inspectUsage(input: { range: UsageRange; groupBy: UsageGrouping }): Promise<UsageProjection>;
+  inspectUsage(input: InspectUsageInput): Promise<UsageProjection>;
   /** 导出为 CSV… (Issue #936): the platform's Save dialog, then the table as numbers and ids only. */
   exportUsageCsv(input: { range: UsageRange; groupBy: UsageGrouping }): Promise<UsageCsvExportResult>;
   setScheduledBackup(input: SetScheduledBackupInput): Promise<ScheduledBackupsProjection>;

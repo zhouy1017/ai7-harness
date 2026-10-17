@@ -8,6 +8,7 @@ import {
   type UsageRouteTokensProjection,
   type UsageRowProjection,
   type UsageRunLinkProjection,
+  type RunReportProjection,
 } from '../shared/protocol.js';
 
 type SqlRow = Record<string, SQLOutputValue>;
@@ -92,7 +93,7 @@ export class UsageLedger {
     this.#db = db;
   }
 
-  inspect(range: UsageRange, groupBy: UsageGrouping, now: Date = new Date()): UsageProjection {
+  inspect(range: UsageRange, groupBy: UsageGrouping, now: Date = new Date(), runOffset = 0, runRecordId?: string): UsageProjection {
     const since = range === 'all' ? null : new Date(now.getTime() - RANGE_MS[range]).toISOString();
     const outcomes = this.#db.prepare(
       `SELECT o.run_record_id, o.task_intent_id, o.recorded_at,
@@ -105,14 +106,15 @@ export class UsageLedger {
        JOIN books bk ON bk.book_id = t.book_id
        LEFT JOIN analysis_execution_attempts a ON a.run_record_id = o.run_record_id
        LEFT JOIN analysis_execution_bindings bd ON bd.attempt_id = a.attempt_id
-       WHERE (?1 IS NULL OR o.recorded_at >= ?1)
+       WHERE (?1 IS NULL OR o.recorded_at >= ?1) AND o.recorded_at <= ?2
        ORDER BY o.recorded_at DESC, o.run_record_id DESC`,
-    ).all(since) as SqlRow[];
+    ).all(since, now.toISOString()) as SqlRow[];
 
     const reviewRuns = this.#reviewRunsOfTasks(outcomes);
     const rows = new Map<string, Accumulator>();
     const totals = { runCount: 0, inputTokens: 0, outputTokens: 0, byRoute: new Map<string | null, { runCount: number; inputTokens: number; outputTokens: number }>() };
     let unrecordedRuns = 0;
+    let detail: UsageRunLinkProjection | null = null;
 
     for (const outcome of outcomes) {
       // A Task Outcome recorded before the Run Report existed holds no usage: said apart, never counted as zero.
@@ -137,12 +139,19 @@ export class UsageLedger {
       row.inputTokens += usage.inputTokens;
       row.outputTokens += usage.outputTokens;
       accumulate(row.byRoute, route, usage.inputTokens, usage.outputTokens);
-      if (row.runs.length < USAGE_ROW_RUN_LINKS) {
+      if ((row.runCount > runOffset && row.runs.length < USAGE_ROW_RUN_LINKS) || outcome.run_record_id === runRecordId) {
         const taskIntentId = String(outcome.task_intent_id);
-        row.runs.push({
+        const link: UsageRunLinkProjection = {
           runRecordId: String(outcome.run_record_id), taskIntentId, bookId, bookTitle, taskKind: kind,
           reviewRunId: reviewRuns.get(taskIntentId) ?? null, route, recordedAt, ...usage,
-        });
+          report: null,
+        };
+        if (row.runCount > runOffset && row.runs.length < USAGE_ROW_RUN_LINKS) row.runs.push(link);
+        if (runRecordId !== undefined && outcome.run_record_id === runRecordId) {
+          const stored = this.#db.prepare("SELECT json_extract(canonical_json, '$.report') report FROM analysis_task_outcomes WHERE run_record_id = ?").get(runRecordId) as SqlRow;
+          const report = typeof stored.report === 'string' ? parseUsage(stored.report) as RunReportProjection | null : null;
+          detail = { ...link, report: report !== null && report.runRecordId === runRecordId && report.taskIntentId === taskIntentId ? report : null };
+        }
       }
       totals.runCount += 1;
       totals.inputTokens += usage.inputTokens;
@@ -162,6 +171,7 @@ export class UsageLedger {
       totals: { runCount: totals.runCount, inputTokens: totals.inputTokens, outputTokens: totals.outputTokens, byRoute: routesOf(totals.byRoute) },
       unrecordedRuns,
       emptyLabel: projected.length === 0 ? USAGE_EMPTY_LABEL : null,
+      ...(runRecordId === undefined ? {} : { detail }),
     };
   }
 

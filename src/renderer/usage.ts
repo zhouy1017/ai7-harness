@@ -20,10 +20,13 @@ import {
   USAGE_PRICES_HEADING,
   USAGE_PRICES_LEDE,
   USAGE_RANGE_HEADING,
-  USAGE_RUNS_TRUNCATED,
+  USAGE_MORE_RUNS,
+  USAGE_RUNS_SHOWN,
+  USAGE_COLUMNS,
+  USAGE_PRICE_FIELDS,
   USAGE_STATUS_LINES,
   USAGE_UNRECORDED_NOTE,
-  moneyText,
+  usagePriceNote,
   tokenText,
   usageCostLine,
   usageGroupingLabel,
@@ -76,6 +79,7 @@ export function mountUsage(options: MountUsageOptions): void {
   let usage: UsageProjection | null = null;
   let prices: UnitPrices = {};
   let busy = false;
+  let loadSequence = 0;
 
   const table = el('div', 'usage-table-host');
   const controls = el('div', 'usage-controls');
@@ -121,7 +125,7 @@ export function mountUsage(options: MountUsageOptions): void {
       delete root.dataset['usageEmpty'];
       const grid = el('table', 'usage-table');
       const head = el('tr');
-      for (const heading of ['', '运行次数', '输入词元', '输出词元', '估算费用']) {
+      for (const heading of ['', ...USAGE_COLUMNS]) {
         const cell = el('th', undefined, heading === '' ? usageGroupingLabel(usage.groupBy).replace('按', '') : heading);
         cell.scope = 'col';
         head.append(cell);
@@ -146,20 +150,46 @@ export function mountUsage(options: MountUsageOptions): void {
         const details = el('details', 'usage-runs');
         details.append(el('summary', undefined, usageRunsSummary(row.runCount)));
         const list = el('ul');
-        for (const run of row.runs) {
-          const item = el('li');
-          const open = el('button', 'quiet', usageRunLinkLabel(run, instant));
-          open.type = 'button';
-          open.dataset['usageRunRecord'] = run.runRecordId;
-          open.addEventListener('click', () => {
-            setStatus(USAGE_STATUS_LINES.opening, 'busy');
-            openRun(run);
-          });
-          item.append(open, el('span', 'field-note', ` · ${usageRouteLabel(run.route)}`));
-          list.append(item);
-        }
+        const appendRuns = (links: readonly UsageRunLinkProjection[]): void => {
+          for (const run of links) {
+            const item = el('li');
+            const open = el('button', 'quiet', usageRunLinkLabel(run, instant));
+            open.type = 'button';
+            open.dataset['usageRunRecord'] = run.runRecordId;
+            open.addEventListener('click', () => {
+              setStatus(USAGE_STATUS_LINES.opening, 'busy');
+              openRun(run);
+            });
+            item.append(open, el('span', 'field-note', ` · ${usageRouteLabel(run.route)}`));
+            list.append(item);
+          }
+        };
+        appendRuns(row.runs);
         details.append(list);
-        if (row.runCount > row.runs.length) details.append(el('p', 'field-note', USAGE_RUNS_TRUNCATED(USAGE_ROW_RUN_LINKS, row.runCount)));
+        let shown = row.runs.length;
+        const count = el('p', 'field-note', USAGE_RUNS_SHOWN(shown, row.runCount));
+        const more = el('button', 'secondary', USAGE_MORE_RUNS);
+        more.type = 'button';
+        more.dataset['usageMoreRuns'] = row.key;
+        more.hidden = shown >= row.runCount;
+        const askedRange = usage.range;
+        const askedGrouping = usage.groupBy;
+        const asOf = usage.asOf;
+        more.addEventListener('click', () => {
+          more.disabled = true;
+          void api.inspectUsage({ range: askedRange, groupBy: askedGrouping, runOffset: shown, asOf }).then((page) => {
+            if (!more.isConnected || usage?.asOf !== asOf) return;
+            const next = page.rows.find((entry) => entry.key === row.key);
+            const known = new Set(Array.from(list.querySelectorAll<HTMLElement>('[data-usage-run-record]'), (node) => node.dataset['usageRunRecord']));
+            appendRuns(next?.runs.filter((run) => !known.has(run.runRecordId)) ?? []);
+            shown += next?.runs.length ?? 0;
+            const total = next?.runCount ?? row.runCount;
+            count.textContent = USAGE_RUNS_SHOWN(list.children.length, total);
+            more.hidden = shown >= total || (next?.runs.length ?? 0) < USAGE_ROW_RUN_LINKS;
+          }).catch((error: unknown) => setStatus(errorMessage(error, USAGE_STATUS_LINES.moreFailed), 'error'))
+            .finally(() => { more.disabled = false; });
+        });
+        details.append(count, more);
         cell.append(details);
         runs.append(cell);
         body.append(runs);
@@ -219,14 +249,14 @@ export function mountUsage(options: MountUsageOptions): void {
         return input;
       };
       form.append(title);
-      const input = field('输入单价（每百万词元）', 'inputPerMillion', held === undefined ? '' : String(held.inputPerMillion), 'decimal', 10);
-      const output = field('输出单价（每百万词元）', 'outputPerMillion', held === undefined ? '' : String(held.outputPerMillion), 'decimal', 10);
-      const currency = field('币种', 'currency', held?.currency ?? 'CNY', 'text', 5);
-      const note = el('p', 'field-note usage-price-note', held === undefined ? '未填写单价' : `${moneyText(held.currency, held.inputPerMillion)} / ${moneyText(held.currency, held.outputPerMillion)}（录入于 ${held.enteredAt}）`);
+      const input = field(USAGE_PRICE_FIELDS.input, 'inputPerMillion', held === undefined ? '' : String(held.inputPerMillion), 'decimal', 10);
+      const output = field(USAGE_PRICE_FIELDS.output, 'outputPerMillion', held === undefined ? '' : String(held.outputPerMillion), 'decimal', 10);
+      const currency = field(USAGE_PRICE_FIELDS.currency, 'currency', held?.currency ?? 'CNY', 'text', 5);
+      const note = el('p', 'field-note usage-price-note', held === undefined ? USAGE_PRICE_FIELDS.empty : usagePriceNote(held.currency, held.inputPerMillion, held.outputPerMillion, held.enteredAt));
       note.setAttribute('role', 'status');
-      const save = el('button', 'secondary', '保存单价');
+      const save = el('button', 'secondary', USAGE_PRICE_FIELDS.save);
       save.type = 'submit';
-      const clear = el('button', 'quiet', '清除');
+      const clear = el('button', 'quiet', USAGE_PRICE_FIELDS.clear);
       clear.type = 'button';
       clear.disabled = held === undefined;
       clear.addEventListener('click', () => {
@@ -254,14 +284,21 @@ export function mountUsage(options: MountUsageOptions): void {
   };
 
   const load = async (): Promise<void> => {
+    const sequence = ++loadSequence;
+    exportButton.disabled = true;
     setStatus(USAGE_STATUS_LINES.loading, 'busy');
     try {
-      usage = await api.inspectUsage({ range, groupBy });
+      const result = await api.inspectUsage({ range, groupBy });
+      if (sequence !== loadSequence) return;
+      usage = result;
       paintTable();
       paintPrices();
       setStatus(USAGE_STATUS_LINES.loaded, 'success');
     } catch (error) {
+      if (sequence !== loadSequence) return;
       setStatus(errorMessage(error, USAGE_STATUS_LINES.failed), 'error');
+    } finally {
+      if (sequence === loadSequence) exportButton.disabled = false;
     }
   };
 

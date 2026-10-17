@@ -28,7 +28,14 @@ export const USAGE_PRICES_HEADING = '单价';
 export const USAGE_PRICES_LEDE = '单价由你自行录入，AI7 不会向模型服务商查询价格。估算费用 = 词元数 × 你录入的单价，只是估算，不是账单。';
 export const USAGE_UNPRICED = '未填写单价，无法估算';
 export const USAGE_UNRECORDED_NOTE = (count: number): string => `另有 ${count.toLocaleString('zh-CN')} 次运行在运行报告出现之前结束，没有用量记录，未计入。`;
-export const USAGE_RUNS_TRUNCATED = (shown: number, total: number): string => `仅列出最近 ${shown} 次运行，共 ${total.toLocaleString('zh-CN')} 次。`;
+export const USAGE_MORE_RUNS = '显示更多运行';
+export const USAGE_RUNS_SHOWN = (shown: number, total: number): string => `已列出 ${shown.toLocaleString('zh-CN')} 次运行，共 ${total.toLocaleString('zh-CN')} 次。`;
+export const USAGE_COLUMNS = ['运行次数', '输入词元', '输出词元', '估算费用'] as const;
+export const USAGE_PRICE_FIELDS = { input: '输入单价（每百万词元）', output: '输出单价（每百万词元）', currency: '币种', save: '保存单价', clear: '清除', empty: '未填写单价' } as const;
+export const USAGE_RUN_TITLE = '运行详情';
+export const USAGE_RUN_REPORT_ABSENT = '这次运行的报告不可用。';
+export const usageRunIdentity = (id: string): string => `运行标识：${id}`;
+export const usagePriceNote = (currency: string, input: number, output: number, day: string): string => `${moneyText(currency, input)} / ${moneyText(currency, output)}（录入于 ${day}）`;
 export const USAGE_STATUS_LINES = {
   loading: '正在读取用量…',
   loaded: '已读取用量。',
@@ -42,6 +49,7 @@ export const USAGE_STATUS_LINES = {
   priceFailed: '无法保存单价。',
   priceInvalid: '请填写 0 以上的数字和三位字母的币种，例如 CNY。',
   opening: '正在打开运行所在的页面…',
+  moreFailed: '无法读取更多运行。',
 } as const;
 
 const RANGE_LABELS: Readonly<Record<UsageRange, string>> = { day: '近一天', week: '近一周', month: '近一月', all: '全部' };
