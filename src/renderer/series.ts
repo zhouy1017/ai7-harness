@@ -431,6 +431,12 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       history.append(reset);
     }
     membersBox.replaceChildren(members);
+    if ((projection.tasks?.length ?? 0) > 0) {
+      const tasks = el('section', 'series-tasks');
+      tasks.append(el('h3', undefined, '书系范围任务'));
+      for (const task of projection.tasks ?? []) tasks.append(el('p', 'field-note', `《${task.bookTitle}》 · ${task.title} · ${task.runRecordId === null ? '待授权' : '已授权'}`));
+      membersBox.append(tasks);
+    }
     historyBox.replaceChildren(history);
     if (membersBox.parentElement !== root) root.replaceChildren(membersBox, knowledgeHost, exclusionsHost, historyBox);
     if (withKnowledge) {

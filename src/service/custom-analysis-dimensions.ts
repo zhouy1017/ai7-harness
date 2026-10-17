@@ -23,7 +23,7 @@ import { CUSTOM_ANALYSIS_SCHEMA_VERSION } from './task-authorization.js';
  * Skill. Nothing here calls a model, prepares a Task or reads manuscript text: the store checks a template against the Books'
  * text before it records one, and a Run of a version is prepared through ②A like any other kind.
  *
- * Schema revision 83 owns three append-only relations, each row carrying canonical JSON and its digest:
+ * Schema revision 82 owns three append-only relations, each row carrying canonical JSON and its digest:
  * - `custom_analysis_dimensions`: one stable identity per dimension; its kind is `custom-analysis/<dimension_id>`.
  * - `custom_analysis_dimension_versions`: each immutable version — the document and its digest, and the version it supersedes.
  * - `custom_analysis_dimension_states`: `待验证` when saved, then `已启用` after 验证并启用, or `已停用` — final for the version.
@@ -81,7 +81,7 @@ export const CUSTOM_ANALYSIS_DIMENSION_FOREIGN_KEYS: Readonly<Record<string, Rea
   custom_analysis_dimension_states: ['version_id>custom_analysis_dimension_versions.version_id:NO ACTION/NO ACTION/NONE'],
 };
 
-/** Revision 83's relations, created once before the version is stamped: an older store gains them empty and nothing moves. */
+/** Revision 82's relations, created once before the version is stamped: an older store gains them empty and nothing moves. */
 export function initializeCustomAnalysisDimensionSchema(db: DatabaseSync, version: number): void {
   if (version >= CUSTOM_ANALYSIS_SCHEMA_VERSION || Object.keys(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL).some((name) => db.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(name) !== undefined)) return;
   db.exec('BEGIN IMMEDIATE');

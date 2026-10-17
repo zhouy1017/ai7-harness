@@ -313,6 +313,10 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   review_guideline_versions: 'house',
   series: 'house',
   // The house's Captured Procedures and Developer Capability Proposals (Issue #65, S30; ADR 0087): no Book material in them.
+  imported_skills: 'house',
+  imported_skill_snapshots: 'house',
+  imported_skill_revisions: 'house',
+  imported_skill_states: 'house',
   captured_procedures: 'house',
   captured_procedure_versions: 'house',
   captured_procedure_states: 'house',

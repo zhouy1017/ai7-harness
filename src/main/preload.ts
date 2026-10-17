@@ -289,6 +289,13 @@ const api: RendererApi = Object.freeze({
   inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
   // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087).
   inspectCapturedProcedures: () => invoke<ServiceOperationMap['inspectCapturedProcedures']['output']>(IPC_CHANNELS.inspectCapturedProcedures),
+  // 外部 Skill and 工序推荐 (Issue #66; ADR 0090): the picker opens in main; nothing here names a path.
+  importSkillPackage: (input?: Parameters<RendererApi['importSkillPackage']>[0]) => invoke<Awaited<ReturnType<RendererApi['importSkillPackage']>>>(IPC_CHANNELS.importSkillPackage, input),
+  validateImportedSkill: (input: Parameters<RendererApi['validateImportedSkill']>[0]) => invoke<ServiceOperationMap['validateImportedSkill']['output']>(IPC_CHANNELS.validateImportedSkill, input),
+  installImportedSkill: (input: Parameters<RendererApi['installImportedSkill']>[0]) => invoke<ServiceOperationMap['installImportedSkill']['output']>(IPC_CHANNELS.installImportedSkill, input),
+  enableImportedSkill: (input: Parameters<RendererApi['enableImportedSkill']>[0]) => invoke<ServiceOperationMap['enableImportedSkill']['output']>(IPC_CHANNELS.enableImportedSkill, input),
+  inspectImportedSkills: (input: Parameters<RendererApi['inspectImportedSkills']>[0]) => invoke<ServiceOperationMap['inspectImportedSkills']['output']>(IPC_CHANNELS.inspectImportedSkills, input),
+  recommendProcedures: (input: Parameters<RendererApi['recommendProcedures']>[0]) => invoke<ServiceOperationMap['recommendProcedures']['output']>(IPC_CHANNELS.recommendProcedures, input),
   inspectCapturedProcedure: (input: Parameters<RendererApi['inspectCapturedProcedure']>[0]) =>
     invoke<ServiceOperationMap['inspectCapturedProcedure']['output']>(IPC_CHANNELS.inspectCapturedProcedure, input),
   inspectDeveloperProposal: (input: Parameters<RendererApi['inspectDeveloperProposal']>[0]) =>
@@ -367,7 +374,7 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['startEvaluation']['output']>(IPC_CHANNELS.startEvaluation, input),
   saveEvaluation: (input: Omit<ServiceOperationMap['saveEvaluation']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['saveEvaluation']['output']>(IPC_CHANNELS.saveEvaluation, input),
-  prepareInitialEvaluation: (input?: { materialIds?: ReadonlyArray<string> }) => invoke<ServiceOperationMap['prepareInitialEvaluation']['output']>(IPC_CHANNELS.prepareInitialEvaluation, input),
+  prepareInitialEvaluation: (input?: { materialIds?: ReadonlyArray<string>; seriesId?: string | null }) => invoke<ServiceOperationMap['prepareInitialEvaluation']['output']>(IPC_CHANNELS.prepareInitialEvaluation, input),
   authorizeInitialEvaluation: (input: Omit<ServiceOperationMap['authorizeInitialEvaluation']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['authorizeInitialEvaluation']['output']>(IPC_CHANNELS.authorizeInitialEvaluation, input),
   prepareReadersReport: (input: Omit<ServiceOperationMap['prepareReadersReport']['input'], 'bookId'>) =>

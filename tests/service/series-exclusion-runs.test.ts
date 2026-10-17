@@ -23,6 +23,10 @@ import {
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { J13_PLACE, J13_SERIES_TITLE, makeJ13Series } from '../support/series-consistency.js';
+import { leaveSeries, takeInNewItem, takeInRevision } from '../support/series-consistency.js';
+import { seriesScopeTooManyReason } from '../../src/service/review/series-consistency.js';
+import { withSeriesKnowledgeFor } from '../support/policy-rules.js';
+import { sheetProcedureOption, SHEET_PROCEDURE_NONE } from '../../src/renderer/captured-procedure-labels.js';
 
 // Service-integration suite (L2) for the Series Retrieval Exclusion's reach into Review Runs (Issue #64, plan slice S29b;
 // V2-UX-SER-022 to SER-027): a prepared Run's approval refused, an approved Run stopped as the exclusion is recorded, one
@@ -82,7 +86,7 @@ async function withSession(body: (session: Session, bookId: string) => Promise<v
   });
   const owner = new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, unitHold,
-    readGuard: (runRecordId) => store.seriesReadGuard(runRecordId),
+    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
   });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   try {
@@ -146,6 +150,98 @@ function outcomeSummary(runRecordId: string): string {
 }
 
 describe('a Series Retrieval Exclusion over Review Runs', () => {
+  it('keeps an enabled consistency procedure offered with fit=all after knowledge moves beyond the earlier Run pins', async () => {
+    await withSession(async ({ store, driver, seriesId }, bookId) => {
+      const prepared = prepare(store, bookId);
+      approve(store, bookId, prepared);
+      await driver.drive(prepared.reviewRunId);
+      expect(run(store, bookId, prepared.reviewRunId).state).toBe('settled');
+      const saved = store.saveCapturedProcedure({ bookId, reviewRunId: prepared.reviewRunId, categoryIds: ['series-consistency'], scopeSlot: 'whole', title: '书系复核', procedureId: null });
+      const versionId = saved.versions[0]!.versionId;
+      store.enableCapturedProcedure(versionId, store.previewCapturedProcedureValidation(versionId).previewDigest);
+      // J-13's knowledge-pagination stage advances this item after the authored Run, before the saved procedure is chosen.
+      takeInRevision(store, seriesId, itemOf(store, seriesId), '更新后的合成知识，用于后续任务。', 'series-tasks');
+      const offered = store.inspectCapturedProcedureApplicability(bookId).procedures;
+      expect([[ '', SHEET_PROCEDURE_NONE, null ], ...offered.map((entry) => [entry.procedureId, sheetProcedureOption(entry), entry.fit])])
+        .toEqual([[ '', '不按工序（自己选类别）', null ], [saved.procedureId, '《书系复核》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选', 'all']]);
+      // Since ADR 0090 (#66) the save writes the /2 successor, whose Series ceiling the resolved Run reads; /1 never widens (unit).
+      expect(store.inspectCapturedProcedureRun(bookId, saved.procedureId).resolved?.runSourceScope).toBe('series');
+    });
+  }, 300_000);
+  it('pins an opt-in category and an evaluation in the existing plan records, retaining membership pins after removal', async () => {
+    await withSession(async ({ store, seriesId }, bookId) => {
+      const policy = withSeriesKnowledgeFor(withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage'), 'evaluation');
+      expect(() => store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, launchPolicy, null, [], null, null, seriesId)).toThrow(/当前策略未开放书系知识/u);
+      expect(() => store.createInitialEvaluationPreparationWork(bookId, launchPolicy, [], null, seriesId)).toThrow(/当前策略未开放书系知识/u);
+      let review = store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, policy, null, [], null, null, seriesId);
+      while (!review.done) review = store.advanceReviewRunPreparationWork(review.workId!);
+      const category = review.projection!.run!.categories[0]!;
+      expect(store.inspectTaskPlan({ bookId, kind: 'review-run', ref: review.projection!.run!.reviewRunId }).scope.reference).toContain(`允许参考 · 书系《${J13_SERIES_TITLE}》的知识条目`);
+      let evaluation = store.createInitialEvaluationPreparationWork(bookId, policy, [], null, seriesId);
+      while (!evaluation.done) evaluation = store.advanceInitialEvaluationPreparationWork(evaluation.workId!);
+      const initial = evaluation.projection!;
+      const scopes = initial.runSourceScope!.seriesScopes!;
+      expect(scopes[0]).toMatchObject({ seriesId, title: J13_SERIES_TITLE, members: [expect.objectContaining({ bookId, revisionId: expect.any(String) })], knowledge: [expect.objectContaining({ revisionId: expect.any(String), digest: expect.any(String) })], exclusions: [] });
+      expect(store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: initial.taskIntent!.taskIntentId }).scope.reference).toContain(`允许参考 · 书系《${J13_SERIES_TITLE}》的知识条目`);
+      const authorization = store.authorizeInitialEvaluation(bookId, initial.taskIntent!.taskIntentId, initial.planEnvelope!.digest);
+      expect(store.seriesScopeGuard(authorization.dispatchRunRecordId!)).toBeNull();
+      expect(store.inspectSeries(seriesId).tasks!.map((task) => task.kind).sort()).toEqual(['editorial-review/typos-and-usage', 'evaluation']);
+      leaveSeries(store, seriesId, bookId);
+      expect(store.inspectInitialEvaluation(bookId).runSourceScope!.seriesScopes).toEqual(scopes);
+      expect(store.seriesScopeGuard(authorization.dispatchRunRecordId!)).toBeNull();
+      exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: itemOf(store, seriesId) } });
+      expect(store.seriesScopeGuard(authorization.dispatchRunRecordId!)).toContain(ITEM_LABEL);
+      expect(category.planEnvelopeDigest).toBeTruthy();
+    }, null, REVIEW_FIXTURE);
+  }, 300_000);
+
+  it('keeps 书系一致性 on its own pins beside a selected Series, names an authorized 初评 in both previews, and stops it for an exact source version', async () => {
+    await withSession(async ({ store, seriesId }, bookId) => {
+      const policy = withSeriesKnowledgeFor(withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage'), 'evaluation');
+      // An item taken in for consistency review only: 书系一致性 pins it, a Series-scoped Task never reads it.
+      const consistencyOnly = takeInNewItem(store, seriesId, { subject: '灯塔', knowledgeClass: 'canon', content: '合成正典说明，只供一致性审阅。', reuseScope: 'consistency-review' });
+      let review = store.createReviewRunPreparationWork(bookId, ['series-consistency', 'typos-and-usage'], WHOLE, policy, null, [], null, null, seriesId);
+      while (!review.done) review = store.advanceReviewRunPreparationWork(review.workId!);
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const pinned = (categoryId: string): string[] => {
+          const taskIntentId = review.projection!.run!.categories.find((category) => category.categoryId === categoryId)!.taskIntentId!;
+          const row = db.prepare("SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'run-source-scope'").get(taskIntentId) as { canonical_json: string };
+          return (JSON.parse(row.canonical_json) as { seriesScopes: Array<{ knowledge: Array<{ itemId: string }> }> }).seriesScopes[0]!.knowledge.map((pin) => pin.itemId).sort();
+        };
+        expect(pinned('series-consistency')).toEqual([consistencyOnly, itemOf(store, seriesId)].sort());
+        expect(pinned('typos-and-usage')).toEqual([store.inspectSeries(seriesId).knowledge.items.find((item) => item.itemId !== consistencyOnly)!.itemId]);
+      } finally { db.close(); }
+
+      let evaluation = store.createInitialEvaluationPreparationWork(bookId, policy, [], null, seriesId);
+      while (!evaluation.done) evaluation = store.advanceInitialEvaluationPreparationWork(evaluation.workId!);
+      const initial = evaluation.projection!;
+      const runRecordId = store.authorizeInitialEvaluation(bookId, initial.taskIntent!.taskIntentId, initial.planEnvelope!.digest).dispatchRunRecordId!;
+      // SER-006: the membership preview counts the authorized Run that froze the Series, and a finished one would not count.
+      const membership = store.previewSeriesMembershipChange({ seriesId, bookId, kind: 'remove' });
+      expect(membership.groups.find((group) => group.key === 'runs')!.unchanged[0]).toBe(`1 个使用书系「${J13_SERIES_TITLE}」范围的任务已授权或正在运行。`);
+      // The frozen member pin carries the Book's exact Source Version: excluding it reaches the 初评 (SER-022) and stops it (SER-023).
+      const source = store.inspectSeriesExclusionTargets({ seriesId, kind: 'source-version', after: null }).targets[0]!;
+      expect(initial.runSourceScope!.seriesScopes![0]!.members.map((member) => member.sourceVersionId)).toEqual([source.id]);
+      expect(store.seriesScopeGuard(runRecordId)).toBeNull();
+      const { preview } = exclude(store, seriesId, 'add', { target: { kind: 'source-version', id: source.id } });
+      expect(preview.groups.find((group) => group.key === 'runs')!.changes.join('')).toContain('《星河之三》AI7 初评');
+      expect(store.seriesScopeGuard(runRecordId)).toBe(source.label);
+      expect(store.inspectInitialEvaluation(bookId).runSourceScope!.seriesScopes).toEqual(initial.runSourceScope!.seriesScopes);
+    }, null, REVIEW_FIXTURE);
+  }, 300_000);
+
+  it('refuses a Series whose eligible knowledge passes what one Task may carry, before anything is prepared', async () => {
+    await withSession(async ({ store, seriesId }, bookId) => {
+      const policy = withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage');
+      for (const subject of ['甲', '乙', '丙', '丁', '戊', '己']) {
+        takeInNewItem(store, seriesId, { subject, knowledgeClass: 'canon', content: '合成书系知识说明。'.repeat(220), reuseScope: 'series-tasks' });
+      }
+      expect(refusal(() => store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, policy, null, [], null, null, seriesId)))
+        .toBe(`SERIES_SCOPE_UNAVAILABLE:${seriesScopeTooManyReason(J13_SERIES_TITLE)}`);
+    }, null, REVIEW_FIXTURE);
+  }, 300_000);
+
   it('refuses a prepared plan, stops an approved Run before its turn, and leaves only 修改计划并重新授权 and 取消任务', async () => {
     await withSession(async ({ store, driver, seriesId }, bookId) => {
       const itemId = itemOf(store, seriesId);
@@ -373,6 +469,8 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       expect([stopped.state, stopped.canContinue, stopped.categories[0]!.state, stopped.categories[0]!.stateLabel])
         .toEqual(['scope-changed', false, 'interrupted', SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL]);
       expect(stopped.categories[0]!.detail?.startsWith(SERIES_SCOPE_STOP_SUMMARY)).toBe(true);
+      expect(store.inspectTaskPlan({ bookId, kind: 'review-run', ref: reviewing.reviewRunId }).technical.find((line) => line.key === 'series-read-counts')?.value)
+        .toBe('1 个阅读范围 · 1 次模型请求');
       // Exactly the one range that was out was read; nothing after it was sent, and nothing reached the manuscript.
       const ledger = store.inspectReviewWorkspace(bookId, reviewing.reviewRunId);
       expect(ledger.run!.findings).toHaveLength(0);

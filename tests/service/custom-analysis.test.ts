@@ -6,15 +6,15 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
-import { ANALYSIS_RESULT_SET_REVISION_82_SQL, ANALYSIS_RESULT_SET_SCHEMA_SQL } from '../../src/service/analysis/result-set-schema.js';
+import { ANALYSIS_RESULT_SET_REVISION_81_SQL, ANALYSIS_RESULT_SET_SCHEMA_SQL } from '../../src/service/analysis/result-set-schema.js';
 import { CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL } from '../../src/service/custom-analysis-dimensions.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
-import { CUSTOM_ANALYSIS_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { CUSTOM_ANALYSIS_ASSURANCE_STATEMENT, type CustomAnalysisDimensionsProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { CUSTOM_DIMENSION_TEMPLATE, CUSTOM_DIMENSION_TITLE } from '../support/custom-analysis.js';
-import { restoreCustomAnalysisPredecessor } from '../support/pre74-schema.js';
+import { execPre74Fixture, restoreCustomAnalysisPredecessor } from '../support/pre74-schema.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 
 // Service-integration suite (L2) for 自定义分析维度 (Issue #922, slice 7f): the real store and ledger, the one execution owner and the
@@ -105,7 +105,7 @@ function custom(projection: CustomAnalysisDimensionsProjection, dimensionId: str
   return projection.dimensions.find((entry) => entry.dimensionId === dimensionId)!;
 }
 
-describe('the dimension ledger (schema revision 83)', () => {
+describe('the dimension ledger (schema revision 82)', () => {
   it('versions a dimension 待验证 → 已启用 → 已停用, supersedes its latest, keeps 停用 final and every row immutable', async () => {
     await withBook(async (book) => {
       const first = book.store.saveCustomAnalysisDimension({ dimensionId: null, title: CUSTOM_DIMENSION_TITLE, questionTemplate: CUSTOM_DIMENSION_TEMPLATE });
@@ -315,8 +315,8 @@ describe('baseline and custom analysis on the same launch', () => {
   }, 180_000);
 });
 
-describe('schema revision 83', () => {
-  it('rebuilds a revision-80 store\'s Result Set relations byte for byte, adds the dimension relations empty, and refuses an 83 without them', async () => {
+describe('schema revision 82', () => {
+  it.each([TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION])('rebuilds revision %i Result Set relations byte for byte, adds dimensions empty, and refuses a terminal store without them', async (predecessor) => {
     expect(LATEST_SCHEMA_VERSION).toBe(CUSTOM_ANALYSIS_SCHEMA_VERSION);
     let bookId = '';
     await withBook(async (book) => {
@@ -336,8 +336,8 @@ describe('schema revision 83', () => {
     const plans = plant.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all();
     expect(sets).toHaveLength(1);
     restoreCustomAnalysisPredecessor(plant);
-    plant.exec(`PRAGMA user_version = ${TASK_INTENT_DRAFT_SCHEMA_VERSION}`);
-    expect((plant.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_result_sets'").get() as { sql: string }).sql).toBe(ANALYSIS_RESULT_SET_REVISION_82_SQL.analysis_result_sets);
+    execPre74Fixture(plant, `PRAGMA user_version = ${predecessor}`);
+    expect((plant.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_result_sets'").get() as { sql: string }).sql).toBe(ANALYSIS_RESULT_SET_REVISION_81_SQL.analysis_result_sets);
     plant.close();
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

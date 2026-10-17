@@ -296,7 +296,7 @@ function verifyRuleBinding(rule: Record<string, unknown>, modelRole: string): vo
 }
 
 /** One boolean of a rule's `source` block as the projection carries it: `true` only when the block states it `true`; absent is `false`. */
-function sourceFlag(rule: Record<string, unknown>, key: 'materialReferencesAllowed' | 'editorialDeliverablesAllowed'): boolean {
+function sourceFlag(rule: Record<string, unknown>, key: 'materialReferencesAllowed' | 'editorialDeliverablesAllowed' | 'seriesKnowledgeAllowed'): boolean {
   const source = rule['source'];
   return isRecord(source) && source[key] === true;
 }
@@ -1091,6 +1091,8 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
       crossUnitSynthesisAllowed: reading.crossUnitSynthesisAllowed,
       materialReferencesAllowed: sourceFlag(rule, 'materialReferencesAllowed'),
       editorialDeliverablesAllowed: sourceFlag(rule, 'editorialDeliverablesAllowed'),
+      // The flag verified above (v22's review rule alone), projected for its consumer (Issue #64, 7b); absent on every other rule.
+      ...(sourceFlag(rule, 'seriesKnowledgeAllowed') ? { seriesKnowledgeAllowed: true } : {}),
       clarificationQuestionAllowed: reading.clarification,
       clarificationTimeoutHours: reading.clarification ? CLARIFICATION_ASKS.timeoutHours : null,
       backgroundOrigin: reading.background === true,
@@ -1655,6 +1657,8 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
       crossUnitSynthesisAllowed: kind.crossUnitSynthesisAllowed,
       materialReferencesAllowed: kind.blocks.source['materialReferencesAllowed'] === true,
       editorialDeliverablesAllowed: kind.blocks.source['editorialDeliverablesAllowed'] === true,
+      // The flag verified at reading (v23's review rule alone), projected for its consumer (Issue #64, 7b); absent on every other rule.
+      ...(kind.blocks.source['seriesKnowledgeAllowed'] === true ? { seriesKnowledgeAllowed: true } : {}),
       clarificationQuestionAllowed: kind.clarification,
       clarificationTimeoutHours: kind.clarification ? CLARIFICATION_ASKS.timeoutHours : null,
       backgroundOrigin: kind.background,

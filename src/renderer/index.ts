@@ -250,6 +250,8 @@ import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } f
 import { mountCapturedProcedures } from './captured-procedures.js';
 import { ANALYSIS_TAB_SHOWN_EVENT, mountCustomAnalysisDimensions, mountCustomAnalysisTab } from './custom-analysis.js';
 import { CUSTOM_TAB_LABEL } from './custom-analysis-labels.js';
+import { mountImportedSkills } from './imported-skills.js';
+import { mountProcedureRecommendationSlots } from './procedure-choice.js';
 import { mountTaskDrawer } from './task-drawer.js';
 import {
   TASK_DRAWER_TITLE,
@@ -370,6 +372,9 @@ const taskDrawer = mountTaskDrawer({
     resume();
   }),
 });
+
+const procedureRecommendationSlots = mountProcedureRecommendationSlots(document.body, window.ai7, () => void renderKnowledgeBase('rules'));
+window.addEventListener('unload', () => procedureRecommendationSlots.disconnect(), { once: true });
 
 /** One range the composer carries, from the words selected now (Issue #423, slice 7a). */
 function composerRangeOf(reading: SelectionSpanReading): ComposerRange {
@@ -5520,7 +5525,11 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
     // 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4): the house's own per-unit questions, beside its 工序.
     const custom = element('div', 'knowledge-custom');
     const customSurface = mountCustomAnalysisDimensions({ root: custom, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails, localInstantLabel });
-    panelNode.append(section, captured, custom, element('h3', undefined, RULES_HEADING));
+    const imported = element('section', 'knowledge-imported-skills');
+    panelNode.append(section, captured, custom, imported, element('h3', undefined, RULES_HEADING));
+    void mountImportedSkills({ root: imported, api: window.ai7, setStatus, errorMessage: rendererErrorMessage }).load().catch((error: unknown) => {
+      if (imported.isConnected) imported.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取外部 Skill。')));
+    });
     void surface.load().catch((error: unknown) => {
       if (captured.isConnected) captured.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取可复用工序。')));
     });

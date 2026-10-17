@@ -76,7 +76,7 @@ describe('the research evidence ledger, schema 75', () => {
       expect(RESEARCH_EVIDENCE_SCHEMA_VERSION).toBe(75);
       // Revisions 76 (#892), 77 (#902), and 78 (#901) follow it; the exact revision-74 store traverses each.
       // Synchronized delta with Issue #423 (slice 7a): revision 80 (Task Intent Drafts) is the terminal version.
-      expect(LATEST_SCHEMA_VERSION).toBe(RESEARCH_EVIDENCE_SCHEMA_VERSION + 8);
+      expect(LATEST_SCHEMA_VERSION).toBe(RESEARCH_EVIDENCE_SCHEMA_VERSION + 7);
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       await importSample1Book(store, roots.codeRoot, '迁移回归');
       store.close(); store = undefined;

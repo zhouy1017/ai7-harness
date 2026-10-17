@@ -61,6 +61,20 @@ function payload(overrides: Partial<AssembledModelPayload> = {}): AssembledModel
 }
 
 describe('evaluateEgress', () => {
+  it('refuses a Series excerpt excluded during assembly before a synthetic transport can send it, including synthesis', async () => {
+    let excluded = false;
+    let transmissions = 0;
+    const facts = { ...binding(), seriesScopeGuard: () => excluded ? '书系知识条目「合成地点」' : null };
+    const assemble = async () => { await Promise.resolve(); excluded = true; return payload(); };
+    const decision = evaluateEgress(await assemble(), facts, scope());
+    if (decision.decision !== 'refuse') transmissions += 1;
+    expect(decision).toMatchObject({ decision: 'refuse', reason: 'series-retrieval-scope-changed' });
+    expect(transmissions).toBe(0);
+    // A synthesis is the same final gate boundary, even when all unit reads were admitted earlier.
+    expect(evaluateEgress(payload({ messages: [user('合成归纳请求')] }), facts, scope())).toMatchObject({ decision: 'refuse', reason: 'series-retrieval-scope-changed' });
+    expect(evaluateEgress(payload(), binding(), scope()).decision).toBe('transmit-local');
+    expect(evaluateEgress(payload(), { ...binding(), seriesScopeGuard: () => { throw new Error('unreadable'); } }, scope()).decision).toBe('refuse');
+  });
   it('admits bounded material only with its category and frozen digest, refusing other words or over-bound excerpts', () => {
     const materials = [{ title: '合成资料', paragraphs: ['合成资料文字。'] }];
     const live: EgressBindingFacts = { ...binding(DEEPSEEK_ROUTE),

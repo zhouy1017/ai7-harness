@@ -45,7 +45,7 @@ export const CUSTOM_ANALYSIS_KIND_GLOB = `${CUSTOM_ANALYSIS_KIND_PREFIX}[a-z0-9-
  * the two literal kinds stand as they were, and the family joins them by pattern. Revision 59 (Issue
  * #429, S81b1) widens them for the evaluation kind, AI7's 初评, one literal kind more, and revision 62 (Issue #429, S81c) for
  * the reader's report kind, 审稿意见, one more; revision 64 (Issue #429, S81b2) for the evaluation rewrite kind, 按我的评分重写评语;
- * revision 65 (Issue #432, S84a) for the writing kind, 写作任务; revision 83 (Issue #922, slice 7f) for the custom analysis kind
+ * revision 65 (Issue #432, S84a) for the writing kind, 写作任务; revision 82 (Issue #922, slice 7f) for the custom analysis kind
  * family, one Result Set per 自定义分析维度, joined by pattern as the review categories are, under its one contract version.
  */
 export const ANALYSIS_RESULT_SET_SCHEMA_SQL = {
@@ -87,11 +87,11 @@ export const ANALYSIS_RESULT_SET_SCHEMA_SQL = {
 } as const;
 
 /**
- * The two Result Set relations as revisions 65 to 82 carried them — the writing kind beside the others, no custom analysis family —
- * kept only to validate such a store exactly before revision 83 (Issue #922, slice 7f) rebuilds them, every row copied byte for
+ * The two Result Set relations as revisions 65 to 81 carried them — the writing kind beside the others, no custom analysis family —
+ * kept only to validate such a store exactly before revision 82 (Issue #922, slice 7f) rebuilds them, every row copied byte for
  * byte, and for the migration case.
  */
-export const ANALYSIS_RESULT_SET_REVISION_82_SQL = {
+export const ANALYSIS_RESULT_SET_REVISION_81_SQL = {
   analysis_result_sets: `CREATE TABLE analysis_result_sets (
     result_set_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),

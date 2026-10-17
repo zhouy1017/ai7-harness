@@ -896,7 +896,7 @@ describe('revision 72 (Issue #811)', () => {
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       // Synchronized delta with Issue #423 (slice 7a): revision 80 (Task Intent Drafts) is the terminal version.
-      expect(LATEST_SCHEMA_VERSION).toBe(83);
+      expect(LATEST_SCHEMA_VERSION).toBe(82);
       // Revision 8 accepts nullable selection: two NULL rows coexist, but a second 1 or any other integer is refused.
       expect(database.prepare('SELECT selected FROM model_service_connections ORDER BY connection_id').all()).toEqual([{ selected: 1 }, { selected: null }]);
       expect(() => database.exec("UPDATE model_service_connections SET selected = 1 WHERE provider_id = 'opencode-go'")).toThrow();

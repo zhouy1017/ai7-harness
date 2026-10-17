@@ -22,7 +22,9 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/p
 import { LEARNING_INFLUENCE_RESULT_MARKER, LEARNING_INFLUENCE_WITHDRAWN_LABEL, type LaunchPolicyProjection, type ReviewCategoryResultSetRevisionProjection, type ReviewRunProjection } from '../../src/shared/protocol.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { withoutHouseReviewPreference } from '../support/policy-rules.js';
+import { ruleFor, withoutHouseReviewPreference, withSeriesKnowledgeFor, withRuleFor } from '../support/policy-rules.js';
+import { makeJ13Series, J13_SERIES_TITLE } from '../support/series-consistency.js';
+import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
 import { HOUSE_PREFERENCE_CLOSED } from '../../src/service/task-plan.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 
@@ -101,7 +103,7 @@ beforeEach(async () => {
       const quote = blockIndex < 0 ? null : blocks[blockIndex]!;
       result = {
         schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: header.ordinal,
-        findings: header.ordinal !== 1 || quote === null ? [] : [{
+        findings: header.ordinal !== 1 || quote === null || header.categoryId === 'series-consistency' ? [] : [{
           quote, blockOrdinal: blockIndex + 1, severity: 'should', note: '合成回归建议；仅验证处置流程。',
           ...(header.categoryId === 'style-and-format' ? {} : { replacement: `${sliceGraphemes(quote, 0, 30)}（合成修改）` }),
         }],
@@ -115,6 +117,8 @@ beforeEach(async () => {
   };
   owner = new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+    currentLaunchPolicy: () => policy,
+    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
     secretResolver: { resolve: async () => 'placeholder-development-key' },
     developerLive: { launch: { runBudgetCeiling: launch.live.runBudgetCeiling, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: { family: 'reference-free-review', case: 'sample1-whole-book', delta: null } }, nativeFetch },
     // The 本社审阅偏好 current-read guard, as index.ts wires it (Issue #912).
@@ -137,6 +141,88 @@ function approvals(run: ReviewRunProjection) {
 }
 
 describe('reference-free review on the Go execution path', () => {
+  it('admits the owner-rederived consistency base only when its listed kind has both the Series flag and category', async () => {
+    const book = await importSample1Book(store, roots.codeRoot, 'L2 consistency admission');
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+    recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
+    makeJ13Series(store, book.bookId);
+    const kind = 'editorial-review/series-consistency';
+    // The selected v22 review rule lists the kind, names the category and projects its verified flag (7p, projected by 7b).
+    const admitted = policy;
+    expect(ruleFor(admitted, kind)).toMatchObject({ seriesKnowledgeAllowed: true, outboundDataCategories: expect.arrayContaining(['series-knowledge-excerpt']) });
+    const original = store.baselineAnalysisLedger.launch;
+    // The flag absent, as every predecessor's projection reads, or false; the category dropped; the kind unlisted.
+    const absent: LaunchPolicyProjection = { ...admitted, providerProcessing: { ...admitted.providerProcessing,
+      admittedRules: admitted.providerProcessing.admittedRules.map(({ seriesKnowledgeAllowed: _flag, ...rule }) => rule) } };
+    for (const closed of [absent, withRuleFor(admitted, kind, { seriesKnowledgeAllowed: false }),
+      withRuleFor(admitted, kind, { outboundDataCategories: ruleFor(admitted, kind).outboundDataCategories.filter((category) => category !== 'series-knowledge-excerpt') }),
+      withRuleFor(admitted, kind, { taskKinds: ruleFor(admitted, kind).taskKinds.filter((listed) => listed !== kind) })]) {
+      store.baselineAnalysisLedger.bindLaunch({ ...original, policy: closed });
+      expect(store.inspectReviewWorkspace(book.bookId, null).categories.find((entry) => entry.categoryId === 'series-consistency')!.unavailableReason).toBe('当前策略未开放书系知识');
+    }
+    store.baselineAnalysisLedger.bindLaunch({ ...original, policy: admitted });
+    policy = admitted;
+    const category = store.inspectReviewWorkspace(book.bookId, null).categories.find((entry) => entry.categoryId === 'series-consistency')!;
+    expect(category.unavailableReason).toBeNull();
+    let prepared = store.createReviewRunPreparationWork(book.bookId, ['series-consistency'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, admitted);
+    while (!prepared.done) prepared = store.advanceReviewRunPreparationWork(prepared.workId!);
+    const run = prepared.projection!.run!;
+    expect(run.categories[0]!.planEnvelopeDigest).toBeTruthy();
+    expect(sent).toBe(0);
+    store.authorizeReviewRun(book.bookId, run.reviewRunId, approvals(run));
+    await driver.drive(run.reviewRunId);
+    const completed = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
+    expect(completed.state, completed.categories[0]!.detail ?? '').toBe('settled');
+    const task = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const row = task.prepare('SELECT run_record_id FROM analysis_run_records WHERE task_intent_id = ?').get(run.categories[0]!.taskIntentId!)!;
+      const definition = store.executionLedgerForRun(String(row.run_record_id)).definition;
+      const base = definition.clarificationBase ?? definition;
+      expect(liveKindAdmission(admitted, base, original.live!)).not.toBeNull();
+      expect(liveKindAdmission(admitted, { ...base }, original.live!)).toBeNull();
+      expect(liveKindAdmission(admitted, { ...base, promptContractDigest: 'a'.repeat(64) }, original.live!)).toBeNull();
+    } finally { task.close(); }
+  });
+  it('executes an opt-in built-in review category with Series knowledge under a stubbed rule and names it in the report', async () => {
+    const book = await importSample1Book(store, roots.codeRoot, 'L2 Series review');
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+    recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
+    const seriesId = makeJ13Series(store, book.bookId);
+    const admitted = withSeriesKnowledgeFor(policy, 'editorial-review/typos-and-usage');
+    policy = admitted;
+    const original = store.baselineAnalysisLedger.launch;
+    store.baselineAnalysisLedger.bindLaunch({ ...original, policy: admitted });
+    let progress = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, admitted, null, [], null, null, seriesId);
+    while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
+    const prepared = progress.projection!.run!;
+    store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
+    await driver.drive(prepared.reviewRunId);
+    const completed = store.inspectReviewWorkspace(book.bookId, prepared.reviewRunId).run!;
+    expect(completed.state).toBe('settled');
+    expect(completed.categories[0]!.basisStatement).toContain(`允许参考 · 书系《${J13_SERIES_TITLE}》的知识条目`);
+    expect(requests.some((request) => request.system.includes(J13_SERIES_TITLE))).toBe(true);
+    // The opt-in wrapper is admitted only as its owner derived it: a copy, or a changed contract, fails closed.
+    const task = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const row = task.prepare('SELECT run_record_id FROM analysis_run_records WHERE task_intent_id = ?').get(prepared.categories[0]!.taskIntentId!)!;
+      const definition = store.executionLedgerForRun(String(row.run_record_id)).definition;
+      const wrapper = definition.clarificationBase ?? definition;
+      expect(wrapper.seriesScopes?.[0]?.seriesId).toBe(seriesId);
+      expect(liveKindAdmission(admitted, wrapper, original.live!)).not.toBeNull();
+      expect(liveKindAdmission(admitted, { ...wrapper }, original.live!)).toBeNull();
+      expect(liveKindAdmission(admitted, { ...wrapper, promptContractDigest: 'a'.repeat(64) }, original.live!)).toBeNull();
+      expect(liveKindAdmission(withRuleFor(admitted, 'editorial-review/typos-and-usage', { seriesKnowledgeAllowed: false }), wrapper, original.live!)).toBeNull();
+    } finally { task.close(); }
+    // A later exclusion marks the completed result and rewrites nothing of it (SER-026).
+    const itemId = store.inspectSeries(seriesId).knowledge.items[0]!.itemId;
+    const request = { seriesId, action: 'add' as const, exclusionId: null, target: { kind: 'knowledge-item' as const, id: itemId }, reason: '' };
+    store.recordSeriesExclusion({ ...request, previewDigest: store.previewSeriesExclusion(request).previewDigest });
+    const marked = store.inspectReviewWorkspace(book.bookId, prepared.reviewRunId).run!;
+    expect(marked.historicalMarker?.label).toBe('此结果使用的材料后来被排除');
+    const unmarked = (findings: typeof completed.findings) => findings.map(({ historicalMarker: _marker, ...finding }) => finding);
+    expect(unmarked(marked.findings)).toEqual(unmarked(completed.findings));
+    expect(marked.findings.every((finding) => finding.historicalMarker === '此结果使用的材料后来被排除')).toBe(true);
+  });
   it.each(['synthetic', 'recorded'] as const)('dispatches all admitted categories with %s unit answers, grounds findings and carries a mark through Apply and reversal', async (source) => {
     if (source === 'recorded') {
       // Completed typos/style unit answers are recorded. Literary units, sampling/reflection and the

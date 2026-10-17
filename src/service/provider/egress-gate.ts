@@ -7,7 +7,7 @@ import type { OutboundDataCategoryId } from '../../shared/protocol.js';
 import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES } from '../../shared/protocol.js';
 import { graphemeLength, writingMaterialDigest } from '../writing-tasks.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex, isRecord } from '../analysis/canonical.js';
-import { assistantToolCalls, messageText, toolResultOf, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
+import { assistantToolCalls, messageText, toolResultOf, seriesScopeRefusal, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
 import {
   PLATFORM_TOOL_NAMES,
   ruleNamedToolSchemas,
@@ -136,6 +136,7 @@ export interface SearchBackendBinding {
 }
 
 export interface EgressBindingFacts {
+  readonly seriesScopeGuard?: () => string | null;
   readonly searchBackend?: SearchBackendBinding;
   readonly bindingDigest: string;
   readonly route: ExecutionRoute;
@@ -209,6 +210,7 @@ export interface EgressAttemptScope {
 }
 
 export type EgressRefusalReason =
+  | 'series-retrieval-scope-changed'
   | 'binding-stale'
   | 'route-mismatch'
   | 'model-mismatch'
@@ -481,6 +483,8 @@ export function evaluateEgress(
   binding: EgressBindingFacts,
   scope: EgressAttemptScope,
 ): EgressDecision {
+  const excluded = seriesScopeRefusal(binding.seriesScopeGuard);
+  if (excluded !== null) return refuse('series-retrieval-scope-changed', `书系检索范围已变化 · 需要重新确认计划：${excluded}；未发送任何内容。`);
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {
     return refuse('binding-stale', '执行绑定已不是当前绑定；未发送任何内容。');
   }

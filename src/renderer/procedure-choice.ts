@@ -5,8 +5,159 @@ import type {
   CapturedProcedureStopPreviewProjection,
   RendererApi,
   ReviewScopeKind,
+  ProcedureRecommendationInput,
+  ProcedureRecommendationCandidate,
+  ProcedureRecommendationProjection,
 } from '../shared/protocol.js';
 import { sheetProcedureChosenStatus } from './captured-procedure-labels.js';
+
+type RecommendationIntent = Omit<ProcedureRecommendationInput, 'bookId'>;
+/** #66 rev 4 relay: the slot carries editorial outcome classes, not service executor names. */
+export function recommendationIntentFromSlot(taskKind: string | undefined, scopeKind: string | undefined, goalDigest: string | undefined): RecommendationIntent {
+  return {
+    goal: goalDigest ?? '',
+    taskKind: scopeKind === 'deliverable' ? 'unclassified'
+      : taskKind === 'review' || taskKind === 'factual' || taskKind === 'review-run' ? 'review-run'
+        : taskKind === 'analysis' || taskKind === 'baseline-analysis' ? 'baseline-analysis'
+          : taskKind === 'writing' ? 'writing' : 'unclassified',
+    scope: scopeKind === 'selection' ? 'selection' : 'whole',
+    categoryIds: taskKind === 'factual' ? ['factual-review'] : [],
+  };
+}
+function recommendationKey(input: RecommendationIntent): string {
+  return JSON.stringify([input.goal.trim(), input.taskKind, input.scope, [...input.categoryIds].sort()]);
+}
+
+/** TASK-014: goal edits stale the recommendation and preserve the editor's exact selected revision. */
+export class ProcedureRecommendationSelection {
+  projection: ProcedureRecommendationProjection | null = null;
+  selected: ProcedureRecommendationCandidate | null = null;
+  #intent = '';
+  #shownIntent: string | null = null;
+  #selectedIntent: string | null = null;
+  update(input: RecommendationIntent): string { this.#intent = recommendationKey(input); return this.#intent; }
+  get stale(): boolean {
+    return this.#shownIntent !== null && this.#shownIntent !== this.#intent;
+  }
+  get selectedNeedsUpdate(): boolean { return this.#selectedIntent !== null && this.#selectedIntent !== this.#intent; }
+  receive(key: string, projection: ProcedureRecommendationProjection): boolean {
+    if (key !== this.#intent) return false;
+    this.projection = projection; this.#shownIntent = key; return true;
+  }
+  choose(candidate: ProcedureRecommendationCandidate): void { this.selected = candidate; this.#selectedIntent = this.#intent; }
+  /**
+   * A choice the surface then fills itself from — 新建审阅 ticks the chosen revision's categories and scope. That fill follows from
+   * the choice and is no goal change: the intent after it becomes what later edits are measured against (TASK-014).
+   */
+  adopt(candidate: ProcedureRecommendationCandidate): void { this.choose(candidate); this.#shownIntent = this.#intent; }
+  clear(): void { this.selected = null; this.#selectedIntent = null; }
+}
+
+export interface ProcedureRecommendationSurfaceOptions {
+  readonly root: HTMLElement;
+  readonly api: Pick<RendererApi, 'recommendProcedures'>;
+  readonly state: ProcedureRecommendationSelection;
+  input(): RecommendationIntent;
+  choose(candidate: ProcedureRecommendationCandidate): void | Promise<void>;
+  browse(): void;
+  edit(): void;
+  clear?(): void;
+}
+
+/** Fill a caller-owned slot; the composer and its Task Intent remain in their existing owner. */
+export function mountProcedureRecommendation(options: ProcedureRecommendationSurfaceOptions): { refreshIntent(): void; load(): Promise<void> } {
+  const { root, state } = options;
+  let busy = false;
+  let problem = '';
+  const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] => {
+    const element = document.createElement(tag); if (text !== undefined) element.textContent = text; return element;
+  };
+  function button(text: string, action: string, run: () => void): HTMLButtonElement {
+    const element = node('button', text); element.type = 'button'; element.className = 'quiet';
+    element.dataset['recommendationAction'] = action; element.disabled = busy; element.addEventListener('click', run); return element;
+  }
+  function render(): void {
+    root.dataset['recommendationState'] = state.stale || state.selectedNeedsUpdate ? 'stale' : state.projection?.status ?? 'unread';
+    const label = node('p', state.stale || state.selectedNeedsUpdate ? '需要更新：任务目标有了变化；所选的确切版本保持不变。' : state.projection?.note ?? '查看适合当前任务的已保存工序。');
+    label.setAttribute('role', 'status');
+    root.replaceChildren(node('h4', '工序推荐'), label);
+    if (state.selected !== null) {
+      root.append(node('p', `已选《${state.selected.purpose}》第 ${state.selected.version} 版；选择工序不授予任何权限。`));
+      if (options.clear !== undefined) root.append(button('清除工序选择', 'clear', () => { state.clear(); options.clear!(); render(); }));
+    }
+    if (problem !== '') { const alert = node('p', problem); alert.setAttribute('role', 'alert'); root.append(alert); }
+    root.append(button(state.stale ? '更新推荐' : '查看推荐', 'refresh', () => void load()));
+    const list = node('ul');
+    for (const candidate of state.projection?.candidates ?? []) {
+      const item = node('li'); item.dataset['recommendationVersionId'] = candidate.versionId;
+      item.append(node('strong', `《${candidate.purpose}》 · ${candidate.kind} · 第 ${candidate.version} 版`));
+      for (const line of candidate.rationale) item.append(node('p', line));
+      item.append(node('p', `需要：${candidate.requiredInputs.join('、')}`), node('p', `预期结果：${candidate.expectedOutcome}`),
+        node('p', `建议类型：${candidate.proposalClasses.join('、') || '无'}；外部操作：${candidate.effectClasses.join('、') || '无'}`));
+      const choose = button('选择此版本', 'choose', () => void (async () => {
+        busy = true; render();
+        try { await options.choose(candidate); state.choose(candidate); }
+        catch { problem = '无法选择这一版工序，请重新查看。'; }
+        finally { busy = false; if (root.isConnected) render(); }
+      })());
+      choose.disabled ||= state.stale;
+      item.append(choose); list.append(item);
+    }
+    root.append(list, button('修改意图', 'edit', options.edit), button('浏览可用工序', 'browse', options.browse),
+      node('p', state.projection?.excludedSkillReason ?? '外部 Skill 在此版本没有执行器，不参与工序推荐。'),
+      node('p', '推荐与选择不会获取、安装、启用或运行工序；计划与授权仍需另行确认。'));
+  }
+  async function load(): Promise<void> {
+    if (busy) return;
+    const input = options.input(); const key = state.update(input);
+    busy = true; problem = ''; render();
+    try { const answer = await options.api.recommendProcedures(input); state.receive(key, answer); }
+    catch { problem = '无法读取工序推荐，请稍后再试。'; }
+    finally { busy = false; if (root.isConnected) render(); }
+  }
+  const refreshIntent = (): void => { state.update(options.input()); render(); };
+  refreshIntent();
+  return { refreshIntent, load };
+}
+
+/** #66 rev 4 / #423 rev 6: the only composer integration is the declared DOM slot and its two bubbling events.
+ * Observe only slot attributes and insertion; no 7a module imports or Task Intent writes belong here.
+ */
+export function mountProcedureRecommendationSlots(root: HTMLElement, api: Pick<RendererApi, 'recommendProcedures'>, browse: () => void): { disconnect(): void } {
+  const mounted = new WeakMap<HTMLElement, ReturnType<typeof mountProcedureRecommendation>>();
+  const mount = (slot: HTMLElement): void => {
+    if (mounted.has(slot)) return;
+    const surface = mountProcedureRecommendation({
+      root: slot, api, state: new ProcedureRecommendationSelection(),
+      input: () => recommendationIntentFromSlot(slot.dataset['taskKind'], slot.dataset['scopeKind'], slot.dataset['goalDigest']),
+      choose: (candidate) => { slot.dispatchEvent(new CustomEvent('procedure-recommendation-selected', {
+        bubbles: true, detail: { procedureId: candidate.procedureId, versionId: candidate.versionId, title: candidate.purpose, matchRationale: candidate.rationale.join('；') },
+      })); },
+      clear: () => { slot.dispatchEvent(new CustomEvent('procedure-recommendation-cleared', { bubbles: true })); },
+      browse,
+      edit: () => slot.parentElement?.querySelector<HTMLElement>('textarea, [contenteditable="true"], input[type="text"]')?.focus(),
+    });
+    mounted.set(slot, surface);
+    void surface.load();
+  };
+  const inserted = (node: Node): void => {
+    if (!(node instanceof HTMLElement)) return;
+    if (node.matches('[data-procedure-recommendation][data-goal-digest]')) mount(node);
+    node.querySelectorAll<HTMLElement>('[data-procedure-recommendation][data-goal-digest]').forEach(mount);
+  };
+  inserted(root);
+  const observer = new MutationObserver((changes) => {
+    for (const change of changes) {
+      if (change.type === 'attributes' && change.target instanceof HTMLElement) {
+        const surface = mounted.get(change.target);
+        if (surface !== undefined) surface.refreshIntent();
+        else inserted(change.target);
+      } else for (const node of change.addedNodes) inserted(node);
+    }
+  });
+  observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-task-kind', 'data-scope-kind', 'data-goal-digest'] });
+  return { disconnect: () => observer.disconnect() };
+}
 
 /**
  * The 新建审阅 sheet's choice of a Captured Procedure version, kept honest while it loads (Issue #66, plan slice S31 review P2-1;

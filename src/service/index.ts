@@ -715,6 +715,19 @@ async function dispatch(
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): deterministic, provider-free; running one is an ordinary Review Run.
     case 'inspectCapturedProcedures':
       return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedures() };
+    // 外部 Skill and 工序推荐 (Issue #66; ADR 0045, ADR 0090): inert records and a deterministic read; nothing here runs a Skill.
+    case 'importSkillPackage':
+      return { id: request.id, ok: true, op: request.op, result: await store.importSkillPackage(request.input) };
+    case 'validateImportedSkill':
+      return { id: request.id, ok: true, op: request.op, result: store.validateImportedSkill(request.input.revisionId) };
+    case 'installImportedSkill':
+      return { id: request.id, ok: true, op: request.op, result: store.installImportedSkill(request.input.revisionId, request.input.previewDigest) };
+    case 'enableImportedSkill':
+      return { id: request.id, ok: true, op: request.op, result: store.enableImportedSkill(request.input.revisionId, request.input.bookId, request.input.previewDigest) };
+    case 'inspectImportedSkills':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectImportedSkills(request.input.revisionId, request.input.before) };
+    case 'recommendProcedures':
+      return { id: request.id, ok: true, op: request.op, result: store.recommendProcedures(request.input) };
     case 'inspectCapturedProcedure':
       return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedure(request.input.procedureId, request.input.before) };
     case 'inspectDeveloperProposal':
@@ -914,7 +927,7 @@ async function dispatch(
     // AI7 初评 (Issue #429, S81b1): prepared as a cooperative job whose plan the Task Drawer opens, and started from its bar
     // through the governor exactly as the baseline analysis is — admitted while a place is free, else waiting for one.
     case 'prepareInitialEvaluation':
-      return { id: request.id, ok: true, op: request.op, result: jobs.startInitialEvaluationPreparation(request.input.bookId, launchPolicy, request.input.materialIds) };
+      return { id: request.id, ok: true, op: request.op, result: jobs.startInitialEvaluationPreparation(request.input.bookId, launchPolicy, request.input.materialIds, null, request.input.seriesId ?? null) };
     case 'authorizeInitialEvaluation': {
       const authorized = store.authorizeInitialEvaluation(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
       if (authorized.dispatchRunRecordId !== null) {
@@ -1067,7 +1080,7 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: jobs.startReviewRunPreparation(request.input.bookId, request.input.categoryIds, request.input.scope, launchPolicy,
-          request.input.capturedProcedure ?? null, request.input.materialIds ?? []),
+          request.input.capturedProcedure ?? null, request.input.materialIds ?? [], null, null, request.input.seriesId ?? null),
       };
     case 'authorizeReviewRun':
       // The one approval, then the drive loop at once: an approved Run nobody drives reads `partial`, so
@@ -1997,7 +2010,7 @@ async function run(): Promise<void> {
       productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', binding),
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
       // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
-      readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
+      seriesScopeGuard: (runRecordId) => guardedStore.seriesScopeGuard(runRecordId),
       // The current-read guard over 本社审阅偏好 (Issue #912; LAUD-008): a withdrawn material stops a Run that read it.
       influenceGuard: (runRecordId) => guardedStore.learningInfluenceGuard(runRecordId),
       materialGuard: (runRecordId, ledger) => guardedStore.materialGuard(runRecordId, ledger),

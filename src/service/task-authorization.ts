@@ -44,7 +44,7 @@ import {
   ANALYSIS_RESULT_SET_REVISION_59_SQL,
   ANALYSIS_RESULT_SET_REVISION_62_SQL,
   ANALYSIS_RESULT_SET_REVISION_64_SQL,
-  ANALYSIS_RESULT_SET_REVISION_82_SQL,
+  ANALYSIS_RESULT_SET_REVISION_81_SQL,
   ANALYSIS_RESULT_SET_SCHEMA_SQL,
   EDITORIAL_REVIEW_KIND_GLOB,
 } from './analysis/result-set-schema.js';
@@ -479,17 +479,18 @@ export const HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION = 79;
  * Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts — three additive, append-only relations owned by
  * `task-intent-drafts.ts` and created before this version is stamped — and `analysis_task_intents` rebuilt, every row copied
  * byte for byte, so that a Task promoted from a draft keeps the draft's own bounded sentence as its goal for every kind, and so
- * that the custom analysis kind family (slice 7f) is admitted with its contract version and the baseline modes. This is the
- * terminal version.
+ * that the custom analysis kind family (slice 7f) is admitted with its contract version and the baseline modes.
  */
 export const TASK_INTENT_DRAFT_SCHEMA_VERSION = 80;
+/** Revision 81 (ADR 0090 / #66): the additive foreign Skill ledgers. */
+export const IMPORTED_SKILL_SCHEMA_VERSION = 81;
 /**
- * Revision 83 (Issue #922, slice 7f; provisional number): 自定义分析维度 — three additive, append-only relations owned by
+ * Revision 82 (Issue #922, slice 7f): 自定义分析维度 — three additive, append-only relations owned by
  * `custom-analysis-dimensions.ts` and created before this version is stamped — and the two Result Set relations rebuilt, every row
  * copied byte for byte, so that each dimension keeps its own Result Set under the custom analysis kind family and its contract
  * version, which revision 80 already admits in `analysis_task_intents`. This is the terminal version.
  */
-export const CUSTOM_ANALYSIS_SCHEMA_VERSION = 83;
+export const CUSTOM_ANALYSIS_SCHEMA_VERSION = 82;
 export const LATEST_SCHEMA_VERSION = CUSTOM_ANALYSIS_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
@@ -762,8 +763,8 @@ export const ANALYSIS_LEDGER_REVISION_23_SQL = {
  * category's bounded one, and no custom analysis kind. Kept only to validate a store at those revisions exactly before revision 80
  * (Issue #423, slice 7a) rebuilds the relation with every row copied byte for byte, and for the migration case.
  */
-/** The two Result Set relations as revisions 65 to 82 carried them, before revision 83 (Issue #922, slice 7f) rebuilds them. */
-export const ANALYSIS_LEDGER_REVISION_82_SQL = { ...ANALYSIS_RESULT_SET_REVISION_82_SQL } as const;
+/** The two Result Set relations as revisions 65 to 81 carried them, before revision 82 (Issue #922, slice 7f) rebuilds them. */
+export const ANALYSIS_LEDGER_REVISION_81_SQL = { ...ANALYSIS_RESULT_SET_REVISION_81_SQL } as const;
 
 export const ANALYSIS_LEDGER_REVISION_79_SQL = {
   analysis_task_intents: `CREATE TABLE analysis_task_intents (
@@ -1906,7 +1907,7 @@ function authorizationsAsFound(db: DatabaseSync): AuthorizationsAsFound {
  * revision 66 widens the Run Authorizations (Issue #95, S39). Only the authorizations' text differs from the terminal ledger.
  */
 function validateRevision65AnalysisLedgerSchema(db: DatabaseSync, authorizations: AuthorizationsAsFound): void {
-  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_79_SQL, ...ANALYSIS_LEDGER_REVISION_82_SQL, ...authorizations }, '分析任务账本表（修订版 65）');
+  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_79_SQL, ...ANALYSIS_LEDGER_REVISION_81_SQL, ...authorizations }, '分析任务账本表（修订版 65）');
   requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 65）');
   validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
   requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
@@ -1925,7 +1926,7 @@ function validateRevision79AnalysisLedgerSchema(db: DatabaseSync): void {
     ...ANALYSIS_LEDGER_SCHEMA_SQL,
     ...(version >= SEARCH_BACKEND_SCHEMA_VERSION ? { analysis_plan_records: WEB_TOOLS_PLAN_RECORDS_SQL } : {}),
     ...ANALYSIS_LEDGER_REVISION_79_SQL,
-    ...ANALYSIS_LEDGER_REVISION_82_SQL,
+    ...ANALYSIS_LEDGER_REVISION_81_SQL,
   }, '分析任务账本表（修订版 79）');
   requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 79）');
   validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
@@ -1934,14 +1935,14 @@ function validateRevision79AnalysisLedgerSchema(db: DatabaseSync): void {
 }
 
 /**
- * The analysis relations as revisions 80 to 82 carried them, validated exactly — shapes, triggers, row digests and references —
- * before revision 83 (Issue #922, slice 7f) rebuilds the two Result Set relations: only their text differs from the terminal
+ * The analysis relations as revisions 80 to 81 carried them, validated exactly — shapes, triggers, row digests and references —
+ * before revision 82 (Issue #922, slice 7f) rebuilds the two Result Set relations: only their text differs from the terminal
  * ledger's.
  */
-function validateRevision82AnalysisLedgerSchema(db: DatabaseSync): void {
-  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, analysis_plan_records: WEB_TOOLS_PLAN_RECORDS_SQL, ...ANALYSIS_LEDGER_REVISION_82_SQL },
-    '分析任务账本表（修订版 82）');
-  requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 82）');
+function validateRevision81AnalysisLedgerSchema(db: DatabaseSync): void {
+  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, analysis_plan_records: WEB_TOOLS_PLAN_RECORDS_SQL, ...ANALYSIS_LEDGER_REVISION_81_SQL },
+    '分析任务账本表（修订版 81）');
+  requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 81）');
   validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
   requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
     'TASK_RECORD_INVALID', '分析任务账本引用校验失败。');
@@ -2278,12 +2279,12 @@ function migrateAnalysisLedgerToRevision80(db: DatabaseSync): void {
 }
 
 /**
- * Revision 80 → 83 (Issue #922, slice 7f): the Task Intents already admit the custom analysis kind family, so only the two Result
+ * Revisions 80/81 → 82 (Issue #922, slice 7f): the Task Intents already admit the custom analysis kind family, so only the two Result
  * Set relations are rebuilt from their current text, every row copied byte for byte in its order, in one transaction with foreign
  * keys off around it as every kind-coupled rebuild has been. `custom-analysis-dimensions.ts`'s relations exist already:
  * `EditorialStore.open` creates them before this runs.
  */
-function migrateResultSetsToRevision83(db: DatabaseSync): void {
+function migrateResultSetsToRevision82(db: DatabaseSync): void {
   const foreignKeysState = (): number => asNumber((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
   const restoreForeignKeys = foreignKeysState() === 1;
   db.exec('PRAGMA foreign_keys = OFF');
@@ -2298,7 +2299,7 @@ function migrateResultSetsToRevision83(db: DatabaseSync): void {
       db.exec('COMMIT');
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], 'Analysis ledger revision 83 rollback failed.');
+        throw new AggregateError([error, rollbackError], 'Analysis ledger revision 82 rollback failed.');
       }
       throw error;
     }
@@ -2331,8 +2332,8 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
          ) SELECT task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
-      // Revision 80 widened only the Task Intents; revision 83 (Issue #922, slice 7f) widens the Result Set relations for the custom
-      // analysis family, so every rebuild from a store before revision 80 moves them too, to their terminal text, and stamps 83.
+      // Revision 80 widened only the Task Intents; revision 82 (Issue #922, slice 7f) widens the Result Set relations for the custom
+      // analysis family, so every rebuild from a store before revision 80 moves them too, to their terminal text, and stamps 82.
       rebuildResultSetRelations(db);
       widenWebToolsPlanRecords(db);
       db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
@@ -2402,15 +2403,15 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === MATERIAL_INDEX_SCHEMA_VERSION || version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
       version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION ||
-      version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION,
+      version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
   if (version === CUSTOM_ANALYSIS_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  // A revision-80 store carries the terminal ledger but for the Result Set relations' text, which revision 83 rebuilds.
-  if (version === TASK_INTENT_DRAFT_SCHEMA_VERSION) {
+  // A revision-80 or revision-81 store carries the terminal ledger but for the Result Set relations' text, which revision 82 rebuilds.
+  if (version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
-    validateRevision82AnalysisLedgerSchema(db);
-    return migrateResultSetsToRevision83(db);
+    validateRevision81AnalysisLedgerSchema(db);
+    return migrateResultSetsToRevision82(db);
   }
   // Revisions 67 to 79 move no analysis relation but the plan records' web-tools component (revision 74, widened in place), so a
   // store at 66 to 79 carries `analysis_task_intents` as revision 65 left it: it is validated as exactly that, and revision 80's

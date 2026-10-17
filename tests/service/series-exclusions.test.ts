@@ -108,6 +108,23 @@ function readable(_store: EditorialStore, bookId: string): string[] | string {
 }
 
 describe('书系检索排除 over the real store', () => {
+  it('honours an exact source-version exclusion when knowledge provenance names that manuscript revision', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const member = await importBook(store, MEMBER);
+      const seriesId = store.createSeries({ title: '来源范围测试', note: '' }).seriesId;
+      joinSeries(store, seriesId, member.bookId);
+      const candidate = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '合成条目', knowledgeClass: 'canon' }, content: '合成知识说明', span: span(store, member) });
+      const review = store.inspectSeriesKnowledgeReview({ seriesId, candidateId: candidate.candidateId });
+      store.promoteSeriesKnowledge({ seriesId, candidateId: candidate.candidateId, candidateVersion: 1, reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'none' });
+      expect(readable(store, member.bookId)).toHaveLength(1);
+      const source = store.inspectSeriesExclusionTargets({ seriesId, kind: 'source-version', after: null }).targets[0]!;
+      const recorded = exclude(store, seriesId, 'add', { target: { kind: 'source-version', id: source.id } });
+      expect(readable(store, member.bookId)).toContain('都已排除在书系检索之外');
+      exclude(store, seriesId, 'end', { exclusionId: recorded.exclusionId });
+      expect(readable(store, member.bookId)).toHaveLength(1);
+    } finally { store.close(); }
+  }, 300_000);
   it('appends 添加, 修改 and 停止 as revisions behind the preview, and refuses what a Series cannot name', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -229,7 +246,7 @@ describe('书系检索排除 over the real store', () => {
       expect(store.inspectSeriesExclusionTargets({ seriesId, kind: 'book', after: null }).targets.map((target) => target.label).sort()).toEqual(['成员图书《书系之外》', '成员图书《星河之一》']);
       const sources = store.inspectSeriesExclusionTargets({ seriesId, kind: 'source-version', after: null }).targets;
       expect(sources).toHaveLength(2);
-      expect(sources.every((target) => !target.read && target.continuing === '只排除这一个来源版本，不包括这本书以后的来源版本。')).toBe(true);
+      expect(sources.every((target) => target.read && target.continuing === '只排除这一个来源版本，不包括这本书以后的来源版本。')).toBe(true);
 
       exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: place } });
       expect(readable(store, member.bookId)).toEqual(['地点「旧港」', '人物「林默」', '正典设定「灯塔」']);
@@ -253,7 +270,7 @@ describe('书系检索排除 over the real store', () => {
       expect(readable(store, member.bookId)).toEqual(['人物「林默」']);
       // A Source Version is recorded so the ledger is whole, and no read reaches one: nothing more is left out.
       const sourceExclusion = exclude(store, seriesId, 'add', { target: { kind: 'source-version', id: sources[0]!.id } });
-      expect(sourceExclusion.revision.target.read).toBe(false);
+      expect(sourceExclusion.revision.target.read).toBe(true);
       expect(readable(store, member.bookId)).toEqual(['人物「林默」']);
       // The last one excluded, the review has nothing left, and says why.
       exclude(store, seriesId, 'add', { target: { kind: 'knowledge-class', id: 'characters' } });

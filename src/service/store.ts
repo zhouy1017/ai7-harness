@@ -1,3 +1,7 @@
+import { acquireSkillPackage, ImportedSkills, ImportedSkillError, SkillAcquisitions, type AcquiredSkillPackage } from './imported-skills.js';
+import { recommendProcedures, type RecommendationReading } from './procedure-recommendation.js';
+import type { ImportedSkillImportProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection, ProcedureRecommendationInput, ProcedureRecommendationProjection } from '../shared/protocol.js';
+import { initializeImportedSkillSchema } from './imported-skill-schema.js';
 import { HOUSE_REVIEW_PREFERENCE_CATEGORY } from './launch-policy.js';
 import { CustomAnalysisDimensionError, CustomAnalysisDimensions, customAnalysisVersionInput, initializeCustomAnalysisDimensionSchema, type CustomAnalysisDimensionVersionRecord } from './custom-analysis-dimensions.js';
 import { CUSTOM_ANALYSIS_FIXED_TERMS, CustomAnalysisDocumentError, customAnalysisTextRefusal } from './analysis/custom-analysis-contract.js';
@@ -487,7 +491,9 @@ import {
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
 import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPlanFacts, type ReviewRunPreparationProgress } from './review/review-runs.js';
 import { OUTCOME_UNKNOWN_NOT_RESENT } from './analysis/outcome-unknown.js';
-import { newSeriesKnowledgeReadings } from './review/series-consistency.js';
+import { newSeriesKnowledgeReadings, freezeSeriesScope, frozenSeriesScopes, seriesScopeMaterials, liveSeriesContract, seriesScopeKindDefinition, seriesConsistencyKindDefinition, seriesKnowledgeAllowed, procedureOffersSeries, seriesScopeChanged, SERIES_POLICY_CLOSED } from './review/series-consistency.js';
+import type { FrozenSeriesScope } from '../shared/protocol.js';
+import { HISTORICALLY_AFFECTED_RESULT_MARKER } from '../shared/protocol.js';
 import { initializePublicationVersionSchema, PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
 import {
   GLOBAL_ATTENTION_READ_LIMIT,
@@ -507,6 +513,7 @@ import {
   baselineAnalysisPlan,
   baselineClarifications,
   initialEvaluationPlan,
+  seriesScopePlan,
   evaluationMaterialPlan,
   analysisTaskStateLabel,
   readersReportPlan,
@@ -850,6 +857,7 @@ import {
   seriesExclusionPreviewDigest,
   seriesExclusionReason,
   seriesExclusionTarget,
+  knowledgeMaterial,
   type SeriesKnowledgeMaterial,
   type StoredExclusion,
   type StoredExclusionRevision,
@@ -1107,7 +1115,7 @@ import {
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   MODEL_CLARIFICATION_SCHEMA_VERSION,
-  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION,
+  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -2399,7 +2407,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2463,7 +2471,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2841,7 +2849,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2894,7 +2902,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -3039,7 +3047,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3091,7 +3099,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3588,7 +3596,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3640,7 +3648,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4626,6 +4634,8 @@ export class EditorialStore {
   #writingTasks!: WritingTasks;
   #readersReports!: ReadersReports;
   #importedExemplars!: ImportedExemplars;
+  /** 导入 Skill…'s disclosed packages not yet kept (ADR 0090 §2): memory only. */
+  readonly #skillAcquisitions = new SkillAcquisitions();
   /** 按我的评分重写评语 (Issue #429, S81b2): one ledger per frozen rewrite contract, made when first asked for; bounded. */
   readonly #evaluationRewriteLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The ledger each rewrite preparation in flight belongs to, by its work. */
@@ -5123,7 +5133,9 @@ export class EditorialStore {
       // Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts; `initializeTaskAuthorizationSchema` rebuilds the Task
       // Intents for the drafts' sentences and stamps the version.
       initializeTaskIntentDraftSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      // Revision 83 (Issue #922, slice 7f): the house's 自定义分析维度; `initializeTaskAuthorizationSchema` rebuilds the Result Set
+      // Revision 81 (Issue #66; ADR 0090): the inert imported-Skill ledgers beside the native artifact's.
+      initializeImportedSkillSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
+      // Revision 82 (Issue #922, slice 7f): the house's 自定义分析维度; `initializeTaskAuthorizationSchema` rebuilds the Result Set
       // relations for the custom analysis family and stamps the version.
       initializeCustomAnalysisDimensionSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeTaskAuthorizationSchema(authority);
@@ -5332,7 +5344,8 @@ export class EditorialStore {
       ledger.bindLaunch(this.#baselineAnalysis.launch);
       return ledger;
     };
-    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}`, make) : make();
+    const seriesRule = definition.seriesScopes === undefined ? '' : sha256(canonicalJson(this.#baselineAnalysis.launch.policy?.providerProcessing.admittedRules ?? []));
+    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}\n${canonicalJson(definition.seriesScopes ?? null)}\n${seriesRule}`, make) : make();
   }
 
   /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
@@ -5406,10 +5419,16 @@ export class EditorialStore {
     if (entry.executor === 'factual-review-kind') return this.#factualReview;
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
-    const base = this.#reviewCategoryDefinitions.obtain(JSON.stringify(input), () => this.#analysisCall(() => reviewCategoryKindDefinition(input)));
+    let base = this.#reviewCategoryDefinitions.obtain(JSON.stringify(input), () => this.#analysisCall(() => reviewCategoryKindDefinition(input)));
+    let scopes = entry.seriesScopes;
+    const finish = (definition: AnalysisKindDefinition): AnalysisKindDefinition => scopes === undefined ? definition
+      : entry.seriesKnowledge === undefined ? seriesScopeKindDefinition(this.#authority, definition, scopes) : definition;
     if (materials === undefined && latestForBook !== undefined) {
       const row = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1").get(latestForBook, base.kind) as SqlRow | undefined;
       if (row !== undefined) {
+        // Current consistency availability is derived from today's knowledge. Its historical Run reconstructs from its
+        // snapshot entry instead; mixing today's definition with a prior Run's pins would falsely make a saved step unavailable.
+        if (entry.seriesKnowledge === undefined) scopes ??= frozenSeriesScopes(this.#authority, asString(row.task_intent_id));
         preference = new HouseReviewPreferenceLedger(this.#authority).pinned(asString(row.task_intent_id));
         const records = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?) AND component IN ('execution-plan', 'plan-envelope')").all(asString(row.task_intent_id), asString(row.task_intent_id)) as SqlRow[];
         const components = new Map(records.map((record) => {
@@ -5431,18 +5450,19 @@ export class EditorialStore {
         }
       }
     }
-    if (materials === undefined) return this.reviewCategoryLedger(houseReviewPreferenceKindDefinition(base, preference ?? null, true));
+    if (entry.seriesKnowledge !== undefined && scopes !== undefined) base = seriesConsistencyKindDefinition(this.#authority, base, scopes);
+    if (materials === undefined) return this.reviewCategoryLedger(finish(houseReviewPreferenceKindDefinition(base, preference ?? null, true)));
     const readings = this.#taskMaterialReadings(materials);
     // The frozen digest is the outermost contract's. A readable pin re-derives the material contract and wraps it again, which
     // must give that digest; an unreadable one is the material wrapper's own blocked definition under it, and never sends.
     const refused = readings.some((reading) => reading.refusal !== null);
-    const material = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, preference == null || refused ? frozenPromptDigest : undefined));
+    const material = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, scopes === undefined && (preference == null || refused) ? frozenPromptDigest : undefined));
     const definition = refused ? material : houseReviewPreferenceKindDefinition(material, preference ?? null, true);
-    requireStore(preference == null || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
+    requireStore(scopes !== undefined || preference == null || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
       'HOUSE_REVIEW_PREFERENCE_INVALID', '本社审阅偏好与任务计划不一致。');
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
-    return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
+    return this.reviewCategoryLedger(finish(definition), readings.every((reading) => reading.refusal === null));
   }
 
   // ---- 自定义分析维度 (Issue #922, wave 10 slice 7f; ADR 0090 item 4) ---------------------------------------------------
@@ -5844,8 +5864,11 @@ export class EditorialStore {
     redoOf: string | null = null,
     // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): the draft the one category's Run is prepared from.
     intentDraft: DraftPromotion | null = null,
+    seriesId: string | null = null,
   ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
     const procedure = capturedProcedure === null ? null : this.#procedureCall(() => this.#capturedProcedurePin(bookId, capturedProcedure));
+    requireStore(seriesId === null || capturedProcedure === null || procedureOffersSeries(this.#requireCapturedVersion(capturedProcedure.versionId).document),
+      'SERIES_SCOPE_UNAVAILABLE', '这个工序版本只允许参考当前图书。');
     requireStore(Array.isArray(materialIds) && materialIds.length <= MAX_WRITING_MATERIALS && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) && new Set(materialIds).size === materialIds.length,
       'TASK_MATERIALS_INVALID', '请选择不重复的资料库资料，最多 4 份。');
     if (materialIds.length > 0) {
@@ -5854,7 +5877,7 @@ export class EditorialStore {
         'REVIEW_MATERIAL_CATEGORY_REQUIRED', REVIEW_MATERIAL_CATEGORY_REQUIRED);
     }
     const references = this.#prepareTaskMaterials(bookId, materialIds);
-    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, redoOf,
+    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, redoOf, seriesId,
       ...(references.length === 0 ? {} : { materialReferences: { bookId, references } }),
       ...(intentDraft === null ? {} : { intentDraft }),
     }));
@@ -6182,14 +6205,21 @@ export class EditorialStore {
       const blocks = this.#analysisCall(() => ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
       // The profile the Task froze (Issue #427), never the house's current one, beside the references its plan froze (#428).
       const profile = this.#initialProfileForTask(projection.taskIntent.taskIntentId);
-      const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
+      const plan = this.#taskPlanCall(() => seriesScopePlan(initialEvaluationPlan({ projection, bookTitle, blocks, profile }), projection.runSourceScope?.seriesScopes));
       return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null && liveMaterialRule(this.#baselineAnalysis.launch.policy, INITIAL_EVALUATION_KIND) === null), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
     const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, reviewRunId));
     const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(facts.manuscript.manuscriptId, facts.inputRevision.revisionId));
-    const reviewed = this.#taskPlanCall(() => reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }));
+    const scopes = [...new Map(facts.categories.flatMap((category) => {
+      const scope = category.task?.components['run-source-scope'] as { seriesScopes?: ReadonlyArray<FrozenSeriesScope> } | undefined;
+      return (scope?.seriesScopes ?? []).map((series) => [series.seriesId, series] as const);
+    })).values()];
+    let reviewed = this.#taskPlanCall(() => seriesScopePlan(reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }), scopes));
+    const seriesReports = scopes.length === 0 ? [] : facts.categories.flatMap((category) => category.task?.researchReport == null ? [] : [category.task.researchReport]);
+    if (seriesReports.length > 0) reviewed = { ...reviewed, technical: [...reviewed.technical, { key: 'series-read-counts', label: '书系范围任务已读取',
+      value: `${seriesReports.reduce((count, report) => count + report.unitRows.filter((unit) => unit.attempts > 0).length, 0)} 个阅读范围 · ${seriesReports.reduce((count, report) => count + report.usagePerStage.units.requests, 0)} 次模型请求` }] };
     // 结果待确认 (Issue #757): each category that sends again a range an earlier Run of its kind left unconfirmed says so.
     const plan = { ...reviewed, resend: this.#reviewResend(input.bookId, facts) };
     // The route the categories' frozen plans resolve, read from the first Task's Provider Resolution Plan as the
@@ -9121,6 +9151,74 @@ export class EditorialStore {
     });
   }
 
+  /**
+   * 导入 Skill… (ADR 0090 §2; REUSE-021, REUSE-022): acquisition reads the picked package into memory and discloses it, keeping
+   * nothing; `keep` then keeps exactly those bytes — the source snapshot and an inert working revision — and nothing more.
+   */
+  async importSkillPackage(input: { path: string | null; keep: string | null }): Promise<ImportedSkillImportProjection> {
+    this.#assertAvailable();
+    const { keep } = input;
+    if (keep !== null) {
+      return this.#procedureCall(() => {
+        const acquired = this.#skillAcquisitions.read(keep);
+        const skills = new ImportedSkills(this.#authority);
+        const revision = skills.keep(acquired);
+        this.#skillAcquisitions.release(keep);
+        return { acquisition: skills.disclose(acquired, keep), revision };
+      });
+    }
+    let acquired: AcquiredSkillPackage;
+    try { acquired = await acquireSkillPackage(input.path ?? ''); }
+    catch (error) {
+      if (error instanceof ImportedSkillError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+    return this.#procedureCall(() => {
+      const acquisition = new ImportedSkills(this.#authority).disclose(acquired, this.#skillAcquisitions.stage(acquired));
+      return { acquisition, revision: null };
+    });
+  }
+
+  inspectImportedSkills(revisionId: string | null, before: string | null): ImportedSkillsProjection {
+    this.#assertAvailable();
+    return this.#procedureCall(() => new ImportedSkills(this.#authority).inspect(revisionId, before));
+  }
+
+  validateImportedSkill(revisionId: string): ImportedSkillRevisionProjection {
+    this.#assertAvailable();
+    return this.#procedureCall(() => new ImportedSkills(this.#authority).validate(revisionId));
+  }
+
+  installImportedSkill(revisionId: string, previewDigest: string): ImportedSkillRevisionProjection {
+    this.#assertAvailable();
+    return this.#procedureCall(() => new ImportedSkills(this.#authority).install(revisionId, previewDigest));
+  }
+
+  enableImportedSkill(revisionId: string, bookId: string, previewDigest: string): ImportedSkillRevisionProjection {
+    this.#assertAvailable();
+    return this.#procedureCall(() => new ImportedSkills(this.#authority).enable(revisionId, bookId, previewDigest));
+  }
+
+  /** ADR 0090: recommendations consume existing eligibility; neither this read nor selection writes authority. */
+  recommendProcedures(input: ProcedureRecommendationInput): ProcedureRecommendationProjection {
+    this.#assertAvailable();
+    return this.#procedureCall(() => {
+      requireStore(typeof input.goal === 'string' && input.goal.length <= 2000 && input.goal.isWellFormed() &&
+        ['whole', 'chapters', 'selection'].includes(input.scope) && ['review-run', 'baseline-analysis', 'writing', 'unclassified'].includes(input.taskKind) &&
+        Array.isArray(input.categoryIds) && input.categoryIds.length <= 32 && input.categoryIds.every((id) => typeof id === 'string'),
+      'PROCEDURE_RECOMMENDATION_INVALID', '工序推荐的任务条件无效。');
+      const applicability = this.inspectCapturedProcedureApplicability(input.bookId, input.scope === 'selection' ? 'selection' : null);
+      const readings: RecommendationReading[] = [];
+      for (const entry of applicability.procedures) {
+        if (entry.latestEligible === null) continue;
+        const stored = this.#capturedProcedures.version(entry.latestEligible.versionId)!;
+        readings.push({ applicability: entry, document: stored.document, documentSha256: stored.documentSha256,
+          labels: capturedStepProjections(stored.document, this.#capturedStepWords()).map((step) => step.label) });
+      }
+      return recommendProcedures(input, readings);
+    });
+  }
+
   /** One Captured Procedure with a page of its versions, newest first, below `before` when it is given (Issue #65 review). */
   inspectCapturedProcedure(procedureId: string, before: number | null): CapturedProcedureProjection {
     return this.#procedureCall(() => {
@@ -9473,6 +9571,7 @@ export class EditorialStore {
         procedureId,
         title,
         resolved: {
+          ...(procedureOffersSeries(stored.document) ? { runSourceScope: 'series' as const } : {}),
           versionId: stored.versionId,
           version: stored.version,
           latestEligible: stored.versionId === eligible[0]!.versionId,
@@ -9524,7 +9623,7 @@ export class EditorialStore {
    * 按已保存的工序 on one Book's 新建审阅 (Issue #66, plan slice S31b; REUSE-046, REUSE-053, REUSE-054): every enabled Captured
    * Procedure of the house, each with the one version a new use takes — its latest eligible — and how many of that version's
    * steps this Book can take now, the Series steps chosen apart among them, and why each other is left out. Deterministic and
-   * provider-free, and a read: no procedure is recommended (ADR 0087 §4) and none is ruled out — a mismatch is said, and the
+   * provider-free, and a read: it recommends nothing itself — 工序推荐 reads it (ADR 0090 §1) — and rules none out: a mismatch is said, and the
    * editor may still choose it by hand. With `scope: 'selection'` (Issue #423, S77 deferred item a) each applies to a 当前选区 of
    * the Book instead of its own slot, for the selection menu's list of the house's procedures.
    */
@@ -9611,7 +9710,7 @@ export class EditorialStore {
       try {
         return operation();
       } catch (error) {
-        if (error instanceof CapturedProcedureError) throw new StoreError(error.code, error.message);
+        if (error instanceof CapturedProcedureError || error instanceof ImportedSkillError) throw new StoreError(error.code, error.message);
         throw error;
       }
     });
@@ -10602,22 +10701,26 @@ export class EditorialStore {
    * The 初评 ledger of one profile and the 资料库 references a plan lists (Issue #427, #428): the built-in ledger for AI7's default
    * profile with none, else one kept per contract — made afresh when a reference no longer reads, as #428's always was.
    */
-  #initialLedger(profile: EvaluationProfileProjection, materials?: TaskMaterialBoundary, frozenPromptDigest?: string): BaselineAnalysisStore {
+  #initialLedger(profile: EvaluationProfileProjection, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, scopes?: ReadonlyArray<FrozenSeriesScope>): BaselineAnalysisStore {
     const base = this.#initialBaseDefinition(profile);
     const readings = materials === undefined || materials.references.length === 0 ? [] : this.#taskMaterialReadings(materials, '评估');
-    if (readings.length === 0 && base === (this.#initialEvaluation.definition.clarificationBase ?? this.#initialEvaluation.definition)) return this.#initialEvaluation;
-    const definition = readings.length === 0 ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, frozenPromptDigest));
+    if (scopes === undefined && readings.length === 0 && base === (this.#initialEvaluation.definition.clarificationBase ?? this.#initialEvaluation.definition)) return this.#initialEvaluation;
+    const material = readings.length === 0 ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, scopes === undefined ? frozenPromptDigest : undefined));
+    const definition = seriesScopeKindDefinition(this.#authority, material, scopes);
     const make = (): BaselineAnalysisStore => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#initialEvaluation.launch);
       return ledger;
     };
-    return readings.some((reading) => reading.refusal !== null) ? make() : this.#initialEvaluationLedgers.obtain(definition.promptContractDigest, make);
+    const seriesRule = scopes === undefined ? '' : sha256(canonicalJson(this.#initialEvaluation.launch.policy?.providerProcessing.admittedRules ?? []));
+    return readings.some((reading) => reading.refusal !== null) ? make() : this.#initialEvaluationLedgers.obtain(`${definition.promptContractDigest}\n${canonicalJson(scopes ?? null)}\n${seriesRule}`, make);
   }
 
   /** The profile contract a ledger's Task snapshots its profile under: the base a plan's references wrap, or the contract itself. */
   #initialBaseDigest(ledger: BaselineAnalysisStore): string {
-    return ledger.definition.materialReferences?.basePromptContractDigest ?? ledger.definition.promptContractDigest;
+    const definition = ledger.definition.clarificationBase ?? ledger.definition;
+    return liveSeriesContract(definition)?.base.materialReferences?.basePromptContractDigest ?? liveSeriesContract(definition)?.base.promptContractDigest
+      ?? definition.materialReferences?.basePromptContractDigest ?? definition.promptContractDigest;
   }
 
   /**
@@ -10633,7 +10736,9 @@ export class EditorialStore {
     requireStore(sha256(asString(row.canonical_json)) === row.sha256, 'EVALUATION_PROFILE_DAMAGED', '初评任务计划已损坏。');
     const envelope = parseStoredJson(asString(row.canonical_json), '初评任务计划已损坏。');
     requireStore(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'EVALUATION_PROFILE_DAMAGED', '初评任务方案快照缺失。');
-    const baseDigest = this.#evaluationMaterialPlan(taskIntentId)?.baseDigest ?? envelope.promptContractDigest;
+    const scope = frozenSeriesScopes(this.#authority, taskIntentId);
+    const baseDigest = this.#evaluationMaterialPlan(taskIntentId)?.baseDigest ?? (scope === undefined ? envelope.promptContractDigest :
+      asString(this.#authority.prepare('SELECT prompt_contract_sha256 FROM initial_evaluation_tasks WHERE task_intent_id = ? ORDER BY rowid DESC LIMIT 1').get(taskIntentId)!.prompt_contract_sha256));
     const snapshot = this.#evaluationProfiles.taskProfile(taskIntentId, baseDigest);
     if (snapshot !== null) return snapshot;
     requireStore(baseDigest === this.#initialEvaluation.definition.promptContractDigest, 'EVALUATION_PROFILE_DAMAGED', '初评任务方案快照缺失。');
@@ -10647,7 +10752,7 @@ export class EditorialStore {
     if (frozen !== null) {
       requireStore(frozen.baseDigest === this.#initialBaseDefinition(profile).promptContractDigest, 'ANALYSIS_RECORD_INVALID', '初评参考资料的基础契约与计划不一致。');
     }
-    return this.#initialLedger(profile, frozen?.boundary, frozen?.promptDigest);
+    return this.#initialLedger(profile, frozen?.boundary, frozen?.promptDigest, frozenSeriesScopes(this.#authority, taskIntentId));
   }
 
   /**
@@ -10686,20 +10791,26 @@ export class EditorialStore {
 
   /** The Book's AI7 初评 Task, latest Result Set Revision and history, as the evaluation kind's ledger holds them. */
   inspectInitialEvaluation(bookId: string, progress?: ProgressReader, revisionId: string | null = null): InitialEvaluationProjection {
-    return this.#analysisCall(() => this.initialEvaluationLedgerForBook(bookId).inspect(bookId, progress, revisionId)) as InitialEvaluationProjection;
+    const projection = this.#analysisCall(() => this.initialEvaluationLedgerForBook(bookId).inspect(bookId, progress, revisionId)) as InitialEvaluationProjection;
+    const scopes = projection.runSourceScope?.seriesScopes;
+    if (scopes !== undefined && projection.taskIntent !== null && (projection.run?.state === 'completed' || projection.run?.state === 'completed-with-gaps') &&
+        seriesScopeChanged(this.#authority, scopes, projection.taskIntent.createdAt) !== null) return { ...projection, historicalMarker: HISTORICALLY_AFFECTED_RESULT_MARKER };
+    return projection;
   }
 
   /**
    * 准备 AI7 初评: the evaluation kind's Task in the mode that applies — the first 初评, or 重新初评 once one settled — whose
    * goal is the kind's own fixed text. The preparation is a cooperative job; its plan opens in the Task Drawer.
    */
-  createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null): AnalysisPreparationResult<InitialEvaluationProjection> {
+  createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null, seriesId: string | null = null): AnalysisPreparationResult<InitialEvaluationProjection> {
+    requireStore(seriesId === null || seriesKnowledgeAllowed(launchPolicy, INITIAL_EVALUATION_KIND), 'SERIES_SCOPE_UNAVAILABLE', SERIES_POLICY_CLOSED);
+    const scopes = seriesId === null ? undefined : [freezeSeriesScope(this.#authority, bookId, seriesId)];
     this.#requireEvaluationMaterialScope(materialIds.length > 0, INITIAL_EVALUATION_KIND);
     this.#requireInitialEvaluationScope();
     const current = this.inspectInitialEvaluation(bookId);
     // One reading of the house profile gives both the contract the Task is prepared under and the snapshot it keeps (Issue #427).
     const profile = this.#evaluationProfiles.current();
-    const ledger = this.#initialLedger(profile, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) });
+    const ledger = this.#initialLedger(profile, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) }, undefined, scopes);
     const mode = current.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again';
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
@@ -10744,6 +10855,11 @@ export class EditorialStore {
   ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
     this.#requireLedgerKindScope('initial-evaluation', bookId, taskIntentId);
     const ledger = this.#ledgerTaskOf('initial-evaluation', bookId, taskIntentId);
+    const scopes = ledger.definition.seriesScopes;
+    if (scopes !== undefined) {
+      requireStore(canonicalJson(scopes) === canonicalJson(scopes.map((scope) => freezeSeriesScope(this.#authority, bookId, scope.seriesId))),
+        'SERIES_SCOPE_CHANGED', '书系参考范围已变化；请重新准备计划。');
+    }
     const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
     return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
   }
@@ -10836,7 +10952,8 @@ export class EditorialStore {
     }
     const runState = projection.run?.state ?? null;
     return {
-      task: projection.taskIntent === null ? null : { taskIntentId: projection.taskIntent.taskIntentId, state: projection.state, label: analysisTaskStateLabel(projection) },
+      task: projection.taskIntent === null ? null : { taskIntentId: projection.taskIntent.taskIntentId, state: projection.state, label: analysisTaskStateLabel(projection),
+        ...(projection.historicalMarker === undefined ? {} : { historicalMarker: projection.historicalMarker }) },
       prepare: this.#evaluationLiveRefused(INITIAL_EVALUATION_KIND)
         ? { allowed: false, reason: INITIAL_EVALUATION_LIVE_UNAVAILABLE }
         : runIsActive(runState)
@@ -18242,8 +18359,8 @@ export class EditorialStore {
     const groups = seriesMembershipImpact(input.kind, {
       seriesTitle: series.title,
       bookTitle,
-      // No Task kind can name a Series in its scope before Series-scope pins (Issue #64, S29): none is authorized or running.
-      seriesScopedRuns: 0,
+      // Runs whose authorized plan froze this Series and have not ended (Issue #64, 7b; SER-006).
+      seriesScopedRuns: this.#series.liveTaskRuns(series.seriesId),
       learningMaterials,
       learningDecided,
       knowledgeFromBook: this.#seriesKnowledge.itemsFromBook(series.seriesId, input.bookId),
@@ -18264,6 +18381,7 @@ export class EditorialStore {
 
   #seriesProjection(series: StoredSeries): SeriesProjection {
     const members = this.#seriesMembersPage(series.seriesId, null);
+    const tasks = this.#series.tasks(series.seriesId);
     const history = this.#seriesHistoryPage({ seriesId: series.seriesId }, null);
     return {
       ...series,
@@ -18276,6 +18394,7 @@ export class EditorialStore {
       historyNext: history.nextCursor,
       knowledge: this.#seriesKnowledgeProjection(series.seriesId),
       exclusions: this.#seriesExclusionsProjection(series.seriesId),
+      ...(tasks.length === 0 ? {} : { tasks }),
     };
   }
 
@@ -18463,13 +18582,12 @@ export class EditorialStore {
    * exclusion in force reaches of the Series material the Run froze, or `null`. A record it cannot read stops the Run rather
    * than let it read past a restriction it could not check.
    */
-  seriesReadGuard(runRecordId: string): string | null {
+  seriesScopeGuard(runRecordId: string): string | null {
     this.#assertAvailable();
     try {
-      return this.#reviewRuns.seriesReadGuard(runRecordId);
-    } catch (error) {
-      if (error instanceof ReviewRunError || error instanceof SeriesExclusionError) return '无法读取的书系检索排除记录';
-      throw error;
+      return this.#reviewRuns.seriesScopeGuard(runRecordId);
+    } catch {
+      return '无法读取的书系检索排除记录';
     }
   }
 
@@ -18552,6 +18670,30 @@ export class EditorialStore {
     }
   }
 
+  /**
+   * The Series-scoped Runs that are not a Review Run's (Issue #64, 7b; SER-022, SER-026): each whose frozen scope a target
+   * reaches, as authorized, waiting or running, or as completed. A Review Run's are read from its own snapshot; a Task not yet
+   * authorized is no Run, and its authorization re-reads the scope.
+   */
+  #seriesScopedTaskReach(seriesId: string, covers: (material: SeriesKnowledgeMaterial) => boolean): {
+    readonly active: ReadonlyArray<{ readonly taskIntentId: string; readonly route: string }>;
+    readonly completed: ReadonlyArray<{ readonly taskIntentId: string; readonly route: string }>;
+  } {
+    const active: Array<{ taskIntentId: string; route: string }> = [];
+    const completed: Array<{ taskIntentId: string; route: string }> = [];
+    for (const task of this.#series.tasks(seriesId)) {
+      if (task.runRecordId === null || isReviewCategoryKindId(task.kind)) continue;
+      const scopes = frozenSeriesScopes(this.#authority, task.taskIntentId);
+      if (scopes === undefined || !seriesScopeMaterials(this.#authority, scopes).some(covers)) continue;
+      const route = `《${task.bookTitle}》${task.kind === INITIAL_EVALUATION_KIND ? 'AI7 初评' : task.title}`;
+      const state = asString((this.#authority.prepare('SELECT state FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1')
+        .get(task.runRecordId) as SqlRow).state);
+      if (state === 'completed' || state === 'completed-with-gaps') completed.push({ taskIntentId: task.taskIntentId, route });
+      else if (!['failed', 'interrupted', 'cancelled', 'blocked-before-dispatch'].includes(state)) active.push({ taskIntentId: task.taskIntentId, route });
+    }
+    return { active, completed };
+  }
+
   #seriesExclusionPreview(input: PreviewSeriesExclusionInput): {
     preview: SeriesExclusionPreviewProjection;
     prior: StoredExclusion | null;
@@ -18590,7 +18732,8 @@ export class EditorialStore {
     const stillNamed: string[] = [];
     let stillCount = 0;
     for (const item of this.#seriesKnowledge.items(series.seriesId)) {
-      const material = { seriesId: series.seriesId, itemId: item.itemId, knowledgeClass: item.knowledgeClass, sourceBookId: item.current.provenance?.bookId ?? null };
+      const material = knowledgeMaterial(this.#authority, { seriesId: series.seriesId, itemId: item.itemId, revisionId: item.current.revisionId });
+      requireStore(material !== null, 'SERIES_SCOPE_INVALID', '书系知识来源记录无法核对。');
       if (!covers(material)) continue;
       itemCount += 1;
       if (itemsNamed.length < NAMED_EXCLUSION_ENTRIES) itemsNamed.push(`「${item.subject}」`);
@@ -18610,8 +18753,11 @@ export class EditorialStore {
     // One entry per Review Run, even where two Books share a title (Issue #64 review).
     const routes = (runs: ReadonlyArray<{ readonly reviewRunId: string; readonly route: string }>): string[] =>
       [...new Map(runs.map((run) => [run.reviewRunId, run.route] as const)).values()];
-    const runRoutes = routes(reach.active);
-    const completedRoutes = routes(reach.completed);
+    // A Series-scoped Run outside 审阅 — an AI7 初评 that froze the Series — is named beside them (Issue #64, 7b; SER-022).
+    const tasks = input.action === 'add' ? this.#seriesScopedTaskReach(series.seriesId, covers) : { active: [], completed: [] };
+    if (tasks.active.length + tasks.completed.length > 0) governing.update(canonicalJson({ kind: 'task-runs', active: tasks.active, completed: tasks.completed }));
+    const runRoutes = [...routes(reach.active), ...tasks.active.map((task) => task.route)];
+    const completedRoutes = [...routes(reach.completed), ...tasks.completed.map((task) => task.route)];
     const groups = seriesExclusionImpact(input.action, {
       seriesTitle: series.title,
       target,

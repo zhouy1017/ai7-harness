@@ -1419,6 +1419,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-credential-removed',
     'consistency-offered',
     'consistency-review-run',
+    'series-scope-review-run',
     'consistency-marks-on-manuscript',
     'consistency-member-reviewed',
     // Issue #64 (S29b): 书系检索排除 — a held 书系一致性 Run, the four-part impact preview, the exclusion in force, the guard
@@ -1428,6 +1429,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'exclusion-preview',
     'exclusion-recorded',
     'exclusion-held-run-stopped',
+    'series-exclusion-payload-refused',
     'exclusion-plan-leaves-out',
     'exclusion-marker',
     'j14-exclusions-keyboard',
@@ -1453,12 +1455,15 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Issue #66 (S31b): a 书系一致性 procedure whose Series step the editor chooses apart, and how it fits a Book in no Series.
     'procedure-series-capture',
     'procedure-series-chosen-apart',
+    'procedure-recommendation',
+    'procedure-series-step-optin',
     // Issue #423 (S77 deferred items a and d): the house's procedure on a selection from the menu, and the card's 跳到所选文字.
     'procedure-selection-run',
     'procedure-series-mismatch',
     'capture-proposal-file',
     'capture-restart',
     'j14-capture-keyboard-reflow-forced-colors',
+    'skill-import-validate-enable',
     'zero-activity',
   ]),
 });

@@ -26,7 +26,11 @@ export function liveReviewRule(
   policy: LaunchPolicyProjection,
   entry: ReviewCategoryConfigurationEntry,
 ): ReviewProviderRule | null {
-  if (entry.seriesKnowledge !== undefined || entry.categoryId === 'publication-risk') return null;
+  if (entry.seriesKnowledge !== undefined) {
+    const rule = liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic', 'series-knowledge-excerpt']);
+    return entry.categoryId === 'series-consistency' && entry.executor === 'review-category-contract' && rule?.seriesKnowledgeAllowed === true ? rule : null;
+  }
+  if (entry.categoryId === 'publication-risk') return null;
   if (entry.searchEngine) {
     if (!['factual-review', 'academic-integrity'].includes(entry.categoryId)) return null;
     const rule = liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic']);

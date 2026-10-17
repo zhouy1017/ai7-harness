@@ -979,7 +979,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 准备 AI7 初评: the route's Book; the mode is the service's to decide from the Book's 初评 so far.
     case 'prepareInitialEvaluation': {
-      const input = requireInputWithOptional(value.input, ['bookId'], ['materialIds'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['materialIds', 'seriesId'], tentativeId);
+      if (!optionalOrNull(input, 'seriesId', validUuid)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every(validUuid)))) throw new ProtocolError(tentativeId);
       break;
     }
@@ -1532,7 +1533,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId'], tentativeId);
+      if (!optionalOrNull(input, 'seriesId', validUuid)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||
           !validReviewRunScope(input.scope) ||
           !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= MAX_WRITING_MATERIALS && input.materialIds.every(validUuid))) ||
@@ -1556,6 +1558,35 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           (input.procedureId !== null && !validUuid(input.procedureId))) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    case 'importSkillPackage': {
+      // Exactly one: the picked path to disclose, or the acquisition the editor keeps.
+      const input = requireInput(value.input, ['path', 'keep'], tentativeId);
+      const disclose = input.keep === null && isBoundedString(input.path, 2048) && input.path.length > 0;
+      if (!disclose && !(input.path === null && validUuid(input.keep))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'validateImportedSkill': {
+      const input = requireInput(value.input, ['revisionId'], tentativeId);
+      if (!validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'installImportedSkill':
+    case 'enableImportedSkill': {
+      const input = requireInput(value.input, op === 'enableImportedSkill' ? ['revisionId', 'bookId', 'previewDigest'] : ['revisionId', 'previewDigest'], tentativeId);
+      if (!validUuid(input.revisionId) || !isBoundedString(input.previewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.previewDigest) || (op === 'enableImportedSkill' && !validUuid(input.bookId))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectImportedSkills': {
+      const input = requireInput(value.input, ['revisionId', 'before'], tentativeId);
+      if ((input.revisionId !== null && !validUuid(input.revisionId)) || (input.before !== null && !validUuid(input.before))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'recommendProcedures': {
+      const input = requireInput(value.input, ['bookId', 'goal', 'taskKind', 'scope', 'categoryIds'], tentativeId);
+      if (!validUuid(input.bookId) || !isBoundedString(input.goal, 2000) || !['review-run', 'baseline-analysis', 'writing', 'unclassified'].includes(String(input.taskKind)) ||
+        !['whole', 'chapters', 'selection'].includes(String(input.scope)) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 0)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectCapturedProcedure':

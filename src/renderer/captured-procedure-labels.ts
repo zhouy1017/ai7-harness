@@ -258,7 +258,9 @@ export function procedureGuidelineLine(guideline: CapturedProcedureGuidelineProj
 /** The ceiling in words (ADR 0087 §4): what a Run prepared from the version may do, and no more. */
 export function procedureCeilingLines(ceiling: CapturedProcedureDocument['authorityCeiling']): string[] {
   return [
-    '只读当前这本书的稿件；书系、其他书与社级资料都要在任务里另行选择和授权',
+    ceiling.runSourceScope === 'series'
+      ? '当前这本书与书系资料；书系一致性须由你另行勾选，资料与范围在每次任务里另行选择和授权'
+      : '只读当前这本书的稿件；书系、其他书与社级资料都要在任务里另行选择和授权',
     `输出：${ceiling.outputs.map((output) => OUTPUT_LABELS[output]).join('、')}；修改建议只是建议，接受与应用都由你决定`,
     ceiling.model ? '会调用模型，按每次的计划与授权' : '不调用模型',
     ceiling.searchEngine ? '会使用搜索引擎' : '不使用搜索引擎',
