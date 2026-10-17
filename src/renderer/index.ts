@@ -841,7 +841,7 @@ window.addEventListener('focus', () => globalAttentionReader.refresh());
 /**
  * The shell (Issue #934, wave 11 slice 11a; editor-surfaces §0.3): the two-level sidebar and the context header around
  * `#screen`. Every way it leads goes through `leaveThen`, so the surface on screen settles what it must first, exactly as
- * its own ways out do; a Book section re-takes the Book's route first, so it opens in the window that shows that Book.
+ * its own ways out do; a Book section checks the window's owned route before opening within that Book.
  */
 const shellPreferences = new ShellPreferences(window.ai7);
 const shell = mountShell({
@@ -6115,15 +6115,16 @@ function renderSettingsHub(): void {
 }
 
 /**
- * A section of the current Book's groups, from the sidebar (Issue #934; IA-012): the Book's route is taken again first, so
- * the section opens in the window that shows the Book; 稿件 enters at the position the editor left (RET-002), as 书库 does.
+ * A section of the current Book's groups, from the sidebar (Issue #934; IA-012): reuse the window's owned Book route so
+ * section changes preserve its manuscript capabilities. Reassigning even the same Book deliberately revokes those in main.
+ * A different route still goes through the window owner; 稿件 enters at the remembered position (RET-002), as 书库 does.
  * 发现 is ②A's judged items until the Book-level aggregate exists (IA-013, a follow-up); 历史与恢复 is 工作概览's records.
  */
 async function openBookSection(book: ShellBookEntry, section: ShellBookSection): Promise<void> {
   const recoveryReturn = currentRecoveryReturn();
   setStatus(SHELL_LABELS.openingBook, 'busy');
   try {
-    await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) => {
+    const openSection = async (route: ResolvedBookWorkbenchRoute): Promise<void> => {
       const { bookId, bookTitle } = route;
       if (section === 'manuscript') await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle }, recoveryReturn);
       else if (section === 'review') renderBookReview(bookId, bookTitle);
@@ -6146,7 +6147,10 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
           }
         }
       }
-    });
+    };
+    const ownedRoute = await window.ai7.getBookWorkbenchRoute();
+    if (ownedRoute?.kind === 'book' && ownedRoute.bookId === book.bookId) await openSection(ownedRoute);
+    else await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, openSection);
   } catch (error) {
     setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
   }
