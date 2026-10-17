@@ -89,7 +89,7 @@ describe('reserved keys', () => {
 
   it('refuses the keys that type, move the caret or edit the text', () => {
     for (const platform of PLATFORMS) {
-      for (const text of ['A', 'Shift+A', 'Space', 'Enter', 'Escape', 'Tab', 'ArrowLeft', 'Mod+C', 'Mod+V', 'Mod+X', 'Mod+A', 'Mod+Z', 'Mod+Y', 'Mod+ArrowLeft', 'Mod+Shift+Home', 'Mod+Backspace']) {
+      for (const text of ['A', 'Shift+A', 'Space', 'Enter', 'Escape', 'Tab', 'ArrowLeft', 'Mod+C', 'Mod+V', 'Mod+X', 'Mod+A', 'Mod+Z', 'Mod+Y', 'Mod+Shift+Y', 'Mod+ArrowLeft', 'Mod+Shift+Home', 'Mod+Backspace']) {
         expect(reservedReason(chord(text), platform), `${platform} ${text}`).toBe('editable-text');
       }
     }
@@ -173,18 +173,18 @@ describe('conflicts', () => {
 describe('恢复默认', () => {
   it('restores one command, and the whole section', () => {
     let bindings = withBinding({}, 'nav.library', 'Mod+Shift+L', 'win32');
-    bindings = withBinding(bindings, 'nav.series', 'Mod+Shift+Y', 'win32');
-    expect(bindings).toEqual({ 'nav.library': 'Mod+Shift+L', 'nav.series': 'Mod+Shift+Y' });
+    bindings = withBinding(bindings, 'nav.series', 'Mod+Shift+U', 'win32');
+    expect(bindings).toEqual({ 'nav.library': 'Mod+Shift+L', 'nav.series': 'Mod+Shift+U' });
     const one = withoutBinding(bindings, 'nav.library');
-    expect(one).toEqual({ 'nav.series': 'Mod+Shift+Y' });
+    expect(one).toEqual({ 'nav.series': 'Mod+Shift+U' });
     expect(effectiveSequence('nav.library', one, 'win32')).toBe('Alt+2');
     expect(defaultBindings()).toEqual({});
     expect(effectiveSequence('nav.series', defaultBindings(), 'win32')).toBe('Alt+3');
   });
 
   it('keeps only what differs from the platform default', () => {
-    expect(normalizedBindings({ 'nav.library': 'Alt+2', 'nav.series': 'Mod+Shift+Y', 'gone.command': 'Alt+8' }, 'win32')).toEqual({ 'nav.series': 'Mod+Shift+Y' });
-    expect(withBinding({ 'nav.series': 'Mod+Shift+Y' }, 'nav.series', 'Alt+3', 'win32')).toEqual({});
+    expect(normalizedBindings({ 'nav.library': 'Alt+2', 'nav.series': 'Mod+Shift+U', 'gone.command': 'Alt+8' }, 'win32')).toEqual({ 'nav.series': 'Mod+Shift+U' });
+    expect(withBinding({ 'nav.series': 'Mod+Shift+U' }, 'nav.series', 'Alt+3', 'win32')).toEqual({});
   });
 });
 

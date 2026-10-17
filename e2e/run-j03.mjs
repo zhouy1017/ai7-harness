@@ -210,7 +210,7 @@ async function runSettingsPages(renderer, cancellation) {
   const bindings = `window.ai7.getPreferences().then((preferences)=>JSON.stringify(preferences.values['keyboard.bindings']))`;
   const libraryDefault = darwin ? 'Command+Option+2' : 'Alt+2';
   const seriesDefault = darwin ? 'Command+Option+3' : 'Alt+3';
-  const seriesRemapped = darwin ? 'Command+Shift+Y' : 'Ctrl+Shift+Y';
+  const seriesRemapped = darwin ? 'Command+Shift+U' : 'Ctrl+Shift+U';
   const alt = darwin ? 5 : 1;
 
   at('usage-settings');
@@ -255,16 +255,16 @@ async function runSettingsPages(renderer, cancellation) {
 
   at('keyboard-remap-saved');
   cancellation.throwIfRequested();
-  await chord('KeyY', 'y', mod | 8);
+  await chord('KeyU', 'u', mod | 8);
   await waitFor(renderer, `Array.from(document.querySelectorAll('.keyboard-capture button')).find((node)=>node.textContent==='设为快捷键' && !node.disabled) && document.querySelector('.keyboard-capture-chords')?.textContent.includes(${JSON.stringify(seriesRemapped)})`, 'keyboard-captured');
   await assertRenderer(renderer, `(() => { Array.from(document.querySelectorAll('.keyboard-capture button')).find((node)=>node.textContent==='设为快捷键').click(); return true; })()`, 'keyboard-apply');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesRemapped)} && !document.querySelector('[data-keyboard-capture]')`, 'keyboard-label-updated');
-  await waitForValue(renderer, `${bindings}.then((held)=>held==='{"nav.series":"Mod+Shift+Y"}')`, 'keyboard-binding-kept');
+  await waitForValue(renderer, `${bindings}.then((held)=>held==='{"nav.series":"Mod+Shift+U"}')`, 'keyboard-binding-kept');
 
   at('keyboard-ime-guard');
   cancellation.throwIfRequested();
   // The Command Guard holds the remapped chord back while a composition is open, says so, and moves nowhere.
-  await assertRenderer(renderer, `(() => { document.activeElement?.blur?.(); window.dispatchEvent(new KeyboardEvent('keydown',{key:'Y',code:'KeyY',ctrlKey:${!darwin},metaKey:${darwin},shiftKey:true,isComposing:true,bubbles:true,cancelable:true})); return true; })()`, 'keyboard-ime-press');
+  await assertRenderer(renderer, `(() => { document.activeElement?.blur?.(); window.dispatchEvent(new KeyboardEvent('keydown',{key:'U',code:'KeyU',ctrlKey:${!darwin},metaKey:${darwin},shiftKey:true,isComposing:true,bubbles:true,cancelable:true})); return true; })()`, 'keyboard-ime-press');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('输入法组合尚未结束') && document.querySelector('[data-screen="keyboard"]')`, 'keyboard-ime-held');
 
   at('keyboard-remap-dispatch');
@@ -273,7 +273,7 @@ async function runSettingsPages(renderer, cancellation) {
   await chord('Digit3', '3', alt | (darwin ? 4 : 0));
   await new Promise((resolveWait) => setTimeout(resolveWait, 300));
   await assertRenderer(renderer, `document.querySelector('[data-screen="keyboard"]')`, 'keyboard-old-chord-idle');
-  await chord('KeyY', 'y', mod | 8);
+  await chord('KeyU', 'u', mod | 8);
   await waitFor(renderer, `document.querySelector('[data-screen="series-list"]')`, 'keyboard-new-chord-opens-series');
 
   at('keyboard-restore-default');
@@ -285,7 +285,7 @@ async function runSettingsPages(renderer, cancellation) {
   await clickSelector(renderer, '[data-keyboard-reset="nav.series"]', 'keyboard-reset-one');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-one-restored');
   // 全部恢复默认 for the whole section.
-  await renderer.evaluate(`window.ai7.savePreference({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+Y', 'nav.knowledge': 'Mod+Shift+K' } })`);
+  await renderer.evaluate(`window.ai7.savePreference({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+U', 'nav.knowledge': 'Mod+Shift+K' } })`);
   await click(renderer, '返回', 'keyboard-back');
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'keyboard-back-library');
   await click(renderer, '键盘与无障碍', 'keyboard-reopen-all');

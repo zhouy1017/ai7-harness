@@ -60,9 +60,9 @@ describe('PreferencesStore', () => {
     const store = new PreferencesStore(path);
     await Promise.all([
       store.save({ key: 'usage.unitPrices', value: { 'opencode-go': price } }),
-      store.save({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+Y' } }),
+      store.save({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+U' } }),
     ]);
-    expect((await store.read()).values).toEqual({ 'usage.unitPrices': { 'opencode-go': price }, 'keyboard.bindings': { 'nav.series': 'Mod+Shift+Y' } });
+    expect((await store.read()).values).toEqual({ 'usage.unitPrices': { 'opencode-go': price }, 'keyboard.bindings': { 'nav.series': 'Mod+Shift+U' } });
   });
 });
 
