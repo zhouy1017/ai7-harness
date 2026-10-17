@@ -666,6 +666,15 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // 资料索引 of HTML, EPUB, ODT and RTF (Issue #428), and a PDF's text layer with page anchors (Issue #892).
     'knowledge-library-index-formats',
     'knowledge-earlier-exemplar-import',
+    // 外部 Skill 的更新 (Issue #89, S33): check from a file, an inert candidate, explicit adoption, the Artifact Update Rule, rollback.
+    'skill-update-seed',
+    'skill-update-check-from-file',
+    'skill-update-candidate-inert',
+    'skill-update-adopt',
+    'skill-update-new-revision-not-enabled',
+    'skill-update-rule-create',
+    'skill-update-rule-clean-auto-adopt',
+    'skill-update-rollback-current-selection',
     'zero-activity',
   ]),
   'J-03': Object.freeze([

@@ -461,11 +461,15 @@ async function constructPredecessorV12(dataRoot, bookId) {
     // Every post-v12 table. A table left off is not caught here: the open accepts a predecessor that kept a later layer's
     // tables (`includeMaterialIndexTables ||= committed(…)` in bounded-manuscript.ts), so that mutant survives by design.
     // Synchronized delta with Issue #901: revision 77's four factual verification relations lead the list.
-    // Synchronized delta with Issue #922 (slice 7f): revision 82's three 自定义分析维度 relations come first.
-    // Revision 81's four imported Skill relations follow, then revision 80's three Task Intent Draft relations.
+    // Synchronized delta with Issue #89: revision 83's three imported Skill update relations lead the list, ahead of revision 81's four.
+    // Synchronized delta with #66: revision 81's four imported Skill relations follow them.
+    // Synchronized delta with Issue #423 (slice 7a): revision 80's three Task Intent Draft relations follow them.
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE imported_skill_update_candidates;
+      DROP TABLE imported_skill_current_selections;
+      DROP TABLE imported_skill_update_rules;
       DROP TABLE custom_analysis_dimension_states;
       DROP TABLE custom_analysis_dimension_versions;
       DROP TABLE custom_analysis_dimensions;
@@ -1475,6 +1479,133 @@ async function main() {
     await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-items select'); select.value='excluded'; return true; })()`, 'earlier-exemplar-exclude');
     await click(renderer, '记录学习准入', 'earlier-exemplar-eligibility');
     await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('学习准入：明确排除')`, 'earlier-exemplar-excluded');
+
+    // ---- 外部 Skill 的更新 (Issue #89, S33; ADR 0090 §3, ADR 0045 § Update and rollback; REUSE-032 to REUSE-035) ----
+    // Synthetic Skill packages only: tests/fixtures/skills/plain (and its v2/v3 variants). The picker answers one choice per
+    // window, so each package is read in a window launched with it; the native dialog is not driven. Nothing here fetches or runs.
+    const SKILLS = resolve(ROOT, 'tests', 'fixtures', 'skills');
+    const openSkills = async (label) => {
+      await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, `${label}-ready`);
+      await click(renderer, '知识库', `${label}-knowledge`);
+      await click(renderer, '工序与规则', `${label}-rules`);
+      await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('[data-skill-action="import"]')`, `${label}-skills`);
+    };
+    const relaunchWith = async (pickerPath, name) => {
+      await closeBrowser();
+      manager = await launch(pickerPath);
+      renderer = await waitForRenderer(manager, `${name}-window`);
+      await openSkills(name);
+    };
+
+    at('skill-update-seed');
+    await relaunchWith(resolve(SKILLS, 'plain'), 'skill-update-seed');
+    await clickSelector(renderer, '[data-skill-action="import"]', 'skill-seed-pick');
+    await waitFor(renderer, `document.querySelector('[data-skill-acquisition]')?.textContent.includes('尚未保留')`, 'skill-seed-disclosed');
+    await clickSelector(renderer, '[data-skill-action="keep"]', 'skill-seed-keep');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='pending-validation'`, 'skill-seed-kept');
+    const skillId = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillOwner`);
+    const firstRevision = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillDetail`);
+    requireJourney(/^[0-9a-f-]{36}$/u.test(skillId ?? '') && /^[0-9a-f-]{36}$/u.test(firstRevision ?? ''), 'skill-seed-identities', { skillId, firstRevision });
+    await clickSelector(renderer, '[data-skill-action="validate"]', 'skill-seed-validate');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='validated'`, 'skill-seed-validated');
+    await clickSelector(renderer, '[data-skill-action="install"]', 'skill-seed-install');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='installed-disabled'`, 'skill-seed-installed');
+    await clickSelector(renderer, '[data-skill-action="books"]', 'skill-seed-books');
+    await waitFor(renderer, `document.querySelectorAll('[data-skill-field="book"] option').length>1`, 'skill-seed-book-options');
+    await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-skill-field="book"]'); select.value=select.options[1].value; select.dispatchEvent(new Event('change',{bubbles:true})); return select.value!==''; })()`, 'skill-seed-book-chosen');
+    await clickSelector(renderer, '[data-skill-action="enable"]', 'skill-seed-enable');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='enabled'`, 'skill-seed-enabled');
+
+    at('skill-update-check-from-file');
+    await relaunchWith(resolve(SKILLS, 'plain-v2-text'), 'skill-update-check');
+    await clickSelector(renderer, '[data-skill-action="inspect"]', 'skill-check-open-card');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillCurrent==='true' && document.querySelector('[data-skill-action="check-update"]')`, 'skill-check-card');
+    await clickSelector(renderer, '[data-skill-action="check-update"]', 'skill-check-pick');
+    // The package is disclosed against the Skill it would update, with nothing kept yet.
+    await waitFor(renderer, `document.querySelector('[data-skill-update-check]')?.textContent.includes('尚未保留')`, 'skill-check-disclosed');
+    await assertRenderer(renderer, `(async () => {
+      const panel=document.querySelector('[data-skill-update-check]'); const text=panel?.textContent??'';
+      const read=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(firstRevision)},before:null});
+      return text.includes('synthetic-style-review') && text.includes('1.1.0') && text.includes('这是一个新的版本') && /SHA-256 [0-9a-f]{64}/.test(text) && text.includes('Run 可读范围：无') &&
+        read.candidates.length===0 && read.history.length===1 && !document.querySelector('[data-skill-candidate]');
+    })()`, 'skill-check-disclosed-nothing-kept');
+
+    at('skill-update-candidate-inert');
+    await clickSelector(renderer, '[data-skill-action="keep-update"]', 'skill-check-keep');
+    await waitFor(renderer, `document.querySelector('[data-skill-candidate]')?.dataset.skillDisposition==='clean' && document.querySelector('[data-skill-candidate]')?.dataset.skillCandidateStatus==='open'`, 'skill-check-candidate');
+    // One inert candidate: the three-way summary and its per-file list; the revision, its state and its enablement are as they were.
+    await assertRenderer(renderer, `(async () => {
+      const card=document.querySelector('[data-skill-candidate]'); const text=card?.textContent??'';
+      const read=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(firstRevision)},before:null});
+      return text.includes('三方对照') && text.includes('之前的来源快照') && text.includes('当前工作修订') && text.includes('新的来源快照') && text.includes('无冲突、校验通过、未扩权') &&
+        card.querySelector('[data-skill-file="SKILL.md"]')?.dataset.skillFileChange==='upstream' && read.candidates.length===1 && read.candidates[0].status==='open' &&
+        read.history.length===1 && read.history[0].current && read.history[0].revisionId===${JSON.stringify(firstRevision)} && read.revision.state==='enabled' && read.revision.enabledBooks.length===1 &&
+        read.rule.active===false && read.skills[0].revisionId===${JSON.stringify(firstRevision)};
+    })()`, 'skill-check-nothing-else-changed');
+
+    at('skill-update-adopt');
+    await clickSelector(renderer, '[data-skill-action="adopt"]', 'skill-adopt');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='pending-validation' && document.querySelector('[data-skill-detail]')?.dataset.skillCurrent==='true' && document.querySelector('[data-skill-detail]')?.dataset.skillDetail!==${JSON.stringify(firstRevision)}`, 'skill-adopted-new-revision');
+    const secondRevision = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillDetail`);
+
+    at('skill-update-new-revision-not-enabled');
+    // The adopted revision is first 待验证 and not enabled; the earlier one keeps its own ledger and is no longer current.
+    await assertRenderer(renderer, `(async () => {
+      const detail=document.querySelector('[data-skill-detail]');
+      const now=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(secondRevision)},before:null});
+      const earlier=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(firstRevision)},before:null});
+      return !detail.querySelector('[data-skill-action="install"], [data-skill-action="enable"]') && now.revision.ordinal===2 && now.revision.enabledBooks.length===0 &&
+        now.revision.previousRevisionId===${JSON.stringify(firstRevision)} && now.history.length===2 && now.history[0].current && now.history[0].origin==='adopt' && !now.history[1].current &&
+        earlier.revision.state==='enabled' && earlier.revision.enabledBooks.length===1 && now.candidates[0].status==='adopted' && now.candidates[0].adoptedBy==='editor' &&
+        document.querySelector('[data-skill-updates]')?.textContent.includes('当前');
+    })()`, 'skill-adopted-not-enabled');
+    await clickSelector(renderer, '[data-skill-action="validate"]', 'skill-adopted-validate');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='validated'`, 'skill-adopted-validated');
+
+    at('skill-update-rule-create');
+    await clickSelector(renderer, '[data-skill-field="rule-confirm"]', 'skill-rule-confirm');
+    await waitFor(renderer, `document.querySelector('[data-skill-action="rule-create"]')?.disabled===false`, 'skill-rule-confirmed');
+    await clickSelector(renderer, '[data-skill-action="rule-create"]', 'skill-rule-create');
+    await waitFor(renderer, `document.querySelector('[data-skill-rule]')?.dataset.skillRule==='active'`, 'skill-rule-active');
+    await assertRenderer(renderer, `(async () => {
+      const read=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(secondRevision)},before:null});
+      return read.rule.active===true && read.rule.history.length===1 && read.revision.enabledBooks.length===0 && document.querySelector('[data-skill-rule]').textContent.includes('不会安装或启用任何东西');
+    })()`, 'skill-rule-recorded');
+
+    at('skill-update-rule-clean-auto-adopt');
+    await relaunchWith(resolve(SKILLS, 'plain-v3-text'), 'skill-update-rule');
+    await clickSelector(renderer, '[data-skill-action="inspect"]', 'skill-rule-open-card');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillDetail===${JSON.stringify(secondRevision)} && document.querySelector('[data-skill-rule]')?.dataset.skillRule==='active'`, 'skill-rule-survived-restart');
+    await clickSelector(renderer, '[data-skill-action="check-update"]', 'skill-rule-pick');
+    await waitFor(renderer, `document.querySelector('[data-skill-update-check]')?.textContent.includes('尚未保留')`, 'skill-rule-disclosed');
+    await clickSelector(renderer, '[data-skill-action="keep-update"]', 'skill-rule-keep');
+    await waitFor(renderer, `document.querySelector('[data-skill-candidate]')?.dataset.skillCandidateStatus==='adopted' && document.querySelector('[data-skill-detail]')?.dataset.skillState==='pending-validation'`, 'skill-rule-adopted');
+    const thirdRevision = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillDetail`);
+    requireJourney(/^[0-9a-f-]{36}$/u.test(thirdRevision ?? '') && thirdRevision !== secondRevision && thirdRevision !== firstRevision, 'skill-rule-new-revision', { thirdRevision });
+    await assertRenderer(renderer, `(async () => {
+      const read=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(thirdRevision)},before:null});
+      return read.revision.ordinal===3 && read.revision.enabledBooks.length===0 && read.history.length===3 && read.history[0].current && read.history[0].origin==='rule' &&
+        read.candidates[0].adoptedBy==='rule' && read.candidates[0].disposition==='clean' && !document.querySelector('[data-skill-detail] [data-skill-action="enable"]');
+    })()`, 'skill-rule-auto-adopted-clean-only');
+
+    at('skill-update-rollback-current-selection');
+    await clickSelector(renderer, `[data-skill-revision="${firstRevision}"] [data-skill-action="rollback"]`, 'skill-rollback');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillDetail===${JSON.stringify(firstRevision)} && document.querySelector('[data-skill-detail]')?.dataset.skillCurrent==='true'`, 'skill-rolled-back');
+    // History is whole; the revision returned to stands at 已安装（未启用）: its earlier enablement is not restored.
+    await assertRenderer(renderer, `(async () => {
+      const read=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(firstRevision)},before:null});
+      return document.querySelector('[data-skill-detail]').dataset.skillState==='installed-disabled' && read.revision.enabledBooks.length===0 && read.history.length===3 &&
+        read.history.find((entry)=>entry.current)?.revisionId===${JSON.stringify(firstRevision)} && read.history.find((entry)=>entry.current)?.selectedReason==='rollback' &&
+        read.skills[0].revisionId===${JSON.stringify(firstRevision)};
+    })()`, 'skill-rollback-selection-not-enablement');
+    await closeBrowser();
+    manager = await launch();
+    renderer = await waitForRenderer(manager, 'skill-rollback-restart-window');
+    await openSkills('skill-rollback-restart');
+    await assertRenderer(renderer, `(async () => {
+      const read=await window.ai7.inspectImportedSkills({revisionId:null,before:null});
+      return read.skills.length===1 && read.skills[0].revisionId===${JSON.stringify(firstRevision)} && read.skills[0].state==='installed-disabled' && document.querySelector('.imported-skill-list li')?.dataset.skillState==='installed-disabled';
+    })()`, 'skill-rollback-survives-restart');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

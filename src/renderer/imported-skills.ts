@@ -124,7 +124,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
         const label = el('label'); const box = el('input'); box.type = 'checkbox'; box.dataset['skillField'] = 'upstream'; box.dataset['skillPath'] = file.path;
         box.checked = upstream.has(file.path); box.disabled = busy;
         box.addEventListener('change', () => { if (box.checked) upstream.add(file.path); else upstream.delete(file.path); });
-        label.append(box, document.createTextNode(` ${IMPORTED_SKILL_UPDATE_UPSTREAM_LABEL}`)); item.append(label);
+        label.append(box, ` ${IMPORTED_SKILL_UPDATE_UPSTREAM_LABEL}`); item.append(label);
       }
       files.append(item);
     }
@@ -143,7 +143,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
       if (read.acceptItems.length > 0) {
         const label = el('label'); confirm = el('input'); confirm.type = 'checkbox'; confirm.dataset['skillField'] = 'accept'; confirm.checked = accepted; confirm.disabled = busy;
         confirm.addEventListener('change', () => { accepted = confirm!.checked; render(); });
-        label.append(confirm, document.createTextNode(` ${IMPORTED_SKILL_UPDATE_ACCEPT_LABEL}`)); panel.append(label);
+        label.append(confirm, ` ${IMPORTED_SKILL_UPDATE_ACCEPT_LABEL}`); panel.append(label);
       }
       const adopt = button('采纳', 'adopt', async () => {
         const next = await api.adoptImportedSkillUpdate({
@@ -173,7 +173,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     section.append(el('p', IMPORTED_SKILL_RULE_INACTIVE));
     const label = el('label'); const box = el('input'); box.type = 'checkbox'; box.dataset['skillField'] = 'rule-confirm'; box.checked = ruleConfirmed; box.disabled = busy;
     box.addEventListener('change', () => { ruleConfirmed = box.checked; render(); });
-    label.append(box, document.createTextNode(` 我确认：${rule.confirmation}`)); section.append(label);
+    label.append(box, ` 我确认：${rule.confirmation}`); section.append(label);
     const create = button(IMPORTED_SKILL_RULE_CREATE_LABEL, 'rule-create', async () => {
       await api.createImportedSkillUpdateRule({ skillId: revision.skillId, confirmation: rule.confirmation });
       ruleConfirmed = false; await inspect(revision.revisionId); return '已创建自动采纳规则';
