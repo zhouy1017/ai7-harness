@@ -848,6 +848,10 @@ globalAttentionReader.subscribe((reading) => {
 });
 window.ai7.onNotificationNavigate((target) => {
   void leaveThen(async () => {
+    if (target.eventId !== null && target.target !== undefined) {
+      await openGlobalAttentionTarget(target.target);
+      return;
+    }
     const projection = await window.ai7.inspectGlobalAttention();
     const item = projection.groups.flatMap((group) => group.items).find((entry) => entry.itemId === target.eventId && entry.book.bookId === target.bookId);
     if (item) await openGlobalAttentionItem(item);
@@ -6101,6 +6105,7 @@ async function renderNotificationSettings(): Promise<void> {
   const preferences = await window.ai7.getPreferences();
   let values = preferences.values;
   const content = panel();
+  content.dataset['notificationSettings'] = 'true';
   content.append(element('h2', undefined, '通知'), element('p', 'field-note', '系统通知仅在 AI7 所有窗口都不在前台时发送。默认只用通用措辞；这些开关不授予任何处理或发布权限。'));
   if (preferences.notice) content.append(element('p', 'attention-note', preferences.notice));
   const rows = [
@@ -6139,7 +6144,7 @@ async function renderNotificationSettings(): Promise<void> {
   }
   paint();
   content.append(button('返回设置', 'secondary', renderSettingsHub));
-  replaceScreen('notification-settings', content);
+  replaceScreen('settings', content);
   setStatus('通知设置');
 }
 

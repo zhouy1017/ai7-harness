@@ -1,3 +1,5 @@
+import type { GlobalAttentionTarget } from './protocol.js';
+
 // Local view and input configuration (Issue #934, wave 11 slice 11a; seam map §2, decision T0-1): how this machine shows
 // the workbench — the sidebar's collapsed state, the pinned and recently opened Books, and what later slices of the wave
 // add (appearance, shortcut remaps, notification switches, usage unit prices). It is not a business record: the main
@@ -120,7 +122,14 @@ export interface PreferencesRendererApi {
 /** Main-only notification navigation; no service protocol operation or record mutation. */
 export interface NotificationsRendererApi {
   notify(input: { bookId: string | null; eventId: string }): Promise<void>;
-  onNotificationNavigate(listener: (target: { bookId: string | null; eventId: string | null }) => void): () => void;
+  onNotificationNavigate(listener: (target: NotificationNavigation) => void): () => void;
+}
+
+export interface NotificationNavigation {
+  readonly bookId: string | null;
+  readonly eventId: string | null;
+  /** Captured from the authoritative projection, so a single record still opens after leaving recent attention. */
+  readonly target?: GlobalAttentionTarget;
 }
 
 /** The main process's IPC channels for the two members; they are not service operations and carry no protocol number. */

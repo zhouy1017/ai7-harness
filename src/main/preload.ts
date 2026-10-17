@@ -18,6 +18,7 @@ import {
   type PreferencesProjection,
   type PreferencesRendererApi,
   type NotificationsRendererApi,
+  type NotificationNavigation,
   type SavePreferenceInput,
 } from '../shared/preferences.js';
 
@@ -716,8 +717,8 @@ const api: RendererApi & PreferencesRendererApi & NotificationsRendererApi = Obj
     invoke<Awaited<ReturnType<RendererApi['getProductDataLocation']>>>(IPC_CHANNELS.getProductDataLocation),
   getPreferences: () => invoke<PreferencesProjection>(PREFERENCE_IPC_CHANNELS.getPreferences),
   notify: (input: { bookId: string | null; eventId: string }) => invoke<void>('ai7:notify', input),
-  onNotificationNavigate: (listener: (target: { bookId: string | null; eventId: string | null }) => void) => {
-    const receive = (_event: unknown, target: { bookId: string | null; eventId: string | null }): void => listener(target);
+  onNotificationNavigate: (listener: (target: NotificationNavigation) => void) => {
+    const receive = (_event: unknown, target: NotificationNavigation): void => listener(target);
     ipcRenderer.on('ai7:notification-navigate', receive);
     return () => { ipcRenderer.removeListener('ai7:notification-navigate', receive); };
   },

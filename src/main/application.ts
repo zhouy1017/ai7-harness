@@ -610,8 +610,9 @@ function registerRendererHandlers(
     const { eventId, bookId } = input as { eventId?: unknown; bookId?: unknown };
     requireDesktop(typeof eventId === 'string' && eventId.length <= 300 && (bookId === null || typeof bookId === 'string'));
     const projection = await service.call('inspectGlobalAttention', {});
-    const item = projection.groups.flatMap((group) => group.items).find((entry) => entry.itemId === eventId && entry.book.bookId === bookId);
-    if (item && (item.group !== 'recent' || isOrdinaryOutcome(item, projection))) notifier.accept(item);
+    const items = projection.groups.flatMap((group) => group.items);
+    const item = items.find((entry) => entry.itemId === eventId && entry.book.bookId === bookId);
+    if (item && (item.group !== 'recent' || isOrdinaryOutcome(item, projection))) notifier.accept(item, items);
   }));
   const requireNothingUnsaved = (): void => {
     if (unsavedWindows()) throw new ServiceCallError('DATABASE_REPLACEMENT_UNSAVED', '还有窗口里的修改没有保存；请先保存或关闭那个窗口，再替换本机数据。');

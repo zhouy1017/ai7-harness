@@ -46,7 +46,7 @@ describe('privacy-safe main notifications', () => {
     expect(test.notices[0]?.input).toEqual({ title: 'AI7', body: 'AI7：有一项需要你处理', silent: true });
     expect(test.notices[0]?.show).toHaveBeenCalledOnce();
     test.notices[0]?.click();
-    expect(test.navigate).toHaveBeenCalledWith({ bookId: event.book.bookId, eventId: event.itemId });
+    expect(test.navigate).toHaveBeenCalledWith({ bookId: event.book.bookId, eventId: event.itemId, target: event.target });
     expect(event).toEqual(before);
   });
   it.each(['focus', 'disabled', 'completion', 'progress'] as const)('suppresses %s without replay when a switch or focus changes', (guard) => {
@@ -84,6 +84,19 @@ describe('privacy-safe main notifications', () => {
     const test = setup();
     for (const at of [new Date(START).toISOString(), new Date(START - 1).toISOString(), 'invalid']) test.notifier.accept(item({ at }));
     expect(test.notices).toHaveLength(0);
+  });
+  it('counts current records, replacing a changed record and dropping resolved records from a later coalesced notice', () => {
+    const test = setup();
+    const first = item();
+    test.notifier.accept(first, [first]);
+    const changed = item({ state: 'analysis-plan-revision', at: new Date(START + 2_000).toISOString() });
+    test.notifier.accept(changed, [changed]);
+    expect(test.notices[1]?.input.body).toBe(NOTIFICATION_LABELS.decision);
+    const second = item({ itemId: 'second', group: 'exceptions', state: 'analysis-failed' });
+    test.notifier.accept(second, [second]);
+    expect(test.notices[2]?.input.body).toBe(NOTIFICATION_LABELS.abnormal);
+    test.notices[2]?.click();
+    expect(test.navigate).toHaveBeenCalledWith({ bookId: second.book.bookId, eventId: second.itemId, target: second.target });
   });
   it('defaults all notification switches off and uses content-free distinct labels', () => {
     for (const [key, value] of Object.entries(preferenceDefaults())) if (key.startsWith('notifications.')) expect(value).toBe(false);

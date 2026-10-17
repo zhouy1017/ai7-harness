@@ -318,6 +318,10 @@ async function click(renderer, label, name) {
 async function clickSelector(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
+/** A checkbox is an input, not a button; use its native click so checked/change follow the product path. */
+async function clickNotificationSwitch(renderer, key, name) {
+  await assertRenderer(renderer, `(() => { const input = document.querySelector('[data-notification-preference="' + ${JSON.stringify(key)} + '"]'); if (!(input instanceof HTMLInputElement) || input.type !== 'checkbox' || input.disabled) return false; input.click(); return true; })()`, name);
+}
 async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); return input.value === ${JSON.stringify(value)}; })()`, name);
 }
@@ -784,12 +788,12 @@ async function main() {
     at('notification-settings');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'notification-settings-hub');
     await clickSelector(renderer, '[data-settings-route="notifications"]', 'notification-settings-open');
-    await waitFor(renderer, `document.querySelector('[data-screen="notification-settings"]')`, 'notification-settings-shown');
-    await assertRenderer(renderer, `(() => { const switches = [...document.querySelectorAll('[data-notification-preference]')]; return switches.length === 4 && switches.every((control) => !control.checked) && document.querySelector('[data-notification-preference="notifications.completions"]').disabled; })()`, 'notification-settings-defaults');
-    await clickSelector(renderer, '[data-notification-preference="notifications.enabled"]', 'notification-settings-enable');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"] [data-notification-settings]')`, 'notification-settings-shown');
+    await assertRenderer(renderer, `(() => { const switches = [...document.querySelectorAll('[data-notification-preference]')]; return switches.length === 4 && switches.every((control) => !control.checked) && document.querySelector('[data-notification-preference="notifications.completions"]').disabled && document.querySelector('[data-nav-settings="hub"]')?.getAttribute('aria-current') === 'page'; })()`, 'notification-settings-defaults');
+    await clickNotificationSwitch(renderer, 'notifications.enabled', 'notification-settings-enable');
     await waitFor(renderer, `document.querySelector('[data-notification-preference="notifications.completions"]')?.disabled === false`, 'notification-completions-enabled');
     await assertRenderer(renderer, `window.ai7.getPreferences().then((preferences) => preferences.values['notifications.enabled'] === true)`, 'notification-settings-saved');
-    await clickSelector(renderer, '[data-notification-preference="notifications.enabled"]', 'notification-settings-disable');
+    await clickNotificationSwitch(renderer, 'notifications.enabled', 'notification-settings-disable');
     await waitFor(renderer, `document.querySelector('[data-notification-preference="notifications.completions"]')?.disabled === true`, 'notification-completions-disabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'notification-return-library');
 
