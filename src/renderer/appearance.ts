@@ -1,11 +1,5 @@
 import { PREFERENCE_KEYS, type AppearanceState, type ThemePreference } from '../shared/preferences.js';
 
-export const APPEARANCE_CHOICES: ReadonlyArray<{ value: ThemePreference; label: string; description: string }> = [
-  { value: 'system', label: '跟随系统', description: '随本机的浅色或深色外观自动切换。' },
-  { value: 'light', label: '浅色', description: '使用冷灰外壳与微暖的稿件背景。' },
-  { value: 'dark', label: '深色', description: '使用低亮度的深灰外壳与中性稿件背景。' },
-];
-
 /** Only root decoration changes: no screen replacement, focus, selection, scroll or editor transaction. */
 export function applyAppearance(root: Pick<HTMLElement, 'dataset' | 'style'>, state: AppearanceState): void {
   const theme = state.preference === 'system' ? (state.systemDark ? 'dark' : 'light') : state.preference;

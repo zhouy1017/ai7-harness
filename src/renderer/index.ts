@@ -1,4 +1,14 @@
-import { APPEARANCE_CHOICES, createAppearance } from './appearance.js';
+import { createAppearance } from './appearance.js';
+import {
+  APPEARANCE_CHOICES,
+  APPEARANCE_LEDE,
+  APPEARANCE_LEGEND,
+  APPEARANCE_SAVED,
+  APPEARANCE_SAVE_FAILED,
+  APPEARANCE_SECTION,
+  APPEARANCE_STATUS,
+  APPEARANCE_TITLE,
+} from './appearance-labels.js';
 import { renderHouseReviewPreference } from './knowledge-base-memory.js';
 import { mountEditQualitySignals } from './quality-learning.js';
 import { mountProposalWorkspace } from './proposal-workspace.js';
@@ -6086,10 +6096,10 @@ function renderBookFilter(
 function renderAppearance(): void {
   const content = panel();
   content.classList.add('appearance-settings');
-  content.append(element('p', 'section-label', '设置 · 本机'), element('h2', undefined, '外观'),
-    element('p', 'lede', '选择适合阅读的外观。系统的高对比度等辅助显示设置始终优先。'));
+  content.append(element('p', 'section-label', APPEARANCE_SECTION), element('h2', undefined, APPEARANCE_TITLE),
+    element('p', 'lede', APPEARANCE_LEDE));
   const choices = element('fieldset', 'appearance-choices');
-  choices.append(element('legend', undefined, '应用外观'));
+  choices.append(element('legend', undefined, APPEARANCE_LEGEND));
   const message = element('p', 'field-note');
   message.setAttribute('role', 'status');
   const radios: HTMLInputElement[] = [];
@@ -6099,14 +6109,13 @@ function renderAppearance(): void {
     input.type = 'radio'; input.name = 'appearance-theme'; input.value = choice.value;
     input.dataset['appearanceTheme'] = choice.value;
     input.checked = appearance.preference === choice.value;
+    // The radios stay enabled while saving: disabling the focused one would drop keyboard focus (KEY-013).
     input.addEventListener('change', () => {
       if (!input.checked) return;
-      for (const radio of radios) radio.disabled = true;
-      void appearance.choose(choice.value).then(() => { message.textContent = '外观已保存在本机。'; }, () => {
-        input.checked = false;
+      void appearance.choose(choice.value).then(() => { message.textContent = APPEARANCE_SAVED; }, () => {
         for (const radio of radios) radio.checked = radio.value === appearance.preference;
-        message.textContent = '外观未能保存，请重试。';
-      }).finally(() => { for (const radio of radios) radio.disabled = false; });
+        message.textContent = APPEARANCE_SAVE_FAILED;
+      });
     });
     radios.push(input);
     label.append(input, element('strong', undefined, choice.label), element('span', 'field-note', choice.description));
@@ -6117,7 +6126,7 @@ function renderAppearance(): void {
   observer.observe(screen, { childList: true });
   content.append(choices, message, button('返回图书列表', 'secondary', () => void initializeRenderer()));
   replaceScreen('appearance', content);
-  setStatus('外观只保存在本机，不改变稿件或导出内容。');
+  setStatus(APPEARANCE_STATUS);
 }
 
 function renderLanding(
@@ -6162,7 +6171,7 @@ function renderLanding(
       renderError(error, () => renderLanding(priorWork, activeRecoveryReturn, books));
     }
   });
-  const appearanceButton = button('外观', 'secondary', renderAppearance);
+  const appearanceButton = button(APPEARANCE_TITLE, 'secondary', renderAppearance);
   appearanceButton.dataset['settingsRoute'] = 'appearance';
   const dataAndStorage = button('数据与存储', 'secondary', () => renderDataAndStorage());
   dataAndStorage.dataset['settingsRoute'] = 'data-storage';
