@@ -26,6 +26,13 @@ import {
 // marks as current, the context header's words, and the 设置 hub's rows. shell-dom.test.ts mounts it; Journeys check layout.
 
 describe('the sidebar', () => {
+  it('keeps usage, exact Run detail and keyboard pages in Settings (#936)', () => {
+    for (const [state, position] of [['usage', '服务 · 用量'], ['usage-run', '服务 · 用量 · 运行详情'], ['keyboard', '本机 · 键盘与无障碍']]) {
+      const active = screenActive(state!, null);
+      expect(active).toEqual({ kind: 'settings' });
+      expect(contextHeading(state!, active, null)).toEqual({ title: '设置', position, book: false });
+    }
+  });
   it('lists the five global destinations in their fixed order, each with a one-character icon of its own name', () => {
     expect(SHELL_DESTINATIONS.map((entry) => [entry.key, entry.label])).toEqual([
       ['attention', '待我处理'], ['library', '书库'], ['series', '书系'], ['knowledge', '知识库'], ['quality', '质量与学习'],
@@ -123,7 +130,7 @@ describe('what a screen marks as current', () => {
     expect(screenActive('series', null)).toEqual({ kind: 'destination', destination: 'series' });
     expect(screenActive('knowledge-base', null)).toEqual({ kind: 'destination', destination: 'knowledge' });
     expect(screenActive('quality-learning', null)).toEqual({ kind: 'destination', destination: 'quality' });
-    for (const state of ['settings', 'model-service', 'data-storage', 'evaluation-calibration']) expect(screenActive(state, null)).toEqual({ kind: 'settings' });
+    for (const state of ['settings', 'model-service', 'data-storage', 'evaluation-calibration', 'diagnostics']) expect(screenActive(state, null)).toEqual({ kind: 'settings' });
     expect(screenActive('target', null)).toEqual({ kind: 'destination', destination: 'library' });
     expect(screenActive('error', null)).toEqual({ kind: 'none' });
   });
@@ -138,6 +145,7 @@ describe('what a screen marks as current', () => {
     expect(contextHeading('book-sources', { kind: 'section', section: 'sources' }, book)).toEqual({ title: '甲书', position: '资料与记录 · 来源与证据', book: true });
     expect(contextHeading('landing', { kind: 'destination', destination: 'library' }, null)).toEqual({ title: '书库', position: '全局', book: false });
     expect(contextHeading('data-storage', { kind: 'settings' }, book)).toEqual({ title: '设置', position: '本机 · 数据与存储', book: false });
+    expect(contextHeading('diagnostics', { kind: 'settings' }, book)).toEqual({ title: '设置', position: '本机 · 诊断', book: false });
     expect(contextHeading('target', { kind: 'destination', destination: 'library' }, null)).toEqual({ title: '导入稿件', position: '书库', book: false });
   });
 });

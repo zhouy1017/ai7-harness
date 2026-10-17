@@ -216,6 +216,9 @@ import type {
   DatabaseExportReceiptProjection,
   DatabaseExportsProjection,
   ScheduledBackupsProjection,
+  UsageGrouping,
+  UsageProjection,
+  UsageRange,
   SetScheduledBackupInput,
   DatabaseImportPreviewProjection,
   DatabaseReplacementsProjection,
@@ -783,6 +786,7 @@ import {
 } from './learning-eligibility.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry } from './review/category-configuration.js';
 import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from './evaluation-calibration.js';
+import { UsageLedger } from './usage.js';
 import {
   SeriesError,
   SeriesLedger,
@@ -4682,6 +4686,7 @@ export class EditorialStore {
   readonly #learningEligibility: LearningEligibilityLedger;
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
+  readonly #usage: UsageLedger;
   readonly #seriesKnowledge: SeriesKnowledgeLedger;
   /** 书系检索排除 (Issue #64, S29b): each Series' Retrieval Exclusions and their revisions. */
   readonly #seriesExclusions: SeriesExclusionLedger;
@@ -4781,6 +4786,7 @@ export class EditorialStore {
     this.#learningEligibility = new LearningEligibilityLedger(authority);
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#series = new SeriesLedger(authority);
+    this.#usage = new UsageLedger(authority);
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#seriesExclusions = new SeriesExclusionLedger(authority);
     this.#dialogues = new DialogueLedger(authority);
@@ -19340,6 +19346,14 @@ export class EditorialStore {
       if (error instanceof DatabaseExportError || error instanceof ExportLedgerError) throw new StoreError(error.code, error.message);
       throw error;
     }
+  }
+
+  // ---- 设置 › 服务 › 用量 (Issue #936, plan slice 11c; V2-UX-MSET-010) ------------------------------------------------------
+
+  /** The Runs already recorded, summed by Book, Task kind or period. A read: it writes nothing and asks no Provider. */
+  inspectUsage(input: { range: UsageRange; groupBy: UsageGrouping; runOffset?: number; runRecordId?: string; asOf?: string }, now: Date = new Date()): UsageProjection {
+    this.#assertAvailable();
+    return this.#usage.inspect(input.range, input.groupBy, input.asOf === undefined ? now : new Date(input.asOf), input.runOffset, input.runRecordId);
   }
 
   // ---- 设置 › 数据与存储 › 定期自动备份 (Issue #434, plan slice S86b; V2-UX-DSTO-018; ADR 0079 §1.4, §1.7) ----------------

@@ -1,13 +1,13 @@
 import { createWriteStream, existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY } from './controller.mjs';
+import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 
@@ -659,6 +659,14 @@ async function main() {
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     dataRootForCleanup = dataRoot;
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+    const diagnosticsDestination = resolve(runRoot, 'diagnostics-export');
+    await mkdir(diagnosticsDestination);
+    await mkdir(resolve(shellRoot, 'crashes'));
+    await writeFile(resolve(shellRoot, 'crashes', '2026-10-17T00-00-00.000Z-render-process-gone.json'), JSON.stringify({
+      instant: '2026-10-17T00:00:00.000Z', kind: 'render-process-gone', reason: 'crashed', exitCode: 1,
+      appVersion: '0.1.0', dataVersion: 83, protocol: 151, platform: process.platform, arch: process.arch,
+      electron: '43.4.1', uptimeSeconds: 1, stack: '    at <redacted-path>:12:3',
+    }), { flag: 'wx' });
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
     const launch = async (picker, savePath) => {
@@ -667,6 +675,7 @@ async function main() {
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot,
         '--j12-observe-reveal', 'true', '--launcher-pid', String(process.pid),
+        '--j12-diagnostics-folder', diagnosticsDestination,
       ];
       if (picker) args.splice(args.length - 4, 0, '--j12-picker-path', picker);
       // 导出数据库's Save dialog, answered once (Issue #434, S86a).
@@ -1223,13 +1232,48 @@ async function main() {
     await waitFor(primary, `document.querySelector('.data-storage-summary')?.dataset.revealRequested==='requested'`, 'reveal-requested');
     await assertRenderer(primary, `document.querySelector('.data-storage-summary')?.dataset.nativeRevealSuppressedForE2e==='true'`, 'main-owned-zero-argument-reveal');
 
-    at('model-service-first-save');
+    at('diagnostics-bundle-export');
     await click(primary, '返回', 'data-storage-return');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'diagnostics-landing');
+    // 设置 › 本机 › 诊断 replaces 11a's 即将提供 row (Issue #938 restack onto #934).
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'diagnostics-open-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'diagnostics-open-settings-hub');
+    await assertRenderer(primary, `(() => { const row=document.querySelector('[data-settings-group="local"] [data-settings-entry="diagnostics"]'); const entry=row?.querySelector('[data-settings-route="diagnostics"]'); return entry instanceof HTMLButtonElement && !entry.disabled && entry.textContent==='诊断' && row.dataset.settingsAvailability===undefined && !row.querySelector('.settings-coming-soon'); })()`, 'diagnostics-settings-row');
+    await click(primary, '诊断', 'diagnostics-open');
+    await waitFor(primary, `document.querySelector('[data-screen="diagnostics"] [data-crash-list-ready="true"]')`, 'diagnostics-ready');
+    await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='设置' && document.querySelector('#context-position')?.textContent==='本机 · 诊断' && document.querySelector('#app-sidebar [data-nav-settings]')?.getAttribute('aria-current')==='page'`, 'diagnostics-settings-place');
+    await assertRenderer(primary, `document.querySelector('[data-screen="diagnostics"]')?.textContent.includes('本机崩溃记录')`, 'diagnostics-crash-heading');
+    await assertRenderer(primary, `document.querySelector('[data-crash-list]')?.textContent.includes('2026-10-17T00:00:00.000Z') && document.querySelector('[data-crash-list]')?.textContent.includes('界面进程退出')`, 'diagnostics-crash-record');
+    await primary.evaluate(`Array.from(document.querySelectorAll('[data-crash-list] .source-card')).find((item) => item.textContent.includes('2026-10-17T00:00:00.000Z')).querySelector('details').open = true`);
+    await assertRenderer(primary, `document.querySelector('[data-crash-list] details[open] pre')?.textContent.includes('<redacted-path>') && !document.querySelector('[data-crash-list] [contenteditable]')`, 'diagnostics-read-only-record');
+    await click(primary, '导出诊断包…', 'diagnostics-export');
+    await waitFor(primary, `document.querySelector('[data-export-state="exported"]')`, 'diagnostics-exported');
+    const diagnosticsFolders = await readdir(diagnosticsDestination);
+    requireJourney(diagnosticsFolders.length === 1 && diagnosticsFolders[0].startsWith('AI7 诊断 '), 'diagnostics-folder');
+    const diagnosticsBundle = resolve(diagnosticsDestination, diagnosticsFolders[0]);
+    requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
+    const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
+    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v15.json'), 'utf8'));
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 83 && diagnosticsSummary.protocol === 152 &&
+      diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
+    requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
+    await click(primary, '查看诊断位置', 'diagnostics-reveal');
+    await waitFor(primary, `document.querySelector('[data-reveal-state="requested"]')`, 'diagnostics-revealed');
+    await click(primary, '返回', 'diagnostics-return');
+
+    at('model-service-first-save');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-service-landing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-service-open-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-service-open-settings-hub');
     await click(primary, '模型服务', 'model-service-open');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready');
+    // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .panel', returnToScreen: async () => {
+      await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dark-pass-return-settings');
+      await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dark-pass-return-settings-hub');
+      await click(primary, '模型服务', 'dark-pass-return-model-service');
+    } });
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready-after-dark-pass');
     await assertRenderer(primary, `(() => {
       const roles=Array.from(document.querySelectorAll('[data-model-role]'));
       const ids=roles.map((node)=>node.dataset.modelRole);

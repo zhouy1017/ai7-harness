@@ -349,8 +349,11 @@ export function j07PackageExportFailureLocation(location, error) {
     (typeof error.code === 'string' && Object.hasOwn(J07_PACKAGE_EXPORT_IO, error.code) ? J07_PACKAGE_EXPORT_IO[error.code] : location);
 }
 
+const J14_DARK_PASS_LOCATIONS = Object.freeze(['j14-dark-pass', 'j14-dark-pass-theme-applied', 'j14-dark-pass-forced-colors-wins', 'j14-dark-pass-restored']);
+
 export const JOURNEY_LOCATIONS = Object.freeze({
   'J-01': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'cli',
     'controller-network-denial',
@@ -461,6 +464,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     ...J01_COMPLETION_LOCATIONS,
   ]),
   'J-02': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'renderer-ready',
     'renderer-ready-flag',
@@ -599,6 +603,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'completion-cleanup',
   ]),
   'J-08': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -617,6 +622,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'snapshot-none-comparison',
   ]),
   'J-12': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
     'controller-imports',
@@ -646,6 +652,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'effect-before-route-arrival-order',
     'existing-book-source-commit-preflight',
     'restart-and-data-location',
+    'diagnostics-bundle-export',
     'model-service-first-save',
     'model-service-search-backends',
     'model-service-restart-and-replace',
@@ -659,6 +666,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'evaluation-calibration-settings',
   ]),
   'J-15': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
     'controller-imports',
@@ -706,6 +714,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'zero-activity',
   ]),
   'J-03': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
     'controller-imports',
@@ -729,6 +738,15 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-settings-ready',
     'model-credential-saved',
     'model-credential-removed',
+    // Issue #936 (S11c): 设置 › 服务 › 用量 and 设置 › 本机 › 键盘与无障碍 › 快捷键 from the landing's settings row.
+    'usage-settings',
+    'usage-price-saved',
+    'keyboard-settings',
+    'keyboard-remap-refused',
+    'keyboard-remap-saved',
+    'keyboard-ime-guard',
+    'keyboard-remap-dispatch',
+    'keyboard-restore-default',
     'acknowledged-edit',
     'j14-ime-focus',
     'j14-reflow-forced-colors',
@@ -756,6 +774,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'zero-activity',
   ]),
   'J-04': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
     'controller-imports',
@@ -876,6 +895,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
   'J-05': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -938,6 +958,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // Resolution Draft across a restart, the three ways out and a reversal's Correction Proposal. Each stage is
   // one thing an editor does or finds, so a hosted failure names the behaviour that broke.
   'J-06': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -971,6 +992,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-07 (Issue #414, plan slice S65): ⑥ 发稿 — Milestone Versions and 设为发稿版本. Each stage is one thing an
   // editor does or finds on 交付物, so a hosted failure names the behaviour that broke.
   'J-07': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1077,6 +1099,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // Each stage is one thing an editor does or finds, so a hosted failure names the
   // behaviour that broke.
   'J-09': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1143,6 +1166,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // Impact Summary, 正在取消, and 已取消 with what it read kept; and a Run AI7 closed under, 任务已中断 · 可续行 on the
   // next launch, and 续行 to its end.
   'J-10': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1234,6 +1258,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // reason a Proposal Decision is asked for once, on 修改建议 of the Journey's own words (Issue #61, S26a), and 质量与学习 ›
   // 学习准入 on the material those records make (Issue #61, S26b).
   'J-11': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1347,6 +1372,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-16 (Issue #423, plan slice S77a): the 任务 panel — the Book's Tasks beside the manuscript, controlled from their cards,
   // a finished Task's result in a window beside the text, and the 回到<位置> chip a jump leaves.
   'J-16': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1422,6 +1448,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // preview, a stale preview refused, 书库's search by 书系, each Book's own records, and a restart; since Issue #64 (S29a)
   // a 书系一致性 Review Run on the J-04 model adapter.
   'J-13': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
     'controller-imports',
@@ -2122,4 +2149,95 @@ export function classifyJourneyResult(result, journey) {
   if (locations.length === 1) return { location: locations[0], errorClass: 'journey-failure' };
   if (result.stdout.length === 0 && result.stderr.length === 0) return { location: 'controller', errorClass: 'controller-exit' };
   return { location: 'controller', errorClass: 'controller-output-ambiguous' };
+}
+
+/** J-14 / #935: choose the theme through 设置 › 本机 › 外观 in the sidebar, check one representative screen, then restore
+ * 跟随系统. `returnTo` is the sidebar row that leads back to that screen; a Journey whose screen no row reaches passes
+ * `returnToScreen`. Neither touches a record: only the local appearance preference changes, and it ends at 跟随系统.
+ */
+export async function runJ14DarkPass({ renderer, journey, at, representative = '[data-screen="landing"] .panel', returnTo = SIDEBAR.destination('library'), returnToScreen }) {
+  // Which screen was showing, as a check label's word: its own `data-screen` when that is a code word, else `other`; `none`
+  // before the renderer has painted its first screen or when it cannot be read.
+  const SCREEN_WORD = `(() => { const state = document.querySelector('#screen')?.dataset.screen; return typeof state !== 'string' ? 'none' : /^[a-z][a-z0-9-]{0,39}$/u.test(state) ? state : 'other'; })()`;
+  // Every check polls to a deadline: a screen the sidebar opens may paint more than once, a read between two paints sees
+  // no node, and a hosted runner is several times slower than a guest. Past the deadline the label names the check that
+  // waited and, after `-on-`, the screen it found instead (Issue #935's hosted J-08 failure carried the check alone).
+  const wait = async (expression, label, timeout = 15_000) => {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      try {
+        if (await renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`)) return;
+      } catch {
+        // A read during a repaint answers on the next poll.
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+    const seen = await renderer.evaluate(SCREEN_WORD).catch(() => 'none');
+    throw journeyCheckFailure(journey, `${label}-on-${seen}`);
+  };
+  const node = `document.querySelector(${JSON.stringify(representative)})`;
+  const open = async () => {
+    await wait(sidebarNavigate(SIDEBAR.settings), 'j14-dark-pass-open-settings');
+    // 设置 opens through `leaveThen`, so the hub paints after the click: wait for its 外观 row before following it.
+    await wait(`(() => { const button = document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'j14-dark-pass-settings');
+    await wait(`(() => { const button = document.querySelector('#screen[data-screen="settings"] [data-settings-route="appearance"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, 'j14-dark-pass-open-appearance');
+    // 外观 is ready when its three choices are there with the saved preference checked, so a choice reads a settled page.
+    await wait(`window.ai7.getPreferences().then((preferences) => { const inputs = Array.from(document.querySelectorAll('#screen[data-screen="appearance"] input[data-appearance-theme]')); return inputs.length === 3 && inputs.filter((input) => input.checked).map((input) => input.value).join() === (preferences.values['appearance.theme'] ?? 'system'); })`, 'j14-dark-pass-appearance');
+  };
+  const back = returnToScreen ?? (async () => {
+    await wait(sidebarNavigate(returnTo), 'j14-dark-pass-return');
+  });
+  const choose = async (theme) => {
+    await open();
+    await wait(`(() => { const input = document.querySelector('#screen[data-screen="appearance"] input[data-appearance-theme="${theme}"]'); if (!input || input.disabled) return false; if (!input.checked) input.click(); return input.checked; })()`, `j14-dark-pass-choose-${theme}`);
+    await wait(`window.ai7.getPreferences().then((preferences) => preferences.values['appearance.theme'] === '${theme}')`, `j14-dark-pass-saved-${theme}`);
+    await back();
+    await wait(node, 'j14-dark-pass-representative');
+  };
+  const forcedColors = async (value) => {
+    if (typeof renderer.send !== 'function') throw journeyCheckFailure(journey, 'j14-dark-pass-renderer-send');
+    try {
+      await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value }] });
+    } catch (error) {
+      throw journeyCheckFailure(journey, `j14-dark-pass-emulate-${value}`, { cause: error });
+    }
+  };
+  at('j14-dark-pass');
+  // The pass starts from its representative screen, painted: the renderer's first screen arrives after product-ready (its
+  // startup reads are asynchronous), and a 设置 opened before it is replaced by it — J-08's hosted failure (Issue #935).
+  // A Journey's own screen waits use 60 s, so this one does too.
+  await wait(node, 'j14-dark-pass-ready', 60_000);
+  await choose('dark');
+  at('j14-dark-pass-theme-applied');
+  await wait(`(() => {
+    const root = getComputedStyle(document.documentElement), screen = ${node};
+    if (!screen || document.documentElement.dataset.theme !== 'dark' || document.documentElement.style.colorScheme !== 'dark') return false;
+    const style = getComputedStyle(screen);
+    const rgb = (value) => (value.match(/[\\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const luminance = (values) => values.map((n) => { const s = n / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4; }).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0);
+    const color = rgb(style.color), background = rgb(style.backgroundColor);
+    const l1 = luminance(color), l2 = luminance(background);
+    const hex = (values) => '#' + values.map((v) => v.toString(16).padStart(2, '0')).join('');
+    return hex(color) === root.getPropertyValue('--text').trim() &&
+      [root.getPropertyValue('--surface').trim(), root.getPropertyValue('--manuscript').trim()].includes(hex(background)) &&
+      (Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05) >= 4.5;
+  })()`, 'j14-dark-pass-theme-applied');
+  at('j14-dark-pass-forced-colors-wins');
+  for (const theme of ['dark', 'light']) {
+    if (theme === 'light') await choose('light');
+    await forcedColors('active');
+    try {
+      await wait(`(() => {
+        const screen = ${node};
+        if (!screen || !matchMedia('(forced-colors: active)').matches || document.documentElement.dataset.theme !== ${JSON.stringify(theme)}) return false;
+        const root = getComputedStyle(document.documentElement), style = getComputedStyle(screen);
+        return style.backgroundColor === root.backgroundColor && style.color === root.color && style.color !== style.backgroundColor;
+      })()`, `j14-dark-pass-forced-colors-${theme}`);
+    } finally {
+      await forcedColors('none');
+    }
+  }
+  at('j14-dark-pass-restored');
+  await choose('system');
+  await wait(`document.documentElement.dataset.theme === (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')`, 'j14-dark-pass-restored');
 }

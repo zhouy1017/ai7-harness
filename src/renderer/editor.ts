@@ -770,11 +770,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           options.onCommand(event.shiftKey ? 'redo' : 'undo');
           return true;
         }
-        if (modifier && !event.altKey && key === 'f') {
-          event.preventDefault();
-          options.onCommand('search');
-          return true;
-        }
+        // 查找 is a remappable command (Issue #936, KEY-002): the window's dispatcher answers its chord, behind the same guard above.
         if (modifier && !event.altKey && key === 'h') {
           event.preventDefault();
           options.onCommand('replace');

@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { openRemainingPackageExport } from './package-export-readiness.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
@@ -145,8 +145,10 @@ const ACTUALS_PROMPT = '录入定价与首印 · 尚未录入';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
 // Issue #416 (S67b): a 图书交付包 version's export adds its own three, and nothing else that exports, publishes or sends.
+// Issue #938: 诊断's local folder export adds exportDiagnosticsBundle; it carries no manuscript and neither publishes nor sends.
+// Issue #936: exportUsageCsv saves numbers and ids only; the native Save dialog grants no Run or manuscript export authority.
 const EXPORT_MEMBERS = Object.freeze([
-  'approveBookDeliveryPackageExport', 'approveDatabaseExport', 'approveManuscriptExport', 'cancelBookDeliveryPackageExport', 'cancelDatabaseExport', 'chooseBookDeliveryPackageExportFolder', 'chooseDatabaseExportDestination', 'chooseManuscriptExportDestination', 'inspectDatabaseExports', 'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
+  'approveBookDeliveryPackageExport', 'approveDatabaseExport', 'approveManuscriptExport', 'cancelBookDeliveryPackageExport', 'cancelDatabaseExport', 'chooseBookDeliveryPackageExportFolder', 'chooseDatabaseExportDestination', 'chooseManuscriptExportDestination', 'exportDiagnosticsBundle', 'exportUsageCsv', 'inspectDatabaseExports', 'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
 ]);
 // Issue #415 (S66a): a 新闻稿's draft, composed at run time from exact sample1's paragraphs after the manuscript's own,
 // imported as source material and made the Book's 新闻稿; the house's five types in its order; and the document's edit.
@@ -951,6 +953,9 @@ async function main() {
     at('deliverables-before-milestone');
     // Before any milestone 设为发稿版本 is there, unavailable, with its reason in words beside it (PUB-002).
     await openDeliverables(renderer, 'before-milestone');
+    // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
+    await runJ14DarkPass({ renderer, journey: 'J-07', at, representative: '#screen[data-screen="book-deliverables"] > .panel', returnTo: SIDEBAR.section('deliverables') });
+    await waitForDeliverables(renderer, 'before-milestone-after-dark-pass');
     await assertRenderer(renderer, `(() => {
       const page = document.querySelector('[data-screen="book-deliverables"] > .book-deliverables');
       const block = window.__j07.block();

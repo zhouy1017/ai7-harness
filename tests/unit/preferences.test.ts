@@ -54,8 +54,10 @@ describe('the preferences registry', () => {
     for (const key of keys) expect(restarted.read().values[key]).toBe(true);
   });
   it('declares the shell keys with their defaults, and each default passes its own validator', () => {
-    expect(Object.keys(PREFERENCE_KEYS)).toEqual(['shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName']);
-    expect(preferenceDefaults()).toMatchObject({ 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [] });
+    expect(Object.keys(PREFERENCE_KEYS)).toEqual(['usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme',
+      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName']);
+    expect(preferenceDefaults()).toEqual({ 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
+      'notifications.enabled': false, 'notifications.completions': false, 'notifications.sound': false, 'notifications.bookName': false });
     for (const definition of Object.values(PREFERENCE_KEYS)) expect(definition.validate(definition.default)).toBe(true);
   });
 
@@ -189,6 +191,7 @@ describe('pinning and recency through ShellPreferences', () => {
       'shell.sidebarCollapsed': true,
       'shell.pinnedBooks': [BOOK],
       'shell.recentBooks': [{ ...BOOK, section: 'manuscript' }],
+      'appearance.theme': 'system',
     });
     expect(store.read().values).toEqual(shell.current);
     // The repeated visit to the same place wrote nothing more: five saves for five changes.

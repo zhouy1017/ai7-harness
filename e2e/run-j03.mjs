@@ -4,7 +4,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -191,6 +191,141 @@ async function fill(renderer, selector, value, name) {
 }
 
 /** Press one button by its selector, refusing one that is missing or disabled. */
+/**
+ * Issue #936 (plan slice 11c; MSET-010, KEY-002, KEY-003, KEY-006, KEY-011): 设置 › 服务 › 用量 and 设置 › 本机 › 键盘与无障碍 ›
+ * 快捷键, reached from the landing's settings row. The data root holds no Run, so 用量 says 尚无用量; a unit price the editor
+ * types is kept as a local preference and never fetched; a shortcut that clashes or is reserved is refused with its reason,
+ * a valid one is kept, shown at once, held back during a composition, and dispatched; 恢复默认 returns the default.
+ */
+async function runSettingsPages(renderer, cancellation) {
+  const darwin = process.platform === 'darwin';
+  // CDP modifiers: Alt 1, Ctrl 2, Meta 4, Shift 8. `Mod` is Command on macOS and Ctrl elsewhere.
+  const mod = darwin ? 4 : 2;
+  const chord = async (code, key, modifiers) => {
+    const windowsVirtualKeyCode = ({ Tab: 9, Enter: 13 })[key] ?? key.toUpperCase().charCodeAt(0);
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, modifiers, windowsVirtualKeyCode });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, modifiers, windowsVirtualKeyCode });
+  };
+  const label = (id) => `document.querySelector('[data-keyboard-command="${id}"] kbd')?.textContent`;
+  const bindings = `window.ai7.getPreferences().then((preferences)=>JSON.stringify(preferences.values['keyboard.bindings']))`;
+  const libraryDefault = darwin ? 'Command+Option+2' : 'Alt+2';
+  const seriesDefault = darwin ? 'Command+Option+3' : 'Alt+3';
+  const seriesRemapped = darwin ? 'Command+Shift+U' : 'Ctrl+Shift+U';
+  const alt = darwin ? 5 : 1;
+
+  at('usage-settings');
+  cancellation.throwIfRequested();
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'usage-open-settings');
+  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'usage-hub-ready');
+  await clickSelector(renderer, '[data-settings-route="usage"]', 'usage-open');
+  await waitFor(renderer, `document.querySelector('[data-screen="usage"] .usage-page[data-usage-range]') && document.querySelector('[data-usage-empty]')`, 'usage-ready');
+  // Nothing has run in this data root: the page says so, offers no export, and shows no cost it could not have.
+  await assertRenderer(renderer, `document.querySelector('[data-usage-empty]').textContent==='尚无用量' && document.querySelector('[data-usage-export]').closest('.button-row').hidden===true && !document.querySelector('[data-usage-cost]')`, 'usage-empty');
+  await assertRenderer(renderer, `(() => { const range=document.querySelector('[data-usage-range="week"]'); const group=document.querySelector('[data-usage-grouping="taskKind"]'); return range instanceof HTMLInputElement && group instanceof HTMLInputElement; })()`, 'usage-controls');
+
+  at('usage-price-saved');
+  cancellation.throwIfRequested();
+  await fill(renderer, '[data-usage-price-route="opencode-go"] [name="inputPerMillion"]', '2', 'usage-price-input');
+  await fill(renderer, '[data-usage-price-route="opencode-go"] [name="outputPerMillion"]', '8', 'usage-price-output');
+  await assertRenderer(renderer, `(() => { const submit=document.querySelector('[data-usage-price-route="opencode-go"] button[type="submit"]'); if(!(submit instanceof HTMLButtonElement))return false; submit.click(); return true; })()`, 'usage-price-submit');
+  await waitForValue(renderer, `window.ai7.getPreferences().then((preferences)=>{ const held=preferences.values['usage.unitPrices']['opencode-go']; return held?.inputPerMillion===2 && held.outputPerMillion===8 && held.currency==='CNY' && held.enteredAt.length===10; })`, 'usage-price-kept');
+  await assertRenderer(renderer, `document.querySelector('[data-usage-price-route="opencode-go"] .usage-price-note')?.textContent.includes('录入于')`, 'usage-price-dated');
+  await click(renderer, '返回', 'usage-back');
+  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'usage-back-library');
+
+  at('keyboard-settings');
+  cancellation.throwIfRequested();
+  await click(renderer, '键盘与无障碍', 'keyboard-open');
+  await waitFor(renderer, `document.querySelector('[data-screen="keyboard"] [data-keyboard-command="nav.series"]')`, 'keyboard-ready');
+  await assertRenderer(renderer, `${label('nav.library')}===${JSON.stringify(libraryDefault)} && ${label('nav.series')}===${JSON.stringify(seriesDefault)} && document.querySelector('[data-shortcut-command="edit.save"]')?.textContent.startsWith(${JSON.stringify(darwin ? 'Command+S' : 'Ctrl+S')})`, 'keyboard-defaults');
+  await assertRenderer(renderer, `document.querySelector('.keyboard-always-on')?.textContent.includes('始终有效')`, 'keyboard-always-on');
+
+  at('keyboard-remap-refused');
+  cancellation.throwIfRequested();
+  await clickSelector(renderer, '[data-keyboard-change="nav.series"]', 'keyboard-change');
+  await waitFor(renderer, `document.querySelector('[data-keyboard-capture="nav.series"]') && document.activeElement?.closest('[data-keyboard-capture]')`, 'keyboard-capture-open');
+  // A key that edits the text is refused at once, with its reason.
+  await chord('KeyC', 'c', mod);
+  await waitFor(renderer, `document.querySelector('.keyboard-refusal:not([hidden])')?.textContent.includes('用于输入文字')`, 'keyboard-reserved-refused');
+  // The chord 书库 answers to is offered: the refusal names that command and the contexts it would make ambiguous.
+  await chord('Digit2', '2', mod === 4 ? 4 | alt : alt);
+  await assertRenderer(renderer, `Array.from(document.querySelectorAll('.keyboard-capture button')).find((node)=>node.textContent==='设为快捷键' && !node.disabled) instanceof HTMLButtonElement`, 'keyboard-apply-ready');
+  await assertRenderer(renderer, `(() => { Array.from(document.querySelectorAll('.keyboard-capture button')).find((node)=>node.textContent==='设为快捷键').click(); return true; })()`, 'keyboard-apply-conflict');
+  await waitFor(renderer, `document.querySelector('.keyboard-refusal:not([hidden])')?.textContent.includes('「书库」') && document.querySelector('.keyboard-refusal').textContent.includes('完全相同')`, 'keyboard-conflict-refused');
+  await assertRenderer(renderer, `${bindings}.then((held)=>held==='{}')`, 'keyboard-refusal-changes-nothing');
+  await assertRenderer(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-refusal-label-unchanged');
+
+  at('keyboard-remap-saved');
+  cancellation.throwIfRequested();
+  await chord('KeyU', 'u', mod | 8);
+  await waitFor(renderer, `Array.from(document.querySelectorAll('.keyboard-capture button')).find((node)=>node.textContent==='设为快捷键' && !node.disabled) && document.querySelector('.keyboard-capture-chords')?.textContent.includes(${JSON.stringify(seriesRemapped)})`, 'keyboard-captured');
+  await pressKey(renderer, TAB_KEY);
+  await assertRenderer(renderer, `document.activeElement?.textContent==='设为快捷键'`, 'keyboard-apply-focus');
+  await pressKey(renderer, ENTER_KEY);
+  await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesRemapped)} && !document.querySelector('[data-keyboard-capture]')`, 'keyboard-label-updated');
+  await assertRenderer(renderer, `document.querySelector('[data-nav-destination="series"]')?.title.includes(${JSON.stringify(seriesRemapped)})`, 'keyboard-sidebar-label-updated');
+  await waitForValue(renderer, `${bindings}.then((held)=>held==='{"nav.series":"Mod+Shift+U"}')`, 'keyboard-binding-kept');
+
+  at('keyboard-ime-guard');
+  cancellation.throwIfRequested();
+  // A window-wide composition is guarded even when this key event omits isComposing.
+  await assertRenderer(renderer, `(() => { window.dispatchEvent(new CompositionEvent('compositionstart')); window.dispatchEvent(new KeyboardEvent('keydown',{key:'U',code:'KeyU',ctrlKey:${!darwin},metaKey:${darwin},shiftKey:true,bubbles:true,cancelable:true})); window.dispatchEvent(new CompositionEvent('compositionend')); return true; })()`, 'keyboard-window-composition');
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('输入法组合尚未结束') && document.querySelector('[data-screen="keyboard"]')`, 'keyboard-window-composition-held');
+  // The Command Guard holds the remapped chord back while a composition is open, says so, and moves nowhere.
+  await assertRenderer(renderer, `(() => { document.activeElement?.blur?.(); window.dispatchEvent(new KeyboardEvent('keydown',{key:'U',code:'KeyU',ctrlKey:${!darwin},metaKey:${darwin},shiftKey:true,isComposing:true,bubbles:true,cancelable:true})); return true; })()`, 'keyboard-ime-press');
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('输入法组合尚未结束') && document.querySelector('[data-screen="keyboard"]')`, 'keyboard-ime-held');
+
+  at('keyboard-remap-dispatch');
+  cancellation.throwIfRequested();
+  // The old default no longer moves; the new chord opens 书系.
+  await chord('Digit3', '3', alt | (darwin ? 4 : 0));
+  await new Promise((resolveWait) => setTimeout(resolveWait, 300));
+  await assertRenderer(renderer, `document.querySelector('[data-screen="keyboard"]')`, 'keyboard-old-chord-idle');
+  await chord('KeyU', 'u', mod | 8);
+  await waitFor(renderer, `document.querySelector('[data-screen="series-list"]')`, 'keyboard-new-chord-opens-series');
+
+  at('keyboard-restore-default');
+  cancellation.throwIfRequested();
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'series-back');
+  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'series-back-library');
+  await click(renderer, '键盘与无障碍', 'keyboard-reopen');
+  await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-remap-persisted');
+  await clickSelector(renderer, '[data-keyboard-reset="nav.series"]', 'keyboard-reset-one');
+  await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-one-restored');
+  await assertRenderer(renderer, `document.querySelector('[data-nav-destination="series"]')?.title.includes(${JSON.stringify(seriesDefault)})`, 'keyboard-sidebar-label-restored');
+  // A freed default may have been taken by another command; restoring it must name and refuse the conflict.
+  await renderer.evaluate(`window.ai7.savePreference({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+U', 'nav.library': ${JSON.stringify(darwin ? 'Mod+Alt+3' : 'Alt+3')} } })`);
+  await click(renderer, '返回', 'keyboard-reset-conflict-back');
+  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-reset-conflict-library');
+  await click(renderer, '键盘与无障碍', 'keyboard-reset-conflict-reopen');
+  await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-reset-conflict-ready');
+  await clickSelector(renderer, '[data-keyboard-reset="nav.series"]', 'keyboard-reset-conflict');
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('「书库」') && ${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-reset-conflict-refused');
+  // 全部恢复默认 for the whole section.
+  await renderer.evaluate(`window.ai7.savePreference({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+U', 'nav.knowledge': 'Mod+Shift+K' } })`);
+  await click(renderer, '返回', 'keyboard-back');
+  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-back-library');
+  await click(renderer, '键盘与无障碍', 'keyboard-reopen-all');
+  await waitFor(renderer, `${label('nav.knowledge')}===${JSON.stringify(darwin ? 'Command+Shift+K' : 'Ctrl+Shift+K')}`, 'keyboard-two-remaps');
+  await clickSelector(renderer, '[data-keyboard-reset-all]', 'keyboard-reset-all');
+  await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-all-restored');
+  await waitForValue(renderer, `${bindings}.then((held)=>held==='{}')`, 'keyboard-all-restored-kept');
+  await click(renderer, '返回', 'keyboard-done');
+  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-done-hub');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'keyboard-done-library');
+  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'keyboard-done-library-ready');
+}
+
+/** Waits for an expression that answers a promise (`waitFor` would read the promise itself, which is always truthy). */
+async function waitForValue(renderer, expression, name, timeout = 60_000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await renderer.evaluate(`Promise.resolve(${expression}).then(Boolean)`).catch(() => false)) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  throw journeyCheckFailure('J-03', name);
+}
+
 async function clickSelector(renderer, selector, name) {
   await assertRenderer(
     renderer,
@@ -596,6 +731,7 @@ async function main() {
 
     at('renderer-ready');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'ready');
+    await runJ14DarkPass({ renderer, journey: 'J-03', at });
     at('renderer-api-boundary');
     await assertRenderer(renderer, `typeof globalThis.process==='undefined' && typeof globalThis.require==='undefined'`, 'renderer-isolation');
     at('renderer-task-api');
@@ -662,6 +798,7 @@ async function main() {
     await click(renderer, '返回', 'model-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-back-library');
     cancellation.throwIfRequested();
+    await runSettingsPages(renderer, cancellation);
     const crossBookId = await createEmptyBook(renderer, cancellation);
     cancellation.throwIfRequested();
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'book-reopen');
