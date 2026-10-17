@@ -1,6 +1,6 @@
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '../shared/protocol.js';
 import type { NotificationsRendererApi } from '../shared/preferences.js';
-import { completionLabel } from './notification-labels.js';
+import { completionLabel, isOrdinaryOutcome } from './notification-labels.js';
 
 export const QUIET_NOTICE_MS = 6_000;
 
@@ -20,6 +20,7 @@ export function createNotificationObserver(options: {
       const at = Date.parse(item.at);
       if (!Number.isFinite(at) || at <= startedAt || seen.has(key)) continue;
       seen.add(key);
+      if (item.group === 'recent' && !isOrdinaryOutcome(item, projection)) continue;
       void options.api.notify({ bookId: item.book.bookId, eventId: item.itemId }).catch(() => {
         // Notifications are optional; durable attention and the authoritative record remain available.
       });

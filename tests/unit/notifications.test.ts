@@ -94,6 +94,17 @@ describe('privacy-safe main notifications', () => {
 });
 
 describe('renderer projection observer', () => {
+  it('keeps a completed Run with an unresolved external outcome actionable, without a quiet completion', () => {
+    const completed = vi.fn();
+    const notify = vi.fn(async () => {});
+    const observe = createNotificationObserver({ api: { notify }, focused: () => true, completed, startedAt: START });
+    observe(projection([
+      item({ itemId: 'outcome', group: 'recent', state: 'analysis-completed-with-gaps' }),
+      item({ itemId: 'unconfirmed', group: 'exceptions', state: 'analysis-outcome-unconfirmed', target: { kind: 'task-plan', bookId: 'synthetic-book', taskKind: 'baseline-analysis', ref: 'synthetic-task' } }),
+    ]));
+    expect(completed).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledExactlyOnceWith({ bookId: 'synthetic-book', eventId: 'unconfirmed' });
+  });
   it('emits one foreground completion per new event without changing history or its attention count', () => {
     const completed = vi.fn();
     const notify = vi.fn(async () => {});
@@ -110,7 +121,7 @@ describe('renderer projection observer', () => {
     const completed = vi.fn();
     const notify = vi.fn(async () => {});
     const observe = createNotificationObserver({ api: { notify }, focused: () => false, completed, startedAt: START });
-    observe(projection([item({ at: new Date(START - 1).toISOString() }), item({ group: 'active' }), item({ group: 'recent' })]));
+    observe(projection([item({ at: new Date(START - 1).toISOString(), target: { kind: 'analysis', bookId: 'synthetic-book', taskIntentId: 'old-task' } }), item({ group: 'active' }), item({ group: 'recent' })]));
     expect(completed).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledOnce();
   });

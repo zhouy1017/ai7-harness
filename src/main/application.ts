@@ -90,6 +90,7 @@ import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
 import { createNotifier, NOTIFICATION_CHANNELS } from './notifications.js';
+import { isOrdinaryOutcome } from '../renderer/notification-labels.js';
 import { PREFERENCE_IPC_CHANNELS } from '../shared/preferences.js';
 import {
   createCanonicalExternalDataRoot,
@@ -610,7 +611,7 @@ function registerRendererHandlers(
     requireDesktop(typeof eventId === 'string' && eventId.length <= 300 && (bookId === null || typeof bookId === 'string'));
     const projection = await service.call('inspectGlobalAttention', {});
     const item = projection.groups.flatMap((group) => group.items).find((entry) => entry.itemId === eventId && entry.book.bookId === bookId);
-    if (item) notifier.accept(item);
+    if (item && (item.group !== 'recent' || isOrdinaryOutcome(item, projection))) notifier.accept(item);
   }));
   const requireNothingUnsaved = (): void => {
     if (unsavedWindows()) throw new ServiceCallError('DATABASE_REPLACEMENT_UNSAVED', '还有窗口里的修改没有保存；请先保存或关闭那个窗口，再替换本机数据。');
