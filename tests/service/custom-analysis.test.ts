@@ -162,6 +162,67 @@ describe('the dimension ledger (schema revision 83)', () => {
 });
 
 describe('a custom analysis Run over the real store on exact sample1', () => {
+  it('finds a custom Connectivity Wait and reconnects on its exact version ledger', async () => {
+    await withBook(async (book) => {
+      const { dimensionId, versionId } = defineDimension(book);
+      const prepared = book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId, update: null }, launchPolicy);
+      const task = book.store.inspectAnalysisTask(book.bookId, prepared.taskIntentId);
+      book.store.startBaselineAnalysisWhenOnline(book.bookId, prepared.taskIntentId, task.planEnvelope!.digest);
+      const waiting = book.store.waitingTaskRuns(book.bookId);
+      expect(waiting).toHaveLength(1);
+      const candidate = waiting[0]!;
+      expect(candidate.ref).toBe(prepared.taskIntentId);
+      expect(candidate.kind).toBe('baseline-analysis');
+      expect(book.store.taskPreflightDrift(candidate)).toEqual([]);
+      const ledger = book.store.waitingRunLedger({ ...candidate, kind: 'baseline-analysis' });
+      expect(ledger.kind).toBe(`custom-analysis/${dimensionId}`);
+      book.owner.admitAndDispatch(candidate.runRecordId, ledger, { afterReconnectPreflight: true });
+      await book.owner.whenIdle();
+      const latest = custom(book.store.inspectCustomAnalysisDimensions(book.bookId), dimensionId).book!.latest!;
+      expect(latest.dimensionVersion.versionId).toBe(versionId);
+      expect(latest.rowCounts.rows).toBe(9);
+      expect(book.store.waitingTaskRuns(book.bookId)).toEqual([]);
+      expect(book.store.inspectBaselineAnalysis(book.bookId).resultSetRevision).toBeNull();
+    });
+  }, 180_000);
+
+  it('edits the pinned custom plan and keeps its version when a successor is enabled before the Run starts', async () => {
+    await withBook(async (book) => {
+      const first = defineDimension(book);
+      const prepared = book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId: first.dimensionId, update: null }, launchPolicy);
+      const task = book.store.inspectAnalysisTask(book.bookId, prepared.taskIntentId);
+      expect(task.authorization).toBeNull();
+      expect(task.run).toBeNull();
+      const edited = book.store.editBaselineAnalysisPlan({
+        bookId: book.bookId, taskIntentId: prepared.taskIntentId, planEnvelopeDigest: task.planEnvelope!.digest,
+        removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 },
+      });
+      expect(edited.kind).toBe(`custom-analysis/${first.dimensionId}`);
+      expect(edited.planVersion!.ordinal).toBe(2);
+      expect(edited.planEnvelope!.digest).not.toBe(task.planEnvelope!.digest);
+      const successor = custom(book.store.saveCustomAnalysisDimension({ dimensionId: first.dimensionId, title: '单元开篇（修订）', questionTemplate: CUSTOM_DIMENSION_TEMPLATE }), first.dimensionId).versions[0]!;
+      book.store.enableCustomAnalysisDimension(successor.versionId);
+      const pinned = book.store.inspectTaskPlan({ bookId: book.bookId, kind: 'baseline-analysis', ref: prepared.taskIntentId });
+      expect(pinned.goal.chips.procedure).toContain('第 1 版');
+      const authorized = book.store.authorizeBaselineAnalysis(book.bookId, prepared.taskIntentId, edited.planEnvelope!.digest);
+      book.owner.admitAndDispatch(authorized.dispatchRunRecordId!, authorized.ledger);
+      await book.owner.whenIdle();
+      const previous = custom(book.store.inspectCustomAnalysisDimensions(book.bookId), first.dimensionId).book!.latest!;
+      expect(previous.dimensionVersion.versionId).toBe(first.versionId);
+      expect(previous.rowCounts.rows).toBe(9);
+      const historical = JSON.stringify(book.store.inspectAnalysisTask(book.bookId, prepared.taskIntentId).resultSetRevision);
+      const next = book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId: first.dimensionId, update: { mode: 'reanalyze-range', selectedRange: { startPosition: 1, endPosition: 1 } } }, launchPolicy);
+      const nextTask = book.store.inspectAnalysisTask(book.bookId, next.taskIntentId);
+      expect(nextTask.planEnvelope!.promptContractDigest).not.toBe(edited.planEnvelope!.promptContractDigest);
+      expect(nextTask.update!.reusePlan!.counts.reused).toBe(0);
+      expect(JSON.stringify(nextTask.resultSetRevision) === historical).toBe(true);
+      expect(book.store.inspectBaselineAnalysis(book.bookId).resultSetRevision).toBeNull();
+      // Stopping the old version keeps the completed result exactly pinned.
+      book.store.stopCustomAnalysisDimension(first.versionId);
+      expect(custom(book.store.inspectCustomAnalysisDimensions(book.bookId), first.dimensionId).book!.latest!.dimensionVersion.versionId).toBe(first.versionId);
+    });
+  }, 180_000);
+
   it('runs through prepare → 开始任务 → fixture execution into a Result Set Revision keyed by the family, rows anchored or said unlocated', async () => {
     await withBook(async (book) => {
       const { dimensionId, versionId } = defineDimension(book);
@@ -190,7 +251,7 @@ describe('a custom analysis Run over the real store on exact sample1', () => {
       // Every located row's range holds exactly its quotation in the text the Task read.
       const blocks = new Map(book.store.baselineAnalysisLedger.readRevisionBlocks(book.manuscriptId, book.revisionId).map((block) => [block.blockId, block.text] as const));
       for (const row of latest.rows.filter((entry) => entry.sourceRange !== null)) {
-        expect(sliceGraphemes(blocks.get(row.sourceRange!.blockId)!, row.sourceRange!.fromGrapheme, row.sourceRange!.toGrapheme)).toBe(row.quote);
+        expect(sliceGraphemes(blocks.get(row.sourceRange!.blockId)!, row.sourceRange!.fromGrapheme, row.sourceRange!.toGrapheme) === row.quote).toBe(true);
       }
     });
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
@@ -237,7 +298,7 @@ describe('a custom analysis Run over the real store on exact sample1', () => {
   }, 180_000);
 });
 
-describe('in J-04 order: the first baseline, then the dimension', () => {
+describe('baseline and custom analysis on the same launch', () => {
   it('answers every unit of the dimension after the first baseline of the Book on the same launch', async () => {
     await withBook(async (book) => {
       let progress = book.store.createBaselineAnalysisPreparationWork(book.bookId, '对当前书稿执行基线稿件分析，形成覆盖全部结构单元的结果集修订版。', null, launchPolicy);
@@ -256,7 +317,6 @@ describe('in J-04 order: the first baseline, then the dimension', () => {
 
 describe('schema revision 83', () => {
   it('rebuilds a revision-80 store\'s Result Set relations byte for byte, adds the dimension relations empty, and refuses an 83 without them', async () => {
-    expect(CUSTOM_ANALYSIS_SCHEMA_VERSION).toBe(83);
     expect(LATEST_SCHEMA_VERSION).toBe(CUSTOM_ANALYSIS_SCHEMA_VERSION);
     let bookId = '';
     await withBook(async (book) => {
@@ -273,6 +333,7 @@ describe('schema revision 83', () => {
     const plant = new DatabaseSync(path);
     const sets = plant.prepare('SELECT rowid, * FROM analysis_result_sets ORDER BY rowid').all();
     const revisions = plant.prepare('SELECT rowid, * FROM analysis_result_set_revisions ORDER BY rowid').all();
+    const plans = plant.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all();
     expect(sets).toHaveLength(1);
     restoreCustomAnalysisPredecessor(plant);
     plant.exec(`PRAGMA user_version = ${TASK_INTENT_DRAFT_SCHEMA_VERSION}`);
@@ -287,12 +348,13 @@ describe('schema revision 83', () => {
     }
     const migrated = new DatabaseSync(path);
     try {
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 83 });
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: CUSTOM_ANALYSIS_SCHEMA_VERSION });
       for (const table of ['analysis_result_sets', 'analysis_result_set_revisions'] as const) {
         expect((migrated.prepare(`SELECT sql FROM sqlite_schema WHERE name = '${table}'`).get() as { sql: string }).sql).toBe(ANALYSIS_RESULT_SET_SCHEMA_SQL[table]);
       }
-      expect(migrated.prepare('SELECT rowid, * FROM analysis_result_sets ORDER BY rowid').all()).toEqual(sets);
-      expect(migrated.prepare('SELECT rowid, * FROM analysis_result_set_revisions ORDER BY rowid').all()).toEqual(revisions);
+      expect(JSON.stringify(migrated.prepare('SELECT rowid, * FROM analysis_result_sets ORDER BY rowid').all()) === JSON.stringify(sets)).toBe(true);
+      expect(JSON.stringify(migrated.prepare('SELECT rowid, * FROM analysis_result_set_revisions ORDER BY rowid').all()) === JSON.stringify(revisions)).toBe(true);
+      expect(JSON.stringify(migrated.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all()) === JSON.stringify(plans)).toBe(true);
       for (const table of Object.keys(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL)) {
         expect((migrated.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n).toBe(0);
       }

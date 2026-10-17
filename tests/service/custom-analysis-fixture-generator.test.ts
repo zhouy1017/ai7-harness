@@ -168,8 +168,8 @@ it.runIf(process.env['AI7_REGENERATE_CUSTOM_ANALYSIS_FIXTURE'] === '1')('generat
   const body = {
     schema: 'ai7.model-fixture/1',
     identity: 'sample1-custom-analysis-authored',
-    description: '自定义分析契约 v1 的人工撰写夹具：为一个合成的自定义分析维度「单元开篇」（每个单元从哪里开始写）逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）的开篇段落后写成，回答该维度第 1 版在未经编辑的 sample1 上的首次运行。每条引文都是其所声明段落的逐字子串，另有一条故意找不到，用来证明未定位的回答仍被保留并标明。unitOrdinal 为 0 的条目回答这次运行发起的运行反思。本夹具叠加在 sample1-baseline-happy 之上：同一次启动先完成基线分析，「分析」才出现「自定义」分页；两者的请求摘要互不相同，叠加不改变任何条目的键。',
-    // Layered over the baseline's happy fixture: J-04's launch runs the first baseline the 自定义 tab needs, then the dimension.
+    description: '自定义分析契约 v1 的人工撰写夹具：为一个合成的自定义分析维度「单元开篇」（每个单元从哪里开始写）逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）的开篇段落后写成，回答该维度第 1 版在未经编辑的 sample1 上的首次运行。每条引文都是其所声明段落的逐字子串，另有一条故意找不到，用来证明未定位的回答仍被保留并标明。unitOrdinal 为 0 的条目回答这次运行发起的运行反思。本夹具叠加在 sample1-baseline-happy 之上：「自定义」分页与运行无需先完成基线分析；两者的请求摘要互不相同，叠加不改变任何条目的键。',
+    // Layering preserves baseline compatibility; J-04 runs this dimension before any baseline on its Book.
     basedOn: 'sample1-baseline-happy',
     provenance: 'authored',
     provider: 'ai7-local-deterministic',

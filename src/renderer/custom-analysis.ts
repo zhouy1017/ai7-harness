@@ -78,10 +78,8 @@ export interface MountCustomAnalysisTabOptions {
 }
 
 /**
- * The tab is drawn again on every refresh of ②A's card, four times a second while a Run executes; the Book's last reading is
- * kept so a redraw shows it at once, and the service is asked again only when it is older than this or the tab is shown.
+ * Keep the last reading for an immediate redraw, then read again: the drawer may have started a custom Task since that reading.
  */
-const READING_FRESH_MS = 2_000;
 const readings = new Map<string, { projection: CustomAnalysisDimensionsProjection; at: number }>();
 
 /** While a dimension's Task is under way the tab reads again this often, as ②A's card does for the baseline's Run. */
@@ -221,7 +219,12 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
   };
 
   let refresh: ReturnType<typeof setTimeout> | null = null;
+  let loading = false;
   const load = async (): Promise<void> => {
+    if (loading) return;
+    loading = true;
+    if (refresh !== null) clearTimeout(refresh);
+    refresh = null;
     try {
       const projection = await api.inspectCustomAnalysisDimensions({ forBook: true });
       readings.set(bookId, { projection, at: Date.now() });
@@ -238,13 +241,15 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       if (!panel.isConnected) return;
       panel.dataset['customAnalysis'] = 'unavailable';
       panel.replaceChildren(el('p', 'attention-note', options.errorMessage(error, '无法读取自定义分析维度。')));
+    } finally {
+      loading = false;
     }
   };
 
   const cached = readings.get(bookId);
   if (cached === undefined) panel.replaceChildren(el('p', 'field-note', CUSTOM_TAB_READING));
   else render(cached.projection);
-  if (cached === undefined || Date.now() - cached.at > READING_FRESH_MS) void load();
+  void load();
   panel.addEventListener(ANALYSIS_TAB_SHOWN_EVENT, () => void load());
 }
 

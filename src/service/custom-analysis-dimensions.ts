@@ -15,6 +15,7 @@ import {
   parseCustomAnalysisDimensionDocument,
 } from './analysis/custom-analysis-contract.js';
 import type { CustomAnalysisVersionInput } from './analysis/custom-analysis-kind.js';
+import { CUSTOM_ANALYSIS_SCHEMA_VERSION } from './task-authorization.js';
 
 /**
  * 自定义分析维度 (Issue #922, wave 10 slice 7f; ADR 0090 item 4): the house's Custom Analysis Dimensions, written in 知识库 ›
@@ -82,7 +83,7 @@ export const CUSTOM_ANALYSIS_DIMENSION_FOREIGN_KEYS: Readonly<Record<string, Rea
 
 /** Revision 83's relations, created once before the version is stamped: an older store gains them empty and nothing moves. */
 export function initializeCustomAnalysisDimensionSchema(db: DatabaseSync, version: number): void {
-  if (version >= 83 || Object.keys(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL).some((name) => db.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(name) !== undefined)) return;
+  if (version >= CUSTOM_ANALYSIS_SCHEMA_VERSION || Object.keys(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL).some((name) => db.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(name) !== undefined)) return;
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const sql of Object.values(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL)) db.exec(sql);

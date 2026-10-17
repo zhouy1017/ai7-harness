@@ -195,7 +195,7 @@ export function customAnalysisKindDefinition(version: CustomAnalysisVersionInput
   };
   const modes: ReadonlyArray<AnalysisModeDefinition> = (['first-baseline', ...BASELINE_ANALYSIS_UPDATE_MODES] as const).map((mode: BaselineAnalysisTaskMode) => ({
     mode,
-    goal: customAnalysisModeGoal(version.title, mode),
+    goal: customAnalysisModeGoal(mode),
     label: BASELINE_ANALYSIS_MODE_LABELS[mode],
     meaning: BASELINE_ANALYSIS_MODE_MEANINGS[mode].replaceAll('基线稿件分析契约 v1', '自定义分析契约 v1'),
     initial: mode === 'first-baseline',
@@ -208,7 +208,7 @@ export function customAnalysisKindDefinition(version: CustomAnalysisVersionInput
     kind: customAnalysisKindId(version.dimensionId),
     contractVersion: CUSTOM_ANALYSIS_CONTRACT_VERSION,
     expectedOutcome: customAnalysisExpectedOutcome(version.title),
-    taskGoal: customAnalysisModeGoal(version.title, 'first-baseline'),
+    taskGoal: customAnalysisModeGoal('first-baseline'),
     initialMode: 'first-baseline',
     modes,
     updateModes: BASELINE_ANALYSIS_UPDATE_MODES,
@@ -289,6 +289,11 @@ export function customAnalysisPlan(
   const [units] = plan.steps;
   return {
     ...plan,
+    // These preparation controls encode the built-in goal in the shared drawer. A custom Task is prepared only by its tab.
+    start: { ...plan.start, reconfirm: null },
+    redo: null,
+    reprepare: null,
+    budgetStop: null,
     goal: { ...plan.goal, sentence: `逐单元回答${named}的提问，定位每条回答所依据的原文，形成结果集修订版。`,
       // The chip reads 工序「…」, so the procedure is named without brackets of its own.
       chips: { ...plan.goal.chips, procedure: `自定义分析 · ${version.title} · 第 ${version.version} 版` } },

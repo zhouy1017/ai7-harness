@@ -598,18 +598,9 @@ async function fill(renderer, selector, value, name) {
 async function waitFor(renderer, expression, name, timeout = 60_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-  }
-  throw journeyCheckFailure('J-04', name);
-}
-
-/** Wait on a service read in the page: `waitFor` takes the truth of its expression, which a pending Promise always has. */
-async function waitForRead(renderer, expression, name, timeout = 60_000) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
+    // Await before testing truth: DOM expressions and asynchronous service reads share the same predicate semantics.
     if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`).catch(() => false)) return;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-04', name);
 }
@@ -3240,7 +3231,7 @@ async function main() {
 
     // ---- 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4) ----
     // Synchronized delta with Issue #922: a fresh, unedited sample1 Book on the provider-free `sample1-custom-analysis-authored`
-    // fixture, layered on `sample1-baseline-happy` so one launch runs the first baseline the 自定义 tab needs and then the one
+    // fixture, layered on `sample1-baseline-happy`, running the dimension before any baseline on this Book and reading the one
     // synthetic dimension 「单元开篇」 the fixture answers. The dimension is written in 知识库 › 工序与规则 and run from ②A through
     // the ordinary plan and 开始任务; nothing reaches a network.
     at('custom-dimension-define');
@@ -3274,21 +3265,17 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('custom-dimension-run');
-    // The 自定义 tab is one of ②A's: the first baseline forms the Book's Result Set Revision, then the tab lists the dimension.
+    // 自定义 is its own kind: the tab and its Run require no baseline Result Set Revision on this Book.
     await click(renderer, '返回', 'custom-knowledge-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'custom-back-library');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(customBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'custom-open-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(customBook.bookId)}]')`, 'custom-manuscript-ready');
     await openAnalysisDestination(renderer, 'custom-analysis');
-    await reviewAction(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', 'custom-baseline-prepare');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'custom-baseline-prepared', 120_000);
-    await startFromBar(renderer, 'custom-baseline');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'custom-baseline-settled', 180_000);
     await reviewAction(renderer, '.baseline-analysis-card [role="tab"][data-analysis-tab="custom"]', 'custom-tab-open');
     const dimensionCard = `.baseline-analysis-card [data-analysis-panel="custom"] .custom-dimension-card[data-dimension-id=${JSON.stringify(customDimension.dimensionId)}]`;
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${dimensionCard} [data-custom-empty="not-run"]`)})?.textContent==='尚未运行' && document.querySelector(${JSON.stringify(`${dimensionCard} [data-analysis-action="custom-run"]`)})?.disabled===false`, 'custom-tab-not-run');
     await reviewAction(renderer, `${dimensionCard} [data-analysis-action="custom-run"]`, 'custom-run');
-    await waitForRead(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.taskState?.state === 'prepared')`, 'custom-prepared', 120_000);
+    await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.taskState?.state === 'prepared')`, 'custom-prepared', 120_000);
     const customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions[0].book.taskState;
     // The plan opens in the Task Drawer as every ②A plan does: the dimension's exact version as its procedure, and nothing sent here.
     const customPlan = await drawerShowing(renderer, customTask.taskIntentId, 'ready', 'custom-drawer');
@@ -3298,15 +3285,15 @@ async function main() {
       customPlanRecord.technical?.some((row) => row.key === 'custom-analysis-dimension' && row.value.startsWith(customDimension.versions[0].versionId)), 'custom-plan-record', customPlanRecord?.scope);
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'custom-bar-ready');
     await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'custom-start');
-    await waitForRead(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.latest !== null && value.dimensions[0]?.book?.taskState?.state === 'settled')`, 'custom-settled', 180_000);
+    await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.latest !== null && value.dimensions[0]?.book?.taskState?.state === 'settled')`, 'custom-settled', 180_000);
     cancellation.throwIfRequested();
 
     at('custom-dimension-tab');
-    // The tab reads again when shown: the latest revision of the dimension — coverage, freshness, per-unit answers — each located
+    // The tab refreshes itself after the drawer starts the Run, without leaving and returning: coverage, freshness, per-unit answers, each located
     // quotation a link back to the manuscript, the one the fixture meant not to be found said so, and no 分析反馈 offered.
-    await reviewAction(renderer, '.baseline-analysis-card [role="tab"][data-analysis-tab="synopsis"]', 'custom-tab-away');
-    await reviewAction(renderer, '.baseline-analysis-card [role="tab"][data-analysis-tab="custom"]', 'custom-tab-again');
     await waitFor(renderer, `document.querySelectorAll(${JSON.stringify(`${dimensionCard} .custom-row`)}).length===9`, 'custom-tab-rows');
+    const builtInAfterCustom = await renderer.evaluate('window.ai7.inspectBaselineAnalysis().then((value) => value.resultSetRevision === null)');
+    requireJourney(builtInAfterCustom === true, 'custom-built-in-unchanged');
     const customTab = await renderer.evaluate(`(() => {
       const card=document.querySelector(${JSON.stringify(dimensionCard)});
       const section=card?.querySelector('.custom-revision');

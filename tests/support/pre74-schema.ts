@@ -1,6 +1,6 @@
 import { HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from '../../src/service/house-review-preference.js';
 import type { DatabaseSync } from 'node:sqlite';
-import { ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_REVISION_82_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, WEB_TOOLS_PLAN_RECORDS_SQL } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_REVISION_82_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, CUSTOM_ANALYSIS_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL } from '../../src/service/task-authorization.js';
 import { CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL, CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL } from '../../src/service/custom-analysis-dimensions.js';
 import { TASK_INTENT_DRAFT_SCHEMA_SQL, TASK_INTENT_DRAFT_TRIGGER_SQL } from '../../src/service/task-intent-drafts.js';
 import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
@@ -35,7 +35,7 @@ export function execPre74Fixture(db: DatabaseSync, sql: string): void {
   const version = /PRAGMA user_version\s*=\s*(\d+)/iu.exec(sql)?.[1];
   // Revisions 15 and 16 are validated against the terminal Task Intents text, as they always were; only 17 to 79 are narrowed.
   // The Result Set relations likewise: only 17 to 82 are narrowed back to the text before revision 83 (Issue #922, slice 7f).
-  if (version !== undefined && Number(version) < 83) restoreCustomAnalysisPredecessor(db, Number(version) >= 17);
+  if (version !== undefined && Number(version) < CUSTOM_ANALYSIS_SCHEMA_VERSION) restoreCustomAnalysisPredecessor(db, Number(version) >= 17);
   if (version !== undefined && Number(version) < 80) restoreTaskIntentDraftPredecessor(db, Number(version) >= 17);
   if (version !== undefined && Number(version) < 79) dropHouseReviewPreferenceRelations(db);
   if (version !== undefined && Number(version) < 78) dropFactualVerificationRelations(db);

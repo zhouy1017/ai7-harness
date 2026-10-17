@@ -5704,7 +5704,7 @@ export class EditorialStore {
     const ledger = this.customAnalysisLedger(definition);
     const mode = input.update?.mode ?? 'first-baseline';
     let progress = this.#analysisCall(() => ledger.prepare({
-      phase: 'start', bookId: input.bookId, goal: customAnalysisModeGoal(version.document.title, mode), update: input.update ?? null, reconfirm: false, launchPolicy,
+      phase: 'start', bookId: input.bookId, goal: customAnalysisModeGoal(mode), update: input.update ?? null, reconfirm: false, launchPolicy,
     }));
     while (!progress.done) {
       const workId = progress.workId;
@@ -6490,8 +6490,9 @@ export class EditorialStore {
     progress?: ProgressReader,
   ): BaselineAnalysisProjection {
     this.#assertAvailable();
-    this.#analysisCall(() => this.#baselineAnalysis.editPlan(input.bookId, input));
-    return this.inspectBaselineAnalysis(input.bookId, progress);
+    const ledger = this.#analysisLedgerOfTask(input.bookId, input.taskIntentId);
+    this.#analysisCall(() => ledger.editPlan(input.bookId, input));
+    return this.inspectAnalysisTask(input.bookId, input.taskIntentId, progress);
   }
 
   /**
@@ -6676,7 +6677,7 @@ export class EditorialStore {
   /** Reconnect Preflight's local half for one waiting Run: the labels of the material inputs that moved, or none. */
   baselineAnalysisPreflightDrift(runRecordId: string): ReadonlyArray<string> {
     this.#assertAvailable();
-    return this.#analysisCall(() => this.#baselineAnalysis.preflightDrift(runRecordId));
+    return this.#analysisCall(() => this.executionLedgerForRun(runRecordId).preflightDrift(runRecordId));
   }
 
   /** A waiting Run that can never dispatch as authorized is blocked with its reasons (OFF-008). */
@@ -6755,6 +6756,14 @@ export class EditorialStore {
       }
     };
     ofLedger('baseline-analysis', this.#baselineAnalysis);
+    // A custom dimension uses the same drawer/Connectivity Wait path, on the contract its own Task froze.
+    const customKinds = this.#authority.prepare(`SELECT t.task_intent_id FROM analysis_task_intents t
+      WHERE t.kind GLOB 'custom-analysis/*' AND t.rowid =
+        (SELECT max(latest.rowid) FROM analysis_task_intents latest WHERE latest.kind = t.kind)`).all() as SqlRow[];
+    for (const row of customKinds) {
+      const version = this.#customAnalysisVersionOfTask(asString(row.task_intent_id));
+      if (version !== null) ofLedger('baseline-analysis', this.customAnalysisLedger(this.#customAnalysisDefinition(version)));
+    }
     // A kind whose records no longer read is said where its own surface reads it: it never keeps another kind's Run waiting.
     for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
       try {
@@ -6814,7 +6823,7 @@ export class EditorialStore {
    */
   waitingRunLedger(run: WaitingTaskRun & { kind: Exclude<WaitingTaskRun['kind'], 'review-run'> }): BaselineAnalysisStore {
     this.#assertAvailable();
-    if (run.kind === 'baseline-analysis') return this.#baselineAnalysis;
+    if (run.kind === 'baseline-analysis') return this.#analysisLedgerOfTask(run.bookId, run.ref);
     this.#requireLedgerKindScope(run.kind, run.bookId, run.ref);
     return this.#ledgerTaskOf(run.kind, run.bookId, run.ref);
   }

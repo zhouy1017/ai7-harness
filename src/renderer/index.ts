@@ -4218,6 +4218,32 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     failed: (error) => setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error'),
   });
 
+  // 自定义 is available before the first baseline too: each dimension owns its own Result Set and needs no built-in result.
+  const revision = projection.inspectedRevision?.revision ?? projection.resultSetRevision;
+  const taskInFlight = projection.state === 'prepared' || projection.state === 'authorized-blocked' || projection.state === 'queued' ||
+    projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing' || projection.state === 'cancelling' ||
+    projection.state === 'pausing' || projection.state === 'paused' || projection.state === 'resumable' ||
+    projection.state === 'awaiting-clarification';
+  const { panels, select } = analysisTabs(card, projection.bookId, revision === null || taskInFlight ? 'history' : 'synopsis');
+  if (revision !== null) {
+    renderBaselineAnalysisOverview(card, panels, select, projection, revision, bookTitle, projection.inspectedRevision !== null
+      ? { historical: true, current: projection.inspectedRevision.current }
+      : { historical: false, current: true });
+  } else {
+    for (const [id] of ANALYSIS_TABS) {
+      if (id !== 'custom' && id !== 'history') panels[id].append(element('p', 'field-note', '尚无基线分析结果。'));
+    }
+  }
+  const records = panels.history;
+  mountCustomAnalysisTab(panels.custom, {
+    bookId: projection.bookId,
+    api: window.ai7,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+    openPlan: (taskIntentId) => openTaskPlan(projection.bookId, 'baseline-analysis', taskIntentId),
+    jump: (blockId) => void jumpToManuscript(projection.bookId, { manuscriptId: null, blockId, markId: null }, '这段原文已不在当前稿件中。'),
+  });
+
   // The first-baseline form exists only while the Book holds no Result Set Revision; afterwards every
   // new Task is one of the three Analysis Update Controls below the Overview. A first baseline cancelled while
   // it waited to start leaves no revision either, so the form is offered again (Issue #502, OFF-010).
@@ -4236,38 +4262,11 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     start.dataset['analysisAction'] = 'prepare';
     actions.append(start, cancel);
     form.append(label, goal, element('p', 'field-note', '开始后先为任务保存修订版并整理阅读范围，计划在右侧的任务计划里打开；不会构造模型请求。'), actions);
-    card.append(form);
+    records.append(form);
     host.replaceChildren(card);
     return;
   }
 
-  // Once the Book holds a revision the card reads as ②A's seven tabs, and everything about how the
-  // analysis was made and is brought up to date — the current Task's plan and Run, its outcome and Run
-  // Report, the three update modes, the history — lives under 历史与更新. Before that there is nothing
-  // to tab through, and the first baseline's plan reads straight down the card as it always has.
-  const revision = projection.inspectedRevision?.revision ?? projection.resultSetRevision;
-  let records: HTMLElement = card;
-  if (revision !== null) {
-    // A Task in flight is what the editor came for, so the card opens where its plan and its Run are;
-    // a choice the editor made themselves always wins over either default.
-    const taskInFlight = projection.state === 'prepared' || projection.state === 'authorized-blocked' || projection.state === 'queued' ||
-      projection.state === 'waiting' || projection.state === 'admitted' || projection.state === 'executing' || projection.state === 'cancelling' ||
-      projection.state === 'pausing' || projection.state === 'paused' || projection.state === 'resumable' ||
-      projection.state === 'awaiting-clarification';
-    const { panels, select } = analysisTabs(card, projection.bookId, taskInFlight ? 'history' : 'synopsis');
-    renderBaselineAnalysisOverview(card, panels, select, projection, revision, bookTitle, projection.inspectedRevision !== null
-      ? { historical: true, current: projection.inspectedRevision.current }
-      : { historical: false, current: true });
-    records = panels.history;
-    mountCustomAnalysisTab(panels.custom, {
-      bookId: projection.bookId,
-      api: window.ai7,
-      setStatus,
-      errorMessage: rendererErrorMessage,
-      openPlan: (taskIntentId) => openTaskPlan(projection.bookId, 'baseline-analysis', taskIntentId),
-      jump: (blockId) => void jumpToManuscript(projection.bookId, { manuscriptId: null, blockId, markId: null }, '这段原文已不在当前稿件中。'),
-    });
-  }
   if (projection.checkpoint !== null) renderFrozenAnalysisPlan(records, projection);
 
   if (projection.taskOutcome) {

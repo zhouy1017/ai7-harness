@@ -134,6 +134,49 @@ describe('②A › 自定义', () => {
 });
 
 describe('②A › 自定义 while a Run is under way', () => {
+  it('cancels an armed poll when a tab-show read observes settlement', async () => {
+    vi.useFakeTimers();
+    try {
+      const running = projection([dimension({ taskState: { taskIntentId: VERSION, state: 'executing', stateLabel: '正在运行' }, latest: null, unavailableReason: null })]);
+      const settled = projection([dimension({ taskState: { taskIntentId: VERSION, state: 'settled', stateLabel: '已完成' }, latest: revision(), unavailableReason: null })]);
+      const { panel, api } = mountTab(running);
+      await settle();
+      api.inspectCustomAnalysisDimensions.mockResolvedValue(settled);
+      panel.dispatchEvent({ type: ANALYSIS_TAB_SHOWN_EVENT });
+      await settle();
+      expect(panel.querySelectorAll('.custom-row')).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(api.inspectCustomAnalysisDimensions).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads a remounted panel after the drawer starts a recently prepared Task', async () => {
+    vi.useFakeTimers();
+    try {
+      const prepared = projection([dimension({ taskState: { taskIntentId: VERSION, state: 'prepared', stateLabel: '待开始' }, latest: null, unavailableReason: null })]);
+      const { panel, api, options } = mountTab(prepared);
+      await settle();
+      panel.remove();
+      const replacement = miniDocument.createElement('section');
+      miniDocument.body.append(replacement);
+      api.inspectCustomAnalysisDimensions.mockResolvedValue(projection([dimension({ taskState: { taskIntentId: VERSION, state: 'executing', stateLabel: '正在运行' }, latest: null, unavailableReason: null })]));
+      mountCustomAnalysisTab(replacement as unknown as HTMLElement, options);
+      await settle();
+      expect(replacement.querySelector('.custom-task-state')?.dataset['taskState']).toBe('executing');
+      api.inspectCustomAnalysisDimensions.mockResolvedValue(projection([dimension({ taskState: { taskIntentId: VERSION, state: 'settled', stateLabel: '已完成' }, latest: revision(), unavailableReason: null })]));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(replacement.querySelectorAll('.custom-row')).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(api.inspectCustomAnalysisDimensions).toHaveBeenCalledTimes(3);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reads again until the Task of the dimension settles, then stops', async () => {
     vi.useFakeTimers();
     try {

@@ -1,5 +1,11 @@
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { readFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createContext, runInContext } from 'node:vm';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import { createSourceFile, forEachChild, isFunctionDeclaration, ModuleKind, ScriptTarget, transpileModule, type Node } from 'typescript';
 import {
   CUSTOM_ANALYSIS_FIXED_TERMS,
   CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA,
@@ -16,7 +22,7 @@ import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/cont
 import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { resolveSourceCheckoutLaunchPolicy, verifyDeveloperLivePolicy } from '../../src/service/launch-policy.js';
 import {
   BASELINE_ANALYSIS_KIND,
   CUSTOM_ANALYSIS_CONTRACT_VERSION,
@@ -172,19 +178,41 @@ describe('the custom analysis kind family (custom-analysis/<dimension-id>)', () 
     ]);
   });
 
-  it('names the dimension version and its template on the plan, and the template as 会发送 only for a live route', () => {
+  it('names the version and template, and refuses every baseline-only drawer preparation entry', async () => {
     const plan = {
       goal: { sentence: '对当前书稿执行基线稿件分析。', chips: { procedure: '基线分析' } },
       scope: { send: '不发送任何内容' },
       service: { send: '不发送任何内容' },
       steps: [{ id: 'units', label: '逐章读取', result: '各章摘要', removable: false, removed: false }, { id: 'reduction', label: '汇总全书', result: '梗概', removable: false, removed: false }],
       outcomes: ['基线分析结果'],
+      start: { reconfirm: { goal: 'baseline-only' } }, redo: { prepare: { goal: 'baseline-only' } }, reprepare: { prepare: { goal: 'baseline-only' } }, budgetStop: {},
       technical: [],
     } as unknown as TaskPlanProjection;
     const local = customAnalysisPlan(plan, { ...version }, false);
     expect(local.goal.chips.procedure).toBe(`自定义分析 · ${CUSTOM_DIMENSION_TITLE} · 第 1 版`);
     expect(local.scope.send).toBe(`不发送任何内容；实时运行时会一并发送该维度第 1 版的提问模板「${CUSTOM_DIMENSION_TEMPLATE}」`);
     expect(local.service.send).toBe('不发送任何内容');
+    // None of the shared drawer's baseline-only preparation controls may turn this custom Task into prepareBaselineAnalysis.
+    expect([local.start.reconfirm, local.redo, local.reprepare, local.budgetStop]).toEqual([null, null, null, null]);
+    // Exercise the real drawer handlers as in task-drawer-completion.test.ts; even a stale click must not prepare a baseline.
+    const source = await readFile(new URL('../../src/renderer/task-drawer.ts', import.meta.url), 'utf8');
+    const parsed = createSourceFile('task-drawer.ts', source, ScriptTarget.ES2022, true);
+    const handlers = new Map<string, string>();
+    function visit(node: Node): void {
+      if (isFunctionDeclaration(node) && node.name !== undefined && ['redoNow', 'reprepareNow', 'reconfirm'].includes(node.name.text)) {
+        handlers.set(node.name.text, node.getText(parsed));
+      }
+      forEachChild(node, visit);
+    }
+    visit(parsed);
+    expect(handlers.size).toBe(3);
+    const prepareBaselineAnalysis = vi.fn();
+    for (const [name, handler] of handlers) {
+      const state = createContext({ plan: local, request: null, api: { prepareBaselineAnalysis }, beginWork: () => true });
+      runInContext(transpileModule(handler, { compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.None } }).outputText, state);
+      await expect(runInContext(`${name}()`, state)).resolves.toBeUndefined();
+    }
+    expect(prepareBaselineAnalysis).not.toHaveBeenCalled();
     expect(local.steps.map((step) => step.id)).toEqual(['units', 'reduction']);
     expect(local.technical.at(-1)).toEqual({ key: 'custom-analysis-dimension', label: '自定义分析维度版本', value: `${VERSION_ID} · ${documentDigest}` });
     const live = customAnalysisPlan({ ...plan, scope: { ...plan.scope, send: '所读阅读范围的稿件正文（8 个）' } }, { ...version }, true);
@@ -206,5 +234,26 @@ describe('live admission of a dimension version (#920 rule, slice 7f definition)
 
   it('is refused under a policy that does not list the family: 当前策略未开放自定义分析', () => {
     expect(liveKindAdmission(withoutRuleFor(policy, definition.kind), definition, binding)).toBeNull();
+  });
+
+  it('refuses the immutable v20 policy and a launch selecting active set v14, without dispatching', async () => {
+    const root = fileURLToPath(new URL('../../', import.meta.url));
+    const predecessor = JSON.parse(await readFile(join(root, 'docs/policies/provider-processing-policy.v20.json'), 'utf8')) as Record<string, unknown>;
+    expect(() => verifyDeveloperLivePolicy(predecessor)).toThrow('LAUNCH_POLICY_INVALID');
+    const temporary = await mkdtemp(join(tmpdir(), 'ai7-custom-policy-'));
+    try {
+      const bytes = await readFile(join(root, 'docs/policies/active-policy-set.v14.json'));
+      const carrier = JSON.parse(await readFile(join(root, 'config/source-checkout-launch-authority.json'), 'utf8')) as Record<string, unknown>;
+      carrier.activePolicySet = { version: 'v14', canonicalPath: 'docs/policies/active-policy-set.v14.json', sha256: createHash('sha256').update(bytes).digest('hex') };
+      await mkdir(join(temporary, 'config'));
+      await mkdir(join(temporary, 'docs/policies'), { recursive: true });
+      await writeFile(join(temporary, 'config/source-checkout-launch-authority.json'), JSON.stringify(carrier));
+      await writeFile(join(temporary, 'docs/policies/active-policy-set.v14.json'), bytes);
+      const denied = await resolveSourceCheckoutLaunchPolicy(temporary, 'developer-live');
+      expect(denied.integrityState).toBe('denied');
+      expect(liveKindAdmission(denied, definition, binding)).toBeNull();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   });
 });

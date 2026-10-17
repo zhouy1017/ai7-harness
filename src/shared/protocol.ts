@@ -3653,18 +3653,18 @@ export function isCustomAnalysisKindId(kind: unknown): kind is CustomAnalysisKin
   return customAnalysisDimensionIdOfKind(kind) !== null;
 }
 
-/** The goal of one mode of one dimension: the baseline's four modes, naming the dimension by its title. */
-export type CustomAnalysisGoal = `${string}「${string}」${string}`;
-export function customAnalysisModeGoal(title: string, mode: BaselineAnalysisTaskMode): CustomAnalysisGoal {
+/** A kind's mode goal stays stable across document versions; the plan separately names its exact dimension version and title. */
+export type CustomAnalysisGoal = `自定义分析：${string}`;
+export function customAnalysisModeGoal(mode: BaselineAnalysisTaskMode): CustomAnalysisGoal {
   switch (mode) {
     case 'first-baseline':
-      return `对当前书稿执行自定义分析「${title}」：逐单元回答该维度的提问并定位所依据的原文，形成结果集修订版。`;
+      return '自定义分析：逐单元回答该维度的提问并定位所依据的原文，形成结果集修订版。';
     case 'sync-current':
-      return `将自定义分析「${title}」同步到当前稿件：复用内容一致的单元，仅重新回答改动过的单元，追加一个结果集修订版。`;
+      return '自定义分析：同步到当前稿件，复用内容一致的单元，仅重新回答改动过的单元，追加一个结果集修订版。';
     case 'reanalyze-range':
-      return `重新分析所选范围的自定义分析「${title}」：重新回答所选范围及其重叠闭包，复用其余单元，追加一个结果集修订版。`;
+      return '自定义分析：重新回答所选范围及其重叠闭包，复用其余单元，追加一个结果集修订版。';
     case 'reanalyze-book':
-      return `重新执行自定义分析「${title}」全书：绕过全部既有单元结果，逐单元重新回答，追加一个结果集修订版。`;
+      return '自定义分析：绕过全部既有单元结果，逐单元重新回答全书，追加一个结果集修订版。';
   }
 }
 export function customAnalysisExpectedOutcome(title: string): string {
