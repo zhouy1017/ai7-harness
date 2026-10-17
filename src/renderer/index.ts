@@ -1,3 +1,4 @@
+import { APPEARANCE_CHOICES, createAppearance } from './appearance.js';
 import { renderHouseReviewPreference } from './knowledge-base-memory.js';
 import { mountEditQualitySignals } from './quality-learning.js';
 import { mountProposalWorkspace } from './proposal-workspace.js';
@@ -6082,6 +6083,43 @@ function renderBookFilter(
   return form;
 }
 
+function renderAppearance(): void {
+  const content = panel();
+  content.classList.add('appearance-settings');
+  content.append(element('p', 'section-label', '设置 · 本机'), element('h2', undefined, '外观'),
+    element('p', 'lede', '选择适合阅读的外观。系统的高对比度等辅助显示设置始终优先。'));
+  const choices = element('fieldset', 'appearance-choices');
+  choices.append(element('legend', undefined, '应用外观'));
+  const message = element('p', 'field-note');
+  message.setAttribute('role', 'status');
+  const radios: HTMLInputElement[] = [];
+  for (const choice of APPEARANCE_CHOICES) {
+    const label = element('label', 'appearance-choice');
+    const input = element('input');
+    input.type = 'radio'; input.name = 'appearance-theme'; input.value = choice.value;
+    input.dataset['appearanceTheme'] = choice.value;
+    input.checked = appearance.preference === choice.value;
+    input.addEventListener('change', () => {
+      if (!input.checked) return;
+      for (const radio of radios) radio.disabled = true;
+      void appearance.choose(choice.value).then(() => { message.textContent = '外观已保存在本机。'; }, () => {
+        input.checked = false;
+        for (const radio of radios) radio.checked = radio.value === appearance.preference;
+        message.textContent = '外观未能保存，请重试。';
+      }).finally(() => { for (const radio of radios) radio.disabled = false; });
+    });
+    radios.push(input);
+    label.append(input, element('strong', undefined, choice.label), element('span', 'field-note', choice.description));
+    choices.append(label);
+  }
+  const unsubscribe = appearance.subscribe(() => { for (const radio of radios) radio.checked = radio.value === appearance.preference; });
+  const observer = new MutationObserver(() => { if (!content.isConnected) { unsubscribe(); observer.disconnect(); } });
+  observer.observe(screen, { childList: true });
+  content.append(choices, message, button('返回图书列表', 'secondary', () => void initializeRenderer()));
+  replaceScreen('appearance', content);
+  setStatus('外观只保存在本机，不改变稿件或导出内容。');
+}
+
 function renderLanding(
   priorWork: ReadonlyArray<PriorWorkItemProjection>,
   recoveryReturn: RecoveryReturnContext | undefined,
@@ -6124,6 +6162,8 @@ function renderLanding(
       renderError(error, () => renderLanding(priorWork, activeRecoveryReturn, books));
     }
   });
+  const appearanceButton = button('外观', 'secondary', renderAppearance);
+  appearanceButton.dataset['settingsRoute'] = 'appearance';
   const dataAndStorage = button('数据与存储', 'secondary', () => renderDataAndStorage());
   dataAndStorage.dataset['settingsRoute'] = 'data-storage';
   const modelService = button('模型服务', 'secondary', () => renderModelServiceSettings());
@@ -6141,7 +6181,7 @@ function renderLanding(
   const qualityLearning = button(QUALITY_LEARNING_TITLE, 'secondary', () => void renderQualityLearning('feedback', null));
   qualityLearning.dataset['settingsRoute'] = 'quality-learning';
   const landingActions = element('div', 'button-row');
-  landingActions.append(importButton, createBook, dataAndStorage, modelService, evaluationCalibration, seriesButton, knowledgeBase, qualityLearning);
+  landingActions.append(importButton, createBook, appearanceButton, dataAndStorage, modelService, evaluationCalibration, seriesButton, knowledgeBase, qualityLearning);
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);
@@ -9414,7 +9454,10 @@ async function initializeStartup(): Promise<void> {
   }
 }
 
+const appearance = createAppearance(window.ai7);
+
 async function initializeRenderer(): Promise<void> {
+  await appearance.ready;
   try {
     const route = await window.ai7.getBookWorkbenchRoute();
     if (route) {

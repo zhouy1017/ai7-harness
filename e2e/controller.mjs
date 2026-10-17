@@ -321,8 +321,11 @@ export function j07PackageExportFailureLocation(location, error) {
     (typeof error.code === 'string' && Object.hasOwn(J07_PACKAGE_EXPORT_IO, error.code) ? J07_PACKAGE_EXPORT_IO[error.code] : location);
 }
 
+const J14_DARK_PASS_LOCATIONS = Object.freeze(['j14-dark-pass', 'j14-dark-pass-theme-applied', 'j14-dark-pass-forced-colors-wins', 'j14-dark-pass-restored']);
+
 export const JOURNEY_LOCATIONS = Object.freeze({
   'J-01': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'cli',
     'controller-network-denial',
@@ -433,6 +436,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     ...J01_COMPLETION_LOCATIONS,
   ]),
   'J-02': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'renderer-ready',
     'renderer-ready-flag',
@@ -571,6 +575,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'completion-cleanup',
   ]),
   'J-08': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -589,6 +594,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'snapshot-none-comparison',
   ]),
   'J-12': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
     'controller-imports',
@@ -631,6 +637,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'evaluation-calibration-settings',
   ]),
   'J-15': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
     'controller-imports',
@@ -678,6 +685,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'zero-activity',
   ]),
   'J-03': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
     'controller-imports',
@@ -728,6 +736,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'zero-activity',
   ]),
   'J-04': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
     'controller-imports',
@@ -848,6 +857,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
   'J-05': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -910,6 +920,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // Resolution Draft across a restart, the three ways out and a reversal's Correction Proposal. Each stage is
   // one thing an editor does or finds, so a hosted failure names the behaviour that broke.
   'J-06': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -943,6 +954,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-07 (Issue #414, plan slice S65): ⑥ 发稿 — Milestone Versions and 设为发稿版本. Each stage is one thing an
   // editor does or finds on 交付物, so a hosted failure names the behaviour that broke.
   'J-07': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1049,6 +1061,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // Each stage is one thing an editor does or finds, so a hosted failure names the
   // behaviour that broke.
   'J-09': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1115,6 +1128,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // Impact Summary, 正在取消, and 已取消 with what it read kept; and a Run AI7 closed under, 任务已中断 · 可续行 on the
   // next launch, and 续行 to its end.
   'J-10': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1204,6 +1218,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // reason a Proposal Decision is asked for once, on 修改建议 of the Journey's own words (Issue #61, S26a), and 质量与学习 ›
   // 学习准入 on the material those records make (Issue #61, S26b).
   'J-11': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1317,6 +1332,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-16 (Issue #423, plan slice S77a): the 任务 panel — the Book's Tasks beside the manuscript, controlled from their cards,
   // a finished Task's result in a window beside the text, and the 回到<位置> chip a jump leaves.
   'J-16': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1392,6 +1408,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // preview, a stale preview refused, 书库's search by 书系, each Book's own records, and a restart; since Issue #64 (S29a)
   // a 书系一致性 Review Run on the J-04 model adapter.
   'J-13': Object.freeze([
+    ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback',
     'controller-imports',
@@ -2092,4 +2109,64 @@ export function classifyJourneyResult(result, journey) {
   if (locations.length === 1) return { location: locations[0], errorClass: 'journey-failure' };
   if (result.stdout.length === 0 && result.stderr.length === 0) return { location: 'controller', errorClass: 'controller-exit' };
   return { location: 'controller', errorClass: 'controller-output-ambiguous' };
+}
+
+/** J-14 / #935: choose the theme through settings, check a real screen, then restore system following.
+ * Callers can supply navigation for a representative Book surface without touching its records.
+ */
+export async function runJ14DarkPass({ renderer, journey, at, representative = '[data-screen="landing"] .panel', openAppearance, returnToScreen }) {
+  const check = (ok, stage) => { if (!ok) throw journeyCheckFailure(journey, stage); };
+  const wait = async (expression, stage) => {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      if (await renderer.evaluate(`Boolean(${expression})`)) return;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+    check(false, stage);
+  };
+  const open = openAppearance ?? (async () => {
+    check(await renderer.evaluate(`(() => { const button = document.querySelector('[data-settings-route="appearance"]'); if (!button || button.disabled) return false; button.click(); return true; })()`), 'j14-dark-pass');
+  });
+  const back = returnToScreen ?? (async () => {
+    check(await renderer.evaluate(`(() => { const button = [...document.querySelectorAll('[data-screen="appearance"] button')].find((item) => item.textContent === '返回图书列表'); if (!button) return false; button.click(); return true; })()`), 'j14-dark-pass');
+    await wait(`document.querySelector(${JSON.stringify(representative)})`, 'j14-dark-pass');
+  });
+  const choose = async (theme) => {
+    await open();
+    await wait(`document.querySelector('[data-appearance-theme="${theme}"]')`, 'j14-dark-pass');
+    check(await renderer.evaluate(`(() => { const input = document.querySelector('[data-appearance-theme="${theme}"]'); if (!input || input.disabled) return false; input.click(); return true; })()`), 'j14-dark-pass');
+    await wait(`document.querySelector('[data-appearance-theme="${theme}"]:checked:not(:disabled)')`, 'j14-dark-pass');
+    await back();
+  };
+  at('j14-dark-pass');
+  await choose('dark');
+  at('j14-dark-pass-theme-applied');
+  await wait(`document.documentElement.dataset.theme === 'dark'`, 'j14-dark-pass-theme-applied');
+  check(await renderer.evaluate(`(() => {
+    const root = getComputedStyle(document.documentElement), screen = document.querySelector(${JSON.stringify(representative)});
+    if (!screen || document.documentElement.style.colorScheme !== 'dark') return false;
+    const style = getComputedStyle(screen);
+    const rgb = (value) => (value.match(/[\\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const luminance = (values) => values.map((n) => { const s = n / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4; }).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0);
+    const color = rgb(style.color), background = rgb(style.backgroundColor);
+    const l1 = luminance(color), l2 = luminance(background);
+    const hex = (values) => '#' + values.map((v) => v.toString(16).padStart(2, '0')).join('');
+    return hex(color) === root.getPropertyValue('--text').trim() &&
+      [root.getPropertyValue('--surface').trim(), root.getPropertyValue('--manuscript').trim()].includes(hex(background)) &&
+      (Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05) >= 4.5;
+  })()`), 'j14-dark-pass-theme-applied');
+  at('j14-dark-pass-forced-colors-wins');
+  for (const theme of ['dark', 'light']) {
+    if (theme === 'light') await choose('light');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    check(await renderer.evaluate(`(() => {
+      if (!matchMedia('(forced-colors: active)').matches) return false;
+      const root = getComputedStyle(document.documentElement), screen = getComputedStyle(document.querySelector(${JSON.stringify(representative)}));
+      return screen.backgroundColor === root.backgroundColor && screen.color === root.color && screen.color !== screen.backgroundColor;
+    })()`), 'j14-dark-pass-forced-colors-wins');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+  }
+  at('j14-dark-pass-restored');
+  await choose('system');
+  check(await renderer.evaluate(`window.ai7.getPreferences().then((values) => values['appearance.theme'] === 'system')`), 'j14-dark-pass-restored');
 }

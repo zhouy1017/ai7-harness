@@ -1,3 +1,5 @@
+import { Preferences } from './preferences.js';
+import { PREFERENCE_CHANNELS, PREFERENCE_KEYS, type AppearanceState } from '../shared/preferences.js';
 import { randomUUID } from 'node:crypto';
 import { release } from 'node:os';
 import { writeFile } from 'node:fs/promises';
@@ -8,6 +10,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeTheme,
   session,
   shell,
   type Event as ElectronEvent,
@@ -583,6 +586,7 @@ function registerRendererHandlers(
   consumeInjectedFolderPath: () => string | undefined,
   quitApplication: () => 'quitting' | 'blocked',
   unsavedWindows: () => boolean,
+  appearanceWindows: () => Iterable<OwnedRendererWindow>,
 ): () => void {
   const requireNothingUnsaved = (): void => {
     if (unsavedWindows()) throw new ServiceCallError('DATABASE_REPLACEMENT_UNSAVED', '还有窗口里的修改没有保存；请先保存或关闭那个窗口，再替换本机数据。');
@@ -1220,6 +1224,28 @@ function registerRendererHandlers(
     );
     return owned;
   };
+  const preferences = new Preferences(app.getPath('userData'));
+  const appearanceState = async (): Promise<AppearanceState> => {
+    const values = await preferences.get();
+    const preference = values['appearance.theme'];
+    return { preference: PREFERENCE_KEYS['appearance.theme'].validate(preference) ? preference : 'system', systemDark: nativeTheme.shouldUseDarkColors };
+  };
+  const broadcastAppearance = async (): Promise<void> => {
+    const state = await appearanceState();
+    for (const owned of appearanceWindows()) {
+      if (!owned.window.isDestroyed()) owned.window.webContents.send(PREFERENCE_CHANNELS.appearance, state);
+    }
+  };
+  const appearanceUpdated = (): void => { void broadcastAppearance().catch(() => undefined); };
+  nativeTheme.on('updated', appearanceUpdated);
+  ipcMain.handle(PREFERENCE_CHANNELS.get, (event) => envelope(async () => { requireSender(event); return preferences.get(); }));
+  ipcMain.handle(PREFERENCE_CHANNELS.save, (event, input: { key: string; value: unknown }) => envelope(async () => {
+    requireSender(event);
+    const values = await preferences.save(input);
+    await broadcastAppearance();
+    return values;
+  }));
+  ipcMain.handle(PREFERENCE_CHANNELS.appearance, (event) => envelope(async () => { requireSender(event); return appearanceState(); }));
   const requireAuthority = (): void => {
     if (!authorityIsAvailable()) {
       throw new ServiceCallError('SERVICE_INTERRUPTED', '本地业务服务已中断；当前业务操作不可继续。');
@@ -5711,6 +5737,8 @@ function registerRendererHandlers(
   );
 
   return () => {
+    nativeTheme.removeListener('updated', appearanceUpdated);
+    for (const channel of Object.values(PREFERENCE_CHANNELS)) ipcMain.removeHandler(channel);
     for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel);
     ipcMain.removeListener(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
   };
@@ -6479,6 +6507,7 @@ export async function runApplication(): Promise<void> {
         return 'quitting';
       },
       () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
+      () => ownedWindows.values(),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

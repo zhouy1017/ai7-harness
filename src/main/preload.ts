@@ -1,3 +1,4 @@
+import { PREFERENCE_CHANNELS, type AppearanceState } from '../shared/preferences.js';
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_CHANNELS,
@@ -173,6 +174,19 @@ async function invoke<Result>(channel: string, input?: unknown): Promise<Result>
 if (process.platform !== 'win32' && process.platform !== 'darwin') throw new Error('Unsupported renderer platform.');
 
 const api: RendererApi = Object.freeze({
+  getPreferences: () => invoke<Record<string, unknown>>(PREFERENCE_CHANNELS.get),
+  savePreference: (input: { key: string; value: unknown }) => invoke<Record<string, unknown>>(PREFERENCE_CHANNELS.save, input),
+  onAppearanceChanged: (listener: (state: AppearanceState) => void) => {
+    let active = true;
+    let generation = 0;
+    const changed = (_event: unknown, state: AppearanceState): void => { generation += 1; if (active) listener(state); };
+    ipcRenderer.on(PREFERENCE_CHANNELS.appearance, changed);
+    const initialGeneration = generation;
+    void invoke<AppearanceState>(PREFERENCE_CHANNELS.appearance).then((state) => {
+      if (active && generation === initialGeneration) listener(state);
+    }).catch(() => { if (active) listener({ preference: 'system', systemDark: false }); });
+    return () => { active = false; ipcRenderer.removeListener(PREFERENCE_CHANNELS.appearance, changed); };
+  },
   platform: process.platform,
   getStartup: () => invoke<ServiceOperationMap['getStartup']['output']>(IPC_CHANNELS.getStartup),
   getRecoveryComparison: (input: ServiceOperationMap['getRecoveryComparison']['input']) =>
