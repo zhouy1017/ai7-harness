@@ -589,13 +589,16 @@ function registerRendererHandlers(
   quitApplication: () => 'quitting' | 'blocked',
   unsavedWindows: () => boolean,
   preferences: PreferenceStore,
+  notificationWindows: () => ReadonlyArray<OwnedRendererWindow>,
 ): () => void {
   const notifier = createNotifier({
     preferences: () => preferences.read().values,
     focused: () => BrowserWindow.getAllWindows().some((window) => window.isFocused()),
     factory: (input) => process.env.AI7_E2E_JOURNEY ? { show() {}, close() {}, on() {} } : new Notification(input),
     navigate: (target) => {
-      const window = BrowserWindow.getAllWindows().find((entry) => !entry.isDestroyed());
+      const owners = notificationWindows();
+      const window = (owners.find((entry) => entry.bookId === target.bookId && !entry.window.isDestroyed()) ??
+        owners.find((entry) => !entry.window.isDestroyed()))?.window;
       if (!window) return;
       if (window.isMinimized()) window.restore();
       window.show();
@@ -6535,6 +6538,7 @@ export async function runApplication(): Promise<void> {
       },
       () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
       createPreferenceStore(shellRoot),
+      () => [...ownedWindows.values()],
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);
