@@ -3,6 +3,7 @@ import {
   type DialogueAttemptProjection,
   type DialogueProjection,
   type RendererApi,
+  type TaskIntentDraftProjection,
 } from '../shared/protocol.js';
 import {
   DIALOGUE_ACTIONS,
@@ -25,7 +26,11 @@ import {
   DIALOGUE_SELECTION_HEADING,
   DIALOGUE_STATE_LABELS,
   DIALOGUE_STATUS,
+  DIALOGUE_PROMOTE_INCOMPLETE,
+  DIALOGUE_PROMOTE_LABEL,
+  DIALOGUE_PROMOTE_STATUS,
   dialogueAttemptHeading,
+  dialogueReasoningLine,
   dialogueConvertedLine,
   dialogueIncompleteLine,
 } from './dialogue-labels.js';
@@ -40,7 +45,7 @@ import {
  * the editor still decides and applies on the manuscript.
  */
 export interface DialogueSurfaceOptions {
-  readonly api: Pick<RendererApi, 'inspectDialogue' | 'stopDialogueAnswer' | 'continueDialogueAnswer' | 'regenerateDialogueAnswer' | 'convertDialogueToChangeSuggestion'>;
+  readonly api: Pick<RendererApi, 'inspectDialogue' | 'stopDialogueAnswer' | 'continueDialogueAnswer' | 'regenerateDialogueAnswer' | 'convertDialogueToChangeSuggestion' | 'promoteAnswerToTaskIntentDraft'>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
   /** The selected words in the manuscript, when it is on screen: `回到所选文字`. */
@@ -49,6 +54,8 @@ export interface DialogueSurfaceOptions {
   onConverted(dialogue: DialogueProjection, markId: string): void;
   /** The dialogue's state moved: what lists it reads again. */
   onChanged(): void;
+  /** 转为任务意图草稿 (Issue #52, S17b): the draft the completed answer became, to open where it is edited. */
+  onPromoted(draft: TaskIntentDraftProjection): void;
 }
 
 export interface DialogueSurface {
@@ -84,9 +91,15 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
   const context = el('div', 'dialogue-context');
   const attemptsHost = el('div', 'dialogue-attempts');
   const actions = el('div', 'button-row compact-actions dialogue-actions');
+  // 转为任务意图草稿 (Issue #52, S17b; DIALOG-016): its own row under the answer's actions, offered on a completed answer only.
+  const promoteRow = el('div', 'button-row compact-actions dialogue-promote');
+  // The Live Reasoning Summary (UI ADR 0014; DIALOG-005, 009): transient words while the foreground answer has not begun.
+  const reasoning = el('p', 'field-note dialogue-reasoning');
+  reasoning.setAttribute('aria-live', 'polite');
+  reasoning.hidden = true;
   const convertHost = el('div', 'dialogue-convert-host');
   const note = el('p', 'field-note dialogue-authority', DIALOGUE_AUTHORITY_NOTE);
-  element.append(context, attemptsHost, actions, convertHost, note);
+  element.append(context, reasoning, attemptsHost, actions, promoteRow, convertHost, note);
 
   let dialogueId: string | null = null;
   let dialogue: DialogueProjection | null = null;
@@ -201,11 +214,51 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       buttons.push(actionButton('convert', can.convert, false, () => openConvert(), incomplete ? DIALOGUE_CONVERT_INCOMPLETE : undefined));
     }
     actions.replaceChildren(...buttons);
+    paintPromote(latest);
+    paintReasoning(latest);
     if (active !== null) {
       const target = buttons.find((button) => button.dataset['dialogueAction'] === active && !button.disabled) ??
         buttons.find((button) => !button.disabled);
       target?.focus();
     }
+  }
+
+  /** 转为任务意图草稿 on the latest answer: offered once it settled, pressable only while it is a completed answer (DIALOG-013). */
+  function paintPromote(latest: DialogueAttemptProjection | undefined): void {
+    if (dialogue === null || latest === undefined || latest.state === 'answering') {
+      promoteRow.replaceChildren();
+      return;
+    }
+    const target = dialogue;
+    const promote = el('button', 'quiet', DIALOGUE_PROMOTE_LABEL);
+    promote.type = 'button';
+    promote.dataset['dialoguePromote'] = latest.attemptId;
+    const can = target.actions.convert;
+    promote.disabled = working || !can;
+    if (!can) promote.title = DIALOGUE_PROMOTE_INCOMPLETE;
+    promote.addEventListener('click', () => {
+      if (promote.disabled) return;
+      promote.disabled = true;
+      options.setStatus(DIALOGUE_PROMOTE_STATUS.promoting, 'busy');
+      void api.promoteAnswerToTaskIntentDraft({ dialogueId: target.dialogueId, attemptId: latest.attemptId }).then((draft) => {
+        options.setStatus(DIALOGUE_PROMOTE_STATUS.promoted, 'success');
+        options.onPromoted(draft);
+      }, (error: unknown) => {
+        promote.disabled = false;
+        options.setStatus(options.errorMessage(error, DIALOGUE_PROMOTE_STATUS.failed), 'error');
+      });
+    });
+    promoteRow.replaceChildren(promote);
+  }
+
+  /**
+   * The Live Reasoning Summary (UI ADR 0014; DIALOG-005, 009): only for the foreground answer, only before its formal answer begins,
+   * in words drawn from what the dialogue already shows — never model reasoning — and never kept anywhere.
+   */
+  function paintReasoning(latest: DialogueAttemptProjection | undefined): void {
+    const live = dialogue !== null && latest !== undefined && latest.state === 'answering' && latest.queued !== true && latest.fragmentTotal === 0;
+    reasoning.hidden = !live;
+    reasoning.textContent = live ? dialogueReasoningLine(dialogue!.anchors?.length ?? 0) : '';
   }
 
   /** Whether `next` only adds fragments to the answer on screen: the same attempt, still answering, read from where it stops. */
@@ -230,6 +283,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
         // New fragments are appended; nothing on screen is redrawn and focus stays where it is (DIALOG-006, 010).
         for (const fragment of next.attempts.at(-1)!.fragments) shown!.host.append(fragmentNode(fragment.text, fragment.breakAfter));
         shown!.count = next.attempts.at(-1)!.fragmentTotal;
+        paintReasoning(next.attempts.at(-1));
       } else {
         // The answer settled, or a new attempt began: read it whole once.
         void read(0);
@@ -388,6 +442,9 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       ticket += 1;
       clearTimer();
       element.dataset['dialogue'] = 'background';
+      // Backgrounded, nothing live is shown (DIALOG-010).
+      reasoning.hidden = true;
+      reasoning.textContent = '';
     },
     current() {
       return dialogueId;

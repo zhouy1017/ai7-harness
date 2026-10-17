@@ -240,9 +240,11 @@ import {
   type SelectionProcedureEntry,
   type SelectionTaskChoice,
   type SelectionTaskChoices,
+  SELECTION_TASK_PICK_RANGE,
 } from './selection-task-labels.js';
 import { marksRefreshStep } from './marks-refresh.js';
-import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
+import { mountEditorialMarks, type EditorialMarksSurface, type SelectionSpanReading } from './editorial-marks.js';
+import type { ComposerRange } from './task-panel.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
@@ -343,7 +345,45 @@ const taskDrawer = mountTaskDrawer({
   // 就这段提问… (Issue #52, S17a): 回到所选文字, and a 修改建议 made from an answer opened on the manuscript with its card.
   dialogueJump: (bookId, target) => void jumpToManuscript(bookId, { manuscriptId: target.manuscriptId, blockId: target.blockId, markId: null }),
   dialogueConverted: (dialogue, markId) => void jumpToManuscript(dialogue.bookId, { manuscriptId: dialogue.manuscriptId, blockId: dialogue.range.blockId, markId }),
+  // The Context-bound Task Composer (Issue #423, wave 10 slice 7a; TASK-001 to 009, 046): the whole-Book composer names its Book;
+  // 再选一段加入 takes the words selected in that Book's manuscript on screen; the house's 工序 open the composer beside them.
+  wholeBookSeed: async (bookId) => {
+    const read = await window.ai7.inspectTaskIntentDrafts({ draftId: null });
+    if (read.bookId !== bookId) throw new Error(SELECTION_TASK_PICK_RANGE);
+    return { bookId, bookTitle: read.bookTitle, origin: 'composer-book', manuscript: null, ranges: [] };
+  },
+  pickRange: async (bookId) => {
+    const showing = manuscriptOnScreen;
+    if (showing === null || showing.bookId !== bookId) return SELECTION_TASK_PICK_RANGE;
+    const reading = await showing.selectionSpan();
+    return typeof reading === 'string' ? reading : composerRangeOf(reading);
+  },
+  openProcedures: (bookId, range) => {
+    const showing = manuscriptOnScreen;
+    if (showing !== null && showing.bookId === bookId && range.span !== null) showing.composeProcedures(range.span);
+  },
+  settle: () => settleScreen(),
+  resumeDraft: (bookId, resume) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
+    renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
+    resume();
+  }),
 });
+
+/** One range the composer carries, from the words selected now (Issue #423, slice 7a). */
+function composerRangeOf(reading: SelectionSpanReading): ComposerRange {
+  return {
+    key: `new-${crypto.randomUUID()}`,
+    rangeId: null,
+    span: reading.span,
+    blockId: reading.span.blockId,
+    text: reading.span.selectedText,
+    position: reading.position,
+    revisionLabel: reading.revisionLabel,
+    journalSequence: reading.journalSequence,
+    state: 'exact',
+    stateLabel: null,
+  };
+}
 
 /** 查看结果's floating window while it is open (Issue #423, S77a); any change of screen closes it. */
 let taskResultWindow: TaskResultWindow | undefined;
@@ -579,6 +619,10 @@ let manuscriptOnScreen: null | {
    * when the editor is busy, typing or has something open over the text, so the caller asks again later.
    */
   refreshMarks(): Promise<boolean>;
+  /** 再选一段加入 (Issue #423, slice 7a): the words selected now as an exact span, or why there are none. */
+  selectionSpan(): Promise<SelectionSpanReading | string>;
+  /** 按现成工序准备…: the house's 工序 on those words, in the composer beside their paragraph. */
+  composeProcedures(span: { readonly blockId: string; readonly fromGrapheme: number; readonly toGrapheme: number }): void;
 } = null;
 
 /**
@@ -1096,6 +1140,13 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
         renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
         taskDrawer.openDialogue(route.bookId, target.dialogueId, () => null);
+      });
+      return;
+    // A Task Intent Draft (Issue #423, slice 7a; TASK-006): its own Book's 工作概览, with the draft in the composer beside it.
+    case 'task-intent-draft':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
+        taskDrawer.openDraft(route.bookId, target.draftId, () => null);
       });
       return;
   }
@@ -8563,6 +8614,8 @@ function renderEditorWindow(
     manuscriptId: initialWindow.manuscriptId,
     branchId: initialWindow.branchId,
     readingPlace,
+    selectionSpan: async () => editorialMarks === undefined ? SELECTION_TASK_PICK_RANGE : editorialMarks.selectionSpan(),
+    composeProcedures: (span) => editorialMarks?.composeProcedures(span),
     // A 审阅 of this Book settled (Issue #423 review, P2-6): the window on screen is read again, in place, so its marks — the ones
     // a 审阅这段 started here made on this paragraph — appear where the editor is. Nothing is read while the editor is busy
     // or holding words not yet written; an open composer stays (it is re-anchored).
@@ -9271,6 +9324,14 @@ function renderEditorWindow(
         bookTitle,
         choices: selectionTaskOffer,
         procedures: selectionProcedureOffer,
+        // The Context-bound Task Composer (Issue #423, slice 7a; TASK-001): exactly the selected words, in the side slot.
+        compose: (reading: SelectionSpanReading) => taskDrawer.openComposer({
+          bookId: initialWindow.bookId,
+          bookTitle,
+          origin: 'composer-selection',
+          manuscript: { revisionLabel: reading.revisionLabel, journalSequence: reading.journalSequence, pending: false },
+          ranges: [composerRangeOf(reading)],
+        }, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
         prepare: (choice: SelectionTaskChoice, anchor: { readonly blockId: string }, chosenApart: ReadonlyArray<string>) =>
           prepareSelectionTask(initialWindow.bookId, choice, anchor, chosenApart, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
       },

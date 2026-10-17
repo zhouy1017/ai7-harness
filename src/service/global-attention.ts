@@ -28,6 +28,7 @@ import {
   type ReviewRunState,
   type ReviewScopeKind,
   type TaskPlanKind,
+  type TaskIntentDraftOrigin,
   type UnconfirmedStageId,
 } from '../shared/protocol.js';
 import type { ProgressReader, RunProgress } from './analysis/baseline-analysis-store.js';
@@ -307,6 +308,8 @@ export interface GlobalAttentionReadings {
   readonly materialIndexes?: ReadonlyArray<MaterialIndexAttentionReading>;
   /** 结果待确认 that completed Runs left, one reading per Book and Task kind (Issue #757; ATTN-002, NOTIF-004). */
   readonly unconfirmed?: ReadonlyArray<UnconfirmedAttentionReading>;
+  /** Every Book's Task Intent Drafts not yet promoted (Issue #423, slice 7a): listed only as their own card. */
+  readonly drafts?: ReadonlyArray<TaskIntentDraftAttentionReading>;
   /** Whether Runs hold every place of the execution owner's governor now (Issue #49, S14). */
   readonly busy: boolean;
   /**
@@ -937,6 +940,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     ...readings.learningMaterials.map(learningMaterialsItem),
     ...(readings.materialIndexes ?? []).filter((reading) => reading.recordedAt >= since).map(materialIndexItem),
     ...(readings.unconfirmed ?? []).map(unconfirmedItem),
+    ...(readings.drafts ?? []).map(draftItem),
   ];
   // One record is one item: a Review Run read both as a Book's latest and as a completion is listed once.
   const unique = Array.from(new Map(all.map((entry) => [`${entry.group}\n${entry.itemId}`, entry] as const)).values());
@@ -974,6 +978,41 @@ export interface BookTaskReadings {
   readonly waitingFor: WaitingFor;
   /** The Book's dialogue Tasks (Issue #52, S17a), each read as its latest answer stands. */
   readonly dialogues?: ReadonlyArray<DialogueTaskReading>;
+  /** The Book's Task Intent Drafts not yet promoted (Issue #423, slice 7a). */
+  readonly drafts?: ReadonlyArray<TaskIntentDraftAttentionReading>;
+}
+
+/**
+ * One Task Intent Draft not yet promoted (Issue #423, slice 7a; TASK-004 to 006): the editor's own sentence, where it began, how
+ * many ranges it pins, its latest version and since when. It is no Task: nothing is prepared, sent or started for it.
+ */
+export interface TaskIntentDraftAttentionReading {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly draftId: string;
+  readonly goal: string;
+  readonly origin: TaskIntentDraftOrigin;
+  readonly ranges: number;
+  readonly ordinal: number;
+  readonly at: string;
+}
+
+/** A draft's card: 等待你的决定 — the Book's 等你处理 — until 准备计划 makes it a Task; 继续编辑草稿 opens it on its Book. */
+function draftItem(reading: TaskIntentDraftAttentionReading): GlobalAttentionItemProjection {
+  return item('decisions', 'draft-unfinished', {
+    itemId: `draft:${reading.draftId}`,
+    blocked: false,
+    at: reading.at,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'draft', goal: reading.goal, origin: reading.origin, ranges: reading.ranges },
+    nextStep: 'continue-draft',
+    target: { kind: 'task-intent-draft', bookId: reading.bookId, draftId: reading.draftId },
+    technical: [
+      { key: 'task-intent-draft', label: '任务意图草稿', value: reading.draftId },
+      { key: 'draft-version', label: '草稿版本', value: String(reading.ordinal) },
+      { key: 'state-at', label: '保存时间', value: reading.at },
+    ],
+  });
 }
 
 /**
@@ -1132,6 +1171,8 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
       result: reading.state !== 'answering' && reading.answered ? { kind: 'dialogue', dialogueId: reading.dialogueId } : null,
     });
   }
+  // Its unfinished Task Intent Drafts wait in 等你处理 as their own card (Issue #423, slice 7a).
+  for (const reading of own(readings.drafts ?? [])) entries.push({ item: draftItem(reading), result: null });
   // One record is one entry: a Review Run read both as the Book's latest and as a completion is listed once.
   const unique = Array.from(new Map(entries.map((entry) => [`${entry.item.group}\n${entry.item.itemId}`, entry] as const)).values());
   const groups = BOOK_TASK_GROUP_KEYS.map((key) => {

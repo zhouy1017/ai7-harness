@@ -1,7 +1,7 @@
 import { readProposalWorkspace } from './proposal-workspace.js';
 import type { ApplyReceiptProjection } from '../shared/protocol.js';
 import { MAX_DIALOGUE_QUESTION_CHARACTERS, SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS } from '../shared/protocol.js';
-import type { AskAboutSelectionInput, DialogueProjection, EditorialPolishProjection, FastInteractionRoutesProjection, PolishSelectionInput } from '../shared/protocol.js';
+import type { AskAboutSelectionInput, DialogueProjection, DialogueSelectionInput, EditorialPolishProjection, FastInteractionRoutesProjection, PolishSelectionInput } from '../shared/protocol.js';
 import {
   DIALOGUE_ASK,
   DIALOGUE_COMPOSER_TITLE,
@@ -73,6 +73,7 @@ import {
   SELECTION_TASK_FIELD,
   SELECTION_TASK_MENU_LABEL,
   SELECTION_TASK_NOTE,
+  SELECTION_TASK_PICK_RANGE,
   SELECTION_TASK_PREPARE,
   SELECTION_TASK_STATUS,
   SELECTION_TASK_TITLE,
@@ -90,6 +91,14 @@ import {
  * editor as decorations, stored by the service, and every command answers with the window's marks.
  * Nothing here changes a character of the manuscript.
  */
+/** The words selected now (Issue #423, slice 7a): the exact span, where its paragraph stands, and the window's revision. */
+export interface SelectionSpanReading {
+  readonly span: DialogueSelectionInput;
+  readonly position: number | null;
+  readonly revisionLabel: string;
+  readonly journalSequence: number;
+}
+
 export interface EditorialMarksSurface {
   /** Close whatever is floating: the blocks it was anchored to may be gone. */
   close(): void;
@@ -100,6 +109,13 @@ export interface EditorialMarksSurface {
   reanchor(): void;
   /** Whether a menu, a Mark Card or a composer is open over the text (Issue #423 review, P2-7): a background reload waits for it. */
   holdsFloating(): boolean;
+  /**
+   * The words selected now, as the exact span a mark names (Issue #423, slice 7a; TASK-046's 再选一段加入): with the paragraph's
+   * position and the revision and journal position the window stands at — or why nothing can be taken.
+   */
+  selectionSpan(): Promise<SelectionSpanReading | string>;
+  /** 按现成工序准备… (Issue #423, slice 7a): the house's 工序 on those words, in the composer anchored to their paragraph (S77b). */
+  composeProcedures(range: { readonly blockId: string; readonly fromGrapheme: number; readonly toGrapheme: number }): void;
   /** Open one mark's card, as a click on it would: 审阅's 回到原文 arrives at a finding's mark this way. */
   openMark(markId: string): Promise<void>;
   /**
@@ -172,6 +188,11 @@ interface MountOptions {
     procedures(): Promise<ReadonlyArray<SelectionProcedureEntry>>;
     /** `chosenApart`: the categories of the chosen procedure's Series steps the editor ticked (REUSE-050); empty for any other choice. */
     prepare(choice: SelectionTaskChoice, anchor: { readonly blockId: string }, chosenApart: ReadonlyArray<string>): Promise<boolean>;
+    /**
+     * The Context-bound Task Composer (Issue #423, slice 7a; TASK-001): the menu's 就这段发起任务… hands it exactly the selected words;
+     * the house's 常用工序 entries still open the composer that prepares at once. Without it, 就这段发起任务… opens that composer too.
+     */
+    compose?(reading: SelectionSpanReading): void;
   };
   busy(): boolean;
   /** The set of marks changed: whatever counts them elsewhere on the surface reads again. */
@@ -1622,14 +1643,42 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    * it carries and nothing else, offering the Tasks that read a range now. 准备任务 prepares the chosen one on that paragraph
    * and its plan opens beside the manuscript, where it is started — or not.
    */
-  const composeTask = async (preselect?: string): Promise<void> => {
+  const composeTask = async (preselect?: string, procedures = false): Promise<void> => {
     if (refuseWhileBusy() || options.startTaskOnSelection === undefined) return;
+    const start = options.startTaskOnSelection;
     composersPending += 1;
     try {
-      await composeTaskNow(options.startTaskOnSelection, preselect);
+      // 就这段发起任务… (Issue #423, slice 7a): the selected words go to the Context-bound Task Composer, and nothing else does.
+      if (start.compose !== undefined && preselect === undefined && !procedures) {
+        const reading = await spanNow();
+        if (reading !== null && !destroyed) start.compose(reading);
+        return;
+      }
+      await composeTaskNow(start, preselect);
     } finally {
       composersPending -= 1;
     }
+  };
+  /** The words selected now as the exact span a mark names, settled first; `null` once the reason was said. */
+  const spanNow = async (): Promise<SelectionSpanReading | null> => {
+    const range = await settledRange();
+    if (range === null || destroyed) return null;
+    const current = editor.currentWindow();
+    return {
+      span: {
+        ...binding(),
+        baseRevisionId: current.revisionId,
+        expectedJournalSequence: current.journalSequence,
+        blockId: range.blockId,
+        baseBlockDigest: range.blockDigest,
+        fromGrapheme: range.fromGrapheme,
+        toGrapheme: range.toGrapheme,
+        selectedText: range.text,
+      },
+      position: current.blocks.find((block) => block.blockId === range.blockId)?.position ?? null,
+      revisionLabel: current.revisionLabel,
+      journalSequence: current.journalSequence,
+    };
   };
   /** `preselect`: the 工序 the menu's own entry chose — one of the house's 可复用工序 — held in the field when it is still offered. */
   const composeTaskNow = async (start: NonNullable<MountOptions['startTaskOnSelection']>, preselect?: string): Promise<void> => {
@@ -2119,6 +2168,17 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (composer) options.setStatus(COMPOSER_LEFT_WINDOW, 'error');
     },
     holdsFloating: () => menu !== undefined || floating !== undefined || composersPending > 0,
+    selectionSpan: async () => {
+      if (editor.selectedRange().kind !== 'range') return SELECTION_TASK_PICK_RANGE;
+      return (await spanNow()) ?? SELECTION_TASK_PICK_RANGE;
+    },
+    composeProcedures: (range) => {
+      if (!editor.selectRange(range.blockId, range.fromGrapheme, range.toGrapheme)) {
+        options.setStatus('请先等待当前写入完成，再就这段发起任务。', 'error');
+        return;
+      }
+      void composeTask(undefined, true);
+    },
     openMark: (markId) => openCard(markId),
     ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
     destroy: () => {

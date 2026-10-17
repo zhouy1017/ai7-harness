@@ -35,6 +35,7 @@ import {
   WRITING_KIND,
   WRITING_MODE_GOALS,
   MAX_REVIEW_CATEGORY_GOAL_LENGTH,
+  MAX_TASK_INTENT_GOAL_LENGTH,
 } from '../shared/protocol.js';
 import { canonicalRecord as analysisCanonicalRecord } from './analysis/canonical.js';
 import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION } from './launch-policy.js';
@@ -473,7 +474,18 @@ export const PROPOSAL_REVIEW_SCHEMA_VERSION = 77;
  */
 export const FACTUAL_VERIFICATION_SCHEMA_VERSION = 78;
 export const HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION = 79;
-export const LATEST_SCHEMA_VERSION = HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION;
+/**
+ * Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts — three additive, append-only relations owned by
+ * `task-intent-drafts.ts` and created before this version is stamped — and `analysis_task_intents` rebuilt, every row copied
+ * byte for byte, so that a Task promoted from a draft keeps the draft's own bounded sentence as its goal for every kind, and so
+ * that the custom analysis kind family (slice 7f) is admitted with its contract version and the baseline modes. This is the
+ * terminal version.
+ */
+export const TASK_INTENT_DRAFT_SCHEMA_VERSION = 80;
+export const LATEST_SCHEMA_VERSION = TASK_INTENT_DRAFT_SCHEMA_VERSION;
+/** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
+const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
+const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -734,6 +746,65 @@ export const ANALYSIS_LEDGER_REVISION_23_SQL = {
     canonical_json TEXT NOT NULL,
     sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
     UNIQUE(result_set_id, ordinal)
+  ) STRICT`,
+} as const;
+
+/**
+ * The shape revisions 65 to 79 gave `analysis_task_intents`: every kind's goal pinned to its mode's fixed text except a review
+ * category's bounded one, and no custom analysis kind. Kept only to validate a store at those revisions exactly before revision 80
+ * (Issue #423, slice 7a) rebuilds the relation with every row copied byte for byte, and for the migration case.
+ */
+export const ANALYSIS_LEDGER_REVISION_79_SQL = {
+  analysis_task_intents: `CREATE TABLE analysis_task_intents (
+    task_intent_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}', '${INITIAL_EVALUATION_KIND}', '${READERS_REPORT_KIND}', '${EVALUATION_REWRITE_KIND}', '${WRITING_KIND}') OR kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}'),
+    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', '${EDITORIAL_REVIEW_CONTRACT_VERSION}', '${INITIAL_EVALUATION_CONTRACT_VERSION}', '${READERS_REPORT_CONTRACT_VERSION}', '${EVALUATION_REWRITE_CONTRACT_VERSION}',
+      '${WRITING_CONTRACT_VERSION}')),
+    goal TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    mode TEXT NOT NULL CHECK(mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'whole-manuscript', 'range',
+      'review-first', 'review-first-range', 'review-again', 'review-sync', 'review-range', 'evaluation-first', 'evaluation-again',
+      'readers-report-first', 'readers-report-again', 'evaluation-rewrite-first', 'evaluation-rewrite-again', 'writing-first', 'writing-again')),
+    predecessor_revision_id TEXT REFERENCES analysis_result_set_revisions(revision_id),
+    selected_start_position INTEGER CHECK(selected_start_position IS NULL OR selected_start_position >= 1),
+    selected_end_position INTEGER CHECK(selected_end_position IS NULL OR selected_end_position >= selected_start_position),
+    CHECK((kind = '${BASELINE_ANALYSIS_KIND}' AND contract_version = '${BASELINE_ANALYSIS_CONTRACT_VERSION}'
+        AND mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book'))
+      OR (kind = '${FACTUAL_REVIEW_KIND}' AND contract_version = '${FACTUAL_REVIEW_CONTRACT_VERSION}'
+        AND mode IN ('whole-manuscript', 'range'))
+      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = '${EDITORIAL_REVIEW_CONTRACT_VERSION}'
+        AND mode IN ('review-first', 'review-first-range', 'review-again', 'review-sync', 'review-range'))
+      OR (kind = '${INITIAL_EVALUATION_KIND}' AND contract_version = '${INITIAL_EVALUATION_CONTRACT_VERSION}'
+        AND mode IN ('evaluation-first', 'evaluation-again'))
+      OR (kind = '${READERS_REPORT_KIND}' AND contract_version = '${READERS_REPORT_CONTRACT_VERSION}'
+        AND mode IN ('readers-report-first', 'readers-report-again'))
+      OR (kind = '${EVALUATION_REWRITE_KIND}' AND contract_version = '${EVALUATION_REWRITE_CONTRACT_VERSION}'
+        AND mode IN ('evaluation-rewrite-first', 'evaluation-rewrite-again'))
+      OR (kind = '${WRITING_KIND}' AND contract_version = '${WRITING_CONTRACT_VERSION}'
+        AND mode IN ('writing-first', 'writing-again'))),
+    CHECK((mode = 'first-baseline' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['first-baseline']}')
+      OR (mode = 'sync-current' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['sync-current']}')
+      OR (mode = 'reanalyze-range' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range']}')
+      OR (mode = 'reanalyze-book' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book']}')
+      OR (mode = 'whole-manuscript' AND goal = '${FACTUAL_REVIEW_MODE_GOALS['whole-manuscript']}')
+      OR (mode = 'range' AND goal = '${FACTUAL_REVIEW_MODE_GOALS.range}')
+      OR (mode IN ('review-first', 'review-first-range', 'review-again', 'review-sync', 'review-range')
+        AND length(goal) BETWEEN 1 AND ${MAX_REVIEW_CATEGORY_GOAL_LENGTH})
+      OR (mode = 'evaluation-first' AND goal = '${INITIAL_EVALUATION_MODE_GOALS['evaluation-first']}')
+      OR (mode = 'evaluation-again' AND goal = '${INITIAL_EVALUATION_MODE_GOALS['evaluation-again']}')
+      OR (mode = 'readers-report-first' AND goal = '${READERS_REPORT_MODE_GOALS['readers-report-first']}')
+      OR (mode = 'readers-report-again' AND goal = '${READERS_REPORT_MODE_GOALS['readers-report-again']}')
+      OR (mode = 'evaluation-rewrite-first' AND goal = '${EVALUATION_REWRITE_MODE_GOALS['evaluation-rewrite-first']}')
+      OR (mode = 'evaluation-rewrite-again' AND goal = '${EVALUATION_REWRITE_MODE_GOALS['evaluation-rewrite-again']}')
+      OR (mode = 'writing-first' AND goal = '${WRITING_MODE_GOALS['writing-first']}')
+      OR (mode = 'writing-again' AND goal = '${WRITING_MODE_GOALS['writing-again']}')),
+    CHECK((mode IN ('first-baseline', 'whole-manuscript', 'review-first', 'review-first-range', 'evaluation-first', 'readers-report-first',
+      'evaluation-rewrite-first', 'writing-first')) = (predecessor_revision_id IS NULL)),
+    CHECK((mode IN ('reanalyze-range', 'range', 'review-first-range', 'review-range')) = (selected_start_position IS NOT NULL)),
+    CHECK((selected_start_position IS NULL) = (selected_end_position IS NULL))
   ) STRICT`,
 } as const;
 
@@ -1136,10 +1207,11 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
   analysis_task_intents: `CREATE TABLE analysis_task_intents (
     task_intent_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),
-    kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}', '${INITIAL_EVALUATION_KIND}', '${READERS_REPORT_KIND}', '${EVALUATION_REWRITE_KIND}', '${WRITING_KIND}') OR kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}'),
+    kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}', '${INITIAL_EVALUATION_KIND}', '${READERS_REPORT_KIND}', '${EVALUATION_REWRITE_KIND}', '${WRITING_KIND}') OR kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}'
+      OR kind GLOB '${CUSTOM_ANALYSIS_KIND_GLOB}'),
     contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', '${EDITORIAL_REVIEW_CONTRACT_VERSION}', '${INITIAL_EVALUATION_CONTRACT_VERSION}', '${READERS_REPORT_CONTRACT_VERSION}', '${EVALUATION_REWRITE_CONTRACT_VERSION}',
-      '${WRITING_CONTRACT_VERSION}')),
-    goal TEXT NOT NULL,
+      '${WRITING_CONTRACT_VERSION}') OR contract_version GLOB '${CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB}'),
+    goal TEXT NOT NULL CHECK(length(goal) BETWEEN 1 AND ${MAX_TASK_INTENT_GOAL_LENGTH}),
     created_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
     sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
@@ -1162,23 +1234,9 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
       OR (kind = '${EVALUATION_REWRITE_KIND}' AND contract_version = '${EVALUATION_REWRITE_CONTRACT_VERSION}'
         AND mode IN ('evaluation-rewrite-first', 'evaluation-rewrite-again'))
       OR (kind = '${WRITING_KIND}' AND contract_version = '${WRITING_CONTRACT_VERSION}'
-        AND mode IN ('writing-first', 'writing-again'))),
-    CHECK((mode = 'first-baseline' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['first-baseline']}')
-      OR (mode = 'sync-current' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['sync-current']}')
-      OR (mode = 'reanalyze-range' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range']}')
-      OR (mode = 'reanalyze-book' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book']}')
-      OR (mode = 'whole-manuscript' AND goal = '${FACTUAL_REVIEW_MODE_GOALS['whole-manuscript']}')
-      OR (mode = 'range' AND goal = '${FACTUAL_REVIEW_MODE_GOALS.range}')
-      OR (mode IN ('review-first', 'review-first-range', 'review-again', 'review-sync', 'review-range')
-        AND length(goal) BETWEEN 1 AND ${MAX_REVIEW_CATEGORY_GOAL_LENGTH})
-      OR (mode = 'evaluation-first' AND goal = '${INITIAL_EVALUATION_MODE_GOALS['evaluation-first']}')
-      OR (mode = 'evaluation-again' AND goal = '${INITIAL_EVALUATION_MODE_GOALS['evaluation-again']}')
-      OR (mode = 'readers-report-first' AND goal = '${READERS_REPORT_MODE_GOALS['readers-report-first']}')
-      OR (mode = 'readers-report-again' AND goal = '${READERS_REPORT_MODE_GOALS['readers-report-again']}')
-      OR (mode = 'evaluation-rewrite-first' AND goal = '${EVALUATION_REWRITE_MODE_GOALS['evaluation-rewrite-first']}')
-      OR (mode = 'evaluation-rewrite-again' AND goal = '${EVALUATION_REWRITE_MODE_GOALS['evaluation-rewrite-again']}')
-      OR (mode = 'writing-first' AND goal = '${WRITING_MODE_GOALS['writing-first']}')
-      OR (mode = 'writing-again' AND goal = '${WRITING_MODE_GOALS['writing-again']}')),
+        AND mode IN ('writing-first', 'writing-again'))
+      OR (kind GLOB '${CUSTOM_ANALYSIS_KIND_GLOB}' AND contract_version GLOB '${CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB}'
+        AND mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book'))),
     CHECK((mode IN ('first-baseline', 'whole-manuscript', 'review-first', 'review-first-range', 'evaluation-first', 'readers-report-first',
       'evaluation-rewrite-first', 'writing-first')) = (predecessor_revision_id IS NULL)),
     CHECK((mode IN ('reanalyze-range', 'range', 'review-first-range', 'review-range')) = (selected_start_position IS NOT NULL)),
@@ -1837,8 +1895,27 @@ function authorizationsAsFound(db: DatabaseSync): AuthorizationsAsFound {
  * revision 66 widens the Run Authorizations (Issue #95, S39). Only the authorizations' text differs from the terminal ledger.
  */
 function validateRevision65AnalysisLedgerSchema(db: DatabaseSync, authorizations: AuthorizationsAsFound): void {
-  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...authorizations }, '分析任务账本表（修订版 65）');
+  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_79_SQL, ...authorizations }, '分析任务账本表（修订版 65）');
   requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 65）');
+  validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
+  requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
+    'TASK_RECORD_INVALID', '分析任务账本引用校验失败。');
+}
+
+/**
+ * The analysis relations as revisions 66 to 79 carried them, validated exactly — shapes, triggers, row digests and references —
+ * before revision 80 (Issue #423, slice 7a) rebuilds `analysis_task_intents`: only its text differs from the terminal ledger's,
+ * beside the plan records' web-tools component that revision 74 widened. A store at 66 to 79 whose Task Intents already read as
+ * revision 80's is not one AI7 wrote.
+ */
+function validateRevision79AnalysisLedgerSchema(db: DatabaseSync): void {
+  const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
+  requireExactObjects(db, 'table', {
+    ...ANALYSIS_LEDGER_SCHEMA_SQL,
+    ...(version >= SEARCH_BACKEND_SCHEMA_VERSION ? { analysis_plan_records: WEB_TOOLS_PLAN_RECORDS_SQL } : {}),
+    ...ANALYSIS_LEDGER_REVISION_79_SQL,
+  }, '分析任务账本表（修订版 79）');
+  requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 79）');
   validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
   requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
     'TASK_RECORD_INVALID', '分析任务账本引用校验失败。');
@@ -2164,14 +2241,14 @@ function migrateAnalysisLedgerToRevision65(db: DatabaseSync): void {
 }
 
 /**
- * Revision 67 → 68 (Issue #757), revision 66 → 68 (Issue #428, S80a), and revision 65 → 68 once revision 66 (Issue #95, S39) has
- * widened the Run Authorizations' origin, which `initializeTaskAuthorizationSchema` has just done. Revision 66 adds
- * `background-analysis-enrollments.ts`'s relations, revision 67 `material-index.ts`'s and revision 68
- * `analysis/outcome-resolutions.ts`'s, all of which `EditorialStore.open` creates before this runs, and none moves anything
- * here: the ledger is already the terminal one, so only the version moves.
+ * Revision 66 to 79 → 80 (Issue #423, slice 7a), and revision 65 → 80 once revision 66 (Issue #95, S39) has widened the Run
+ * Authorizations' origin, which `initializeTaskAuthorizationSchema` has just done. Revisions 66 to 79 add other modules'
+ * relations, which `EditorialStore.open` creates before this runs, and move no analysis relation but the two widened in place;
+ * so a store at any of them carries `analysis_task_intents` as revision 65 left it. It alone is rebuilt, exactly as the
+ * kind-coupled relations were rebuilt before, every row copied byte for byte; the Result Set relations are untouched.
  */
-function advanceToTerminalRevision(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${LATEST_SCHEMA_VERSION};`, 'Terminal version');
+function migrateAnalysisLedgerToRevision80(db: DatabaseSync): void {
+  rebuildKindCoupledAnalysisRelations(db, 80);
 }
 
 /**
@@ -2180,7 +2257,7 @@ function advanceToTerminalRevision(db: DatabaseSync): void {
  * terminal version, which the revisions between them moved without touching them — in this one transaction;
  * `revision` names the rebuild only for the report of a rollback that itself failed.
  */
-function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24 | 59 | 62 | 64 | 65): void {
+function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24 | 59 | 62 | 64 | 65 | 80): void {
   const foreignKeysState = (): number => asNumber((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
   const restoreForeignKeys = foreignKeysState() === 1;
   db.exec('PRAGMA foreign_keys = OFF');
@@ -2195,7 +2272,8 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
          ) SELECT task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
-      rebuildResultSetRelations(db);
+      // Revision 80 widens only the Task Intents; every earlier rebuild moved the Result Set relations with them.
+      if (revision !== 80) rebuildResultSetRelations(db);
       widenWebToolsPlanRecords(db);
       db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
@@ -2263,32 +2341,18 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === WRITING_TASK_SCHEMA_VERSION || version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION || version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
       version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION,
+      version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION ||
+      version === TASK_INTENT_DRAFT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if (version === FACTUAL_VERIFICATION_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
-  // Revision 78 (Issue #901) moves no task-authorization or analysis relation, so a revision-77 store carries the terminal ledger.
-  if (version === PROPOSAL_REVIEW_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
-  if (version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
-  // Revision 76 (Issue #892) moves no task-authorization or analysis relation, so a revision-75 store carries the terminal ledger.
-  if (version === RESEARCH_EVIDENCE_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
-  // Revision 75 (Issue #425) moves no task-authorization or analysis relation, so a revision-74 store carries the terminal ledger.
-  if (version === SEARCH_BACKEND_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
-  if (version === MODEL_CLARIFICATION_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
-  // Revision 72 (Issue #811) moves no task-authorization or analysis relation, so a revision-71 store carries the terminal ledger.
-  if (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
-      version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION) {
+  if (version === TASK_INTENT_DRAFT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // Revisions 67 to 79 move no analysis relation but the plan records' web-tools component (revision 74, widened in place), so a
+  // store at 66 to 79 carries `analysis_task_intents` as revision 65 left it: it is validated as exactly that, and revision 80's
+  // rebuild of the Task Intents brings it to the terminal ledger and stamps the terminal version (Issue #423, slice 7a).
+  if (version >= BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
-    validateAnalysisLedgerSchema(db);
-    return advanceToTerminalRevision(db);
-  }
-  if (version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION || version === MATERIAL_INDEX_SCHEMA_VERSION) {
-    // Revisions 67 (Issue #428, S80a) and 68 (Issue #757) add no task-authorization or analysis relation, so a revision-66 or
-    // revision-67 store carries the terminal ledger: it is validated as exactly that, and nothing but the version moves.
-    validateJ03TaskAuthorizationSchema(db);
-    validateAnalysisLedgerSchema(db);
-    return advanceToTerminalRevision(db);
+    validateRevision79AnalysisLedgerSchema(db);
+    return migrateAnalysisLedgerToRevision80(db);
   }
   if (version >= INITIAL_EVALUATION_SCHEMA_VERSION) {
     // A store at revision 59 to 65 is validated exactly as its revision left it first — its Run Authorizations in the text
@@ -2303,9 +2367,9 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     else validateRevision59AnalysisLedgerSchema(db, asFound);
     widenAnalysisRelation(db, 'analysis_run_authorizations', [ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations],
       'authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256', 66);
-    // Revisions 66 to 68 add no other task-authorization or analysis relation: a revision-65 store's widened ledger is the
-    // terminal one, and only the version moves — to 68.
-    if (version === WRITING_TASK_SCHEMA_VERSION) return advanceToTerminalRevision(db);
+    // Revisions 66 to 79 add no other task-authorization or analysis relation: a revision-65 store's widened ledger has only
+    // revision 80's rebuild of the Task Intents left to make.
+    if (version === WRITING_TASK_SCHEMA_VERSION) return migrateAnalysisLedgerToRevision80(db);
     // A revision-64 store has revision 65's rebuild of the three kind-coupled relations left to make.
     if (version === EVALUATION_REWRITE_SCHEMA_VERSION) return migrateAnalysisLedgerToRevision65(db);
     // Revision 63 (Issue #65, S30) added no task-authorization or analysis relation: a revision-62 or revision-63 store has one

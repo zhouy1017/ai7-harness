@@ -1041,3 +1041,8 @@ export function taskPlanActivityIsStale(activity: NonNullable<TaskPlanRunControl
 export function taskPlanSummaryLine(parts: ReadonlyArray<string>): string {
   return `计划：${parts.filter((part) => part.length > 0).join(' · ')}`;
 }
+
+/** A Task prepared from a Task Intent Draft (Issue #423, slice 7a): the 目标块 leads with the editor's own sentence. */
+export function taskPlanDraftSentence(sentence: string): string {
+  return `你的要求：「${sentence}」`;
+}

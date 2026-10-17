@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 146 as const;
+export const SERVICE_PROTOCOL_VERSION = 147 as const;
 
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
@@ -294,6 +294,11 @@ export const IPC_CHANNELS = {
   continueDialogueAnswer: 'ai7:j16:continue-dialogue-answer',
   regenerateDialogueAnswer: 'ai7:j16:regenerate-dialogue-answer',
   convertDialogueToChangeSuggestion: 'ai7:j16:convert-dialogue-to-change-suggestion',
+  // Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b).
+  inspectTaskIntentDrafts: 'ai7:j16:inspect-task-intent-drafts',
+  saveTaskIntentDraft: 'ai7:j16:save-task-intent-draft',
+  promoteTaskIntentDraft: 'ai7:j16:promote-task-intent-draft',
+  promoteAnswerToTaskIntentDraft: 'ai7:j16:promote-answer-to-task-intent-draft',
   inspectFastInteractionRoutes: 'ai7:j05:inspect-fast-interaction-routes',
   polishSelection: 'ai7:j05:polish-selection',
   inspectFastInteractionRequest: 'ai7:j05:inspect-fast-interaction-request',
@@ -3567,6 +3572,11 @@ export const REVIEW_CATEGORY_MODE_MEANINGS = {
  */
 export type ReviewCategoryGoal = `${string}「${string}」${string}`;
 export const MAX_REVIEW_CATEGORY_GOAL_LENGTH = 400;
+/**
+ * The longest goal any Task Intent holds, in characters (Issue #423, slice 7a): a Task Intent Draft's sentence — which a promoted
+ * Task keeps as its goal — and every kind's own goal. Counted in code points, so it never holds more than as many graphemes.
+ */
+export const MAX_TASK_INTENT_GOAL_LENGTH = 400;
 export function reviewCategoryModeGoal(label: string, mode: ReviewCategoryTaskMode): ReviewCategoryGoal {
   switch (mode) {
     case 'review-first':
@@ -6855,6 +6865,11 @@ export interface TaskPlanProjection {
     };
     /** Preparing the Task saved its Task Input revision for acknowledged edits (TASK-039/040). */
     savedForEdits: boolean;
+    /**
+     * The Task Intent Draft this Task was prepared from with 准备计划 (Issue #423, slice 7a): its sentence, which the 目标块 shows
+     * with 修改 back to the composer. Absent for every Task prepared otherwise.
+     */
+    draft?: { draftId: string; sentence: string };
   };
   /** 要处理 · 允许参考 · 可能发送 · 不会读, each stated apart (TASK-030). */
   scope: { process: string; reference: ReadonlyArray<string>; send: string; notRead: string };
@@ -11627,7 +11642,9 @@ export type GlobalAttentionStateKey =
   | 'dialogue-answered'
   | 'dialogue-stopped'
   | 'dialogue-interrupted'
-  | 'dialogue-failed';
+  | 'dialogue-failed'
+  // An unfinished Task Intent Draft (Issue #423, slice 7a; TASK-004 to 006): in the Book's 等你处理, and in 待我处理 only as this.
+  | 'draft-unfinished';
 
 /**
  * The closed map of safe next steps (V2-UX-ATTN-007): each is an action the item's own record offers, in
@@ -11666,13 +11683,15 @@ export type GlobalAttentionNextStep =
   // 查看索引: the item's card in 资料库, its index layers and 查看分段 (Issue #428, S80a).
   | 'view-material-index'
   // A dialogue Task's 打开对话 (Issue #52, S17a; TASK-044).
-  | 'open-dialogue';
+  | 'open-dialogue'
+  // 继续编辑草稿: a Task Intent Draft in the Task Drawer, on its own Book (Issue #423, slice 7a; TASK-006).
+  | 'continue-draft';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
   'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue', 'view-material-index',
-  'view-unconfirmed', 'view-apply-receipt',
+  'view-unconfirmed', 'view-apply-receipt', 'continue-draft',
 ];
 
 /**
@@ -11700,7 +11719,9 @@ export type GlobalAttentionTarget =
   // A Task kind's plan in the Task Drawer, on the surface that owns it — ②A, 审阅, 评估 for AI7 初评, 审稿意见 and 按我的评分重写评语,
   // 交付物 for a 写作任务: a waiting ledger Task of another kind, named by its Task (Issue #760, S74c), and 结果待确认 a Run left,
   // on the Book's current Task of the kind or, for a review, its latest Review Run (Issue #757).
-  | { kind: 'task-plan'; bookId: string; taskKind: TaskPlanKind; ref: string | null };
+  | { kind: 'task-plan'; bookId: string; taskKind: TaskPlanKind; ref: string | null }
+  // A Task Intent Draft in the Task Drawer beside its own Book's manuscript (Issue #423, slice 7a).
+  | { kind: 'task-intent-draft'; bookId: string; draftId: string };
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
@@ -11724,7 +11745,9 @@ export type GlobalAttentionObjectProjection =
   // holds no turn of it here.
   | { kind: 'dialogue'; question: string | null }
   // 结果待确认 that completed Runs of one Task kind left on the Book (Issue #757): how many ranges, and which steps.
-  | { kind: 'unconfirmed'; taskKind: TaskPlanKind; ranges: number; steps: ReadonlyArray<UnconfirmedStageId> };
+  | { kind: 'unconfirmed'; taskKind: TaskPlanKind; ranges: number; steps: ReadonlyArray<UnconfirmedStageId> }
+  // A Task Intent Draft (Issue #423, slice 7a): the editor's own sentence, where the draft began, and how many ranges it pins.
+  | { kind: 'draft'; goal: string; origin: TaskIntentDraftOrigin; ranges: number };
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
@@ -11933,6 +11956,183 @@ export interface DialogueConversionProjection {
   readonly markId: string;
   readonly completionLabel: string;
   readonly dialogue: DialogueProjection;
+}
+
+// ---- Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b; V2-UX-TASK-001 to 009, 042, 043, DIALOG-013, 016) ----------
+
+/**
+ * Where a Task Intent Draft began: the Context-bound Task Composer on a selection (就这段发起任务…) or on the whole Book
+ * (发起全书任务), or a completed dialogue answer (转为任务意图草稿).
+ */
+export type TaskIntentDraftOrigin = 'composer-selection' | 'composer-book' | 'dialogue-answer';
+/** The intended outcome a draft names (TASK-005): what kind of Task it should become once promoted. */
+export type TaskIntentOutcomeClass = 'analysis' | 'review' | 'factual' | 'writing';
+export const TASK_INTENT_OUTCOME_CLASSES: readonly TaskIntentOutcomeClass[] = ['analysis', 'review', 'factual', 'writing'];
+/** The most Pinned Manuscript Ranges one draft carries (再选一段加入, TASK-046). */
+export const MAX_TASK_INTENT_DRAFT_RANGES = 8;
+/** The most characters of a completed dialogue answer a draft keeps (DIALOG-016), cut at a fragment. */
+export const MAX_TASK_INTENT_DRAFT_ANSWER_CHARACTERS = 2_000;
+
+/** A range the draft carries: one its version already pinned, by identity, or the exact words selected now. */
+export type TaskIntentDraftRangeInput =
+  | { readonly kind: 'kept'; readonly rangeId: string }
+  | { readonly kind: 'new'; readonly span: DialogueSelectionInput };
+
+/** What the draft is about (TASK-005, 007): the whole Book's manuscript, or only the Pinned Manuscript Ranges it carries. */
+export type TaskIntentDraftTargetInput =
+  | { readonly kind: 'book' }
+  | { readonly kind: 'ranges'; readonly ranges: ReadonlyArray<TaskIntentDraftRangeInput> };
+
+/**
+ * 准备任务 in the composer, or 保存修改 on a draft (TASK-004, 005): a new draft — its first version — or a new version of the draft
+ * whose `expectedOrdinal` version the editor edited. Nothing is sent, no Run Record or authorization is made, and the
+ * manuscript is not touched.
+ */
+export interface SaveTaskIntentDraftInput {
+  readonly bookId: string;
+  readonly draftId: string | null;
+  readonly expectedOrdinal: number | null;
+  /** Where a new draft began; a new version keeps its draft's. */
+  readonly origin: 'composer-selection' | 'composer-book';
+  readonly goal: string;
+  readonly target: TaskIntentDraftTargetInput;
+  readonly outcomeClass: TaskIntentOutcomeClass | null;
+  /**
+   * The 工序 the editor picked from the composer's recommendation slot (slice 7c fills it; #423 rev 6): kept by identity in the
+   * version, never resolved, validated or enabled here. Absent or `null` when none is picked.
+   */
+  readonly procedurePin?: TaskIntentDraftProcedurePin | null;
+}
+
+/** A 工序 picked for a draft, by identity (#423 rev 6): selection is never acquisition, enablement or authorization (TASK-013). */
+export interface TaskIntentDraftProcedurePin {
+  readonly procedureId: string;
+  readonly versionId: string;
+}
+
+/** The Book's drafts, or — `draftId` set — one draft with how it would be promoted. */
+export interface InspectTaskIntentDraftsInput {
+  readonly bookId: string;
+  readonly draftId: string | null;
+}
+
+/**
+ * One Pinned Manuscript Range of a draft (TASK-002, 031, 043): the words as pinned, where, and how they stand now — exact on the
+ * revision they were pinned at, `待保存修订版` (pinned on edits newer than that revision), `待核对到任务修订版` (the manuscript has
+ * a newer revision; checked exactly when the Task's own revision is saved), or `任务范围需要重新选择` (the words are no longer
+ * there).
+ */
+export interface TaskIntentDraftRangeProjection {
+  readonly rangeId: string;
+  readonly manuscriptId: string;
+  readonly blockId: string;
+  readonly fromGrapheme: number;
+  readonly toGrapheme: number;
+  readonly text: string;
+  readonly revisionLabel: string;
+  readonly journalSequence: number;
+  readonly state: 'exact' | 'pending-save' | 'awaiting-resolution' | 'reselect';
+  readonly stateLabel: string | null;
+  /** The paragraph's position in the working manuscript, `null` once it is gone. */
+  readonly position: number | null;
+}
+
+/** What a draft promoted from a dialogue answer keeps of it (DIALOG-016): generated content, with its provenance. */
+export interface TaskIntentDraftAnswerProjection {
+  readonly dialogueId: string;
+  readonly attemptId: string;
+  readonly attemptOrdinal: number;
+  readonly selectionSha256: string;
+  readonly text: string;
+  /** The answer's lines when it has more than one — the structured rows its format yields — and none otherwise. */
+  readonly rows: ReadonlyArray<string>;
+  readonly truncated: boolean;
+}
+
+/** How 准备计划 would make a Task of the draft: one exact preparation of an existing kind, with the choice it takes. */
+export type TaskIntentDraftChoice =
+  | { readonly kind: 'baseline'; readonly mode: BaselineAnalysisTaskMode }
+  | { readonly kind: 'review'; readonly categoryId: string }
+  | { readonly kind: 'writing'; readonly typeId: string };
+
+export interface TaskIntentDraftOption {
+  readonly choice: TaskIntentDraftChoice;
+  readonly taskKind: 'baseline-analysis' | 'review-run' | 'writing';
+  readonly label: string;
+  readonly available: boolean;
+  readonly reason: string | null;
+}
+
+/**
+ * The Task a draft becomes, chosen from its target and intended outcome alone — no model is asked: one option when exactly one
+ * fits, the options to choose from when several do, or why none does, the draft staying editable.
+ */
+export type TaskIntentDraftResolution =
+  | { readonly state: 'ready'; readonly option: TaskIntentDraftOption }
+  | { readonly state: 'choose'; readonly options: ReadonlyArray<TaskIntentDraftOption> }
+  | { readonly state: 'unsupported'; readonly reason: string };
+
+export interface TaskIntentDraftProjection {
+  readonly draftId: string;
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly origin: TaskIntentDraftOrigin;
+  readonly createdAt: string;
+  readonly version: {
+    readonly versionId: string;
+    readonly ordinal: number;
+    readonly goal: string;
+    readonly target: 'book' | 'ranges';
+    readonly outcomeClass: TaskIntentOutcomeClass | null;
+    readonly ranges: ReadonlyArray<TaskIntentDraftRangeProjection>;
+    readonly answer: TaskIntentDraftAnswerProjection | null;
+    readonly procedurePin: TaskIntentDraftProcedurePin | null;
+    readonly createdAt: string;
+  };
+  /** The Task the draft became with 准备计划 — a normal prepared Task that still needs 开始任务 — or `null`. */
+  readonly promotion: null | {
+    readonly taskKind: 'baseline-analysis' | 'review-run' | 'writing';
+    /** Every draft promotion creates exactly one Task Intent; model-free baseline leads are excluded. */
+    readonly taskIntentId: string;
+    /** What the Task Drawer opens: the Task Intent, or the Review Run. */
+    readonly planRef: string;
+    readonly promotedAt: string;
+  };
+  /** Only on a read of the one draft, while it is not promoted. */
+  readonly resolution: TaskIntentDraftResolution | null;
+}
+
+export interface TaskIntentDraftsProjection {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  /**
+   * The Book's manuscript as it stands now (TASK-002): its revision, its journal position, and whether the journal holds edits
+   * no revision holds yet — words pinned now are `待保存修订版` until a revision holds them. `null` before it has one.
+   */
+  readonly manuscript: null | { readonly revisionLabel: string; readonly journalSequence: number; readonly pendingSave: boolean };
+  /** The Book's drafts not yet promoted, newest first, then up to ten promoted ones. */
+  readonly drafts: ReadonlyArray<TaskIntentDraftProjection>;
+}
+
+/**
+ * 准备计划 on a draft (decision 1): the draft's exact version made into a prepared Task through the existing preparation of its
+ * kind — the same cooperative job 先看计划 starts — with the draft's sentence as the Task Intent's goal. The plan opens in the Task
+ * Drawer and still needs 开始任务 (AUTH-002); nothing is sent.
+ */
+export interface PromoteTaskIntentDraftInput {
+  readonly bookId: string;
+  readonly draftId: string;
+  readonly versionId: string;
+  readonly choice: TaskIntentDraftChoice;
+  /** A writing Task's audience and channel, which the editor writes when the choice is a writing type. */
+  readonly writing?: { readonly audience: string; readonly channel: string };
+}
+
+/** 转为任务意图草稿 (DIALOG-016): a new draft from a completed answer, which `attemptId` must name as the dialogue's latest. */
+export interface PromoteAnswerToTaskIntentDraftInput {
+  readonly bookId: string;
+  readonly dialogueId: string;
+  readonly attemptId: string;
 }
 
 // ---- ④ 导出 · DOCX (Issue #413, plan slice S64; editor-surfaces §7 导出, V2-UX-EXP-001 to EXP-024) ------
@@ -13309,6 +13509,14 @@ export interface ServiceOperationMap {
   regenerateDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
   /** 转为修改建议: an AI7-produced 修改建议 on the dialogue's selected words, from a completed answer; never applied. */
   convertDialogueToChangeSuggestion: { input: ConvertDialogueToChangeSuggestionInput & { bookId: string }; output: DialogueConversionProjection };
+  /** The Book's Task Intent Drafts, or one with the Task 准备计划 would make of it (Issue #423, slice 7a): a read. */
+  inspectTaskIntentDrafts: { input: InspectTaskIntentDraftsInput; output: TaskIntentDraftsProjection };
+  /** 准备任务 in the composer, or 保存修改 on a draft: a new version; nothing is sent and no Task is made. */
+  saveTaskIntentDraft: { input: SaveTaskIntentDraftInput; output: TaskIntentDraftProjection };
+  /** 准备计划 on a draft: the existing preparation of the kind it resolves to, as one cooperative job; still needs 开始任务. */
+  promoteTaskIntentDraft: { input: PromoteTaskIntentDraftInput; output: ServiceJobProjection };
+  /** 转为任务意图草稿 (DIALOG-016): a draft from a completed dialogue answer, with its provenance; nothing is sent. */
+  promoteAnswerToTaskIntentDraft: { input: PromoteAnswerToTaskIntentDraftInput; output: TaskIntentDraftProjection };
   /** Whether 润色这段 and 基于当前稿件重新生成建议 can be asked for the Book under this launch (Issue #842): a read. */
   inspectFastInteractionRoutes: { input: { bookId: string }; output: FastInteractionRoutesProjection };
   /** 润色这段 (Issue #842): the selected words to the Fast Interaction Role; its answer becomes open 修改建议, never applied. */
@@ -13780,6 +13988,11 @@ export interface RendererApi {
   continueDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
   regenerateDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
   convertDialogueToChangeSuggestion(input: ConvertDialogueToChangeSuggestionInput): Promise<DialogueConversionProjection>;
+  /** The Task Intent Drafts of the Book this window shows (Issue #423, slice 7a): a read. */
+  inspectTaskIntentDrafts(input: Omit<InspectTaskIntentDraftsInput, 'bookId'>): Promise<TaskIntentDraftsProjection>;
+  saveTaskIntentDraft(input: Omit<SaveTaskIntentDraftInput, 'bookId'>): Promise<TaskIntentDraftProjection>;
+  promoteTaskIntentDraft(input: Omit<PromoteTaskIntentDraftInput, 'bookId'>): Promise<ServiceJobProjection>;
+  promoteAnswerToTaskIntentDraft(input: Omit<PromoteAnswerToTaskIntentDraftInput, 'bookId'>): Promise<TaskIntentDraftProjection>;
   /** Whether 润色这段 and 基于当前稿件重新生成建议 can be asked for the Book this window shows (Issue #842): a read. */
   inspectFastInteractionRoutes(): Promise<FastInteractionRoutesProjection>;
   /** 润色这段 on the Book this window shows (Issue #842): only the selected words and their paragraph's context are sent. */

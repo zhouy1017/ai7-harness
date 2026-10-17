@@ -223,6 +223,10 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   dialogue_harness_spans: 'owned',
   dialogue_attempt_outcomes: 'owned',
   dialogue_conversions: 'owned',
+  // Its Task Intent Drafts (Issue #423, slice 7a): what the editor asked for, each version, and the Task each draft became.
+  task_intent_drafts: 'owned',
+  task_intent_draft_versions: 'owned',
+  task_intent_draft_promotions: 'owned',
   // The Captured Procedure version each of its Review Runs pinned (Issue #65, S30): named by value, so the Run keeps naming
   // what it ran in a house that never had that procedure.
   review_run_procedure_pins: 'owned',

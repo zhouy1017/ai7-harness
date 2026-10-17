@@ -1364,6 +1364,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'selection-task-review-run',
     'selection-task-from-mark',
     'selection-task-reanalyze',
+    // The Context-bound Task Composer and Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b): a selection's draft with
+    // 再选一段加入 and the IME guard, a whole-Book draft promoted into a prepared Task, and a dialogue answer made a draft.
+    'composer-selection-draft',
+    'draft-promote-prepared-task',
+    'dialogue-promote-draft',
     // 跳到所选文字 on a paragraph the manuscript no longer holds (Issue #423 review, P2-1): the Book reimported without it.
     'selection-task-gone',
     'zero-loopback-requests',

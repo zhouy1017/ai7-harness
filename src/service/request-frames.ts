@@ -60,6 +60,9 @@ import {
   REVIEW_FINDING_STATUSES,
   REVIEW_SCOPE_KINDS,
   TASK_PLAN_KINDS,
+  MAX_TASK_INTENT_GOAL_LENGTH,
+  MAX_TASK_INTENT_DRAFT_RANGES,
+  TASK_INTENT_OUTCOME_CLASSES,
   isReviewCategoryId,
   publicationText,
   SERIES_KNOWLEDGE_CLASSES,
@@ -708,13 +711,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         throw new ProtocolError(tentativeId);
       }
       const update = input.update;
+      // 重新确认计划 of a Task promoted from a Task Intent Draft names the draft's sentence (Issue #423, slice 7a): bounded here,
+      // and checked by the ledger against the Task it reconfirms.
+      const draftGoal = input.reconfirm === true && isBoundedString(input.goal, MAX_TASK_INTENT_GOAL_LENGTH) && input.goal.trim() === input.goal && input.goal.length > 0;
       if (update === null) {
-        if (input.goal !== BASELINE_ANALYSIS_MODE_GOALS['first-baseline']) throw new ProtocolError(tentativeId);
+        if (input.goal !== BASELINE_ANALYSIS_MODE_GOALS['first-baseline'] && !draftGoal) throw new ProtocolError(tentativeId);
         break;
       }
       if (!isRecord(update) || !(hasExactKeys(update, ['mode', 'selectedRange']) || hasExactKeys(update, ['mode', 'selectedRange', 'selectedBlocks'])) ||
           !BASELINE_ANALYSIS_UPDATE_MODES.includes(update.mode as BaselineAnalysisUpdateMode) ||
-          input.goal !== BASELINE_ANALYSIS_MODE_GOALS[update.mode as BaselineAnalysisUpdateMode]) {
+          (input.goal !== BASELINE_ANALYSIS_MODE_GOALS[update.mode as BaselineAnalysisUpdateMode] && !draftGoal)) {
         throw new ProtocolError(tentativeId);
       }
       const range = update.selectedRange;
@@ -2305,6 +2311,52 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !isBoundedString(input.proposedText, 2 * MAX_DIALOGUE_PROPOSAL_CHARACTERS) || !isBoundedString(input.rationale, 2 * MAX_DIALOGUE_PROPOSAL_CHARACTERS, true)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b): the route's Book; a draft and its version by identity; the goal,
+    // the target — the whole Book, or ranges each kept by identity or newly pinned as an exact span a mark names — the intended
+    // outcome and the picked 工序 within their bounds; 准备计划's one choice of an existing preparation; an answer by its attempt.
+    case 'inspectTaskIntentDrafts': {
+      const input = requireInput(value.input, ['bookId', 'draftId'], tentativeId);
+      if (!validUuid(input.bookId) || !(input.draftId === null || validUuid(input.draftId))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'saveTaskIntentDraft': {
+      const input = requireInputWithOptional(value.input, ['bookId', 'draftId', 'expectedOrdinal', 'origin', 'goal', 'target', 'outcomeClass'], ['procedurePin'], tentativeId);
+      const target = input.target;
+      const validRange = (range: unknown): boolean => isRecord(range) && (
+        (hasExactKeys(range, ['kind', 'rangeId']) && range.kind === 'kept' && validUuid(range.rangeId)) ||
+        (hasExactKeys(range, ['kind', 'span']) && range.kind === 'new' && range.span !== null && validKnowledgeSpan(range.span)));
+      const validTarget = isRecord(target) && ((hasExactKeys(target, ['kind']) && target.kind === 'book') ||
+        (hasExactKeys(target, ['kind', 'ranges']) && target.kind === 'ranges' && Array.isArray(target.ranges) && target.ranges.length >= 1 &&
+          target.ranges.length <= MAX_TASK_INTENT_DRAFT_RANGES && target.ranges.every(validRange)));
+      const pin = input.procedurePin;
+      const validPin = pin === undefined || pin === null ||
+        (isRecord(pin) && hasExactKeys(pin, ['procedureId', 'versionId']) && validUuid(pin.procedureId) && validUuid(pin.versionId));
+      if (!validUuid(input.bookId) || !(input.draftId === null ? input.expectedOrdinal === null : validUuid(input.draftId) && isSafeInteger(input.expectedOrdinal, 1)) ||
+          (input.origin !== 'composer-selection' && input.origin !== 'composer-book') || !isBoundedString(input.goal, 4 * MAX_TASK_INTENT_GOAL_LENGTH) ||
+          !validTarget || !(input.outcomeClass === null || TASK_INTENT_OUTCOME_CLASSES.includes(input.outcomeClass as never)) || !validPin) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'promoteTaskIntentDraft': {
+      const input = requireInputWithOptional(value.input, ['bookId', 'draftId', 'versionId', 'choice'], ['writing'], tentativeId);
+      const choice = input.choice;
+      const validChoice = isRecord(choice) && (
+        (hasExactKeys(choice, ['kind', 'mode']) && choice.kind === 'baseline' &&
+          ['first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book'].includes(choice.mode as string)) ||
+        (hasExactKeys(choice, ['kind', 'categoryId']) && choice.kind === 'review' && isReviewCategoryId(choice.categoryId)) ||
+        (hasExactKeys(choice, ['kind', 'typeId']) && choice.kind === 'writing' && isBoundedString(choice.typeId, 64)));
+      const writing = input.writing;
+      const validWriting = writing === undefined ||
+        (isRecord(writing) && hasExactKeys(writing, ['audience', 'channel']) && isBoundedString(writing.audience, 240, true) && isBoundedString(writing.channel, 240, true));
+      if (!validUuid(input.bookId) || !validUuid(input.draftId) || !validUuid(input.versionId) || !validChoice || !validWriting) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'promoteAnswerToTaskIntentDraft': {
+      const input = requireInput(value.input, ['bookId', 'dialogueId', 'attemptId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
       break;
     }
     // 润色这段 and 基于当前稿件重新生成建议 (Issue #842): the route's Book and the exact span as a mark names one; a conflict unit by

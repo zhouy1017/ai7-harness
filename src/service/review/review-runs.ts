@@ -862,10 +862,23 @@ export type ReviewRunPrepareInput =
      */
     procedure?: ReviewRunProcedurePinInput | null;
     materialReferences?: TaskMaterialBoundary;
+    /**
+     * 准备计划 on a Task Intent Draft (Issue #423, slice 7a; decision 1): exactly one category, its Task — when it has one — a new
+     * Task Intent holding the draft's sentence as its goal; the promotion is recorded with the Run, in the write that makes it.
+     */
+    intentDraft?: ReviewRunIntentDraft;
   }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
   | { phase: 'cancel-all' };
+
+/** A Task Intent Draft a Review Run is prepared from (Issue #423, slice 7a): its version, its sentence, and how its promotion is recorded. */
+export interface ReviewRunIntentDraft {
+  readonly versionId: string;
+  readonly goal: string;
+  readonly paragraphs?: number;
+  promoted(task: { readonly taskIntentId: string | null; readonly reviewRunId: string }): void;
+}
 
 /** The progress of one cooperative Review Run preparation; `reviewRunId` names the Run once it is written. */
 export interface ReviewRunPreparationProgress {
@@ -885,6 +898,9 @@ interface PlannedCategory {
 
 interface PreparationWork {
   readonly housePreferences?: Readonly<Record<string, HouseReviewPreferenceUse>> | undefined;
+  /** The Task Intent Draft the Run is prepared from (Issue #423, slice 7a); absent for every other preparation. */
+  readonly intentDraft?: ReviewRunIntentDraft;
+  draftReviewRunId?: string;
   readonly redoOf: string | null;
   readonly materialReferences?: TaskMaterialBoundary;
   readonly workId: string;
@@ -1025,6 +1041,8 @@ export class ReviewRunStore {
     const procedure = input.procedure === undefined || input.procedure === null
       ? null
       : this.#procedureSelection(bookId, head, configuration, baseline, scope, input.categoryIds, input.procedure);
+    requireReview(input.intentDraft === undefined || (input.categoryIds.length === 1 && procedure === null && (input.redoOf ?? null) === null),
+      'REVIEW_CATEGORIES_INVALID', '一份任务意图草稿只准备成一个类别的审阅。');
     // Configuration order is the categories' position in the Run, whatever order they were ticked in.
     const planned = configuration.categories
       .filter((entry) => input.categoryIds.includes(entry.categoryId))
@@ -1048,6 +1066,7 @@ export class ReviewRunStore {
       : offeredPreferences.some(([, offer]) => offer === 'closed') ? {} : undefined;
     const work: PreparationWork = {
       ...(housePreferences === undefined ? {} : { housePreferences }),
+      ...(input.intentDraft === undefined ? {} : { intentDraft: input.intentDraft }),
       redoOf: input.redoOf ?? null,
       workId: randomUUID(),
       bookId,
@@ -1126,18 +1145,35 @@ export class ReviewRunStore {
       while (work.index < work.planned.length) {
         const planned = work.planned[work.index]!;
         if (planned.plan.kind === 'leads') {
+          requireReview(work.intentDraft === undefined, 'REVIEW_CATEGORIES_INVALID', '任务意图草稿只能准备有任务计划的审阅类别。');
           work.prepared.push(this.#snapshotCategory(planned, null));
           work.index += 1;
           continue;
         }
         const ledger = this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined, undefined, undefined, work.housePreferences?.[this.#ledgers.ledgerOf(planned.entry).definition.kind]);
         const request = this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger);
+        // A draft's intent, plan, Review Run and promotion commit together, including on cancellation, drift or a repeated request.
+        const draft = work.intentDraft === undefined ? {} : {
+          goal: work.intentDraft.goal as AnalysisGoal,
+          intentDraft: { ...work.intentDraft, promoted: (): void => {
+            const prepared = ledger.inspect(work.bookId);
+            requireReview(prepared.state === 'prepared' && prepared.taskIntent !== null && prepared.planEnvelope !== null,
+              'REVIEW_PLAN_UNAVAILABLE', `「${planned.entry.label}」的计划没有准备好。`);
+            work.prepared.push(this.#snapshotCategory(planned, prepared));
+            work.draftReviewRunId = this.#writeRun(work);
+          } },
+        };
         const result = work.ledgerWorkId === null
-          ? ledger.prepare({ ...request, reconfirm: false })
+          ? ledger.prepare({ ...request, reconfirm: false, ...draft })
           : ledger.prepare({ phase: 'advance', workId: work.ledgerWorkId });
         if (!result.done) {
           work.ledgerWorkId = result.workId;
           return progress();
+        }
+        if (work.intentDraft !== undefined) {
+          requireReview(work.draftReviewRunId !== undefined, 'REVIEW_PLAN_UNAVAILABLE', '草稿的任务计划没有准备好。');
+          this.#work.delete(work.workId);
+          return { done: true, workId: null, completed: total, total, bookId: work.bookId, reviewRunId: work.draftReviewRunId };
         }
         work.ledgerWorkId = null;
         let projection = result.projection;
@@ -1240,7 +1276,8 @@ export class ReviewRunStore {
         },
         scope: {
           kind: work.scope.kind,
-          label: reviewScopeLabel(work.scope),
+          label: work.intentDraft?.paragraphs === undefined ? reviewScopeLabel(work.scope)
+            : `${reviewScopeLabel(work.scope)}；所选文字已扩展为所在的 ${work.intentDraft.paragraphs} 个完整段落；任务按包含这些段落的阅读范围处理。`,
           selectedRange: work.scope.selectedRange,
           ...(work.scope.blockIds === undefined ? {} : { blockIds: work.scope.blockIds }),
         },
@@ -1271,6 +1308,8 @@ export class ReviewRunStore {
         recordReviewRunProcedurePin(this.#db, reviewRunId, work.procedure.pin, work.prepared.map((category) => category.categoryId),
           work.procedure.leftOut, createdAt);
       }
+      // The Task Intent Draft the Run was prepared from (Issue #423, slice 7a): promoted with the Run, once.
+      work.intentDraft?.promoted({ taskIntentId: work.prepared[0]?.task?.taskIntentId ?? null, reviewRunId });
     });
     return reviewRunId;
   }

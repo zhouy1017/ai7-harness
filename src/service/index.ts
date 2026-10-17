@@ -1473,6 +1473,16 @@ async function dispatch(
     }
     case 'convertDialogueToChangeSuggestion':
       return { id: request.id, ok: true, op: request.op, result: store.convertDialogueToChangeSuggestion(request.input.bookId, request.input) };
+    // Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b): reads and appends of the editor's own drafts — no model call,
+    // no transmission and no Run Record — and 准备计划, which starts the existing preparation of the kind the draft resolves to.
+    case 'inspectTaskIntentDrafts':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectTaskIntentDrafts(request.input) };
+    case 'saveTaskIntentDraft':
+      return { id: request.id, ok: true, op: request.op, result: store.saveTaskIntentDraft(request.input) };
+    case 'promoteTaskIntentDraft':
+      return { id: request.id, ok: true, op: request.op, result: jobs.startTaskIntentDraftPromotion(request.input, launchPolicy) };
+    case 'promoteAnswerToTaskIntentDraft':
+      return { id: request.id, ok: true, op: request.op, result: store.promoteAnswerToTaskIntentDraft(request.input) };
     // 润色这段 and 基于当前稿件重新生成建议 on the Fast Interaction Role (Issue #842): whether this launch can ask them, the polish
     // request — checked at once, answered beside this loop — and either request read again until it settles.
     case 'inspectFastInteractionRoutes':
