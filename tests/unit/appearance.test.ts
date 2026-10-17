@@ -4,9 +4,10 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Preferences } from '../../src/main/preferences.js';
+import { createPreferenceStore } from '../../src/main/preferences.js';
 import { applyAppearance, createAppearance } from '../../src/renderer/appearance.js';
-import type { AppearanceState } from '../../src/shared/preferences.js';
+import type { AppearanceState } from '../../src/shared/appearance.js';
+import type { PreferencesProjection } from '../../src/shared/preferences.js';
 import { renderDocxExport, type DocxExportInput } from '../../src/service/docx-export.js';
 import { renderMarkdownExport, renderPdfHtmlExport } from '../../src/service/text-export.js';
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } from '../../src/shared/protocol.js';
@@ -17,19 +18,18 @@ const directories: string[] = [];
 afterEach(async () => { for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true }); vi.unstubAllGlobals(); });
 
 describe('application appearance', () => {
-  it('defaults to system and restores a validated choice after relaunch; rejects undeclared values', async () => {
+  it('defaults to system through the shared preferences owner and restores a validated choice after relaunch', async () => {
     const path = await mkdtemp(join(tmpdir(), 'ai7-appearance-')); directories.push(path);
-    const preferences = new Preferences(path);
-    expect(await preferences.get()).toEqual({ 'appearance.theme': 'system' });
-    await preferences.save({ key: 'appearance.theme', value: 'dark' });
-    expect(await new Preferences(path).get()).toEqual({ 'appearance.theme': 'dark' });
-    expect(JSON.parse(await readFile(join(path, 'preferences.json'), 'utf8'))).toEqual({ version: 1, values: { 'appearance.theme': 'dark' } });
-    await expect(preferences.save({ key: 'appearance.theme', value: 'custom' })).rejects.toThrow('PREFERENCE_INVALID');
-    await expect(preferences.save({ key: '__proto__', value: 'dark' })).rejects.toThrow('PREFERENCE_INVALID');
-    await Promise.all(['light', 'dark', 'system'].map((value) => preferences.save({ key: 'appearance.theme', value })));
-    expect(await new Preferences(path).get()).toEqual({ 'appearance.theme': 'system' });
+    const preferences = createPreferenceStore(path);
+    expect(preferences.read().values['appearance.theme']).toBe('system');
+    preferences.save({ key: 'appearance.theme', value: 'dark' });
+    expect(createPreferenceStore(path).read().values['appearance.theme']).toBe('dark');
+    const stored = JSON.parse(await readFile(join(path, 'preferences.json'), 'utf8'));
+    expect(stored.version).toBe(1); expect(stored.values['appearance.theme']).toBe('dark');
+    expect(() => preferences.save({ key: 'appearance.theme', value: 'custom' })).toThrow(expect.objectContaining({ code: 'AI7_PREFERENCE_VALUE_INVALID' }));
+    expect(createPreferenceStore(path).read().values['appearance.theme']).toBe('dark');
     await writeFile(join(path, 'preferences.json'), '{broken');
-    expect(await preferences.get()).toEqual({ 'appearance.theme': 'system' });
+    expect(createPreferenceStore(path).read().values['appearance.theme']).toBe('system');
   });
 
   it('follows main-process system changes across windows without replacing focused editing content', async () => {
@@ -43,8 +43,8 @@ describe('application appearance', () => {
       Object.assign(editor, state);
       vi.stubGlobal('document', { ...miniDocument, documentElement: root });
       let notify: (state: AppearanceState) => void = () => undefined;
-      const save = vi.fn(async ({ value }: { key: string; value: unknown }) => ({ 'appearance.theme': value }));
-      const appearance = createAppearance({ getPreferences: async () => ({}), savePreference: save,
+      const save = vi.fn(async ({ value }: { key: string; value: unknown }) => ({ values: { 'appearance.theme': value } }) as unknown as PreferencesProjection);
+      const appearance = createAppearance({ savePreference: save,
         onAppearanceChanged: (listener) => { notify = (next) => { listener(next); applyAppearance(secondRoot as unknown as HTMLElement, next); }; return () => undefined; } });
       notify({ preference: 'system', systemDark: false }); await appearance.ready;
       notify({ preference: 'system', systemDark: true });
@@ -86,15 +86,15 @@ describe('application appearance', () => {
     const root = { dataset: {} as Record<string, string>, style: { colorScheme: '' } };
     vi.stubGlobal('document', { documentElement: root });
     let notify!: (state: AppearanceState) => void;
-    let complete!: (values: Record<string, unknown>) => void;
-    const appearance = createAppearance({ getPreferences: async () => ({}),
+    let complete!: (projection: PreferencesProjection) => void;
+    const appearance = createAppearance({
       savePreference: () => new Promise((resolve) => { complete = resolve; }),
       onAppearanceChanged: (listener) => { notify = listener; return () => undefined; } });
     notify({ preference: 'system', systemDark: false }); await appearance.ready;
     const saving = appearance.choose('dark');
     notify({ preference: 'dark', systemDark: false });
     notify({ preference: 'light', systemDark: true });
-    complete({ 'appearance.theme': 'dark' }); await saving;
+    complete({ values: { 'appearance.theme': 'dark' } } as unknown as PreferencesProjection); await saving;
     expect(appearance.preference).toBe('light');
     expect(root.dataset['theme']).toBe('light');
   });

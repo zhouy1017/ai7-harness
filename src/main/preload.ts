@@ -1,4 +1,3 @@
-import { PREFERENCE_CHANNELS, type AppearanceState } from '../shared/preferences.js';
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_CHANNELS,
@@ -14,6 +13,13 @@ import {
   type RendererCallResult,
   type ServiceOperationMap,
 } from '../shared/protocol.js';
+import {
+  PREFERENCE_IPC_CHANNELS,
+  type PreferencesProjection,
+  type PreferencesRendererApi,
+  type SavePreferenceInput,
+} from '../shared/preferences.js';
+import { APPEARANCE_IPC_CHANNEL, type AppearanceRendererApi, type AppearanceState } from '../shared/appearance.js';
 
 function markServiceInterrupted(): void {
   const mark = (): void => {
@@ -173,22 +179,8 @@ async function invoke<Result>(channel: string, input?: unknown): Promise<Result>
 
 if (process.platform !== 'win32' && process.platform !== 'darwin') throw new Error('Unsupported renderer platform.');
 
-const api: RendererApi = Object.freeze({
-  getPreferences: () => invoke<Record<string, unknown>>(PREFERENCE_CHANNELS.get),
-  savePreference: (input: { key: string; value: unknown }) => invoke<Record<string, unknown>>(PREFERENCE_CHANNELS.save, input),
-  onAppearanceChanged: (listener: (state: AppearanceState) => void) => {
-    let active = true;
-    let generation = 0;
-    const changed = (_event: unknown, state: AppearanceState): void => { generation += 1; if (active) listener(state); };
-    ipcRenderer.on(PREFERENCE_CHANNELS.appearance, changed);
-    const initialGeneration = generation;
-    void invoke<AppearanceState>(PREFERENCE_CHANNELS.appearance).then((state) => {
-      if (active && generation === initialGeneration) listener(state);
-    }).catch(() => {
-      if (active && generation === initialGeneration) listener({ preference: 'system', systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches });
-    });
-    return () => { active = false; ipcRenderer.removeListener(PREFERENCE_CHANNELS.appearance, changed); };
-  },
+// Local view and input configuration (Issue #934, slice 11a) rides beside the service's members: main-owned, no protocol op.
+const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi = Object.freeze({
   platform: process.platform,
   getStartup: () => invoke<ServiceOperationMap['getStartup']['output']>(IPC_CHANNELS.getStartup),
   getRecoveryComparison: (input: ServiceOperationMap['getRecoveryComparison']['input']) =>
@@ -722,6 +714,22 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['getHistoricalRevision']['output']>(IPC_CHANNELS.getHistoricalRevision, input),
   getProductDataLocation: () =>
     invoke<Awaited<ReturnType<RendererApi['getProductDataLocation']>>>(IPC_CHANNELS.getProductDataLocation),
+  getPreferences: () => invoke<PreferencesProjection>(PREFERENCE_IPC_CHANNELS.getPreferences),
+  savePreference: (input: SavePreferenceInput) => invoke<PreferencesProjection>(PREFERENCE_IPC_CHANNELS.savePreference, input),
+  // Issue #935: the initial main-process appearance state, then every change; a push that arrives first wins over the read.
+  onAppearanceChanged: (listener: (state: AppearanceState) => void) => {
+    let active = true;
+    let generation = 0;
+    const changed = (_event: unknown, state: AppearanceState): void => { generation += 1; if (active) listener(state); };
+    ipcRenderer.on(APPEARANCE_IPC_CHANNEL, changed);
+    const initialGeneration = generation;
+    void invoke<AppearanceState>(APPEARANCE_IPC_CHANNEL).then((state) => {
+      if (active && generation === initialGeneration) listener(state);
+    }).catch(() => {
+      if (active && generation === initialGeneration) listener({ preference: 'system', systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches });
+    });
+    return () => { active = false; ipcRenderer.removeListener(APPEARANCE_IPC_CHANNEL, changed); };
+  },
   revealProductDataLocation: () =>
     invoke<Awaited<ReturnType<RendererApi['revealProductDataLocation']>>>(IPC_CHANNELS.revealProductDataLocation),
   selectSearchBackend: (input: Parameters<RendererApi['selectSearchBackend']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectSearchBackend']>>>(IPC_CHANNELS.selectSearchBackend, input),

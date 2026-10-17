@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
 import { fixedArchiveTime } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PROFILE_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
@@ -729,6 +729,7 @@ async function main() {
     let manager = await launch();
     let renderer = await waitForRenderer(manager, 'initial-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'initial-ready');
+    await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
     // Product readiness is emitted only after ServiceClient accepts the exact dormant-Harness
     // handshake, including zero configured agents, agents, sessions, Providers, tools, and assembled tools.
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true'`, 'exact-service-readiness-zero-harness');
@@ -923,7 +924,7 @@ async function main() {
         exactPins[0].includes(${JSON.stringify(SIDECAR_REVISION_1_DIGEST)}) &&
         exactPins[1].includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)});
     })()`, 'book-a-sidecar-history-after-restart');
-    await click(renderer, '返回图书列表', 'return-after-book-a');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'return-after-book-a');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'landing-before-book-b');
 
     at('second-book-disabled');
@@ -941,6 +942,8 @@ async function main() {
     at('accessibility-reflow-forced-colors');
     await focusAction(renderer, 'enable-current-book', 'book-b-keyboard-focus');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(renderer, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.native-artifact-facts')).gridTemplateColumns.split(' ').length===1`, 'zoom-reflow');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
@@ -953,9 +956,9 @@ async function main() {
     at('knowledge-guidelines');
     // 知识库 from 书库: its seven classes as tabs, opening at 审阅规范文件 — every guideline document the review categories apply,
     // at AI7's built-in first version, with its numbered clauses and a version no review has used yet.
-    await click(renderer, '返回图书列表', 'knowledge-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'knowledge-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'knowledge-landing');
-    await click(renderer, '知识库', 'knowledge-open');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-open');
     const opened = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready');
     requireJourney(opened.tab === 'guidelines' && JSON.stringify(opened.tabs) === JSON.stringify(KNOWLEDGE_TABS.map((label, index) => [label, String(index === 0)])) &&
       JSON.stringify(opened.cards.map((card) => card.title)) === JSON.stringify(GUIDELINE_TITLES) && opened.cards.every((card) => card.pill === '第 1 版 · AI7 内置默认') &&
@@ -1004,6 +1007,8 @@ async function main() {
     // At 200% the tabs, the cards and their clauses reflow into the width; under forced colours a card keeps its border and the
     // chosen tab its heavier underline.
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('.knowledge-tabs'), ...document.querySelectorAll('.guideline-card')]; return parts.length===8 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2; })()`, 'knowledge-reflow', 10_000);
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
@@ -1026,7 +1031,7 @@ async function main() {
     manager = await launch();
     renderer = await waitForRenderer(manager, 'knowledge-restart-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'knowledge-restart-ready');
-    await click(renderer, '知识库', 'knowledge-restart-open');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-restart-open');
     const restarted = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-restart-ready-page');
     requireJourney(restarted.cards[0].pill === '第 2 版 · 本社' && restarted.cards[0].versions.length === 2 && restarted.cards[0].clauses.length === 5, 'knowledge-restart-kept', restarted.cards[0]);
 
@@ -1046,7 +1051,7 @@ async function main() {
         manager = await launch();
         renderer = await waitForRenderer(manager, 'knowledge-page-window');
         await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'knowledge-page-ready');
-        await click(renderer, '知识库', 'knowledge-page-open');
+        await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-page-open');
         await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-page-loaded');
       }
       await activateGuideline('[data-guideline-action="import"]', 'knowledge-page-import-start');
@@ -1119,7 +1124,7 @@ async function main() {
     manager = await launch(SAMPLE1_PATH);
     renderer = await waitForRenderer(manager, 'library-picker-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'library-picker-ready');
-    await click(renderer, '知识库', 'library-picker-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'library-picker-knowledge');
     await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'library-picker-knowledge-ready');
     // 放入资料… with sample1 as a book the editor collected: the file as it will arrive, named and said to be a 图书 by the
     // editor, then kept whole — deciding nothing: no attribution, no eligibility, and no Task may list it under 允许参考 yet.
@@ -1160,7 +1165,7 @@ async function main() {
     // decision in focus.
     const libraryItem = `library-material:${materialId}`;
     const itemSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(libraryItem)}]`;
-    await clickSelector(renderer, '#global-attention-entry', 'library-attention-entry');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'library-attention-entry');
     await waitFor(renderer, `document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4 && document.querySelector(${JSON.stringify(itemSelector)}) !== null`, 'library-attention-listed', 30_000);
     const libraryListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(itemSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, state: item.dataset.attentionState, book: item.querySelector('.global-attention-book')?.textContent ?? null, object: item.querySelector('button.global-attention-open')?.textContent ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null, count: document.querySelector('#global-attention-entry')?.dataset.attentionCount ?? null }; })()`);
     requireJourney(libraryListed.group === 'decisions' && libraryListed.state === 'library-attribution-pending' && libraryListed.book === '尚未定归属' &&
@@ -1249,7 +1254,7 @@ async function main() {
     const indexSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(indexItem)}]`;
     const indexAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection)=>{ const group=projection.groups.find((entry)=>entry.items.some((item)=>item.itemId===${JSON.stringify(indexItem)})); const item=group?.items.find((entry)=>entry.itemId===${JSON.stringify(indexItem)}); return [group?.key ?? null, item?.state ?? null, item?.nextStep ?? null, item?.object.kind ?? null, item?.object.outcome ?? null, projection.actionableCount]; })`);
     requireJourney(JSON.stringify(indexAttention) === JSON.stringify(['recent', 'indexing-completed', 'view-material-index', 'library-index', 'complete', 0]), 'library-index-attention', indexAttention);
-    await clickSelector(renderer, '#global-attention-entry', 'library-index-attention-entry');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'library-index-attention-entry');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(indexSelector)}) !== null`, 'library-index-attention-listed', 30_000);
     const indexListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(indexSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, object: item.querySelector('button.global-attention-open')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null }; })()`);
     requireJourney(indexListed.group === 'recent' && indexListed.pill === '索引完成' && indexListed.object === `资料索引 · 图书「${LIBRARY_TITLE}」` &&
@@ -1281,6 +1286,8 @@ async function main() {
     await clickSelector(renderer, '[data-library-action="attribute"]', 'library-reflow-chooser');
     await readLibrary(renderer, (page) => page.cards[0]?.chooser?.kind === 'attribution', 'library-reflow-chooser-open');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
+    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('article.library-material'), document.querySelector('.library-chooser'), document.querySelector('.library-facts')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2; })()`, 'library-reflow', 10_000);
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
@@ -1327,7 +1334,7 @@ async function main() {
       manager = await launch(referencePath);
       renderer = await waitForRenderer(manager, 'library-page-window');
       await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'library-page-ready');
-      await click(renderer, '知识库', 'library-page-knowledge');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'library-page-knowledge');
       await click(renderer, '资料库', 'library-page-tab');
       await readLibrary(renderer, (page) => page.state === 'ready', 'library-page-loaded');
       await clickSelector(renderer, '[data-library-action="add"]', 'library-page-add');
@@ -1367,7 +1374,7 @@ async function main() {
     manager = await launch(epubPath);
     renderer = await waitForRenderer(manager, 'library-epub-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'library-epub-ready');
-    await click(renderer, '知识库', 'library-epub-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'library-epub-knowledge');
     await click(renderer, '资料库', 'library-epub-tab');
     await readLibrary(renderer, (page) => page.state === 'ready', 'library-epub-loaded');
     await clickSelector(renderer, '[data-library-action="add"]', 'library-epub-add');
@@ -1399,7 +1406,7 @@ async function main() {
     manager = await launch(pdfPath);
     renderer = await waitForRenderer(manager, 'library-pdf-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'library-pdf-ready');
-    await click(renderer, '知识库', 'library-pdf-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'library-pdf-knowledge');
     await click(renderer, '资料库', 'library-pdf-tab');
     await readLibrary(renderer, (page) => page.state === 'ready', 'library-pdf-loaded');
     await clickSelector(renderer, '[data-library-action="add"]', 'library-pdf-add');
@@ -1430,10 +1437,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'library-books-landed');
     for (let index = 0; index < 19; index += 1) {
       await createEmptyBook(renderer, `J15 分页图书${String(index).padStart(2, '0')}`);
-      await click(renderer, '返回图书列表', 'library-books-return');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'library-books-return');
       await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'library-books-returned');
     }
-    await click(renderer, '知识库', 'library-books-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'library-books-knowledge');
     await click(renderer, '资料库', 'library-books-tab');
     await readLibrary(renderer, (page) => page.state === 'ready', 'library-books-ready');
     await clickSelector(renderer, 'article.library-material [data-library-action="attribute"]', 'library-books-open');
@@ -1454,7 +1461,7 @@ async function main() {
     manager = await launch(exemplarPath);
     renderer = await waitForRenderer(manager, 'earlier-exemplar-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'earlier-exemplar-ready');
-    await click(renderer, '知识库', 'earlier-exemplar-knowledge');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'earlier-exemplar-knowledge');
     await click(renderer, '范例', 'earlier-exemplar-tab');
     await waitFor(renderer, `document.querySelector('[data-exemplar-action="import"]')`, 'earlier-exemplar-open-ready');
     await click(renderer, '导入以前图书的范例', 'earlier-exemplar-open');
@@ -1486,7 +1493,7 @@ async function main() {
     const SKILLS = resolve(ROOT, 'tests', 'fixtures', 'skills');
     const openSkills = async (label) => {
       await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, `${label}-ready`);
-      await click(renderer, '知识库', `${label}-knowledge`);
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `${label}-knowledge`);
       await click(renderer, '工序与规则', `${label}-rules`);
       await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('[data-skill-action="import"]')`, `${label}-skills`);
     };

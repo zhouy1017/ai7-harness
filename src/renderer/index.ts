@@ -1,5 +1,6 @@
 import { createAppearance } from './appearance.js';
 import {
+  APPEARANCE_BACK,
   APPEARANCE_CHOICES,
   APPEARANCE_LEDE,
   APPEARANCE_LEGEND,
@@ -301,6 +302,9 @@ import {
   runStepIsStale,
   taskAuthorizationDispatchNote,
 } from './plan-preview-labels.js';
+import { MAX_PINNED_BOOKS, type ShellBookEntry, type ShellBookSection } from '../shared/preferences.js';
+import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
+import { PREFERENCES_LOCAL_LINE, SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
 
 function requiredElement(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -846,10 +850,74 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
 window.addEventListener('focus', () => globalAttentionReader.refresh());
 
+/**
+ * The shell (Issue #934, wave 11 slice 11a; editor-surfaces §0.3): the two-level sidebar and the context header around
+ * `#screen`. Every way it leads goes through `leaveThen`, so the surface on screen settles what it must first, exactly as
+ * its own ways out do; a Book section checks the window's owned route before opening within that Book.
+ */
+const shellPreferences = new ShellPreferences(window.ai7);
+const shell = mountShell({
+  sidebar: requiredElement('#app-sidebar'),
+  attentionEntry: globalAttentionEntry,
+  toggle: ((): HTMLButtonElement => {
+    const node = requiredElement('#sidebar-toggle');
+    if (!(node instanceof HTMLButtonElement)) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
+    return node;
+  })(),
+  title: requiredElement('#context-title'),
+  position: requiredElement('#context-position'),
+  actions: requiredElement('#context-actions'),
+  preferenceNotice: requiredElement('#preferences-notice'),
+  preferences: shellPreferences,
+  pinLimit: MAX_PINNED_BOOKS,
+  setStatus,
+  errorMessage: rendererErrorMessage,
+  openDestination: (destination) => {
+    if (authorityInterrupted) return;
+    if (destination === 'library') void leaveThen(() => returnToLibrary());
+    else if (destination === 'series') void leaveThen(() => renderSeriesList(null));
+    else if (destination === 'knowledge') void leaveThen(() => renderKnowledgeBase('guidelines'));
+    else void leaveThen(() => renderQualityLearning('learning', null));
+  },
+  openSection: (book, section) => {
+    if (authorityInterrupted) return;
+    void leaveThen(() => openBookSection(book, section));
+  },
+  openBook: (bookId) => {
+    if (authorityInterrupted) return;
+    void leaveThen(async () => {
+      setStatus(SHELL_LABELS.openingBook, 'busy');
+      try {
+        await requestBookWorkbenchRoute({ kind: 'book', bookId }, undefined, currentRecoveryReturn());
+      } catch (error) {
+        setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
+      }
+    });
+  },
+  openSettings: () => {
+    if (authorityInterrupted) return;
+    void leaveThen(async () => renderSettingsHub());
+  },
+});
+// Another window may have pinned or opened a Book: the list is read again whenever this one gains focus.
+window.addEventListener('focus', () => void shellPreferences.load().catch(() => undefined));
+void shellPreferences.load().then(
+  (notice) => { if (notice !== null) setStatus(notice, 'error'); },
+  (error: unknown) => setStatus(rendererErrorMessage(error, SHELL_LABELS.preferenceReadFailed), 'error'),
+);
+
 interface RecoveryReturnContext {
   attentionId: string;
   attentionVersion: number;
   bookTitle: string;
+}
+
+// A recovery return belongs to its surface, never to preferences; implicit inheritance stays within one Book.
+const recoveryReturnContexts = new WeakMap<HTMLElement, RecoveryReturnContext>();
+
+function currentRecoveryReturn(): RecoveryReturnContext | undefined {
+  const content = screen.firstElementChild;
+  return content instanceof HTMLElement ? recoveryReturnContexts.get(content) : undefined;
 }
 
 function recoveryTone(access: ImportDraftRecoveryProjection['originalFileAccess']['state']): string {
@@ -957,12 +1025,19 @@ function applyAuthorityInterruption(): void {
   }
   globalAttentionReader.interrupt();
   globalAttentionEntry.disabled = true;
+  shell.interrupt();
   taskDrawer.interrupt();
   if (editor) editor.interrupt();
   else setStatus('本地业务服务已中断；当前业务操作已停止。', 'error');
 }
 
-function replaceScreen(state: string, content: HTMLElement): void {
+function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | null = null): void {
+  const previous = screen.firstElementChild;
+  const recoveryReturn = currentRecoveryReturn();
+  if (recoveryReturn && previous instanceof HTMLElement && previous.dataset['bookId'] !== undefined &&
+      previous.dataset['bookId'] === content.dataset['bookId'] && !recoveryReturnContexts.has(content)) {
+    recoveryReturnContexts.set(content, recoveryReturn);
+  }
   // Where the manuscript was read as it is left (Issue #423, S77a): a jump back into it from another screen returns there.
   const reading = manuscriptOnScreen?.readingPlace() ?? null;
   if (reading !== null) lastReadingPlace = reading;
@@ -998,6 +1073,8 @@ function replaceScreen(state: string, content: HTMLElement): void {
   taskDrawer.followScreen(state, content.dataset['bookId'] ?? null);
   // 待我处理's number follows the screens the editor moves through (Issue #424).
   globalAttentionReader.refresh();
+  // The sidebar marks where the window is, and a Book screen makes its Book current and recent (Issue #934).
+  shell.follow(state, place);
 }
 
 /**
@@ -1022,6 +1099,7 @@ async function openGlobalAttention(): Promise<void> {
   }
   try {
     await window.ai7.leaveBookWorkbench();
+    shell.leaveBook();
     renderGlobalAttention();
   } catch (error) {
     setStatus(rendererErrorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable), 'error');
@@ -1080,7 +1158,7 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
           content.append(recheck);
         }
         content.append(button('在稿件中查看', 'secondary', async () => { const opened = await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }); await openEditorWindow(opened, route.bookTitle); }), button('返回提案', 'secondary', () => renderProposalWorkspace({ manuscriptId: target.manuscriptId, branchId: target.branchId, resultId: null }, target.bookId, route.bookTitle)));
-        replaceScreen('apply-receipt', content);
+        replaceScreen('apply-receipt', content, { bookId: target.bookId, title: route.bookTitle, section: 'review' });
       });
       return;
     case 'manuscript-recovery':
@@ -1223,11 +1301,13 @@ function panel(): HTMLElement {
 async function returnToRecoveryComparison(attentionId: string): Promise<void> {
   const recovery = await window.ai7.getRecoveryComparison({ attentionId });
   await window.ai7.leaveBookWorkbench();
+  shell.leaveBook();
   renderManuscriptRecovery(recovery);
 }
 
 function appendRecoveryReturnAction(content: HTMLElement, context: RecoveryReturnContext | undefined): void {
   if (!context) return;
+  recoveryReturnContexts.set(content, context);
   const actions = element('div', 'button-row recovery-return-actions');
   const returnButton = button(`返回 ${context.bookTitle} 的恢复待确认`, 'secondary', async () => {
     returnButton.disabled = true;
@@ -1297,6 +1377,10 @@ async function renderResolvedBookWorkbenchRoute(
       recoveryReturn?.attentionId,
       manuscriptEntryNotice(anchor),
     );
+    const content = screen.firstElementChild;
+    if (recoveryReturn && content instanceof HTMLElement && content.dataset['bookId'] === route.bookId) {
+      recoveryReturnContexts.set(content, recoveryReturn);
+    }
     return;
   }
   renderHistoricalRevision(await window.ai7.getHistoricalRevision({ revisionId: route.revisionId, cursor: null }));
@@ -1336,6 +1420,7 @@ async function returnToLibrary(): Promise<void> {
   setStatus('正在返回图书列表…', 'busy');
   try {
     await window.ai7.leaveBookWorkbench();
+    shell.leaveBook();
     await initializeStartup();
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法返回图书列表。'), 'error');
@@ -1780,6 +1865,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
         expectedAttentionVersion: recovery.attentionVersion,
       });
       await window.ai7.leaveBookWorkbench();
+      shell.leaveBook();
       setStatus(deferred.completionLabel, 'success');
       const recoveryReturn = {
         attentionId: deferred.attentionId,
@@ -1932,7 +2018,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   if (projection.previousCursor) actions.append(button('上一窗口', 'quiet', () => showPage(projection.previousCursor!)));
   if (projection.nextCursor) actions.append(button('下一窗口', 'quiet', () => showPage(projection.nextCursor!)));
   content.append(actions);
-  replaceScreen('historical-revision', content);
+  replaceScreen('historical-revision', content, { bookId: projection.bookId, title: projection.bookTitle, section: 'history' });
   focusRecoveryHeading(content);
   setStatus(`只读历史修订版已打开；${projection.position.label}。`);
 }
@@ -2405,7 +2491,7 @@ async function renderBookWorkbenchChooser(
     }
     actions.append(button('返回当前图书', 'quiet', () => renderBookOverview(currentOverview)));
     content.append(actions);
-    replaceScreen('book-workbench-chooser', content);
+    replaceScreen('book-workbench-chooser', content, { bookId: currentOverview.book.bookId, title: currentOverview.book.title, section: 'overview' });
     setStatus('请选择另一图书工作台');
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法读取其他图书。'), 'error');
@@ -2458,7 +2544,7 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
   const backgroundHost = element('section');
   backgroundHost.dataset['bookId'] = bookId;
   content.append(host, backgroundHost, actions);
-  replaceScreen('book-analysis', content);
+  replaceScreen('book-analysis', content, { bookId, title: bookTitle, section: 'analysis' });
   setStatus('分析已打开');
   const inspect = (first: boolean): void => {
     // A 学习材料 entry opens ②A on the revision it judged (Issue #61, S26b): read-only when that is no longer the current one.
@@ -2592,7 +2678,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
   });
   actions.append(openManuscript, openOverview);
   content.append(actions);
-  replaceScreen('book-review', content);
+  replaceScreen('book-review', content, { bookId, title: bookTitle, section: 'review' });
   reviewWorkspace = surface;
   // The drawer's bar approved the Run (Issue #420): ②B reads it again and follows it as it runs.
   taskSurfaceRefresh = { 'review-run': () => surface.refresh() };
@@ -2622,7 +2708,7 @@ async function renderProposalWorkspace(input: { manuscriptId: string; branchId: 
       await openEditorWindow(opened, bookTitle, undefined, undefined, markId ?? undefined);
     }, openConflict: (markId) => renderProposalConflict({ ...input, bookId, markId }, bookTitle),
   });
-  replaceScreen('proposal-workspace', content); proposalWorkspaceSurface = surface; leaveGuard = () => surface.settle(); surface.start();
+  replaceScreen('proposal-workspace', content, { bookId, title: bookTitle, section: 'review' }); proposalWorkspaceSurface = surface; leaveGuard = () => surface.settle(); surface.start();
 }
 
 /**
@@ -2668,7 +2754,7 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
     },
     openConflict: (markId) => renderProposalConflict({ ...target, markId }, bookTitle),
   });
-  replaceScreen('proposal-conflict', content);
+  replaceScreen('proposal-conflict', content, { bookId: target.bookId, title: bookTitle, section: 'review' });
   proposalConflictSurface = surface;
   // Leaving for 待我处理 from the header saves the draft on screen first, as 返回稿件 does (Issue #424).
   leaveGuard = () => surface.settle();
@@ -2732,7 +2818,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
   });
   actions.append(openManuscript, openOverview);
   content.append(actions);
-  replaceScreen('book-evaluation', content);
+  replaceScreen('book-evaluation', content, { bookId, title: bookTitle, section: 'evaluation' });
   taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh(), 'readers-report': () => surface.refresh(), 'evaluation-rewrite': () => surface.refresh() };
   setStatus(EVALUATION_STATUS.loading, 'busy');
   void surface.load().then(
@@ -2785,7 +2871,7 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
   });
   actions.append(openManuscript, openOverview);
   content.append(actions);
-  replaceScreen('book-sources', content);
+  replaceScreen('book-sources', content, { bookId, title: bookTitle, section: 'sources' });
   setStatus(SOURCES_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
@@ -2860,7 +2946,7 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
   });
   actions.append(openManuscript, openOverview);
   content.append(actions);
-  replaceScreen('book-deliverables', content);
+  replaceScreen('book-deliverables', content, { bookId, title: bookTitle, section: 'deliverables' });
   deliverablesSurface = surface;
   taskSurfaceRefresh = { writing: () => surface.refreshWriting() };
   surface.start();
@@ -3248,7 +3334,7 @@ function renderBookOverview(
   // `.commit-bar` occupies on the three review surfaces.
   content.append(records, actions);
   appendRecoveryReturnAction(content, recoveryReturn);
-  replaceScreen(completion ? 'imported' : 'book-overview', content);
+  replaceScreen(completion ? 'imported' : 'book-overview', content, { bookId: overview.book.bookId, title: overview.book.title, section: 'overview' });
   // The drawer's bar started a Task of this Book (Issue #420): J-03's card and the one-line summaries read it again.
   taskSurfaceRefresh = {
     'fixed-task': inspectTaskAuthorization,
@@ -5005,7 +5091,8 @@ async function renderDataAndStorage(): Promise<void> {
       element('dt', undefined, '实际位置'), root,
       element('dt', undefined, '本机占用'), element('dd', undefined, projection.footprint.label),
     );
-    summary.append(element('h3', undefined, '产品数据位置'), values);
+    // The shell's own file stays on this machine (Issue #934): it is not a record and 导出数据库 does not carry it.
+    summary.append(element('h3', undefined, '产品数据位置'), values, element('p', 'field-note preferences-local-line', PREFERENCES_LOCAL_LINE));
     const credentials = element('section', 'review-section');
     credentials.append(
       element('h3', undefined, '凭据与产品数据分开'),
@@ -5317,7 +5404,7 @@ function readersReportExemplars(book: ExemplarBookProjection): HTMLElement {
 
 /**
  * 质量与学习 (Issue #61, plan slices S26b and S26c; LEARN-002, FDBK-009, FDBK-010): a house-wide destination beside 知识库 with
- * three tabs — 反馈历史, the passive history it opens at from the landing; 学习准入, where a Book's 学习准入待处理 in
+ * three tabs — 反馈历史, the passive history; 学习准入, the sidebar's entry (Issue #934), where a Book's 学习准入待处理 in
  * 待我处理 opens it, for that Book, with the way to every Book one step away; and 学习回溯 (Issue #62, S27a), the learning
  * audit of every material's lineage and 停止今后使用.
  */
@@ -5988,6 +6075,100 @@ async function renderEvaluationCalibration(focusBookId: string | null): Promise<
   }
 }
 
+/**
+ * 设置 (Issue #934; editor-surfaces §8.6): 服务 · 编辑工作 · 本机, one row per page. A page that exists keeps its own render
+ * function and its `data-settings-route`; a row whose page a later slice of the wave brings is unavailable, 即将提供.
+ */
+function renderSettingsHub(): void {
+  const content = panel();
+  content.classList.add('settings-hub');
+  content.append(
+    element('p', 'section-label', SETTINGS_HUB_WORDS.section),
+    element('h2', undefined, SETTINGS_HUB_WORDS.title),
+    element('p', 'lede', SETTINGS_HUB_WORDS.lede),
+  );
+  const pages: Partial<Record<SettingsRoute, () => void>> = {
+    'model-service': () => void renderModelServiceSettings(),
+    'evaluation-calibration': () => void renderEvaluationCalibration(null),
+    'data-storage': () => void renderDataAndStorage(),
+    appearance: renderAppearance,
+  };
+  for (const group of SETTINGS_HUB_GROUPS) {
+    const section = element('section', 'settings-group');
+    section.dataset['settingsGroup'] = group.key;
+    const heading = element('h3', undefined, group.label);
+    heading.id = `settings-group-${group.key}`;
+    section.setAttribute('aria-labelledby', heading.id);
+    const list = element('ul', 'settings-rows');
+    for (const row of group.rows) {
+      const item = element('li', 'settings-row');
+      item.dataset['settingsEntry'] = row.route;
+      const open = pages[row.route];
+      const entry = button(row.label, 'secondary', () => open?.());
+      entry.dataset['settingsRoute'] = row.route;
+      const note = element('p', 'field-note', row.note);
+      note.id = `settings-note-${row.route}`;
+      entry.setAttribute('aria-describedby', note.id);
+      item.append(entry, note);
+      if (open === undefined) {
+        entry.disabled = true;
+        item.dataset['settingsAvailability'] = 'coming-soon';
+        const soon = element('span', 'settings-coming-soon', SETTINGS_HUB_WORDS.comingSoon);
+        soon.id = `settings-soon-${row.route}`;
+        entry.setAttribute('aria-describedby', `${soon.id} ${note.id}`);
+        item.insertBefore(soon, note);
+      }
+      list.append(item);
+    }
+    section.append(heading, list);
+    content.append(section);
+  }
+  replaceScreen('settings', content);
+  setStatus(SETTINGS_HUB_WORDS.opened);
+}
+
+/**
+ * A section of the current Book's groups, from the sidebar (Issue #934; IA-012): reuse the window's owned Book route so
+ * section changes preserve its manuscript capabilities. Reassigning even the same Book deliberately revokes those in main.
+ * A different route still goes through the window owner; 稿件 enters at the remembered position (RET-002), as 书库 does.
+ * 发现 is ②A's judged items until the Book-level aggregate exists (IA-013, a follow-up); 历史与恢复 is 工作概览's records.
+ */
+async function openBookSection(book: ShellBookEntry, section: ShellBookSection): Promise<void> {
+  const recoveryReturn = currentRecoveryReturn();
+  setStatus(SHELL_LABELS.openingBook, 'busy');
+  try {
+    const openSection = async (route: ResolvedBookWorkbenchRoute): Promise<void> => {
+      const { bookId, bookTitle } = route;
+      if (section === 'manuscript') await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle }, recoveryReturn);
+      else if (section === 'review') renderBookReview(bookId, bookTitle);
+      else if (section === 'evaluation') renderBookEvaluation(bookId, bookTitle);
+      else if (section === 'deliverables') renderBookDeliverables(bookId, bookTitle);
+      else if (section === 'analysis' || section === 'findings') {
+        renderBookAnalysis(bookId, bookTitle);
+        if (section === 'findings') shell.markSection('findings');
+      } else if (section === 'sources') renderBookSources(bookId, bookTitle);
+      else {
+        renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }), undefined, recoveryReturn);
+        if (section === 'history') {
+          shell.markSection('history');
+          const records = screen.querySelector<HTMLElement>('.record-navigation');
+          const heading = records?.querySelector<HTMLElement>('h3');
+          if (heading) {
+            heading.tabIndex = -1;
+            heading.focus();
+            records?.scrollIntoView({ block: 'start' });
+          }
+        }
+      }
+    };
+    const ownedRoute = await window.ai7.getBookWorkbenchRoute();
+    if (ownedRoute?.kind === 'book' && ownedRoute.bookId === book.bookId) await openSection(ownedRoute);
+    else await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, openSection);
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
+  }
+}
+
 async function renderModelServiceSettings(): Promise<void> {
   setStatus('正在读取模型服务状态…', 'busy');
   try {
@@ -6124,7 +6305,9 @@ function renderAppearance(): void {
   const unsubscribe = appearance.subscribe(() => { for (const radio of radios) radio.checked = radio.value === appearance.preference; });
   const observer = new MutationObserver(() => { if (!content.isConnected) { unsubscribe(); observer.disconnect(); } });
   observer.observe(screen, { childList: true });
-  content.append(choices, message, button('返回图书列表', 'secondary', () => void initializeRenderer()));
+  const actions = element('div', 'button-row');
+  actions.append(button(APPEARANCE_BACK, 'quiet', () => void initializeStartup()));
+  content.append(choices, message, actions);
   replaceScreen('appearance', content);
   setStatus(APPEARANCE_STATUS);
 }
@@ -6147,11 +6330,13 @@ function renderLanding(
     : undefined;
   const activeRecoveryReturn = recoveryReturn ?? inferredRecoveryReturn;
   const content = panel();
-  content.classList.add('hero');
+  // 书库 (Issue #934; editor-surfaces §8.2): the sidebar's destination for every Book, with the two ways a Book begins. The
+  // screen keeps its state name `landing`, the window's first screen, which every Journey waits for.
+  content.classList.add('library-home');
   const copy = element('div');
   copy.append(
-    element('p', 'section-label', '图书与稿件'),
-    element('h2', undefined, '开始工作'),
+    element('p', 'section-label', SHELL_LABELS.library),
+    element('h2', undefined, SHELL_LABELS.libraryTitle),
     element('p', 'lede', '可以先创建空图书，也可以从本地 DOCX 开始一次导入。两项操作彼此独立。'),
   );
   const createBook = button('新建图书', 'secondary', renderBookCreationForm);
@@ -6171,33 +6356,17 @@ function renderLanding(
       renderError(error, () => renderLanding(priorWork, activeRecoveryReturn, books));
     }
   });
-  const appearanceButton = button(APPEARANCE_TITLE, 'secondary', renderAppearance);
-  appearanceButton.dataset['settingsRoute'] = 'appearance';
-  const dataAndStorage = button('数据与存储', 'secondary', () => renderDataAndStorage());
-  dataAndStorage.dataset['settingsRoute'] = 'data-storage';
-  const modelService = button('模型服务', 'secondary', () => renderModelServiceSettings());
-  modelService.dataset['settingsRoute'] = 'model-service';
-  // 设置 › 编辑工作 › 评估校准与预测 (Issue #430, S82).
-  const evaluationCalibration = button(CALIBRATION_PAGE_TITLE, 'secondary', () => void renderEvaluationCalibration(null));
-  evaluationCalibration.dataset['settingsRoute'] = 'evaluation-calibration';
-  // 书系 (Issue #63, S28a): the house's Series, each with its 成员与共享范围.
-  const seriesButton = button(SERIES_TITLE, 'secondary', () => void renderSeriesList(null));
-  seriesButton.dataset['settingsRoute'] = 'series';
-  // 知识库 (Issue #427, S79a): its seven classes, opening at 审阅规范文件.
-  const knowledgeBase = button('知识库', 'secondary', () => renderKnowledgeBase('guidelines'));
-  knowledgeBase.dataset['settingsRoute'] = 'knowledge-base';
-  // 质量与学习 (Issue #61, S26b): 学习准入, the house's record of what may teach and where.
-  const qualityLearning = button(QUALITY_LEARNING_TITLE, 'secondary', () => void renderQualityLearning('feedback', null));
-  qualityLearning.dataset['settingsRoute'] = 'quality-learning';
+  // 书系, 知识库 and 质量与学习 are the sidebar's destinations now, and 数据与存储, 模型服务 and 评估校准与预测 are rows of 设置
+  // (Issue #934): the library keeps only what begins a Book.
   const landingActions = element('div', 'button-row');
-  landingActions.append(importButton, createBook, appearanceButton, dataAndStorage, modelService, evaluationCalibration, seriesButton, knowledgeBase, qualityLearning);
+  landingActions.append(importButton, createBook);
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);
   if (books.items.length > 0 || filter !== null) {
     const library = element('section', 'recent-work');
     library.dataset['bookFilter'] = filter === null ? 'none' : filter.field;
-    library.append(element('p', 'section-label', '图书'), element('h3', undefined, '图书工作概览'));
+    library.append(element('p', 'section-label', '图书'), element('h3', undefined, SHELL_LABELS.allBooks));
     library.append(renderBookFilter(priorWork, activeRecoveryReturn, filter));
     if (filter !== null) library.append(element('p', 'field-note book-filter-line', bookFilterLine(filter)));
     if (books.items.length === 0) library.append(element('p', 'field-note book-filter-none', BOOK_FILTER_NONE));
@@ -8183,7 +8352,7 @@ function renderEditorWindow(
   identities.append(identityGrid);
   content.append(toolbar, workspace, identities);
   if (reimport !== undefined) toolbar.after(reimportLandingSection(reimport));
-  replaceScreen('editor', content);
+  replaceScreen('editor', content, { bookId: initialWindow.bookId, title: bookTitle, section: isDocument ? 'deliverables' : 'manuscript' });
   // …and the drawer opening closes 导航: the slot is this manuscript's while it is on screen.
   closeNavigation = () => {
     if (!navigator.hidden) setNavigationOpen(false);

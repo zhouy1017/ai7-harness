@@ -1,4 +1,5 @@
-import { PREFERENCE_KEYS, type AppearanceState, type ThemePreference } from '../shared/preferences.js';
+import { isThemePreference, type AppearanceRendererApi, type AppearanceState, type ThemePreference } from '../shared/appearance.js';
+import type { PreferencesRendererApi } from '../shared/preferences.js';
 
 /** Only root decoration changes: no screen replacement, focus, selection, scroll or editor transaction. */
 export function applyAppearance(root: Pick<HTMLElement, 'dataset' | 'style'>, state: AppearanceState): void {
@@ -7,7 +8,7 @@ export function applyAppearance(root: Pick<HTMLElement, 'dataset' | 'style'>, st
   root.style.colorScheme = theme;
 }
 
-export function createAppearance(api: Pick<Window['ai7'], 'getPreferences' | 'savePreference' | 'onAppearanceChanged'>) {
+export function createAppearance(api: Pick<PreferencesRendererApi, 'savePreference'> & AppearanceRendererApi) {
   let preference: ThemePreference = 'system';
   let systemDark = false;
   let revision = 0;
@@ -28,9 +29,8 @@ export function createAppearance(api: Pick<Window['ai7'], 'getPreferences' | 'sa
     subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); },
     async choose(value: ThemePreference): Promise<void> {
       const requestedAt = revision;
-      const values = await api.savePreference({ key: 'appearance.theme', value });
-      const saved = values['appearance.theme'];
-      if (revision === requestedAt && PREFERENCE_KEYS['appearance.theme'].validate(saved)) update({ preference: saved, systemDark });
+      const saved = (await api.savePreference({ key: 'appearance.theme', value })).values['appearance.theme'];
+      if (revision === requestedAt && isThemePreference(saved)) update({ preference: saved, systemDark });
     },
   };
 }

@@ -1,5 +1,3 @@
-import { Preferences } from './preferences.js';
-import { PREFERENCE_CHANNELS, PREFERENCE_KEYS, type AppearanceState } from '../shared/preferences.js';
 import { randomUUID } from 'node:crypto';
 import { release } from 'node:os';
 import { writeFile } from 'node:fs/promises';
@@ -90,6 +88,9 @@ import { developerProposalFileName } from '../shared/developer-proposal.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
+import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
+import { PREFERENCE_IPC_CHANNELS } from '../shared/preferences.js';
+import { APPEARANCE_IPC_CHANNEL, type AppearanceState } from '../shared/appearance.js';
 import {
   createCanonicalExternalDataRoot,
   createCanonicalProductionDataRoot,
@@ -586,6 +587,7 @@ function registerRendererHandlers(
   consumeInjectedFolderPath: () => string | undefined,
   quitApplication: () => 'quitting' | 'blocked',
   unsavedWindows: () => boolean,
+  preferences: PreferenceStore,
   appearanceWindows: () => Iterable<OwnedRendererWindow>,
 ): () => void {
   const requireNothingUnsaved = (): void => {
@@ -1224,32 +1226,6 @@ function registerRendererHandlers(
     );
     return owned;
   };
-  const preferences = new Preferences(app.getPath('userData'));
-  const appearanceState = async (): Promise<AppearanceState> => {
-    const values = await preferences.get();
-    const stored = values['appearance.theme'];
-    const preference = PREFERENCE_KEYS['appearance.theme'].validate(stored) ? stored : 'system';
-    // Native frames, menus and dialogs follow the same choice (VIS-004); under 'system' the reading below is the OS state.
-    if (nativeTheme.themeSource !== preference) nativeTheme.themeSource = preference;
-    return { preference, systemDark: nativeTheme.shouldUseDarkColors };
-  };
-  const broadcastAppearance = async (): Promise<void> => {
-    const state = await appearanceState();
-    for (const owned of appearanceWindows()) {
-      if (!owned.window.isDestroyed()) owned.window.webContents.send(PREFERENCE_CHANNELS.appearance, state);
-    }
-  };
-  const appearanceUpdated = (): void => { void broadcastAppearance().catch(() => undefined); };
-  nativeTheme.on('updated', appearanceUpdated);
-  appearanceUpdated();
-  ipcMain.handle(PREFERENCE_CHANNELS.get, (event) => envelope(async () => { requireSender(event); return preferences.get(); }));
-  ipcMain.handle(PREFERENCE_CHANNELS.save, (event, input: { key: string; value: unknown }) => envelope(async () => {
-    requireSender(event);
-    const values = await preferences.save(input);
-    await broadcastAppearance();
-    return values;
-  }));
-  ipcMain.handle(PREFERENCE_CHANNELS.appearance, (event) => envelope(async () => { requireSender(event); return appearanceState(); }));
   const requireAuthority = (): void => {
     if (!authorityIsAvailable()) {
       throw new ServiceCallError('SERVICE_INTERRUPTED', '本地业务服务已中断；当前业务操作不可继续。');
@@ -2409,6 +2385,53 @@ function registerRendererHandlers(
     envelope(async () => {
       requireSender(event);
       return getProductDataLocation();
+    }),
+  );
+  // Local view and input configuration (Issue #934, slice 11a): main's own file, read and written without the service, so
+  // it answers while the service is interrupted as well; a refusal keeps its own words.
+  const preferenceCall = <Result>(operation: () => Result): Result => {
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof PreferenceError) throw new ServiceCallError(error.code, error.message);
+      throw error;
+    }
+  };
+  ipcMain.handle(PREFERENCE_IPC_CHANNELS.getPreferences, (event) =>
+    envelope(() => {
+      requireSender(event);
+      return preferenceCall(() => preferences.read());
+    }),
+  );
+  // Application Theme Preference (Issue #935, VIS-004/005): the chosen theme with nativeTheme's reading, sent to every owned
+  // window when either changes; native frames, menus and dialogs follow the same choice. Under 'system' the reading is the
+  // operating system's state.
+  const appearanceState = (): AppearanceState => {
+    const preference = preferences.read().values['appearance.theme'];
+    if (nativeTheme.themeSource !== preference) nativeTheme.themeSource = preference;
+    return { preference, systemDark: nativeTheme.shouldUseDarkColors };
+  };
+  const broadcastAppearance = (): void => {
+    const state = appearanceState();
+    for (const owned of appearanceWindows()) {
+      if (!owned.window.isDestroyed()) owned.window.webContents.send(APPEARANCE_IPC_CHANNEL, state);
+    }
+  };
+  nativeTheme.on('updated', broadcastAppearance);
+  broadcastAppearance();
+  ipcMain.handle(PREFERENCE_IPC_CHANNELS.savePreference, (event, input: unknown) =>
+    envelope(() => {
+      requireSender(event);
+      const saved = preferenceCall(() => preferences.save(input));
+      // Every window hears the new theme before the choosing window's answer arrives.
+      if ((input as { key?: unknown }).key === 'appearance.theme') broadcastAppearance();
+      return saved;
+    }),
+  );
+  ipcMain.handle(APPEARANCE_IPC_CHANNEL, (event) =>
+    envelope(() => {
+      requireSender(event);
+      return appearanceState();
     }),
   );
   ipcMain.handle(IPC_CHANNELS.revealProductDataLocation, (event) =>
@@ -5741,9 +5764,10 @@ function registerRendererHandlers(
   );
 
   return () => {
-    nativeTheme.removeListener('updated', appearanceUpdated);
-    for (const channel of Object.values(PREFERENCE_CHANNELS)) ipcMain.removeHandler(channel);
+    nativeTheme.removeListener('updated', broadcastAppearance);
+    ipcMain.removeHandler(APPEARANCE_IPC_CHANNEL);
     for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel);
+    for (const channel of Object.values(PREFERENCE_IPC_CHANNELS)) ipcMain.removeHandler(channel);
     ipcMain.removeListener(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
   };
 }
@@ -6511,6 +6535,7 @@ export async function runApplication(): Promise<void> {
         return 'quitting';
       },
       () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
+      createPreferenceStore(shellRoot),
       () => ownedWindows.values(),
     );
     startupLocation = reachStartup('renderer-first-paint');

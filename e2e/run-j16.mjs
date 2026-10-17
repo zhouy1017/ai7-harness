@@ -6,7 +6,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeRevisedAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 
@@ -271,6 +271,7 @@ async function pressEnter(renderer) {
 /** Exact `sample1` through the import flow; the second import names the new Book as a distinct intended work. */
 async function importSample1(renderer, title, distinct, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+  await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
   const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
@@ -298,7 +299,7 @@ async function openAnalysisOf(renderer, bookId, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await clickSelector(renderer, `button[data-book-id=${JSON.stringify(bookId)}]`, `${name}-book`);
   await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, `${name}-manuscript`);
-  await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-records-group'); const open=group?.querySelector('button[data-records-destination="analysis"]'); if(!(open instanceof HTMLButtonElement)||open.disabled||open.textContent!=='分析')return false; open.click(); return true; })()`, `${name}-analysis-entry`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), `${name}-analysis-entry`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookId)}] .baseline-analysis-card')`, `${name}-analysis`);
 }
 
@@ -892,8 +893,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'artifact-enable-ready');
     await click(renderer, '审阅并为本图书启用 Revision 2', 'artifact-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'artifact-enabled');
-    await click(renderer, '返回图书列表', 'model-return-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-open-settings-hub');
     await click(renderer, '模型服务', 'model-open');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     cancellation.throwIfRequested();
@@ -1058,9 +1061,9 @@ async function main() {
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'chip-navigation-open');
     await waitFor(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === false && ${CHIP} !== null`, 'chip-navigation');
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'chip-navigation-close');
-    await click(renderer, '返回图书工作概览', 'chip-leave');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'chip-leave');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'chip-overview', 60_000);
-    await click(renderer, '打开稿件', 'chip-reopen');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'chip-reopen');
     await waitFor(renderer, `${CHIP} !== null && ${CHIP}.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'chip-still-there', 60_000);
     // The exact-key navigation hint survives a renderer restart without reconstructing every Book's positions.
     await closeOwnedBrowser();
@@ -1132,9 +1135,9 @@ async function main() {
     })()`);
     await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-delayed-storage');
     await waitFor(renderer, `typeof globalThis.__j16ReleaseReturn === 'function'`, 'mark-rail-storage-held');
-    await click(renderer, '返回图书工作概览', 'mark-rail-held-leave');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'mark-rail-held-leave');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'mark-rail-held-overview');
-    await click(renderer, '打开稿件', 'mark-rail-held-reopen');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'mark-rail-held-reopen');
     await waitFor(renderer, `${blockInView(chip.blockId)} && ${CHIP} !== null`, 'mark-rail-replacement-editor');
     await renderer.evaluate(`(() => { globalThis.__j16ReleaseReturn(); delete globalThis.__j16ReleaseReturn; return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()`);
     await assertRenderer(renderer, `${blockInView(chip.blockId)}`, 'mark-rail-old-click-cannot-move-replacement');
@@ -1160,7 +1163,7 @@ async function main() {
     // At once, well inside the half second before the words would write themselves.
     await assertRenderer(renderer, `(() => { const open = document.querySelector('.task-result-window [data-task-result-action="open"]'); if (!(open instanceof HTMLButtonElement)) return false; open.click(); return true; })()`, 'leave-open-analysis');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')?.dataset.inspectedRevisionOrdinal === '1'`, 'leave-analysis-exact-historical-result', 60_000);
-    await click(renderer, '打开稿件', 'leave-reopen');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'leave-reopen');
     await waitFor(renderer, `(document.querySelector(${JSON.stringify(`[data-screen="editor"] .ProseMirror [data-block-id="${chip.blockId}"]`)})?.textContent ?? '').endsWith(${JSON.stringify(LEAVE_WORDS)})`, 'leave-words-kept', 60_000);
 
     at('analysis-jump-chip');
