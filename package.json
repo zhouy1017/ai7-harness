@@ -25,6 +25,7 @@
     "e2e:diagnose": "node e2e/diagnose.mjs",
     "e2e:debug": "node e2e/debug.mjs",
     "e2e:repeat": "node e2e/repeat.mjs",
+    "generate:licenses": "node tools/generate-licenses.mjs",
     "evidence:replay": "node tools/editorial-evidence.mjs --replay fixtures"
   },
   "dependencies": {
