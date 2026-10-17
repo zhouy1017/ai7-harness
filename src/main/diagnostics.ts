@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 /** Pure, allowlisted diagnostics projection. Never accepts a filesystem root to crawl. */
@@ -105,16 +105,6 @@ export function buildDiagnosticsBundle(inputs: DiagnosticsInputs): Readonly<Reco
     files[`crashes/${String(index + 1).padStart(2, '0')}-${record.kind}.json`] = JSON.stringify(record, null, 2);
   });
   return files;
-}
-
-/** The sole preferences file is read directly. No tree traversal, database or cache access. */
-export async function collectDiagnosticsPreferences(userData: string): Promise<unknown> {
-  const path = join(userData, 'preferences.json');
-  try {
-    const stat = await lstat(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) return null;
-    return JSON.parse(await readFile(path, 'utf8')) as unknown;
-  } catch { return null; }
 }
 
 /** Exclusive folder creation prevents overwriting or retaining unrelated files in an existing bundle. */

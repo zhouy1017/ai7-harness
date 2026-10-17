@@ -1235,8 +1235,13 @@ async function main() {
     at('diagnostics-bundle-export');
     await click(primary, '返回', 'data-storage-return');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'diagnostics-landing');
+    // 设置 › 本机 › 诊断 replaces 11a's 即将提供 row (Issue #938 restack onto #934).
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'diagnostics-open-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'diagnostics-open-settings-hub');
+    await assertRenderer(primary, `(() => { const row=document.querySelector('[data-settings-group="local"] [data-settings-entry="diagnostics"]'); const entry=row?.querySelector('[data-settings-route="diagnostics"]'); return entry instanceof HTMLButtonElement && !entry.disabled && entry.textContent==='诊断' && row.dataset.settingsAvailability===undefined && !row.querySelector('.settings-coming-soon'); })()`, 'diagnostics-settings-row');
     await click(primary, '诊断', 'diagnostics-open');
     await waitFor(primary, `document.querySelector('[data-screen="diagnostics"] [data-crash-list-ready="true"]')`, 'diagnostics-ready');
+    await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='设置' && document.querySelector('#context-position')?.textContent==='本机 · 诊断' && document.querySelector('#app-sidebar [data-nav-settings]')?.getAttribute('aria-current')==='page'`, 'diagnostics-settings-place');
     await assertRenderer(primary, `document.querySelector('[data-screen="diagnostics"]')?.textContent.includes('本机崩溃记录')`, 'diagnostics-crash-heading');
     await assertRenderer(primary, `document.querySelector('[data-crash-list]')?.textContent.includes('2026-10-17T00:00:00.000Z') && document.querySelector('[data-crash-list]')?.textContent.includes('界面进程退出')`, 'diagnostics-crash-record');
     await primary.evaluate(`Array.from(document.querySelectorAll('[data-crash-list] .source-card')).find((item) => item.textContent.includes('2026-10-17T00:00:00.000Z')).querySelector('details').open = true`);

@@ -86,7 +86,7 @@ import {
 } from '../shared/protocol.js';
 import { developerProposalFileName } from '../shared/developer-proposal.js';
 import { CrashRecords, crashHook, installCrashHooks } from './crash-records.js';
-import { DIAGNOSTICS_CHANNELS, collectDiagnosticsPreferences, writeDiagnosticsBundle } from './diagnostics.js';
+import { DIAGNOSTICS_CHANNELS, writeDiagnosticsBundle } from './diagnostics.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
@@ -6229,6 +6229,8 @@ export async function runApplication(): Promise<void> {
       shell.showItemInFolder(dataRoot);
       return { state: 'requested', nativeRevealSuppressedForE2e: false };
     };
+    // The preference owner (Issue #934) is the only reader of preferences.json; diagnostics takes its validated projection.
+    const preferenceStore = createPreferenceStore(shellRoot);
     // Main-only, zero-argument operations: the renderer supplies neither a source nor an output path.
     const requireDiagnosticsSender = (event: IpcMainInvokeEvent): OwnedRendererWindow => {
       const owned = getOwnedWindow(event);
@@ -6265,7 +6267,7 @@ export async function runApplication(): Promise<void> {
       await writeDiagnosticsBundle(parent, {
         facts: { ...crashFacts(), policySetVersion: policySet.version, node: process.versions.node,
           locale: app.getLocale(), windowCount: ownedWindows.size },
-        crashes: crashes.list(), preferences: await collectDiagnosticsPreferences(shellRoot),
+        crashes: crashes.list(), preferences: (({ version, values }) => ({ version, values }))(preferenceStore.read()),
       });
       return { state: 'exported' as const };
     }));
@@ -6570,7 +6572,7 @@ export async function runApplication(): Promise<void> {
         return 'quitting';
       },
       () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
-      createPreferenceStore(shellRoot),
+      preferenceStore,
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);
