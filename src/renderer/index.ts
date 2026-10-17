@@ -264,6 +264,10 @@ import {
   publicationStateOf,
 } from './deliverables-labels.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
+import { focusMode, mountEditorModes, type EditorModes } from './editor-modes.js';
+import { mountProtectionSurface, type ProtectionSurface } from './editor-protection.js';
+import { PROTECTION_CLOSE_BLOCKED } from './editor-protection-labels.js';
+import { ViewPreferences, mountRegionSeparator, renderViewSettings } from './layout.js';
 import {
   createGlobalAttentionReader,
   mountGlobalAttention,
@@ -834,6 +838,10 @@ async function openTaskRunSurface(plan: TaskPlanProjection): Promise<void> {
 let editor: BoundedEditor | undefined;
 let editorialMarks: EditorialMarksSurface | undefined;
 let manuscriptRail: PositionRail | undefined;
+/** 专注 and 视图 in the context header, and the protection surface beside them, while a manuscript is on screen (Issue #951). */
+let editorModes: EditorModes | undefined;
+let protectionSurface: ProtectionSurface | undefined;
+let supportingSeparator: { destroy(): void } | undefined;
 /** ②B 审阅 while it is on screen: its poll and its sheet end with the screen. */
 let reviewWorkspace: ReviewWorkspaceSurface | undefined;
 /** ⑥ 交付物 while it is on screen: nothing still in flight paints once the screen is replaced. */
@@ -993,6 +1001,24 @@ window.addEventListener('focus', () => globalAttentionReader.refresh());
  * its own ways out do; a Book section checks the window's owned route before opening within that Book.
  */
 const shellPreferences = new ShellPreferences(window.ai7);
+/**
+ * Density, reading typography and region sizes (Issue #951, wave 12 slice 12a; VIEW-001 to VIEW-012): three more keys of the
+ * same preferences owner, applied to the root as every read or write of the owner answers. The Task Drawer's width is adjusted
+ * from a separator on its left edge, mounted once beside it.
+ */
+const viewPreferences = new ViewPreferences(window.ai7, () => document.documentElement);
+shellPreferences.subscribe((values) => viewPreferences.accept(values));
+(() => {
+  const drawer = requiredElement('#task-drawer');
+  const separator = mountRegionSeparator({
+    region: 'drawerWidth',
+    view: viewPreferences,
+    measure: () => drawer.getBoundingClientRect().width,
+    announce: (message) => setStatus(message),
+  });
+  separator.element.id = 'task-drawer-separator';
+  drawer.before(separator.element);
+})();
 const shell = mountShell({
   sidebar: requiredElement('#app-sidebar'),
   attentionEntry: globalAttentionEntry,
@@ -1153,6 +1179,42 @@ function setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void {
   else delete persistenceStatus.dataset['tone'];
 }
 
+/**
+ * Put plain text on the clipboard (Issue #951, 复制受影响内容): the document's copy command over a detached field, else the
+ * window's own copy through main. The page holds no clipboard permission, so `navigator.clipboard` is not used.
+ */
+async function copyPlainText(text: string): Promise<void> {
+  const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const field = document.createElement('textarea');
+  field.value = text;
+  field.readOnly = true;
+  field.className = 'clipboard-carrier';
+  field.setAttribute('aria-hidden', 'true');
+  document.body.append(field);
+  try {
+    field.focus({ preventScroll: true });
+    field.select();
+    if (!document.execCommand('copy')) await window.ai7.runEditorClipboardCommand({ command: 'copy' });
+  } finally {
+    field.remove();
+    returnFocus?.focus({ preventScroll: true });
+  }
+}
+
+/**
+ * The button or link the editor activated last, for a refusal said beside it (Issue #951; DUR-005). Read at activation, before
+ * the control's own handler disables it, and only for a moment: a refusal much later names no control.
+ */
+let lastActivatedControl: { control: HTMLElement; at: number } | null = null;
+document.addEventListener('click', (event) => {
+  const control = event.target instanceof Element ? event.target.closest<HTMLElement>('button, a') : null;
+  lastActivatedControl = control === null ? null : { control, at: performance.now() };
+}, true);
+function recentlyActivatedControl(): HTMLElement | null {
+  const recent = lastActivatedControl;
+  return recent !== null && recent.control.isConnected && performance.now() - recent.at < 3_000 ? recent.control : null;
+}
+
 function setCloseRisk(risk: boolean): void {
   document.documentElement.dataset['ai7CloseRisk'] = risk ? 'true' : 'false';
 }
@@ -1214,6 +1276,12 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   proposalConflictSurface = undefined;
   globalAttentionSurface?.destroy();
   globalAttentionSurface = undefined;
+  protectionSurface?.destroy();
+  protectionSurface = undefined;
+  supportingSeparator?.destroy();
+  supportingSeparator = undefined;
+  editorModes?.destroy();
+  editorModes = undefined;
   editor?.destroy();
   editor = undefined;
   editorCommandsOff?.();
@@ -6663,7 +6731,11 @@ function renderAppearance(): void {
   observer.observe(screen, { childList: true });
   const actions = element('div', 'button-row');
   actions.append(button(APPEARANCE_BACK, 'quiet', () => void initializeStartup()));
-  content.append(choices, message, actions);
+  // 工作区密度, 稿件阅读预设, 稿件排版 and 区域宽度 (Issue #951, wave 12 slice 12a; VIEW-001 to VIEW-009) share this page.
+  const viewSettings = renderViewSettings(viewPreferences, setStatus);
+  const viewObserver = new MutationObserver(() => { if (!content.isConnected) { viewSettings.destroy(); viewObserver.disconnect(); } });
+  viewObserver.observe(screen, { childList: true });
+  content.append(choices, message, viewSettings.element, actions);
   replaceScreen('appearance', content);
   setStatus(APPEARANCE_STATUS);
 }
@@ -8734,6 +8806,34 @@ function renderEditorWindow(
   content.append(toolbar, workspace, identities);
   if (reimport !== undefined) toolbar.after(reimportLandingSection(reimport));
   replaceScreen('editor', content, { bookId: initialWindow.bookId, title: bookTitle, section: isDocument ? 'deliverables' : 'manuscript' });
+  // 专注 and 视图 in the context header, and the protection surface first beside them (Issue #951; ED-004, DUR-003, VIEW-012).
+  editorModes = mountEditorModes({
+    host: requiredElement('#context-view'),
+    view: viewPreferences,
+    focus: focusMode,
+    rail: true,
+    openNavigation: () => setNavigationOpen(true),
+    ...(isDocument ? {} : { openTasks: () => taskDrawer.openPanel(initialWindow.bookId, () => tasksEntry) }),
+    setStatus,
+    shortcutHint,
+  });
+  protectionSurface = mountProtectionSurface({
+    host: editorModes.protectionHost,
+    root: document.documentElement,
+    retry: () => editor?.retryWrite(),
+    affectedContent: () => editor?.affectedContent() ?? '',
+    writeClipboard: copyPlainText,
+    setStatus,
+  });
+  // The supporting slot's width (VIEW-007): one separator for 导航 or 分析, whichever is open.
+  const separator = mountRegionSeparator({
+    region: 'supportingWidth',
+    view: viewPreferences,
+    measure: () => (analysisPanel.hidden ? navigator : analysisPanel).getBoundingClientRect().width,
+    announce: (message) => setStatus(message),
+  });
+  workspace.append(separator.element);
+  supportingSeparator = separator;
   if (saveMenu !== undefined) {
     activeSaveMenu = saveMenu;
     saveMenu.element.id = 'manuscript-save-menu';
@@ -8927,12 +9027,18 @@ function renderEditorWindow(
   };
 
   async function settleLocalEdit(): Promise<boolean> {
+    // The action the editor just used: under Editing Protection Mode its refusal is said beside it (DUR-005).
+    const attempted = recentlyActivatedControl();
     if (editor?.isComposing()) {
       setStatus('请先完成当前输入法组合。', 'busy');
       return false;
     }
     if (dirty || saving || retryRequired) await editor?.flush();
-    return !dirty && !saving && !retryRequired;
+    const settled = !dirty && !saving && !retryRequired;
+    // Leaving, Apply, bulk replacement, undo/redo, a milestone and every other graph-changing command come through here: while
+    // input is at risk none of them may discard, duplicate or fork it (DUR-005, ED-056).
+    if (!settled && editor?.protection() != null) protectionSurface?.blockAction(attempted?.closest('.editing-protection-host') ? null : attempted);
+    return settled;
   }
 
   /**
@@ -9922,7 +10028,10 @@ function renderEditorWindow(
       updatePersistenceMenu();
       save.disabled = authoritativeMutationBusy() || !state.dirty || state.saving || state.interrupted;
       journal.textContent = `修订日志序号 ${state.journalSequence}`;
-      setCloseRisk(authoritativeMutationBusy() || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty));
+      // Editing Protection Mode (Issue #951): the header's protection surface, and the close guard while input is at risk (DUR-010).
+      protectionSurface?.update(state.protection);
+      setCloseRisk(authoritativeMutationBusy() || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty) ||
+        (state.protection?.atRisk.characters ?? 0) > 0);
       if (editor) {
         const editorWindowProjection = editor.currentWindow();
         const bindingChanged = editorWindowProjection.revisionId !== currentWindow.revisionId ||
@@ -9975,6 +10084,8 @@ function renderEditorWindow(
       if (!previousResults.hidden) previousResults.click();
     },
     'view.focusManuscript': () => editor?.focus(),
+    // 专注模式 (Issue #951; ED-004): the same toggle as the header's 专注.
+    'view.focusMode': () => focusMode.toggle(),
   });
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
   // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.
@@ -10128,7 +10239,13 @@ async function initializeRenderer(): Promise<void> {
 new MutationObserver(() => {
   if (document.documentElement.dataset['ai7ServiceState'] === 'interrupted') applyAuthorityInterruption();
   if (document.documentElement.dataset['ai7CloseState'] === 'blocked') {
-    setStatus('当前编辑尚未获得持久写入确认，请先保存成功后再关闭窗口。', 'error');
+    // A close request with at-risk input opens the protection surface itself (DUR-010).
+    if (editor?.protection() != null) {
+      setStatus(PROTECTION_CLOSE_BLOCKED, 'error');
+      protectionSurface?.openOptions(PROTECTION_CLOSE_BLOCKED);
+    } else {
+      setStatus('当前编辑尚未获得持久写入确认，请先保存成功后再关闭窗口。', 'error');
+    }
     delete document.documentElement.dataset['ai7CloseState'];
   }
   if (document.documentElement.dataset['ai7BookWorkbenchRouteGeneration']) {

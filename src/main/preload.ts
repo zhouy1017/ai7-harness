@@ -141,6 +141,20 @@ if (j02ObservationEnabled) {
   });
 }
 
+// J-02's Edit Journal write-failure injection (Issue #951, T0-1): a J-02-only global of this isolated world, never a `window.ai7`
+// member, so no other launch's page can reach it; main and the service refuse it anyway unless the launch armed it.
+if (j02ObservationEnabled) {
+  Object.defineProperty(globalThis, '__ai7J02JournalFault', {
+    value: Object.freeze({
+      set: (mode: ServiceOperationMap['setEditJournalFault']['input']['mode']) =>
+        invoke<ServiceOperationMap['setEditJournalFault']['output']>(IPC_CHANNELS.setEditJournalFault, { mode }),
+    }),
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
+}
+
 ipcRenderer.on(MAIN_EVENTS.serviceInterrupted, markServiceInterrupted);
 ipcRenderer.on(MAIN_EVENTS.closeBlocked, markCloseBlocked);
 ipcRenderer.on(MAIN_EVENTS.productReady, markProductReady);
