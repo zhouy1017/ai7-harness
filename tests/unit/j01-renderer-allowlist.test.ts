@@ -10,7 +10,7 @@ describe('J-01 renderer isolation assertion', () => {
     expect(line).toContain("typeof globalThis.process === 'undefined'");
     expect(line).toContain("typeof globalThis.require === 'undefined'");
     const list = line.slice(line.indexOf(marker) + marker.length).split("'")[0]!.split(',');
-    const api = preload.slice(preload.indexOf('const api: RendererApi & PreferencesRendererApi = Object.freeze({'), preload.lastIndexOf('contextBridge.exposeInMainWorld'));
+    const api = preload.slice(preload.indexOf('const api: RendererApi & PreferencesRendererApi & NotificationsRendererApi = Object.freeze({'), preload.lastIndexOf('contextBridge.exposeInMainWorld'));
     const actual = [...api.matchAll(/^  ([A-Za-z][A-Za-z0-9]*):/gmu)].map((match) => match[1]!).sort();
     expect(list).toEqual(actual);
     expect(new Set(list).size).toBe(list.length);
