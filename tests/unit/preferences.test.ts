@@ -46,6 +46,13 @@ function refusal(operation: () => unknown): PreferenceError {
 }
 
 describe('the preferences registry', () => {
+  it('persists every notification switch in the existing preference file across restart', () => {
+    const store = createPreferenceStore(sandbox);
+    const keys = ['notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName'] as const;
+    for (const key of keys) store.save({ key, value: true });
+    const restarted = createPreferenceStore(sandbox);
+    for (const key of keys) expect(restarted.read().values[key]).toBe(true);
+  });
   it('declares the shell keys with their defaults, and each default passes its own validator', () => {
     expect(Object.keys(PREFERENCE_KEYS)).toEqual(['shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName']);
     expect(preferenceDefaults()).toMatchObject({ 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [] });

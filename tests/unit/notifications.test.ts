@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNotifier } from '../../src/main/notifications.js';
-import { createNotificationObserver } from '../../src/renderer/notifications.js';
+import { createNotificationObserver, mountQuietNotice } from '../../src/renderer/notifications.js';
+import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 import { completionLabel, NOTIFICATION_LABELS } from '../../src/renderer/notification-labels.js';
 import { preferenceDefaults } from '../../src/shared/preferences.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '../../src/shared/protocol.js';
@@ -10,7 +11,7 @@ function item(overrides: Partial<GlobalAttentionItemProjection> = {}): GlobalAtt
   return {
     itemId: 'analysis:synthetic-task', group: 'decisions', state: 'analysis-clarification', blocked: false,
     at: new Date(START + 1_000).toISOString(), book: { bookId: 'synthetic-book', title: 'Synthetic private title' },
-    object: { kind: 'analysis', mode: 'baseline' }, facts: {}, nextStep: 'view-run',
+    object: { kind: 'analysis', mode: 'first-baseline' }, facts: { progress: null, categories: [], revisionOrdinal: null }, nextStep: 'view-run',
     target: { kind: 'analysis', bookId: 'synthetic-book', taskIntentId: 'synthetic-task' }, technical: [], ...overrides,
   };
 }
@@ -112,5 +113,55 @@ describe('renderer projection observer', () => {
     observe(projection([item({ at: new Date(START - 1).toISOString() }), item({ group: 'active' }), item({ group: 'recent' })]));
     expect(completed).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledOnce();
+  });
+});
+
+describe('quiet notice lifetime', () => {
+  it('replaces the one notice, pauses its remaining reading time on hover and focus, and dismisses without touching the record', async () => {
+    const restore = installMiniDom();
+    vi.useFakeTimers();
+    let hovering = false;
+    vi.stubGlobal('document', {
+      body: miniDocument.body,
+      get activeElement() { return miniDocument.activeElement; },
+      createElement: (tag: string) => Object.assign(miniDocument.createElement(tag), { matches: () => hovering }),
+    });
+    try {
+      const open = vi.fn();
+      const show = mountQuietNotice(open);
+      show(item({ group: 'recent', state: 'analysis-completed' }));
+      const host = miniDocument.body.children[0]!;
+      vi.advanceTimersByTime(2_000);
+      hovering = true;
+      host.dispatchEvent({ type: 'mouseenter' });
+      vi.advanceTimersByTime(20_000);
+      expect(host.hidden).toBe(false);
+      hovering = false;
+      host.dispatchEvent({ type: 'mouseleave' });
+      vi.advanceTimersByTime(3_999);
+      expect(host.hidden).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(host.hidden).toBe(true);
+
+      const latest = item({ itemId: 'latest', group: 'recent', state: 'review-completed' });
+      const original = structuredClone(latest);
+      show(item({ group: 'recent', state: 'analysis-completed' }));
+      show(latest);
+      expect(miniDocument.body.children).toHaveLength(1);
+      expect(host.children[0]?.textContent).toBe('审阅结果已可查看');
+      const view = host.children[1]!;
+      view.focus();
+      host.dispatchEvent({ type: 'focusin' });
+      vi.advanceTimersByTime(20_000);
+      expect(host.hidden).toBe(false);
+      view.click();
+      expect(host.hidden).toBe(true);
+      expect(open).toHaveBeenCalledWith(latest);
+      expect(latest).toEqual(original);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      restore();
+    }
   });
 });

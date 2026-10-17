@@ -6,6 +6,8 @@ export const NOTIFICATION_LABELS = Object.freeze({
   abnormal: 'AI7：一项任务出现异常',
   candidate: '候选结果已可查看',
   outcome: '任务结果已记录',
+  outcomeWithGaps: '任务结果已记录，仍有未完成部分',
+  cancelled: '任务取消结果已记录',
   effect: '应用凭据已记录',
   ambiguous: '结果待确认',
   failure: '任务出现异常',
@@ -15,6 +17,8 @@ export const NOTIFICATION_LABELS = Object.freeze({
 });
 
 export function completionLabel(item: GlobalAttentionItemProjection): string {
+  if (item.state === 'analysis-completed-with-gaps') return NOTIFICATION_LABELS.outcomeWithGaps;
+  if (item.state === 'analysis-cancelled') return NOTIFICATION_LABELS.cancelled;
   if (item.state === 'review-completed') return NOTIFICATION_LABELS.review;
   if (item.state === 'indexing-completed') return NOTIFICATION_LABELS.indexing;
   return NOTIFICATION_LABELS.outcome;

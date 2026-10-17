@@ -44,7 +44,7 @@ export function mountQuietNotice(open: (item: GlobalAttentionItemProjection) => 
   close.textContent = '关闭提示';
   host.append(status, view, close);
   // Reuse shell surface roles without adding another styling owner.
-  host.className = 'panel button-row';
+  host.className = 'panel button-row quiet-completion-notice';
   document.body.append(host);
   let current: GlobalAttentionItemProjection | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
