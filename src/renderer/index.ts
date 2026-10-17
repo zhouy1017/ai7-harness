@@ -121,6 +121,18 @@ import {
 import { mountDatabaseExport } from './database-export.js';
 import { mountDatabaseImport } from './database-import.js';
 import { mountScheduledBackup } from './scheduled-backup.js';
+import {
+  activeCommandBindings,
+  configureCommandLabels,
+  createCommandDispatcher,
+  refreshShortcutLabels,
+  shortcutHint,
+  type CommandPlatform,
+} from './commands.js';
+import { mountKeyboardSettings } from './keyboard-settings.js';
+import { KEYBOARD_SECTION_LABEL, KEYBOARD_TITLE } from './keyboard-labels.js';
+import { mountUsage } from './usage.js';
+import { USAGE_RETURN, USAGE_SECTION_LABEL, USAGE_TITLE } from './usage-labels.js';
 import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_LEDE, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
 import {
@@ -822,6 +834,70 @@ async function leaveThen(open: () => Promise<void>): Promise<void> {
 }
 
 /**
+ * The remappable navigation, search and view commands (Issue #936, plan slice 11c; V2-UX-KEY-002, KEY-006): one dispatcher on the
+ * window, the IME-safe Command Guard in front of every command. Each command only moves to a place or focuses a control, through
+ * the surface's own ways out; none starts, adopts, designates or deletes anything (KEY-004). The commands of the manuscript on
+ * screen register with it and leave with it.
+ */
+let compositionOpen = false;
+document.addEventListener('compositionstart', () => { compositionOpen = true; }, true);
+document.addEventListener('compositionend', () => { compositionOpen = false; }, true);
+const commandPlatformInUse: CommandPlatform = window.ai7.platform;
+const commandDispatcher = createCommandDispatcher({
+  platform: commandPlatformInUse,
+  bindings: activeCommandBindings,
+  composing: () => compositionOpen || editor?.isComposing() === true,
+  announce: (message) => setStatus(message, 'busy'),
+});
+window.addEventListener('keydown', (event) => commandDispatcher.handle(event));
+/** The commands of the manuscript on screen, removed with it. */
+let editorCommandsOff: (() => void) | undefined;
+
+/** A Book's section, opened in the Book this window shows. */
+function bookSectionCommand(open: (route: { bookId: string; bookTitle: string }) => Promise<void>): () => Promise<void> {
+  return async () => {
+    if (authorityInterrupted) return;
+    const route = await window.ai7.getBookWorkbenchRoute();
+    if (route === null || route.kind !== 'book') return;
+    await leaveThen(() => open({ bookId: route.bookId, bookTitle: route.bookTitle }));
+  };
+}
+
+commandDispatcher.register({
+  'nav.attention': () => openGlobalAttention(),
+  'nav.library': () => leaveThen(() => returnToLibrary()),
+  'nav.series': () => leaveThen(() => renderSeriesList(null)),
+  'nav.knowledge': () => leaveThen(() => renderKnowledgeBase('guidelines')),
+  'nav.quality': () => leaveThen(() => renderQualityLearning('feedback', null)),
+  'nav.back': () => leaveThen(() => returnToLibrary()),
+  'nav.book.manuscript': async () => {
+    if (authorityInterrupted) return;
+    const route = await window.ai7.getBookWorkbenchRoute();
+    if (route !== null) await leaveThen(() => renderResolvedBookWorkbenchRoute(route));
+  },
+  'nav.book.review': bookSectionCommand(async (book) => renderBookReview(book.bookId, book.bookTitle)),
+  'nav.book.evaluation': bookSectionCommand(async (book) => renderBookEvaluation(book.bookId, book.bookTitle)),
+  'nav.book.deliverables': bookSectionCommand(async (book) => renderBookDeliverables(book.bookId, book.bookTitle)),
+  'nav.book.analysis': bookSectionCommand(async (book) => renderBookAnalysis(book.bookId, book.bookTitle)),
+  'nav.book.sources': bookSectionCommand(async (book) => renderBookSources(book.bookId, book.bookTitle)),
+  'nav.book.overview': bookSectionCommand(async (book) => renderBookOverview(await window.ai7.getBookOverview({ bookId: book.bookId, historyCursor: null }))),
+  'view.openTasks': () => {
+    const bookId = (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'];
+    if (bookId !== undefined && !authorityInterrupted) taskDrawer.openPanel(bookId, () => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
+  },
+});
+
+/**
+ * The preference the shortcut labels and the dispatcher read (KEY-012: local view/input configuration). Until it arrives the
+ * defaults stand; a remap reaches every shown chord at once.
+ */
+function applyKeyboardBindings(bindings: Parameters<typeof configureCommandLabels>[1]): void {
+  configureCommandLabels(commandPlatformInUse, bindings);
+  refreshShortcutLabels(document);
+}
+void window.ai7.getPreferences().then((preferences) => applyKeyboardBindings(preferences.values['keyboard.bindings']), () => undefined);
+
+/**
  * 待我处理 (Issue #424, plan slice S78): one reader for the whole window, read on every screen change and
  * whenever the window gains focus, and slowly on its own while a Run is in flight; the header's entry and the
  * screen paint the same answer (global-attention.ts).
@@ -973,6 +1049,8 @@ function replaceScreen(state: string, content: HTMLElement): void {
   globalAttentionSurface = undefined;
   editor?.destroy();
   editor = undefined;
+  editorCommandsOff?.();
+  editorCommandsOff = undefined;
   closeNavigation = null;
   leaveGuard = null;
   taskSurfaceRefresh = {};
@@ -5977,6 +6055,67 @@ async function renderEvaluationCalibration(focusBookId: string | null): Promise<
   }
 }
 
+/**
+ * The existing surface of one Run a 用量 row lists (Issue #936): a Review Run's own page, a Task's plan in the Task Drawer where
+ * its kind owns one, otherwise the Book it ran on. The drawer names a Task that is no longer the Book's current one as such.
+ */
+async function openUsageRun(run: { bookId: string; taskIntentId: string; taskKind: string; reviewRunId: string | null }): Promise<void> {
+  const taskKinds: Readonly<Record<string, TaskPlanKind>> = {
+    'baseline-manuscript-analysis': 'baseline-analysis',
+    evaluation: 'initial-evaluation',
+    'readers-report': 'readers-report',
+    'evaluation-rewrite': 'evaluation-rewrite',
+    writing: 'writing',
+  };
+  const taskKind = taskKinds[run.taskKind];
+  try {
+    await leaveThen(async () => {
+      if (run.reviewRunId !== null) {
+        await openGlobalAttentionTarget({ kind: 'review', bookId: run.bookId, reviewRunId: run.reviewRunId });
+      } else if (taskKind !== undefined) {
+        await openGlobalAttentionTarget({ kind: 'task-plan', bookId: run.bookId, taskKind, ref: run.taskIntentId });
+      } else {
+        await requestBookWorkbenchRoute({ kind: 'book', bookId: run.bookId });
+      }
+    });
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, '无法打开运行所在的页面。'), 'error');
+  }
+}
+
+/** 设置 › 服务 › 用量 (Issue #936, plan slice 11c; V2-UX-MSET-010). */
+function renderUsage(): void {
+  const content = panel();
+  content.classList.add('usage-screen');
+  content.append(element('p', 'section-label', USAGE_SECTION_LABEL), element('h2', undefined, USAGE_TITLE));
+  const body = element('div');
+  mountUsage({
+    root: body, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel,
+    openRun: (run) => void openUsageRun(run),
+  });
+  const actions = element('div', 'button-row');
+  actions.append(button(USAGE_RETURN, 'quiet', () => void initializeStartup()));
+  content.append(body, actions);
+  replaceScreen('usage', content);
+  setStatus('用量', 'success');
+}
+
+/** 设置 › 本机 › 键盘与无障碍 › 快捷键 (Issue #936, plan slice 11c; V2-UX-KEY-002, KEY-003, KEY-011). */
+function renderKeyboardSettings(): void {
+  const content = panel();
+  content.classList.add('keyboard-screen');
+  content.append(element('p', 'section-label', KEYBOARD_SECTION_LABEL), element('h2', undefined, KEYBOARD_TITLE));
+  const body = element('div');
+  mountKeyboardSettings({
+    root: body, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, onChanged: applyKeyboardBindings,
+  });
+  const actions = element('div', 'button-row');
+  actions.append(button(USAGE_RETURN, 'quiet', () => void initializeStartup()));
+  content.append(body, actions);
+  replaceScreen('keyboard', content);
+  setStatus('键盘与无障碍', 'success');
+}
+
 async function renderModelServiceSettings(): Promise<void> {
   setStatus('正在读取模型服务状态…', 'busy');
   try {
@@ -6140,8 +6279,13 @@ function renderLanding(
   // 质量与学习 (Issue #61, S26b): 学习准入, the house's record of what may teach and where.
   const qualityLearning = button(QUALITY_LEARNING_TITLE, 'secondary', () => void renderQualityLearning('feedback', null));
   qualityLearning.dataset['settingsRoute'] = 'quality-learning';
+  // 设置 › 服务 › 用量 and 设置 › 本机 › 键盘与无障碍 (Issue #936, plan slice 11c; MSET-010, KEY-002).
+  const usagePage = button(USAGE_TITLE, 'secondary', () => renderUsage());
+  usagePage.dataset['settingsRoute'] = 'usage';
+  const keyboardPage = button(KEYBOARD_TITLE, 'secondary', () => renderKeyboardSettings());
+  keyboardPage.dataset['settingsRoute'] = 'keyboard';
   const landingActions = element('div', 'button-row');
-  landingActions.append(importButton, createBook, dataAndStorage, modelService, evaluationCalibration, seriesButton, knowledgeBase, qualityLearning);
+  landingActions.append(importButton, createBook, dataAndStorage, modelService, usagePage, keyboardPage, evaluationCalibration, seriesButton, knowledgeBase, qualityLearning);
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);
@@ -7726,7 +7870,9 @@ function renderEditorWindow(
   title.append(meta, chipHost);
   const save = button('保存当前编辑', 'primary', () => editor?.flush());
   save.disabled = true;
-  save.title = window.ai7.platform === 'darwin' ? '快捷键 Command+S' : '快捷键 Ctrl+S';
+  // The chord comes from the one label source and follows a remap (KEY-011); 保存 keeps its chord, the words are the window's own.
+  save.dataset['shortcutCommand'] = 'edit.save';
+  save.title = shortcutHint('edit.save') ?? '';
   const undo = button('撤销', 'quiet', () => void runHistory('undo'));
   const redo = button('重做', 'quiet', () => void runHistory('redo'));
   const retryAuthoritativeRefreshButton = button('重试权威刷新', 'quiet', () => void retryAuthoritativeRefresh());
@@ -8059,7 +8205,9 @@ function renderEditorWindow(
   navigationEntry.dataset['edgeEntry'] = 'navigation';
   navigationEntry.setAttribute('aria-controls', navigator.id);
   navigationEntry.setAttribute('aria-expanded', 'false');
-  navigationEntry.title = '大纲与全稿查找';
+  navigationEntry.dataset['shortcutCommand'] = 'search.find';
+  navigationEntry.dataset['shortcutBase'] = '大纲与全稿查找';
+  navigationEntry.title = `大纲与全稿查找（${shortcutHint('search.find') ?? ''}）`;
   const analysisEntry = button('分析', 'quiet', () => openAnalysis.click());
   analysisEntry.dataset['edgeEntry'] = 'analysis';
   analysisEntry.title = '打开这本书的分析';
@@ -8074,7 +8222,9 @@ function renderEditorWindow(
   });
   tasksEntry.dataset['edgeEntry'] = 'tasks';
   tasksEntry.setAttribute('aria-controls', 'task-drawer');
-  tasksEntry.title = '这本书的任务';
+  tasksEntry.dataset['shortcutCommand'] = 'view.openTasks';
+  tasksEntry.dataset['shortcutBase'] = '这本书的任务';
+  tasksEntry.title = `这本书的任务（${shortcutHint('view.openTasks') ?? ''}）`;
   const edgeEntries = element('div', 'edge-entries');
   edgeEntries.append(navigationEntry, ...(isDocument ? [] : [analysisEntry, tasksEntry]));
   const railTrack = element('div', 'rail-track');
@@ -9281,6 +9431,22 @@ function renderEditorWindow(
       const loads = [...(editorHost.dataset['windowLoads'] ?? '').split(',').filter((entry) => entry.length > 0), windowLoadCause].slice(-12);
       editorHost.dataset['windowLoads'] = loads.join(',');
     },
+  });
+  // 查找, 查找结果 and 聚焦稿件 (Issue #936, plan slice 11c; KEY-002): the remappable commands of the manuscript on screen. The
+  // dispatcher's Command Guard holds each back while an input method composes; they leave with the screen.
+  editorCommandsOff?.();
+  editorCommandsOff = commandDispatcher.register({
+    'search.find': () => {
+      setNavigationOpen(true);
+      searchInput.focus();
+    },
+    'search.next': () => {
+      if (!nextResults.hidden) nextResults.click();
+    },
+    'search.previous': () => {
+      if (!previousResults.hidden) previousResults.click();
+    },
+    'view.focusManuscript': () => editor?.focus(),
   });
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
   // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.
