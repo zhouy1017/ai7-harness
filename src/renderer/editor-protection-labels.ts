@@ -6,7 +6,7 @@
 
 /** The persistent header line that replaces the saved styling (ED-055, DUR-003). */
 export const PROTECTION_HEADLINE = '本地写入中断 · 当前更改尚未持久保存';
-export const PROTECTION_READ_ONLY_HEADLINE = '保护性只读 · 当前更改尚未持久保存';
+export const PROTECTION_READ_ONLY_HEADLINE = '保护性只读 · 本地写入中断 · 当前更改尚未持久保存';
 /** The one direct action of the header (DUR-003). */
 export const PROTECTION_OPTIONS_ACTION = '查看保护选项';
 export const PROTECTION_OPTIONS_TITLE = '编辑保护选项';
@@ -23,6 +23,8 @@ export const PROTECTION_RESTART_PROMISE = '如果 AI7 被强制关闭，重新�
 export const PROTECTION_SALVAGE_UNAVAILABLE = '本地业务服务目前无法重建并出具回执，暂不提供导出受影响内容；请先复制受影响内容。';
 /** An input that would take the buffer past its safe capacity is not taken (DUR-002). */
 export const PROTECTION_BUFFER_REFUSED = '未确认内容已接近安全上限，这次输入未被接收；请先重试写入，或复制受影响内容。';
+export const PENDING_BUFFER_REFUSED = '尚待确认的编辑已达到单次安全上限，这次输入未被接收；请等待写入确认后分段输入。';
+export const PROTECTION_ACK_MISMATCH = '修订日志确认与当前编辑不匹配。';
 /** The marker shape beside the words (ED-058): text and shape, never colour alone. */
 export const PROTECTION_MARKER = '⚠';
 

@@ -48,6 +48,7 @@ const DRIFT_CODES: ReadonlySet<string> = new Set([
   'IDEMPOTENCY_CONFLICT',
   'AI7_EDITOR_CAPABILITY_INVALID',
   'EDITOR_ACK_MISMATCH',
+  'JOURNAL_ACK_FAILED',
 ]);
 
 export type JournalFailureKind = 'unavailable' | 'drift';
@@ -88,6 +89,17 @@ export function changedCharacters(acknowledged: ReadonlyArray<string>, current: 
     acknowledged[acknowledged.length - 1 - suffix] === current[current.length - 1 - suffix]
   ) suffix += 1;
   return (acknowledged.length - prefix - suffix) + (current.length - prefix - suffix);
+}
+
+/** An unacknowledged command may already be durable even if the editor has since undone its visible text. */
+export function unacknowledgedCharacters(
+  acknowledged: ReadonlyArray<string>, current: ReadonlyArray<string>,
+  pending?: { readonly fromGrapheme: number; readonly toGrapheme: number; readonly inserted: ReadonlyArray<string> },
+): number {
+  const visible = changedCharacters(acknowledged, current);
+  if (!pending) return visible;
+  const written = [...acknowledged.slice(0, pending.fromGrapheme), ...pending.inserted, ...acknowledged.slice(pending.toGrapheme)];
+  return Math.max(visible, changedCharacters(acknowledged, written), changedCharacters(written, current));
 }
 
 /** The At-risk Edit Extent (DUR-004): where, in the manuscript's own numbering, and how much. */

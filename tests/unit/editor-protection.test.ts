@@ -7,6 +7,7 @@ import {
   bufferAdmits,
   bufferReachedLimit,
   changedCharacters,
+  unacknowledgedCharacters,
   classifyJournalFailure,
   protectionAttribute,
   retryDelayMs,
@@ -85,11 +86,20 @@ describe('the Bounded Edit Safety Buffer', () => {
     expect(changedCharacters(split('甲乙丙丁'), split('甲戊丁'))).toBe(3);
     expect(changedCharacters(split('👨‍👩‍👧'), split('👨‍👩‍👧一'))).toBe(1);
   });
+
+  it('retains the risk of an outstanding command after the editor reverses its visible text', () => {
+    const base = split('甲乙');
+    const pending = { fromGrapheme: 2, toGrapheme: 2, inserted: split('丙') };
+    expect(unacknowledgedCharacters(base, base, pending)).toBe(1);
+    expect(unacknowledgedCharacters(base, split('甲乙丙丁'), pending)).toBe(2);
+    expect(unacknowledgedCharacters(base, base)).toBe(0);
+    expect(unacknowledgedCharacters(base, split('甲'), pending)).toBe(2);
+  });
 });
 
 describe('a refused journal write', () => {
   it('reads a moved target as drift, which stops replay (DUR-007)', () => {
-    for (const code of ['EDIT_BINDING_CHANGED', 'EDIT_SEQUENCE_CHANGED', 'EDIT_BLOCK_CHANGED', 'EDIT_RANGE_INVALID', 'IDEMPOTENCY_CONFLICT', 'AI7_EDITOR_CAPABILITY_INVALID', 'EDITOR_ACK_MISMATCH']) {
+    for (const code of ['EDIT_BINDING_CHANGED', 'EDIT_SEQUENCE_CHANGED', 'EDIT_BLOCK_CHANGED', 'EDIT_RANGE_INVALID', 'IDEMPOTENCY_CONFLICT', 'AI7_EDITOR_CAPABILITY_INVALID', 'EDITOR_ACK_MISMATCH', 'JOURNAL_ACK_FAILED']) {
       expect(classifyJournalFailure({ code, message: '' })).toBe('drift');
     }
   });

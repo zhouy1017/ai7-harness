@@ -53,7 +53,7 @@ const RENDERER_TARGET_QUERY_ABANDONED = new Error('renderer-target query abandon
 // Editing Protection Mode (Issue #951, wave 12 slice 12a): the product's exact words, and the journal's one-edit bound
 // (src/shared/protocol.ts MAX_EDIT_GRAPHEMES) that says how many entries a buffered run of text lands as.
 const PROTECTION_HEADLINE = '本地写入中断 · 当前更改尚未持久保存';
-const PROTECTION_READ_ONLY_HEADLINE = '保护性只读 · 当前更改尚未持久保存';
+const PROTECTION_READ_ONLY_HEADLINE = '保护性只读 · 本地写入中断 · 当前更改尚未持久保存';
 const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
 const JOURNAL_EDIT_GRAPHEMES = 256;
 const PROTECTION_CJK_BASE = 0x7000;
@@ -1567,6 +1567,12 @@ async function runProtectionJourney(renderer) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'End', code: 'End', windowsVirtualKeyCode: 35 });
   await protectionChecks(renderer, `({ bannerHidden: !p.shown, noProtection: p.document === null, writable: p.writable, closeRiskClear: p.closeRisk === 'false', journal: Number.isSafeInteger(p.journal) })`, 'protection-idle');
   const durable = await renderer.evaluate(JOURNAL_SEQUENCE_PROBE);
+  at('protection-initial-bound');
+  // Even the input before the first unavailable acknowledgement must fit the declared reserve; a large paste is refused intact.
+  const initialLength = await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length`);
+  const initialLimit = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferSoftLimit)`);
+  await typeAtWindowEnd(renderer, protectionText(initialLimit + 1, 8_000), 'protection-initial-bound-type');
+  await protectionChecks(renderer, `({ noInput: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength}, noProtection: !p.shown, noEntry: p.journal === ${durable} })`, 'protection-initial-bound');
   requireJourney((await renderer.setJournalFault('fail-all'))?.mode === 'fail-all', 'protection-arm');
   at('protection-enter');
   await typeAtWindowEnd(renderer, protectionText(12), 'protection-enter-type');
@@ -1586,6 +1592,24 @@ async function runProtectionJourney(renderer) {
   requireJourney((await renderer.setJournalFault('off'))?.mode === 'off', 'protection-fault-off');
   await assertRenderer(renderer, `(() => { const retry = document.querySelector('#editing-protection-options [data-protection-action="retry"]'); if (!(retry instanceof HTMLButtonElement)) return false; if (retry.disabled) return true; retry.click(); return true; })()`, 'protection-retry-click');
   await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, oneEntry: p.journal === ${durable + 1}, writable: p.writable, closeRisk: p.closeRisk === 'false', status: document.querySelector('#persistence-status')?.textContent === '已写入修订日志', optionsClosed: document.querySelector('#editing-protection-options')?.hidden === true, reasonsGone: document.querySelector('.editing-protection-blocked') === null })`, 'protection-retry-recovered', 60_000);
+  at('protection-reversed-input');
+  requireJourney((await renderer.setJournalFault('fail-all'))?.mode === 'fail-all', 'protection-reversed-arm');
+  await typeAtWindowEnd(renderer, protectionText(12, 7_000), 'protection-reversed-type');
+  await protectionChecks(renderer, `({ shown: p.shown, atRisk: p.atRisk === 12 })`, 'protection-reversed-start');
+  await renderer.evaluate(`(async () => {
+    const editor = document.querySelector('[data-testid="manuscript-editor"]');
+    editor.focus({ preventScroll: true });
+    const range = document.createRange(); range.selectNodeContents(editor.lastElementChild); range.collapse(false);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    for (let index = 0; index < 12; index += 1) selection.modify('extend', 'backward', 'character');
+    document.execCommand('delete');
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  })()`);
+  await protectionChecks(renderer, `({ pendingCommandRetained: p.atRisk === 12, stillProtected: p.shown && p.closeRisk === 'true', reverted: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength + 12}, noEntry: p.journal === ${durable + 1} })`, 'protection-reversed-pending');
+  at('protection-reversed-recovery');
+  requireJourney((await renderer.setJournalFault('off'))?.mode === 'off', 'protection-reversed-off');
+  // First acknowledge the exact outstanding command, then its reversal; neither is duplicated or silently discarded.
+  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, twoEntries: p.journal === ${durable + 3}, exactVisibleLength: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength + 12}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`, 'protection-reversed-recovered', 60_000);
   at('protection-capacity-fill');
   const softLimit = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferSoftLimit)`);
   const capacity = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferCapacity)`);
@@ -1599,7 +1623,7 @@ async function runProtectionJourney(renderer) {
     await typeAtWindowEnd(renderer, protectionText(chunk, 200 + typed), 'protection-capacity-type');
     typed += chunk;
   }
-  await protectionChecks(renderer, `({ atRisk: p.atRisk === ${filled}, writable: p.writable, readOnly: p.readOnly === 'none', noEntry: p.journal === ${durable + 1} })`, 'protection-capacity-filled');
+  await protectionChecks(renderer, `({ atRisk: p.atRisk === ${filled}, writable: p.writable, readOnly: p.readOnly === 'none', noEntry: p.journal === ${durable + 3} })`, 'protection-capacity-filled');
   at('protection-ime-reserve');
   // A composition that crosses the soft limit is taken into the reserve and never cut short (DUR-008).
   const composition = protectionText(100, 4_000);
@@ -1608,7 +1632,7 @@ async function runProtectionJourney(renderer) {
   await protectionChecks(renderer, `({ composing: p.composing === 'true', notReadOnly: p.readOnly === 'none', writable: p.writable })`, 'protection-ime-composing', 15_000);
   await renderer.send('Input.insertText', { text: composition });
   at('protection-read-only');
-  await protectionChecks(renderer, `({ ended: p.composing === 'false', kept: p.atRisk === ${filled + 100}, readOnly: p.readOnly === 'capacity' && p.document === 'read-only', headline: p.headline === ${JSON.stringify(PROTECTION_READ_ONLY_HEADLINE)}, refused: !p.writable, withinCapacity: p.atRisk <= p.capacity, noEntry: p.journal === ${durable + 1} })`, 'protection-read-only', 30_000);
+  await protectionChecks(renderer, `({ ended: p.composing === 'false', kept: p.atRisk === ${filled + 100}, readOnly: p.readOnly === 'capacity' && p.document === 'read-only', headline: p.headline === ${JSON.stringify(PROTECTION_READ_ONLY_HEADLINE)}, refused: !p.writable, withinCapacity: p.atRisk <= p.capacity, noEntry: p.journal === ${durable + 3} })`, 'protection-read-only', 30_000);
   // The read-only text takes nothing more, and its options still offer 重试写入 and 复制受影响内容 (DUR-009).
   await renderer.evaluate(`(async () => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); editor?.focus({ preventScroll: true }); document.execCommand('insertText', false, ${JSON.stringify(protectionText(5, 9_000))}); await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); document.querySelector('#editing-protection [data-protection-action="options"]')?.click(); return true; })()`);
   await waitForChecks(renderer, `(() => { const p = ${PROTECTION_PROBE}; const options = document.querySelector('#editing-protection-options'); return { unchanged: p.atRisk === ${filled + 100}, optionsOpen: options instanceof HTMLElement && !options.hidden, retryOffered: options?.querySelector('[data-protection-action="retry"]') instanceof HTMLButtonElement, copyOffered: options?.querySelector('[data-protection-action="copy"]') instanceof HTMLButtonElement, readOnlyReason: options?.querySelector('.editing-protection-read-only')?.hidden === false }; })()`, 'protection-read-only-options', 15_000);
@@ -1618,7 +1642,7 @@ async function runProtectionJourney(renderer) {
   // The exact buffered sequence lands in order, one entry per bounded edit, and nothing more (DUR-006, DUR-012).
   // The first ten characters are the edit the retries hold; what was typed after lands as bounded edits behind it.
   const entries = 1 + Math.ceil((filled - 10 + 100) / JOURNAL_EDIT_GRAPHEMES);
-  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, exactEntries: p.journal === ${durable + 1 + entries}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`, 'protection-read-only-recovered', 90_000);
+  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, exactEntries: p.journal === ${durable + 3 + entries}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`, 'protection-read-only-recovered', 90_000);
 }
 
 async function main() {

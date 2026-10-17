@@ -96,7 +96,7 @@ export function typographyProperties(typography: ManuscriptTypography): Readonly
 /** A region width the editor chose, as the root property states it: never wider than leaves the manuscript its minimum. */
 export function regionProperty(region: RegionKey, width: number): string {
   if (region === 'supportingWidth') return `${width}px`;
-  return `min(${width}px, max(20rem, calc(100vw - var(--sidebar-width) - var(--manuscript-min-width))))`;
+  return `min(${width}px, max(20rem, calc(100vw - var(--sidebar-width) - var(--manuscript-min-width) - 9rem)))`;
 }
 
 export function clampRegion(region: RegionKey, width: number): number {
@@ -172,39 +172,41 @@ export class ViewPreferences {
   }
 
   setDensity(density: WorkspaceDensity): Promise<void> {
-    return this.write('editor.density', density);
+    return this.write('editor.density', () => density);
   }
 
   setTypography(typography: ManuscriptTypography): Promise<void> {
-    return this.write('editor.typography', typography);
+    return this.write('editor.typography', () => typography);
   }
 
   /** Adjust one value; the preset stays named, its values are now the editor's own. */
   adjustTypography(change: Partial<Omit<ManuscriptTypography, 'preset'>>): Promise<void> {
-    return this.write('editor.typography', { ...this.state.typography, ...change });
+    return this.write('editor.typography', () => ({ ...this.state.typography, ...change }));
   }
 
   choosePreset(preset: ReadingPreset): Promise<void> {
-    return this.write('editor.typography', presetTypography(preset));
+    return this.write('editor.typography', () => presetTypography(preset));
   }
 
   resetTypography(): Promise<void> {
-    return this.write('editor.typography', DEFAULT_TYPOGRAPHY);
+    return this.write('editor.typography', () => DEFAULT_TYPOGRAPHY);
   }
 
   setRegionWidth(region: RegionKey, width: number): Promise<void> {
-    return this.write('layout.regions', { ...this.state.regions, [region]: clampRegion(region, width) });
+    return this.write('layout.regions', () => ({ ...this.state.regions, [region]: clampRegion(region, width) }));
   }
 
   /** Show or hide an optional region (VIEW-010); identity, persistence status and danger are never among them (VIEW-011). */
   setRegionHidden(region: OptionalRegion, hidden: boolean): Promise<void> {
-    const rest = this.state.regions.hidden.filter((entry) => entry !== region);
-    return this.write('layout.regions', { ...this.state.regions, hidden: hidden ? [...rest, region] : rest });
+    return this.write('layout.regions', () => {
+      const rest = this.state.regions.hidden.filter((entry) => entry !== region);
+      return { ...this.state.regions, hidden: hidden ? [...rest, region] : rest };
+    });
   }
 
   /** 恢复默认布局 (VIEW-007, VIEW-012): region sizes and visibility return to their defaults; nothing is dismissed or resolved. */
   restoreDefaultLayout(): Promise<void> {
-    return this.write('layout.regions', DEFAULT_LAYOUT_REGIONS);
+    return this.write('layout.regions', () => DEFAULT_LAYOUT_REGIONS);
   }
 
   /** Apply at once for a drag in progress, without writing; the drag's end writes. */
@@ -214,10 +216,10 @@ export class ViewPreferences {
     applyViewState(root, { ...this.state, regions: { ...this.state.regions, [region]: clampRegion(region, width) } });
   }
 
-  private write<Key extends 'editor.density' | 'editor.typography' | 'layout.regions'>(key: Key, value: PreferenceValues[Key]): Promise<void> {
+  private write<Key extends 'editor.density' | 'editor.typography' | 'layout.regions'>(key: Key, value: () => PreferenceValues[Key]): Promise<void> {
     const run = this.queue.then(async () => {
       try {
-        this.accept((await this.api.savePreference({ key, value })).values);
+        this.accept((await this.api.savePreference({ key, value: value() })).values);
       } catch (error) {
         // What is shown stays what is stored.
         const root = this.root();
@@ -260,7 +262,8 @@ export function mountRegionSeparator(options: RegionSeparatorOptions): { element
   separator.setAttribute('aria-valuemin', String(bounds.min));
   separator.setAttribute('aria-valuemax', String(bounds.max));
   separator.tabIndex = 0;
-  const current = (): number => view.current.regions[region] ?? clampRegion(region, options.measure() || bounds.initial);
+  // The CSS may constrain a saved width when the window is smaller; announce and adjust the width actually on screen.
+  const current = (): number => Math.round(options.measure() || view.current.regions[region] || bounds.initial);
   const paint = (): void => {
     const width = current();
     separator.setAttribute('aria-valuenow', String(width));
@@ -268,7 +271,7 @@ export function mountRegionSeparator(options: RegionSeparatorOptions): { element
   };
   const commit = (width: number): void => {
     void view.setRegionWidth(region, width).then(
-      () => options.announce(regionAnnouncement(region, clampRegion(region, width))),
+      () => { paint(); options.announce(regionAnnouncement(region, current())); },
       () => options.announce(VIEW_SETTINGS_SAVE_FAILED),
     );
   };
@@ -305,9 +308,11 @@ export function mountRegionSeparator(options: RegionSeparatorOptions): { element
   };
   separator.addEventListener('pointerup', endDrag);
   separator.addEventListener('pointercancel', endDrag);
+  separator.addEventListener('focus', paint);
+  window.addEventListener('resize', paint);
   paint();
   const unsubscribe = view.subscribe(paint);
-  return { element: separator, destroy: () => { unsubscribe(); separator.remove(); } };
+  return { element: separator, destroy: () => { unsubscribe(); window.removeEventListener('resize', paint); separator.remove(); } };
 }
 
 /** 设置 › 本机 › 外观's density, reading preset, typography and region controls, beside 11b's theme (VIEW-001 to VIEW-009). */

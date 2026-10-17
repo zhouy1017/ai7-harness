@@ -6,6 +6,7 @@ import {
   ViewPreferences,
   applyViewState,
   clampRegion,
+  mountRegionSeparator,
   presetTypography,
   steppedRegion,
   typographyProperties,
@@ -111,7 +112,7 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
     const root = new FakeRoot();
     applyViewState(root, { ...DEFAULT_VIEW_STATE, regions: { supportingWidth: 400, drawerWidth: 500, hidden: ['position-rail'] } });
     expect(root.properties.get('--supporting-surface-width')).toBe('400px');
-    expect(root.properties.get('--task-drawer-width')).toBe('min(500px, max(20rem, calc(100vw - var(--sidebar-width) - var(--manuscript-min-width))))');
+    expect(root.properties.get('--task-drawer-width')).toBe('min(500px, max(20rem, calc(100vw - var(--sidebar-width) - var(--manuscript-min-width) - 9rem)))');
     expect(root.dataset['hiddenRegions']).toBe('position-rail');
     applyViewState(root, DEFAULT_VIEW_STATE);
     expect(root.properties.has('--supporting-surface-width')).toBe(false);
@@ -151,6 +152,15 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
     await expect(view.setRegionWidth('supportingWidth', 500)).rejects.toThrow('disk full');
     expect(root.properties.has('--supporting-surface-width')).toBe(false);
     expect(view.current).toEqual(DEFAULT_VIEW_STATE);
+  });
+
+  it('keeps independent adjustments made before the previous preference write answers', async () => {
+    const { api } = fakeApi();
+    const view = new ViewPreferences(api, () => new FakeRoot());
+    await Promise.all([view.choosePreset('reading'), view.adjustTypography({ fontSize: 21 }), view.adjustTypography({ columnWidth: 30 })]);
+    expect(view.current.typography).toEqual({ ...presetTypography('reading'), fontSize: 21, columnWidth: 30 });
+    await Promise.all([view.setRegionWidth('supportingWidth', 400), view.setRegionWidth('drawerWidth', 500), view.setRegionHidden('position-rail', true)]);
+    expect(view.current.regions).toEqual({ supportingWidth: 400, drawerWidth: 500, hidden: ['position-rail'] });
   });
 });
 
@@ -244,5 +254,19 @@ describe('专注模式 (ED-004 to ED-007)', () => {
     expect(focus.active).toBe(false);
     expect(host.children).toHaveLength(0);
     expect(keydown).toHaveLength(0);
+  });
+
+  it('announces and adjusts a constrained region from its rendered width, not a larger stored width', async () => {
+    const root = new FakeRoot();
+    const { api, savePreference } = fakeApi();
+    const view = new ViewPreferences(api, () => root);
+    await view.setRegionWidth('supportingWidth', 560);
+    const separator = mountRegionSeparator({ region: 'supportingWidth', view, measure: () => 320, announce: vi.fn() });
+    const node = separator.element as unknown as MiniElement;
+    expect(node.getAttribute('aria-valuenow')).toBe('320');
+    node.dispatchEvent({ type: 'keydown', key: 'ArrowRight' });
+    await vi.waitFor(() => expect(savePreference).toHaveBeenLastCalledWith({ key: 'layout.regions', value: { ...DEFAULT_LAYOUT_REGIONS, supportingWidth: 304 } }));
+    expect(node.getAttribute('aria-valuetext')).toBe('320 像素');
+    separator.destroy();
   });
 });

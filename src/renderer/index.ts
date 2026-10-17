@@ -9879,7 +9879,7 @@ function renderEditorWindow(
       // Editing Protection Mode (Issue #951): the header's protection surface, and the close guard while input is at risk (DUR-010).
       protectionSurface?.update(state.protection);
       setCloseRisk(authoritativeMutationBusy() || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty) ||
-        state.protection !== null);
+        (state.protection?.atRisk.characters ?? 0) > 0);
       if (editor) {
         const editorWindowProjection = editor.currentWindow();
         const bindingChanged = editorWindowProjection.revisionId !== currentWindow.revisionId ||

@@ -8,10 +8,12 @@ import { createPreferenceStore } from '../../src/main/preferences.js';
 import { BoundedStoreError, EditJournalFaultInjection, journalWriteUnderFault } from '../../src/service/bounded-manuscript.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { presetTypography } from '../../src/renderer/layout.js';
+import { classifyJournalFailure } from '../../src/renderer/editor-protection.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
   EDIT_JOURNAL_FAULT_CODE,
   EDIT_JOURNAL_FAULT_REFUSED_CODE,
+  editJournalFaultControlAdmitted,
   type JournalEditInput,
   type ManuscriptExportTargetInput,
   type ManuscriptWindowProjection,
@@ -79,7 +81,7 @@ function code(operation: () => unknown): string {
 
 describe('the Edit Journal write-failure injection (T0-1)', () => {
   it('is refused outside the armed launch and never fires there', () => {
-    const unarmed = new EditJournalFaultInjection(false);
+    const unarmed = new EditJournalFaultInjection(editJournalFaultControlAdmitted(undefined, 'J-02', 'ordinary-production') === true);
     expect(code(() => unarmed.set('fail-all'))).toBe(EDIT_JOURNAL_FAULT_REFUSED_CODE);
     expect(code(() => unarmed.set('fail-next'))).toBe(EDIT_JOURNAL_FAULT_REFUSED_CODE);
     expect(unarmed.mode).toBe('off');
@@ -128,6 +130,11 @@ describe('the Edit Journal write-failure injection (T0-1)', () => {
       const after = counts();
       expect(after.edit_journal_entries).toBe(before.edit_journal_entries! + 3);
       expect({ ...after, edit_journal_entries: 0 }).toEqual({ ...before, edit_journal_entries: 0 });
+
+      // A lost acknowledgement retried after another committed edit is target drift too; replay must stop at the renderer.
+      const movedAcknowledgement = code(() => store.flushJournalEdit(first));
+      expect(movedAcknowledgement).toBe('JOURNAL_ACK_FAILED');
+      expect(classifyJournalFailure({ code: movedAcknowledgement })).toBe('drift');
 
       // A buffered edit replayed against a moved target is refused as drift, never applied fuzzily (DUR-007).
       expect(code(() => journalWriteUnderFault(fault, () => store.flushJournalEdit({ ...edit(window, '丁') })))).toBe('EDIT_SEQUENCE_CHANGED');

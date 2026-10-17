@@ -575,7 +575,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
    beside the central destination. Below 1120 px it lies over the page (§0.3: 所有面都要在 1120 px 以下把右侧辅助面
    改为覆盖抽屉); at 1120 px and wider the page makes room for it, so the manuscript stays visible beside the plan.
    It never scrolls sideways, its header and footer stay in view, and its content wraps at 200% zoom. */
-:root { --task-drawer-width: min(26rem, 34vw); }
+:root { --task-drawer-width: min(26rem, max(20rem, calc(100vw - var(--sidebar-width) - var(--manuscript-min-width, 480px) - 9rem))); }
 .task-drawer { position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; width: min(26rem, calc(100vw - 1rem)); min-width: 0; border-left: 1px solid var(--boundary); background: var(--surface); color: var(--text); box-shadow: -18px 0 40px var(--shadow); overflow-wrap: anywhere; }
 .task-drawer[hidden] { display: none; }
 @media (min-width: 1120px) {
@@ -2049,6 +2049,12 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 @media (min-width: 1120px) {
   body[data-task-drawer="open"] #task-drawer-separator { display: block; }
 }
+/* At the column breakpoint a full sidebar can still leave too little room for both minima and the manuscript's rail/gutters. */
+@media (min-width: 1120px) and (max-width: 1184px) {
+  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"] { padding-right: 0; }
+  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"] .status-bar { right: 1.2rem; }
+  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"] #task-drawer-separator { display: none; }
+}
 /* Optional Surface Visibility (VIEW-010): only what `视图` names; identity, status and danger have no such switch. */
 :root[data-hidden-regions~="position-rail"] .rail-column { display: none; }
 
@@ -2099,8 +2105,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 :root[data-focus-mode="on"] #task-drawer,
 :root[data-focus-mode="on"] #task-drawer-separator,
 :root[data-focus-mode="on"] .book-work-group,
-:root[data-focus-mode="on"] .book-records-group,
-:root[data-focus-mode="on"] .editor-identities { display: none !important; }
+:root[data-focus-mode="on"] .book-records-group { display: none !important; }
 :root[data-focus-mode="on"] body { padding-left: 0; padding-right: 0 !important; }
 :root[data-focus-mode="on"] .status-bar { left: 1.2rem; right: 1.2rem !important; }
 
