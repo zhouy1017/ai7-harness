@@ -16,8 +16,15 @@ export class CrashRecords {
     const stat = lstatSync(this.directory);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('AI7_CRASH_DIRECTORY_INVALID');
   }
+  /** Listing is read-only: an absent directory is an empty list and is never created here. */
   private names(): string[] {
-    this.ensureDirectory();
+    try {
+      const stat = lstatSync(this.directory);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('AI7_CRASH_DIRECTORY_INVALID');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
     return readdirSync(this.directory).filter((name) => RECORD_NAME.test(name)).sort();
   }
   write(kind: CrashKind, detail: { reason?: unknown; exitCode?: unknown; stack?: unknown } = {}): void {

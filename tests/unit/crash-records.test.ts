@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
@@ -63,6 +63,11 @@ describe('local crash records', () => {
     writeFileSync(join(store.directory, 'foreign.key.txt'), 'synthetic-secret');
     writeFileSync(join(store.directory, '2026-01-01T00-00-00.000Z-uncaughtException.json'), 'invalid');
     expect(store.list().every((record) => record.stack === '')).toBe(true);
+  });
+  it('lists read-only: an absent crash directory is an empty list and is not created', () => {
+    const store = records();
+    expect(store.list()).toEqual([]);
+    expect(existsSync(store.directory)).toBe(false);
   });
   it('continues termination when persistence fails', () => {
     let followed = false;
