@@ -2161,7 +2161,8 @@ async function main() {
     await reopenDeliverables(renderer, 'package-archive');
     await clickSelector(renderer, packageAction('export'), 'package-archive-open');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready'`, 'package-archive-reviewed', 60_000);
-    await clickSelector(renderer, 'input[name="package-export-route"][value="archive"]', 'package-archive-route');
+    // 导出为压缩包 is a radio of the export card, not a button.
+    await assertRenderer(renderer, `(() => { const radio = window.__j07.packageExport()?.querySelector('input[type="radio"][name="package-export-route"][value="archive"]'); if (!(radio instanceof HTMLInputElement) || radio.disabled || radio.checked) return false; radio.click(); return radio.checked; })()`, 'package-archive-route');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready' && window.__j07.packageExport()?.querySelector('input[value=archive]')?.checked === true`, 'package-archive-reviewed', 60_000);
     await clickSelector(renderer, packageAction('export-choose'), 'package-archive-choose');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared'`, 'package-archive-prepared', 60_000);
