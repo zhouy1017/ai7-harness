@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path';
+import { MAX_SKILL_PACKAGE_BYTES } from './imported-skills.js';
 import { clarificationGraphemes } from './analysis/clarifications.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -1598,9 +1599,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'adoptImportedSkillUpdate': {
       const input = requireInput(value.input, ['candidateId', 'reviewDigest', 'acceptItems', 'upstreamPaths'], tentativeId);
-      const texts = (list: unknown, limit: number): boolean => Array.isArray(list) && list.length <= 64 && list.every((item) => isBoundedString(item, limit));
+      const texts = (list: unknown, limit: number, count = 64): boolean => Array.isArray(list) && list.length <= count && list.every((item) => isBoundedString(item, limit));
+      // Acknowledgements name the converter's findings verbatim, including prefixes on 4096-character declarations and
+      // unrecognized field names bounded by the source package. Its byte bound is a conservative ceiling for both finding
+      // length and count; the existing MAX_FRAME_BYTES still bounds the whole request. Conflict-path bounds stay unchanged.
       if (!validUuid(input.candidateId) || !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
-        !texts(input.acceptItems, 600) || !texts(input.upstreamPaths, 240)) throw new ProtocolError(tentativeId);
+        !texts(input.acceptItems, MAX_SKILL_PACKAGE_BYTES, MAX_SKILL_PACKAGE_BYTES) || !texts(input.upstreamPaths, 240)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'createImportedSkillUpdateRule': {

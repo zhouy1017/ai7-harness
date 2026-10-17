@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
+import { MAX_SKILL_PACKAGE_BYTES } from '../../src/service/imported-skills.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION } from '../../src/service/review/category-configuration.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -1572,7 +1573,8 @@ describe('decodeRequest rejects malformed frames', () => {
       ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'A'.repeat(64), acceptItems: [], upstreamPaths: [] }],
       ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: 'x', upstreamPaths: [] }],
       ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: [], upstreamPaths: [1] }],
-      ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: Array.from({ length: 65 }, () => 'x'), upstreamPaths: [] }],
+      ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: Array.from({ length: MAX_SKILL_PACKAGE_BYTES + 1 }, () => 'x'), upstreamPaths: [] }],
+      ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: ['x'.repeat(MAX_SKILL_PACKAGE_BYTES + 1)], upstreamPaths: [] }],
       ['adoptImportedSkillUpdate', { candidateId, reviewDigest: 'a'.repeat(64), acceptItems: [] }],
       ['createImportedSkillUpdateRule', { skillId }],
       ['createImportedSkillUpdateRule', { skillId, confirmation: 'x'.repeat(201) }],

@@ -17,6 +17,7 @@ import { canonicalJson, canonicalRecord, hasExactKeys, isRecord, parseCanonicalJ
  */
 export const MAX_SKILL_PACKAGE_BYTES = 96 * 1024;
 export const MAX_SKILL_FILES = 32;
+export const MAX_SKILL_DECLARATION_CHARACTERS = 4096;
 const MAX_ARCHIVE_BYTES = 256 * 1024;
 export const STATE_LABELS: Record<ImportedSkillState, string> = {
   'pending-validation': '待验证', validated: '验证通过（未安装）', restricted: '已拒绝（受限）', rejected: '已拒绝',
@@ -180,7 +181,7 @@ export function convertSkillFiles(files: readonly ImportedSkillFile[], digest: s
           report.mapped.push(`${key}：保留声明，AI7 不提供这些宿主能力。`);
           if (/hooks?|scripts|dependencies|runtime|subagents?|agents?/iu.test(key)) report.unsupported.push(`${key} 需要此版本不提供的执行环境。`);
         } else report.reviewRequired.push(`未识别字段 ${key}：保留原文，未解释其语义。`);
-        if (value.length > 4096) problems.push(`前置信息字段过长：${key}`);
+        if (value.length > MAX_SKILL_DECLARATION_CHARACTERS) problems.push(`前置信息字段过长：${key}`);
       }
     }
   }

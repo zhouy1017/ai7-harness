@@ -8,7 +8,8 @@ import {
   IMPORTED_SKILL_UPDATE_RULE_CONFIRMATION, IMPORTED_SKILL_UPDATE_SCHEMA_SQL, initializeImportedSkillSchema, initializeImportedSkillUpdateSchema,
 } from '../../src/service/imported-skill-schema.js';
 import { authorityChanges, ImportedSkillUpdates, reconcileFiles, skillIdentity } from '../../src/service/imported-skill-updates.js';
-import { acquireSkillPackage, convertSkillFiles, ImportedSkills } from '../../src/service/imported-skills.js';
+import { acquireSkillPackage, convertSkillFiles, ImportedSkills, MAX_SKILL_DECLARATION_CHARACTERS, MAX_SKILL_FILES } from '../../src/service/imported-skills.js';
+import { decodeRequest } from '../../src/service/request-frames.js';
 import { CapturedProcedures, capturedProcedureDocument, initializeCapturedProcedureSchema, recordReviewRunProcedurePin } from '../../src/service/captured-procedures.js';
 import { reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import type { ImportedSkillFile, ImportedSkillUpdateCandidateProjection } from '../../src/shared/protocol.js';
@@ -207,6 +208,27 @@ describe('checking an update from a file', () => {
 });
 
 describe('explicit adoption (REUSE-033)', () => {
+  it('can acknowledge and adopt every actual finding through the request frame, including a maximum-length declaration', async () => {
+    const base = await imported();
+    const source = await acquireSkillPackage(fixture('plain-v2-text'));
+    const original = Buffer.from(source.files[0]!.base64, 'base64').toString('utf8');
+    const declarations = [`allowed-tools: ${'a'.repeat(MAX_SKILL_DECLARATION_CHARACTERS)}`,
+      ...Array.from({ length: MAX_SKILL_FILES + MAX_SKILL_FILES + 1 }, (_, index) => `synthetic-unknown-${index}: inert`)];
+    const files = [file('SKILL.md', original.replace('license: MIT', `license: MIT\n${declarations.join('\n')}`))];
+    const contentSha256 = sha256Hex(canonicalJson(files));
+    const candidate = updates.keep(base.skillId, { ...source, files, contentSha256, conversion: convertSkillFiles(files, contentSha256, base.name) }, randomUUID()).candidate!;
+    expect(candidate.acceptItems.length).toBeGreaterThan(MAX_SKILL_FILES + MAX_SKILL_FILES);
+    expect(Math.max(...candidate.acceptItems.map((item) => item.length))).toBeGreaterThan(MAX_SKILL_DECLARATION_CHARACTERS);
+    const request = { id: randomUUID(), op: 'adoptImportedSkillUpdate' as const, input: {
+      candidateId: candidate.candidateId, reviewDigest: candidate.reviewDigest, acceptItems: candidate.acceptItems, upstreamPaths: [],
+    } };
+    const decoded = decodeRequest(new TextEncoder().encode(JSON.stringify(request)));
+    expect(decoded).toEqual(request);
+    if (decoded.op !== 'adoptImportedSkillUpdate') throw new Error('wrong decoded operation');
+    const adopted = updates.adopt(decoded.input.candidateId, decoded.input);
+    expect(skills.revision(adopted.adoptedRevisionId!)).toMatchObject({ state: 'pending-validation', enabledBooks: [] });
+  });
+
   it('adopts into a new working revision at 待验证, current but never enabled, and validation is the existing separate stage', async () => {
     const base = await imported();
     skills.validate(base.revisionId);
