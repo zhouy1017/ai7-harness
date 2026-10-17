@@ -324,6 +324,8 @@ import {
 } from './plan-preview-labels.js';
 import { MAX_PINNED_BOOKS, type ShellBookEntry, type ShellBookSection } from '../shared/preferences.js';
 import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
+import { mountHelp } from './help.js';
+import { HELP_ENTRY, HELP_OPENED } from './help-labels.js';
 import { PREFERENCES_LOCAL_LINE, SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
 
 function requiredElement(selector: string): HTMLElement {
@@ -1018,6 +1020,25 @@ const shell = mountShell({
     void leaveThen(async () => renderSettingsHub());
   },
 });
+
+/**
+ * 帮助's sidebar entry (Issue #939, wave 11 slice 11f; Owner decision 27): slice 11a left the bottom slot beside 设置, and
+ * the screen it opens is the last of the wave's shell surfaces. It is an ordinary sidebar row, so it keeps the shell's
+ * icon, hover name and interrupted behavior without the shell needing to know about it.
+ */
+(() => {
+  const link = element('a', 'sidebar-link');
+  link.href = '#';
+  link.dataset['navIcon'] = HELP_ENTRY.icon;
+  link.dataset['navHelp'] = 'hub';
+  link.append(element('span', 'nav-label', HELP_ENTRY.label));
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (authorityInterrupted || link.getAttribute('aria-disabled') === 'true') return;
+    void leaveThen(async () => renderHelp());
+  });
+  requiredElement('[data-shell-slot="help"]').replaceChildren(link);
+})();
 // Another window may have pinned or opened a Book: the list is read again whenever this one gains focus.
 window.addEventListener('focus', () => void shellPreferences.load().catch(() => undefined));
 void shellPreferences.load().then(
@@ -6385,6 +6406,23 @@ function renderSettingsHub(): void {
   }
   replaceScreen('settings', content);
   setStatus(SETTINGS_HUB_WORDS.opened);
+}
+
+/**
+ * 帮助 (Issue #939, wave 11 slice 11f; Owner decision 27): the sidebar entry's screen, beside 设置 in the bottom area — a
+ * 使用帮助 · 隐私说明 · 第三方许可 tab set and the 关于 line. Its versions come from the same service read 设置 › 数据与存储
+ * uses, so the two screens cannot disagree.
+ */
+function renderHelp(): void {
+  const content = panel();
+  content.classList.add('help-screen');
+  mountHelp({
+    root: content,
+    loadVersions: () => window.ai7.inspectDataVersion(),
+    back: () => void initializeStartup(),
+  });
+  replaceScreen('help', content);
+  setStatus(HELP_OPENED);
 }
 
 /**
