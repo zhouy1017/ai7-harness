@@ -1453,13 +1453,18 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await store.reviewBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
+    case 'prepareBookDeliveryPackageArchiveExport':
+      return { id: request.id, ok: true, op: request.op,
+        result: await store.prepareBookDeliveryPackageArchiveExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable) };
     case 'prepareBookDeliveryPackageExport':
       return {
         id: request.id, ok: true, op: request.op,
         result: await store.prepareBookDeliveryPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
       };
+    case 'cancelBookDeliveryPackageArchiveExport':
     case 'cancelBookDeliveryPackageExport':
       return { id: request.id, ok: true, op: request.op, result: jobs.cancelPackageExport(request.input.jobId) };
+    case 'approveBookDeliveryPackageArchiveExport':
     case 'approveBookDeliveryPackageExport':
       return {
         id: request.id, ok: true, op: request.op,
