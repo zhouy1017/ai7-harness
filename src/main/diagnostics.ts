@@ -1,3 +1,6 @@
+import { lstat, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+
 /** Pure, allowlisted diagnostics projection. Never accepts a filesystem root to crawl. */
 export const DIAGNOSTICS_CHANNELS = {
   listCrashRecords: 'ai7:diagnostics:list-crashes',
@@ -102,4 +105,37 @@ export function buildDiagnosticsBundle(inputs: DiagnosticsInputs): Readonly<Reco
     files[`crashes/${String(index + 1).padStart(2, '0')}-${record.kind}.json`] = JSON.stringify(record, null, 2);
   });
   return files;
+}
+
+/** The sole preferences file is read directly. No tree traversal, database or cache access. */
+export async function collectDiagnosticsPreferences(userData: string): Promise<unknown> {
+  const path = join(userData, 'preferences.json');
+  try {
+    const stat = await lstat(path);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) return null;
+    return JSON.parse(await readFile(path, 'utf8')) as unknown;
+  } catch { return null; }
+}
+
+/** Exclusive folder creation prevents overwriting or retaining unrelated files in an existing bundle. */
+export async function writeDiagnosticsBundle(parent: string, inputs: DiagnosticsInputs, now = new Date()): Promise<string> {
+  const files = buildDiagnosticsBundle(inputs);
+  const stem = `AI7 诊断 ${now.toISOString().replaceAll(':', '-')}`;
+  let folder = join(parent, stem);
+  for (let suffix = 0; ; suffix++) {
+    folder = join(parent, `${stem}${suffix === 0 ? '' : ` ${suffix}`}`);
+    try { await mkdir(folder, { mode: 0o700 }); break; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || suffix >= 100) throw error; }
+  }
+  try {
+    await mkdir(join(folder, 'crashes'), { mode: 0o700 });
+    for (const [name, content] of Object.entries(files)) {
+      await mkdir(dirname(join(folder, name)), { recursive: true });
+      await writeFile(join(folder, name), content, { flag: 'wx', mode: 0o600 });
+    }
+    return folder;
+  } catch (error) {
+    await rm(folder, { recursive: true, force: true });
+    throw error;
+  }
 }

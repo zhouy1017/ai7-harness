@@ -659,6 +659,8 @@ async function main() {
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     dataRootForCleanup = dataRoot;
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+    const diagnosticsDestination = resolve(runRoot, 'diagnostics-export');
+    await mkdir(diagnosticsDestination);
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
     const launch = async (picker, savePath) => {
@@ -667,6 +669,7 @@ async function main() {
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot,
         '--j12-observe-reveal', 'true', '--launcher-pid', String(process.pid),
+        '--j12-diagnostics-folder', diagnosticsDestination,
       ];
       if (picker) args.splice(args.length - 4, 0, '--j12-picker-path', picker);
       // 导出数据库's Save dialog, answered once (Issue #434, S86a).
@@ -1223,8 +1226,27 @@ async function main() {
     await waitFor(primary, `document.querySelector('.data-storage-summary')?.dataset.revealRequested==='requested'`, 'reveal-requested');
     await assertRenderer(primary, `document.querySelector('.data-storage-summary')?.dataset.nativeRevealSuppressedForE2e==='true'`, 'main-owned-zero-argument-reveal');
 
-    at('model-service-first-save');
+    at('diagnostics-bundle-export');
     await click(primary, '返回', 'data-storage-return');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'diagnostics-landing');
+    await click(primary, '诊断', 'diagnostics-open');
+    await waitFor(primary, `document.querySelector('[data-screen="diagnostics"] [data-crash-list-ready="true"]')`, 'diagnostics-ready');
+    await assertRenderer(primary, `document.querySelector('[data-screen="diagnostics"]')?.textContent.includes('本机崩溃记录')`, 'diagnostics-crash-heading');
+    await click(primary, '导出诊断包…', 'diagnostics-export');
+    await waitFor(primary, `document.querySelector('[data-export-state="exported"]')`, 'diagnostics-exported');
+    const diagnosticsFolders = await readdir(diagnosticsDestination);
+    requireJourney(diagnosticsFolders.length === 1 && diagnosticsFolders[0].startsWith('AI7 诊断 '), 'diagnostics-folder');
+    const diagnosticsBundle = resolve(diagnosticsDestination, diagnosticsFolders[0]);
+    requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
+    const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
+    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v15.json'), 'utf8'));
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 83 && diagnosticsSummary.protocol === 151 &&
+      diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
+    requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
+    await click(primary, '查看诊断位置', 'diagnostics-reveal');
+    await click(primary, '返回', 'diagnostics-return');
+
+    at('model-service-first-save');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-service-landing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-service-open-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-service-open-settings-hub');
