@@ -8,6 +8,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeTheme,
   session,
   shell,
   type Event as ElectronEvent,
@@ -95,6 +96,7 @@ import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
 import { PREFERENCE_IPC_CHANNELS } from '../shared/preferences.js';
+import { APPEARANCE_IPC_CHANNEL, type AppearanceState } from '../shared/appearance.js';
 import {
   createCanonicalExternalDataRoot,
   createCanonicalProductionDataRoot,
@@ -598,6 +600,7 @@ function registerRendererHandlers(
   quitApplication: () => 'quitting' | 'blocked',
   unsavedWindows: () => boolean,
   preferences: PreferenceStore,
+  appearanceWindows: () => Iterable<OwnedRendererWindow>,
 ): () => void {
   const requireNothingUnsaved = (): void => {
     if (unsavedWindows()) throw new ServiceCallError('DATABASE_REPLACEMENT_UNSAVED', '还有窗口里的修改没有保存；请先保存或关闭那个窗口，再替换本机数据。');
@@ -2428,10 +2431,35 @@ function registerRendererHandlers(
       return preferenceCall(() => preferences.read());
     }),
   );
+  // Application Theme Preference (Issue #935, VIS-004/005): the chosen theme with nativeTheme's reading, sent to every owned
+  // window when either changes; native frames, menus and dialogs follow the same choice. Under 'system' the reading is the
+  // operating system's state.
+  const appearanceState = (): AppearanceState => {
+    const preference = preferences.read().values['appearance.theme'];
+    if (nativeTheme.themeSource !== preference) nativeTheme.themeSource = preference;
+    return { preference, systemDark: nativeTheme.shouldUseDarkColors };
+  };
+  const broadcastAppearance = (): void => {
+    const state = appearanceState();
+    for (const owned of appearanceWindows()) {
+      if (!owned.window.isDestroyed()) owned.window.webContents.send(APPEARANCE_IPC_CHANNEL, state);
+    }
+  };
+  nativeTheme.on('updated', broadcastAppearance);
+  broadcastAppearance();
   ipcMain.handle(PREFERENCE_IPC_CHANNELS.savePreference, (event, input: unknown) =>
     envelope(() => {
       requireSender(event);
-      return preferenceCall(() => preferences.save(input));
+      const saved = preferenceCall(() => preferences.save(input));
+      // Every window hears the new theme before the choosing window's answer arrives.
+      if ((input as { key?: unknown }).key === 'appearance.theme') broadcastAppearance();
+      return saved;
+    }),
+  );
+  ipcMain.handle(APPEARANCE_IPC_CHANNEL, (event) =>
+    envelope(() => {
+      requireSender(event);
+      return appearanceState();
     }),
   );
   ipcMain.handle(IPC_CHANNELS.revealProductDataLocation, (event) =>
@@ -5790,6 +5818,8 @@ function registerRendererHandlers(
   );
 
   return () => {
+    nativeTheme.removeListener('updated', broadcastAppearance);
+    ipcMain.removeHandler(APPEARANCE_IPC_CHANNEL);
     for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel);
     for (const channel of Object.values(PREFERENCE_IPC_CHANNELS)) ipcMain.removeHandler(channel);
     ipcMain.removeListener(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
@@ -6618,6 +6648,7 @@ export async function runApplication(): Promise<void> {
       },
       () => [...ownedWindows.values()].some((owned) => owned.closeRisk && !owned.window.isDestroyed()),
       preferenceStore,
+      () => ownedWindows.values(),
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

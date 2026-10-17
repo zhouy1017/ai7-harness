@@ -1,3 +1,15 @@
+import { createAppearance } from './appearance.js';
+import {
+  APPEARANCE_BACK,
+  APPEARANCE_CHOICES,
+  APPEARANCE_LEDE,
+  APPEARANCE_LEGEND,
+  APPEARANCE_SAVED,
+  APPEARANCE_SAVE_FAILED,
+  APPEARANCE_SECTION,
+  APPEARANCE_STATUS,
+  APPEARANCE_TITLE,
+} from './appearance-labels.js';
 import { renderHouseReviewPreference } from './knowledge-base-memory.js';
 import { mountDiagnostics } from './diagnostics.js';
 import { DIAGNOSTICS_OPENED } from './diagnostics-labels.js';
@@ -6245,6 +6257,7 @@ function renderSettingsHub(): void {
     'model-service': () => void renderModelServiceSettings(),
     'evaluation-calibration': () => void renderEvaluationCalibration(null),
     'data-storage': () => void renderDataAndStorage(),
+    appearance: renderAppearance,
     diagnostics: renderDiagnostics,
     usage: renderUsage,
     keyboard: renderKeyboardSettings,
@@ -6428,6 +6441,44 @@ function renderBookFilter(
   }
   form.append(legend, fieldLabel, textLabel, row);
   return form;
+}
+
+function renderAppearance(): void {
+  const content = panel();
+  content.classList.add('appearance-settings');
+  content.append(element('p', 'section-label', APPEARANCE_SECTION), element('h2', undefined, APPEARANCE_TITLE),
+    element('p', 'lede', APPEARANCE_LEDE));
+  const choices = element('fieldset', 'appearance-choices');
+  choices.append(element('legend', undefined, APPEARANCE_LEGEND));
+  const message = element('p', 'field-note');
+  message.setAttribute('role', 'status');
+  const radios: HTMLInputElement[] = [];
+  for (const choice of APPEARANCE_CHOICES) {
+    const label = element('label', 'appearance-choice');
+    const input = element('input');
+    input.type = 'radio'; input.name = 'appearance-theme'; input.value = choice.value;
+    input.dataset['appearanceTheme'] = choice.value;
+    input.checked = appearance.preference === choice.value;
+    // The radios stay enabled while saving: disabling the focused one would drop keyboard focus (KEY-013).
+    input.addEventListener('change', () => {
+      if (!input.checked) return;
+      void appearance.choose(choice.value).then(() => { message.textContent = APPEARANCE_SAVED; }, () => {
+        for (const radio of radios) radio.checked = radio.value === appearance.preference;
+        message.textContent = APPEARANCE_SAVE_FAILED;
+      });
+    });
+    radios.push(input);
+    label.append(input, element('strong', undefined, choice.label), element('span', 'field-note', choice.description));
+    choices.append(label);
+  }
+  const unsubscribe = appearance.subscribe(() => { for (const radio of radios) radio.checked = radio.value === appearance.preference; });
+  const observer = new MutationObserver(() => { if (!content.isConnected) { unsubscribe(); observer.disconnect(); } });
+  observer.observe(screen, { childList: true });
+  const actions = element('div', 'button-row');
+  actions.append(button(APPEARANCE_BACK, 'quiet', () => void initializeStartup()));
+  content.append(choices, message, actions);
+  replaceScreen('appearance', content);
+  setStatus(APPEARANCE_STATUS);
 }
 
 function renderLanding(
@@ -9772,7 +9823,10 @@ async function initializeStartup(): Promise<void> {
   }
 }
 
+const appearance = createAppearance(window.ai7);
+
 async function initializeRenderer(): Promise<void> {
+  await appearance.ready;
   try {
     const route = await window.ai7.getBookWorkbenchRoute();
     if (route) {

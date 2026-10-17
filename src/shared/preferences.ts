@@ -7,6 +7,8 @@
 // `PREFERENCE_KEYS` is the one registry of keys, and it is append-only: a later slice adds its keys here with their
 // validators and defaults, and never changes or removes one another slice declared.
 
+import { isThemePreference, type ThemePreference } from './appearance.js';
+
 /** One declared key: what a stored value must be, and the value read when none is stored or the stored one is invalid. */
 export interface PreferenceDefinition<Value> {
   validate(value: unknown): value is Value;
@@ -169,6 +171,8 @@ export const PREFERENCE_KEYS = Object.freeze({
   'shell.pinnedBooks': preference(isBookList(MAX_PINNED_BOOKS, isPinnedEntry), [] as ReadonlyArray<ShellBookEntry>),
   // 11a: 最近打开 Books, most recent first, at most eight (IA-009); recency changes no business record.
   'shell.recentBooks': preference(isBookList(MAX_RECENT_BOOKS, isRecentEntry), [] as ReadonlyArray<ShellRecentBookEntry>),
+  // 11b: 外观 — 跟随系统 (default) / 浅色 / 深色 (VIS-004); decoration only, read by no record, export or model context (VIS-009).
+  'appearance.theme': preference(isThemePreference, 'system' as ThemePreference),
 });
 
 export type PreferenceKey = keyof typeof PREFERENCE_KEYS;

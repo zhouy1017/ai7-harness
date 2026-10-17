@@ -20,6 +20,7 @@ import {
   type PreferencesRendererApi,
   type SavePreferenceInput,
 } from '../shared/preferences.js';
+import { APPEARANCE_IPC_CHANNEL, type AppearanceRendererApi, type AppearanceState } from '../shared/appearance.js';
 
 function markServiceInterrupted(): void {
   const mark = (): void => {
@@ -180,7 +181,7 @@ async function invoke<Result>(channel: string, input?: unknown): Promise<Result>
 if (process.platform !== 'win32' && process.platform !== 'darwin') throw new Error('Unsupported renderer platform.');
 
 // Local view and input configuration (Issue #934, slice 11a) rides beside the service's members: main-owned, no protocol op.
-const api: RendererApi & PreferencesRendererApi = Object.freeze({
+const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi = Object.freeze({
   listCrashRecords: () => invoke<Awaited<ReturnType<DiagnosticsApi['listCrashRecords']>>>('ai7:diagnostics:list-crashes'),
   exportDiagnosticsBundle: () => invoke<Awaited<ReturnType<DiagnosticsApi['exportDiagnosticsBundle']>>>('ai7:diagnostics:export'),
   revealDiagnosticsLocation: () => invoke<Awaited<ReturnType<DiagnosticsApi['revealDiagnosticsLocation']>>>('ai7:diagnostics:reveal'),
@@ -723,6 +724,20 @@ const api: RendererApi & PreferencesRendererApi = Object.freeze({
     invoke<Awaited<ReturnType<RendererApi['getProductDataLocation']>>>(IPC_CHANNELS.getProductDataLocation),
   getPreferences: () => invoke<PreferencesProjection>(PREFERENCE_IPC_CHANNELS.getPreferences),
   savePreference: (input: SavePreferenceInput) => invoke<PreferencesProjection>(PREFERENCE_IPC_CHANNELS.savePreference, input),
+  // Issue #935: the initial main-process appearance state, then every change; a push that arrives first wins over the read.
+  onAppearanceChanged: (listener: (state: AppearanceState) => void) => {
+    let active = true;
+    let generation = 0;
+    const changed = (_event: unknown, state: AppearanceState): void => { generation += 1; if (active) listener(state); };
+    ipcRenderer.on(APPEARANCE_IPC_CHANNEL, changed);
+    const initialGeneration = generation;
+    void invoke<AppearanceState>(APPEARANCE_IPC_CHANNEL).then((state) => {
+      if (active && generation === initialGeneration) listener(state);
+    }).catch(() => {
+      if (active && generation === initialGeneration) listener({ preference: 'system', systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches });
+    });
+    return () => { active = false; ipcRenderer.removeListener(APPEARANCE_IPC_CHANNEL, changed); };
+  },
   revealProductDataLocation: () =>
     invoke<Awaited<ReturnType<RendererApi['revealProductDataLocation']>>>(IPC_CHANNELS.revealProductDataLocation),
   selectSearchBackend: (input: Parameters<RendererApi['selectSearchBackend']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectSearchBackend']>>>(IPC_CHANNELS.selectSearchBackend, input),

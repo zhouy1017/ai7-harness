@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 function preloadMembers(): string[] {
   const preload = readFileSync(new URL('../../src/main/preload.ts', import.meta.url), 'utf8');
-  const api = preload.slice(preload.indexOf('const api: RendererApi & PreferencesRendererApi = Object.freeze({'), preload.lastIndexOf('contextBridge.exposeInMainWorld'));
+  const api = preload.slice(preload.indexOf('const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi = Object.freeze({'), preload.lastIndexOf('contextBridge.exposeInMainWorld'));
   return [...api.matchAll(/^  ([A-Za-z][A-Za-z0-9]*):/gmu)].map((match) => match[1]!).sort();
 }
 
