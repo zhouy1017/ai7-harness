@@ -475,7 +475,7 @@ describe('the update ledgers are append-only and refuse an unreasoned row', () =
     }
     const other = await imported('resources');
     expect(() => skills.appendSelection(base.skillId, other.revisionId, 'import', null, null)).toThrow(/IMPORTED_SKILL_SELECTION_INVALID/u);
-    expect(() => skills.appendSelection(base.skillId, base.revisionId, 'adopt', candidate.candidateId.replace(/./u, '0'), null)).toThrow();
+    expect(() => skills.appendSelection(base.skillId, base.revisionId, 'adopt', candidate.candidateId.replace(/./u, (first) => (first === '0' ? '1' : '0')), null)).toThrow();
     expect(() => db.prepare("INSERT INTO imported_skill_update_rules VALUES (?, ?, 5, 'revoke', ?, NULL, 'x', '{}', ?)")
       .run(randomUUID(), base.skillId, randomUUID(), 'a'.repeat(64))).toThrow();
     expect(() => db.prepare("INSERT INTO imported_skill_update_rules VALUES (?, ?, 2, 'create', NULL, '随便一句', 'x', '{}', ?)")
