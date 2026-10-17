@@ -55,7 +55,7 @@ describe('the persisted search settings and schema 74', () => {
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.getSearchBackendConnections()).toHaveLength(5); store.close(); store = undefined;
       const terminal = new DatabaseSync(path);
-      // Synchronized delta with #66: imported Skill sibling relations follow the house review preference revision.
+      // Synchronized delta with #66: revision 81 (imported Skill relations) follows revision 80 (Task Intent Drafts).
       expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(81);
       expect(String(terminal.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_plan_records'").get()!.sql)).toContain('web-tools-backend');
       expect(() => terminal.prepare("INSERT INTO search_backend_connections VALUES ('search-kimi', NULL, 'missing', NULL, 'now')").run()).toThrow();

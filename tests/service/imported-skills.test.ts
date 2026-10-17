@@ -12,7 +12,7 @@ let roots: ServiceTestRoots | undefined;
 afterEach(async () => { await roots?.dispose(); roots = undefined; });
 
 describe('imported Skill store boundary', () => {
-  it('migrates schema 79 additively, preserving existing schema and native installation bytes, and retains exact history across restart', async () => {
+  it('migrates schema 80 additively, preserving existing schema and native installation bytes, and retains exact history across restart', async () => {
     roots = await createServiceTestRoots('ai7-imported-skill-service-');
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const creation = store.prepareBookCreation('合成工序测试图书', null);
@@ -24,7 +24,7 @@ describe('imported Skill store boundary', () => {
     try {
       for (const trigger of Object.keys(IMPORTED_SKILL_TRIGGER_SQL)) prior.exec(`DROP TRIGGER ${trigger}`);
       for (const table of Object.keys(IMPORTED_SKILL_SCHEMA_SQL).reverse()) prior.exec(`DROP TABLE ${table}`);
-      prior.exec('PRAGMA user_version = 79');
+      prior.exec('PRAGMA user_version = 80');
       before = prior.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
       expect(String(prior.prepare("SELECT sql FROM sqlite_schema WHERE name = 'native_artifact_installations'").get()?.sql)).toBe(NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL);
     } finally { prior.close(); }

@@ -461,18 +461,19 @@ async function constructPredecessorV12(dataRoot, bookId) {
     // Every post-v12 table. A table left off is not caught here: the open accepts a predecessor that kept a later layer's
     // tables (`includeMaterialIndexTables ||= committed(…)` in bounded-manuscript.ts), so that mutant survives by design.
     // Synchronized delta with Issue #901: revision 77's four factual verification relations lead the list.
-    // Synchronized delta with Issue #423 (slice 7a): revision 80's three Task Intent Draft relations come first.
+    // Synchronized delta with #66: revision 81's four imported Skill relations come first.
+    // Synchronized delta with Issue #423 (slice 7a): revision 80's three Task Intent Draft relations follow them.
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
-      DROP TABLE task_intent_draft_promotions;
-      DROP TABLE task_intent_draft_versions;
-      DROP TABLE task_intent_drafts;
-      DROP TABLE review_run_preference_pins;
       DROP TABLE imported_skill_states;
       DROP TABLE imported_skill_revisions;
       DROP TABLE imported_skill_snapshots;
       DROP TABLE imported_skills;
+      DROP TABLE task_intent_draft_promotions;
+      DROP TABLE task_intent_draft_versions;
+      DROP TABLE task_intent_drafts;
+      DROP TABLE review_run_preference_pins;
       DROP TABLE house_review_preference_versions;
       DROP TABLE correction_proposals;
       DROP TABLE factual_review_decisions;
