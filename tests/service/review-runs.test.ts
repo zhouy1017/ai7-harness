@@ -3,7 +3,7 @@ import { HouseReviewPreferenceLedger } from '../../src/service/house-review-pref
 import { HOUSE_PREFERENCE_CLOSED, HOUSE_PREFERENCE_NOT_RULE } from '../../src/service/task-plan.js';
 import { editCategoryWeight, graphemeEditVolume } from '../../src/service/edit-quality-signals.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -1835,6 +1835,26 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
       // A report that is not this Book's — or none at all — is refused, and nothing is prepared.
       expect(await exportCode(() => session.store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'report', reportId: randomUUID() }, options }, true)))
         .toBe('EXPORT_TARGET_NOT_FOUND');
+      // #953: a frozen package carries the exact recorded report through S64's archive stream hook too.
+      const milestone = await session.store.saveMilestone(book.manuscriptId, book.branchId, '归档稿', 'stage-archive', null, '');
+      session.store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '测试存档', basis: '测试记录' });
+      for (const typeId of ['news-release', 'promotion-article', 'review-article', 'launch-materials', 'marketing-points']) {
+        session.store.decideProductionDocumentType({ bookId: book.bookId, typeId, notForThisBook: true });
+      }
+      const bundle = session.store.inspectBookDeliveryPackage(book.bookId);
+      const version = session.store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '报告存档', expectedContentDigest: bundle.content.digest }).package.versions[0]!;
+      const archiveReview = await session.store.reviewBookDeliveryPackageExport({ bookId: book.bookId, packageVersionId: version.packageVersionId,
+        options: { includeAnnotations: true, includeSuggestions: true }, route: 'archive' }, true);
+      const archivePath = join(outbox, '含审阅报告.zip');
+      const preparedArchive = await session.store.prepareBookDeliveryPackageArchiveExport({ bookId: book.bookId, packageVersionId: version.packageVersionId,
+        options: archiveReview.options, memberKeys: [], reviewDigest: archiveReview.reviewDigest, destination: archivePath }, true);
+      const exportedArchive = await session.store.approveBookDeliveryPackageExport({ bookId: book.bookId, exportId: preparedArchive.exportId }, true);
+      const reportMember = exportedArchive.export.files.find((file) => file.key === `report:${report.reportId}`)!;
+      expect(reportMember.outcome).toBe('created');
+      const archive = unzipSync(await readFile(archivePath));
+      expect(createHash('sha256').update(archive[reportMember.fileName]!).digest('hex'))
+        .toBe(createHash('sha256').update(written).digest('hex'));
+
     });
   }, 300_000);
 });

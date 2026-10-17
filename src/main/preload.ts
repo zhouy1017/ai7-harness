@@ -680,6 +680,12 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<Awaited<ReturnType<RendererApi['reviewBookDeliveryPackageExport']>>>(IPC_CHANNELS.reviewBookDeliveryPackageExport, input),
   chooseBookDeliveryPackageExportFolder: (input: Parameters<RendererApi['chooseBookDeliveryPackageExportFolder']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageExportFolder']>>>(IPC_CHANNELS.chooseBookDeliveryPackageExportFolder, input),
+  chooseBookDeliveryPackageArchiveDestination: (input: Parameters<RendererApi['chooseBookDeliveryPackageArchiveDestination']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageArchiveDestination']>>>(IPC_CHANNELS.chooseBookDeliveryPackageArchiveDestination, input),
+  approveBookDeliveryPackageArchiveExport: (input: Parameters<RendererApi['approveBookDeliveryPackageArchiveExport']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['approveBookDeliveryPackageArchiveExport']>>>(IPC_CHANNELS.approveBookDeliveryPackageArchiveExport, input),
+  cancelBookDeliveryPackageArchiveExport: (input: Parameters<RendererApi['cancelBookDeliveryPackageArchiveExport']>[0]) =>
+    invoke<boolean>(IPC_CHANNELS.cancelBookDeliveryPackageArchiveExport, input),
   cancelBookDeliveryPackageExport: (input: Parameters<RendererApi['cancelBookDeliveryPackageExport']>[0]) =>
     invoke<boolean>(IPC_CHANNELS.cancelBookDeliveryPackageExport, input),
   approveBookDeliveryPackageExport: (input: Parameters<RendererApi['approveBookDeliveryPackageExport']>[0]) =>

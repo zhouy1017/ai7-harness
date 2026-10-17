@@ -1,14 +1,17 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { unzipSync } from 'fflate';
 import { existsSync, writeFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT } from '../../src/service/book-delivery-package-exports.js';
+import { BookDeliveryPackageArchiveWriter } from '../../src/service/book-delivery-package-archives.js';
 import { BookDeliveryPackages, BOOK_DELIVERY_PACKAGE_WORDS } from '../../src/service/book-delivery-packages.js';
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { ManuscriptExportStore } from '../../src/service/manuscript-export.js';
+import * as exportFiles from '../../src/service/manuscript-export.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import type { EvaluationContent } from '../../src/shared/protocol.js';
@@ -149,6 +152,242 @@ async function count(table: string): Promise<number> {
 }
 
 describe('图书交付包 · 导出 (S67b)', () => {
+  it('keeps an ambiguous publication unconfirmed and never retries it', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { bookId, packageVersionId } = await preparedPackage(store);
+      const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, route: 'archive' }, true);
+      const destination = join(roots.inputRoot, '待确认.zip');
+      const prepared = await store.prepareBookDeliveryPackageArchiveExport({ bookId, packageVersionId, options: ALL,
+        memberKeys: [], reviewDigest: review.reviewDigest, destination }, true);
+      const publish = exportFiles.writeAtomically;
+      const write = vi.spyOn(exportFiles, 'writeAtomically').mockImplementationOnce(async (...args) => {
+        await publish(...args);
+        return { outcome: 'ambiguous', code: 'EXPORT_VERIFY_UNCERTAIN' };
+      });
+      const result = await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
+      expect(result.export).toMatchObject({ state: 'incomplete', summary: '结果待确认 · 压缩包', archiveReceipt: { outcome: 'ambiguous', sha256: null } });
+      expect(result.export.files.every((file) => file.outcome === 'ambiguous' && !file.revealAvailable)).toBe(true);
+      expect(existsSync(destination)).toBe(true);
+      await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(result.package.versions[0]!.exports[0]!.revealPreparationId).toBeNull();
+    } finally { store.close(); }
+  }, 180_000);
+
+  it('records a staging failure even before the first member, without leaving a target', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { bookId, packageVersionId } = await preparedPackage(store);
+      const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, route: 'archive' }, true);
+      const destination = join(roots.inputRoot, '无法暂存.zip');
+      const prepared = await store.prepareBookDeliveryPackageArchiveExport({ bookId, packageVersionId, options: ALL,
+        memberKeys: [], reviewDigest: review.reviewDigest, destination }, true);
+      vi.spyOn(BookDeliveryPackageArchiveWriter, 'create').mockRejectedValueOnce(new Error('synthetic staging failure'));
+      const result = await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
+      expect(result.export).toMatchObject({ state: 'incomplete', stopped: { fileName: review.files[0]!.fileName, reason: '失败' },
+        archiveReceipt: { outcome: 'failed' } });
+      expect(result.export.files.map((file) => file.outcome)).toEqual(['not-written', 'not-written']);
+      expect(result.package.versions[0]!.exports).toHaveLength(1);
+      expect(existsSync(destination)).toBe(false);
+      expect(await count('export_approvals')).toBe(0);
+    } finally { store.close(); }
+  }, 180_000);
+
+  it('exports all content across review pages, with bounded projections and one receipt per member', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { bookId, packageVersionId } = await preparedPackage(store);
+      // Synthetic package-source expansion at the verified-record seam, using a real sample1-derived delivered document.
+      // This tests a content set larger than the renderer's page without inventing report or manuscript payloads.
+      const original = BookDeliveryPackages.prototype.record;
+      vi.spyOn(BookDeliveryPackages.prototype, 'record').mockImplementation(function (this: BookDeliveryPackages, ...args) {
+        const found = original.apply(this, args);
+        if (found === null) return null;
+        const document = found.record.content.documents.find((entry) => entry.disposition === 'included')!;
+        return { ...found, record: { ...found.record, content: { ...found.record.content,
+          documents: Array.from({ length: 45 }, (_, index) => ({ ...document, typeId: `synthetic-${index}` })) } } };
+      });
+      const first = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, route: 'archive' }, true);
+      const second = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, route: 'archive', offset: 40 }, true);
+      expect([first.files.length, first.nextOffset, second.files.length, second.nextOffset]).toEqual([40, 40, 6, null]);
+      expect(first.reviewDigest).toBe(second.reviewDigest);
+      expect([...first.files, ...second.files].some((file) => file.key === 'manifest')).toBe(false);
+      const destination = join(roots.inputRoot, '跨页.zip');
+      const prepared = await store.prepareBookDeliveryPackageArchiveExport({ bookId, packageVersionId, options: ALL,
+        memberKeys: [], reviewDigest: first.reviewDigest, destination }, true);
+      expect([prepared.files.length, prepared.filesTruncated]).toEqual([40, true]);
+      const result = await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
+      expect(result.export.archiveReceipt).toMatchObject({ memberCount: 46, membersTruncated: true });
+      expect(result.export.archiveReceipt!.members).toHaveLength(40);
+      const archive = unzipSync(await readFile(destination));
+      expect(Object.keys(archive)).toHaveLength(48);
+      expect(await count('export_receipts')).toBe(46);
+      expect(new TextDecoder().decode(archive['checksums.txt']).trimEnd().split('\n')).toHaveLength(47);
+    } finally { store.close(); }
+  }, 240_000);
+
+  it('accepts cancellation while streaming and records nothing: no approval, receipt, history line or target archive', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const jobs = new CooperativeJobOwner(store);
+    let release!: () => void;
+    try {
+      const { bookId, packageVersionId } = await preparedPackage(store);
+      const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, route: 'archive' }, true);
+      const destination = join(roots.inputRoot, '取消压缩.zip');
+      const prepared = await store.prepareBookDeliveryPackageArchiveExport({ bookId, packageVersionId, options: ALL,
+        memberKeys: [], reviewDigest: review.reviewDigest, destination }, true);
+      let reached!: () => void;
+      const atStream = new Promise<void>((resolve) => { reached = resolve; });
+      const resume = new Promise<void>((resolve) => { release = resolve; });
+      const add = BookDeliveryPackageArchiveWriter.prototype.add;
+      vi.spyOn(BookDeliveryPackageArchiveWriter.prototype, 'add').mockImplementationOnce(async function (this: BookDeliveryPackageArchiveWriter, ...args) {
+        reached(); await resume; return add.apply(this, args);
+      });
+      const job = jobs.startPackageExport({ bookId, exportId: prepared.exportId }, true);
+      await atStream;
+      expect(jobs.cancelPackageExport(job.jobId)).toBe(true);
+      release();
+      let terminal = jobs.poll(job.jobId);
+      while (terminal.state === 'queued' || terminal.state === 'running') {
+        await new Promise<void>((resolve) => setTimeout(resolve, 1));
+        terminal = jobs.poll(job.jobId);
+      }
+      expect(terminal.state).toBe('cancelled');
+      expect(existsSync(destination)).toBe(false);
+      expect((await readdir(roots.inputRoot)).some((name) => name.endsWith('.ai7-partial'))).toBe(false);
+      // EXP-011 / EXP-020: the cancelled staging leaves the export as prepared, with no Effect Approval or Receipt.
+      expect([await count('export_approvals'), await count('export_receipts')]).toEqual([0, 0]);
+      expect(store.inspectBookDeliveryPackage(bookId).versions[0]!.exports).toHaveLength(0);
+      const result = await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
+      expect(result.export.archiveReceipt?.outcome).toBe('created');
+      expect(result.export.files.every((file) => file.outcome === 'created')).toBe(true);
+    } finally { release?.(); await jobs.dispose(); store.close(); }
+  }, 180_000);
+
+  it('exports the frozen folder members into a readable ZIP with checksums and linked durable receipts', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId = '';
+    let packageVersionId = '';
+    let exportId = '';
+    let history = '';
+    try {
+      ({ bookId, packageVersionId } = await preparedPackage(store));
+      const started = store.startEvaluation(bookId).record!;
+      store.saveEvaluation({ bookId, recordId: started.recordId, expectedEntries: 1, finalize: true,
+        content: { ...started.content, conclusion: 'revise',
+          items: started.content.items.map((item, index) => ({ ...item, score: [16, 15, 17, 14, 12][index]! })),
+          risks: started.content.risks.map((risk) => ({ ...risk, level: 'low' as const, statement: '已核对。', reviewed: false })) } });
+      const bundle = store.inspectBookDeliveryPackage(bookId);
+      packageVersionId = store.prepareBookDeliveryPackage({ bookId, purpose: '压缩包测试', expectedContentDigest: bundle.content.digest })
+        .package.versions[0]!.packageVersionId;
+      const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL }, true);
+      const input = { bookId, packageVersionId, options: ALL, memberKeys: review.files.map((file) => file.key), reviewDigest: review.reviewDigest };
+      const folder = join(roots.inputRoot, '对照文件夹');
+      await mkdir(folder);
+      const folderExport = await store.prepareBookDeliveryPackageExport({ ...input, folder }, true);
+      await store.approveBookDeliveryPackageExport({ bookId, exportId: folderExport.exportId }, true);
+      const destination = join(roots.inputRoot, '交付包.zip');
+      const archiveReview = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, route: 'archive' }, true);
+      const prepared = await store.prepareBookDeliveryPackageArchiveExport({ ...input, reviewDigest: archiveReview.reviewDigest, destination }, true);
+      exportId = prepared.exportId;
+      expect(existsSync(destination)).toBe(false);
+      expect(prepared.kind).toBe('archive');
+      const exported = await store.approveBookDeliveryPackageExport({ bookId, exportId }, true);
+      const bytes = await readFile(destination);
+      const zip = unzipSync(bytes);
+      const members = Object.keys(zip).filter((name) => name !== 'checksums.txt').sort();
+      expect(members).toEqual((await readdir(folder)).sort());
+      for (const name of members) expect(Buffer.compare(Buffer.from(zip[name]!), await readFile(join(folder, name)))).toBe(0);
+      const checksumLines = members.map((name) => `${createHash('sha256').update(zip[name]!).digest('hex')}  ${name}\n`).join('');
+      expect(new TextDecoder().decode(zip['checksums.txt'])).toBe(checksumLines);
+      expect(exported.export).toMatchObject({ kind: 'archive', state: 'exported', archiveReceipt: {
+        finalPath: destination, outcome: 'created', memberCount: members.length - 1, byteLength: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex') } });
+      expect(exported.export.archiveReceipt!.members.every((member) => member.receiptId !== null)).toBe(true);
+      expect(exported.package.versions[0]!.exports.map((entry) => entry.kind ?? 'folder')).toEqual(['archive', 'folder']);
+      expect((await store.approveBookDeliveryPackageExport({ bookId, exportId }, true)).export).toEqual(exported.export);
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const rows = db.prepare(`SELECT canonical_json FROM book_delivery_package_exports WHERE export_id = ?
+          OR json_extract(canonical_json, '$.parentExportId') = ? ORDER BY rowid`).all(exportId, exportId);
+        const records = rows.map((row) => JSON.parse(row.canonical_json as string));
+        expect(records.map((record) => record.kind)).toEqual(['archive-preparation', 'archive-receipt']);
+        expect(records[1].parentExportId).toBe(records[0].exportId);
+        const bindings = db.prepare(`SELECT p.canonical_json, r.canonical_json receipt_json FROM export_preparations p
+          JOIN book_delivery_package_export_files f ON f.preparation_id = p.preparation_id
+          JOIN export_receipts r ON r.preparation_id = p.preparation_id WHERE f.export_id = ?`).all(exportId);
+        expect(bindings).toHaveLength(members.length - 1);
+        for (const row of bindings) {
+          const preparation = JSON.parse(row.canonical_json as string);
+          const receipt = JSON.parse(row.receipt_json as string);
+          expect(preparation.archive).toEqual({ exportId, destination, memberPath: preparation.fileName });
+          expect(receipt.archive).toEqual(preparation.archive);
+          expect(receipt.finalPath).toBe(destination);
+        }
+        expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(83);
+      } finally { db.close(); }
+      history = JSON.stringify(store.inspectBookDeliveryPackage(bookId).versions);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try { expect(JSON.stringify(reopened.inspectBookDeliveryPackage(bookId).versions)).toBe(history); reopened.markCleanShutdown(); }
+    finally { reopened.close(); }
+  }, 240_000);
+
+  it('removes an unfinished archive and records the stopping member without publishing a target or blindly retrying', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { bookId, packageVersionId } = await preparedPackage(store);
+      const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, route: 'archive' }, true);
+      const destination = join(roots.inputRoot, '失败.zip');
+      const prepared = await store.prepareBookDeliveryPackageArchiveExport({ bookId, packageVersionId, options: ALL,
+        memberKeys: review.files.map((file) => file.key), reviewDigest: review.reviewDigest, destination }, true);
+      const add = BookDeliveryPackageArchiveWriter.prototype.add;
+      let calls = 0;
+      vi.spyOn(BookDeliveryPackageArchiveWriter.prototype, 'add').mockImplementation(async function (this: BookDeliveryPackageArchiveWriter, ...args) {
+        if (++calls === 2) throw new Error('synthetic write failure');
+        return add.apply(this, args);
+      });
+      const result = await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
+      expect(result.export.state).toBe('incomplete');
+      expect(result.export.stopped).toEqual({ fileName: review.files[1]!.fileName, reason: '失败' });
+      // Staging stopped before the commit boundary: no member was approved, and the archive receipt names the member.
+      expect(result.export.files.map((file) => file.outcome)).toEqual(['not-written', 'not-written']);
+      expect(result.export.archiveReceipt).toMatchObject({ outcome: 'failed', byteLength: null, sha256: null,
+        stopped: { fileName: review.files[1]!.fileName, reason: '失败' } });
+      expect(result.export.archiveReceipt!.members.every((member) => member.receiptId === null)).toBe(true);
+      expect(existsSync(destination)).toBe(false);
+      expect((await readdir(roots.inputRoot)).some((name) => name.endsWith('.ai7-partial'))).toBe(false);
+      await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
+      expect(calls).toBe(2);
+      expect([await count('export_approvals'), await count('export_receipts')]).toEqual([0, 0]);
+      expect(result.package.versions[0]!.exports).toHaveLength(1);
+    } finally { store.close(); }
+  }, 180_000);
+
+  it('binds native replacement exactly and cancels before recording an approval', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { bookId, packageVersionId } = await preparedPackage(store);
+      const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: ALL, route: 'archive' }, true);
+      const destination = join(roots.inputRoot, '覆盖.zip');
+      await writeFile(destination, 'synthetic existing archive');
+      const input = { bookId, packageVersionId, options: ALL, memberKeys: review.files.map((file) => file.key), reviewDigest: review.reviewDigest, destination };
+      const first = await store.prepareBookDeliveryPackageArchiveExport(input, true);
+      await writeFile(destination, 'synthetic changed target');
+      expect(await code(() => store.approveBookDeliveryPackageExport({ bookId, exportId: first.exportId }, true))).toBe('EXPORT_TARGET_CHANGED');
+      expect(await count('export_approvals')).toBe(0);
+      const second = await store.prepareBookDeliveryPackageArchiveExport(input, true);
+      expect(await code(() => store.approveBookDeliveryPackageExport({ bookId, exportId: second.exportId }, true,
+        () => { throw new StoreError('EXPORT_CANCELLED', '已取消导出。'); }))).toBe('EXPORT_CANCELLED');
+      expect(await count('export_approvals')).toBe(0);
+      expect(await readFile(destination, 'utf8')).toBe('synthetic changed target');
+      const result = await store.approveBookDeliveryPackageExport({ bookId, exportId: second.exportId }, true);
+      expect(result.export.archiveReceipt?.outcome).toBe('replaced');
+      expect(Object.keys(unzipSync(await readFile(destination)))).toHaveLength(4);
+    } finally { store.close(); }
+  }, 180_000);
   it('writes one frozen version into a chosen folder, file by file with receipts, and keeps the history beside the package', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let bookId: string;

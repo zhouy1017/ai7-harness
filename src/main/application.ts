@@ -1491,6 +1491,20 @@ function registerRendererHandlers(
     return folder;
   };
 
+  const choosePackageArchiveFile = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+    const injected = consumeInjectedSavePath();
+    if (injected !== undefined) { requireDesktop(isAbsolute(injected)); return injected; }
+    const chosen = await dialog.showSaveDialog(owned.window, {
+      title: '选择导出图书交付包压缩包的位置', buttonLabel: '选择此位置',
+      defaultPath: resolve(app.getPath('documents'), '图书交付包.zip'),
+      filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (chosen.canceled || !chosen.filePath) return undefined;
+    requireDesktop(isAbsolute(chosen.filePath));
+    return chosen.filePath;
+  };
+
   ipcMain.on(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
 
   ipcMain.handle(IPC_CHANNELS.getStartup, (event) =>
@@ -5340,6 +5354,7 @@ function registerRendererHandlers(
             bookId: route.bookId,
             packageVersionId: input.packageVersionId,
             options: input.options,
+            ...(input.route === 'archive' ? { route: 'archive' as const } : {}),
             ...(input.offset === undefined ? {} : { offset: input.offset }),
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
@@ -5375,10 +5390,31 @@ function registerRendererHandlers(
         });
       }),
   );
+  ipcMain.handle(IPC_CHANNELS.chooseBookDeliveryPackageArchiveDestination,
+    (event, input: Parameters<RendererApi['chooseBookDeliveryPackageArchiveDestination']>[0]) => envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['chooseBookDeliveryPackageArchiveDestination']>>> => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const destination = await choosePackageArchiveFile(owned);
+        if (destination === undefined) return { outcome: 'cancelled' };
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        const prepared = await service.call('prepareBookDeliveryPackageArchiveExport', {
+          bookId: route.bookId, packageVersionId: input.packageVersionId, options: input.options,
+          ...(input.offset === undefined ? {} : { offset: input.offset }),
+          reviewDigest: input.reviewDigest, memberKeys: input.memberKeys, destination,
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return { outcome: 'prepared', export: prepared };
+      });
+    }),
+  );
   // The effect lock stays held while a package job runs. Only its owning window's cancellation bypasses it.
   let packageExportInFlight: { owned: OwnedRendererWindow; bookId: string; exportId: string; job: Promise<ServiceJobProjection> } | null = null;
+  for (const operation of ['approveBookDeliveryPackageExport', 'approveBookDeliveryPackageArchiveExport'] as const) {
   ipcMain.handle(
-    IPC_CHANNELS.approveBookDeliveryPackageExport,
+    IPC_CHANNELS[operation],
     (event, input: Parameters<RendererApi['approveBookDeliveryPackageExport']>[0]) =>
       envelope(async () => {
         const owned = requireSender(event);
@@ -5387,7 +5423,7 @@ function registerRendererHandlers(
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
           const active = { owned, bookId: route.bookId, exportId: input.exportId,
-            job: service.call('approveBookDeliveryPackageExport', { bookId: route.bookId, exportId: input.exportId }) };
+            job: service.call(operation, { bookId: route.bookId, exportId: input.exportId }) };
           packageExportInFlight = active;
           try {
             let job = await active.job;
@@ -5411,8 +5447,10 @@ function registerRendererHandlers(
         });
       }),
   );
+  }
+  for (const operation of ['cancelBookDeliveryPackageExport', 'cancelBookDeliveryPackageArchiveExport'] as const) {
   ipcMain.handle(
-    IPC_CHANNELS.cancelBookDeliveryPackageExport,
+    IPC_CHANNELS[operation],
     (event, input: Parameters<RendererApi['cancelBookDeliveryPackageExport']>[0]) =>
       envelope(async () => {
         const owned = requireSender(event);
@@ -5422,13 +5460,14 @@ function registerRendererHandlers(
         if (active === null || active.owned !== owned || active.bookId !== route.bookId || active.exportId !== input.exportId) return false;
         const job = await active.job;
         if (packageExportInFlight !== active) return false;
-        try { return await service.call('cancelBookDeliveryPackageExport', { jobId: job.jobId }); }
+        try { return await service.call(operation, { jobId: job.jobId }); }
         catch (error) {
           if (error instanceof ServiceCallError && error.code === 'JOB_NOT_FOUND') return false;
           throw error;
         }
       }),
   );
+  }
   ipcMain.handle(
     IPC_CHANNELS.createProductionDocument,
     (event, input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>

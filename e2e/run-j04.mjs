@@ -86,6 +86,7 @@ const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSu
 const ENROLLMENT_MEMBERS = ['inspectBackgroundAnalysisEnrollment', 'enrollBackgroundAnalysis', 'revokeBackgroundAnalysisEnrollment', 'holdBackgroundAnalysisEnrollment'];
 const EXPORT_MEMBERS = [
   'reviewManuscriptExport', 'chooseManuscriptExportDestination', 'approveManuscriptExport', 'revealManuscriptExport',
+  'approveBookDeliveryPackageArchiveExport', 'cancelBookDeliveryPackageArchiveExport',
   'reviewBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'approveBookDeliveryPackageExport', 'cancelBookDeliveryPackageExport',
   // Synchronized delta with Issue #434 (S86a): 导出数据库's three, house-wide, and since its review 取消导出, which only stops one.
   'chooseDatabaseExportDestination', 'approveDatabaseExport', 'inspectDatabaseExports', 'cancelDatabaseExport',
