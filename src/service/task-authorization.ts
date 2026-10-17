@@ -2344,7 +2344,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       // Revision 80 widened only the Task Intents; revision 82 (Issue #922, slice 7f) widens the Result Set relations for the custom
-      // analysis family, so every rebuild from a store before revision 80 moves them too, to their terminal text, and stamps 82.
+      // analysis family, so every rebuild from a store before revision 80 moves them too and stamps the terminal version (83).
       rebuildResultSetRelations(db);
       widenWebToolsPlanRecords(db);
       db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);

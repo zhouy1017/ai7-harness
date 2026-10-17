@@ -9,7 +9,7 @@ import {
   IMPORTED_SKILL_SCHEMA_SQL, IMPORTED_SKILL_TRIGGER_SQL, IMPORTED_SKILL_UPDATE_RULE_CONFIRMATION, IMPORTED_SKILL_UPDATE_SCHEMA_SQL, IMPORTED_SKILL_UPDATE_TRIGGER_SQL,
 } from '../../src/service/imported-skill-schema.js';
 import { IMPORTED_SKILL_UPDATE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { execPre74Fixture, IMPORTED_SKILL_UPDATE_RELATIONS } from '../support/pre74-schema.js';
+import { execPre74Fixture, IMPORTED_SKILL_UPDATE_RELATIONS, pre82SchemaRows } from '../support/pre74-schema.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 let roots: ServiceTestRoots | undefined;
@@ -245,7 +245,7 @@ describe('import and update stay distinct at the shared acquisition seam', () =>
 });
 
 describe('revision 83 over earlier stores', () => {
-  it('adds its three relations empty to a revision-81 store, moving nothing else, and reads a Skill kept before as on its latest revision', async () => {
+  it.each([81, 82])('adds its three relations empty to a revision-%i store and reads a Skill kept before as on its latest revision', async (predecessor) => {
     let store = await open();
     const first = await importPlain(store);
     store.markCleanShutdown(); store.close();
@@ -253,7 +253,7 @@ describe('revision 83 over earlier stores', () => {
     let before: unknown[];
     try {
       // The shared predecessor fixture undoes revision 83 (and 81, 80 … for an earlier stamp); at 81 only revision 83 is missing.
-      execPre74Fixture(planted, 'PRAGMA user_version = 81');
+      execPre74Fixture(planted, `PRAGMA user_version = ${predecessor}`);
       before = planted.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
       for (const table of IMPORTED_SKILL_UPDATE_RELATIONS) expect(planted.prepare('SELECT 1 FROM sqlite_schema WHERE name = ?').get(table)).toBeUndefined();
       expect(planted.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name LIKE 'imported_skill%'").get()?.n)
@@ -266,7 +266,9 @@ describe('revision 83 over earlier stores', () => {
         expect(Number(after.prepare('PRAGMA user_version').get()?.user_version)).toBe(IMPORTED_SKILL_UPDATE_SCHEMA_VERSION);
         expect(IMPORTED_SKILL_UPDATE_SCHEMA_VERSION).toBe(LATEST_SCHEMA_VERSION);
         const added = new Set([...Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL)]);
-        expect(after.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all().filter((row) => !added.has(String(row.name)))).toEqual(before!);
+        const rows = after.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all() as Array<{ type: string; name: string; sql: string }>;
+        // At 81 the predecessor also traverses 7f's admitted Result Set rebuild; at 82 every pre-existing schema row is exact.
+        expect((predecessor < 82 ? pre82SchemaRows(rows) : rows).filter((row) => !added.has(String(row.name)))).toEqual(before!);
         for (const table of IMPORTED_SKILL_UPDATE_RELATIONS) {
           expect(after.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n).toBe(0);
           expect(MERGE_TABLE_POLICY[table as keyof typeof MERGE_TABLE_POLICY]).toBe('house');

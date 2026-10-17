@@ -461,7 +461,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
     // Every post-v12 table. A table left off is not caught here: the open accepts a predecessor that kept a later layer's
     // tables (`includeMaterialIndexTables ||= committed(…)` in bounded-manuscript.ts), so that mutant survives by design.
     // Synchronized delta with Issue #901: revision 77's four factual verification relations lead the list.
-    // Synchronized delta with Issue #89: revision 83's three imported Skill update relations lead the list, ahead of revision 81's four.
+    // Synchronized delta with Issue #89: revision 83's updates lead revision 82's custom dimensions, then revision 81's imported Skills.
     // Synchronized delta with #66: revision 81's four imported Skill relations follow them.
     // Synchronized delta with Issue #423 (slice 7a): revision 80's three Task Intent Draft relations follow them.
     database.exec(`
