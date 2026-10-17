@@ -505,7 +505,8 @@ async function attachRendererTarget(browser, onTarget = () => undefined) {
         deadline,
       )) {
         at('renderer-ready');
-        return { evaluate };
+        // The shared J-14 dark pass (#935) emulates forced colours through the same session.
+        return { evaluate, send: (method, params) => send(method, params) };
       }
       latestCarrierError = undefined;
     } catch (error) {
