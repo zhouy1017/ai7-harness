@@ -686,6 +686,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectBookFindings': {
+      const input = requireInput(value.input, ['bookId', 'offset'], tentativeId);
+      if (!validUuid(input.bookId) || !isSafeInteger(input.offset, 0)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectParagraphAnalysis': {
+      const input = requireInput(value.input, ['bookId', 'manuscriptId', 'blockId', 'radius'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.manuscriptId) || !isBoundedString(input.blockId, 28) ||
+          !MARK_BLOCK_PATTERN.test(input.blockId) || !isSafeInteger(input.radius, 0) || input.radius > 4) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'inspectForegroundExecutionBoundary': {
       const input = requireInput(value.input, ['bookId', 'runRecordId'], tentativeId);
       if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||

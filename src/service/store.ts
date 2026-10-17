@@ -327,6 +327,8 @@ import type {
   ReviewRunScopeRequest,
   ReviewWorkspaceProjection,
 } from '../shared/protocol.js';
+import { bookFindingsPage, paragraphAnalysis } from './book-findings.js';
+import type { BookFindingProjection, BookFindingsProjection, ParagraphAnalysisProjection } from '../shared/protocol.js';
 import {
   BACKGROUND_ANALYSIS_CEILING_MAX,
   INITIAL_EVALUATION_MODE_GOALS,
@@ -5285,6 +5287,64 @@ export class EditorialStore {
   /** ②A's analysis; each update mode carries its quick start (Issue #421). */
   inspectBaselineAnalysis(bookId: string, progress?: ProgressReader, revisionId: string | null = null): BaselineAnalysisProjection {
     return this.#withBackgroundReport(this.#withQuickStart(this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress, revisionId)) as BaselineAnalysisProjection));
+  }
+
+  /** Read-only aggregation: the source owners derive dispositions on every read. */
+  inspectBookFindings(bookId: string, offset = 0): BookFindingsProjection {
+    requireStore(Number.isSafeInteger(offset) && offset >= 0, 'FINDINGS_PAGE_INVALID', '发现分页无效。');
+    this.#evaluationBookTitle(bookId);
+    const store = this;
+    function* findings(): Generator<BookFindingProjection> {
+      const revision = store.#latestAnalysisRevision(bookId);
+      if (revision !== null) for (const gap of revision.gaps) {
+        yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未覆盖', severity: '注意', status: '未覆盖', summary: gap.reason,
+          target: { kind: 'gap', revisionId: revision.revisionId, unitOrdinal: gap.unitOrdinal, blockId: gap.blockIds[0] ?? null } };
+      }
+      // The workspace's history is bounded; enumerate identities from its ledger, then page each Run through its owner.
+      const runs = store.#authority.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').iterate(bookId);
+      for (const row of runs) {
+        const reviewRunId = asString(row.review_run_id);
+        let after: number | null = null;
+        for (;;) {
+          const run: NonNullable<ReviewWorkspaceProjection['run']> = store.inspectReviewWorkspace(bookId, reviewRunId, undefined,
+            { findingsAfterOrdinal: after, categoryId: null, severity: null, status: null, chapterBlockId: null }).run!;
+          for (const finding of run.findings) if (finding.status === 'pending') {
+            yield { id: finding.findingId, category: `review:${finding.categoryId}`, categoryLabel: finding.categoryLabel, severity: finding.severityLabel, status: finding.statusLabel, summary: finding.note,
+              target: { kind: 'review', reviewRunId, findingId: finding.findingId, blockId: finding.blockId } };
+          }
+          if (!run.findingsTruncated || run.findings.length === 0) break;
+          after = run.findings[run.findings.length - 1]!.ordinal;
+        }
+      }
+      // Only the version on show is current: an earlier version is immutable history, its risks carried or settled by the next.
+      const record = store.inspectEvaluation(bookId, null).record;
+      if (record !== null) {
+        for (const risk of record.content.risks) if (!risk.reviewed && (risk.level !== null || risk.statement !== null)) {
+          yield { id: `risk:${record.recordId}:${risk.riskId}`, category: 'evaluation-risks', categoryLabel: '评估风险', severity: risk.level === 'high' ? '高' : risk.level === 'medium' ? '中' : risk.level === 'low' ? '低' : '未评级', status: '待复核',
+            summary: risk.statement ?? record.profile.risks.find((item) => item.riskId === risk.riskId)?.label ?? '评估风险',
+            target: { kind: 'risk', recordId: record.recordId, riskId: risk.riskId, revisionId: record.revisionId } };
+        }
+      }
+    }
+    return bookFindingsPage(bookId, findings(), offset);
+  }
+
+  inspectParagraphAnalysis(bookId: string, manuscriptId: string, blockId: string, radius: number): ParagraphAnalysisProjection {
+    requireStore(Number.isSafeInteger(radius) && radius >= 0 && radius <= 4, 'ANALYSIS_RANGE_INVALID', '段落分析范围无效。');
+    const block = this.#authority.prepare(`SELECT wb.position, wb.branch_id FROM manuscripts m
+      JOIN branch_working_state bws ON bws.manuscript_id = m.manuscript_id
+      JOIN working_blocks wb ON wb.branch_id = bws.branch_id
+      WHERE m.book_id = ? AND m.manuscript_id = ? AND m.role = 'primary' AND wb.block_id = ?`).get(bookId, manuscriptId, blockId) as SqlRow | undefined;
+    requireStore(block !== undefined, 'ANALYSIS_BLOCK_UNAVAILABLE', '这段文字已不在当前稿件中。');
+    const nearby = this.#authority.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? AND position BETWEEN ? AND ?')
+      .all(asString(block.branch_id), asNumber(block.position) - radius, asNumber(block.position) + radius) as SqlRow[];
+    return paragraphAnalysis(bookId, manuscriptId, blockId, new Set(nearby.map((row) => asString(row.block_id))), this.#latestAnalysisRevision(bookId));
+  }
+
+  /** The latest settled result set alone: the panel reads it on a cadence, so none of 分析's page decorations are built. */
+  #latestAnalysisRevision(bookId: string): BaselineAnalysisResultSetRevisionProjection | null {
+    if (this.#baselineAnalysis.analysisFreshnessOf(bookId) === 'absent') return null;
+    return (this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, undefined, null)) as BaselineAnalysisProjection).resultSetRevision;
   }
 
   // ---- J-04 factual review (Issue #53, plan slice S18a) -------------------------------------------

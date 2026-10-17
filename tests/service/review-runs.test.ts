@@ -514,6 +514,17 @@ describe('a Review Run over the real store on exact sample1', () => {
     await withBook('sample1-review-authored', async (session, book) => {
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
       const reviewRunId = run.reviewRunId;
+      const databaseBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      const walBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal'));
+      const aggregateBefore = session.store.inspectBookFindings(book.bookId);
+      expect(aggregateBefore.items.filter((item) => item.target.kind === 'review').length).toBe(run.findingCounts.pending);
+      expect(aggregateBefore.groups.some((group) => group.category === `review:${TYPOS}`)).toBe(true);
+      expect(aggregateBefore.groups.some((group) => group.category === `review:${STYLE}`)).toBe(true);
+      const aggregateAgain = session.store.inspectBookFindings(book.bookId, 1);
+      // Filtering, grouping and dropping this projection are reads. Compare booleans to keep payloads out of failures.
+      aggregateAgain.items.filter((item) => item.category === `review:${TYPOS}`);
+      expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite')).equals(databaseBytes)).toBe(true);
+      expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal')).equals(walBytes)).toBe(true);
       const [annotation, anotherAnnotation] = run.findings.filter((finding) => finding.categoryId === STYLE);
       const [applied, ignored] = run.findings.filter((finding) => finding.categoryId === TYPOS && finding.severity !== 'must');
       const must = run.findings.filter((finding) => finding.severity === 'must');
@@ -538,6 +549,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, applied!.findingId, '已经应用'))).toBe('REVIEW_FINDING_NOT_PENDING');
       const reason = '作者坚持保留这一写法，出版社体例允许。';
       current = session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, `  ${reason}  `).run!;
+      const aggregateAfter = session.store.inspectBookFindings(book.bookId);
+      expect(aggregateAfter.items.some((item) => item.id === ignored!.findingId)).toBe(false);
+      expect(aggregateAfter.items.filter((item) => item.target.kind === 'review').length).toBe(current.findingCounts.pending);
       expect(status(ignored!.findingId)).toMatchObject({ status: 'ignored', statusLabel: '已忽略', ignoreReason: reason, markStatus: 'removed' });
       expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, reason))).toBe('REVIEW_FINDING_NOT_PENDING');
       // The ignored finding's mark is set aside: it no longer stands on the manuscript.
