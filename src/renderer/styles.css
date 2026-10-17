@@ -1073,7 +1073,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-panel-group { min-width: 0; }
 .task-panel-count { display: inline-block; min-width: 1.4rem; padding: 0 .35rem; border: 1px solid var(--boundary); border-radius: 999px; font-size: .8rem; font-weight: 700; text-align: center; }
 .task-panel-list { display: grid; gap: .55rem; margin: 0; padding: 0; list-style: none; }
-.task-card { display: grid; gap: .3rem; min-width: 0; padding: .6rem .7rem; border: 1px solid var(--boundary); border-left: 3px solid var(--boundary); border-radius: 8px; background: var(--manuscript); }
+.task-card { display: grid; gap: .3rem; min-width: 0; padding: .6rem .7rem; border: 1px solid var(--boundary); border-left: 3px solid var(--boundary); border-radius: 8px; background: var(--surface); }
 .task-card[data-task-blocked="true"] { border-left: 5px solid var(--status-attention); }
 .task-card-kind { margin: 0; color: var(--text-subdued); font-size: .75rem; }
 .task-card-head { display: flex; flex-wrap: wrap; gap: .3rem .5rem; align-items: center; justify-content: space-between; min-width: 0; }
@@ -1112,7 +1112,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .dialogue-convert textarea { width: 100%; box-sizing: border-box; }
 .task-result-dialogue-answer { line-height: 1.7; overflow-wrap: anywhere; }
 .task-result-dialogue-state, .task-result-dialogue-place { margin: 0; }
-.task-result-foot { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; padding: .55rem .8rem; border-top: 1px solid var(--boundary); border-radius: 0 0 12px 12px; background: var(--manuscript); }
+.task-result-foot { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; padding: .55rem .8rem; border-top: 1px solid var(--boundary); border-radius: 0 0 12px 12px; background: var(--surface); }
 .return-chip-host { margin-top: .35rem; }
 .return-chip-host[hidden] { display: none; }
 .return-chip { border-radius: 999px; }
@@ -1415,8 +1415,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .milestone-purpose-option input { flex: none; width: 16px; height: 16px; margin: 0; }
 .milestone-purpose-note, .milestone-save-reason { margin-top: 0; }
 .milestone-save-reason[hidden] { display: none; }
-.manuscript-surface { min-width: 0; background: var(--surface); }
-.editor-window { position: relative; max-height: min(70vh, 760px); overflow: auto; padding: 2.2rem clamp(1.5rem, 5vw, 5rem) 3rem; background: var(--surface); }
+.manuscript-surface { min-width: 0; background: var(--manuscript); }
+.editor-window { position: relative; max-height: min(70vh, 760px); overflow: auto; padding: 2.2rem clamp(1.5rem, 5vw, 5rem) 3rem; background: var(--manuscript); }
 .ProseMirror { min-height: 480px; max-width: 760px; margin: 0 auto; line-height: 1.9; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.05rem; caret-color: var(--status-good); }
 .ProseMirror h1 { font-size: 2rem; line-height: 1.35; }
 .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6 { margin-top: 1.8em; line-height: 1.5; }
@@ -1520,7 +1520,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .editor-window::-webkit-scrollbar { width: 10px; }
 .editor-window::-webkit-scrollbar-track { background: transparent; }
 .editor-window::-webkit-scrollbar-thumb { border-radius: 5px; background: transparent; }
-.editor-window[data-scrolling="true"]::-webkit-scrollbar-thumb { background: var(--surface-subdued); }
+.editor-window[data-scrolling="true"]::-webkit-scrollbar-thumb { background: var(--boundary-strong); }
 .editor-identities { margin: 0; padding: .8rem 1.25rem; border-top: 1px solid var(--boundary); background: var(--surface-subdued); }
 .editor-identities summary { cursor: pointer; font-weight: 700; }
 
@@ -1914,4 +1914,12 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 }
 [data-recommendation-state="stale"] {
   border-style: dashed;
+}
+
+/* Native appearance takes precedence, including the new appearance controls and selection. */
+@media (forced-colors: active) {
+  :root { color-scheme: light dark !important; }
+  .appearance-choice { color: CanvasText; background: Canvas; border-color: CanvasText; }
+  .appearance-choice:has(input:checked), :focus-visible { outline-color: Highlight; }
+  ::selection { background: Highlight; color: HighlightText; }
 }

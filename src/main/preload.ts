@@ -184,7 +184,9 @@ const api: RendererApi = Object.freeze({
     const initialGeneration = generation;
     void invoke<AppearanceState>(PREFERENCE_CHANNELS.appearance).then((state) => {
       if (active && generation === initialGeneration) listener(state);
-    }).catch(() => { if (active) listener({ preference: 'system', systemDark: false }); });
+    }).catch(() => {
+      if (active && generation === initialGeneration) listener({ preference: 'system', systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches });
+    });
     return () => { active = false; ipcRenderer.removeListener(PREFERENCE_CHANNELS.appearance, changed); };
   },
   platform: process.platform,

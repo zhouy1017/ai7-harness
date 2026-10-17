@@ -16,8 +16,10 @@ export function applyAppearance(root: Pick<HTMLElement, 'dataset' | 'style'>, st
 export function createAppearance(api: Pick<Window['ai7'], 'getPreferences' | 'savePreference' | 'onAppearanceChanged'>) {
   let preference: ThemePreference = 'system';
   let systemDark = false;
+  let revision = 0;
   const listeners = new Set<() => void>();
   const update = (state: AppearanceState): void => {
+    revision += 1;
     preference = state.preference;
     systemDark = state.systemDark;
     applyAppearance(document.documentElement, state);
@@ -31,9 +33,10 @@ export function createAppearance(api: Pick<Window['ai7'], 'getPreferences' | 'sa
     get preference() { return preference; },
     subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); },
     async choose(value: ThemePreference): Promise<void> {
+      const requestedAt = revision;
       const values = await api.savePreference({ key: 'appearance.theme', value });
       const saved = values['appearance.theme'];
-      if (PREFERENCE_KEYS['appearance.theme'].validate(saved)) update({ preference: saved, systemDark });
+      if (revision === requestedAt && PREFERENCE_KEYS['appearance.theme'].validate(saved)) update({ preference: saved, systemDark });
     },
   };
 }

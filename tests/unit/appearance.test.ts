@@ -73,12 +73,46 @@ describe('application appearance', () => {
     applyAppearance(root, { preference: 'dark', systemDark: false }); expect(exports()).toEqual(light);
   });
 
+  it('keeps a newer cross-window theme when an older save acknowledgement arrives later', async () => {
+    const root = { dataset: {} as Record<string, string>, style: { colorScheme: '' } };
+    vi.stubGlobal('document', { documentElement: root });
+    let notify!: (state: AppearanceState) => void;
+    let complete!: (values: Record<string, unknown>) => void;
+    const appearance = createAppearance({ getPreferences: async () => ({}),
+      savePreference: () => new Promise((resolve) => { complete = resolve; }),
+      onAppearanceChanged: (listener) => { notify = listener; return () => undefined; } });
+    notify({ preference: 'system', systemDark: false }); await appearance.ready;
+    const saving = appearance.choose('dark');
+    notify({ preference: 'dark', systemDark: false });
+    notify({ preference: 'light', systemDark: true });
+    complete({ 'appearance.theme': 'dark' }); await saving;
+    expect(appearance.preference).toBe('light');
+    expect(root.dataset['theme']).toBe('light');
+  });
+
   it('defines every color in a root token and leaves forced-colors independent of theme tokens', () => {
     const css = readFileSync(new URL('../../src/renderer/styles.css', import.meta.url), 'utf8');
     const withoutComments = css.replace(/\/\*[\s\S]*?\*\//gu, '');
     const roots = [...withoutComments.matchAll(/:root(?:\[data-theme="dark"\])?\s*\{([^}]+)\}/gu)].slice(0, 2).map((match) => match[1]!);
     const names = roots.map((root) => [...root.matchAll(/(--[\w-]+):/gu)].map((match) => match[1]!).sort());
     expect(names[0]).toEqual(names[1]);
+    const luminance = (hex: string) => {
+      const channels = hex.slice(1).match(/../gu)!.map((part) => {
+        const value = Number.parseInt(part, 16) / 255;
+        return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
+      });
+      return channels[0]! * .2126 + channels[1]! * .7152 + channels[2]! * .0722;
+    };
+    for (const root of roots) {
+      const tokens = Object.fromEntries([...root.matchAll(/(--[\w-]+):\s*(#[\da-f]{6})/gu)].map((match) => [match[1]!, match[2]!]));
+      const pairs = ['surface', 'surface-subdued', 'manuscript', 'shell'].flatMap((surface) => [['text', surface], ['text-subdued', surface]]);
+      pairs.push(['action-primary-text', 'action-primary'], ['selection-text', 'selection']);
+      for (const status of ['neutral', 'good', 'attention', 'blocked', 'progress']) pairs.push([`status-${status}`, `status-${status}-surface`]);
+      for (const [foreground, background] of pairs) {
+        const l1 = luminance(tokens[`--${foreground}`]!), l2 = luminance(tokens[`--${background}`]!);
+        expect((Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05), `${foreground} on ${background}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
     const components = withoutComments.replace(/:root(?:\[data-theme="dark"\])?\s*\{[^}]+\}/gu, '');
     expect(components).not.toMatch(/#[a-f\d]{3,8}\b|rgba?\(|:\s*(?:white|black)\b/iu);
     const start = css.indexOf('@media (forced-colors: active)');
