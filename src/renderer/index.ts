@@ -1,7 +1,10 @@
 import { createAppearance } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
-import { createSaveMenu, saveMenuPersistenceLine } from './save-menu.js';
+import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
+import { createSaveMenu } from './save-menu.js';
+import { SAVE_MENU_WORDS } from './save-menu-labels.js';
 import { mountParagraphAnalysis } from './paragraph-analysis.js';
+import { PARAGRAPH_ANALYSIS_WORDS } from './paragraph-analysis-labels.js';
 import type { BookFindingProjection, ParagraphAnalysisProjection } from '../shared/protocol.js';
 import {
   APPEARANCE_BACK,
@@ -2690,8 +2693,8 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
   const content = panel();
   content.classList.add('book-findings'); content.dataset['bookId'] = bookId;
   const host = element('div', 'findings-center');
-  content.append(element('p', 'section-label', `处理 · 《${bookTitle}》`), element('h2', undefined, '发现'),
-    element('p', 'lede', '这里汇集尚未处理的分析未覆盖处、审阅发现与评估风险。查看原记录并在那里处理，刷新后同步显示。'), host);
+  content.append(element('p', 'section-label', FINDINGS_CENTER_WORDS.section(bookTitle)), element('h2', undefined, FINDINGS_CENTER_WORDS.heading),
+    element('p', 'lede', FINDINGS_CENTER_WORDS.lede), host);
   replaceScreen('book-findings', content, { bookId, title: bookTitle, section: 'findings' });
   mountFindingsCenter(host, (offset) => window.ai7.inspectBookFindings({ offset }), (item: BookFindingProjection) => {
     const target = item.target;
@@ -2699,7 +2702,7 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
     else if (target.kind === 'risk') renderBookEvaluation(bookId, bookTitle, target);
     else renderBookAnalysis(bookId, bookTitle, target.revisionId, { tab: 'chapters', gap: target.unitOrdinal });
   });
-  setStatus('发现已打开');
+  setStatus(FINDINGS_CENTER_WORDS.opened);
 }
 
 function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAnalysisItem | string, focus?: { tab: AnalysisTabId; gap?: number }): void {
@@ -8446,7 +8449,7 @@ function renderEditorWindow(
     try {
       if (!(await settleLocalEdit())) return;
       await rememberEntryPosition(); renderBookFindings(currentWindow.bookId, bookTitle);
-    } catch (error) { setStatus(rendererErrorMessage(error, '无法打开发现。'), 'error'); }
+    } catch (error) { setStatus(rendererErrorMessage(error, FINDINGS_CENTER_WORDS.openFailed), 'error'); }
   });
   openFindings.dataset['workDestination'] = 'findings';
   processingGroup.append(element('span', 'section-label', '处理'), openFindings);
@@ -8535,7 +8538,7 @@ function renderEditorWindow(
   // Nothing is preselected, and 保存里程碑版本 stays unavailable, its reason in words beside it, until a label
   // and a purpose are given. A purpose states the next use only and grants nothing (MILE-009).
   const milestoneSection = element('details', 'navigator-section milestone-section');
-  const milestoneSummary = element('summary', undefined, `${MILESTONE_FORM_WORDS.summary}…`);
+  const milestoneSummary = element('summary', undefined, SAVE_MENU_WORDS.milestone);
   const milestoneLabel = element('label', undefined, MILESTONE_FORM_WORDS.label);
   milestoneLabel.htmlFor = 'milestone-label';
   const milestoneName = element('input');
@@ -8611,7 +8614,7 @@ function renderEditorWindow(
   const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => openDeliverables.click());
   const analysisPanel = element('aside', 'manuscript-navigator paragraph-analysis-panel');
   analysisPanel.id = 'paragraph-analysis-panel';
-  analysisPanel.setAttribute('aria-label', '当前段落的分析');
+  analysisPanel.setAttribute('aria-label', PARAGRAPH_ANALYSIS_WORDS.title);
   analysisPanel.hidden = true;
   // The outline and the search are one 导航 panel, opened on demand over the manuscript's right side and
   // closed by default, so the manuscript stays the central object (V2-UX-ED-015).
@@ -8654,7 +8657,7 @@ function renderEditorWindow(
   let analysisPositionSource: 'caret' | 'scroll' = 'caret';
   const analysisEntry = button('分析', 'quiet', () => localParagraphPanel?.toggle());
   analysisEntry.dataset['edgeEntry'] = 'analysis';
-  analysisEntry.title = '查看当前段落附近的分析';
+  analysisEntry.title = PARAGRAPH_ANALYSIS_WORDS.entry;
   // 任务 (Issue #423, S77a; TASK-044): the Book's 任务 panel in the side slot, and closed again from here.
   const tasksEntry = button('任务', 'quiet', () => {
     const showing = taskDrawer.view();
@@ -8734,7 +8737,7 @@ function renderEditorWindow(
   if (saveMenu !== undefined) {
     activeSaveMenu = saveMenu;
     saveMenu.element.id = 'manuscript-save-menu';
-    saveMenu.update('正在确认修订日志');
+    saveMenu.update(null, null);
     shell.setContextActions(saveMenu.element);
     persistenceStatus.setAttribute('role', 'button'); persistenceStatus.tabIndex = 0;
     persistenceStatus.setAttribute('aria-controls', saveMenu.element.id);
@@ -8759,12 +8762,12 @@ function renderEditorWindow(
       read: async () => {
         const blockId = currentBlock(); if (blockId === null) return null;
         const result = await window.ai7.inspectParagraphAnalysis({ manuscriptId: initialWindow.manuscriptId, blockId, radius: 1 });
-        if (blockId !== currentBlock()) { localParagraphPanel?.refresh(); return null; }
+        if (blockId !== currentBlock()) { localParagraphPanel?.refresh(); return undefined; }
         return result;
       },
       lastViewed: () => shellPreferences.current['analysis.lastViewedRevision'][initialWindow.bookId]?.ordinal ?? 0,
       viewed: (revision) => shellPreferences.viewAnalysis(initialWindow.bookId, revision),
-      notice: () => showEntryNotice(content, '分析有新发现'),
+      notice: () => showEntryNotice(content, PARAGRAPH_ANALYSIS_WORDS.hint),
       beforeOpen: () => { setNavigationOpen(false); taskDrawer.close(false); },
       openItem: (item: ParagraphAnalysisProjection['items'][number], revisionId: string) => {
         void (async () => {
@@ -8772,7 +8775,7 @@ function renderEditorWindow(
           if (!(await settleLocalEdit())) return;
           await rememberEntryPosition();
           renderBookAnalysis(initialWindow.bookId, bookTitle, revisionId, { tab: item.kind === 'settingClaims' ? 'settings' : item.kind });
-        })().catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法打开分析。'), 'error'));
+        })().catch((error: unknown) => setStatus(rendererErrorMessage(error, PARAGRAPH_ANALYSIS_WORDS.openFailed), 'error'));
       },
     });
     paragraphPanel = localParagraphPanel;
@@ -8790,7 +8793,7 @@ function renderEditorWindow(
   let milestonePersistenceTimer: number | undefined;
   let milestonePersistenceRead = 0;
   let milestoneReadDigest: string | undefined;
-  const updatePersistenceMenu = (): void => saveMenu?.update(saveMenuPersistenceLine({ dirty, saving, retryRequired, interrupted: editingInterrupted }, changedSinceMilestone));
+  const updatePersistenceMenu = (): void => saveMenu?.update({ dirty, saving, retryRequired, interrupted: editingInterrupted }, changedSinceMilestone);
   const refreshMilestonePersistence = (force = false): void => {
     if (saveMenu === undefined || (!force && milestoneReadDigest === currentWindow.workingDigest)) return;
     milestoneReadDigest = currentWindow.workingDigest;
@@ -8804,10 +8807,10 @@ function renderEditorWindow(
         if (!content.isConnected || request !== milestonePersistenceRead || page.manuscript?.manuscriptId !== currentWindow.manuscriptId ||
             page.manuscript.workingDigest !== currentWindow.workingDigest || page.manuscript.revisionId !== currentWindow.revisionId) return;
         const latest = page.publication.milestones[0];
-        changedSinceMilestone = latest?.changedSince === true ? `自里程碑版本「${latest.label}」后有修改` : null;
+        changedSinceMilestone = latest?.changedSince === true ? SAVE_MENU_WORDS.changedSinceMilestone(latest.label) : null;
         updatePersistenceMenu();
       }).catch(() => {
-        if (content.isConnected && request === milestonePersistenceRead) { changedSinceMilestone = '里程碑版本状态暂不可用'; updatePersistenceMenu(); }
+        if (content.isConnected && request === milestonePersistenceRead) { changedSinceMilestone = SAVE_MENU_WORDS.milestoneUnavailable; updatePersistenceMenu(); }
       });
     }, 250);
   };

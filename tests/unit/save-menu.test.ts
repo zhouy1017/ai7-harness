@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSaveMenu, saveMenuPersistenceLine } from '../../src/renderer/save-menu.js';
+import { createSaveMenu, persistenceConfirmed, saveMenuPersistenceLine } from '../../src/renderer/save-menu.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
 let restore: () => void;
@@ -24,15 +24,23 @@ describe('the manuscript save menu persistence facts', () => {
     expect(saveMenuPersistenceLine({ ...state, saving: true }, null)).toBe('正在写入修订日志');
     expect(saveMenuPersistenceLine({ ...state, retryRequired: true }, changed)).toBe(`修订日志写入待确认 · ${changed}`);
     expect(saveMenuPersistenceLine({ ...state, interrupted: true }, null)).toBe('修订日志写入待确认');
+    expect(persistenceConfirmed(state)).toBe(true);
+    for (const pending of ['dirty', 'saving', 'retryRequired', 'interrupted'] as const) expect(persistenceConfirmed({ ...state, [pending]: true })).toBe(false);
   });
 
   it('hosts the same form, offers export, and removes saved presentation in protection mode', () => {
     const form = document.createElement('details'); form.className = 'milestone-section';
     const exporter = vi.fn(); const menu = createSaveMenu(form, exporter);
     expect(menu.element.querySelector('.milestone-section')).toBe(form);
-    menu.update('已写入修订日志');
+    expect(menu.element.querySelector('summary')?.textContent).toBe('正在确认修订日志 ▾');
+    expect(menu.element.dataset['persistence']).toBe('unconfirmed');
+    const settled = { dirty: false, saving: false, retryRequired: false, interrupted: false };
+    menu.update({ ...settled, saving: true }, null);
+    expect(menu.element.dataset['persistence']).toBe('unconfirmed');
+    menu.update(settled, null);
     expect(menu.element.querySelector('summary')?.textContent).toBe('已写入修订日志 ▾');
     expect(menu.element.dataset['persistence']).toBe('confirmed');
+    expect(menu.element.querySelector('summary')?.textContent).not.toContain('已保存');
     document.documentElement.dataset['editingProtection'] = 'active'; observers[0]!.changed();
     expect(menu.element.querySelector('summary')?.textContent).toBe('修订日志写入待确认 ▾');
     expect(menu.element.dataset['persistence']).toBe('unconfirmed');
