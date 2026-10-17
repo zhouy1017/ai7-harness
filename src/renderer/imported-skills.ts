@@ -1,24 +1,41 @@
 import type {
-  BookSummaryCursor, BookSummaryProjection, ImportedSkillAcquisitionProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection, RendererApi,
+  BookSummaryCursor, BookSummaryProjection, ImportedSkillAcquisitionProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection,
+  ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCheckProjection, RendererApi,
 } from '../shared/protocol.js';
-import { importedSkillCeilingLines, importedSkillIdentityLine, IMPORTED_SKILLS_HEADING, IMPORTED_SKILLS_NO_EXECUTOR } from './imported-skill-labels.js';
+import {
+  importedSkillCeilingLines, importedSkillDisclosureLines, importedSkillHistoryLine, importedSkillIdentityLine, importedSkillRuleActiveLine, importedSkillRuleConfirmLine,
+  importedSkillThreeWayLines, importedSkillUpdateCandidateLine, importedSkillUpdateCheckTitle, importedSkillUpdateDispositionLine, importedSkillUpdateFileLine,
+  importedSkillUpdateRelationLine, importedSkillUpdateSourceFileLine, importedSkillUpdateSourceLines, importedSkillUpdateStatusLine, importedSkillUpdateValidatorLine, IMPORTED_SKILLS_HEADING, IMPORTED_SKILLS_NO_EXECUTOR, IMPORTED_SKILL_HISTORY_HEADING,
+  IMPORTED_SKILL_HISTORY_NOT_RESTORED, IMPORTED_SKILL_NOT_CURRENT_NOTE, IMPORTED_SKILL_REPAIR_NOTE, IMPORTED_SKILL_RULE_CREATE_LABEL, IMPORTED_SKILL_RULE_HEADING, IMPORTED_SKILL_RULE_INACTIVE,
+  IMPORTED_SKILL_RULE_REVOKE_LABEL, IMPORTED_SKILL_RULE_SCOPE, IMPORTED_SKILL_UPDATE_ACCEPT_LABEL, IMPORTED_SKILL_UPDATE_ACTIONS, IMPORTED_SKILL_UPDATE_BOUNDARY,
+  IMPORTED_SKILL_UPDATE_CHECK_DIRECTORY_LABEL, IMPORTED_SKILL_UPDATE_CHECK_LABEL, IMPORTED_SKILL_UPDATE_CONFLICT_NOTE, IMPORTED_SKILL_UPDATE_HEADING,
+  IMPORTED_SKILL_UPDATE_HEADINGS, IMPORTED_SKILL_UPDATE_NONE, IMPORTED_SKILL_UPDATE_NOT_ENABLED, IMPORTED_SKILL_UPDATE_STATUS, IMPORTED_SKILL_UPDATE_UPSTREAM_LABEL,
+} from './imported-skill-labels.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag); if (text !== undefined) node.textContent = text; return node;
 }
 interface Options {
   readonly root: HTMLElement;
-  readonly api: Pick<RendererApi, 'importSkillPackage' | 'inspectImportedSkills' | 'validateImportedSkill' | 'installImportedSkill' | 'enableImportedSkill' | 'listBooks'>;
+  readonly api: Pick<RendererApi, 'importSkillPackage' | 'inspectImportedSkills' | 'validateImportedSkill' | 'installImportedSkill' | 'enableImportedSkill' | 'listBooks'
+    | 'checkImportedSkillUpdate' | 'inspectImportedSkillUpdate' | 'adoptImportedSkillUpdate' | 'dismissImportedSkillUpdate' | 'createImportedSkillUpdateRule'
+    | 'revokeImportedSkillUpdateRule' | 'rollbackImportedSkill'>;
   setStatus(text: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
 }
 /**
  * ADR 0090: what was picked is disclosed before anything is kept; kept files and conversion are inspectable before separate
- * installation and scoped enablement.
+ * installation and scoped enablement. An update (Issue #89) is read from a local file the same way, kept as an inert candidate,
+ * and adopted only by the editor's own reviewed act (or, for a clean one, the Skill's own rule).
  */
 export function mountImportedSkills({ root, api, setStatus, errorMessage }: Options): { load(): Promise<void> } {
-  let projection: ImportedSkillsProjection = { skills: [], revision: null, nextBefore: null };
+  let projection: ImportedSkillsProjection = { skills: [], revision: null, nextBefore: null, history: [], candidates: [], rule: null };
   let acquisition: ImportedSkillAcquisitionProjection | null = null;
+  let updateCheck: ImportedSkillUpdateCheckProjection | null = null;
+  let candidate: ImportedSkillUpdateCandidateProjection | null = null;
+  let upstream = new Set<string>();
+  let accepted = false;
+  let ruleConfirmed = false;
   let busy = false;
   let books: BookSummaryProjection[] = [];
   let booksAfter: BookSummaryCursor | null = null;
@@ -33,12 +50,17 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     busy = true; render();
     try { const done = await run(); if (typeof done === 'string') setStatus(done); }
     catch (error) { setStatus(errorMessage(error, '无法处理这个 Skill。'), 'error'); }
-    finally { busy = false; if (root.isConnected) { render(); root.querySelector<HTMLElement>('[data-skill-acquisition] h4, [data-skill-detail] h4')?.focus(); } }
+    finally {
+      busy = false;
+      if (root.isConnected) { render(); root.querySelector<HTMLElement>('[data-skill-acquisition] h4, [data-skill-update-check] h4, [data-skill-candidate] h4, [data-skill-detail] h4')?.focus(); }
+    }
   }
   async function inspect(revisionId: string | null, before: string | null = null): Promise<void> {
     const next = await api.inspectImportedSkills({ revisionId, before });
     if (!root.isConnected) return;
     projection = next;
+    // What was open about another Skill's update does not follow the editor to this one.
+    if (candidate !== null && next.revision !== null && candidate.skillId !== next.revision.skillId) { candidate = null; updateCheck = null; }
   }
   async function changed(revision: ImportedSkillRevisionProjection): Promise<string> {
     await inspect(revision.revisionId);
@@ -53,6 +75,129 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
   async function readBooks(more = false): Promise<void> {
     const page = await api.listBooks({ after: more ? booksAfter : null });
     books = more ? [...books, ...page.items] : [...page.items]; booksAfter = page.nextCursor;
+  }
+  async function openCandidate(candidateId: string): Promise<null> {
+    candidate = await api.inspectImportedSkillUpdate({ candidateId });
+    upstream = new Set(); accepted = false;
+    return null;
+  }
+  /** REUSE-021 for an update: the same disclosure as an import, against the Skill it would update, before anything is kept. */
+  function updateCheckPanel(read: ImportedSkillUpdateCheckProjection): HTMLElement {
+    const panel = el('article'); panel.className = 'imported-skill-detail'; panel.dataset['skillUpdateCheck'] = read.acquisition.acquisitionId;
+    const disclosed = read.acquisition;
+    const title = el('h4', importedSkillUpdateCheckTitle(read)); title.tabIndex = -1;
+    panel.append(title, el('p', importedSkillUpdateRelationLine(read.relation)));
+    for (const line of importedSkillUpdateSourceLines(disclosed)) panel.append(el('p', line));
+    const files = el('ul');
+    for (const file of disclosed.files) files.append(el('li', importedSkillUpdateSourceFileLine(file)));
+    panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.files), files);
+    panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.conversion));
+    for (const line of importedSkillDisclosureLines(disclosed)) panel.append(el('p', line));
+    if (projection.rule?.active) panel.append(el('p', importedSkillRuleActiveLine(projection.rule.since)));
+    for (const problem of disclosed.problems) panel.append(el('p', problem));
+    for (const line of importedSkillCeilingLines(disclosed.ceiling)) panel.append(el('p', line));
+    const keep = button(IMPORTED_SKILL_UPDATE_ACTIONS.keep, 'keep-update', async () => {
+      const kept = await api.checkImportedSkillUpdate({ skillId: read.skillId, keep: disclosed.acquisitionId });
+      updateCheck = null;
+      if (kept?.candidate == null || !root.isConnected) return null;
+      candidate = kept.candidate; upstream = new Set(); accepted = false;
+      await inspect(kept.candidate.adoptedRevisionId ?? projection.revision?.revisionId ?? null);
+      return kept.candidate.status === 'adopted' ? IMPORTED_SKILL_UPDATE_STATUS.keptAdopted : IMPORTED_SKILL_UPDATE_STATUS.keptOpen;
+    });
+    keep.disabled ||= read.relation !== 'newer' || !disclosed.keepable;
+    panel.append(keep, button(IMPORTED_SKILL_UPDATE_ACTIONS.discard, 'discard-update', async () => { updateCheck = null; return IMPORTED_SKILL_UPDATE_STATUS.discarded; }));
+    return panel;
+  }
+  /** The three-way reconciliation of one candidate, its findings, and the editor's choices (REUSE-033). */
+  function candidatePanel(read: ImportedSkillUpdateCandidateProjection, revision: ImportedSkillRevisionProjection): HTMLElement {
+    const panel = el('article'); panel.className = 'imported-skill-detail'; panel.dataset['skillCandidate'] = read.candidateId;
+    panel.dataset['skillDisposition'] = read.disposition; panel.dataset['skillCandidateStatus'] = read.status;
+    const title = el('h4', importedSkillUpdateCandidateLine(read)); title.tabIndex = -1;
+    panel.append(title);
+    const summary = el('ul'); summary.className = 'imported-skill-three-way';
+    for (const line of importedSkillThreeWayLines(read)) summary.append(el('li', line));
+    panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.threeWay), summary);
+    const files = el('ul'); files.className = 'imported-skill-update-files';
+    for (const file of read.files) {
+      const item = el('li'); item.dataset['skillFile'] = file.path; item.dataset['skillFileChange'] = file.change;
+      item.append(el('span', importedSkillUpdateFileLine(file.path, file.change)));
+      if (file.change === 'conflict' && read.status === 'open' && !read.stale) {
+        const label = el('label'); const box = el('input'); box.type = 'checkbox'; box.dataset['skillField'] = 'upstream'; box.dataset['skillPath'] = file.path;
+        box.checked = upstream.has(file.path); box.disabled = busy;
+        box.addEventListener('change', () => { if (box.checked) upstream.add(file.path); else upstream.delete(file.path); });
+        label.append(box, ` ${IMPORTED_SKILL_UPDATE_UPSTREAM_LABEL}`); item.append(label);
+      }
+      files.append(item);
+    }
+    panel.append(el('h5', IMPORTED_SKILL_UPDATE_HEADINGS.perFile), files);
+    const disposition = el('p', importedSkillUpdateDispositionLine(read.disposition)); disposition.dataset['skillDispositionLine'] = read.disposition;
+    panel.append(disposition, el('p', importedSkillUpdateValidatorLine(read.validator.state)));
+    for (const [heading, lines] of [[IMPORTED_SKILL_UPDATE_HEADINGS.validation, read.validator.state === 'validated' ? [] : read.validator.reasons], [IMPORTED_SKILL_UPDATE_HEADINGS.authority, read.authorityChanges], [IMPORTED_SKILL_UPDATE_HEADINGS.conflicts, read.conflicts]] as const) {
+      if (lines.length === 0) continue;
+      const list = el('ul'); for (const line of lines) list.append(el('li', line));
+      panel.append(el('h5', heading), list);
+    }
+    if (read.conflicts.length > 0) panel.append(el('p', IMPORTED_SKILL_UPDATE_CONFLICT_NOTE));
+    panel.append(el('p', importedSkillUpdateStatusLine(read)), el('p', IMPORTED_SKILL_UPDATE_NOT_ENABLED));
+    if (read.status === 'open' && !read.stale) {
+      let confirm: HTMLInputElement | null = null;
+      if (read.acceptItems.length > 0) {
+        const label = el('label'); confirm = el('input'); confirm.type = 'checkbox'; confirm.dataset['skillField'] = 'accept'; confirm.checked = accepted; confirm.disabled = busy;
+        confirm.addEventListener('change', () => { accepted = confirm!.checked; render(); });
+        label.append(confirm, ` ${IMPORTED_SKILL_UPDATE_ACCEPT_LABEL}`); panel.append(label);
+      }
+      const adopt = button(IMPORTED_SKILL_UPDATE_ACTIONS.adopt, 'adopt', async () => {
+        const next = await api.adoptImportedSkillUpdate({
+          candidateId: read.candidateId, reviewDigest: read.reviewDigest, acceptItems: read.acceptItems, upstreamPaths: read.conflicts.filter((path) => upstream.has(path)),
+        });
+        candidate = next; upstream = new Set(); accepted = false;
+        if (next.adoptedRevisionId !== null) await inspect(next.adoptedRevisionId);
+        return IMPORTED_SKILL_UPDATE_STATUS.adopted;
+      });
+      adopt.disabled ||= read.acceptItems.length > 0 && !accepted;
+      panel.append(adopt, button(IMPORTED_SKILL_UPDATE_ACTIONS.dismiss, 'dismiss', async () => { candidate = await api.dismissImportedSkillUpdate({ candidateId: read.candidateId }); await inspect(revision.revisionId); return IMPORTED_SKILL_UPDATE_STATUS.dismissed; }));
+    }
+    panel.append(button(IMPORTED_SKILL_UPDATE_ACTIONS.close, 'close-candidate', async () => { candidate = null; return null; }));
+    return panel;
+  }
+  /** REUSE-034: one revocable rule per Skill, created with its confirmation line. */
+  function rulePanel(revision: ImportedSkillRevisionProjection): HTMLElement {
+    const rule = projection.rule;
+    const section = el('section'); section.dataset['skillRule'] = rule?.active === true ? 'active' : 'inactive';
+    section.append(el('h5', IMPORTED_SKILL_RULE_HEADING), el('p', IMPORTED_SKILL_RULE_SCOPE));
+    if (rule === null) return section;
+    if (rule.active) {
+      section.append(el('p', importedSkillRuleActiveLine(rule.since)),
+        button(IMPORTED_SKILL_RULE_REVOKE_LABEL, 'rule-revoke', async () => { await api.revokeImportedSkillUpdateRule({ skillId: revision.skillId }); await inspect(revision.revisionId); return IMPORTED_SKILL_UPDATE_STATUS.ruleRevoked; }));
+      return section;
+    }
+    section.append(el('p', IMPORTED_SKILL_RULE_INACTIVE));
+    const label = el('label'); const box = el('input'); box.type = 'checkbox'; box.dataset['skillField'] = 'rule-confirm'; box.checked = ruleConfirmed; box.disabled = busy;
+    box.addEventListener('change', () => { ruleConfirmed = box.checked; render(); });
+    label.append(box, importedSkillRuleConfirmLine(rule.confirmation)); section.append(label);
+    const create = button(IMPORTED_SKILL_RULE_CREATE_LABEL, 'rule-create', async () => {
+      await api.createImportedSkillUpdateRule({ skillId: revision.skillId, confirmation: rule.confirmation });
+      ruleConfirmed = false; await inspect(revision.revisionId); return IMPORTED_SKILL_UPDATE_STATUS.ruleCreated;
+    });
+    create.disabled ||= !ruleConfirmed;
+    section.append(create);
+    return section;
+  }
+  /** REUSE-035: the revisions of the Skill, the current one marked, and a way back to any earlier one. */
+  function historyPanel(revision: ImportedSkillRevisionProjection): HTMLElement {
+    const section = el('section'); section.append(el('h5', IMPORTED_SKILL_HISTORY_HEADING));
+    const list = el('ul'); list.className = 'imported-skill-history';
+    for (const entry of projection.history) {
+      const item = el('li'); item.dataset['skillRevision'] = entry.revisionId; item.dataset['skillCurrent'] = String(entry.current);
+      item.append(el('span', importedSkillHistoryLine(entry)));
+      if (entry.revisionId !== revision.revisionId) item.append(button(IMPORTED_SKILL_UPDATE_ACTIONS.inspectRevision, 'inspect-revision', () => inspect(entry.revisionId)));
+      if (!entry.current) {
+        item.append(button(IMPORTED_SKILL_UPDATE_ACTIONS.rollback, 'rollback', async () => { const back = await api.rollbackImportedSkill({ skillId: revision.skillId, revisionId: entry.revisionId }); await inspect(back.revisionId); return IMPORTED_SKILL_UPDATE_STATUS.rolledBack; }));
+      }
+      list.append(item);
+    }
+    section.append(list, el('p', IMPORTED_SKILL_HISTORY_NOT_RESTORED));
+    return section;
   }
   /** REUSE-021: identity, kind, source revision, provenance, license and notices, digest and conversion — before keeping. */
   function acquisitionPanel(read: ImportedSkillAcquisitionProjection): HTMLElement {
@@ -98,7 +243,9 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     if (projection.revision === null) return;
     const revision = projection.revision;
     const detail = el('article'); detail.className = 'imported-skill-detail'; detail.dataset['skillDetail'] = revision.revisionId;
-    detail.dataset['skillState'] = revision.state;
+    detail.dataset['skillState'] = revision.state; detail.dataset['skillOwner'] = revision.skillId;
+    const isCurrent = projection.history.some((entry) => entry.current && entry.revisionId === revision.revisionId);
+    detail.dataset['skillCurrent'] = String(isCurrent);
     const title = el('h4', importedSkillIdentityLine(revision)); title.tabIndex = -1;
     detail.append(title, el('p', `来源：${revision.sourcePath}`), el('p', `许可：${revision.license ?? '未提供'}`), el('p', `声明文件：${revision.notices.join('、') || '未提供'}`));
     const identities = el('details'); identities.append(el('summary', '查看技术详情'));
@@ -125,10 +272,11 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     for (const line of importedSkillCeilingLines(revision.ceiling)) detail.append(el('p', line));
     for (const reason of revision.reasons) detail.append(el('p', reason));
     if (revision.previousRevisionId !== null) detail.append(button('查看上一修订', 'previous', () => inspect(revision.previousRevisionId)));
-    if (revision.state === 'pending-validation') detail.append(button('验证 Skill', 'validate', async () => changed(await api.validateImportedSkill({ revisionId: revision.revisionId }))));
-    if (revision.state === 'validated') detail.append(button('安装（暂不启用）', 'install', async () => changed(await api.installImportedSkill({ revisionId: revision.revisionId, previewDigest: revision.previewDigest }))));
-    if (revision.state === 'restricted' || revision.state === 'rejected') detail.append(el('p', '这一修订保持可查看。请在原目录修复后重新导入，生成后继修订；旧记录不改写。'));
-    if (revision.state === 'installed-disabled' || revision.state === 'enabled') {
+    if (!isCurrent) detail.append(el('p', IMPORTED_SKILL_NOT_CURRENT_NOTE));
+    if (isCurrent && revision.state === 'pending-validation') detail.append(button('验证 Skill', 'validate', async () => changed(await api.validateImportedSkill({ revisionId: revision.revisionId }))));
+    if (isCurrent && revision.state === 'validated') detail.append(button('安装（暂不启用）', 'install', async () => changed(await api.installImportedSkill({ revisionId: revision.revisionId, previewDigest: revision.previewDigest }))));
+    if (revision.state === 'restricted' || revision.state === 'rejected') detail.append(el('p', IMPORTED_SKILL_REPAIR_NOTE));
+    if (isCurrent && (revision.state === 'installed-disabled' || revision.state === 'enabled')) {
       const label = el('label', '为图书启用：');
       const select = el('select'); select.dataset['skillField'] = 'book'; select.disabled = busy;
       select.append(new Option('请选择图书', ''));
@@ -142,6 +290,33 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
       detail.append(enable, el('p', `已为 ${revision.enabledBooks.length} 本图书启用；仍不运行任何内容。`));
     }
     root.append(detail);
+    // 外部 Skill 的更新 (Issue #89): the check, its candidates, the rule, and the way back.
+    const updates = el('section'); updates.dataset['skillUpdates'] = revision.skillId;
+    updates.append(el('h5', IMPORTED_SKILL_UPDATE_HEADING), el('p', IMPORTED_SKILL_UPDATE_BOUNDARY),
+      button(IMPORTED_SKILL_UPDATE_CHECK_LABEL, 'check-update', async () => {
+        const read = await api.checkImportedSkillUpdate({ skillId: revision.skillId, kind: 'zip' });
+        if (read === null || !root.isConnected) return null;
+        updateCheck = read;
+        return IMPORTED_SKILL_UPDATE_STATUS.disclosed;
+      }),
+      button(IMPORTED_SKILL_UPDATE_CHECK_DIRECTORY_LABEL, 'check-update-directory', async () => {
+        const read = await api.checkImportedSkillUpdate({ skillId: revision.skillId, kind: 'directory' });
+        if (read === null || !root.isConnected) return null;
+        updateCheck = read;
+        return IMPORTED_SKILL_UPDATE_STATUS.disclosed;
+      }));
+    if (projection.candidates.length === 0) updates.append(el('p', IMPORTED_SKILL_UPDATE_NONE));
+    const candidates = el('ul'); candidates.className = 'imported-skill-candidates';
+    for (const summary of projection.candidates) {
+      const item = el('li'); item.dataset['skillCandidateId'] = summary.candidateId; item.dataset['skillDisposition'] = summary.disposition; item.dataset['skillCandidateStatus'] = summary.status;
+      item.append(el('span', importedSkillUpdateCandidateLine(summary)), button(IMPORTED_SKILL_UPDATE_ACTIONS.open, 'open-candidate', () => openCandidate(summary.candidateId)));
+      candidates.append(item);
+    }
+    updates.append(candidates);
+    if (updateCheck !== null && updateCheck.skillId === revision.skillId) updates.append(updateCheckPanel(updateCheck));
+    if (candidate !== null && candidate.skillId === revision.skillId) updates.append(candidatePanel(candidate, revision));
+    updates.append(rulePanel(revision), historyPanel(revision));
+    root.append(updates);
   }
   return { async load() { await inspect(null); if (root.isConnected) render(); } };
 }

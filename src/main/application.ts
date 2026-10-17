@@ -3230,6 +3230,59 @@ function registerRendererHandlers(
       return service.call('enableImportedSkill', { revisionId: input.revisionId, bookId: input.bookId, previewDigest: input.previewDigest });
     });
   }));
+  // ADR 0090 §3: 检查更新（从文件）… takes its package from the same platform picker, for the Skill named, and discloses and keeps
+  // nothing; `keep` names the disclosed acquisition the service holds, never a path. The renderer never selects a path.
+  ipcMain.handle(IPC_CHANNELS.checkImportedSkillUpdate, (event, input: Parameters<RendererApi['checkImportedSkillUpdate']>[0]) => envelope(async () => {
+    const owned = requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object' && typeof input.skillId === 'string' && UUID_PATTERN.test(input.skillId) && (
+      ('kind' in input && (input.kind === 'zip' || input.kind === 'directory')) || ('keep' in input && typeof input.keep === 'string' && UUID_PATTERN.test(input.keep))));
+    return serializeEffect(async () => {
+      requireAuthority();
+      if ('keep' in input) return service.call('checkImportedSkillUpdate', { skillId: input.skillId, path: null, keep: input.keep });
+      let path = owned.injectedPickerPath;
+      owned.injectedPickerPath = undefined;
+      if (path === undefined) {
+        const picked = await dialog.showOpenDialog(owned.window, {
+          title: '选择这个 Skill 的新版本', buttonLabel: '查看更新', properties: input.kind === 'directory' ? ['openDirectory'] : ['openFile'],
+          ...(input.kind === 'directory' ? {} : { filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }] }),
+        });
+        if (picked.canceled || picked.filePaths.length !== 1) return null;
+        path = picked.filePaths[0];
+      }
+      requireDesktop(path !== undefined && isAbsolute(path));
+      return service.call('checkImportedSkillUpdate', { skillId: input.skillId, path, keep: null });
+    });
+  }));
+  ipcMain.handle(IPC_CHANNELS.inspectImportedSkillUpdate, (event, input: Parameters<RendererApi['inspectImportedSkillUpdate']>[0]) => envelope(async () => {
+    requireSender(event); requireAuthority();
+    requireDesktop(input !== null && typeof input === 'object');
+    return service.call('inspectImportedSkillUpdate', { candidateId: input.candidateId });
+  }));
+  ipcMain.handle(IPC_CHANNELS.adoptImportedSkillUpdate, (event, input: Parameters<RendererApi['adoptImportedSkillUpdate']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => {
+      requireAuthority();
+      return service.call('adoptImportedSkillUpdate', {
+        candidateId: input.candidateId, reviewDigest: input.reviewDigest, acceptItems: input.acceptItems, upstreamPaths: input.upstreamPaths,
+      });
+    });
+  }));
+  ipcMain.handle(IPC_CHANNELS.dismissImportedSkillUpdate, (event, input: Parameters<RendererApi['dismissImportedSkillUpdate']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('dismissImportedSkillUpdate', { candidateId: input.candidateId }); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.createImportedSkillUpdateRule, (event, input: Parameters<RendererApi['createImportedSkillUpdateRule']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('createImportedSkillUpdateRule', { skillId: input.skillId, confirmation: input.confirmation }); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.revokeImportedSkillUpdateRule, (event, input: Parameters<RendererApi['revokeImportedSkillUpdateRule']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('revokeImportedSkillUpdateRule', { skillId: input.skillId }); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.rollbackImportedSkill, (event, input: Parameters<RendererApi['rollbackImportedSkill']>[0]) => envelope(async () => {
+    requireSender(event); requireDesktop(input !== null && typeof input === 'object');
+    return serializeEffect(async () => { requireAuthority(); return service.call('rollbackImportedSkill', { skillId: input.skillId, revisionId: input.revisionId }); });
+  }));
   ipcMain.handle(IPC_CHANNELS.recommendProcedures, (event, input: Parameters<RendererApi['recommendProcedures']>[0]) => envelope(async () => {
     const owned = requireSender(event); requireAuthority();
     requireDesktop(input !== null && typeof input === 'object');

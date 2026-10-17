@@ -479,8 +479,8 @@ describe('the kind a draft becomes, decided without a model', () => {
 describe('schema revision 80', () => {
   it('rebuilds a revision-79 store\'s Task Intents with every row byte for byte and adds the draft relations empty', async () => {
     expect(TASK_INTENT_DRAFT_SCHEMA_VERSION).toBe(80);
-    // Synchronized delta with Issue #922 (slice 7f): revision 82 is the terminal version after revision 80.
-    expect(LATEST_SCHEMA_VERSION).toBe(82);
+    // Synchronized delta with #66 and #89: revision 81 (imported Skill relations) and revision 83 (their updates) follow revision 80; 83 is the terminal version.
+    expect(LATEST_SCHEMA_VERSION).toBe(TASK_INTENT_DRAFT_SCHEMA_VERSION + 3);
     const store = await open();
     let bookId: string;
     try {
@@ -510,8 +510,7 @@ describe('schema revision 80', () => {
     }
     const migrated = new DatabaseSync(path);
     try {
-      // Synchronized delta with Issue #922 (slice 7f): the migration stamps the terminal revision 82.
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 82 });
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 83 });
       expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents);
       expect(migrated.prepare('SELECT rowid, * FROM analysis_task_intents ORDER BY rowid').all()).toEqual(intents);
       expect(migrated.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all()).toEqual(plans);

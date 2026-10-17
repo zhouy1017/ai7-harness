@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path';
+import { MAX_SKILL_PACKAGE_BYTES } from './imported-skills.js';
 import { clarificationGraphemes } from './analysis/clarifications.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -1581,6 +1582,44 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectImportedSkills': {
       const input = requireInput(value.input, ['revisionId', 'before'], tentativeId);
       if ((input.revisionId !== null && !validUuid(input.revisionId)) || (input.before !== null && !validUuid(input.before))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'checkImportedSkillUpdate': {
+      // Exactly one: the picked path to disclose against the Skill, or the acquisition the editor keeps.
+      const input = requireInput(value.input, ['skillId', 'path', 'keep'], tentativeId);
+      const disclose = input.keep === null && isBoundedString(input.path, 2048) && input.path.length > 0;
+      if (!validUuid(input.skillId) || (!disclose && !(input.path === null && validUuid(input.keep)))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectImportedSkillUpdate':
+    case 'dismissImportedSkillUpdate': {
+      const input = requireInput(value.input, ['candidateId'], tentativeId);
+      if (!validUuid(input.candidateId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'adoptImportedSkillUpdate': {
+      const input = requireInput(value.input, ['candidateId', 'reviewDigest', 'acceptItems', 'upstreamPaths'], tentativeId);
+      const texts = (list: unknown, limit: number, count = 64): boolean => Array.isArray(list) && list.length <= count && list.every((item) => isBoundedString(item, limit));
+      // Acknowledgements name the converter's findings verbatim, including prefixes on 4096-character declarations and
+      // unrecognized field names bounded by the source package. Its byte bound is a conservative ceiling for both finding
+      // length and count; the existing MAX_FRAME_BYTES still bounds the whole request. Conflict-path bounds stay unchanged.
+      if (!validUuid(input.candidateId) || !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
+        !texts(input.acceptItems, MAX_SKILL_PACKAGE_BYTES, MAX_SKILL_PACKAGE_BYTES) || !texts(input.upstreamPaths, 240)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'createImportedSkillUpdateRule': {
+      const input = requireInput(value.input, ['skillId', 'confirmation'], tentativeId);
+      if (!validUuid(input.skillId) || !isBoundedString(input.confirmation, 200)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'revokeImportedSkillUpdateRule': {
+      const input = requireInput(value.input, ['skillId'], tentativeId);
+      if (!validUuid(input.skillId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'rollbackImportedSkill': {
+      const input = requireInput(value.input, ['skillId', 'revisionId'], tentativeId);
+      if (!validUuid(input.skillId) || !validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'recommendProcedures': {

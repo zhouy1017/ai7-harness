@@ -488,10 +488,16 @@ export const IMPORTED_SKILL_SCHEMA_VERSION = 81;
  * Revision 82 (Issue #922, slice 7f): 自定义分析维度 — three additive, append-only relations owned by
  * `custom-analysis-dimensions.ts` and created before this version is stamped — and the two Result Set relations rebuilt, every row
  * copied byte for byte, so that each dimension keeps its own Result Set under the custom analysis kind family and its contract
- * version, which revision 80 already admits in `analysis_task_intents`. This is the terminal version.
+ * version, which revision 80 already admits in `analysis_task_intents`.
  */
 export const CUSTOM_ANALYSIS_SCHEMA_VERSION = 82;
-export const LATEST_SCHEMA_VERSION = CUSTOM_ANALYSIS_SCHEMA_VERSION;
+/**
+ * Revision 83 (Issue #89; ADR 0090 §3): foreign Skill update candidates, the Artifact Update Rule ledger and current selections —
+ * three additive relations owned by `imported-skill-schema.ts` and created before this version is stamped. This is the terminal
+ * version.
+ */
+export const IMPORTED_SKILL_UPDATE_SCHEMA_VERSION = 83;
+export const LATEST_SCHEMA_VERSION = IMPORTED_SKILL_UPDATE_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -2278,6 +2284,11 @@ function migrateAnalysisLedgerToRevision80(db: DatabaseSync): void {
   rebuildKindCoupledAnalysisRelations(db, 80);
 }
 
+/** Revision 82 → 83 (#89): the existing ledger is unchanged; only the version advances. */
+function advanceToTerminalRevision(db: DatabaseSync): void {
+  migrateInTransaction(db, `PRAGMA user_version = ${LATEST_SCHEMA_VERSION};`, 'Terminal version');
+}
+
 /**
  * Revisions 80/81 → 82 (Issue #922, slice 7f): the Task Intents already admit the custom analysis kind family, so only the two Result
  * Set relations are rebuilt from their current text, every row copied byte for byte in its order, in one transaction with foreign
@@ -2333,7 +2344,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       // Revision 80 widened only the Task Intents; revision 82 (Issue #922, slice 7f) widens the Result Set relations for the custom
-      // analysis family, so every rebuild from a store before revision 80 moves them too, to their terminal text, and stamps 82.
+      // analysis family, so every rebuild from a store before revision 80 moves them too and stamps the terminal version (83).
       rebuildResultSetRelations(db);
       widenWebToolsPlanRecords(db);
       db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
@@ -2403,10 +2414,12 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === MATERIAL_INDEX_SCHEMA_VERSION || version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
       version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION ||
-      version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION,
+      version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === CUSTOM_ANALYSIS_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // Revision 82 already has the terminal ledger; revision 83 adds only the update ledgers.
+  if (version === CUSTOM_ANALYSIS_SCHEMA_VERSION) { validateJ03TaskAuthorizationSchema(db); validateAnalysisLedgerSchema(db); return advanceToTerminalRevision(db); }
   // A revision-80 or revision-81 store carries the terminal ledger but for the Result Set relations' text, which revision 82 rebuilds.
   if (version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
