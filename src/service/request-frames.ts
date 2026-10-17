@@ -2540,7 +2540,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // Its export (Issue #416, S67b): one version of the route's Book's package, the folder the dialog returned, an export.
     case 'reviewBookDeliveryPackageExport': {
-      const input = requireInputWithOptional(value.input, ['bookId', 'packageVersionId', 'options'], ['offset'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'packageVersionId', 'options'], ['offset', 'route'], tentativeId);
+      if (input.route !== undefined && input.route !== 'archive') throw new ProtocolError(tentativeId);
       if (input.offset !== undefined && (!isSafeInteger(input.offset) || input.offset > Number.MAX_SAFE_INTEGER - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options)) throw new ProtocolError(tentativeId);
       break;
@@ -2558,11 +2559,25 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'prepareBookDeliveryPackageArchiveExport': {
+      const input = requireInputWithOptional(value.input, ['bookId', 'packageVersionId', 'options', 'reviewDigest', 'destination', 'memberKeys'], ['offset'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.packageVersionId) || !validPackageExportOptions(input.options) ||
+        !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
+        !isBoundedString(input.destination, MAX_EXPORT_DESTINATION_CODE_UNITS) || !isAbsolute(input.destination) ||
+        !Array.isArray(input.memberKeys) || input.memberKeys.length > MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED ||
+        !input.memberKeys.every((key) => isBoundedString(key, 80)) ||
+        (input.offset !== undefined && (!isSafeInteger(input.offset) || input.offset > Number.MAX_SAFE_INTEGER - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'cancelBookDeliveryPackageArchiveExport':
     case 'cancelBookDeliveryPackageExport': {
       const input = requireInput(value.input, ['jobId'], tentativeId);
       if (!validUuid(input.jobId)) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'approveBookDeliveryPackageArchiveExport':
     case 'approveBookDeliveryPackageExport': {
       const input = requireInput(value.input, ['bookId', 'exportId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.exportId)) throw new ProtocolError(tentativeId);
