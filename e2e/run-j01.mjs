@@ -1776,7 +1776,8 @@ async function runJourney(
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor-screen-after-dark-pass');
   }
   at('editor');
-  await assertRenderer(
+  // The window is waited for, not read once: the editor reopened after the J-14 dark pass loads its blocks after it mounts.
+  await waitFor(
     renderer,
     `(() => { const forward = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向后浏览'); return document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32 && document.querySelector('.editor-meta')?.textContent.includes('全稿 0.000%') && forward && !forward.disabled; })()`,
     'bounded-window',

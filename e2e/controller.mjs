@@ -349,7 +349,7 @@ export function j07PackageExportFailureLocation(location, error) {
     (typeof error.code === 'string' && Object.hasOwn(J07_PACKAGE_EXPORT_IO, error.code) ? J07_PACKAGE_EXPORT_IO[error.code] : location);
 }
 
-const J14_DARK_PASS_LOCATIONS = Object.freeze(['j14-dark-pass', 'j14-dark-pass-theme-applied', 'j14-dark-pass-forced-colors-wins', 'j14-dark-pass-restored']);
+const J14_DARK_PASS_LOCATIONS = Object.freeze(['j14-dark-pass', 'j14-dark-pass-theme-applied', 'j14-dark-pass-forced-colors-wins', 'j14-dark-pass-restored', 'j14-dark-pass-settled']);
 
 export const JOURNEY_LOCATIONS = Object.freeze({
   'J-01': Object.freeze([
@@ -2239,5 +2239,28 @@ export async function runJ14DarkPass({ renderer, journey, at, representative = '
   }
   at('j14-dark-pass-restored');
   await choose('system');
-  await wait(`document.documentElement.dataset.theme === (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')`, 'j14-dark-pass-restored');
+  await wait(`document.documentElement.dataset.theme === (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')`, 'j14-dark-pass-restored-theme');
+  // The restore re-renders the screen once more, and a hosted runner answers the Journey's next read before that paint
+  // settles (Issue #935: J-02's scrollbar-at-rest read found the editor pane still scrolling). The pass hands the Journey
+  // back only when the representative screen is the same node on two reads a settle window apart and nothing on it is
+  // mid-scroll. It asserts nothing about navigation or other panels: a Journey that needs one opens it itself.
+  at('j14-dark-pass-settled');
+  const SETTLE_WINDOW = 1_000; // longer than the editor pane's 900 ms scrolling rest
+  const settleDeadline = Date.now() + 60_000;
+  let stableSince = null;
+  while (stableSince === null || Date.now() - stableSince < SETTLE_WINDOW) {
+    if (Date.now() >= settleDeadline) {
+      const seen = await renderer.evaluate(SCREEN_WORD).catch(() => 'none');
+      throw journeyCheckFailure(journey, `j14-dark-pass-restored-settled-on-${seen}`);
+    }
+    let state = 'unread';
+    try {
+      state = await renderer.evaluate(`(() => { const screen = ${node}; if (!screen) return 'absent'; if (document.querySelector('[data-scrolling]')) return 'scrolling'; if (screen.__j14Seen === true) return 'stable'; screen.__j14Seen = true; return 'new'; })()`);
+    } catch {
+      // A read during a repaint answers on the next poll.
+    }
+    if (state !== 'stable') stableSince = null;
+    else stableSince ??= Date.now();
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
 }

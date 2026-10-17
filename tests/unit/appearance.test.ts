@@ -104,6 +104,41 @@ describe('application appearance', () => {
     }
   });
 
+  it('hands the Journey back from the restored theme only once the representative screen has settled', async () => {
+    // The hosted J-02 failure: the restore re-rendered the editor and the next read found its pane still scrolling.
+    const controller = (await import(new URL('../../e2e/controller.mjs', import.meta.url).href)) as {
+      runJ14DarkPass(options: object): Promise<void>;
+      journeyCheckLabel(error: unknown): string | null;
+    };
+    const run = async (probe: (call: number) => string) => {
+      let calls = 0;
+      const locations: string[] = [];
+      const evaluate = async (expression: string): Promise<unknown> => {
+        if (expression.includes('#screen\')?.dataset.screen')) return 'editor';
+        if (expression.includes('__j14Seen')) return probe(calls++);
+        return true;
+      };
+      const outcome = controller.runJ14DarkPass({ renderer: { evaluate, send: async () => undefined }, journey: 'J-02', at: (location: string) => locations.push(location), representative: '.editor-window' })
+        .then(() => null, (error: unknown) => controller.journeyCheckLabel(error));
+      await vi.runAllTimersAsync();
+      return { label: await outcome, locations, calls };
+    };
+    vi.useFakeTimers();
+    try {
+      const settled = await run((call) => (call === 0 ? 'new' : 'stable'));
+      expect(settled.label).toBeNull();
+      expect(settled.locations.at(-1)).toBe('j14-dark-pass-settled');
+      // A pane that scrolls for a few reads, then rests, is waited out rather than failed.
+      const resting = await run((call) => (call < 5 ? 'scrolling' : call === 5 ? 'new' : 'stable'));
+      expect(resting.label).toBeNull();
+      expect(resting.calls).toBeGreaterThan(20);
+      expect((await run(() => 'scrolling')).label).toBe('j14-dark-pass-restored-settled-on-editor');
+      expect((await run(() => 'absent')).label).toBe('j14-dark-pass-restored-settled-on-editor');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps the theme and the preference file out of every service module, so no record, export or model context can read them', () => {
     const service = new URL('../../src/service/', import.meta.url);
     const files = readdirSync(service, { recursive: true, encoding: 'utf8' }).filter((path) => path.endsWith('.ts'));
