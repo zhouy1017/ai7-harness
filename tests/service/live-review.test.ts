@@ -192,7 +192,7 @@ describe('reference-free review on the Go execution path', () => {
     policy = admitted;
     const original = store.baselineAnalysisLedger.launch;
     store.baselineAnalysisLedger.bindLaunch({ ...original, policy: admitted });
-    let progress = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, admitted, null, [], null, seriesId);
+    let progress = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, admitted, null, [], null, null, seriesId);
     while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
     const prepared = progress.projection!.run!;
     store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));

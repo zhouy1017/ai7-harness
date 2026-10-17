@@ -170,9 +170,9 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
   it('pins an opt-in category and an evaluation in the existing plan records, retaining membership pins after removal', async () => {
     await withSession(async ({ store, seriesId }, bookId) => {
       const policy = withSeriesKnowledgeFor(withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage'), 'evaluation');
-      expect(() => store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, launchPolicy, null, [], null, seriesId)).toThrow(/当前策略未开放书系知识/u);
+      expect(() => store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, launchPolicy, null, [], null, null, seriesId)).toThrow(/当前策略未开放书系知识/u);
       expect(() => store.createInitialEvaluationPreparationWork(bookId, launchPolicy, [], null, seriesId)).toThrow(/当前策略未开放书系知识/u);
-      let review = store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, policy, null, [], null, seriesId);
+      let review = store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, policy, null, [], null, null, seriesId);
       while (!review.done) review = store.advanceReviewRunPreparationWork(review.workId!);
       const category = review.projection!.run!.categories[0]!;
       expect(store.inspectTaskPlan({ bookId, kind: 'review-run', ref: review.projection!.run!.reviewRunId }).scope.reference).toContain(`允许参考 · 书系《${J13_SERIES_TITLE}》的知识条目`);
@@ -199,7 +199,7 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       const policy = withSeriesKnowledgeFor(withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage'), 'evaluation');
       // An item taken in for consistency review only: 书系一致性 pins it, a Series-scoped Task never reads it.
       const consistencyOnly = takeInNewItem(store, seriesId, { subject: '灯塔', knowledgeClass: 'canon', content: '合成正典说明，只供一致性审阅。', reuseScope: 'consistency-review' });
-      let review = store.createReviewRunPreparationWork(bookId, ['series-consistency', 'typos-and-usage'], WHOLE, policy, null, [], null, seriesId);
+      let review = store.createReviewRunPreparationWork(bookId, ['series-consistency', 'typos-and-usage'], WHOLE, policy, null, [], null, null, seriesId);
       while (!review.done) review = store.advanceReviewRunPreparationWork(review.workId!);
       const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
       try {
@@ -236,7 +236,7 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       for (const subject of ['甲', '乙', '丙', '丁', '戊', '己']) {
         takeInNewItem(store, seriesId, { subject, knowledgeClass: 'canon', content: '合成书系知识说明。'.repeat(220), reuseScope: 'series-tasks' });
       }
-      expect(refusal(() => store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, policy, null, [], null, seriesId)))
+      expect(refusal(() => store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, policy, null, [], null, null, seriesId)))
         .toBe(`SERIES_SCOPE_UNAVAILABLE:${seriesScopeTooManyReason(J13_SERIES_TITLE)}`);
     }, null, REVIEW_FIXTURE);
   }, 300_000);
