@@ -23,15 +23,17 @@ describe('local crash records', () => {
     let terminations = 0;
     const dispose = installCrashHooks(store, app, main, () => {
       terminations++;
-      expect(store.list()).toHaveLength(terminations);
+      expect(store.list()).toHaveLength(terminations + 1);
     });
     app.emit('child-process-gone', {}, { reason: 'crashed', exitCode: 7 });
+    expect(terminations).toBe(0);
+    expect(store.list()[0]!.kind).toBe('child-process-gone');
     main.emit('uncaughtException', new TypeError('SYNTHETIC_PRIVATE_TEXT'));
     main.emit('unhandledRejection', new Error('SYNTHETIC_PRIVATE_TEXT'));
     expect(store.list().map((record) => record.kind)).toEqual(['child-process-gone', 'uncaughtException', 'unhandledRejection']);
     main.emit('uncaughtException', null);
     main.emit('unhandledRejection', 'SYNTHETIC_PRIVATE_TEXT');
-    expect(terminations).toBe(5);
+    expect(terminations).toBe(4);
     expect(store.list().slice(-2).every((record) => record.reason === '<redacted>' && record.stack === '')).toBe(true);
     dispose();
     expect(app.listenerCount('child-process-gone')).toBe(0);

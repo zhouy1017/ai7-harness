@@ -70,7 +70,8 @@ interface HookSource {
 export function installCrashHooks(records: CrashRecords, electronApp: HookSource, mainProcess: HookSource,
   terminate: () => void): () => void {
   const child = (_event: unknown, detail: { reason: string; exitCode: number }): void =>
-    crashHook(records, 'child-process-gone', terminate)(detail);
+    // Electron owns child restart/recovery; this hook adds a record without introducing a new app shutdown.
+    crashHook(records, 'child-process-gone', () => undefined)(detail);
   const uncaught = (error: unknown): void =>
     crashHook(records, 'uncaughtException', terminate)(error instanceof Error ? { reason: error.name, stack: error.stack } : {});
   const rejected = (reason: unknown): void =>
