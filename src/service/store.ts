@@ -5295,7 +5295,7 @@ export class EditorialStore {
     this.#evaluationBookTitle(bookId);
     const store = this;
     function* findings(): Generator<BookFindingProjection> {
-      const revision = store.#baselineAnalysis.analysisFreshnessOf(bookId) === 'absent' ? null : store.inspectBaselineAnalysis(bookId).resultSetRevision;
+      const revision = store.#latestAnalysisRevision(bookId);
       if (revision !== null) for (const gap of revision.gaps) {
         yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未覆盖', severity: '注意', status: '未覆盖', summary: gap.reason,
           target: { kind: 'gap', revisionId: revision.revisionId, unitOrdinal: gap.unitOrdinal, blockId: gap.blockIds[0] ?? null } };
@@ -5339,8 +5339,13 @@ export class EditorialStore {
     requireStore(block !== undefined, 'ANALYSIS_BLOCK_UNAVAILABLE', '这段文字已不在当前稿件中。');
     const nearby = this.#authority.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? AND position BETWEEN ? AND ?')
       .all(asString(block.branch_id), asNumber(block.position) - radius, asNumber(block.position) + radius) as SqlRow[];
-    const revision = this.#baselineAnalysis.analysisFreshnessOf(bookId) === 'absent' ? null : this.inspectBaselineAnalysis(bookId).resultSetRevision;
-    return paragraphAnalysis(bookId, manuscriptId, blockId, new Set(nearby.map((row) => asString(row.block_id))), revision);
+    return paragraphAnalysis(bookId, manuscriptId, blockId, new Set(nearby.map((row) => asString(row.block_id))), this.#latestAnalysisRevision(bookId));
+  }
+
+  /** The latest settled result set alone: the panel reads it on a cadence, so none of 分析's page decorations are built. */
+  #latestAnalysisRevision(bookId: string): BaselineAnalysisResultSetRevisionProjection | null {
+    if (this.#baselineAnalysis.analysisFreshnessOf(bookId) === 'absent') return null;
+    return (this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, undefined, null)) as BaselineAnalysisProjection).resultSetRevision;
   }
 
   // ---- J-04 factual review (Issue #53, plan slice S18a) -------------------------------------------

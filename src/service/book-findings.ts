@@ -23,7 +23,10 @@ export function bookFindingsPage(bookId: string, findings: Iterable<BookFindingP
   return { bookId, total, offset, next: offset + items.length < total ? offset + items.length : null, pageSize: BOOK_FINDINGS_PAGE_SIZE, groups: [...groups.values()], items };
 }
 
-/** Anchors, never name matching: an item belongs here only when it cites a nearby block. */
+/**
+ * Anchors, never name matching: an item belongs here only when it cites a nearby block. The synthesis, its sections and the
+ * units restate one item at each level, so an item is listed once per kind and wording, at its first nearby anchor.
+ */
 export function paragraphAnalysis(bookId: string, manuscriptId: string, blockId: string, nearby: ReadonlySet<string>, revision: BaselineAnalysisResultSetRevisionProjection | null): ParagraphAnalysisProjection {
   const items: ParagraphAnalysisProjection['items'][number][] = [];
   let total = 0;
@@ -36,7 +39,7 @@ export function paragraphAnalysis(bookId: string, manuscriptId: string, blockId:
           const anchor = item.sourceRanges.find((range) => nearby.has(range.blockId));
           if (anchor === undefined) continue;
           const label = 'name' in item ? item.name : 'summary' in item ? item.summary : 'claim' in item ? `${item.subject}：${item.claim}` : `${item.subject} · ${item.relation} · ${item.object}`;
-          const key = JSON.stringify([kind, label, item.sourceRanges]);
+          const key = JSON.stringify([kind, label]);
           if (seen.has(key)) continue;
           seen.add(key);
           total += 1;

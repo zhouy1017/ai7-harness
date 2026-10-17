@@ -514,13 +514,13 @@ describe('a Review Run over the real store on exact sample1', () => {
     await withBook('sample1-review-authored', async (session, book) => {
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
       const reviewRunId = run.reviewRunId;
+      const databaseBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      const walBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal'));
       const aggregateBefore = session.store.inspectBookFindings(book.bookId);
       expect(aggregateBefore.items.filter((item) => item.target.kind === 'review').length).toBe(run.findingCounts.pending);
       expect(aggregateBefore.groups.some((group) => group.category === `review:${TYPOS}`)).toBe(true);
       expect(aggregateBefore.groups.some((group) => group.category === `review:${STYLE}`)).toBe(true);
-      const databaseBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-      const walBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal'));
-      const aggregateAgain = session.store.inspectBookFindings(book.bookId);
+      const aggregateAgain = session.store.inspectBookFindings(book.bookId, 1);
       // Filtering, grouping and dropping this projection are reads. Compare booleans to keep payloads out of failures.
       aggregateAgain.items.filter((item) => item.category === `review:${TYPOS}`);
       expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite')).equals(databaseBytes)).toBe(true);
