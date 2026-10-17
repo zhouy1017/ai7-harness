@@ -77,6 +77,9 @@ describe('隐私说明', () => {
     expect(text).toContain('不联网');
     expect(text).toContain('开始任务');
     expect(text).toContain('模型处理策略');
+    expect(text).toContain('主动提问');
+    expect(text).toContain('已登记的后台分析');
+    expect(text).not.toContain('不会自动上传任何内容');
     expect(text).toContain('凭据');
     expect(text).toContain('诊断包');
     expect(text).toContain('遥测');

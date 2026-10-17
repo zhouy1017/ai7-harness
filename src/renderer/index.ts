@@ -1031,6 +1031,7 @@ const shell = mountShell({
   link.href = '#';
   link.dataset['navIcon'] = HELP_ENTRY.icon;
   link.dataset['navHelp'] = 'hub';
+  link.title = HELP_ENTRY.label;
   link.append(element('span', 'nav-label', HELP_ENTRY.label));
   link.addEventListener('click', (event) => {
     event.preventDefault();
@@ -1220,6 +1221,15 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   // The sidebar marks where the window is, and a Book screen makes its Book current and recent (Issue #934).
   shell.follow(state, place);
   refreshCommandEntries();
+  const helpLink = screen.ownerDocument.querySelector('[data-nav-help="hub"]');
+  if (state === 'help') {
+    helpLink?.setAttribute('aria-current', 'page');
+    requiredElement('#context-title').textContent = HELP_ENTRY.label;
+    requiredElement('#context-title').dataset['contextBook'] = 'false';
+    requiredElement('#context-position').textContent = SHELL_LABELS.global;
+  } else {
+    helpLink?.removeAttribute('aria-current');
+  }
 }
 
 /**
@@ -6422,6 +6432,7 @@ function renderHelp(): void {
     back: () => void initializeStartup(),
   });
   replaceScreen('help', content);
+  content.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
   setStatus(HELP_OPENED);
 }
 

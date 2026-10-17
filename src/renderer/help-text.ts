@@ -4,6 +4,9 @@
 // (docs/policies/README.md, MSET-008, slice 11e) and makes no legal promise.
 
 import { SETTINGS_HUB_GROUPS, SHELL_BOOK_GROUPS, SHELL_DESTINATIONS, SHELL_SETTINGS } from './shell-labels.js';
+import { TASK_PANEL_TITLE } from './task-panel-labels.js';
+import { TASK_BAR_START } from './task-drawer-labels.js';
+import { KNOWLEDGE_BASE_TAB_VIEWS } from './knowledge-base-labels.js';
 
 export interface HelpSection {
   readonly heading: string;
@@ -24,7 +27,7 @@ export const HELP_USAGE_SECTIONS: ReadonlyArray<HelpSection> = Object.freeze([
     `${destinationLabel('library')}是全部图书；点「新建图书」建空图书，点「导入稿件」导入文件。打开一本书会回到它上次的「${sectionLabel('manuscript')}」位置。`,
   ] },
   { heading: '任务与运行', paragraphs: [
-    `${sectionLabel('manuscript')}与${sectionLabel('deliverables')}的「任务面」发起任务；完成后需要你确认的事项出现在${destinationLabel('attention')}。`,
+    `在「${sectionLabel('manuscript')}」打开「${TASK_PANEL_TITLE}」，或在「${sectionLabel('deliverables')}」发起任务；完成后需要你确认的事项出现在「${destinationLabel('attention')}」。`,
   ] },
   { heading: '审阅与评估', paragraphs: [
     `${sectionLabel('review')}按类别给出结果与审阅报告，${sectionLabel('evaluation')}给出评估与审稿意见；两者都要你在原页面作出决定。`,
@@ -33,7 +36,7 @@ export const HELP_USAGE_SECTIONS: ReadonlyArray<HelpSection> = Object.freeze([
     `${sectionLabel('deliverables')}管理发稿、交付与图书交付包：先保存里程碑版本，再设为发稿版本，然后按关口推进。`,
   ] },
   { heading: '知识库与工序', paragraphs: [
-    `${destinationLabel('knowledge')}七类：审阅规范文件、评估方案、工序与规则、社级编辑记忆、范例、资料库、外部来源留存；任务只选用并记版本。`,
+    `${destinationLabel('knowledge')}七类：${KNOWLEDGE_BASE_TAB_VIEWS.map((entry) => entry.label).join('、')}；任务只选用并记版本。`,
   ] },
   { heading: '书系', paragraphs: [
     `${destinationLabel('series')}管理成员与共享范围、书系知识与检索排除；书系一致性审阅在成员图书的「${sectionLabel('review')}」里。`,
@@ -46,16 +49,18 @@ export const HELP_USAGE_SECTIONS: ReadonlyArray<HelpSection> = Object.freeze([
 /** 隐私说明: local-first by default, what may leave the machine and under which policy, and what never does. */
 export const HELP_PRIVACY_SECTIONS: ReadonlyArray<HelpSection> = Object.freeze([
   { heading: '本机处理', paragraphs: [
-    'AI7 默认在本机处理文档、索引与检索，不联网。',
+    'AI7 默认在本机处理文档、索引与检索；本地处理不联网。',
   ] },
   { heading: '什么会离开本机', paragraphs: [
-    '只有你选择「开始任务」后，模型请求才会按当前生效的模型处理策略发送；策略允许的联网检索或抓取也只在对应任务里发生。',
+    `任务计划由你选择「${TASK_BAR_START}」开始；模型请求只按当前生效的模型处理策略发送，可能包含任务获准读取的稿件、资料与提问。`,
+    '你主动提问、润色、翻译或快速开始时，也可能发送策略允许的模型请求；已登记的后台分析可在登记范围与预算内运行。',
+    '联网检索只发送模型提出的查询；抓取只读取模型引用的公开网页，两者都须当前策略允许，并限于获准使用它们的任务。',
   ] },
   { heading: '凭据', paragraphs: [
     '模型服务凭据保存在系统保护位置，界面只显示连接名与状态；凭据不会被显示、复制、导出，也不会进入任务文本或诊断包。',
   ] },
   { heading: '不上传', paragraphs: [
-    'AI7 不发送遥测，也不会自动上传任何内容。',
+    'AI7 不发送遥测，不自动上传诊断包。',
   ] },
   { heading: '诊断包', paragraphs: [
     '诊断包由你手动导出到本机，导出前已去掉稿件内容与凭据。',

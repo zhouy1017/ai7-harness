@@ -4,7 +4,7 @@ import licensesDocument from './third-party-licenses.generated.json' with { type
 import {
   HELP_ABOUT_FAILED, HELP_ABOUT_HEADING, HELP_ABOUT_LOADING, HELP_BACK, HELP_BREADCRUMB, HELP_LICENSE_EMPTY,
   HELP_LICENSE_FIELD_LICENSE, HELP_LICENSE_FIELD_SOURCE, HELP_LICENSE_FILTER_LABEL, HELP_LICENSE_FILTER_PLACEHOLDER,
-  HELP_LICENSE_NO_SOURCE, HELP_LICENSE_TEXT_SUMMARY, HELP_LEDE, HELP_TABS, HELP_TABS_LABEL, HELP_TITLE, helpAboutLine,
+  HELP_LICENSE_NO_SOURCE, HELP_LICENSE_LOCAL_NOTE, HELP_LICENSE_TEXT_SUMMARY, HELP_LEDE, HELP_TABS, HELP_TABS_LABEL, HELP_TITLE, helpAboutLine,
   helpLicenseCount, type HelpTab,
 } from './help-labels.js';
 import { HELP_PRIVACY_SECTIONS, HELP_USAGE_SECTIONS, type HelpSection } from './help-text.js';
@@ -82,6 +82,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   const usagePanel = el('section', 'help-panel');
   usagePanel.id = 'help-panel-usage';
   usagePanel.setAttribute('role', 'tabpanel');
+  usagePanel.tabIndex = 0;
   usagePanel.setAttribute('aria-labelledby', 'help-tab-usage');
   usagePanel.append(el('h3', undefined, HELP_TABS[0]!.label));
   for (const section of HELP_USAGE_SECTIONS) usagePanel.append(helpSection(section));
@@ -89,6 +90,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   const privacyPanel = el('section', 'help-panel');
   privacyPanel.id = 'help-panel-privacy';
   privacyPanel.setAttribute('role', 'tabpanel');
+  privacyPanel.tabIndex = 0;
   privacyPanel.setAttribute('aria-labelledby', 'help-tab-privacy');
   privacyPanel.append(el('h3', undefined, HELP_TABS[1]!.label));
   for (const section of HELP_PRIVACY_SECTIONS) privacyPanel.append(helpSection(section));
@@ -96,8 +98,10 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   const licensesPanel = el('section', 'help-panel');
   licensesPanel.id = 'help-panel-licenses';
   licensesPanel.setAttribute('role', 'tabpanel');
+  licensesPanel.tabIndex = 0;
   licensesPanel.setAttribute('aria-labelledby', 'help-tab-licenses');
   licensesPanel.append(el('h3', undefined, HELP_TABS[2]!.label));
+  licensesPanel.append(el('p', 'field-note', HELP_LICENSE_LOCAL_NOTE));
   const filterLabel = el('label', 'field-note', HELP_LICENSE_FILTER_LABEL);
   filterLabel.htmlFor = 'help-license-filter';
   const filter = el('input');
@@ -129,7 +133,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     list.append(item);
     return item;
   });
-  const applyFilter = (): void => {
+  const filterLicenses = (): void => {
     const query = filter.value.trim().toLowerCase();
     let shown = 0;
     for (const item of items) {
@@ -140,7 +144,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     count.textContent = helpLicenseCount(shown, items.length);
     empty.hidden = shown > 0;
   };
-  filter.addEventListener('input', applyFilter);
+  filter.addEventListener('input', filterLicenses);
   licensesPanel.append(filterLabel, filter, count, empty, list);
 
   panels.set('usage', usagePanel);
@@ -191,7 +195,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   root.append(back);
 
   select('usage', false);
-  applyFilter();
+  filterLicenses();
   root.dataset['helpReady'] = 'true';
   buttons.get('usage')?.focus();
 }

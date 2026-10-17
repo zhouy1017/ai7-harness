@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 
 // The third-party license list (Issue #939, wave 11 slice 11f): it reads only `pnpm-lock.yaml`
 // and the already-installed `node_modules`, makes no network request and adds no dependency.
-// The list is sorted by name and version and is written to
+// Brief revision 2: include EVERY lockfile package across all platforms. Installed packages
+// carry their real metadata/text; uninstalled platform variants carry an explicit placeholder.
+// Staleness checks compare the full name/version union and metadata/text for the installed subset.
+// Missing unconstrained packages fail closed. The list is sorted by name and version and written to
 // `src/renderer/third-party-licenses.generated.json`; the unit suite regenerates it in memory
 // and fails when the committed file is stale, naming the command to run.
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -13,21 +16,15 @@ export const OUTPUT_RELATIVE_PATH = 'src/renderer/third-party-licenses.generated
 const LOCKFILE_RELATIVE_PATH = 'pnpm-lock.yaml';
 /** The exact sentence the tab and the file use for a package that ships no license text. */
 export const LICENSE_TEXT_ABSENT = '文本未随包提供';
-/** Candidate license/notice file names, checked in this order inside the installed package. */
-const LICENSE_FILE_NAMES = [
-  'LICENSE', 'LICENSE.md', 'LICENSE.txt', 'LICENCE', 'LICENCE.md', 'LICENCE.txt',
-  'COPYING', 'COPYING.md', 'COPYING.txt', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE',
-];
+export const PLATFORM_LICENSE_ABSENT = '文本未随本机安装提供（平台限定包）';
 
 function sha256(text) {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
 /**
- * The packages the lockfile resolves, without the host-specific ones. `pnpm-lock.yaml` records a
- * `os:`/`cpu:`/`libc:` constraint for every package that only materializes on some hosts, so
- * excluding those entries keeps the generated file identical on Windows and macOS while every
- * production dependency of `package.json` (none of which is host-constrained) still appears.
+ * All packages the lockfile resolves. `os:`/`cpu:`/`libc:` identifies platform variants
+ * that may be absent from this host, but never removes them from the list.
  */
 export function readLockfilePackages(lockfileText) {
   const lines = lockfileText.split(/\r?\n/u);
@@ -118,19 +115,23 @@ function normalizeHomepage(manifest) {
 
 /** The package's license text, normalized to LF and stripped of a BOM and trailing whitespace, or `LICENSE_TEXT_ABSENT`. */
 export function readLicenseText(packageDir) {
-  for (const name of LICENSE_FILE_NAMES) {
+  const texts = [];
+  const names = readdirSync(packageDir).filter((name) => /^(?:licen[sc]e|copying|notice)(?:[._-].*)?$/iu.test(name)).sort();
+  for (const name of names) {
     const candidate = join(packageDir, name);
     if (!existsSync(candidate) || !statSync(candidate).isFile()) continue;
     const text = readFileSync(candidate, 'utf8').replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').trimEnd();
-    if (text.length > 0) return text;
+    if (text.length > 0) texts.push({ name, text });
   }
-  return LICENSE_TEXT_ABSENT;
+  if (texts.length === 0) return LICENSE_TEXT_ABSENT;
+  if (texts.length === 1) return texts[0].text;
+  return texts.map(({ name, text }) => `${name}\n\n${text}`).join('\n\n');
 }
 
 /** One package's record, exactly as the JSON carries it. */
 export function licenseRecord(name, version, packageDir) {
   if (packageDir === undefined) {
-    return { name, version, license: '未知', repository: null, homepage: null, licenseText: LICENSE_TEXT_ABSENT, licenseTextDigest: sha256(LICENSE_TEXT_ABSENT) };
+    return { name, version, license: PLATFORM_LICENSE_ABSENT, repository: null, homepage: null, licenseText: PLATFORM_LICENSE_ABSENT, licenseTextDigest: sha256(PLATFORM_LICENSE_ABSENT) };
   }
   const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
   const licenseText = readLicenseText(packageDir);
@@ -145,12 +146,12 @@ export function licenseRecord(name, version, packageDir) {
   };
 }
 
-/** The whole document: the lockfile digest plus every non-host-specific package, sorted by name then version. */
+/** The whole document: the lockfile digest plus every resolved package, sorted by name then version. */
 export function buildLicensesDocument({ root = ROOT } = {}) {
   const lockfileText = readFileSync(join(root, LOCKFILE_RELATIVE_PATH), 'utf8');
   const installed = readInstalledPackages(join(root, 'node_modules'));
-  const resolved = readLockfilePackages(lockfileText).filter((entry) => !entry.hostSpecific);
-  const missing = resolved.filter((entry) => !installed.has(`${entry.name}@${entry.version}`)).map((entry) => `${entry.name}@${entry.version}`);
+  const resolved = readLockfilePackages(lockfileText);
+  const missing = resolved.filter((entry) => !entry.hostSpecific && !installed.has(`${entry.name}@${entry.version}`)).map((entry) => `${entry.name}@${entry.version}`);
   if (missing.length > 0) throw new Error(`Installed closure is missing lockfile packages: ${missing.join(', ')}. Run bootstrap first.`);
   const packages = resolved
     .map((entry) => licenseRecord(entry.name, entry.version, installed.get(`${entry.name}@${entry.version}`)))
@@ -166,13 +167,24 @@ export function generateLicensesAt(root) {
   return serializeLicensesDocument(buildLicensesDocument({ root }));
 }
 
+/** Another host cannot verify license bytes for packages it does not install. */
+export function licensesDocumentMatches(committed, fresh) {
+  if (committed.lockfileSha256 !== fresh.lockfileSha256 || committed.packages.length !== fresh.packages.length) return false;
+  return fresh.packages.every((entry, index) => {
+    const previous = committed.packages[index];
+    if (previous?.name !== entry.name || previous.version !== entry.version) return false;
+    if (entry.license === PLATFORM_LICENSE_ABSENT) return true;
+    return JSON.stringify(previous) === JSON.stringify(entry);
+  });
+}
+
 function main() {
   const check = process.argv.includes('--check');
   const serialized = generateLicensesAt(ROOT);
   const target = join(ROOT, OUTPUT_RELATIVE_PATH);
   if (check) {
     const committed = existsSync(target) ? readFileSync(target, 'utf8') : '';
-    if (committed !== serialized) {
+    if (!committed || !licensesDocumentMatches(JSON.parse(committed), JSON.parse(serialized))) {
       console.error(`Third-party license list is stale; run "pnpm run generate:licenses".`);
       process.exitCode = 1;
     }

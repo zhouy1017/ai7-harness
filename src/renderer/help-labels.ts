@@ -37,6 +37,7 @@ export const HELP_LICENSE_TEXT_SUMMARY = '查看许可文本';
 export const HELP_LICENSE_FIELD_LICENSE = '许可';
 export const HELP_LICENSE_FIELD_SOURCE = '来源';
 export const HELP_LICENSE_NO_SOURCE = '未注明';
+export const HELP_LICENSE_LOCAL_NOTE = '本机安装的包附许可文本；其他平台的包只列名称与版本。';
 /** The exact sentence a package with no shipped license file states; tools/generate-licenses.mjs writes the same literal. */
 export const HELP_LICENSE_TEXT_ABSENT = '文本未随包提供';
 

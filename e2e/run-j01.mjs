@@ -1872,6 +1872,26 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons' && document.documentElement.dataset.sidebarCollapsed === 'true' && document.querySelector('#sidebar-toggle')?.getAttribute('aria-expanded') === 'false' && document.querySelector('#sidebar-toggle')?.getAttribute('aria-label') === '展开侧栏' && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.title === '书库'`, 'empty-book-sidebar-collapsed');
   await assertRenderer(renderer, sidebarNavigate('#sidebar-toggle'), 'empty-book-sidebar-expand');
   await waitFor(renderer, `document.documentElement.dataset.sidebar === 'full' && document.documentElement.dataset.sidebarCollapsed === 'false' && document.querySelector('#sidebar-toggle')?.getAttribute('aria-expanded') === 'true'`, 'empty-book-sidebar-expanded');
+  // Help is read-only navigation inside this existing launch stage; it adds no preload member or stage.
+  await assertRenderer(renderer, sidebarNavigate('[data-shell-slot="help"] [data-nav-help="hub"]'), 'help-open');
+  await waitFor(renderer, `document.querySelector('[data-screen="help"] [data-help-ready="true"]') && document.activeElement?.id === 'help-tab-usage'`, 'help-usage-focus');
+  await waitFor(renderer, `Boolean(document.querySelector('.help-about-line')?.textContent.match(/^软件版本 .+ · 数据版本 [0-9]+ · 服务协议 [0-9]+$/)) && document.querySelector('#context-title')?.textContent === '帮助' && document.querySelector('[data-nav-help="hub"]')?.getAttribute('aria-current') === 'page'`, 'help-live-versions');
+  await assertRenderer(renderer, `(() => {
+    const tab = document.querySelector('#help-tab-usage');
+    tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    return document.activeElement?.id === 'help-tab-privacy' && document.querySelector('#help-panel-privacy')?.hidden === false;
+  })()`, 'help-privacy-keyboard');
+  await assertRenderer(renderer, `(() => {
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+    const filter = document.querySelector('#help-license-filter');
+    if (document.activeElement?.id !== 'help-tab-licenses' || !(filter instanceof HTMLInputElement)) return false;
+    filter.value = '@napi-rs/keyring-win32-x64-msvc';
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
+    const shown = [...document.querySelectorAll('.help-license')].filter((item) => !item.hidden);
+    return shown.length === 1 && shown[0].dataset.licenseName === filter.value;
+  })()`, 'help-licenses-filter');
+  await clickExactButton(renderer, '返回', 'help-back');
+  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'help-library-return');
   await clickExactButton(renderer, '新建图书', 'empty-book-create-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-book-form');
   await clickExactButton(renderer, '复核创建', 'empty-book-missing-title');

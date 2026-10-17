@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountHelp, type ThirdPartyLicense } from '../../src/renderer/help.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
+import { SERVICE_PROTOCOL_VERSION } from '../../src/shared/protocol.js';
 
 // #939 slice 11f: drive the mounted 帮助 screen through its own data attributes — tab switching by click and by arrow
 // key, the 关于 line, and the license filter — with the same minimal DOM the other renderer surfaces use.
@@ -24,7 +25,6 @@ function mounted(back = vi.fn()) {
     loadVersions: async () => ({ softwareVersion: '0.9.9', dataVersion: 83 }),
     back,
     licenses: LICENSES,
-    protocolVersion: 152,
   });
   const find = (selector: string): MiniElement => root.querySelector(selector) as unknown as MiniElement;
   return { root, back, find };
@@ -38,7 +38,7 @@ describe('the mounted 帮助 screen', () => {
   it('shows the 关于 line from the same versions 数据与存储 reads, protocol included', async () => {
     const { root, find } = mounted();
     expect((root as unknown as MiniElement).dataset['helpReady']).toBe('true');
-    await vi.waitFor(() => expect(find('.help-about-line').textContent).toBe('软件版本 0.9.9 · 数据版本 83 · 服务协议 152'));
+    await vi.waitFor(() => expect(find('.help-about-line').textContent).toBe(`软件版本 0.9.9 · 数据版本 83 · 服务协议 ${SERVICE_PROTOCOL_VERSION}`));
   });
 
   it('starts on 使用帮助 and switches tabs by click and by the arrow keys', () => {
@@ -46,6 +46,7 @@ describe('the mounted 帮助 screen', () => {
     expect((root as unknown as MiniElement).dataset['helpTab']).toBe('usage');
     expect(find('[id="help-tab-usage"]').getAttribute('aria-selected')).toBe('true');
     expect(find('[id="help-panel-usage"]').hidden).toBe(false);
+    expect(find('[id="help-panel-usage"]').tabIndex).toBe(0);
     expect(find('[id="help-panel-privacy"]').hidden).toBe(true);
 
     find('[id="help-tab-privacy"]').click();
@@ -57,6 +58,12 @@ describe('the mounted 帮助 screen', () => {
     expect((root as unknown as MiniElement).dataset['helpTab']).toBe('licenses');
     expect(find('[id="help-tab-licenses"]').getAttribute('aria-selected')).toBe('true');
     expect(find('[id="help-panel-licenses"]').hidden).toBe(false);
+    dispatch(find('[id="help-tab-licenses"]'), 'ArrowRight');
+    expect((root as unknown as MiniElement).dataset['helpTab']).toBe('usage');
+    dispatch(find('[id="help-tab-usage"]'), 'End');
+    expect((root as unknown as MiniElement).dataset['helpTab']).toBe('licenses');
+    dispatch(find('[id="help-tab-licenses"]'), 'Home');
+    expect((root as unknown as MiniElement).dataset['helpTab']).toBe('usage');
   });
 
   it('lists every generated license and filters by name with a live count', () => {
