@@ -211,11 +211,16 @@ export class BookDeliveryPackageExports {
   /** `导出…` of one package version: the files it writes, each reviewed as S64 reviews a file (EXP-007 to EXP-010). */
   async review(input: ReviewBookDeliveryPackageExportInput, available: boolean): Promise<BookDeliveryPackageExportReviewProjection> {
     requirePackageExport(isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
-      typeof input.packageVersionId === 'string' && UUID_PATTERN.test(input.packageVersionId),
+      typeof input.packageVersionId === 'string' && UUID_PATTERN.test(input.packageVersionId) &&
+      (input.route === undefined || input.route === 'archive'),
     'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '图书交付包导出请求无效。');
     const options = requirePackageOptions(input.options);
     const offset = requireOffset(input.offset);
-    const { versionLabel, files, reviewDigest, nextOffset } = await this.#plan(input.bookId, input.packageVersionId, options, available, offset);
+    const whole = input.route === 'archive' ? await this.#archivePlan(input.bookId, input.packageVersionId, options, available) : null;
+    const { versionLabel, files, reviewDigest, nextOffset } = whole === null
+      ? await this.#plan(input.bookId, input.packageVersionId, options, available, offset)
+      : { ...whole, files: whole.files.slice(offset, offset + MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED),
+        nextOffset: offset + MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED < whole.files.length ? offset + MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED : null };
     return {
       bookId: input.bookId,
       packageVersionId: input.packageVersionId,
@@ -237,8 +242,8 @@ export class BookDeliveryPackageExports {
       filesTruncated: nextOffset !== null,
       offset,
       nextOffset,
-      degraded: files.some((file) => file.degraded),
-      statement: BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT,
+      degraded: (whole?.files ?? files).some((file) => file.degraded),
+      statement: whole === null ? BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT : '导出只把这一版图书交付包的全部内容、交付包清单和校验和写到你选择的压缩包；交付包本身不变，AI7 不会发送任何文件。',
       reviewDigest,
     };
   }
@@ -254,16 +259,18 @@ export class BookDeliveryPackageExports {
     'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '图书交付包导出请求无效。');
     const options = requirePackageOptions(input.options);
     const folder = await requireFolder(input.folder);
-    requirePackageExport(Array.isArray(input.memberKeys) && input.memberKeys.length > 0 &&
+    requirePackageExport(archiveDestination !== undefined || (Array.isArray(input.memberKeys) && input.memberKeys.length > 0 &&
       input.memberKeys.length <= MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED &&
       input.memberKeys.every((key) => typeof key === 'string' && key.length > 0 && key.length <= 80) &&
-      new Set(input.memberKeys).size === input.memberKeys.length,
+      new Set(input.memberKeys).size === input.memberKeys.length),
     'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '请明确选择本次要导出的文件。');
-    const plan = await this.#plan(input.bookId, input.packageVersionId, options, available, requireOffset(input.offset));
+    const plan = archiveDestination === undefined
+      ? await this.#plan(input.bookId, input.packageVersionId, options, available, requireOffset(input.offset))
+      : await this.#archivePlan(input.bookId, input.packageVersionId, options, available);
     requirePackageExport(plan.reviewDigest === input.reviewDigest, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED',
       '要导出的文件在查看后有了变化，请重新查看导出。');
-    const selected = plan.files.filter((file) => input.memberKeys.includes(file.key));
-    requirePackageExport(selected.length === input.memberKeys.length, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED',
+    const selected = archiveDestination === undefined ? plan.files.filter((file) => input.memberKeys.includes(file.key)) : plan.files;
+    requirePackageExport(archiveDestination !== undefined || selected.length === input.memberKeys.length, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED',
       '只能导出本页已查看并明确选择的文件，请重新查看导出。');
     for (const file of archiveDestination === undefined ? selected : []) {
       requirePackageExport(!(await exists(join(folder, file.fileName))), 'BOOK_DELIVERY_PACKAGE_EXPORT_FOLDER_TAKEN',
@@ -297,7 +304,8 @@ export class BookDeliveryPackageExports {
       reviewDigest: plan.reviewDigest,
       actor: '本机编辑',
       createdAt,
-      ...(archiveDestination === undefined ? {} : { kind: 'archive-preparation', destination: archiveDestination }),
+      ...(archiveDestination === undefined ? {} : { kind: 'archive-preparation', destination: archiveDestination,
+        manifestDigest: this.manifest(input.bookId, input.packageVersionId)!.digest }),
     });
     this.#transaction(() => {
       this.#db.prepare(
@@ -330,7 +338,7 @@ export class BookDeliveryPackageExports {
    * file that fails or cannot be confirmed stops the rest (EXP-021): they stay unwritten, and nothing retries by itself. An
    * export already approved answers with what it came to — never a second write.
    */
-  async approve(input: ApproveBookDeliveryPackageExportInput, available: boolean, beforeWrite?: () => void): Promise<BookDeliveryPackageExportProjection> {
+  async approve(input: ApproveBookDeliveryPackageExportInput, available: boolean, beforeWrite?: (phase?: 'check' | 'commit') => void): Promise<BookDeliveryPackageExportProjection> {
     requirePackageExport(isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
       typeof input.exportId === 'string' && UUID_PATTERN.test(input.exportId),
     'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '图书交付包导出请求无效。');
@@ -391,7 +399,7 @@ export class BookDeliveryPackageExports {
       const exportId = text(row.export_id);
       const files = this.#files(bookId, exportId);
       const receipts = files.map((file) => this.#exports.approvedReceipt(bookId, file.preparationId));
-      if (receipts.every((receipt) => receipt === null)) continue;
+      if (receipts.every((receipt) => receipt === null) && this.#archiveReceipt(bookId, exportId) === null) continue;
       total += 1;
       if (exports.length >= MAX_BOOK_DELIVERY_PACKAGE_EXPORTS_LISTED) continue;
       const projection = this.#projection(bookId, exportId);
@@ -509,37 +517,90 @@ export class BookDeliveryPackageExports {
 
   // ---- reading ------------------------------------------------------------------------------------------------
 
+  /** The archive binds the whole frozen content set; display pagination never narrows this set. */
+  async #archivePlan(bookId: string, packageVersionId: string, options: ManuscriptExportOptions, available: boolean): Promise<{
+    versionLabel: string; files: PlannedFile[]; reviewDigest: string;
+  }> {
+    const files: PlannedFile[] = [];
+    let offset: number | null = 0;
+    let versionLabel = '';
+    while (offset !== null) {
+      const page = await this.#plan(bookId, packageVersionId, options, available, offset);
+      files.push(...page.files.filter((file) => file.key !== 'manifest'));
+      requirePackageExport(files.length <= 65_532, 'BOOK_DELIVERY_PACKAGE_ARCHIVE_TOO_LARGE', '数据超过 4 GB');
+      versionLabel = page.versionLabel;
+      offset = page.nextOffset;
+    }
+    const manifest = this.manifest(bookId, packageVersionId);
+    requirePackageExport(manifest !== null, 'BOOK_DELIVERY_PACKAGE_EXPORT_NOT_FOUND', '交付包清单不存在。');
+    return { versionLabel, files, reviewDigest: canonicalRecord({ schema: 'ai7.book-delivery-package-archive-review/1',
+      bookId, packageVersionId, options, manifestDigest: manifest.digest,
+      files: files.map((file) => ({ key: file.key, fileName: file.fileName, revisionId: file.revisionId, reviewDigest: file.reviewDigest })) }).digest };
+  }
+
   #archivePreparation(bookId: string, exportId: string): { destination: string } | null {
     const row = this.#db.prepare('SELECT canonical_json, sha256 FROM book_delivery_package_exports WHERE book_id = ? AND export_id = ?')
       .get(bookId, exportId) as SqlRow | undefined;
     requirePackageExport(row !== undefined && sha256Hex(text(row.canonical_json)) === text(row.sha256),
       'BOOK_DELIVERY_PACKAGE_EXPORT_NOT_FOUND', '这次导出不属于这本书。');
     const record = parseCanonicalJson(text(row.canonical_json));
+    requirePackageExport(isRecord(record) && record.kind !== 'archive-receipt', 'BOOK_DELIVERY_PACKAGE_EXPORT_NOT_FOUND', '请选择这条收据所属的交付包导出。');
     if (!isRecord(record) || record.kind !== 'archive-preparation') return null;
     requirePackageExport(typeof record.destination === 'string', 'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '压缩包保存位置无效。');
     return { destination: record.destination };
   }
 
   #archiveReceipt(bookId: string, exportId: string): BookDeliveryPackageArchiveReceiptProjection | null {
-    const row = this.#db.prepare(`SELECT canonical_json, sha256 FROM book_delivery_package_exports WHERE book_id = ?
+    const row = this.#db.prepare(`SELECT * FROM book_delivery_package_exports WHERE book_id = ?
       AND json_extract(canonical_json, '$.kind') = 'archive-receipt' AND json_extract(canonical_json, '$.parentExportId') = ?`)
       .get(bookId, exportId) as SqlRow | undefined;
     if (row === undefined) return null;
     requirePackageExport(sha256Hex(text(row.canonical_json)) === text(row.sha256),
       'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '压缩包收据与其摘要不一致。');
     const record = parseCanonicalJson(text(row.canonical_json));
-    requirePackageExport(isRecord(record) && isRecord(record.receipt), 'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '压缩包收据无效。');
-    return record.receipt as unknown as BookDeliveryPackageArchiveReceiptProjection;
+    requirePackageExport(isRecord(record) && record.schema === 'ai7.book-delivery-package-archive-receipt/1' &&
+      record.parentExportId === exportId && record.bookId === bookId && record.exportId === text(row.export_id) &&
+      record.packageVersionId === text(row.package_version_id) && record.createdAt === text(row.created_at) && isRecord(record.receipt),
+    'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '压缩包收据无效。');
+    const receipt = record.receipt;
+    const success = receipt.outcome === 'created' || receipt.outcome === 'replaced';
+    requirePackageExport(receipt.receiptId === record.exportId && receipt.finalPath === text(row.folder) &&
+      receipt.finalPath === this.#archivePreparation(bookId, exportId)?.destination &&
+      (success || receipt.outcome === 'failed' || receipt.outcome === 'ambiguous') &&
+      (success ? typeof receipt.byteLength === 'number' && Number.isSafeInteger(receipt.byteLength) && receipt.byteLength > 0 &&
+        typeof receipt.sha256 === 'string' && DIGEST_PATTERN.test(receipt.sha256) : receipt.byteLength === null && receipt.sha256 === null) &&
+      receipt.memberCount === integer(row.file_count) && Array.isArray(receipt.members) && receipt.members.length === receipt.memberCount &&
+      receipt.members.every((member) => isRecord(member) && typeof member.path === 'string' && typeof member.sha256 === 'string' &&
+        DIGEST_PATTERN.test(member.sha256) && (member.receiptId === null || typeof member.receiptId === 'string' && UUID_PATTERN.test(member.receiptId))) &&
+      Array.isArray(receipt.metadata) && receipt.metadata.length <= 2 && (!success || receipt.metadata.length === 2) &&
+      receipt.metadata.every((member) => isRecord(member) && (member.path === '交付包清单.md' || member.path === 'checksums.txt') &&
+        typeof member.byteLength === 'number' && Number.isSafeInteger(member.byteLength) && member.byteLength > 0 &&
+        typeof member.sha256 === 'string' && DIGEST_PATTERN.test(member.sha256)) &&
+      (receipt.stopped === null || isRecord(receipt.stopped) && typeof receipt.stopped.fileName === 'string' && typeof receipt.stopped.reason === 'string'),
+    'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '压缩包收据与其内容不一致。');
+    const members = this.#files(bookId, exportId).map((file) => {
+      const member = this.#exports.preparationOf(bookId, file.preparationId);
+      return { path: member.fileName, sha256: member.technical.payloadDigest,
+        receiptId: this.#exports.approvedReceipt(bookId, file.preparationId)?.technical.receiptId ?? null };
+    });
+    requirePackageExport(canonicalRecord(members).json === canonicalRecord(receipt.members).json &&
+      new Set(receipt.metadata.map((member) => member.path)).size === receipt.metadata.length,
+    'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '压缩包收据与成员收据不一致。');
+    return receipt as unknown as BookDeliveryPackageArchiveReceiptProjection;
   }
 
   async #approveArchive(input: ApproveBookDeliveryPackageExportInput, available: boolean,
-    archive: { destination: string }, beforeWrite?: () => void): Promise<BookDeliveryPackageExportProjection> {
+    archive: { destination: string }, beforeWrite?: (phase?: 'check' | 'commit') => void): Promise<BookDeliveryPackageExportProjection> {
     const files = this.#files(input.bookId, input.exportId);
     if (this.#archiveReceipt(input.bookId, input.exportId) !== null ||
       files.some((file) => this.#exports.approvedReceipt(input.bookId, file.preparationId) !== null)) {
       return this.#projection(input.bookId, input.exportId);
     }
     for (const file of files) await this.#exports.checkPrepared(input.bookId, file.preparationId, available);
+    const parentRecordRow = this.#db.prepare('SELECT package_version_id, canonical_json FROM book_delivery_package_exports WHERE export_id = ?').get(input.exportId) as SqlRow;
+    const parentRecord = parseCanonicalJson(text(parentRecordRow.canonical_json));
+    requirePackageExport(isRecord(parentRecord) && this.manifest(input.bookId, text(parentRecordRow.package_version_id))?.digest === parentRecord.manifestDigest,
+      'EXPORT_PAYLOAD_CHANGED', '交付包清单在准备后有了变化，请重新查看导出。');
     // The members all bind this same target and its create/replace identity. Never resolve a new overwrite here.
     const first = this.#db.prepare('SELECT canonical_json FROM export_preparations WHERE preparation_id = ?').get(files[0]!.preparationId) as SqlRow;
     const prepared = parseCanonicalJson(text(first.canonical_json));
@@ -547,43 +608,59 @@ export class BookDeliveryPackageExports {
       'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '压缩包导出准备无效。');
     const replaces = isRecord(prepared.replaces) && typeof prepared.replaces.bytes === 'number' && typeof prepared.replaces.sha256 === 'string'
       ? { bytes: prepared.replaces.bytes, sha256: prepared.replaces.sha256 } : null;
-    beforeWrite?.();
-    const writer = await BookDeliveryPackageArchiveWriter.create(archive.destination, input.exportId);
+    beforeWrite?.('check');
+    let writer: BookDeliveryPackageArchiveWriter | null = null;
     const approved: string[] = [];
     let stopped: BookDeliveryPackageExportProjection['stopped'] = null;
-    let activeName = '';
+    let activeName = this.#exports.preparationOf(input.bookId, files[0]!.preparationId).fileName;
     let result: Awaited<ReturnType<typeof writeAtomically>> = { outcome: 'failed', code: 'EXPORT_STAGE_FAILED' };
     let archiveBytes: number | null = null;
     let archiveSha256: string | null = null;
+    const metadata: Array<{ path: string; byteLength: number; sha256: string }> = [];
     try {
+      writer = await BookDeliveryPackageArchiveWriter.create(archive.destination, input.exportId);
+      const archiveWriter = writer;
       for (const file of files) {
         const preparation = this.#exports.preparationOf(input.bookId, file.preparationId);
         activeName = preparation.fileName;
         await this.#exports.approvePackageArchiveMember(input.bookId, file.preparationId, input.exportId, async (bytes) => {
           approved.push(file.preparationId);
-          await writer.add(preparation.fileName, bytes, preparation.format === 'markdown');
+          await archiveWriter.add(preparation.fileName, bytes, preparation.format === 'markdown', () => beforeWrite?.('check'));
         }, available);
       }
-      const checksums = files.map((file) => this.#exports.preparationOf(input.bookId, file.preparationId))
-        .sort((a, b) => a.fileName < b.fileName ? -1 : a.fileName > b.fileName ? 1 : 0)
-        .map((file) => `${file.technical.payloadDigest}  ${file.fileName}\n`).join('');
+      const parentRow = this.#db.prepare('SELECT package_version_id FROM book_delivery_package_exports WHERE export_id = ?').get(input.exportId) as SqlRow;
+      const manifest = this.manifest(input.bookId, text(parentRow.package_version_id));
+      requirePackageExport(manifest !== null, 'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '交付包清单不存在。');
+      activeName = '交付包清单.md';
+      const manifestBytes = new TextEncoder().encode(manifest.markdown);
+      await writer.add(activeName, manifestBytes, true, () => beforeWrite?.('check'));
+      metadata.push({ path: activeName, byteLength: manifestBytes.length, sha256: sha256Hex(manifestBytes) });
+      const checksums = [...files.map((file) => { const member = this.#exports.preparationOf(input.bookId, file.preparationId);
+        return { path: member.fileName, sha256: member.technical.payloadDigest }; }), ...metadata]
+        .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+        .map((file) => `${file.sha256}  ${file.path}\n`).join('');
       activeName = 'checksums.txt';
-      await writer.add(activeName, new TextEncoder().encode(checksums), true);
+      const checksumBytes = new TextEncoder().encode(checksums);
+      await writer.add(activeName, checksumBytes, true, () => beforeWrite?.('check'));
+      metadata.push({ path: activeName, byteLength: checksumBytes.length, sha256: sha256Hex(checksumBytes) });
       const payload = await writer.finish();
       archiveBytes = payload.bytes;
       archiveSha256 = payload.sha256;
+      beforeWrite?.('commit');
       result = await writeAtomically(archive.destination, payload, payload.sha256, prepared.disposition, input.exportId, replaces);
       if (result.outcome === 'failed' || result.outcome === 'ambiguous') stopped = { fileName: activeName, reason: result.outcome === 'ambiguous' ? '结果待确认' : '失败' };
     } catch (error) {
       stopped = { fileName: activeName, reason: error instanceof Error && error.message === '数据超过 4 GB' ? '数据超过 4 GB' : '失败' };
     } finally {
-      await writer.dispose();
+      await writer?.dispose();
     }
+    this.#transaction(() => {
     for (const preparationId of approved) this.#exports.settlePackageArchiveMember(input.bookId, preparationId, input.exportId, result);
     const receiptId = randomUUID();
     const receipt: BookDeliveryPackageArchiveReceiptProjection = { receiptId, finalPath: archive.destination, outcome: result.outcome,
       byteLength: result.outcome === 'created' || result.outcome === 'replaced' ? archiveBytes : null,
       sha256: result.outcome === 'created' || result.outcome === 'replaced' ? archiveSha256 : null, memberCount: files.length,
+      metadata, stopped,
       members: files.map((file) => { const preparation = this.#exports.preparationOf(input.bookId, file.preparationId);
         return { path: preparation.fileName, sha256: preparation.technical.payloadDigest,
           receiptId: this.#exports.approvedReceipt(input.bookId, file.preparationId)?.technical.receiptId ?? null }; }),
@@ -596,6 +673,7 @@ export class BookDeliveryPackageExports {
     this.#db.prepare(`INSERT INTO book_delivery_package_exports(export_id, package_version_id, book_id, folder, file_count,
       review_digest, actor, created_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, '本机编辑', ?, ?, ?)`)
       .run(receiptId, text(parent.package_version_id), input.bookId, archive.destination, files.length, text(parent.review_digest), createdAt, record.json, record.digest);
+    });
     return { ...this.#projection(input.bookId, input.exportId), stopped };
   }
 
@@ -698,7 +776,9 @@ export class BookDeliveryPackageExports {
     requirePackageExport(row !== undefined, 'BOOK_DELIVERY_PACKAGE_EXPORT_NOT_FOUND', '这次导出不属于这本书。');
     const files = this.#files(bookId, exportId);
     const receipts = files.map((file) => this.#exports.approvedReceipt(bookId, file.preparationId));
-    const approved = receipts.some((receipt) => receipt !== null);
+    const archive = this.#archivePreparation(bookId, exportId);
+    const archiveReceipt = archive === null ? null : this.#archiveReceipt(bookId, exportId);
+    const approved = receipts.some((receipt) => receipt !== null) || archiveReceipt !== null;
     const outcomes: BookDeliveryPackageExportFileOutcomeProjection[] = files.map((file, index) => {
       const receipt = receipts[index]!;
       const preparation = this.#exports.preparationOf(bookId, file.preparationId);
@@ -720,11 +800,12 @@ export class BookDeliveryPackageExports {
     const summary = bookDeliveryPackageExportSummary(outcomes.map((file) => file.outcome));
     const record = this.#sources.record(bookId, text(row.package_version_id));
     requirePackageExport(record !== null, 'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '导出所属的交付包版本不存在。');
-    const archive = this.#archivePreparation(bookId, exportId);
-    const archiveReceipt = archive === null ? null : this.#archiveReceipt(bookId, exportId);
     const archiveSuccess = archiveReceipt?.outcome === 'created' || archiveReceipt?.outcome === 'replaced';
     return {
-      ...(archive === null ? {} : { kind: 'archive' as const, ...(archiveReceipt === null ? {} : { archiveReceipt }) }),
+      ...(archive === null ? {} : { kind: 'archive' as const, ...(archiveReceipt === null ? {} : { archiveReceipt: {
+        ...archiveReceipt, members: archiveReceipt.members.slice(0, MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED),
+        membersTruncated: archiveReceipt.members.length > MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
+      } }) }),
       exportId,
       packageVersionId: text(row.package_version_id),
       versionLabel: `v${record.record.version}`,
@@ -736,7 +817,7 @@ export class BookDeliveryPackageExports {
       createdAt: text(row.created_at),
       files: outcomes.slice(0, MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED),
       filesTruncated: outcomes.length > MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
-      stopped: null,
+      stopped: archiveReceipt?.stopped ?? null,
     };
   }
 

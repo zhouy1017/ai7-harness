@@ -19933,7 +19933,7 @@ export class EditorialStore {
   }
 
   /** `按上述方式导出`: each file approved and written in turn with its receipt, and the package as it stands. */
-  async approveBookDeliveryPackageExport(input: ApproveBookDeliveryPackageExportInput, available: boolean, beforeWrite?: () => void): Promise<BookDeliveryPackageExportResultProjection> {
+  async approveBookDeliveryPackageExport(input: ApproveBookDeliveryPackageExportInput, available: boolean, beforeWrite?: (phase?: 'check' | 'commit') => void): Promise<BookDeliveryPackageExportResultProjection> {
     const exported = await this.#packageExportCall(() => this.#packageExports.approve(input, available, beforeWrite));
     return { bookId: input.bookId, export: exported, package: this.inspectBookDeliveryPackage(input.bookId) };
   }

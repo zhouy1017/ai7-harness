@@ -329,6 +329,10 @@ const J07_PACKAGE_EXPORT_ASSERTIONS = Object.freeze([
   'package-export-folder-files', 'package-export-docx-publication', 'package-export-docx-news-release',
   'package-export-manifest-words', 'package-export-not-in-export-records',
   'package-export-close', 'package-export-closed', 'package-export-without-forbidden-words',
+  'package-archive-open', 'package-archive-reviewed', 'package-archive-route', 'package-archive-choose',
+  'package-archive-prepared', 'package-archive-prepared-writes-nothing', 'package-archive-approve',
+  'package-archive-written', 'package-archive-members', 'package-archive-member-bytes', 'package-archive-checksums',
+  'package-archive-history', 'package-archive-receipt', 'package-archive-close',
 ]);
 const J07_PACKAGE_EXPORT_FAILURES = new Map([
   ...J07_PACKAGE_EXPORT_ASSERTIONS.map((name) => ['J-07/' + name, name]),

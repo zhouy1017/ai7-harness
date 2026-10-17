@@ -476,11 +476,11 @@ export class CooperativeJobOwner {
         progress: { completed: 0, total: 1, label: '正在检查导出文件…' }, result: null, failure: null },
     };
     this.#jobs.set(job.projection.jobId, job);
-    const work = this.#store.approveBookDeliveryPackageExport(input, available, () => {
+    const work = this.#store.approveBookDeliveryPackageExport(input, available, (phase = 'commit') => {
       if (job.cancelRequested) throw new StoreError('EXPORT_CANCELLED', '已取消导出，没有写入任何文件。');
-      job.writeStarted = true;
+      if (phase === 'commit') job.writeStarted = true;
     }).then((result) => {
-      job.projection = { ...job.projection, state: 'completed', result,
+      job.projection = { ...job.projection, state: job.cancelRequested ? 'cancelled' : 'completed', result,
         progress: { completed: 1, total: 1, label: result.export.summary } };
     }, (error: unknown) => {
       if (error instanceof StoreFatalError) { setImmediate(() => { throw error; }); return; }

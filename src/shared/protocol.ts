@@ -11938,6 +11938,7 @@ export interface BookDeliveryPackageExportSummaryProjection {
 
 /** `导出…` of one version of the route's Book's package, under the options chosen. */
 export interface ReviewBookDeliveryPackageExportInput {
+  route?: 'archive';
   offset?: number;
   bookId: string;
   packageVersionId: string;
@@ -11965,6 +11966,9 @@ export interface BookDeliveryPackageArchiveReceiptProjection {
   sha256: string | null;
   memberCount: number;
   members: ReadonlyArray<{ path: string; sha256: string; receiptId: string | null }>;
+  membersTruncated?: boolean;
+  metadata: ReadonlyArray<{ path: string; byteLength: number; sha256: string }>;
+  stopped: { fileName: string; reason: string } | null;
 }
 
 /** `按上述方式导出` of one prepared package export. */

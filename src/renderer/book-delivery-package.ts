@@ -473,14 +473,16 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       radio.disabled = inFlight || current.result !== null;
       radio.addEventListener('change', () => {
         if (!radio.checked || inFlight || current.result !== null) return;
-        current.route = value; current.prepared = null; current.phase = 'ready'; current.problem = null;
+        current.route = value; current.prepared = null; current.phase = 'reviewing'; current.problem = null;
+        current.offset = 0; current.selected.clear();
         draw('keep');
+        reviewExport(current, 'keep');
       });
       label.append(radio, document.createTextNode(title)); routes.append(label);
     }
     panel.append(routes);
     if (current.route === 'archive') panel.append(el('p', 'field-note',
-      '压缩包只汇集已完成的工作，包含所选文件、交付包清单与校验和；交付包不是发稿或交付，不会改变任何记录，也不会发送文件。'));
+      '压缩包包含这一版交付包的全部内容，包括其他页的文件；交付包清单与校验和会自动生成。它只汇集已完成的工作，不是发稿或交付，不改变任何记录，也不会发送文件。'));
     const shown = current.result ?? current.prepared;
     if (current.review !== null) panel.append(el('p', 'export-local-line', current.review.statement));
     panel.append(renderExportOptions(current));
@@ -496,7 +498,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       }
       panel.append(label, list);
       if (shown === null) {
-        panel.append(el('p', 'field-note', '勾选本次要导出的文件，每次最多选择本页的 40 个。翻页会清除选择；其他文件不会一并导出。'));
+        panel.append(el('p', 'field-note', current.route === 'archive'
+          ? '每页最多显示 40 个内容文件，可以翻页查看保真情况；导出包含全部内容文件。'
+          : '勾选本次要导出的文件，每次最多选择本页的 40 个。翻页会清除选择；其他文件不会一并导出。'));
         const pages = el('div', 'button-row');
         for (const [name, offset] of [['上一页', review.offset > 0 ? Math.max(0, review.offset - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED) : null], ['下一页', review.nextOffset]] as const) {
           const button = el('button', 'quiet', name);
@@ -517,17 +521,20 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         }
         panel.append(pages);
       }
-      if ((shown?.filesTruncated ?? review.filesTruncated) === true) panel.append(el('p', 'field-note', PACKAGE_EXPORT_FILES_TRUNCATED));
+      if ((shown?.filesTruncated ?? review.filesTruncated) === true) panel.append(el('p', 'field-note', current.route === 'archive'
+        ? '这里只显示部分内容文件；压缩包会包含这一版的全部内容文件。' : PACKAGE_EXPORT_FILES_TRUNCATED));
       // EXP-008: what is degraded or cannot be written is said above; the approval accepts it for this export only.
       if (review.degraded) panel.append(el('p', 'export-degraded-note attention-note', EXPORT_DEGRADED_NOTE));
     }
     const folder = el('div', 'package-export-folder-choice');
     folder.dataset['packageExportFolder'] = current.prepared === null ? 'unchosen' : 'chosen';
-    folder.append(el('p', 'package-export-folder-line', current.prepared === null ? PACKAGE_EXPORT_FOLDER_UNCHOSEN : packageExportFolderLine(current.prepared.folder)));
+    folder.append(el('p', 'package-export-folder-line', current.prepared === null
+      ? current.route === 'archive' ? '尚未选择压缩包的保存位置。' : PACKAGE_EXPORT_FOLDER_UNCHOSEN
+      : packageExportFolderLine(current.prepared.folder)));
     if (current.result === null) {
       const choose = exportButton(current.prepared === null ? 'choose' : 'chooseAgain', 'secondary', () => void chooseFolder());
       choose.dataset['packageAction'] = 'export-choose';
-      choose.disabled = inFlight || current.review === null || current.selected.size === 0;
+      choose.disabled = inFlight || current.review === null || (current.route === 'folder' && current.selected.size === 0);
       folder.append(choose);
     }
     panel.append(folder);
@@ -580,7 +587,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const item = el('li');
     item.dataset['packageExportFile'] = file.key;
     item.dataset['packageExportFormat'] = file.format;
-    if (current.prepared === null && current.result === null) {
+    if (current.route === 'folder' && current.prepared === null && current.result === null) {
       const label = el('label');
       const box = el('input');
       box.type = 'checkbox';
@@ -687,7 +694,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const request = ++exportTicket;
     const asked = current.options;
     options.setStatus(PACKAGE_EXPORT_STATUS_LINES.reviewing, 'busy');
-    void api.reviewBookDeliveryPackageExport({ packageVersionId: current.packageVersionId, options: asked, offset: current.offset }).then(
+    void api.reviewBookDeliveryPackageExport({ packageVersionId: current.packageVersionId, options: asked, offset: current.offset,
+      ...(current.route === 'archive' ? { route: 'archive' as const } : {}) }).then(
       (next) => {
         if (destroyed || exporting !== current || request !== exportTicket) return;
         current.phase = 'ready';
@@ -719,7 +727,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   async function chooseFolder(): Promise<void> {
     const current = exporting;
     if (destroyed || current === null || busy() || current.review === null || current.result !== null) return;
-    if (current.selected.size === 0) return;
+    if (current.route === 'folder' && current.selected.size === 0) return;
     const reviewed = current.review;
     const request = ++exportTicket;
     current.phase = 'choosing';

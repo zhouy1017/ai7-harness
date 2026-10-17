@@ -1867,6 +1867,12 @@ export class ManuscriptExportStore {
       ? text((this.#db.prepare('SELECT label FROM milestone_versions WHERE milestone_id = ?').get(text(row.target_id)) as SqlRow | undefined)?.label)
       : null;
     const disposition = text(row.disposition) as ManuscriptExportDisposition;
+    const stored = parseCanonicalJson(text(row.canonical_json));
+    if (isRecord(stored) && stored.archive !== undefined) {
+      requireExport(isRecord(stored.archive) && typeof stored.archive.exportId === 'string' && UUID_PATTERN.test(stored.archive.exportId) &&
+        stored.archive.destination === text(row.destination) && stored.archive.memberPath === text(row.file_name),
+      'EXPORT_RECORD_INVALID', '压缩包成员与导出准备不一致。');
+    }
     const recordDigest = requireRecord(row.canonical_json, row.sha256, {
       schema: PREPARATION_SCHEMA,
       preparationId,
@@ -2020,12 +2026,20 @@ export class ManuscriptExportStore {
     requireExport(text(outcome.receipt_approval_id) === approvalId && text(outcome.final_path) === preparation.destination,
       'EXPORT_RECORD_INVALID', '导出回执与其批准不一致。');
     const exported = kind === 'created' || kind === 'replaced';
+    const preparedRecord = parseCanonicalJson(text(preparationRow.canonical_json));
+    const archive = isRecord(preparedRecord) ? preparedRecord.archive : undefined;
+    if (archive !== undefined) {
+      const receiptRecord = parseCanonicalJson(text(outcome.receipt_json));
+      requireExport(isRecord(receiptRecord) && canonicalJson(receiptRecord.archive) === canonicalJson(archive),
+        'EXPORT_RECORD_INVALID', '压缩包成员收据与导出准备不一致。');
+    }
     return {
       ...base,
       outcome: kind,
       outcomeLabel: exported ? EXPORT_OUTCOME_LABELS.exported : kind === 'ambiguous' ? EXPORT_OUTCOME_LABELS.ambiguous : EXPORT_OUTCOME_LABELS.failed,
       detail: exported
-        ? kind === 'created' ? `已新建「${preparation.fileName}」。` : `已替换所选位置的「${preparation.fileName}」。`
+        ? archive !== undefined ? `已写入所选压缩包：「${preparation.fileName}」。`
+          : kind === 'created' ? `已新建「${preparation.fileName}」。` : `已替换所选位置的「${preparation.fileName}」。`
         : EXPORT_FAILURE_DETAILS[failureCode ?? ''] ?? EXPORT_FAILURE_DETAILS.EXPORT_COMMIT_UNCERTAIN!,
       byteLength,
       recordedAt: text(outcome.recorded_at),

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { unzipSync } from 'fflate';
 import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -148,7 +149,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 // Issue #938: 诊断's local folder export adds exportDiagnosticsBundle; it carries no manuscript and neither publishes nor sends.
 // Issue #936: exportUsageCsv saves numbers and ids only; the native Save dialog grants no Run or manuscript export authority.
 const EXPORT_MEMBERS = Object.freeze([
-  'approveBookDeliveryPackageExport', 'approveDatabaseExport', 'approveManuscriptExport', 'cancelBookDeliveryPackageExport', 'cancelDatabaseExport', 'chooseBookDeliveryPackageExportFolder', 'chooseDatabaseExportDestination', 'chooseManuscriptExportDestination', 'exportDiagnosticsBundle', 'exportUsageCsv', 'inspectDatabaseExports', 'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
+  'approveBookDeliveryPackageArchiveExport', 'approveBookDeliveryPackageExport', 'approveDatabaseExport', 'approveManuscriptExport', 'cancelBookDeliveryPackageArchiveExport', 'cancelBookDeliveryPackageExport', 'cancelDatabaseExport', 'chooseBookDeliveryPackageExportFolder', 'chooseDatabaseExportDestination', 'chooseManuscriptExportDestination', 'exportDiagnosticsBundle', 'exportUsageCsv', 'inspectDatabaseExports', 'revealManuscriptExport', 'reviewBookDeliveryPackageExport', 'reviewManuscriptExport',
 ]);
 // Issue #415 (S66a): a 新闻稿's draft, composed at run time from exact sample1's paragraphs after the manuscript's own,
 // imported as source material and made the Book's 新闻稿; the house's five types in its order; and the document's edit.
@@ -900,6 +901,7 @@ async function main() {
     // Issue #415 (S66b): the file of the 新闻稿's delivered version.
     const documentExportPath = resolve(exportsRoot, DOCUMENT_EXPORT_FILE);
     // Issue #416 (S67b): the empty folder the folder dialog's launch control names for the package's export.
+    const packageArchive = resolve(exportsRoot, '图书交付包.zip');
     const packageFolder = resolve(runRoot, 'package-export');
     await mkdir(packageFolder);
     const metadata = await lstat(manuscript);
@@ -2153,6 +2155,41 @@ async function main() {
     await waitFor(renderer, `window.__j07.packageExport() === null && document.activeElement === window.__j07.packageVersions()[0].querySelector('[data-package-action="export"]')`, 'package-export-closed');
     await assertNoForbiddenWords(renderer, 'package-export-without-forbidden-words');
 
+    // The archive uses a fresh single-use injected Save path, never a real platform dialog in the Journey.
+    await close();
+    renderer = await launch({ save: packageArchive });
+    await reopenDeliverables(renderer, 'package-archive');
+    await clickSelector(renderer, packageAction('export'), 'package-archive-open');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready'`, 'package-archive-reviewed', 60_000);
+    await clickSelector(renderer, 'input[name="package-export-route"][value="archive"]', 'package-archive-route');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready' && window.__j07.packageExport()?.querySelector('input[value=archive]')?.checked === true`, 'package-archive-reviewed', 60_000);
+    await clickSelector(renderer, packageAction('export-choose'), 'package-archive-choose');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared'`, 'package-archive-prepared', 60_000);
+    requireJourney(!existsSync(packageArchive), 'package-archive-prepared-writes-nothing');
+    await clickSelector(renderer, packageAction('export-approve'), 'package-archive-approve');
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 压缩包 · 3 个文件'`, 'package-archive-written', 60_000);
+    const archiveBytes = await readFile(packageArchive);
+    const archiveMembers = unzipSync(archiveBytes);
+    requireJourney(JSON.stringify(Object.keys(archiveMembers).filter((name) => name !== 'checksums.txt').sort()) ===
+      JSON.stringify(packageFiles.map(([, , , name]) => name).sort()), 'package-archive-members');
+    for (const [, , , name] of packageFiles) {
+      requireJourney(createHash('sha256').update(archiveMembers[name]).digest('hex') ===
+        createHash('sha256').update(await readFile(resolve(packageFolder, name))).digest('hex'), 'package-archive-member-bytes');
+    }
+    const checksumLines = packageFiles.map(([, , , name]) => name).sort()
+      .map((name) => createHash('sha256').update(archiveMembers[name]).digest('hex') + '  ' + name + '\n').join('');
+    requireJourney(new TextDecoder().decode(archiveMembers['checksums.txt']) === checksumLines, 'package-archive-checksums');
+    await assertRenderer(renderer, `(() => {
+      const line = window.__j07.packageVersions()[0]?.querySelector('ol.package-export-list > li');
+      return line?.dataset.packageExportKind === 'archive' && line.dataset.packageExportState === 'exported' &&
+        line.querySelector('.package-export-folder')?.textContent === ${JSON.stringify(packageArchive)} &&
+        line.querySelector('[data-package-action="reveal-export"]')?.textContent === '查看位置' &&
+        window.__j07.packageExport()?.querySelector('[data-package-action="export-reveal"]')?.textContent === '查看位置';
+    })()`, 'package-archive-history');
+    const archiveReceipt = await renderer.evaluate(`window.ai7.inspectBookDeliveryPackage().then((answer) => answer.versions[0].exports[0])`);
+    requireJourney(archiveReceipt?.kind === 'archive' && archiveReceipt.fileCount === 3 && archiveReceipt.revealPreparationId !== null, 'package-archive-receipt');
+    await clickSelector(renderer, packageAction('export-close'), 'package-archive-close');
+
     at('maintenance-cases');
     // 维护事项 (Issue #426, S68a; MAINT-001 to 011). On the first designation `记录维护事项…` opens a draft bound to it: the six
     // classifications unselected, each with what it does, and `记录维护事项` waiting with its reason in words. A 勘误 is
@@ -2377,7 +2414,7 @@ async function main() {
     await reopenDeliverables(renderer, 'documents-restart');
     const documentsAfter = await renderer.evaluate(readBoth);
     requireJourney(typeof documentsBefore === 'string' && documentsAfter === documentsBefore, 'documents-restart-moved-nothing');
-    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false' && window.__j07.packageVersions().length === 2 && (window.__j07.packageVersions()[0].querySelector('ol.package-export-list > li .package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 1 个文件 · ')`, 'documents-restart-card');
+    await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false' && window.__j07.packageVersions().length === 2 && (window.__j07.packageVersions()[0].querySelector('ol.package-export-list > li .package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 压缩包 · 3 个文件 · ')`, 'documents-restart-card');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="open"]', 'documents-restart-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 3' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)})`, 'documents-restart-document');
     // Reopened from 交付物 after the restart, the document still says how its material was read (Issue #547).

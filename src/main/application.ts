@@ -5354,6 +5354,7 @@ function registerRendererHandlers(
             bookId: route.bookId,
             packageVersionId: input.packageVersionId,
             options: input.options,
+            ...(input.route === 'archive' ? { route: 'archive' as const } : {}),
             ...(input.offset === undefined ? {} : { offset: input.offset }),
           });
           requireCurrentRouteGeneration(owned, routeGeneration);

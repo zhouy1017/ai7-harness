@@ -7,6 +7,17 @@ import { stagedPathFor } from './manuscript-export.js';
 const MAX_ZIP_BYTES = 0xffff_ffff;
 const CHUNK_BYTES = 1 << 20;
 
+function archiveEntry(name: string, compressed: boolean): ZipPassThrough | ZipDeflate {
+  if (compressed) {
+    const entry = new ZipDeflate(name, { level: 6 });
+    entry.mtime = fixedArchiveTime();
+    return entry;
+  }
+  const entry = new ZipPassThrough(name);
+  entry.mtime = fixedArchiveTime();
+  return entry;
+}
+
 /** The database-export ZIP pattern, with back pressure between input chunks and no ZIP64. */
 export class BookDeliveryPackageArchiveWriter {
   readonly path: string;
@@ -37,12 +48,13 @@ export class BookDeliveryPackageArchiveWriter {
     return new BookDeliveryPackageArchiveWriter(path, await open(path, 'wx', 0o600));
   }
 
-  async add(name: string, bytes: Uint8Array, compressed: boolean): Promise<void> {
+  async add(name: string, bytes: Uint8Array, compressed: boolean, checkCancelled?: () => void): Promise<void> {
+    checkCancelled?.();
     if (++this.#members > 65_534 || bytes.byteLength > MAX_ZIP_BYTES) throw new Error('数据超过 4 GB');
-    const entry = compressed ? new ZipDeflate(name, { level: 6 }) : new ZipPassThrough(name);
-    entry.mtime = fixedArchiveTime();
+    const entry = archiveEntry(name, compressed);
     this.#zip.add(entry);
     for (let offset = 0; offset < bytes.length; offset += CHUNK_BYTES) {
+      checkCancelled?.();
       const end = Math.min(bytes.length, offset + CHUNK_BYTES);
       entry.push(bytes.subarray(offset, end), end === bytes.length);
       await this.#flush();
