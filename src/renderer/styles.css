@@ -1826,6 +1826,21 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .imported-skill-list li, [data-procedure-recommendation] li {
   margin-block: 0.75rem;
 }
+/* An update's candidates, three-way report and history reflow like the card they belong to (Issue #89). */
+[data-skill-updates], .imported-skill-candidates li, .imported-skill-history li, .imported-skill-update-files li, .imported-skill-three-way li {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.imported-skill-candidates li, .imported-skill-history li, .imported-skill-update-files li {
+  margin-block: 0.5rem;
+}
+[data-skill-current="true"] > span:first-child {
+  font-weight: 600;
+}
+[data-skill-file-change="conflict"] > span:first-child {
+  text-decoration: underline;
+}
 [data-recommendation-state="stale"] {
   border-style: dashed;
 }
