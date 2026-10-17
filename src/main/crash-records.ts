@@ -71,8 +71,8 @@ export function installCrashHooks(records: CrashRecords, electronApp: HookSource
   terminate: () => void): () => void {
   const child = (_event: unknown, detail: { reason: string; exitCode: number }): void =>
     crashHook(records, 'child-process-gone', terminate)(detail);
-  const uncaught = (error: Error): void =>
-    crashHook(records, 'uncaughtException', terminate)({ reason: error.name, stack: error.stack });
+  const uncaught = (error: unknown): void =>
+    crashHook(records, 'uncaughtException', terminate)(error instanceof Error ? { reason: error.name, stack: error.stack } : {});
   const rejected = (reason: unknown): void =>
     crashHook(records, 'unhandledRejection', terminate)(reason instanceof Error ? { reason: reason.name, stack: reason.stack } : {});
   electronApp.on('child-process-gone', child);

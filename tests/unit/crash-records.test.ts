@@ -29,6 +29,10 @@ describe('local crash records', () => {
     main.emit('uncaughtException', new TypeError('SYNTHETIC_PRIVATE_TEXT'));
     main.emit('unhandledRejection', new Error('SYNTHETIC_PRIVATE_TEXT'));
     expect(store.list().map((record) => record.kind)).toEqual(['child-process-gone', 'uncaughtException', 'unhandledRejection']);
+    main.emit('uncaughtException', null);
+    main.emit('unhandledRejection', 'SYNTHETIC_PRIVATE_TEXT');
+    expect(terminations).toBe(5);
+    expect(store.list().slice(-2).every((record) => record.reason === '<redacted>' && record.stack === '')).toBe(true);
     dispose();
     expect(app.listenerCount('child-process-gone')).toBe(0);
     expect(main.listenerCount('uncaughtException')).toBe(0);
