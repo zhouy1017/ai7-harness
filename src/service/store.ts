@@ -5316,10 +5316,9 @@ export class EditorialStore {
           after = run.findings[run.findings.length - 1]!.ordinal;
         }
       }
-      const records = store.#authority.prepare('SELECT record_id FROM evaluation_records WHERE book_id = ? ORDER BY ordinal DESC').iterate(bookId);
-      for (const row of records) {
-        const record = store.inspectEvaluation(bookId, asString(row.record_id)).record;
-        if (record === null) continue;
+      // Only the version on show is current: an earlier version is immutable history, its risks carried or settled by the next.
+      const record = store.inspectEvaluation(bookId, null).record;
+      if (record !== null) {
         for (const risk of record.content.risks) if (!risk.reviewed && (risk.level !== null || risk.statement !== null)) {
           yield { id: `risk:${record.recordId}:${risk.riskId}`, category: 'evaluation-risks', categoryLabel: '评估风险', severity: risk.level === 'high' ? '高' : risk.level === 'medium' ? '中' : risk.level === 'low' ? '低' : '未评级', status: '待复核',
             summary: risk.statement ?? record.profile.risks.find((item) => item.riskId === risk.riskId)?.label ?? '评估风险',

@@ -71,6 +71,9 @@ describe('②C 评估 over the real store', () => {
         store.saveEvaluation({ bookId: book.bookId, recordId: record.recordId, expectedEntries: record.entries, content: record.content, finalize: true });
       }
       let page = store.inspectEvaluation(book.bookId, null);
+      // 发现 reads only the version on show: thirteen versions restating the same two unreviewed risks are two findings.
+      const currentRisks = store.inspectBookFindings(book.bookId).items.flatMap((item) => item.target.kind === 'risk' ? [item.target.recordId] : []);
+      expect(currentRisks).toEqual([page.record!.recordId, page.record!.recordId]);
       const ordinals: number[] = [];
       for (;;) {
         expect(page.records.length).toBeLessThanOrEqual(10);
@@ -202,6 +205,8 @@ describe('②C 评估 over the real store', () => {
       expect(second).toMatchObject({ ordinal: 2, state: 'editing', revisionLabel: 'r1', uncheckpointed: true, entries: 1, conclusion: null, recommendationBlocked: true });
       expect(second.content.items).toEqual(finalized.content.items);
       expect(second.content.risks).toEqual(finalized.content.risks.map((risk) => ({ ...risk, reviewed: false })));
+      const secondRisks = store.inspectBookFindings(book.bookId).items.flatMap((item) => item.target.kind === 'risk' ? [item.target.recordId] : []);
+      expect(secondRisks).toEqual(second.content.risks.map(() => second.recordId));
       expect(second.comparison).toMatchObject({ previousOrdinal: 1, conclusion: { previous: 'recommend', current: null } });
       expect(await refusal(() => store.saveEvaluation({
         bookId: book.bookId, recordId: second.recordId, expectedEntries: 1, finalize: true, content: { ...second.content, conclusion: 'recommend' },
