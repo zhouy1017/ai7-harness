@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
+import { dataVersionStartupRefusal } from '../shared/data-version-labels.js';
 import {
   MAX_FRAME_BYTES,
   PROVIDER_CACHE_ROOT_ARGUMENT,
@@ -37,17 +38,17 @@ const SERVICE_STOP_FORCE_MS = 5_000;
 /**
  * How far the service's startup came (Issue #675): `spawned` once its process exists, which the client sees itself, then
  * the steps the service names on its stderr as it enters them, and `stopped` if it stopped before it was ready. Only these
- * fixed lines are read from that stream, and only until the service is ready; everything else on it is discarded as before.
+ * fixed steps are relayed; bounded storage refusals also reach the pending ready call. Everything else is discarded.
  */
 export type ServiceStartupStep = 'spawned' | 'process' | 'store' | 'owners' | 'serving' | 'stopped';
 const SERVICE_STARTUP_LINE = /^AI7_SERVICE_(?:STARTUP\/(process|store|owners|serving)|(STOPPED)\/[A-Z][A-Z0-9_]{0,63})$/u;
-// A startup line is a few dozen bytes; a longer unfinished line is something else the service said, and is dropped.
-const MAX_STARTUP_LINE_BYTES = 128;
+// Enough for the fixed Chinese storage refusals as UTF-8 JSON; longer lines are dropped, including a single oversized chunk.
+const MAX_STARTUP_LINE_BYTES = 4096;
 
 /**
  * Main's relay of the service's startup steps (Issue #675): under an E2E Journey only, the same switch as main's own
  * `AI7_STARTUP/` steps, each step one fixed line on main's stderr; otherwise no relay at all, and the service's stderr is
- * discarded as before.
+ * never relayed. Storage refusal parsing is independent of this optional Journey trace.
  */
 export function journeyStartupRelay(
   env: NodeJS.ProcessEnv,
@@ -167,7 +168,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 157 &&
+    value.protocolVersion === 159 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -199,11 +200,11 @@ export class ServiceClient {
   #terminalUnexpected = false;
   #unexpectedExit: (() => void) | undefined;
   #endStartupTrace: (() => void) | undefined;
+  #startupFailure: ServiceCallError | undefined;
 
   private constructor(child: ChildProcessWithoutNullStreams, onStartupStep?: (step: ServiceStartupStep) => void) {
     this.#child = child;
-    if (onStartupStep === undefined) child.stderr.resume();
-    else this.#traceStartup(onStartupStep);
+    this.#traceStartup(onStartupStep);
     child.stdout.on('data', (chunk: Buffer) => this.#acceptStdout(chunk));
     child.stdout.on('error', () => this.#fault());
     child.stdin.on('error', () => this.#fault());
@@ -211,8 +212,19 @@ export class ServiceClient {
     child.on('exit', () => {
       const unexpected = !this.#expectedExit;
       this.#stopped = true;
-      this.#rejectPending(new ServiceCallError('SERVICE_STOPPED', '本地业务服务已停止。'));
-      if (unexpected) this.#reportUnexpectedExit();
+      const finish = (): void => {
+        child.stderr.off('end', finish);
+        child.stderr.off('close', finish);
+        this.#rejectPending(this.#startupFailure ?? new ServiceCallError('SERVICE_STOPPED', '本地业务服务已停止。'));
+        this.#endStartupTrace?.();
+        if (unexpected) this.#reportUnexpectedExit();
+      };
+      // Process exit may precede the last stderr bytes. Drain the startup refusal before settling ready; once ready,
+      // unexpected exits retain their immediate behavior. The existing ready deadline still bounds startup.
+      if (this.#endStartupTrace !== undefined && !child.stderr.readableEnded && !child.stderr.destroyed) {
+        child.stderr.once('end', finish);
+        child.stderr.once('close', finish);
+      } else finish();
     });
   }
 
@@ -281,6 +293,7 @@ export class ServiceClient {
     try {
       const readiness = await client.call('ready', {});
       if (!readinessIsExact(readiness)) throw new ServiceCallError('SERVICE_READINESS_INVALID', '本地业务服务就绪校验失败。');
+      client.#startupFailure = undefined;
       client.#endStartupTrace?.();
       return client;
     } catch (error) {
@@ -289,8 +302,8 @@ export class ServiceClient {
     }
   }
 
-  /** Read the service's startup lines from its stderr until it is ready (Issue #675); every other byte is discarded. */
-  #traceStartup(onStartupStep: (step: ServiceStartupStep) => void): void {
+  /** Read fixed startup steps and bounded storage refusals until ready; never relay arbitrary stderr to the editor. */
+  #traceStartup(onStartupStep?: (step: ServiceStartupStep) => void): void {
     const child = this.#child;
     let line = '';
     let overlong = false;
@@ -299,8 +312,20 @@ export class ServiceClient {
       for (let index = 0; index < parts.length; index += 1) {
         const part = parts[index] ?? '';
         if (index < parts.length - 1) {
-          const found = overlong ? null : SERVICE_STARTUP_LINE.exec((line + part).replace(/\r$/u, ''));
-          if (found !== null) onStartupStep(found[2] === 'STOPPED' ? 'stopped' : (found[1] as ServiceStartupStep));
+          const complete = line + part;
+          const text = overlong || complete.length > MAX_STARTUP_LINE_BYTES ? '' : Buffer.from(complete, 'latin1').toString('utf8').replace(/\r$/u, '');
+          const found = SERVICE_STARTUP_LINE.exec(text);
+          if (found !== null) onStartupStep?.(found[2] === 'STOPPED' ? 'stopped' : (found[1] as ServiceStartupStep));
+          const reason = /^AI7_SERVICE_STOPPED\/([A-Z][A-Z0-9_]{0,63})\/(.+)$/u.exec(text);
+          if (reason !== null) {
+            try {
+              const refusal = dataVersionStartupRefusal(reason[1], JSON.parse(reason[2]!) as unknown);
+              if (refusal !== null) {
+                this.#startupFailure = new ServiceCallError(refusal.code, refusal.message);
+                onStartupStep?.('stopped');
+              }
+            } catch { /* An unrecognized line is discarded, as before. */ }
+          }
           line = '';
           overlong = false;
         } else if (!overlong) {
@@ -312,7 +337,7 @@ export class ServiceClient {
         }
       }
     };
-    const spawned = (): void => onStartupStep('spawned');
+    const spawned = (): void => onStartupStep?.('spawned');
     child.once('spawn', spawned);
     child.stderr.on('data', read);
     this.#endStartupTrace = () => {

@@ -837,11 +837,16 @@ import {
   DataVersionError,
   DataVersionLedger,
   initializeDataVersionSchema,
+  inspectDataVersionMarker,
   MAX_STORE_VERSIONS_LISTED,
+  readDataVersionMarker,
   readSoftwareVersion,
+  refuseNewerDataVersion,
   SCHEMA_REVISION_CLASSES,
+  writeDataVersionMarker,
 } from './data-version.js';
 import { DatabaseExportError, DatabaseExports, initializeDatabaseExportSchema } from './database-exports.js';
+import { DATA_VERSION_MARKER_UNWRITABLE } from '../shared/data-version-labels.js';
 import { ScheduledBackupError, ScheduledBackups, backupLocationFor, initializeScheduledBackupSchema } from './scheduled-backups.js';
 import { backUpBeforeUpgrade, completeUpgrade } from './upgrade-backup.js';
 import { DatabasePackageError } from './database-package-reader.js';
@@ -3787,7 +3792,7 @@ interface StoreControl {
   softwareVersion?: string;
   /**
    * The suites' own classification of schema revisions (Issue #433, S85b), so an upgrade to a later Data Version can be
-   * opened before the first packaged release classifies one. The service entry never sets it.
+   * opened before a later revision is classified breaking. The service entry never sets it.
    */
   schemaRevisionClasses?: ReadonlyArray<ClassifiedSchemaRevision>;
   /**
@@ -4970,6 +4975,8 @@ export class EditorialStore {
       throw error;
     });
     const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
+    // Refuse before pending replacement recovery can remove staging, move data or merge into SQLite (#967 review).
+    await EditorialStore.#checkDataVersionMarker(dataRoot, control);
     // 替换本机全部数据 (Issue #434, S86c; ADR 0079 §1.3): a replacement prepared in the last lifetime is applied before anything
     // opens the data, and what came of it is recorded in the data that opens — the replacement's, or the data it spared.
     const { store, replacement } = await openWithPendingReplacement(
@@ -4994,7 +5001,21 @@ export class EditorialStore {
     return store;
   }
 
-  /** Open the store of the data at `dataRoot`, as it is. */
+  /** Read-only preflight before recovery or SQLite can touch this data. */
+  static async #checkDataVersionMarker(dataRoot: string, control: StoreControl): Promise<void> {
+    try {
+      const marker = await readDataVersionMarker(dataRoot);
+      if (marker !== null) refuseNewerDataVersion(marker, {
+        dataVersion: dataVersionAt(LATEST_SCHEMA_VERSION, control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES),
+        schemaRevision: LATEST_SCHEMA_VERSION,
+      });
+    } catch (error) {
+      if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  /** Check the data again after a pending replacement, then open its store. */
   static async #openAt(
     dataRoot: string,
     codeRoot: string,
@@ -5002,6 +5023,10 @@ export class EditorialStore {
     workflowProfile: BuiltInWorkflowProfile,
     softwareVersion: string,
   ): Promise<EditorialStore> {
+    // 数据版本标记 (Issue #967; ADR 0023): data a newer AI7 wrote is refused before anything here touches it — nothing is created,
+    // migrated or backed up. A store without a marker yet opens, and this open writes it.
+    const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
+    await EditorialStore.#checkDataVersionMarker(dataRoot, control);
     const objectsRoot = await ensureCanonicalDataDirectory(dataRoot, 'objects');
     const recoveryObjects = await RecoveryObjectStore.open(dataRoot);
     const storeRoot = await ensureCanonicalDataDirectory(dataRoot, 'store');
@@ -5016,7 +5041,6 @@ export class EditorialStore {
       configureDatabase(authority, 'FILE');
       // 升级前备份 (Issue #433, S85b; DSTO-016): a store this software must move to a later Data Version is written whole into
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
-      const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
         terminalRevision: LATEST_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
@@ -5214,6 +5238,12 @@ export class EditorialStore {
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
+      // The marker last, once every owner has opened and the versions are recorded (Issue #967): create or replace.
+      await writeDataVersionMarker(dataRoot, {
+        dataVersion: store.#dataVersion, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion, writtenAt: new Date().toISOString(),
+      }).catch(() => {
+        throw new StoreError('DATA_VERSION_MARKER_UNWRITABLE', DATA_VERSION_MARKER_UNWRITABLE);
+      });
       return store;
     } catch (error) {
       // A refused open leaves no handle behind, so the caller can remove the Agent Data Root
@@ -19313,8 +19343,10 @@ export class EditorialStore {
         frozen: DATA_VERSION_FROZEN,
         schemaRevision: latest!.schemaRevision,
         update,
+        // A record of an upgrade names the backup made before it, and whether it is still in the backup location (Issue #967).
         history: recent
-          .map((entry) => ({ softwareVersion: entry.softwareVersion, dataVersion: entry.dataVersion, schemaRevision: entry.schemaRevision, recordedAt: entry.recordedAt })),
+          .map((entry) => ({ softwareVersion: entry.softwareVersion, dataVersion: entry.dataVersion, schemaRevision: entry.schemaRevision, recordedAt: entry.recordedAt,
+            ...(entry.upgrade === null ? {} : { backup: { fileName: entry.upgrade.backup.fileName, present: existsSync(join(location, entry.upgrade.backup.fileName)) } }) })),
         historyTruncated: count > MAX_STORE_VERSIONS_LISTED,
         // Each upgrade to a later Data Version, newest first, with the backup made before it (Issue #433, S85b): the newest
         // twenty, kept as the ledger is read as a stream.
@@ -19334,6 +19366,8 @@ export class EditorialStore {
           recordedAt: entry.recordedAt,
         })),
         backupLocation: location,
+        // The data root's version marker as it stands now (Issue #967; ADR 0023): this open wrote it.
+        marker: inspectDataVersionMarker(this.#dataRoot),
       };
     });
   }

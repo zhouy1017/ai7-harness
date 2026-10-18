@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import { lstatSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import { readSmallFile, writeAtomic } from './database-replacement.js';
+import { DATA_VERSION_MARKER_UNREADABLE, newerDataVersionMessage } from '../shared/data-version-labels.js';
 
 /**
  * 数据版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1). The Data Version is a compatibility contract, an
  * editor-visible integer apart from the software version: it changes only when older software could no longer read the
- * store, so an additive schema revision stays inside it. Nothing is frozen before the first packaged release (§1.2) —
- * until then development stores are disposable — and Data Version 1 is the one that release will freeze.
+ * store, so an additive schema revision stays inside it. Before the freeze (§1.2) development stores were disposable; Data
+ * Version 1 is the one the 1.0.0 development milestone boundary froze (Issue #967, below).
  *
  * Every store records it: schema revision 54 owns one ledger of the versions that opened the store — the software, the
  * Data Version and the schema revision — appended whenever one of them differs from the last, so a software update that
@@ -17,12 +20,17 @@ import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/
  * S85b (ADR 0079 §1.1, §1.3, §1.4): every schema revision after the first release is classified additive or breaking, and a
  * breaking one raises the Data Version. An open that must raise it backs the data up first (`upgrade-backup.ts`), and the
  * record of that open carries the upgrade — from which Data Version, what changed, and the backup made — for the 版本 row.
+ *
+ * Issue #967 (wave 14 decision 2; ADR 0079 §1.2): Data Version 1 is frozen at the 1.0.0 development milestone boundary, at schema
+ * revision 83. Every later revision is classified here, and a version number never authorizes a destructive migration: a
+ * `breaking` class only changes the number and the words, while every migration stays forward and additive in code. The data
+ * root also carries a version marker beside the store (ADR 0023), so an older build refuses newer data before it opens it.
  */
 
 /** The Data Version this software reads and writes. A breaking migration — one older software could not read — raises it. */
 export const DATA_VERSION = 1 as const;
-/** Whether the Data Version is frozen: only at the first packaged release (ADR 0079 §1.2). */
-export const DATA_VERSION_FROZEN = false as const;
+/** Whether the Data Version is frozen: since the 1.0.0 development milestone boundary (Issue #967; ADR 0079 §1.2). */
+export const DATA_VERSION_FROZEN = true as const;
 
 /** How a schema revision stands against the Data Version (ADR 0079 §1.1): additive stays inside it; breaking raises it by one. */
 export type SchemaRevisionClass = 'additive' | 'breaking';
@@ -35,17 +43,30 @@ export interface ClassifiedSchemaRevision {
 }
 
 /**
- * The last schema revision of Data Version 1 as the first packaged release freezes it (ADR 0079 §1.2): `null` until then.
- * Development stores are disposable before that release, so the revisions up to it are never classified.
+ * The last schema revision of Data Version 1 as the 1.0.0 development milestone boundary freezes it (Issue #967; ADR 0079 §1.2).
+ * The revisions up to it were development stores and are never classified; it is a literal, so no later revision moves it.
  */
-export const DATA_VERSION_BASELINE_REVISION: number | null = null;
+export const DATA_VERSION_BASELINE_REVISION: number = 83;
 
 /**
  * Every schema revision after the baseline, classified (ADR 0079 §1.1): this list is what 「非必要不改」 means in code. Each new
- * revision from the first release on is added here as additive or breaking, and a breaking one raises `DATA_VERSION` by one,
- * which the unit suite holds. Before that release the list is empty, and every revision reads as Data Version 1.
+ * revision from the freeze on is added here as additive or breaking, and a breaking one raises `DATA_VERSION` by one, which the
+ * unit suite holds; a `breaking` class is the Owner's decision alone. None has come yet, so every revision reads as Data Version 1.
  */
 export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = [];
+
+/**
+ * The schema revisions after the baseline that the classification does not name (Issue #967): each must be classified before
+ * it ships. The unit suite runs it over every `*_SCHEMA_VERSION` constant of the service.
+ */
+export function unclassifiedRevisions(
+  revisions: Iterable<number>,
+  baseline: number = DATA_VERSION_BASELINE_REVISION,
+  classes: ReadonlyArray<ClassifiedSchemaRevision> = SCHEMA_REVISION_CLASSES,
+): number[] {
+  const classified = new Set(classes.map((entry) => entry.revision));
+  return [...new Set(revisions)].filter((revision) => revision > baseline && !classified.has(revision)).sort((a, b) => a - b);
+}
 
 /** The Data Version a store at `revision` holds: one more than 1 for every breaking revision it has passed. */
 export function dataVersionAt(revision: number, classes: ReadonlyArray<ClassifiedSchemaRevision> = SCHEMA_REVISION_CLASSES): number {
@@ -423,4 +444,96 @@ export function latestSoftwareUpdate(history: ReadonlyArray<StoredVersion>): {
     }
   }
   return null;
+}
+
+// ---- 数据版本标记 (Issue #967; ADR 0023 "the data root carries a version marker so an older build refuses newer data") ----
+
+/**
+ * The data root's version marker, beside the store it describes: `store/ai7-data-version.json`. It names the Data Version, the
+ * schema revision and the software that last opened the data, and when — never a secret, never a path. Each open writes it
+ * whole, create or replace, once the store has opened; the next open reads it before anything touches the store, so an older
+ * build facing newer data refuses it rather than opening it. A database package carries only `store/ai7.sqlite` under `store/`: its
+ * package's manifest is its own version marker, and the open after an import writes the data root's afresh.
+ */
+export const DATA_VERSION_MARKER_FILE = 'ai7-data-version.json' as const;
+/** No marker AI7 writes comes near this: four short fields. */
+const MAX_MARKER_BYTES = 4096;
+const MARKER_KEYS = 'dataVersion,schemaRevision,softwareVersion,writtenAt';
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+
+export interface DataVersionMarker {
+  readonly dataVersion: number;
+  readonly schemaRevision: number;
+  readonly softwareVersion: string;
+  readonly writtenAt: string;
+}
+
+export function dataVersionMarkerPath(dataRoot: string): string {
+  return join(dataRoot, 'store', DATA_VERSION_MARKER_FILE);
+}
+
+function unreadableMarker(): DataVersionError {
+  return new DataVersionError('DATA_VERSION_MARKER_UNREADABLE', DATA_VERSION_MARKER_UNREADABLE);
+}
+
+/** A marker as AI7 writes it: its four fields and no others, each of its kind. Anything else is refused, never taken as none. */
+export function readDataVersionMarkerText(text: string): DataVersionMarker {
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    throw unreadableMarker();
+  }
+  if (!isRecord(value) || Object.keys(value).sort().join(',') !== MARKER_KEYS) throw unreadableMarker();
+  const { dataVersion, schemaRevision, softwareVersion, writtenAt } = value;
+  if (typeof dataVersion !== 'number' || !Number.isSafeInteger(dataVersion) || dataVersion < 1 ||
+    typeof schemaRevision !== 'number' || !Number.isSafeInteger(schemaRevision) || schemaRevision < 1 ||
+    typeof softwareVersion !== 'string' || !SOFTWARE_VERSION.test(softwareVersion) ||
+    typeof writtenAt !== 'string' || !INSTANT.test(writtenAt) || Number.isNaN(Date.parse(writtenAt)) ||
+    new Date(writtenAt).toISOString() !== writtenAt) throw unreadableMarker();
+  return { dataVersion, schemaRevision, softwareVersion, writtenAt };
+}
+
+/** The data root's marker, `null` only when there is none; one that is not a small regular file AI7 wrote is refused. */
+export async function readDataVersionMarker(dataRoot: string): Promise<DataVersionMarker | null> {
+  let text: string | null;
+  try {
+    text = await readSmallFile(dataVersionMarkerPath(dataRoot), MAX_MARKER_BYTES);
+  } catch {
+    throw unreadableMarker();
+  }
+  return text === null ? null : readDataVersionMarkerText(text);
+}
+
+/**
+ * Refuse data a newer AI7 wrote, before anything opens it (ADR 0023): a marker of a later Data Version than this software's, or
+ * of a schema revision this software does not know. A marker of the same or an earlier Data Version opens as ever.
+ */
+export function refuseNewerDataVersion(marker: DataVersionMarker, reader: { readonly dataVersion: number; readonly schemaRevision: number }): void {
+  if (marker.dataVersion > reader.dataVersion || marker.schemaRevision > reader.schemaRevision) {
+    throw new DataVersionError('DATA_VERSION_NEWER',
+      newerDataVersionMessage(marker.dataVersion, marker.schemaRevision));
+  }
+}
+
+/**
+ * The marker as it stands now, for the 版本 row (Issue #967): `present` only while a marker AI7 wrote is there — a regular file,
+ * small, that reads whole — and then when and by which software it was written.
+ */
+export function inspectDataVersionMarker(dataRoot: string): { present: boolean; writtenAt: string | null; softwareVersion: string | null } {
+  try {
+    const path = dataVersionMarkerPath(dataRoot);
+    const held = lstatSync(path);
+    if (!held.isFile() || held.size > MAX_MARKER_BYTES) return { present: false, writtenAt: null, softwareVersion: null };
+    const marker = readDataVersionMarkerText(readFileSync(path, 'utf8'));
+    return { present: true, writtenAt: marker.writtenAt, softwareVersion: marker.softwareVersion };
+  } catch {
+    return { present: false, writtenAt: null, softwareVersion: null };
+  }
+}
+
+/** Write the marker whole, create or replace, once the store has opened: a marker half written is never left in its place. */
+export async function writeDataVersionMarker(dataRoot: string, marker: DataVersionMarker): Promise<void> {
+  readDataVersionMarkerText(JSON.stringify(marker));
+  await writeAtomic(dataVersionMarkerPath(dataRoot), `${canonicalJson(marker)}\n`);
 }

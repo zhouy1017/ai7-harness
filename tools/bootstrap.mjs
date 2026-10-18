@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { inspectDevelopmentInputs } from './doctor.mjs';
 import { materializeElectronRuntime } from './electron-runtime.mjs';
+import { PACKAGER_CACHE } from './package.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE_ROOT = resolve(ROOT, '.cache', 'bootstrap');
@@ -53,6 +54,7 @@ async function prepareGeneratedRoots() {
   requireValue(samePath(cacheParent, resolve(checkoutRoot, '.cache')), 'Bootstrap cache root was redirected.');
   await requireCanonicalDirectory(checkoutRoot, CACHE_ROOT);
   await requireCanonicalDirectory(checkoutRoot, ELECTRON_CACHE);
+  await requireCanonicalDirectory(checkoutRoot, PACKAGER_CACHE);
   await requireCanonicalDirectory(checkoutRoot, STORE_ROOT);
 
   const nodeModules = resolve(ROOT, 'node_modules');
@@ -141,6 +143,10 @@ async function digestFile(path) {
 }
 
 function artifactCachePath(cacheRoot, artifact) {
+  if (artifact.kind === 'packager-secondary-artifact') {
+    requireValue(/^[\w@.-]+$/.test(artifact.cacheDirectory) && /^[\w.-]+$/.test(artifact.fileName), 'Packager cache identity is invalid.');
+    return resolve(cacheRoot, artifact.cacheDirectory, artifact.fileName);
+  }
   const parsed = new URL(artifact.url);
   parsed.hash = '';
   parsed.search = '';
@@ -196,6 +202,7 @@ async function downloadPinnedArtifact(artifact, target, cacheRoot, allowedHosts)
     await handle.close();
     handle = undefined;
     requireValue(hash.digest('hex') === artifact.sha256, 'Pinned artifact SHA-256 mismatch.');
+    requireValue(artifact.size === undefined || size === artifact.size, 'Pinned artifact size mismatch.');
     await rename(partial, target);
   } catch (error) {
     await handle?.close().catch(() => undefined);
@@ -323,6 +330,9 @@ async function main() {
     resolve(CACHE_ROOT, 'pnpm'),
   ]);
   await verifyInstalledClosure();
+  for (const packager of diagnosis.inputs.packagerArtifacts) {
+    await ensurePinnedArchive(packager, PACKAGER_CACHE, ['github.com', 'release-assets.githubusercontent.com']);
+  }
   const archive = await ensurePinnedArchive(artifact, ELECTRON_CACHE, [
     'github.com',
     'release-assets.githubusercontent.com',
@@ -347,6 +357,7 @@ async function main() {
           executingVersionMatched: true,
         },
         secondaryArtifact: { id: artifact.id, sha256: artifact.sha256, verified: true },
+        packagerArtifacts: diagnosis.inputs.packagerArtifacts.map(({ id, sha256 }) => ({ id, sha256, verified: true })),
         electronExtraction: materialized.adapter,
         electronNodeMode: materialized.evidence,
       },

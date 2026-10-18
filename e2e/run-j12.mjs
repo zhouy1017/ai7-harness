@@ -664,7 +664,7 @@ async function main() {
     await mkdir(resolve(shellRoot, 'crashes'));
     await writeFile(resolve(shellRoot, 'crashes', '2026-10-17T00-00-00.000Z-render-process-gone.json'), JSON.stringify({
       instant: '2026-10-17T00:00:00.000Z', kind: 'render-process-gone', reason: 'crashed', exitCode: 1,
-      appVersion: '0.1.0', dataVersion: 83, protocol: 157, platform: process.platform, arch: process.arch,
+      appVersion: '0.1.0', schemaRevision: 83, protocol: 159, platform: process.platform, arch: process.arch,
       electron: '43.4.1', uptimeSeconds: 1, stack: '    at <redacted-path>:12:3',
     }), { flag: 'wx' });
     const executable = electronExecutable();
@@ -1249,14 +1249,22 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'data-storage-open-settings-hub');
     await click(primary, '数据与存储', 'data-storage-open');
     await waitFor(primary, `document.querySelector('[data-screen="data-storage"]')`, 'data-storage-ready');
-    await assertRenderer(primary, `(() => { const view=document.querySelector('.data-storage-summary'); return view?.dataset.platform===${JSON.stringify(process.platform === 'win32' ? 'windows' : 'macos')} && view.dataset.runtimeForm==='source-checkout' && view.dataset.footprintMaximumEntries==='128' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(dataRoot)} && view.textContent.includes('产品数据位置') && view.textContent.includes('凭据与产品数据分开') && view.textContent.includes(${JSON.stringify(process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串')}) && !Object.keys(window.ai7).some((key)=>key.toLowerCase().includes('path')); })()`, 'truthful-data-location');
+    await assertRenderer(primary, `(() => { const view=document.querySelector('.data-storage-summary'); return view?.dataset.platform===${JSON.stringify(process.platform === 'win32' ? 'windows' : 'macos')} && view.dataset.runtimeForm==='source-checkout' && view.dataset.channel==='source-checkout' && [...view.querySelectorAll('dt')].find((term)=>term.textContent==='分发渠道')?.nextElementSibling?.textContent==='源码检出' &&view.dataset.footprintMaximumEntries==='128' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(dataRoot)} && view.textContent.includes('产品数据位置') && view.textContent.includes('凭据与产品数据分开') && view.textContent.includes(${JSON.stringify(process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串')}) && !Object.keys(window.ai7).some((key)=>key.toLowerCase().includes('path')); })()`, 'truthful-data-location');
     // 版本 (Issue #433, S85a; DSTO-016): the software version and the Data Version apart. The same software reopened the data
     // after the restart, so the store keeps its one version record and has seen no software update.
     const packageVersion = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8')).version;
     await waitFor(primary, `document.querySelector('.data-version')?.dataset.dataVersion === '1'`, 'data-version-read');
     const versionSection = await primary.evaluate(`(() => { const section = document.querySelector('.data-version'); const text = (selector) => section?.querySelector(selector)?.textContent ?? null; return [text('.data-version-software'), text('.data-version-data'), text('.data-version-state'), text('.data-version-update'), text('.data-version-history > summary'), section?.dataset.frozen ?? null]; })()`);
-    requireJourney(JSON.stringify(versionSection) === JSON.stringify([packageVersion, '1', '开发阶段：首个正式发布时冻结为数据版本 1；在那之前，开发中的数据可以重建。',
-      '这份数据还没有经历过软件更新。', '版本记录（1）', 'false']), 'data-version-words', versionSection);
+    // Synchronized delta with Issue #967: Data Version 1 is frozen at the 1.0.0 development milestone boundary, and the data
+    // root carries the version marker this open wrote (ADR 0023), never a path.
+    requireJourney(JSON.stringify(versionSection) === JSON.stringify([packageVersion, '1', '数据版本 1 已冻结。',
+      '这份数据还没有经历过软件更新。', '版本记录（1）', 'true']), 'data-version-words', versionSection);
+    const versionMarker = await primary.evaluate(`window.ai7.inspectDataVersion().then((version) => version.marker)`);
+    requireJourney(versionMarker?.present === true && versionMarker.softwareVersion === packageVersion && typeof versionMarker.writtenAt === 'string' &&
+      !JSON.stringify(versionMarker).includes(JSON.stringify(dataRoot).slice(1, -1)), 'data-version-marker', versionMarker);
+    const markerFile = JSON.parse(await readFile(resolve(dataRoot, 'store', 'ai7-data-version.json'), 'utf8'));
+    requireJourney(markerFile.dataVersion === 1 && markerFile.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && markerFile.softwareVersion === packageVersion &&
+      Object.keys(markerFile).sort().join(',') === 'dataVersion,schemaRevision,softwareVersion,writtenAt', 'data-version-marker-file', markerFile);
     await primary.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab' });
     await primary.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab' });
     await assertRenderer(primary, `document.activeElement instanceof HTMLButtonElement && document.activeElement.matches(':focus-visible')`, 'j14-keyboard-visible-focus');
@@ -1286,7 +1294,8 @@ async function main() {
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
     const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v15.json'), 'utf8'));
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 83 && diagnosticsSummary.protocol === 157 &&
+    // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 159 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -1497,6 +1506,10 @@ async function main() {
       'database-export-manifest',
       { schema: manifest.schema, dataVersion: manifest.dataVersion, schemaRevision: manifest.schemaRevision, contents: manifest.contents },
     );
+    // The package format is unchanged (Issue #967, brief revision 2): its manifest is its own version marker, and the data root's
+    // marker beside the store is never exported — no store member but the store's copy.
+    const storeMembers = Object.keys(packaged).filter((name) => name.toLowerCase().startsWith('store/'));
+    requireJourney(JSON.stringify(storeMembers) === JSON.stringify(['store/ai7.sqlite']), 'database-export-store-members', storeMembers);
     const membersWithSecret = Object.entries(packaged).filter(([, bytes]) => [secretOne, secretTwo].some((secret) =>
       Buffer.from(bytes).includes(Buffer.from(secret, 'utf8')) || Buffer.from(bytes).includes(Buffer.from(secret, 'utf16le')))).map(([name]) => name);
     requireJourney(membersWithSecret.length === 0, 'database-export-no-credential', membersWithSecret);

@@ -308,6 +308,8 @@ describe('导入数据库 over the real store', () => {
     // The next open brings the package's data in, and records the replacement there.
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
+      expect(JSON.parse(await readFile(join(roots.dataRoot, 'store', 'ai7-data-version.json'), 'utf8')))
+        .toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: store.inspectDataVersion().softwareVersion });
       expect(titles(store)).toEqual(['甲书']);
       expect(existsSync(replacementStagingFor(roots.dataRoot))).toBe(false);
       const replaced = await store.inspectDatabaseReplacements();
@@ -342,6 +344,8 @@ describe('导入数据库 over the real store', () => {
     // The next open brings the backup's data back: both Books the replacement took away, and none it brought.
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
+      expect(JSON.parse(await readFile(join(roots.dataRoot, 'store', 'ai7-data-version.json'), 'utf8')))
+        .toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: store.inspectDataVersion().softwareVersion });
       expect(titles(store)).toEqual(['乙书', '甲书']);
       const rolledBack = await store.inspectDatabaseReplacements();
       expect(rolledBack).toMatchObject({ pending: null, total: 1, rollBackOf: null });

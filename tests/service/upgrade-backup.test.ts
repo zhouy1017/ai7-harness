@@ -11,6 +11,7 @@ import { DATA_VERSION_TRIGGER_SQL, DataVersionLedger, PRE_UPGRADE_BACKUP_NAME, t
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { LATEST_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { backUpBeforeUpgrade, preUpgradeBackupFileName, writePendingUpgrade } from '../../src/service/upgrade-backup.js';
+import { dataVersionRollbackSteps } from '../../src/renderer/data-version-labels.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
@@ -62,6 +63,8 @@ const storePath = (): string => join(roots.dataRoot, 'store', 'ai7.sqlite');
 const backups = (): string => `${roots.dataRoot}-backups`;
 /** The note an open leaves beside the store between its backup and its record of the upgrade (Issue #433 review). */
 const note = (): string => join(roots.dataRoot, 'store', 'upgrade-pending.json');
+/** The data root's version marker each open writes once it has opened (Issue #967). */
+const marker = (): string => join(roots.dataRoot, 'store', 'ai7-data-version.json');
 const upgradeBackups = async (): Promise<string[]> => (await readdir(backups())).filter((name) => name.startsWith('AI7 升级前备份 ')).sort();
 const T = new Date(2026, 8, 26, 10, 0, 0);
 
@@ -151,6 +154,15 @@ describe('升级前备份 over the real store', () => {
       expect(backupFileName).toMatch(PRE_UPGRADE_BACKUP_NAME);
       // The software update is stated as the one that changed the Data Version.
       expect([version.update, version.history.map((entry) => entry.dataVersion)]).toEqual([null, [2, 1]]);
+      // 版本记录 names the backup the upgrading open made, and that it is still there (Issue #967); the earlier record made none.
+      expect(version.history.map((entry) => entry.backup ?? null)).toEqual([{ fileName: backupFileName, present: true }, null]);
+      // The rollback steps name the actual backup location and file (Issue #967; ADR 0079 §1.3).
+      const rollback = dataVersionRollbackSteps(upgrade!, { dataRoot: roots.dataRoot, backupLocation: version.backupLocation });
+      expect(rollback.steps).toHaveLength(3);
+      expect(rollback.steps[0]).toContain(`「${roots.dataRoot}」`);
+      expect(rollback.steps[2]).toContain(`选「${backups()}」里的「${backupFileName}」`);
+      // The data root's marker names the Data Version the upgrade reached (Issue #967; ADR 0023).
+      expect(JSON.parse(await readFile(marker(), 'utf8'))).toMatchObject({ dataVersion: 2, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: software });
       // The backup is the data as it was: the package of the revision before, at Data Version 1, with its Book, and no
       // half-written file beside it.
       const packaged = unzipSync(await readFile(join(backups(), backupFileName)));
@@ -187,22 +199,35 @@ describe('升级前备份 over the real store', () => {
     store = await open(BREAKING);
     try {
       expect(store.inspectDataVersion().upgrades[0]!.backupPresent).toBe(false);
+      expect(store.inspectDataVersion().history[0]!.backup).toEqual({ fileName: backupFileName!, present: false });
       store.markCleanShutdown();
     } finally {
       store.close();
     }
+    // An AI7 whose classification stops at Data Version 1 — an older build — refuses the upgraded data before touching it, in
+    // the plain words, and writes nothing: no marker, no backup, no migration (Issue #967; ADR 0023).
+    const markerBefore = await readFile(marker(), 'utf8');
+    const refused = await refusal(open());
+    expect(refused instanceof StoreError ? [refused.code, refused.message] : refused).toEqual(['DATA_VERSION_NEWER',
+      `这份数据来自更新的 AI7（数据版本 2 / 数据库修订 ${LATEST_SCHEMA_VERSION}），请使用更新的 AI7 打开。`]);
+    expect(await readFile(marker(), 'utf8')).toBe(markerBefore);
+    expect(await upgradeBackups()).toEqual([]);
   }, 180_000);
 
   it('opens nothing and upgrades nothing when the backup before an upgrade cannot be made', async () => {
     await storeBeforeUpgrade();
     // Something that is not a folder stands where the backup location goes.
     await writeFile(backups(), 'not a folder');
+    const markerBefore = await readFile(marker(), 'utf8');
     const refused = await open(BREAKING).then((store) => {
       store.close();
       return null;
     }, (error: unknown) => error);
     expect(code(refused)).toBe('UPGRADE_BACKUP_FAILED');
+    expect(refused instanceof StoreError ? refused.message : refused).toBe('升级前备份没有完成：AI7 没有升级这份数据，也没有打开它。请确认备份位置可以写入、空间足够，再启动 AI7。');
     expect(userVersion(storePath())).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+    // The refused open wrote no marker of its own (Issue #967): the one before still stands.
+    expect(await readFile(marker(), 'utf8')).toBe(markerBefore);
     // Once the backup can be made, the upgrade goes on.
     await rm(backups());
     const store = await open(BREAKING);

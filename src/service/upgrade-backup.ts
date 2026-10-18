@@ -8,6 +8,7 @@ import { DATABASE_PACKAGE_EXTENSION, writeDatabasePackage } from './database-exp
 import { readSmallFile, writeAtomic } from './database-replacement.js';
 import { takeFreeName } from './manuscript-export.js';
 import { ensureBackupLocation } from './scheduled-backups.js';
+import { UPGRADE_BACKUP_EXISTS, UPGRADE_BACKUP_FAILED, UPGRADE_BACKUP_UNSUPPORTED } from '../shared/data-version-labels.js';
 
 /**
  * 升级前备份 (Issue #433, plan slice S85b; V2-UX-DSTO-016; ADR 0079 §1.1, §1.3, §1.4). A software update that must move the data
@@ -15,8 +16,9 @@ import { ensureBackupLocation } from './scheduled-backups.js';
  * beside it — is written as the database package of S86a into the backup location, named `AI7 升级前备份 <date time>.ai7db`
  * and kept until the editor deletes it. A backup that cannot be made opens nothing, so no data is ever upgraded without one.
  *
- * Which schema revisions change the Data Version is the classification in `data-version.ts`. Nothing is frozen before the first
- * packaged release (§1.2), so no store is upgraded this way yet; the classification is what makes one do so from then on.
+ * Which schema revisions change the Data Version is the classification in `data-version.ts`. Data Version 1 is frozen at the
+ * 1.0.0 development milestone boundary (Issue #967; §1.2) and no later revision is classified breaking yet, so no store is
+ * upgraded this way yet; the classification is what makes one do so from then on. This gate runs before any schema advance.
  *
  * The upgrade is noted beside the store before anything migrates it (Issue #433 review): `store/upgrade-pending.json` names the
  * backup, what changes, and the software, Data Version and schema revision it was bringing the store to. An open of that same
@@ -256,7 +258,7 @@ export async function backUpBeforeUpgrade(
     const taken = await takeFreeName(partial, destination);
     if (taken === 'exists') throw new DataVersionError('UPGRADE_BACKUP_EXISTS', UPGRADE_BACKUP_EXISTS);
     if (taken === 'unsupported') {
-      throw new DataVersionError('UPGRADE_BACKUP_UNSUPPORTED', '备份位置所在的磁盘不能安全地新建文件，升级前备份没有完成：AI7 没有升级这份数据，也没有打开它。');
+      throw new DataVersionError('UPGRADE_BACKUP_UNSUPPORTED', UPGRADE_BACKUP_UNSUPPORTED);
     }
     if (taken !== 'taken') throw new Error('The backup could not be put in place.');
     const upgrade: DataVersionUpgrade = {
@@ -273,10 +275,8 @@ export async function backUpBeforeUpgrade(
     return { upgrade, earlier };
   } catch (error) {
     if (error instanceof DataVersionError) throw error;
-    throw new DataVersionError('UPGRADE_BACKUP_FAILED', '升级前备份没有完成：AI7 没有升级这份数据，也没有打开它。请确认备份位置可以写入、空间足够，再启动 AI7。');
+    throw new DataVersionError('UPGRADE_BACKUP_FAILED', UPGRADE_BACKUP_FAILED);
   } finally {
     if (partial !== null) await rm(partial, { force: true }).catch(() => undefined);
   }
 }
-
-const UPGRADE_BACKUP_EXISTS = '备份位置里已经有一个同名的文件，升级前备份没有完成：AI7 没有升级这份数据，也没有打开它。请稍后再启动 AI7。';
