@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AGENT_WORKSPACE_CAPABILITIES, agentWorkspaceComposition } from '../../src/service/agent-workspace/capabilities.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { AGENT_WORKSPACE_ATOMIC_REASON, AGENT_WORKSPACE_MARK_SOURCE_LABEL, AGENT_WORKSPACE_UNAVAILABLE_REASON, AgentWorkspace } from '../../src/service/agent-workspace/workspace.js';
-import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST } from '../../src/service/dialogue/contract.js';
+import { AGENT_WORKSPACE_PROMPT_CONTRACT, AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RESULT_SCHEMA } from '../../src/service/dialogue/contract.js';
 import { DialogueExecutionOwner, dialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import { DialogueError } from '../../src/service/dialogue/dialogue-ledger.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
@@ -141,7 +141,8 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
       expect(changedTables(looked, rowCounts())).toEqual({});
 
       const asked = await workspace.propose(book.bookId, { selection, instruction: SET_INSTRUCTION });
-      expect(asked.proposal?.state).toBe('proposing');
+      // The answer runs beside the request; the fixture may already have settled it.
+      expect(['proposing', 'ready']).toContain(asked.proposal?.state);
       const ready = await settled(workspace, book.bookId);
       const proposal = ready.proposal!;
       expect(proposal.state).toBe('ready');
@@ -269,6 +270,52 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
       expect(changedTables(pinned, rowCounts())).toEqual({});
     } finally {
       await dialogues.dispose();
+    }
+  });
+
+  it('sends one whole-answer request on the admitted dialogue route under developer-live: the workspace contract, no tool, no stream', async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), 'ai7-agent-workspace-live-'));
+    const store = await openStore();
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '工作区实时');
+      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+      const calls: Array<{ url: string; body: string }> = [];
+      const content = JSON.stringify({ schema: AGENT_WORKSPACE_RESULT_SCHEMA, items: [{ anchor: SECOND_ANCHOR, proposedText: '以如此重器作比', rationale: '更凝练。' }] });
+      const nativeFetch = (async (url: string, init: { body: string }) => {
+        calls.push({ url, body: init.body });
+        return { status: 200, headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({ model: JSON.parse(init.body).model, choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 300, completion_tokens: 40 } }) };
+      }) as unknown as typeof fetch;
+      // Actual business (no development validation): the request reaches the stubbed transport itself, and nothing else does.
+      const live = dialogueLiveRoute(
+        { launch: { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 }, providerCacheRoot: cacheRoot, validation: null }, nativeFetch },
+        policy, { resolve: async () => 'placeholder-development-key' },
+      );
+      const dialogues = new DialogueExecutionOwner({ records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live });
+      const workspace = new AgentWorkspace(store, dialogues);
+      try {
+        const selection = paragraphHolding(store, book, FIRST_ANCHOR);
+        await workspace.propose(book.bookId, { selection, instruction: SET_INSTRUCTION });
+        const ready = (await settled(workspace, book.bookId)).proposal!;
+        expect(ready.state).toBe('ready');
+        expect(ready.candidates.map((candidate) => candidate.anchor.text)).toEqual([SECOND_ANCHOR]);
+        expect(calls).toHaveLength(1);
+        const sent = JSON.parse(calls[0]!.body) as { stream?: unknown; tools?: unknown; messages: Array<{ role: string; content: unknown }> };
+        expect(sent.stream ?? false).toBe(false);
+        expect(sent.tools).toBeUndefined();
+        expect(sent.messages[0]).toMatchObject({ role: 'system', content: AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt });
+        const user = JSON.stringify(sent.messages.slice(1));
+        expect(user).toContain(SET_INSTRUCTION);
+        expect(user).toContain(JSON.stringify(selection.selectedText).slice(1, -1));
+        // Only the selected words and the instruction: no other paragraph of the Book travels.
+        const other = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks.find((block) => block.kind === 'paragraph' && block.blockId !== selection.blockId && block.text.length > 30)!;
+        expect(user).not.toContain(JSON.stringify(other.text.slice(0, 20)).slice(1, -1));
+      } finally {
+        await dialogues.dispose();
+      }
+    } finally {
+      await rm(cacheRoot, { recursive: true, force: true });
     }
   });
 

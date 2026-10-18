@@ -380,7 +380,9 @@ export class DialogueExecutionOwner {
             return nativeFetch(url, init);
           };
           // The streaming capability is a declaration, not an admission: it chooses the transport for a model the policy admitted.
-          const streamShape = route.modelProfile.capabilities.streaming === 'chat-completions-sse' ? 'editorial-dialogue-sse' as const : null;
+          // The SSE request shape is the dialogue's own and admitted for its contracts alone; an Agent 工作区 turn, read only once
+          // it has settled, keeps the whole-answer request (Issue #90, slice 13a).
+          const streamShape = !workspace && route.modelProfile.capabilities.streaming === 'chat-completions-sse' ? 'editorial-dialogue-sse' as const : null;
           return new DeepSeekOpenAiCompatibleAdapter({
             broker: live.broker,
             slotBinding,
