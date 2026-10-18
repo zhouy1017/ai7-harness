@@ -6695,8 +6695,8 @@ async function openAgentWorkspace(bookId: string, back: () => void): Promise<voi
       if (route.kind !== 'book') return;
       const content = panel();
       content.dataset['bookId'] = route.bookId;
-      replaceScreen('agent-workspace', content);
-      agentWorkspaceSurface = mountAgentWorkspace({
+      // Mounted before it replaces the screen, so its 返回 is on screen when the screen's back command is bound to it.
+      const surface = mountAgentWorkspace({
         root: content,
         bookId: route.bookId,
         bookTitle: route.bookTitle,
@@ -6707,6 +6707,8 @@ async function openAgentWorkspace(bookId: string, back: () => void): Promise<voi
         openProfile: () => void leaveThen(() => openAgentWorkspaceProfile(route.bookId, route.bookTitle)),
         openMarks: (promotion) => void leaveThen(() => openAgentWorkspaceMarks(promotion, route.bookTitle)),
       });
+      replaceScreen('agent-workspace', content);
+      agentWorkspaceSurface = surface;
     };
     const ownedRoute = await window.ai7.getBookWorkbenchRoute();
     if (ownedRoute?.kind === 'book' && ownedRoute.bookId === bookId) await render(ownedRoute);
