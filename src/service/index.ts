@@ -1,6 +1,7 @@
 import { ImportedExemplarError } from './imported-exemplars.js';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveDevelopmentSampleBook } from '../shared/data-root.js';
 import {
   J04_MODEL_ADAPTER_CONTROL_PATTERN,
   MAX_FRAME_BYTES,
@@ -311,6 +312,11 @@ async function dispatch(
       };
     case 'getImportStartup':
       return { id: request.id, ok: true, op: request.op, result: await store.getImportStartup() };
+    case 'importBundledSampleBook': {
+      const exact = await resolveDevelopmentSampleBook(fileURLToPath(new URL('../../', import.meta.url)), 'source-checkout');
+      if (request.input.selectedPath !== exact) throw new ProtocolError(request.id);
+      return { id: request.id, ok: true, op: request.op, result: await store.stageSelectedManuscript(request.input.selectionToken, exact) };
+    }
     case 'stageSelectedManuscript':
       return {
         id: request.id,

@@ -2141,3 +2141,10 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 .view-control { display: grid; gap: .25rem; max-width: 26rem; font-weight: 700; }
 .view-control select, .view-control input[type="range"] { min-height: 36px; font: inherit; }
 .view-region-row { margin: .3rem 0; }
+
+/* Issue #961: optional guidance stays within the existing landing and Book overview. */
+.onboarding-card:empty, .onboarding-guidance:empty { display: none; }
+.onboarding-card, .onboarding-guidance { margin-block: 1.5rem; padding: 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; }
+.onboarding-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; list-style: none; padding: 0; }
+.onboarding-data-location { overflow-wrap: anywhere; }
+@media (max-width: 900px) { .onboarding-steps { grid-template-columns: 1fr; } }

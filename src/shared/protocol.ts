@@ -4,7 +4,7 @@ import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-con
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 155 as const;
+export const SERVICE_PROTOCOL_VERSION = 156 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -129,6 +129,7 @@ export const IPC_CHANNELS = {
   restoreRecovery: 'ai7:j08:restore-recovery',
   getImportStartup: 'ai7:j01:get-import-startup',
   selectAndStageManuscript: 'ai7:j01:select-and-stage-manuscript',
+  importBundledSampleBook: 'ai7:onboarding:import-bundled-sample-book',
   continueImportDraft: 'ai7:j01:continue-import-draft',
   reselectImportDraft: 'ai7:j01:reselect-import-draft',
   abandonImportDraft: 'ai7:j01:abandon-import-draft',
@@ -2130,8 +2131,8 @@ export interface BookWorkbenchOpenProjection {
 export interface ProductDataLocationProjection {
   platform: 'windows' | 'macos';
   platformLabel: 'Windows' | 'macOS';
-  runtimeForm: 'source-checkout';
-  runtimeFormLabel: '源码检出运行';
+  runtimeForm: 'source-checkout' | 'packaged';
+  runtimeFormLabel: '源码检出运行' | '安装版运行';
   locationLabel: '本机产品数据位置';
   canonicalRoot: string;
   footprint: {
@@ -13272,6 +13273,10 @@ export interface ServiceOperationMap {
     output: RecoveryRestorationProjection;
   };
   getImportStartup: { input: Record<string, never>; output: ImportStartupProjection };
+  importBundledSampleBook: {
+    input: { selectionToken: string; selectedPath: string };
+    output: StagedImportProjection;
+  };
   stageSelectedManuscript: {
     input: { selectionToken: string; selectedPath: string };
     output: StagedImportProjection;
@@ -14279,6 +14284,7 @@ export interface RendererApi {
   restoreRecovery(input: Omit<ServiceOperationMap['restoreRecovery']['input'], 'restorationId'>): Promise<RecoveryRestorationProjection>;
   getImportStartup(): Promise<ImportStartupProjection>;
   selectAndStageManuscript(): Promise<PickerStageResult>;
+  importBundledSampleBook(): Promise<PickerStageResult>;
   continueImportDraft(input: ServiceOperationMap['continueImportDraft']['input']): Promise<ContinueImportProjection>;
   reselectImportDraft(input: {
     draftId: string;
