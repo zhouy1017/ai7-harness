@@ -908,6 +908,9 @@ async function main() {
     await writeFile(holdPath, String(FIRST_HOLD), 'utf8');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'product-ready');
+    // Restacked wave 13: onboarding owns the empty library, while Agent 工作区 remains gated on an exact current Book.
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]') !== null`, 'workspace-onboarding-coexists');
+    await assertRenderer(renderer, `(() => { const row = document.querySelector(${JSON.stringify(AGENT_ROW)}); return row instanceof HTMLElement && row.closest('[hidden]') !== null && document.querySelector('[data-screen="agent-workspace"]') === null; })()`, 'workspace-empty-library-gated');
     // The 任务 panel is one read; a dialogue (Issue #52, S17a) is asked about a selection and read, stopped, answered again or
     // converted by its own operations — no chat, conversation or stream is exposed to the renderer.
     await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.inspectBookTasks === 'function' && typeof window.ai7.askAboutSelection === 'function' && Object.keys(window.ai7).filter((key)=>/dialog/i.test(key)).sort().join(',') === 'continueDialogueAnswer,convertDialogueToChangeSuggestion,inspectDialogue,regenerateDialogueAnswer,stopDialogueAnswer' && !Object.keys(window.ai7).some((key)=>/chat|conversation|stream/i.test(key))`, 'renderer-api-boundary');

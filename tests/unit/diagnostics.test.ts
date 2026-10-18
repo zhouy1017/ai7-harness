@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DIAGNOSTICS_CHANNELS, buildDiagnosticsBundle, type DiagnosticsInputs } from '../../src/main/diagnostics.js';
 
 const facts: DiagnosticsInputs['facts'] = {
-  appVersion: '0.1.0', dataVersion: 83, protocol: 156, policySetVersion: 'v15', platform: 'win32',
+  appVersion: '0.1.0', dataVersion: 83, protocol: 157, policySetVersion: 'v15', platform: 'win32',
   arch: 'x64', electron: '42.0.0', node: '24.18.1', locale: 'zh-CN', uptimeSeconds: 42, windowCount: 2,
 };
 describe('pure diagnostics bundle', () => {
