@@ -1,8 +1,21 @@
-import { lstat, mkdir, opendir, realpath, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { lstat, mkdir, opendir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 function requireBoundary(condition: unknown): asserts condition {
   if (!condition) throw new Error('AI7_DATA_ROOT_BOUNDARY_INVALID');
+}
+
+/** Issue #961: the sole admitted development sample, never a packaged or renderer-selected path. */
+export async function resolveDevelopmentSampleBook(codeRoot: string, runtimeForm: string): Promise<string> {
+  requireBoundary(runtimeForm === 'source-checkout' && isAbsolute(codeRoot));
+  const expected = resolve(await realpath(codeRoot), 'SampleBooks', 'sample1.docx');
+  requireBoundary(samePath(expected, await realpath(expected)));
+  const bytes = await readFile(expected);
+  requireBoundary(bytes.length === 29_550 && createHash('sha256').update(bytes).digest('hex') ===
+    'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483');
+  return expected;
 }
 
 function isInside(parent: string, child: string): boolean {
@@ -71,6 +84,52 @@ export async function createCanonicalExternalDataRoot(dataRootInput: string, cod
  * defaults to, and the name the #811 brief gives it. Development captures live there and nowhere an ordinary user's data does.
  */
 export const DEVELOPMENT_CACHE_SIBLING_DIRECTORIES = ['ai7-harness-provider-cache', 'ai7-provider-cache'] as const;
+
+export function defaultProductionDataRoot({ platform = process.platform, env = process.env, home = homedir() }: {
+  platform?: string; env?: Record<string, string | undefined>; home?: string;
+} = {}): string {
+  if (platform === 'win32') {
+    requireBoundary(typeof env['LOCALAPPDATA'] === 'string' && isAbsolute(env['LOCALAPPDATA']));
+    return resolve(env['LOCALAPPDATA'], 'ai7', 'production');
+  }
+  requireBoundary(platform === 'darwin' && isAbsolute(home));
+  return resolve(home, 'Library', 'Application Support', 'ai7', 'production');
+}
+
+export function startupDataChoiceFile(defaultRoot: string): string {
+  requireBoundary(isAbsolute(defaultRoot));
+  return resolve(defaultRoot, '..', 'startup-data-location.json');
+}
+
+export function requireStartupChoiceOutsideDataRoot(defaultRoot: string, dataRoot: string): void {
+  requireBoundary(isAbsolute(dataRoot) && !isInside(resolve(dataRoot), startupDataChoiceFile(defaultRoot)));
+}
+
+export async function readStartupDataChoice(defaultRoot: string): Promise<string | null> {
+  let text: string;
+  try {
+    text = await readFile(startupDataChoiceFile(defaultRoot), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new Error('AI7_STARTUP_CHOICE_INVALID');
+  }
+  const stored: unknown = JSON.parse(text);
+  requireBoundary(typeof stored === 'object' && stored !== null && !Array.isArray(stored));
+  const value = stored as Record<string, unknown>;
+  requireBoundary(Object.keys(value).length === 2 && value['version'] === 1 && typeof value['dataRoot'] === 'string' && isAbsolute(value['dataRoot']));
+  requireStartupChoiceOutsideDataRoot(defaultRoot, value['dataRoot']);
+  return resolve(value['dataRoot']);
+}
+
+/** Launcher metadata beside the default root, never in the selected product root or its database export. */
+export async function storeStartupDataChoice(defaultRoot: string, dataRoot: string): Promise<void> {
+  requireStartupChoiceOutsideDataRoot(defaultRoot, dataRoot);
+  const path = startupDataChoiceFile(defaultRoot);
+  await mkdir(dirname(path), { recursive: true });
+  const staged = `${path}.${process.pid}.tmp`;
+  await writeFile(staged, `${JSON.stringify({ version: 1, dataRoot: resolve(dataRoot) })}\n`, { flag: 'wx' });
+  await rename(staged, path);
+}
 
 /**
  * An ordinary-production Agent Data Root (Issue #811): outside the checkout exactly as every data root is — so never under its

@@ -258,6 +258,16 @@ const isAnalysisLastViewed = (value: unknown): value is AnalysisLastViewed => is
     Object.keys(revision).length === 2 && typeof revision['revisionId'] === 'string' && revision['revisionId'].length > 0 && revision['revisionId'].length <= 64 &&
     Number.isSafeInteger(revision['ordinal']) && (revision['ordinal'] as number) > 0);
 
+export type OnboardingState = null | 'skipped' | 'completed';
+
+export function showOnboardingCard(hasBooks: boolean, state: OnboardingState): boolean {
+  return !hasBooks && state === null;
+}
+
+export function showSampleGuidance(isSample: boolean, state: OnboardingState, hasBaseline: boolean): boolean {
+  return isSample && !(state !== null && hasBaseline);
+}
+
 export const PREFERENCE_KEYS = Object.freeze({
   'usage.unitPrices': preference(isUnitPrices, {} as UnitPrices),
   'keyboard.bindings': preference(isKeyboardBindings, {} as KeyboardBindings),
@@ -282,6 +292,7 @@ export const PREFERENCE_KEYS = Object.freeze({
   'layout.regions': preference(isLayoutRegions, DEFAULT_LAYOUT_REGIONS),
   // 12b: the last analysis panel actually viewed for each Book, local UI state only.
   'analysis.lastViewedRevision': preference(isAnalysisLastViewed, {} as AnalysisLastViewed),
+  'onboarding.state': preference((value: unknown): value is OnboardingState => value === null || value === 'skipped' || value === 'completed', null as OnboardingState),
 });
 
 export type PreferenceKey = keyof typeof PREFERENCE_KEYS;

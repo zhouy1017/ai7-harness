@@ -211,6 +211,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['deferRecovery']['output']>(IPC_CHANNELS.deferRecovery, input),
   restoreRecovery: (input: Omit<ServiceOperationMap['restoreRecovery']['input'], 'restorationId'>) =>
     invoke<ServiceOperationMap['restoreRecovery']['output']>(IPC_CHANNELS.restoreRecovery, input),
+  importBundledSampleBook: () => invoke<PickerStageResult>(IPC_CHANNELS.importBundledSampleBook),
   getImportStartup: () =>
     invoke<ServiceOperationMap['getImportStartup']['output']>(IPC_CHANNELS.getImportStartup),
   selectAndStageManuscript: () => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageManuscript),

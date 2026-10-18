@@ -571,6 +571,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'importBundledSampleBook':
     case 'stageSelectedManuscript': {
       const input = requireInput(value.input, ['selectionToken', 'selectedPath'], tentativeId);
       if (

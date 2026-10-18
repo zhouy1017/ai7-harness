@@ -109,6 +109,7 @@ import {
   ensureCanonicalDataDirectory,
   inspectBoundedDataFootprint,
   requireSameCanonicalDataDirectory,
+  resolveDevelopmentSampleBook,
 } from '../shared/data-root.js';
 
 interface LaunchArguments {
@@ -1728,6 +1729,20 @@ function registerRendererHandlers(
       });
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.importBundledSampleBook, (event, ...args: unknown[]) =>
+    envelope<PickerStageResult>(async () => {
+      const owned = requireSender(event);
+      requireDesktop(args.length === 0, 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        claims.requireNewDraftCapacity(owned);
+        const selectedPath = await resolveDevelopmentSampleBook(resolve(__dirname, '..', '..'), app.isPackaged ? 'packaged' : 'source-checkout');
+        const staged = await service.call('importBundledSampleBook', { selectionToken: randomUUID(), selectedPath });
+        rememberImportDraft(owned, staged.draftId);
+        return { status: 'staged' as const, staged };
+      });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.continueImportDraft, (event, input: ServiceOperationMap['continueImportDraft']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -1842,6 +1857,7 @@ function registerRendererHandlers(
           'AI7_SERVICE_ROUTE_INVALID',
         );
         bindCommittedImport(owned, result, input.draftId);
+        completeOnboarding();
         return result;
       });
     }),
@@ -2570,12 +2586,21 @@ function registerRendererHandlers(
       return serializeEffect<unknown>(() => searchOps[op](input));
     }));
   }
+  const completeOnboarding = (): void => {
+    try {
+      if (preferences.read().values['onboarding.state'] === null) preferences.save({ key: 'onboarding.state', value: 'completed' });
+    } catch {
+      // The Book has already committed; a local preference write must never turn that success into a retry.
+      process.stderr.write('AI7_ONBOARDING/preference-write-failed\n');
+    }
+  };
   ipcMain.handle(IPC_CHANNELS.commitBookCreation, (event, input: ServiceOperationMap['commitBookCreation']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
       return serializeEffect(async () => {
         requireAuthority();
         const result = await service.call('commitBookCreation', input);
+        completeOnboarding();
         bindPresentedBook(owned, result.overview.book.bookId, result.overview.book.title);
         return result;
       });
@@ -6404,8 +6429,8 @@ export async function runApplication(): Promise<void> {
       return {
         platform: windows ? 'windows' : 'macos',
         platformLabel: windows ? 'Windows' : 'macOS',
-        runtimeForm: 'source-checkout',
-        runtimeFormLabel: '源码检出运行',
+        runtimeForm: app.isPackaged ? 'packaged' : 'source-checkout',
+        runtimeFormLabel: app.isPackaged ? '安装版运行' : '源码检出运行',
         locationLabel: '本机产品数据位置',
         canonicalRoot: dataRoot,
         footprint: {

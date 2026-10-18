@@ -311,6 +311,8 @@ async function dispatch(
       };
     case 'getImportStartup':
       return { id: request.id, ok: true, op: request.op, result: await store.getImportStartup() };
+    case 'importBundledSampleBook':
+      return { id: request.id, ok: true, op: request.op, result: await store.importBundledSampleBook(request.input.selectionToken, request.input.selectedPath) };
     case 'stageSelectedManuscript':
       return {
         id: request.id,
