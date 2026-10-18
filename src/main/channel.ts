@@ -61,6 +61,8 @@ export async function resolvePackagedDataLocation(options: {
   const writable = options.writable ?? requireWritableDataRoot;
   const prepare = async (root: string): Promise<string> => {
     const canonical = await createCanonicalProductionDataRoot(root, options.codeRoot);
+    // DSTO-014: the DMG's selected Application Support location cannot redirect through an alias.
+    if (platform === 'darwin' && canonical !== resolve(root)) throw new Error('AI7_DATA_ROOT_BOUNDARY_INVALID');
     await writable(canonical);
     return canonical;
   };

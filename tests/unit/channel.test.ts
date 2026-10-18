@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -78,5 +78,15 @@ describe('channel-owned product data location', () => {
     expect(dataLocationSyncWarning(synced, {})).toContain('未公开的编辑材料');
     expect(dataLocationSyncWarning(join(root, 'plain'), {})).toBeNull();
     expect(dataLocationSyncWarning(join(root, 'custom', 'data'), { OneDrive: join(root, 'custom') })).not.toBeNull();
+  });
+  it('refuses a redirected DMG Application Support root without falling back', async () => {
+    const support = join(root, 'Library', 'Application Support', 'io.github.zhouy1017.ai7');
+    const redirected = join(root, 'redirected');
+    await mkdir(support, { recursive: true });
+    await mkdir(redirected);
+    await symlink(redirected, join(support, 'production'), process.platform === 'win32' ? 'junction' : 'dir');
+    await expect(resolvePackagedDataLocation({ channel: 'macos-dmg', codeRoot,
+      executablePath: join(root, 'AI7.app', 'Contents', 'MacOS', 'AI7'), platform: 'darwin', home: root }))
+      .rejects.toThrow('AI7_DATA_ROOT_BOUNDARY_INVALID');
   });
 });
