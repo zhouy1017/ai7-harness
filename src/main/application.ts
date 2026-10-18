@@ -1745,7 +1745,8 @@ function registerRendererHandlers(
   ipcMain.handle(IPC_CHANNELS.importBundledSampleBook, (event, ...args: unknown[]) =>
     envelope<PickerStageResult>(async () => {
       const owned = requireSender(event);
-      requireDesktop(args.length === 0, 'AI7_RENDERER_BOUNDARY_INVALID');
+      // The shared preload invoke helper sends one `undefined` for a zero-input operation.
+      requireDesktop(args.length <= 1 && args[0] === undefined, 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
         claims.requireNewDraftCapacity(owned);
