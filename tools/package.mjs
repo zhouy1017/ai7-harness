@@ -172,8 +172,10 @@ async function main(args) {
   await cp(resolve(ROOT, 'dist'), resolve(stage, 'dist'), { recursive: true });
   // The closure is explicitly staged, so builder cannot pick up pnpm's dev graph.
   await copyRuntimeClosure(ROOT, stage);
-  await writeFile(resolve(stage, 'package.json'), `${JSON.stringify({ name: manifest.name, version: manifest.version,
-    description: manifest.description, type: 'module', main: manifest.main, author: 'AI7 contributors', license: 'UNLICENSED' }, null, 2)}\n`);
+  // productName makes the packaged runtime name itself AI7, so Chromium's own pre-data-root state lands under the OS's AI7 folder.
+  await writeFile(resolve(stage, 'package.json'), `${JSON.stringify({ name: manifest.name, productName: manifest.build.productName,
+    version: manifest.version, description: manifest.description, type: 'module', main: manifest.main, author: 'AI7 contributors',
+    license: 'UNLICENSED' }, null, 2)}\n`);
   const { build, Platform, Arch } = await import('electron-builder');
   const channel = process.platform === 'win32' ? 'windows-installer' : 'macos-dmg';
   const config = builderConfiguration(manifest, stage);
