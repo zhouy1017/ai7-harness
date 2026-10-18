@@ -718,7 +718,7 @@ async function main() {
     at('guided-strip');
     await waitFor(onboardingPage, `document.querySelector('[data-onboarding-guidance="sample-book"]')`, 'guided-strip-visible');
     await assertRenderer(onboardingPage, `(async () => { const labels=Array.from(document.querySelectorAll('[data-onboarding-step]')).map(node=>node.textContent); const tasks=await window.ai7.inspectBookTasks(); return labels.join(',')==='分析,审阅,标记,导出' && !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`, 'guided-strip-navigation-only');
-    await click(onboardingPage, '分析', 'guided-analysis-link');
+    await assertRenderer(onboardingPage, `(() => { const link=document.querySelector('[data-onboarding-guidance="sample-book"] button[data-onboarding-step="analysis"]'); if(!(link instanceof HTMLButtonElement)||link.disabled)return false; link.click(); return true; })()`, 'guided-analysis-link');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-analysis"]')`, 'guided-analysis-page');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card[data-analysis-state="unavailable"]')`, 'guided-analysis-prerequisite');
     await assertRenderer(onboardingPage, `(async () => { const tasks=await window.ai7.inspectBookTasks(); return !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`, 'guided-analysis-not-started');

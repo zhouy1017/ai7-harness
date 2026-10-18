@@ -337,6 +337,7 @@ import { MAX_PINNED_BOOKS, showOnboardingCard, readSampleGuidance, type ShellBoo
 import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
 import { mountHelp } from './help.js';
 import { HELP_ENTRY, HELP_OPENED } from './help-labels.js';
+import { FIRST_RUN_CARD_LABELS, SAMPLE_GUIDANCE_LABELS } from './onboarding-labels.js';
 import { PREFERENCES_LOCAL_LINE, SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
 
 function requiredElement(selector: string): HTMLElement {
@@ -3284,10 +3285,10 @@ function renderBookOverview(
         () => window.ai7.inspectBaselineAnalysis().then((analysis) => analysis.resultSetRevision !== null));
       if (!guidance.isConnected || !visible) return;
       guidance.dataset['onboardingGuidance'] = 'sample-book';
-      guidance.append(element('h3', undefined, '引导'), element('p', 'field-note', '按需了解 分析 → 审阅 → 标记 → 导出；打开页面不会开始任务。'));
+      guidance.append(element('h3', undefined, SAMPLE_GUIDANCE_LABELS.title), element('p', 'field-note', SAMPLE_GUIDANCE_LABELS.note));
       const links = element('div', 'button-row');
       const book = { bookId: overview.book.bookId, title: overview.book.title };
-      for (const [label, section] of [['分析', 'analysis'], ['审阅', 'review'], ['标记', 'manuscript'], ['导出', 'deliverables']] as const) {
+      for (const { label, section } of SAMPLE_GUIDANCE_LABELS.steps) {
         const link = button(label, 'secondary', () => void openBookSection(book, section));
         link.dataset['onboardingStep'] = section;
         links.append(link);
@@ -6822,40 +6823,44 @@ function renderLanding(
     void Promise.all([window.ai7.getPreferences(), window.ai7.getProductDataLocation()]).then(([preferences, location]) => {
       if (!onboarding.isConnected || !showOnboardingCard(books.items.length > 0, preferences.values['onboarding.state'])) return;
       onboarding.dataset['onboardingCard'] = 'first-run';
-      onboarding.append(element('h3', undefined, '开始使用 AI7'));
+      const labels = FIRST_RUN_CARD_LABELS;
+      onboarding.append(element('h3', undefined, labels.title));
       const steps = element('ol', 'onboarding-steps');
       const data = element('li');
-      data.append(element('strong', undefined, '① 数据位置'), element('p', 'onboarding-data-location', location.canonicalRoot),
-        element('p', 'field-note', '在 设置 › 数据与存储 查看'), button('查看数据与存储', 'quiet', () => void renderDataAndStorage()));
+      data.append(element('strong', undefined, labels.dataStep), element('p', 'onboarding-data-location', location.canonicalRoot),
+        element('p', 'field-note', labels.dataNote), button(labels.dataOpen, 'quiet', () => void renderDataAndStorage()));
       const model = element('li');
-      model.append(element('strong', undefined, '② 模型服务（可选）'), element('p', undefined, '本地编辑与恢复不依赖模型服务'),
-        button('设置模型服务', 'secondary', () => void renderModelServiceSettings()));
+      model.append(element('strong', undefined, labels.modelStep), element('p', undefined, labels.modelNote),
+        button(labels.modelOpen, 'secondary', () => void renderModelServiceSettings()));
       const start = element('li');
-      start.append(element('strong', undefined, '③ 开始'), element('p', undefined, '使用上方的 新建图书 或 导入稿件，也可以先导入示例书。'));
+      start.append(element('strong', undefined, labels.startStep), element('p', undefined, labels.startNote));
       if (location.runtimeForm === 'source-checkout') {
-        const sample = button('导入示例书', 'secondary', async () => {
+        const sample = button(labels.sampleImport, 'secondary', async () => {
           sample.disabled = true;
-          setStatus('正在本地解析示例书…', 'busy');
+          setStatus(labels.sampleBusy, 'busy');
           try {
             const result = await window.ai7.importBundledSampleBook();
-            if (result.status === 'staged') renderTargetChoice(result.staged, null, undefined, activeRecoveryReturn);
+            if (result.status === 'staged') {
+              setStatus(labels.sampleStaged, 'success');
+              renderTargetChoice(result.staged, null, undefined, activeRecoveryReturn);
+            }
           } catch (error) {
             sample.disabled = false;
-            setStatus(rendererErrorMessage(error, '无法导入示例书。'), 'error');
+            setStatus(rendererErrorMessage(error, labels.sampleFailed), 'error');
           }
         });
-        start.append(sample, element('p', 'field-note', '仅供开发环境试用；导入前仍需选择图书目标并复核。'));
-      } else start.append(element('p', undefined, '示例书尚未提供'), element('p', 'field-note', '公开发行的示例书正在准备中。'));
+        start.append(sample, element('p', 'field-note', labels.sampleNote));
+      } else start.append(element('p', undefined, labels.sampleUnavailable), element('p', 'field-note', labels.sampleUnavailableNote));
       steps.append(data, model, start);
-      const skip = button('跳过引导', 'quiet', async () => {
+      const skip = button(labels.skip, 'quiet', async () => {
         skip.disabled = true;
         try {
           await window.ai7.savePreference({ key: 'onboarding.state', value: 'skipped' });
           onboarding.remove();
-          setStatus('已跳过引导');
+          setStatus(labels.skipped);
         } catch (error) {
           skip.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法保存引导选择，请重试。'), 'error');
+          setStatus(rendererErrorMessage(error, labels.skipFailed), 'error');
         }
       });
       onboarding.append(steps, skip);

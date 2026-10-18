@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { createPreferenceStore } from '../../src/main/preferences.js';
 import { readSampleGuidance, showOnboardingCard, showSampleGuidance } from '../../src/shared/preferences.js';
 import { resolveDevelopmentSampleBook } from '../../src/shared/data-root.js';
+import { FIRST_RUN_CARD_LABELS, SAMPLE_GUIDANCE_LABELS } from '../../src/renderer/onboarding-labels.js';
 import { decodeRequest } from '../../src/service/request-frames.js';
 
 describe('first-run guidance', () => {
@@ -19,6 +20,13 @@ describe('first-run guidance', () => {
     let reads = 0;
     await expect(readSampleGuidance(false, null, async () => { reads += 1; return false; })).resolves.toBe(false);
     expect(reads).toBe(0);
+  });
+  it('names the model service as optional and links the four existing surfaces in order', () => {
+    expect(FIRST_RUN_CARD_LABELS.modelStep).toContain('可选');
+    expect(FIRST_RUN_CARD_LABELS.modelNote).toBe('本地编辑与恢复不依赖模型服务');
+    expect(FIRST_RUN_CARD_LABELS.sampleUnavailable).toBe('示例书尚未提供');
+    expect(SAMPLE_GUIDANCE_LABELS.steps.map((step) => `${step.label}:${step.section}`))
+      .toEqual(['分析:analysis', '审阅:review', '标记:manuscript', '导出:deliverables']);
   });
   it('appears only in an empty library with no saved choice', () => {
     expect(showOnboardingCard(false, null)).toBe(true);

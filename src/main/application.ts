@@ -102,6 +102,7 @@ import { createPreferenceStore, PreferenceError, type PreferenceStore } from './
 import { chooseStartupDataRoot, type StartupLocationChoice } from './startup-data-root.js';
 import { createNotifier, NOTIFICATION_CHANNELS } from './notifications.js';
 import { isOrdinaryOutcome } from '../renderer/notification-labels.js';
+import { STARTUP_LOCATION_LABELS } from '../renderer/onboarding-labels.js';
 import { PREFERENCE_IPC_CHANNELS } from '../shared/preferences.js';
 import { APPEARANCE_IPC_CHANNEL, type AppearanceState } from '../shared/appearance.js';
 import {
@@ -6204,15 +6205,15 @@ export async function runApplication(): Promise<void> {
         await app.whenReady();
         installChromiumDenial(session.defaultSession);
         while (decision.kind === 'choose') {
+          const labels = STARTUP_LOCATION_LABELS;
           const answer = await dialog.showMessageBox({
-            type: 'question', title: '选择数据位置', message: '图书、稿件与历史保存在本机',
-            detail: `默认位置：${defaultRoot}\n模型服务凭据由操作系统单独保护。`,
-            buttons: ['使用默认位置', '选择文件夹…', '取消'], defaultId: 0, cancelId: 2, noLink: true,
+            type: 'question', title: labels.title, message: labels.message, detail: labels.defaultLocation(defaultRoot),
+            buttons: [labels.useDefault, labels.chooseFolder, labels.cancel], defaultId: 0, cancelId: 2, noLink: true,
           });
           let choice: StartupLocationChoice = { kind: 'cancel' };
           if (answer.response === 0) choice = { kind: 'default' };
           else if (answer.response === 1) {
-            const folder = await dialog.showOpenDialog({ title: '选择产品数据位置', properties: ['openDirectory', 'createDirectory'] });
+            const folder = await dialog.showOpenDialog({ title: labels.folderTitle, properties: ['openDirectory', 'createDirectory'] });
             if (!folder.canceled && folder.filePaths.length === 1) choice = { kind: 'folder', path: folder.filePaths[0]! };
           }
           decision = chooseStartupDataRoot({ choice }, null, { dataRoot: defaultRoot });
@@ -6223,7 +6224,7 @@ export async function runApplication(): Promise<void> {
               await storeStartupDataChoice(defaultRoot, canonical);
               decision = { kind: 'ready', dataRoot: canonical };
             } catch {
-              await dialog.showMessageBox({ type: 'error', title: '此位置不可用', message: '请选择开发目录以外的本机文件夹。', buttons: ['返回选择'] });
+              await dialog.showMessageBox({ type: 'error', title: labels.refusedTitle, message: labels.refusedMessage, buttons: [labels.refusedBack] });
               decision = { kind: 'choose', defaultRoot };
             }
           }
