@@ -681,6 +681,14 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['promoteTaskIntentDraft']['output']>(IPC_CHANNELS.promoteTaskIntentDraft, input),
   promoteAnswerToTaskIntentDraft: (input: Parameters<RendererApi['promoteAnswerToTaskIntentDraft']>[0]) =>
     invoke<ServiceOperationMap['promoteAnswerToTaskIntentDraft']['output']>(IPC_CHANNELS.promoteAnswerToTaskIntentDraft, input),
+  inspectAgentWorkspace: () =>
+    invoke<ServiceOperationMap['inspectAgentWorkspace']['output']>(IPC_CHANNELS.inspectAgentWorkspace),
+  proposeAgentWorkspaceChangeSet: (input: Parameters<RendererApi['proposeAgentWorkspaceChangeSet']>[0]) =>
+    invoke<ServiceOperationMap['proposeAgentWorkspaceChangeSet']['output']>(IPC_CHANNELS.proposeAgentWorkspaceChangeSet, input),
+  promoteAgentWorkspaceProposals: (input: Parameters<RendererApi['promoteAgentWorkspaceProposals']>[0]) =>
+    invoke<ServiceOperationMap['promoteAgentWorkspaceProposals']['output']>(IPC_CHANNELS.promoteAgentWorkspaceProposals, input),
+  discardAgentWorkspaceProposals: (input: Parameters<RendererApi['discardAgentWorkspaceProposals']>[0]) =>
+    invoke<ServiceOperationMap['discardAgentWorkspaceProposals']['output']>(IPC_CHANNELS.discardAgentWorkspaceProposals, input),
   inspectFastInteractionRoutes: () =>
     invoke<ServiceOperationMap['inspectFastInteractionRoutes']['output']>(IPC_CHANNELS.inspectFastInteractionRoutes),
   polishSelection: (input: Parameters<RendererApi['polishSelection']>[0]) =>

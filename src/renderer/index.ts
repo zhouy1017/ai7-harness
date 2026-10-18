@@ -1,5 +1,7 @@
 import { createAppearance } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
+import { mountAgentWorkspace } from './agent-workspace.js';
+import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
 import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
 import { createSaveMenu } from './save-menu.js';
 import { SAVE_MENU_WORDS } from './save-menu-labels.js';
@@ -27,6 +29,7 @@ import { researchPlanLine, researchStatusLine, researchUnavailableLine } from '.
 import { exemplarImportButton, exemplarEligibility } from './imported-exemplars.js';
 import { consumeReturnPlace, preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type {
+  AgentWorkspacePromotionProjection,
   AnalysisReusePlanCounts,
   AnalysisReusePlanProjection,
   BaselineAnalysisPlanRevisionProjection,
@@ -849,6 +852,7 @@ let reviewWorkspace: ReviewWorkspaceSurface | undefined;
 let deliverablesSurface: DeliverablesSurface | undefined;
 /** The dedicated Proposal review workspace while it is on screen (Issue #902): it stops painting once replaced. */
 let proposalWorkspaceSurface: ReturnType<typeof mountProposalWorkspace> | undefined;
+let agentWorkspaceSurface: ReturnType<typeof mountAgentWorkspace> | undefined;
 /** 稿件冲突 while it is on screen: a draft save still in flight never paints once the screen is replaced. */
 let proposalConflictSurface: ProposalConflictSurface | undefined;
 /** 待我处理 while it is on screen: it stops painting once the screen is replaced. */
@@ -1046,6 +1050,11 @@ const shell = mountShell({
   openSection: (book, section) => {
     if (authorityInterrupted) return;
     void leaveThen(() => openBookSection(book, section));
+  },
+  openAgentWorkspace: (book) => {
+    if (authorityInterrupted) return;
+    const back = agentWorkspaceReturn(book.bookId, book.title);
+    void leaveThen(() => openAgentWorkspace(book.bookId, back));
   },
   openBook: (bookId) => {
     if (authorityInterrupted) return;
@@ -1273,6 +1282,8 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   deliverablesSurface = undefined;
   proposalWorkspaceSurface?.destroy();
   proposalWorkspaceSurface = undefined;
+  agentWorkspaceSurface?.destroy();
+  agentWorkspaceSurface = undefined;
   proposalConflictSurface?.destroy();
   proposalConflictSurface = undefined;
   globalAttentionSurface?.destroy();
@@ -5226,6 +5237,21 @@ function renderEditorialWorkspaceProfile(
     enable.dataset['nativeArtifactAction'] = 'enable-current-book';
     actions.append(enable);
   }
+  // Agent 工作区 (Issue #90, wave 13 slice 13a; AGENT-001, 004): an explicit choice from here once Revision 2 is enabled for
+  // this Book; before that, the one sentence of what opens it.
+  const agentEntry = element('div', 'agent-workspace-entry');
+  const agentAvailable = projection.lifecycle.enabledForCurrentBook && projection.sidecar.activeRevision === 2;
+  agentEntry.dataset['agentWorkspaceEntry'] = agentAvailable ? 'available' : 'unavailable';
+  if (agentAvailable) {
+    const open = button(AGENT_WORKSPACE_WORDS.overviewEntry, 'secondary', () => {
+      const back = agentWorkspaceReturn(projection.bookId, shell.currentBook()?.title ?? '');
+      void leaveThen(() => openAgentWorkspace(projection.bookId, back));
+    });
+    open.dataset['agentWorkspaceAction'] = 'open';
+    agentEntry.append(element('p', 'field-note', AGENT_WORKSPACE_WORDS.overviewNote), open);
+  } else {
+    agentEntry.append(element('p', 'field-note', AGENT_WORKSPACE_WORDS.overviewPrerequisite));
+  }
   card.append(
     heading,
     element('p', 'field-note', '这是一份声明式、Provider-free 的本地方案；安装与为当前图书启用是两个独立动作。'),
@@ -5235,6 +5261,7 @@ function renderEditorialWorkspaceProfile(
     element('h4', undefined, '明确不会发生'),
     nonEffects,
     actions,
+    agentEntry,
   );
   host.replaceChildren(card);
 }
@@ -6616,6 +6643,111 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
   } catch (error) {
     setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
   }
+}
+
+/** The Book sections a 返回 from the Agent 工作区 goes back to, by the screen the editor left (Issue #90, slice 13a). */
+const AGENT_WORKSPACE_RETURN_SECTIONS: Readonly<Record<string, ShellBookSection>> = Object.freeze({
+  'book-overview': 'overview',
+  imported: 'overview',
+  'book-analysis': 'analysis',
+  'book-review': 'review',
+  'book-evaluation': 'evaluation',
+  'book-deliverables': 'deliverables',
+  'book-findings': 'findings',
+  'book-sources': 'sources',
+});
+
+/**
+ * Where 返回 leaves the Agent 工作区 for (Issue #90, slice 13a; AGENT-002): the work the editor left, read before the workspace
+ * replaces it — the manuscript where it was being read, or the Book section on screen; 工作概览 otherwise.
+ */
+function agentWorkspaceReturn(bookId: string, bookTitle: string): () => void {
+  const state = screen.dataset['screen'] ?? '';
+  const onScreen = (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] ?? null;
+  const reading = state === 'editor' && onScreen === bookId ? manuscriptOnScreen?.readingPlace() ?? null : null;
+  const section = onScreen === bookId ? AGENT_WORKSPACE_RETURN_SECTIONS[state] ?? null : null;
+  return () => void leaveThen(async () => {
+    try {
+      if (reading !== null) {
+        await openEditorWindow(await window.ai7.getManuscriptWindowAt({
+          manuscriptId: reading.manuscriptId, branchId: reading.branchId, target: { kind: 'block', blockId: reading.blockId },
+        }), bookTitle);
+      } else if (state === 'editor' && onScreen === bookId) {
+        await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
+      } else {
+        await openBookSection({ bookId, title: bookTitle }, section ?? 'overview');
+      }
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
+    }
+  });
+}
+
+/**
+ * The Agent 工作区 of a Book (Issue #90, wave 13 slice 13a; UI ADR 0015): a central screen of the AI7 shell, reached on the
+ * window's own Book route — as a Book section is, so the window's manuscript capabilities stand — and never by itself.
+ * Entering records nothing: no Active Work Object, Run, grant, permission or recent-section preference changes.
+ */
+async function openAgentWorkspace(bookId: string, back: () => void): Promise<void> {
+  setStatus(SHELL_LABELS.openingBook, 'busy');
+  try {
+    const render = async (route: ResolvedBookWorkbenchRoute): Promise<void> => {
+      if (route.kind !== 'book') return;
+      const content = panel();
+      content.dataset['bookId'] = route.bookId;
+      replaceScreen('agent-workspace', content);
+      agentWorkspaceSurface = mountAgentWorkspace({
+        root: content,
+        bookId: route.bookId,
+        bookTitle: route.bookTitle,
+        api: window.ai7,
+        setStatus,
+        errorMessage: rendererErrorMessage,
+        back,
+        openProfile: () => void leaveThen(() => openAgentWorkspaceProfile(route.bookId, route.bookTitle)),
+        openMarks: (promotion) => void leaveThen(() => openAgentWorkspaceMarks(promotion, route.bookTitle)),
+      });
+    };
+    const ownedRoute = await window.ai7.getBookWorkbenchRoute();
+    if (ownedRoute?.kind === 'book' && ownedRoute.bookId === bookId) await render(ownedRoute);
+    else await requestBookWorkbenchRoute({ kind: 'book', bookId }, render);
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
+  }
+}
+
+/** 在稿件中查看 after 提交为修改建议: the manuscript at the change set's paragraph, the first new 修改建议's card open. */
+async function openAgentWorkspaceMarks(promotion: AgentWorkspacePromotionProjection, bookTitle: string): Promise<void> {
+  try {
+    const card = await window.ai7.getEditorialMarkCard({ manuscriptId: promotion.manuscriptId, branchId: promotion.branchId, markId: promotion.markIds[0]! });
+    const opened = await window.ai7.getManuscriptWindowAt({
+      manuscriptId: promotion.manuscriptId, branchId: promotion.branchId, target: { kind: 'block', blockId: card.blockId },
+    });
+    await openEditorWindow(opened, bookTitle, undefined, undefined, promotion.markIds[0]);
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
+  }
+}
+
+/** 前往编辑工作区方案: 工作概览 with the profile card, where Revision 2 is enabled for the Book, in view. */
+async function openAgentWorkspaceProfile(bookId: string, bookTitle: string): Promise<void> {
+  await openBookSection({ bookId, title: bookTitle }, 'overview');
+  const card = await new Promise<HTMLElement | null>((resolveCard) => {
+    const started = performance.now();
+    const look = (): void => {
+      const found = screen.querySelector<HTMLElement>(`[data-native-artifact-book-id="${bookId}"] .native-artifact-card`);
+      if (found !== null || performance.now() - started > 5_000) resolveCard(found);
+      else window.setTimeout(look, 50);
+    };
+    look();
+  });
+  if (card === null) return;
+  const heading = card.querySelector<HTMLElement>('h3');
+  if (heading) {
+    heading.tabIndex = -1;
+    heading.focus();
+  }
+  card.scrollIntoView({ block: 'start' });
 }
 
 async function renderModelServiceSettings(): Promise<void> {

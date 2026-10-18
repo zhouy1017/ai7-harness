@@ -27,7 +27,15 @@ import {
 import { transmitOnce } from '../provider/live-transmission.js';
 import type { ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache } from '../provider/provider-result-cache.js';
-import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogueMessage, type DialogueMessageInput } from './contract.js';
+import {
+  AGENT_WORKSPACE_PROMPT_CONTRACT,
+  AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST,
+  DIALOGUE_PROMPT_CONTRACT,
+  DIALOGUE_PROMPT_CONTRACT_DIGEST,
+  buildDialogueMessage,
+  type DialogueMessageInput,
+} from './contract.js';
+import { AGENT_WORKSPACE_COMPOSITION_OPTIONS } from '../agent-workspace/capabilities.js';
 import type { LiveAnswer } from './dialogue-history.js';
 import { DialogueError, type DialogueOutcome, type DialogueTurnStart, type StoredDialogueBinding } from './dialogue-ledger.js';
 import { DIALOGUE_OUTBOUND_CATEGORY, DIALOGUE_TASK_KIND, admittedDialogueRoute, type AdmittedDialogueRoute } from './dialogue-route.js';
@@ -123,6 +131,27 @@ export function productionDialogueRoute(
   };
 }
 
+/**
+ * An Agent 工作区 turn (Issue #90, wave 13 slice 13a): a dialogue turn like any other — the same Task, attempt, route,
+ * refusals, Execution Binding and Harness Session Ledger — under the workspace fragment of the dialogue contract, with no tool
+ * registered, whose whole streamed answer is handed to the workspace once the attempt has settled.
+ */
+export interface WorkspaceTurnStart extends DialogueTurnStart {
+  readonly settled: (outcome: DialogueOutcome, streamed: string) => void;
+}
+
+/** A turn this owner runs: a dialogue's, or a workspace's with the hand-over it settles into. */
+type OwnedTurn = DialogueTurnStart & { readonly settled?: WorkspaceTurnStart['settled'] };
+
+/** Hand a workspace turn its settled answer; a hand-over that throws changes nothing already recorded. */
+function handOver(turn: OwnedTurn, outcome: DialogueOutcome, streamed: string): void {
+  try {
+    turn.settled?.(outcome, streamed);
+  } catch {
+    // The workspace reads the round again from what it holds; the dialogue's records stand as settled.
+  }
+}
+
 /** The validation purpose every live dialogue call is filed under in the Provider Test Ledger. */
 export const DIALOGUE_TEST_ITEM_PURPOSE = DIALOGUE_TASK_KIND;
 
@@ -163,7 +192,7 @@ export const DIALOGUE_CLOSED_CAUSE = 'AI7_CLOSED';
 export class DialogueExecutionOwner {
   readonly #deps: DialogueExecutionDeps;
   #active: ActiveAnswer | null = null;
-  readonly #queued: DialogueTurnStart[] = [];
+  readonly #queued: OwnedTurn[] = [];
   #disposed = false;
 
   constructor(deps: DialogueExecutionDeps) {
@@ -193,8 +222,16 @@ export class DialogueExecutionOwner {
     return this.#active !== null;
   }
 
+  /**
+   * An Agent 工作区 turn (Issue #90, slice 13a): begun as a dialogue turn is, under the workspace contract; the workspace is
+   * handed the whole answer once the attempt settles, however it settles.
+   */
+  beginWorkspaceTurn(turn: WorkspaceTurnStart): void {
+    this.begin(turn);
+  }
+
   /** Start the attempt's turn and return at once; the answer streams into memory and settles its own outcome. */
-  begin(turn: DialogueTurnStart): void {
+  begin(turn: OwnedTurn): void {
     this.requireReady();
     if (this.#active?.attemptId === turn.attemptId || this.#queued.some((queued) => queued.attemptId === turn.attemptId)) return;
     if (this.#active !== null) {
@@ -220,6 +257,7 @@ export class DialogueExecutionOwner {
       catch (error) {
         const code = error instanceof DialogueError ? error.code : 'DIALOGUE_DISPATCH_FAILED';
         this.#deps.records.settleDialogueAttempt(next.attemptId, 'failed', null, code);
+        handOver(next, 'failed', '');
       }
     }
   }
@@ -230,7 +268,7 @@ export class DialogueExecutionOwner {
     if (queued !== -1) {
       // A queued attempt has neither a Harness span nor a sent request. Cancellation uses the existing stopped outcome.
       this.#deps.records.settleDialogueAttempt(attemptId, 'stopped', null, null);
-      this.#queued.splice(queued, 1);
+      handOver(this.#queued.splice(queued, 1)[0]!, 'stopped', '');
       return;
     }
     const active = this.#active;
@@ -244,22 +282,30 @@ export class DialogueExecutionOwner {
   async dispose(): Promise<void> {
     this.#disposed = true;
     try {
-      for (const queued of this.#queued.splice(0)) this.#deps.records.settleDialogueAttempt(queued.attemptId, 'interrupted', null, DIALOGUE_CLOSED_CAUSE);
+      for (const queued of this.#queued.splice(0)) {
+        this.#deps.records.settleDialogueAttempt(queued.attemptId, 'interrupted', null, DIALOGUE_CLOSED_CAUSE);
+        handOver(queued, 'interrupted', '');
+      }
     } finally {
       const active = this.#active;
       if (active !== null) { active.harness?.interrupt(); await active.done; }
     }
   }
 
-  async #run(active: ActiveAnswer, turn: DialogueTurnStart): Promise<void> {
+  async #run(active: ActiveAnswer, turn: OwnedTurn): Promise<void> {
     const { records } = this.#deps;
     const live = this.#deps.live;
     const message = buildDialogueMessage(turn.message);
     const sessionId = randomUUID();
-    const localRule = live?.route?.localTools ?? (live === null && this.#deps.fixture !== null ? dialogueRetrievalFixtureRule(this.#deps.fixture, turn.message) : null);
+    // An Agent 工作区 turn registers no tool, whatever the rule or fixture offers the dialogue (Issue #90, slice 13a).
+    const workspace = turn.settled !== undefined;
+    const localRule = workspace ? null
+      : live?.route?.localTools ?? (live === null && this.#deps.fixture !== null ? dialogueRetrievalFixtureRule(this.#deps.fixture, turn.message) : null);
     let retrieval: RetrievalIndex | null = null;
-    const promptContractDigest = localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
-    const systemPrompt = localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
+    const promptContractDigest = workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST
+      : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
+    const systemPrompt = workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt
+      : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
     let current: string | null = null;
     let spanOpened = false;
     let outcome: HarnessTurnOutcome | null = null;
@@ -273,7 +319,8 @@ export class DialogueExecutionOwner {
       const credentialReference = live === null ? '' : live.credentialReference;
       const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
       const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
-      const composition = describeComposition(executionRoute, model, promptContractDigest, { sessionLog: true, localTools: localRule !== null });
+      const composition = describeComposition(executionRoute, model, promptContractDigest,
+        workspace ? AGENT_WORKSPACE_COMPOSITION_OPTIONS : { sessionLog: true, localTools: localRule !== null });
       const bindingDigest = sha256Hex(`${turn.attemptId}\u0000${sessionId}\u0000${composition.digest}`);
       const slotBinding: CredentialSlotBinding | null = live === null || route === null ? null : {
         bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference,
@@ -442,6 +489,7 @@ export class DialogueExecutionOwner {
     for (let tries = 0; tries < 2; tries += 1) {
       try {
         records.settleDialogueAttempt(turn.attemptId, settled, endSeq, cause);
+        handOver(turn, settled, active.streamed);
         return;
       } catch {
         if (tries === 0) await new Promise((resolve) => setTimeout(resolve, SETTLE_RETRY_MS));

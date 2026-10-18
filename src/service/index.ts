@@ -48,6 +48,7 @@ import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } f
 import type { WaitingFor } from './task-plan.js';
 import { controlledAnswerHold, controlledUnitHold } from './unit-hold.js';
 import type { DialogueExecutionOwner } from './dialogue/dialogue-execution.js';
+import type { AgentWorkspace } from './agent-workspace/workspace.js';
 import { DialogueError } from './dialogue/dialogue-ledger.js';
 import type { FastRoleExecutionOwner } from './fast-role/fast-role-execution.js';
 import { FastRoleError } from './fast-role/fast-role-error.js';
@@ -199,6 +200,7 @@ async function dispatch(
   reviewRuns: ReviewRunDriver,
   dialogues: DialogueExecutionOwner,
   fastRole: FastRoleContext,
+  agentWorkspace: AgentWorkspace,
   request: ServiceRequest,
   importControl: J01ImportControl | undefined,
   launchPolicy: LaunchPolicyProjection,
@@ -1552,6 +1554,25 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: jobs.startTaskIntentDraftPromotion(request.input, launchPolicy) };
     case 'promoteAnswerToTaskIntentDraft':
       return { id: request.id, ok: true, op: request.op, result: store.promoteAnswerToTaskIntentDraft(request.input) };
+    // Agent 工作区 (Issue #90, wave 13 slice 13a): a read; one proposal round as a dialogue turn under the workspace fragment;
+    // 提交为修改建议 through the produced-mark path; 放弃, which records nothing. Nothing here applies anything.
+    case 'inspectAgentWorkspace':
+      return { id: request.id, ok: true, op: request.op, result: await agentWorkspaceCall(() => agentWorkspace.inspect(request.input.bookId)) };
+    case 'proposeAgentWorkspaceChangeSet':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await agentWorkspaceCall(() => agentWorkspace.propose(request.input.bookId, { selection: request.input.selection, instruction: request.input.instruction })),
+      };
+    case 'promoteAgentWorkspaceProposals':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await agentWorkspaceCall(() => agentWorkspace.promote(request.input.bookId, { proposalSetId: request.input.proposalSetId })),
+      };
+    case 'discardAgentWorkspaceProposals':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await agentWorkspaceCall(() => agentWorkspace.discard(request.input.bookId, { proposalSetId: request.input.proposalSetId })),
+      };
     // 润色这段 and 基于当前稿件重新生成建议 on the Fast Interaction Role (Issue #842): whether this launch can ask them, the polish
     // request — checked at once, answered beside this loop — and either request read again until it settles.
     case 'inspectFastInteractionRoutes':
@@ -1623,6 +1644,18 @@ function dialogueReady(dialogues: DialogueExecutionOwner, sourceDigest: string |
     dialogues.requireReady(sourceDigest);
   } catch (error) {
     if (error instanceof DialogueError) throw new StoreErrorClass(error.code, error.message);
+    throw error;
+  }
+}
+
+/** An Agent 工作区 refusal (Issue #90, slice 13a) — its own or the dialogue's — said as the store says its own. */
+async function agentWorkspaceCall<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof Error && (error.name === 'AgentWorkspaceError' || error instanceof DialogueError) && 'code' in error && typeof error.code === 'string') {
+      throw new StoreErrorClass(error.code, error.message);
+    }
     throw error;
   }
 }
@@ -1893,6 +1926,7 @@ async function run(): Promise<void> {
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
     { baselinePromptContractForLaunch },
     { materialTranslator, MATERIAL_TRANSLATION_KIND },
+    { AgentWorkspace: AgentWorkspaceClass },
   ] =
     await Promise.all([
       import('./store.js'),
@@ -1909,6 +1943,7 @@ async function run(): Promise<void> {
       import('./background-analysis.js'),
       import('./analysis/kind-definition.js'),
       import('./fast-role/material-translation-contract.js'),
+      import('./agent-workspace/workspace.js'),
     ]);
   StoreErrorClass = StoreError;
   // The Edit Journal write-failure injection (Issue #951, T0-1): armed only by J-02's armed launch, refused everywhere else.
@@ -1935,6 +1970,7 @@ async function run(): Promise<void> {
   let reviewRuns: ReviewRunDriver | undefined;
   let dialogues: DialogueExecutionOwner | undefined;
   let fastRole: FastRoleContext | undefined;
+  let agentWorkspace: AgentWorkspace | undefined;
   let preflightTimer: NodeJS.Timeout | undefined;
   let backupTimer: NodeJS.Timeout | undefined;
   let background: BackgroundAnalysisDispatcher | undefined;
@@ -2166,6 +2202,8 @@ async function run(): Promise<void> {
           : null,
     });
     fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store) };
+    // Agent 工作区 (Issue #90, slice 13a): its rounds run on the dialogue's owner and are held in this service's memory only.
+    agentWorkspace = new AgentWorkspaceClass(store, dialogues);
     // 生成来源译文 (Issue #892): the same owner, under the rule the selected policy names for the kind — none, under every
     // policy before one names it, which refuses it with 「当前策略未开放来源译文」.
     store.useMaterialTranslator(materialTranslator(
@@ -2273,7 +2311,7 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, request, importControl, launchPolicy, connectivity,
+        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace, request, importControl, launchPolicy, connectivity,
           background, modelServiceChanged, probeBackend);
       } catch (error) {
         if (error instanceof StoreFatalError) {

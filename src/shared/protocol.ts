@@ -4,7 +4,7 @@ import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-con
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 156 as const;
+export const SERVICE_PROTOCOL_VERSION = 157 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -399,6 +399,11 @@ export const IPC_CHANNELS = {
   saveTaskIntentDraft: 'ai7:j16:save-task-intent-draft',
   promoteTaskIntentDraft: 'ai7:j16:promote-task-intent-draft',
   promoteAnswerToTaskIntentDraft: 'ai7:j16:promote-answer-to-task-intent-draft',
+  // Agent 工作区 (Issue #90, wave 13 slice 13a).
+  inspectAgentWorkspace: 'ai7:j16:inspect-agent-workspace',
+  proposeAgentWorkspaceChangeSet: 'ai7:j16:propose-agent-workspace-change-set',
+  promoteAgentWorkspaceProposals: 'ai7:j16:promote-agent-workspace-proposals',
+  discardAgentWorkspaceProposals: 'ai7:j16:discard-agent-workspace-proposals',
   inspectFastInteractionRoutes: 'ai7:j05:inspect-fast-interaction-routes',
   polishSelection: 'ai7:j05:polish-selection',
   inspectFastInteractionRequest: 'ai7:j05:inspect-fast-interaction-request',
@@ -12472,6 +12477,95 @@ export interface DialogueConversionProjection {
   readonly dialogue: DialogueProjection;
 }
 
+// ---- Agent 工作区 (Issue #90, wave 13 slice 13a; ADR 0045, UI ADR 0015; V2-UX-AGENT-001 to 004, APREP-001) ----------------
+
+/**
+ * What the Book-bound Agent 工作区 may do, as its capability declaration states it: no filesystem, no shell, no network of
+ * its own and no Apply; it may name only the two current-Book scope kinds Revision 2 of the editorial workspace profile's
+ * authority sidecar makes eligible. `safetyLabel` is the visible safety state the screen shows.
+ */
+export interface AgentWorkspaceCapabilityProjection {
+  readonly filesystem: false;
+  readonly shell: false;
+  readonly network: false;
+  readonly apply: false;
+  readonly scopes: readonly ['current-book-primary-manuscript-revision', 'current-book-source-version'];
+  readonly safetyLabel: '未联网 · 无文件系统 · 无 shell · 不能应用修改';
+}
+
+/** One proposed change of a change set, anchored on exact words of the selected range; a candidate, not a mark. */
+export interface AgentWorkspaceCandidateProjection {
+  /** 1-based position in the model's answer. */
+  readonly ordinal: number;
+  /** The words it would replace, where they stand in the manuscript: inside the selected range, on whole graphemes. */
+  readonly anchor: { readonly blockId: string; readonly fromGrapheme: number; readonly toGrapheme: number; readonly text: string };
+  readonly proposedText: string;
+  readonly rationale: string;
+}
+
+/** An item of the answer that is not offered, with why in the editor's words. */
+export interface AgentWorkspaceDroppedProjection {
+  readonly ordinal: number;
+  readonly reason: string;
+}
+
+/**
+ * The one proposal round the workspace holds for a Book: the dialogue turn that asked for it and, once it settles, its
+ * candidates. It lives in the service's memory only; 提交为修改建议 turns it into 修改建议 marks, 放弃 forgets it.
+ */
+export interface AgentWorkspaceProposalProjection {
+  readonly proposalSetId: string;
+  /** The dialogue Task of the turn: the one record the round writes. */
+  readonly dialogueId: string;
+  readonly state: 'proposing' | 'ready' | 'failed';
+  readonly instruction: string;
+  readonly selection: {
+    readonly manuscriptId: string;
+    readonly branchId: string;
+    readonly blockId: string;
+    readonly fromGrapheme: number;
+    readonly toGrapheme: number;
+    readonly text: string;
+  };
+  readonly candidates: ReadonlyArray<AgentWorkspaceCandidateProjection>;
+  readonly dropped: ReadonlyArray<AgentWorkspaceDroppedProjection>;
+  /** What the round says now, in the editor's words. */
+  readonly label: string;
+  readonly startedAt: string;
+}
+
+export interface AgentWorkspaceProjection {
+  readonly bookId: string;
+  /** Whether this Book's editorial workspace profile is enabled at Revision 2, which opens the workspace. */
+  readonly available: boolean;
+  /** The one-sentence prerequisite when it is not; `null` when it is. */
+  readonly unavailableReason: string | null;
+  readonly capabilities: AgentWorkspaceCapabilityProjection;
+  readonly proposal: AgentWorkspaceProposalProjection | null;
+}
+
+export interface ProposeAgentWorkspaceChangeSetInput {
+  /** The exact words of the Book's primary manuscript the change set is about (one block), as the editor selected them. */
+  readonly selection: DialogueSelectionInput;
+  /** The editor's instruction, sent as a dialogue question is. */
+  readonly instruction: string;
+}
+
+export interface AgentWorkspaceProposalSetInput {
+  readonly proposalSetId: string;
+}
+
+/** 提交为修改建议: the 修改建议 marks the change set became — one atomic group when there are two or more — never applied. */
+export interface AgentWorkspacePromotionProjection {
+  readonly bookId: string;
+  readonly markIds: ReadonlyArray<string>;
+  readonly atomicGroupId: string | null;
+  readonly manuscriptId: string;
+  readonly branchId: string;
+  readonly label: string;
+  readonly workspace: AgentWorkspaceProjection;
+}
+
 // ---- Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b; V2-UX-TASK-001 to 009, 042, 043, DIALOG-013, 016) ----------
 
 /**
@@ -14169,6 +14263,14 @@ export interface ServiceOperationMap {
   promoteTaskIntentDraft: { input: PromoteTaskIntentDraftInput; output: ServiceJobProjection };
   /** 转为任务意图草稿 (DIALOG-016): a draft from a completed dialogue answer, with its provenance; nothing is sent. */
   promoteAnswerToTaskIntentDraft: { input: PromoteAnswerToTaskIntentDraftInput; output: TaskIntentDraftProjection };
+  /** The Agent 工作区 of a Book (Issue #90, slice 13a): whether it opens, what it may do, and the round it holds; a read. */
+  inspectAgentWorkspace: { input: { bookId: string }; output: AgentWorkspaceProjection };
+  /** One proposal round: a dialogue turn under the workspace fragment on the selected words; nothing changes. */
+  proposeAgentWorkspaceChangeSet: { input: ProposeAgentWorkspaceChangeSetInput & { bookId: string }; output: AgentWorkspaceProjection };
+  /** 提交为修改建议: the held change set becomes 修改建议 marks through the produced-mark path; never applied. */
+  promoteAgentWorkspaceProposals: { input: AgentWorkspaceProposalSetInput & { bookId: string }; output: AgentWorkspacePromotionProjection };
+  /** 放弃这组提议: the held round is forgotten; nothing is recorded. */
+  discardAgentWorkspaceProposals: { input: AgentWorkspaceProposalSetInput & { bookId: string }; output: AgentWorkspaceProjection };
   /** Whether 润色这段 and 基于当前稿件重新生成建议 can be asked for the Book under this launch (Issue #842): a read. */
   inspectFastInteractionRoutes: { input: { bookId: string }; output: FastInteractionRoutesProjection };
   /** 润色这段 (Issue #842): the selected words to the Fast Interaction Role; its answer becomes open 修改建议, never applied. */
@@ -14677,6 +14779,12 @@ export interface RendererApi {
   saveTaskIntentDraft(input: Omit<SaveTaskIntentDraftInput, 'bookId'>): Promise<TaskIntentDraftProjection>;
   promoteTaskIntentDraft(input: Omit<PromoteTaskIntentDraftInput, 'bookId'>): Promise<ServiceJobProjection>;
   promoteAnswerToTaskIntentDraft(input: Omit<PromoteAnswerToTaskIntentDraftInput, 'bookId'>): Promise<TaskIntentDraftProjection>;
+  /** The Agent 工作区 of the Book this window shows (Issue #90, slice 13a): a read. */
+  inspectAgentWorkspace(): Promise<AgentWorkspaceProjection>;
+  /** One proposal round on the Book this window shows: only the selected words and the instruction are sent. */
+  proposeAgentWorkspaceChangeSet(input: ProposeAgentWorkspaceChangeSetInput): Promise<AgentWorkspaceProjection>;
+  promoteAgentWorkspaceProposals(input: AgentWorkspaceProposalSetInput): Promise<AgentWorkspacePromotionProjection>;
+  discardAgentWorkspaceProposals(input: AgentWorkspaceProposalSetInput): Promise<AgentWorkspaceProjection>;
   /** Whether 润色这段 and 基于当前稿件重新生成建议 can be asked for the Book this window shows (Issue #842): a read. */
   inspectFastInteractionRoutes(): Promise<FastInteractionRoutesProjection>;
   /** 润色这段 on the Book this window shows (Issue #842): only the selected words and their paragraph's context are sent. */
