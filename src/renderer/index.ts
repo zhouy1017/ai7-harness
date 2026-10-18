@@ -853,6 +853,8 @@ let deliverablesSurface: DeliverablesSurface | undefined;
 /** The dedicated Proposal review workspace while it is on screen (Issue #902): it stops painting once replaced. */
 let proposalWorkspaceSurface: ReturnType<typeof mountProposalWorkspace> | undefined;
 let agentWorkspaceSurface: ReturnType<typeof mountAgentWorkspace> | undefined;
+/** Exact return routes belong to the work surface; never persist a second Active Work Object for Agent 工作区. */
+const agentWorkspaceReturns = new WeakMap<HTMLElement, () => void | Promise<void>>();
 /** 稿件冲突 while it is on screen: a draft save still in flight never paints once the screen is replaced. */
 let proposalConflictSurface: ProposalConflictSurface | undefined;
 /** 待我处理 while it is on screen: it stops painting once the screen is replaced. */
@@ -1053,6 +1055,7 @@ const shell = mountShell({
   },
   openAgentWorkspace: (book) => {
     if (authorityInterrupted) return;
+    if (screen.dataset['screen'] === 'agent-workspace' && (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] === book.bookId) return;
     const back = agentWorkspaceReturn(book.bookId, book.title);
     void leaveThen(() => openAgentWorkspace(book.bookId, back));
   },
@@ -2284,6 +2287,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   if (projection.nextCursor) actions.append(button('下一窗口', 'quiet', () => showPage(projection.nextCursor!)));
   content.append(actions);
   replaceScreen('historical-revision', content, { bookId: projection.bookId, title: projection.bookTitle, section: 'history' });
+  agentWorkspaceReturns.set(content, () => renderHistoricalRevision(projection));
   focusRecoveryHeading(content);
   setStatus(`只读历史修订版已打开；${projection.position.label}。`);
 }
@@ -2826,6 +2830,7 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
   backgroundHost.dataset['bookId'] = bookId;
   content.append(host, backgroundHost, actions);
   replaceScreen('book-analysis', content, { bookId, title: bookTitle, section: 'analysis' });
+  agentWorkspaceReturns.set(content, () => renderBookAnalysis(bookId, bookTitle, target, focus));
   setStatus('分析已打开');
   const inspect = (first: boolean): void => {
     // A 学习材料 entry opens ②A on the revision it judged (Issue #61, S26b): read-only when that is no longer the current one.
@@ -2965,6 +2970,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
   actions.append(openManuscript, openOverview);
   content.append(actions);
   replaceScreen('book-review', content, { bookId, title: bookTitle, section: 'review' });
+  agentWorkspaceReturns.set(content, () => renderBookReview(bookId, bookTitle, focus, procedureId));
   reviewWorkspace = surface;
   // The drawer's bar approved the Run (Issue #420): ②B reads it again and follows it as it runs.
   taskSurfaceRefresh = { 'review-run': () => surface.refresh() };
@@ -2995,6 +3001,7 @@ async function renderProposalWorkspace(input: { manuscriptId: string; branchId: 
     }, openConflict: (markId) => renderProposalConflict({ ...input, bookId, markId }, bookTitle),
   });
   replaceScreen('proposal-workspace', content, { bookId, title: bookTitle, section: 'review' }); proposalWorkspaceSurface = surface; leaveGuard = () => surface.settle(); surface.start();
+  agentWorkspaceReturns.set(content, () => renderProposalWorkspace(input, bookId, bookTitle));
 }
 
 /**
@@ -3041,6 +3048,7 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
     openConflict: (markId) => renderProposalConflict({ ...target, markId }, bookTitle),
   });
   replaceScreen('proposal-conflict', content, { bookId: target.bookId, title: bookTitle, section: 'review' });
+  agentWorkspaceReturns.set(content, () => renderProposalConflict(target, bookTitle));
   proposalConflictSurface = surface;
   // Leaving for 待我处理 from the header saves the draft on screen first, as 返回稿件 does (Issue #424).
   leaveGuard = () => surface.settle();
@@ -3109,6 +3117,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
   actions.append(openManuscript, openOverview);
   content.append(actions);
   replaceScreen('book-evaluation', content, { bookId, title: bookTitle, section: 'evaluation' });
+  agentWorkspaceReturns.set(content, () => renderBookEvaluation(bookId, bookTitle, focus));
   taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh(), 'readers-report': () => surface.refresh(), 'evaluation-rewrite': () => surface.refresh() };
   setStatus(EVALUATION_STATUS.loading, 'busy');
   void surface.load().then(
@@ -3168,6 +3177,7 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
   actions.append(openManuscript, openOverview);
   content.append(actions);
   replaceScreen('book-sources', content, { bookId, title: bookTitle, section: 'sources' });
+  agentWorkspaceReturns.set(content, () => renderBookSources(bookId, bookTitle, focusEvidenceId));
   setStatus(SOURCES_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
@@ -3243,6 +3253,7 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
   actions.append(openManuscript, openOverview);
   content.append(actions);
   replaceScreen('book-deliverables', content, { bookId, title: bookTitle, section: 'deliverables' });
+  agentWorkspaceReturns.set(content, () => renderBookDeliverables(bookId, bookTitle, openCase, focusPackageVersionId));
   deliverablesSurface = surface;
   taskSurfaceRefresh = { writing: () => surface.refreshWriting() };
   surface.start();
@@ -6663,7 +6674,9 @@ const AGENT_WORKSPACE_RETURN_SECTIONS: Readonly<Record<string, ShellBookSection>
  */
 function agentWorkspaceReturn(bookId: string, bookTitle: string): () => void {
   const state = screen.dataset['screen'] ?? '';
-  const onScreen = (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] ?? null;
+  const content = screen.firstElementChild as HTMLElement | null;
+  const onScreen = content?.dataset['bookId'] ?? null;
+  const restore = content !== null && onScreen === bookId ? agentWorkspaceReturns.get(content) : undefined;
   const reading = state === 'editor' && onScreen === bookId ? manuscriptOnScreen?.readingPlace() ?? null : null;
   const section = onScreen === bookId ? AGENT_WORKSPACE_RETURN_SECTIONS[state] ?? null : null;
   return () => void leaveThen(async () => {
@@ -6672,6 +6685,8 @@ function agentWorkspaceReturn(bookId: string, bookTitle: string): () => void {
         await openEditorWindow(await window.ai7.getManuscriptWindowAt({
           manuscriptId: reading.manuscriptId, branchId: reading.branchId, target: { kind: 'block', blockId: reading.blockId },
         }), bookTitle);
+      } else if (restore !== undefined) {
+        await restore();
       } else if (state === 'editor' && onScreen === bookId) {
         await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
       } else {
@@ -6727,7 +6742,7 @@ async function openAgentWorkspaceMarks(promotion: AgentWorkspacePromotionProject
     });
     await openEditorWindow(opened, bookTitle, undefined, undefined, promotion.markIds[0]);
   } catch (error) {
-    setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
+    setStatus(rendererErrorMessage(error, AGENT_WORKSPACE_WORDS.manuscriptFailed), 'error');
   }
 }
 
@@ -9015,6 +9030,10 @@ function renderEditorWindow(
   content.append(toolbar, workspace, identities);
   if (reimport !== undefined) toolbar.after(reimportLandingSection(reimport));
   replaceScreen('editor', content, { bookId: initialWindow.bookId, title: bookTitle, section: isDocument ? 'deliverables' : 'manuscript' });
+  agentWorkspaceReturns.set(content, async () => {
+    const opened = await window.ai7.getManuscriptWindow({ manuscriptId: initialWindow.manuscriptId, branchId: initialWindow.branchId, cursor: null });
+    await openEditorWindow(opened, bookTitle, recoveryAttentionId, undefined, openMarkId);
+  });
   // 专注 and 视图 in the context header, and the protection surface first beside them (Issue #951; ED-004, DUR-003, VIEW-012).
   editorModes = mountEditorModes({
     host: requiredElement('#context-view'),

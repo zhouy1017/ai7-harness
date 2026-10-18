@@ -29,7 +29,7 @@ export const AGENT_WORKSPACE_WORDS = Object.freeze({
   droppedLine: (ordinal: number, reason: string) => `第 ${ordinal} 项：${reason}`,
   promote: '提交为修改建议',
   discard: '放弃这组提议',
-  discarded: '已放弃这组提议；没有记录任何内容。',
+  discarded: '已放弃这组提议；没有新建修改建议，这轮提问的记录仍保留。',
   openMarks: '在稿件中查看',
   opened: 'Agent 工作区已打开',
   unavailable: 'Agent 工作区尚未启用',
@@ -41,5 +41,5 @@ export const AGENT_WORKSPACE_WORDS = Object.freeze({
   noManuscript: '这本书还没有主稿件；导入稿件后才能选择范围。',
   overviewEntry: '打开 Agent 工作区',
   overviewNote: '在 Agent 工作区里，可以就一段稿件提出一组修改，提交为修改建议后再由你决定。',
-  overviewPrerequisite: '在这里为本图书启用 Revision 2 后，才能打开 Agent 工作区。',
+  overviewPrerequisite: '在这里为本图书启用第 2 版后，才能打开 Agent 工作区。',
 });

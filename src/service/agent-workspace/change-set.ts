@@ -1,3 +1,4 @@
+import { WORKSPACE_SERVICE_WORDS as words } from './agent-workspace-labels.js';
 import { graphemesOf } from '../../shared/mark-anchor.js';
 import { MAX_DIALOGUE_PROPOSAL_CHARACTERS, MAX_MARK_BODY_CODE_UNITS } from '../../shared/protocol.js';
 import { AGENT_WORKSPACE_RESULT_SCHEMA, MAX_AGENT_WORKSPACE_ITEMS, MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS } from '../dialogue/contract.js';
@@ -30,7 +31,7 @@ export type AgentWorkspaceReading =
   /** The answer as a whole is outside the contract: nothing of it is offered. */
   | { readonly kind: 'withheld'; readonly reason: string };
 
-const NOT_A_CHANGE_SET = '模型的回答不是约定格式的变更集';
+const NOT_A_CHANGE_SET = words.invalidAnswer;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -44,12 +45,12 @@ function sameKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>): 
 /** Where `anchor` stands in `selection`, in graphemes, when it occurs there exactly once on whole graphemes; else why not. */
 function locate(selection: string, anchor: string): { from: number; to: number } | string {
   const first = selection.indexOf(anchor);
-  if (first === -1) return '摘出的文字不在所选范围内';
-  if (selection.indexOf(anchor, first + 1) !== -1) return '摘出的文字在所选范围内不止一处，无法确定位置';
+  if (first === -1) return words.outside;
+  if (selection.indexOf(anchor, first + 1) !== -1) return words.ambiguous;
   const from = graphemesOf(selection.slice(0, first)).length;
   const length = graphemesOf(anchor).length;
   // An occurrence that cuts a grapheme in two is not a range of the editor's words.
-  if (graphemesOf(selection).slice(from, from + length).join('') !== anchor) return '摘出的文字没有落在完整的字上';
+  if (graphemesOf(selection).slice(from, from + length).join('') !== anchor) return words.splitGrapheme;
   return { from, to: from + length };
 }
 
@@ -79,25 +80,25 @@ export function readAgentWorkspaceAnswer(text: string, selection: string): Agent
   for (const [index, item] of (parsed['items'] as unknown[]).entries()) {
     const ordinal = index + 1;
     const drop = (reason: string): void => { dropped.push({ ordinal, reason }); };
-    if (ordinal > MAX_AGENT_WORKSPACE_ITEMS) { drop(`超过 ${MAX_AGENT_WORKSPACE_ITEMS} 项的提议不予提供`); continue; }
-    if (!isRecord(item) || !sameKeys(item, ['anchor', 'proposedText', 'rationale'])) { drop('提议不是约定的格式'); continue; }
+    if (ordinal > MAX_AGENT_WORKSPACE_ITEMS) { drop(words.tooMany(MAX_AGENT_WORKSPACE_ITEMS)); continue; }
+    if (!isRecord(item) || !sameKeys(item, ['anchor', 'proposedText', 'rationale'])) { drop(words.invalidItem); continue; }
     const { anchor, proposedText, rationale } = item;
     if (typeof anchor !== 'string' || typeof proposedText !== 'string' || typeof rationale !== 'string' ||
-        !anchor.isWellFormed() || !proposedText.isWellFormed() || !rationale.isWellFormed()) { drop('提议不是约定的格式'); continue; }
-    if (anchor.length === 0) { drop('提议没有摘出要替换的文字'); continue; }
-    if (proposedText === anchor) { drop('替换后的文字与原文相同'); continue; }
+        !anchor.isWellFormed() || !proposedText.isWellFormed() || !rationale.isWellFormed()) { drop(words.invalidItem); continue; }
+    if (anchor.length === 0) { drop(words.noAnchor); continue; }
+    if (proposedText === anchor) { drop(words.unchanged); continue; }
     if (proposedText.length > MAX_MARK_BODY_CODE_UNITS || [...proposedText].length > MAX_DIALOGUE_PROPOSAL_CHARACTERS) {
-      drop('替换后的文字超过修改建议的长度上限');
+      drop(words.tooLong);
       continue;
     }
     const line = rationale.trim();
     if (line.length === 0 || /[\r\n]/u.test(line) || [...line].length > MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS) {
-      drop(`理由要是一行，最多 ${MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS} 个字`);
+      drop(words.invalidRationale(MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS));
       continue;
     }
     const place = locate(selection, anchor);
     if (typeof place === 'string') { drop(place); continue; }
-    if (candidates.some((kept) => place.from < kept.toGrapheme && kept.fromGrapheme < place.to)) { drop('与前面的提议重叠'); continue; }
+    if (candidates.some((kept) => place.from < kept.toGrapheme && kept.fromGrapheme < place.to)) { drop(words.overlap); continue; }
     candidates.push({ ordinal, anchor, proposedText, rationale: line, fromGrapheme: place.from, toGrapheme: place.to });
   }
   return { kind: 'read', candidates, dropped };

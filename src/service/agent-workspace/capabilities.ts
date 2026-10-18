@@ -1,3 +1,4 @@
+import { WORKSPACE_SERVICE_WORDS } from './agent-workspace-labels.js';
 import type { AgentWorkspaceCapabilityProjection } from '../../shared/protocol.js';
 import { describeComposition, type CompositionOptions, type HarnessCompositionDescriptor } from '../harness/primary-agent-harness.js';
 import type { ExecutionRoute } from '../provider/egress-gate.js';
@@ -21,7 +22,7 @@ export const AGENT_WORKSPACE_CAPABILITIES: AgentWorkspaceCapabilityProjection = 
   network: false,
   apply: false,
   scopes: Object.freeze(['current-book-primary-manuscript-revision', 'current-book-source-version'] as const),
-  safetyLabel: '未联网 · 无文件系统 · 无 shell · 不能应用修改',
+  safetyLabel: WORKSPACE_SERVICE_WORDS.safety,
 });
 
 /**

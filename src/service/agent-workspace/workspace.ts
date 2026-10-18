@@ -1,3 +1,4 @@
+import { WORKSPACE_SERVICE_WORDS as words } from './agent-workspace-labels.js';
 import { randomUUID } from 'node:crypto';
 import { UUID_PATTERN } from '../analysis/canonical.js';
 import type { ProducedEditorialMarkInput } from '../editorial-marks.js';
@@ -33,11 +34,11 @@ export type AgentWorkspaceStore = Pick<EditorialStore,
 export type AgentWorkspaceDialogues = Pick<DialogueExecutionOwner, 'requireReady' | 'beginWorkspaceTurn' | 'stop'>;
 
 /** The label every workspace mark carries as its source, beside the dialogue Task of the turn it came from. */
-export const AGENT_WORKSPACE_MARK_SOURCE_LABEL = 'Agent 工作区';
+export const AGENT_WORKSPACE_MARK_SOURCE_LABEL = words.source;
 /** What an atomic group of a promoted change set says partial acceptance would cause. */
-export const AGENT_WORKSPACE_ATOMIC_REASON = 'Agent 工作区变更集';
+export const AGENT_WORKSPACE_ATOMIC_REASON = words.atomicReason;
 /** The one-sentence prerequisite of a Book whose profile is not enabled at Revision 2. */
-export const AGENT_WORKSPACE_UNAVAILABLE_REASON = '在「工作概览」的编辑工作区方案中为本图书启用 Revision 2 后，才能打开 Agent 工作区。';
+export const AGENT_WORKSPACE_UNAVAILABLE_REASON = words.unavailable;
 /** The longest quotation a workspace mark's basis keeps, in characters. */
 const BASIS_QUOTE_CHARACTERS = 200;
 
@@ -85,11 +86,11 @@ function settledRound(round: HeldRound, outcome: DialogueOutcome, streamed: stri
   if (outcome !== 'completed') {
     return {
       state: 'failed', candidates: [], dropped: [],
-      label: outcome === 'stopped' ? '这轮提议已停止；没有可提交的提议。' : '这轮提议没有完成；没有可提交的提议。可以放弃后重新提出。',
+      label: outcome === 'stopped' ? words.stopped : words.failed,
     };
   }
   const reading = readAgentWorkspaceAnswer(streamed, round.selection.text);
-  if (reading.kind === 'withheld') return { state: 'failed', candidates: [], dropped: [], label: `${reading.reason}；没有可提交的提议。` };
+  if (reading.kind === 'withheld') return { state: 'failed', candidates: [], dropped: [], label: words.withheld(reading.reason) };
   const candidates = reading.candidates.map((candidate) => ({
     ordinal: candidate.ordinal,
     anchor: {
@@ -101,12 +102,12 @@ function settledRound(round: HeldRound, outcome: DialogueOutcome, streamed: stri
     proposedText: candidate.proposedText,
     rationale: candidate.rationale,
   }));
-  const notOffered = reading.dropped.length === 0 ? '' : `另有 ${reading.dropped.length} 项不在所选范围内或不合格式，没有提供。`;
+  const notOffered = reading.dropped.length === 0 ? '' : words.notOffered(reading.dropped.length);
   const label = candidates.length > 0
-    ? `提出了 ${candidates.length} 项修改；它们还不是修改建议，提交后在修改建议卡上由你决定。${notOffered}`
+    ? words.offered(candidates.length, notOffered)
     : reading.dropped.length > 0
-      ? `模型给出的 ${reading.dropped.length} 项提议都没有提供；没有可提交的提议。`
-      : '这段文字没有需要修改的地方；没有可提交的提议。';
+      ? words.allDropped(reading.dropped.length)
+      : words.empty;
   return { state: 'ready', candidates, dropped: reading.dropped, label };
 }
 
@@ -125,7 +126,7 @@ export class AgentWorkspace {
 
   /** Whether the Book's profile opens the workspace: enabled for this Book and pinned at Revision 2. A read. */
   async #available(bookId: string): Promise<boolean> {
-    require(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    require(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', words.invalidBook);
     const profile = await this.#store.inspectEditorialWorkspaceProfile(bookId);
     return profile.lifecycle.enabledForCurrentBook && profile.sidecar.activeRevision === 2;
   }
@@ -154,13 +155,13 @@ export class AgentWorkspace {
    */
   async propose(bookId: string, input: ProposeAgentWorkspaceChangeSetInput): Promise<AgentWorkspaceProjection> {
     require(input !== null && typeof input === 'object' && input.selection !== null && typeof input.selection === 'object',
-      'AGENT_WORKSPACE_SELECTION_INVALID', '所选文字无效。');
+      'AGENT_WORKSPACE_SELECTION_INVALID', words.invalidSelection);
     await this.#requireAvailable(bookId);
     const held = this.#rounds.get(bookId);
-    require(held === undefined || held.state === 'failed', 'AGENT_WORKSPACE_ROUND_HELD', '这本书已有一组提议；先提交为修改建议或放弃，再提出新的一组。');
+    require(held === undefined || held.state === 'failed', 'AGENT_WORKSPACE_ROUND_HELD', words.held);
     const anchor = this.#store.getBookOverview(bookId).manuscriptAnchor;
     require(anchor !== null && anchor.manuscriptId === input.selection.manuscriptId && anchor.branchId === input.selection.branchId,
-      'AGENT_WORKSPACE_SCOPE', '只能就本书主稿件的当前修订版提出变更集。');
+      'AGENT_WORKSPACE_SCOPE', words.scope);
     this.#dialogues.requireReady(this.#store.dialogueSourceDigest(bookId, input.selection));
     const turn = this.#store.askAboutSelection(bookId, { selection: input.selection, question: input.instruction }, this.#now());
     const round: HeldRound = {
@@ -181,7 +182,7 @@ export class AgentWorkspace {
       state: 'proposing',
       candidates: [],
       dropped: [],
-      label: '正在提出变更集…',
+      label: words.proposing,
     };
     this.#rounds.set(bookId, round);
     try {
@@ -206,7 +207,7 @@ export class AgentWorkspace {
    */
   async promote(bookId: string, input: AgentWorkspaceProposalSetInput): Promise<AgentWorkspacePromotionProjection> {
     const round = this.#requireRound(bookId, input);
-    require(round.state === 'ready' && round.candidates.length > 0, 'AGENT_WORKSPACE_NOTHING_TO_PROMOTE', '这组提议还没有可提交的修改。');
+    require(round.state === 'ready' && round.candidates.length > 0, 'AGENT_WORKSPACE_NOTHING_TO_PROMOTE', words.nothingToPromote);
     await this.#requireAvailable(bookId);
     const atomicGroupId = round.candidates.length >= 2 ? randomUUID() : null;
     const inputs: ProducedEditorialMarkInput[] = round.candidates.map((candidate) => ({
@@ -224,7 +225,7 @@ export class AgentWorkspace {
       atomicReason: atomicGroupId === null ? null : AGENT_WORKSPACE_ATOMIC_REASON,
       source: { kind: 'ai7', origin: 'task', label: AGENT_WORKSPACE_MARK_SOURCE_LABEL, taskId: round.dialogueId },
       basis: [{
-        label: `${AGENT_WORKSPACE_MARK_SOURCE_LABEL} · 第 ${candidate.ordinal} 项`,
+        label: words.basis(candidate.ordinal),
         blockId: candidate.anchor.blockId,
         fromGrapheme: candidate.anchor.fromGrapheme,
         toGrapheme: candidate.anchor.toGrapheme,
@@ -233,7 +234,7 @@ export class AgentWorkspace {
     }));
     const markIds = this.#store.createProducedEditorialMarks(inputs, (placed) => {
       // A set is one change: when any of its words moved, none of it is placed (the transaction rolls back).
-      require(placed.every((markId) => markId !== null), 'MARK_ANCHOR_CHANGED', '所选文字已改动；这组提议没有新建修改建议，可以放弃后重新提出。');
+      require(placed.every((markId) => markId !== null), 'MARK_ANCHOR_CHANGED', words.changed);
       return placed as ReadonlyArray<string>;
     });
     this.#rounds.delete(bookId);
@@ -244,8 +245,8 @@ export class AgentWorkspace {
       manuscriptId: round.selection.manuscriptId,
       branchId: round.selection.branchId,
       label: atomicGroupId === null
-        ? '已新建 1 条修改建议：它不会自动应用，是否接受由你决定。'
-        : `已新建 ${markIds.length} 条修改建议，同属一个变更集，需要整体处理：它们不会自动应用，是否接受由你决定。`,
+        ? words.promotedOne
+        : words.promotedGroup(markIds.length),
       workspace: await this.inspect(bookId),
     };
   }
@@ -259,11 +260,11 @@ export class AgentWorkspace {
   }
 
   #requireRound(bookId: string, input: AgentWorkspaceProposalSetInput): HeldRound {
-    require(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    require(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', words.invalidBook);
     require(input !== null && typeof input === 'object' && typeof input.proposalSetId === 'string' && UUID_PATTERN.test(input.proposalSetId),
-      'AGENT_WORKSPACE_ROUND_NOT_FOUND', '这组提议已不在工作区中。');
+      'AGENT_WORKSPACE_ROUND_NOT_FOUND', words.missing);
     const round = this.#rounds.get(bookId);
-    require(round !== undefined && round.proposalSetId === input.proposalSetId, 'AGENT_WORKSPACE_ROUND_NOT_FOUND', '这组提议已不在工作区中。');
+    require(round !== undefined && round.proposalSetId === input.proposalSetId, 'AGENT_WORKSPACE_ROUND_NOT_FOUND', words.missing);
     return round;
   }
 }
