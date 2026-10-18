@@ -7,6 +7,7 @@ import type { DataVersionProjection, DataVersionUpgradeProjection, StoreVersionP
  */
 
 export const DATA_VERSION_HEADING = '版本';
+export const DATA_VERSION_MARKER = '数据版本标记';
 export const DATA_VERSION_SOFTWARE = '软件版本';
 export const DATA_VERSION_DATA = '数据版本';
 export const DATA_VERSION_MEANING = '数据版本说明';

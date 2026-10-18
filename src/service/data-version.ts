@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { readSmallFile, writeAtomic } from './database-replacement.js';
+import { DATA_VERSION_MARKER_UNREADABLE, newerDataVersionMessage } from '../shared/data-version-labels.js';
 
 /**
  * 数据版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1). The Data Version is a compatibility contract, an
@@ -451,7 +452,7 @@ export function latestSoftwareUpdate(history: ReadonlyArray<StoredVersion>): {
  * The data root's version marker, beside the store it describes: `store/ai7-data-version.json`. It names the Data Version, the
  * schema revision and the software that last opened the data, and when — never a secret, never a path. Each open writes it
  * whole, create or replace, once the store has opened; the next open reads it before anything touches the store, so an older
- * build facing newer data refuses it rather than opening it. It lives in `store/`, which no database package carries: a
+ * build facing newer data refuses it rather than opening it. A database package carries only `store/ai7.sqlite` under `store/`: its
  * package's manifest is its own version marker, and the open after an import writes the data root's afresh.
  */
 export const DATA_VERSION_MARKER_FILE = 'ai7-data-version.json' as const;
@@ -472,7 +473,7 @@ export function dataVersionMarkerPath(dataRoot: string): string {
 }
 
 function unreadableMarker(): DataVersionError {
-  return new DataVersionError('DATA_VERSION_MARKER_UNREADABLE', '这份数据的数据版本标记无法读取：AI7 没有打开这份数据，也没有改动它。请使用写入这份数据的 AI7 打开，或从备份恢复。');
+  return new DataVersionError('DATA_VERSION_MARKER_UNREADABLE', DATA_VERSION_MARKER_UNREADABLE);
 }
 
 /** A marker as AI7 writes it: its four fields and no others, each of its kind. Anything else is refused, never taken as none. */
@@ -488,7 +489,8 @@ export function readDataVersionMarkerText(text: string): DataVersionMarker {
   if (typeof dataVersion !== 'number' || !Number.isSafeInteger(dataVersion) || dataVersion < 1 ||
     typeof schemaRevision !== 'number' || !Number.isSafeInteger(schemaRevision) || schemaRevision < 1 ||
     typeof softwareVersion !== 'string' || !SOFTWARE_VERSION.test(softwareVersion) ||
-    typeof writtenAt !== 'string' || !INSTANT.test(writtenAt) || Number.isNaN(Date.parse(writtenAt))) throw unreadableMarker();
+    typeof writtenAt !== 'string' || !INSTANT.test(writtenAt) || Number.isNaN(Date.parse(writtenAt)) ||
+    new Date(writtenAt).toISOString() !== writtenAt) throw unreadableMarker();
   return { dataVersion, schemaRevision, softwareVersion, writtenAt };
 }
 
@@ -510,7 +512,7 @@ export async function readDataVersionMarker(dataRoot: string): Promise<DataVersi
 export function refuseNewerDataVersion(marker: DataVersionMarker, reader: { readonly dataVersion: number; readonly schemaRevision: number }): void {
   if (marker.dataVersion > reader.dataVersion || marker.schemaRevision > reader.schemaRevision) {
     throw new DataVersionError('DATA_VERSION_NEWER',
-      `这份数据来自更新的 AI7（数据版本 ${marker.dataVersion} / 数据库修订 ${marker.schemaRevision}），请使用更新的 AI7 打开。`);
+      newerDataVersionMessage(marker.dataVersion, marker.schemaRevision));
   }
 }
 

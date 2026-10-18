@@ -100,6 +100,7 @@ import { CrashRecords, crashHook, installCrashHooks } from './crash-records.js';
 import { DIAGNOSTICS_CHANNELS, writeDiagnosticsBundle } from './diagnostics.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
+import { DATA_VERSION_STARTUP_CLOSE, DATA_VERSION_STARTUP_TITLE, dataVersionStartupRefusal } from '../shared/data-version-labels.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
 import { chooseStartupDataRoot, type StartupLocationChoice } from './startup-data-root.js';
@@ -6928,7 +6929,7 @@ export async function runApplication(): Promise<void> {
     productReady = true;
     initialWindow.window.webContents.send(MAIN_EVENTS.productReady);
     requireDesktop(!serviceInterrupted);
-  } catch {
+  } catch (error) {
     process.stderr.write(`AI7_STARTUP_FAILED/${startupLocation}\n`);
     quitting = true;
     app.removeListener('before-quit', beforeQuit);
@@ -6941,6 +6942,10 @@ export async function runApplication(): Promise<void> {
     } catch {
       // The product process exits nonzero after best-effort exact-child teardown.
     }
+    const refusal = error instanceof ServiceCallError ? dataVersionStartupRefusal(error.code, error.message) : null;
+    if (refusal !== null) await dialog.showMessageBox({
+      type: 'error', title: DATA_VERSION_STARTUP_TITLE, message: refusal.message, buttons: [DATA_VERSION_STARTUP_CLOSE],
+    }).catch(() => undefined);
     app.exit(1);
   }
 }

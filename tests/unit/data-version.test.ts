@@ -72,6 +72,7 @@ describe('数据版本标记 (ADR 0023)', () => {
       '', '{', 'null', '[]', JSON.stringify({ ...marker, path: 'C:/AI7' }), JSON.stringify({ ...marker, dataVersion: 0 }),
       JSON.stringify({ ...marker, schemaRevision: 1.5 }), JSON.stringify({ ...marker, softwareVersion: 'latest' }),
       JSON.stringify({ ...marker, writtenAt: 'yesterday' }), JSON.stringify({ dataVersion: 1, schemaRevision: 83, softwareVersion: '1.0.0' }),
+      JSON.stringify({ ...marker, writtenAt: '2026-02-30T00:00:00.000Z' }),
     ]) {
       expect(codeOf(() => readDataVersionMarkerText(text))).toEqual(unreadable);
     }

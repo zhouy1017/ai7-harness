@@ -4,7 +4,8 @@ import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { replacementStagingFor } from '../../src/service/database-replacement.js';
 import {
   DATA_VERSION_TRIGGER_SQL,
   DataVersionError,
@@ -293,6 +294,15 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
   const markerPath = (): string => join(roots.dataRoot, 'store', 'ai7-data-version.json');
   const readMarker = async (): Promise<Record<string, unknown>> => JSON.parse(await readFile(markerPath(), 'utf8')) as Record<string, unknown>;
 
+  // Digest every file without opening SQLite, so the comparison includes WAL/journal bytes and replacement staging.
+  async function treeBytes(root: string): Promise<unknown> {
+    if (!existsSync(root)) return null;
+    const entries = await readdir(root, { withFileTypes: true });
+    return Promise.all(entries.sort((a, b) => a.name.localeCompare(b.name)).map(async (entry) => [entry.name,
+      entry.isDirectory() ? await treeBytes(join(root, entry.name)) : sha256Hex(await readFile(join(root, entry.name))),
+    ]));
+  }
+
   /** What a refused open must leave as it was: the marker, the store's revision and records, the store's files, no backups. */
   async function untouched(): Promise<unknown> {
     const database = new DatabaseSync(databasePath(), { readOnly: true });
@@ -304,6 +314,7 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
         lifetimes: (database.prepare('SELECT count(*) AS n FROM service_lifetimes').get() as { n: number }).n,
         store: (await readdir(join(roots.dataRoot, 'store'))).sort(),
         backups: existsSync(`${roots.dataRoot}-backups`),
+        bytes: await treeBytes(join(roots.dataRoot, 'store')),
       };
     } finally {
       database.close();
@@ -316,6 +327,52 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
       return null;
     }, (error: unknown) => (error instanceof StoreError ? [error.code, error.message] : error));
   }
+
+  it.each(['replace', 'merge'] as const)('refuses newer or corrupt data before a pending %s changes any bytes', async (kind) => {
+    const packagePath = join(roots.inputRoot, '版本检查.ai7db');
+    const source = await EditorialStore.open(join(roots.inputRoot, 'source-data'), roots.codeRoot);
+    try {
+      const creation = source.prepareBookCreation('版本检查', null);
+      source.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest });
+      const prepared = await source.prepareDatabaseExport(packagePath, true);
+      expect((await source.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
+    } finally { source.close(); }
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const preview = await store.inspectDatabaseImport(packagePath);
+      if (kind === 'replace') await store.prepareDatabaseReplacement(preview.previewId);
+      else await store.prepareDatabaseMerge(preview.previewId);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const originalMarker = await readFile(markerPath(), 'utf8');
+    const snapshot = () => Promise.all([roots.dataRoot, replacementStagingFor(roots.dataRoot), `${roots.dataRoot}-backups`].map(treeBytes));
+    for (const [text, code] of [
+      [JSON.stringify({ dataVersion: 2, schemaRevision: 90, softwareVersion: '2.0.0', writtenAt: '2027-01-01T00:00:00.000Z' }), 'DATA_VERSION_NEWER'],
+      ['{', 'DATA_VERSION_MARKER_UNREADABLE'],
+    ]) {
+      await writeFile(markerPath(), text!);
+      const before = await snapshot();
+      expect(await refusal()).toEqual([code, expect.any(String)]);
+      expect(await snapshot()).toEqual(before);
+    }
+    await writeFile(markerPath(), originalMarker);
+    const opened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect((await opened.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind, outcome: 'applied' });
+      expect(opened.inspectDataVersion().marker).toMatchObject({ present: true, softwareVersion: await packageVersion() });
+    } finally { opened.close(); }
+  }, 120_000);
+
+  it('does not discard abandoned replacement staging on a marker refusal', async () => {
+    await reopened(() => undefined);
+    const staging = replacementStagingFor(roots.dataRoot);
+    await mkdir(staging);
+    await writeFile(join(staging, 'unfinished'), 'preparation');
+    await writeFile(markerPath(), '{');
+    const before = await treeBytes(staging);
+    expect(await refusal()).toEqual(['DATA_VERSION_MARKER_UNREADABLE', expect.any(String)]);
+    expect(await treeBytes(staging)).toEqual(before);
+  });
 
   it('writes the marker after every open, create or replace, never a path, and tolerates a missing one once', async () => {
     const version = await packageVersion();
