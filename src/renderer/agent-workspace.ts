@@ -181,9 +181,9 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
       options.setStatus(words.selectionTooLong(MAX_DIALOGUE_SELECTION_GRAPHEMES), 'error');
       return;
     }
-    const next = selectionIn(page, blockId, from, to);
-    if (next === null || (!range.collapsed && next.selectedText !== range.toString())) return;
-    selection = next;
+    const picked = selectionIn(page, blockId, from, to);
+    if (picked === null || (!range.collapsed && picked.selectedText !== range.toString())) return;
+    selection = picked;
     paintSelection();
   };
   pages.addEventListener('mouseup', capture);

@@ -1903,15 +1903,20 @@ async function main() {
     // A click in one paragraph chooses it whole; with a 修改要求, 提出变更集 sends one dialogue turn, answered by the J-04 adapter.
     // The answer is listed as proposals anchored on exact words of that range — not marks — and the item whose words are not
     // in the range is dropped with why. The manuscript and its marks are as they were.
-    await waitFor(renderer, `document.querySelector('.agent-workspace-blocks [data-agent-workspace-block]') !== null`, 'workspace-blocks');
-    let workspaceBlock = null;
-    for (let pageTurn = 0; pageTurn < 12 && workspaceBlock === null; pageTurn += 1) {
-      workspaceBlock = await renderer.evaluate(`Array.from(document.querySelectorAll('.agent-workspace-blocks [data-agent-workspace-block]')).find((node) => (node.textContent ?? '').includes(${JSON.stringify(WORKSPACE_FIRST_ANCHOR)}))?.dataset.agentWorkspaceBlock ?? null`);
-      if (workspaceBlock !== null) break;
-      const firstShown = await renderer.evaluate(`document.querySelector('.agent-workspace-blocks [data-agent-workspace-block]')?.dataset.agentWorkspaceBlock ?? null`);
-      await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="next-page"]', 'workspace-next-page');
-      await waitFor(renderer, `(document.querySelector('.agent-workspace-blocks [data-agent-workspace-block]')?.dataset.agentWorkspaceBlock ?? null) !== ${JSON.stringify(firstShown)}`, 'workspace-next-page-shown');
-    }
+    // The range picker shows the manuscript a page at a time: the paragraph is found by the words the fixture anchors on, then by
+    // its block once its words have changed.
+    const pageToParagraph = async (find, name) => {
+      await waitFor(renderer, `document.querySelector('.agent-workspace-blocks [data-agent-workspace-block]') !== null`, `${name}-blocks`, 60_000);
+      for (let pageTurn = 0; pageTurn < 12; pageTurn += 1) {
+        const found = await renderer.evaluate(`Array.from(document.querySelectorAll('.agent-workspace-blocks [data-agent-workspace-block]')).find((node) => ${find})?.dataset.agentWorkspaceBlock ?? null`);
+        if (found !== null) return found;
+        const firstShown = await renderer.evaluate(`document.querySelector('.agent-workspace-blocks [data-agent-workspace-block]')?.dataset.agentWorkspaceBlock ?? null`);
+        await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="next-page"]', `${name}-next-page`);
+        await waitFor(renderer, `(document.querySelector('.agent-workspace-blocks [data-agent-workspace-block]')?.dataset.agentWorkspaceBlock ?? null) !== ${JSON.stringify(firstShown)}`, `${name}-next-page-shown`);
+      }
+      return null;
+    };
+    const workspaceBlock = await pageToParagraph(`(node.textContent ?? '').includes(${JSON.stringify(WORKSPACE_FIRST_ANCHOR)})`, 'workspace-propose');
     requireJourney(/^blk_[0-9a-f]{24}$/.test(workspaceBlock ?? ''), 'workspace-paragraph');
     const workspaceBinding = await renderer.evaluate(`window.ai7.getBookOverview({ bookId: ${JSON.stringify(bookId)}, historyCursor: null }).then((overview) => ({ manuscriptId: overview.manuscriptAnchor.manuscriptId, branchId: overview.manuscriptAnchor.branchId }))`);
     const workspaceState = () => renderer.evaluate(`window.ai7.getManuscriptWindowAt({ manuscriptId: ${JSON.stringify(workspaceBinding.manuscriptId)}, branchId: ${JSON.stringify(workspaceBinding.branchId)}, target: { kind: 'block', blockId: ${JSON.stringify(workspaceBlock)} } }).then((window) => ({ digest: window.workingDigest, text: window.blocks.find((block) => block.blockId === ${JSON.stringify(workspaceBlock)})?.text ?? null, marks: window.marks.map((mark) => mark.markId).sort() }))`);
@@ -1984,7 +1989,7 @@ async function main() {
     // A second round on the same paragraph, then 放弃这组提议: the round is forgotten. Its one dialogue turn stays recorded as any
     // dialogue's does; no mark, no draft and no word of the manuscript changes, and the 任务 panel is as it was.
     await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-discard-row');
-    await waitFor(renderer, `document.querySelector('.agent-workspace-blocks [data-agent-workspace-block=${JSON.stringify(workspaceBlock)}]') !== null`, 'workspace-discard-block', 60_000);
+    requireJourney(await pageToParagraph(`node.dataset.agentWorkspaceBlock === ${JSON.stringify(workspaceBlock)}`, 'workspace-discard') === workspaceBlock, 'workspace-discard-block');
     await assertRenderer(renderer, `(() => { const node = document.querySelector('.agent-workspace-blocks [data-agent-workspace-block=${JSON.stringify(workspaceBlock)}]'); if (!(node instanceof HTMLElement) || !(node.firstChild instanceof Text)) return false; const range = document.createRange(); range.setStart(node.firstChild, 1); range.collapse(true); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 })); const input = document.querySelector('[data-agent-workspace-field="instruction"]'); if (!(input instanceof HTMLTextAreaElement)) return false; input.value = ${JSON.stringify(WORKSPACE_ONE_INSTRUCTION)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`, 'workspace-discard-pick');
     await waitFor(renderer, `(document.querySelector('[data-agent-workspace-selection]')?.dataset.agentWorkspaceSelection ?? '').startsWith(${JSON.stringify(`${workspaceBlock}:0-`)}) && document.querySelector('[data-agent-workspace-action="propose"]')?.disabled === false`, 'workspace-discard-picked');
     await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="propose"]', 'workspace-discard-propose');
