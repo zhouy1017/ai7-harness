@@ -5260,8 +5260,8 @@ function renderEditorialWorkspaceProfile(
     sidecar,
     element('h4', undefined, '明确不会发生'),
     nonEffects,
-    actions,
     agentEntry,
+    actions,
   );
   host.replaceChildren(card);
 }
