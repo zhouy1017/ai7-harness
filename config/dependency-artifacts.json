@@ -40,14 +40,8 @@
       "license": "MIT and bundled third-party notices",
       "notice": "https://github.com/electron/electron/blob/v43.4.1/LICENSE",
       "requiredNoticeFiles": [
-        {
-          "id": "electron-license",
-          "relativePath": "LICENSE"
-        },
-        {
-          "id": "electron-chromium-notices",
-          "relativePath": "LICENSES.chromium.html"
-        }
+        { "id": "electron-license", "relativePath": "LICENSE" },
+        { "id": "electron-chromium-notices", "relativePath": "LICENSES.chromium.html" }
       ]
     },
     {
@@ -61,14 +55,8 @@
       "license": "MIT and bundled third-party notices",
       "notice": "https://github.com/electron/electron/blob/v43.4.1/LICENSE",
       "requiredNoticeFiles": [
-        {
-          "id": "electron-license",
-          "relativePath": "LICENSE"
-        },
-        {
-          "id": "electron-chromium-notices",
-          "relativePath": "LICENSES.chromium.html"
-        }
+        { "id": "electron-license", "relativePath": "LICENSE" },
+        { "id": "electron-chromium-notices", "relativePath": "LICENSES.chromium.html" }
       ]
     },
     {
