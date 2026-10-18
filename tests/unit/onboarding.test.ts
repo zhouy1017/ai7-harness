@@ -5,11 +5,21 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createPreferenceStore } from '../../src/main/preferences.js';
-import { showOnboardingCard, showSampleGuidance } from '../../src/shared/preferences.js';
+import { readSampleGuidance, showOnboardingCard, showSampleGuidance } from '../../src/shared/preferences.js';
 import { resolveDevelopmentSampleBook } from '../../src/shared/data-root.js';
 import { decodeRequest } from '../../src/service/request-frames.js';
 
 describe('first-run guidance', () => {
+  it('keeps sample navigation available before analysis prerequisites are configured', async () => {
+    await expect(readSampleGuidance(true, 'completed', async () => { throw new Error('ANALYSIS_PREREQUISITE_REQUIRED'); })).resolves.toBe(true);
+    await expect(readSampleGuidance(true, 'completed', async () => false)).resolves.toBe(true);
+    await expect(readSampleGuidance(true, 'completed', async () => true)).resolves.toBe(false);
+    await expect(readSampleGuidance(true, 'skipped', async () => true)).resolves.toBe(false);
+    await expect(readSampleGuidance(true, null, async () => true)).resolves.toBe(true);
+    let reads = 0;
+    await expect(readSampleGuidance(false, null, async () => { reads += 1; return false; })).resolves.toBe(false);
+    expect(reads).toBe(0);
+  });
   it('appears only in an empty library with no saved choice', () => {
     expect(showOnboardingCard(false, null)).toBe(true);
     for (const state of [null, 'skipped', 'completed'] as const) {

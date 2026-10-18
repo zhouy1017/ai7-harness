@@ -717,10 +717,11 @@ async function main() {
     await assertRenderer(onboardingPage, `(async () => { const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(sampleBook.bookId)},historyCursor:null}); return overview.records.some(record=>record.kind==='source' && record.sourceDigest==='b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483') && (await window.ai7.getPreferences()).values['onboarding.state']==='completed'; })()`, 'sample-admitted-source-and-completion');
     at('guided-strip');
     await waitFor(onboardingPage, `document.querySelector('[data-onboarding-guidance="sample-book"]')`, 'guided-strip-visible');
-    await assertRenderer(onboardingPage, `(async () => { const labels=Array.from(document.querySelectorAll('[data-onboarding-step]')).map(node=>node.textContent); const analysis=await window.ai7.inspectBaselineAnalysis(); return labels.join(',')==='分析,审阅,标记,导出' && analysis.taskIntent===null && analysis.resultSetRevision===null; })()`, 'guided-strip-navigation-only');
+    await assertRenderer(onboardingPage, `(async () => { const labels=Array.from(document.querySelectorAll('[data-onboarding-step]')).map(node=>node.textContent); const tasks=await window.ai7.inspectBookTasks(); return labels.join(',')==='分析,审阅,标记,导出' && !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`, 'guided-strip-navigation-only');
     await click(onboardingPage, '分析', 'guided-analysis-link');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-analysis"]')`, 'guided-analysis-page');
-    await assertRenderer(onboardingPage, `(async () => (await window.ai7.inspectBaselineAnalysis()).taskIntent===null)()`, 'guided-analysis-not-started');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card[data-analysis-state="unavailable"]')`, 'guided-analysis-prerequisite');
+    await assertRenderer(onboardingPage, `(async () => { const tasks=await window.ai7.inspectBookTasks(); return !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`, 'guided-analysis-not-started');
     await close();
 
     at('offline-empty-and-import');

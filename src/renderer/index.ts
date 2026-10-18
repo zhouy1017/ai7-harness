@@ -333,7 +333,7 @@ import {
   runStepIsStale,
   taskAuthorizationDispatchNote,
 } from './plan-preview-labels.js';
-import { MAX_PINNED_BOOKS, showOnboardingCard, showSampleGuidance, type ShellBookEntry, type ShellBookSection } from '../shared/preferences.js';
+import { MAX_PINNED_BOOKS, showOnboardingCard, readSampleGuidance, type ShellBookEntry, type ShellBookSection } from '../shared/preferences.js';
 import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
 import { mountHelp } from './help.js';
 import { HELP_ENTRY, HELP_OPENED } from './help-labels.js';
@@ -3279,8 +3279,10 @@ function renderBookOverview(
   const isSample = overview.records.some((record) => record.kind === 'source' && record.sourceDigest ===
     'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483');
   if (isSample && anchor !== null) {
-    void Promise.all([window.ai7.getPreferences(), window.ai7.inspectBaselineAnalysis()]).then(([preferences, analysis]) => {
-      if (!guidance.isConnected || !showSampleGuidance(isSample, preferences.values['onboarding.state'], analysis.resultSetRevision !== null)) return;
+    void window.ai7.getPreferences().then(async (preferences) => {
+      const visible = await readSampleGuidance(isSample, preferences.values['onboarding.state'],
+        () => window.ai7.inspectBaselineAnalysis().then((analysis) => analysis.resultSetRevision !== null));
+      if (!guidance.isConnected || !visible) return;
       guidance.dataset['onboardingGuidance'] = 'sample-book';
       guidance.append(element('h3', undefined, '引导'), element('p', 'field-note', '按需了解 分析 → 审阅 → 标记 → 导出；打开页面不会开始任务。'));
       const links = element('div', 'button-row');
@@ -3291,7 +3293,7 @@ function renderBookOverview(
         links.append(link);
       }
       guidance.append(links);
-    }, () => undefined);
+    }).catch(() => undefined);
   }
   if (anchor !== null) {
     const anchorSection = element('section', 'source-card manuscript-anchor');

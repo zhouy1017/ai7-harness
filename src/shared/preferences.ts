@@ -268,6 +268,17 @@ export function showSampleGuidance(isSample: boolean, state: OnboardingState, ha
   return isSample && !(state !== null && hasBaseline);
 }
 
+/** The overview reads baseline existence without asking to prepare or authorize analysis. */
+export async function readSampleGuidance(isSample: boolean, state: OnboardingState, readBaseline: () => Promise<boolean>): Promise<boolean> {
+  if (!isSample) return false;
+  try {
+    return showSampleGuidance(isSample, state, await readBaseline());
+  } catch {
+    // A new Book need not have an enabled workflow or model connection just to see navigation.
+    return true;
+  }
+}
+
 export const PREFERENCE_KEYS = Object.freeze({
   'usage.unitPrices': preference(isUnitPrices, {} as UnitPrices),
   'keyboard.bindings': preference(isKeyboardBindings, {} as KeyboardBindings),
