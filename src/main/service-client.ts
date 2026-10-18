@@ -212,9 +212,19 @@ export class ServiceClient {
     child.on('exit', () => {
       const unexpected = !this.#expectedExit;
       this.#stopped = true;
-      this.#rejectPending(this.#startupFailure ?? new ServiceCallError('SERVICE_STOPPED', '本地业务服务已停止。'));
-      this.#endStartupTrace?.();
-      if (unexpected) this.#reportUnexpectedExit();
+      const finish = (): void => {
+        child.stderr.off('end', finish);
+        child.stderr.off('close', finish);
+        this.#rejectPending(this.#startupFailure ?? new ServiceCallError('SERVICE_STOPPED', '本地业务服务已停止。'));
+        this.#endStartupTrace?.();
+        if (unexpected) this.#reportUnexpectedExit();
+      };
+      // Process exit may precede the last stderr bytes. Drain the startup refusal before settling ready; once ready,
+      // unexpected exits retain their immediate behavior. The existing ready deadline still bounds startup.
+      if (this.#endStartupTrace !== undefined && !child.stderr.readableEnded && !child.stderr.destroyed) {
+        child.stderr.once('end', finish);
+        child.stderr.once('close', finish);
+      } else finish();
     });
   }
 

@@ -29,7 +29,7 @@ class Peer extends EventEmitter {
     this.requests.push(JSON.parse(frame.subarray(4).toString('utf8')) as { id: string; op: string });
     done();
   } });
-  readonly kill = vi.fn(() => { this.exitCode = 1; this.emit('exit', 1, null); return true; });
+  readonly kill = vi.fn(() => { this.exitCode = 1; this.emit('exit', 1, null); this.stderr.end(); return true; });
 
   reply(request: { id: string; op: string }, result: unknown): void {
     const payload = Buffer.from(JSON.stringify({ ...request, ok: true, result }));
@@ -88,6 +88,7 @@ describe('the service startup trace (Issue #675)', () => {
     await settle();
     peer.exitCode = 1;
     peer.emit('exit', 1, null);
+    peer.stderr.end();
     expect(await started).toMatchObject({ code: 'SERVICE_STOPPED' });
     expect(steps).toEqual(['store', 'stopped']);
   });
@@ -146,5 +147,15 @@ describe('the service startup trace (Issue #675)', () => {
     await settle();
     peer.kill();
     expect(await started).toMatchObject({ code: 'SERVICE_STOPPED', message: '本地业务服务已停止。' });
+  });
+
+  it('drains a storage refusal that reaches stderr after the child exit event', async () => {
+    const peer = new Peer();
+    const started = start(peer).catch((error: unknown) => error);
+    peer.exitCode = 1;
+    peer.emit('exit', 1, null);
+    await settle();
+    peer.stderr.end(`AI7_SERVICE_STOPPED/DATA_VERSION_MARKER_UNREADABLE/${JSON.stringify(DATA_VERSION_MARKER_UNREADABLE)}\n`);
+    expect(await started).toMatchObject({ code: 'DATA_VERSION_MARKER_UNREADABLE', message: DATA_VERSION_MARKER_UNREADABLE });
   });
 });
