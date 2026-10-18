@@ -4,7 +4,7 @@ import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-con
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 158 as const;
+export const SERVICE_PROTOCOL_VERSION = 159 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -2133,11 +2133,18 @@ export interface BookWorkbenchOpenProjection {
   target: 'requesting-window' | 'existing-window' | 'new-window';
 }
 
+export type DistributionChannel = 'source-checkout' | 'windows-installer' | 'windows-portable' | 'macos-dmg' | 'packaged';
+
 export interface ProductDataLocationProjection {
   platform: 'windows' | 'macos';
   platformLabel: 'Windows' | 'macOS';
   runtimeForm: 'source-checkout' | 'packaged';
-  runtimeFormLabel: '源码检出运行' | '安装版运行';
+  runtimeFormLabel: '源码检出运行' | '打包运行';
+  channel: DistributionChannel;
+  channelLabel: '源码检出' | '安装版' | '便携版' | 'macOS 磁盘映像' | '未知渠道';
+  channelDescription: string;
+  dataLocationException: 'portable-unwritable' | null;
+  syncWarning: string | null;
   locationLabel: '本机产品数据位置';
   canonicalRoot: string;
   footprint: {

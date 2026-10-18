@@ -104,6 +104,8 @@ import { DATA_VERSION_STARTUP_CLOSE, DATA_VERSION_STARTUP_TITLE, dataVersionStar
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
 import { chooseStartupDataRoot, type StartupLocationChoice } from './startup-data-root.js';
+import { CHANNEL_LABELS, channelDescription, dataLocationSyncWarning, packagedLaunchForm, readDistributionChannel,
+  requireWritableDataRoot, resolvePackagedDataLocation, type PackagedDataLocation } from './channel.js';
 import { createNotifier, NOTIFICATION_CHANNELS } from './notifications.js';
 import { isOrdinaryOutcome } from '../renderer/notification-labels.js';
 import { STARTUP_LOCATION_LABELS } from '../renderer/onboarding-labels.js';
@@ -6248,22 +6250,57 @@ export async function runApplication(): Promise<void> {
   const allWindowsClosed = (): void => app.quit();
 
   try {
+    if (app.isPackaged) {
+      // No source launcher ships: carry its Chromium network-denial switches into this launch form.
+      for (const name of ['disable-background-networking', 'disable-client-side-phishing-detection', 'disable-component-update',
+        'disable-default-apps', 'disable-domain-reliability', 'disable-sync', 'metrics-recording-only', 'no-first-run']) {
+        app.commandLine.appendSwitch(name);
+      }
+    }
     validateRuntime();
     startupLocation = reachStartup('arguments');
-    const entryIndex = process.argv.findIndex((value) => resolve(value) === resolve(__filename));
-    requireDesktop(entryIndex > 0);
-    const launch = parseArguments(process.argv.slice(entryIndex + 1));
-    requireDesktop(processIsAlive(launch.launcherPid));
-    launcherLease = setInterval(() => {
-      if (process.ppid !== launch.launcherPid || !processIsAlive(launch.launcherPid)) terminate();
-    }, 1_000);
-    launcherLease.unref();
+    const packaged = app.isPackaged ? packagedLaunchForm(process.argv.slice(1)) : null;
+    let launch: LaunchArguments;
+    if (packaged !== null) {
+      launch = {
+        dataRoot: undefined, allowFirstRunChooser: false, launchForm: packaged.launchForm,
+        injectedPickerPath: undefined, injectedSavePath: undefined, injectedFolderPath: undefined,
+        injectedDiagnosticsFolder: undefined, importControl: undefined, foregroundExecutionControl: undefined,
+        recoveryControl: undefined, modelAdapterControl: undefined, connectivityPath: undefined, unitHoldPath: undefined,
+        answerHoldPath: undefined, backgroundQuietMs: undefined, calibrationMinBooks: undefined,
+        applyControl: undefined, observeJ12Reveal: false, launcherPid: 0, journalFaultArmed: false,
+      };
+    } else {
+      const entryIndex = process.argv.findIndex((value) => resolve(value) === resolve(__filename));
+      requireDesktop(entryIndex > 0);
+      launch = parseArguments(process.argv.slice(entryIndex + 1));
+      requireDesktop(processIsAlive(launch.launcherPid));
+      launcherLease = setInterval(() => {
+        if (process.ppid !== launch.launcherPid || !processIsAlive(launch.launcherPid)) terminate();
+      }, 1_000);
+      launcherLease.unref();
+    }
     app.enableSandbox();
     startupLocation = reachStartup('data-root');
     const codeRoot = resolve(__dirname, '..', '..');
+    const resourcesPath = process.platform === 'win32' ? resolve(dirname(process.execPath), 'resources')
+      : resolve(dirname(process.execPath), '..', 'Resources');
+    const channel = await readDistributionChannel(app.isPackaged, resourcesPath);
+    let packagedLocation: PackagedDataLocation | null = null;
+    if (packaged !== null) {
+      // Only the installer keeps wave 13's first-run chooser. Self-check never prompts.
+      const defaultRoot = channel === 'windows-installer' ? defaultProductionDataRoot() : null;
+      launch.allowFirstRunChooser = !packaged.selfCheck && defaultRoot !== null && await readStartupDataChoice(defaultRoot) === null;
+      if (!launch.allowFirstRunChooser) {
+        packagedLocation = await resolvePackagedDataLocation({ channel, codeRoot, executablePath: process.execPath });
+        launch.dataRoot = packagedLocation.dataRoot;
+      }
+    }
     if (launch.allowFirstRunChooser) {
       // The launcher owns the temporary sibling and cleans it only after this Electron process exits.
-      const bootstrapRoot = app.commandLine.getSwitchValue('user-data-dir');
+      const bootstrapRoot = packaged !== null
+        ? await ensureCanonicalDataDirectory(await createCanonicalProductionDataRoot(defaultProductionDataRoot(), codeRoot), 'shell')
+        : app.commandLine.getSwitchValue('user-data-dir');
       requireDesktop(isAbsolute(bootstrapRoot));
       app.setPath('userData', bootstrapRoot);
       const defaultRoot = defaultProductionDataRoot();
@@ -6299,7 +6336,10 @@ export async function runApplication(): Promise<void> {
       }
       // 70 = chooser complete, 71 = cancelled. Only the explicitly flagged launcher consumes these codes:
       // it survives this child's exit, reloads the choice and starts the ordinary explicit-root child, preserving its lease.
-      app.exit(decision.kind === 'quit' ? 71 : 70);
+      if (packaged !== null) {
+        if (decision.kind !== 'quit') app.relaunch({ args: [] });
+        app.exit(0);
+      } else app.exit(decision.kind === 'quit' ? 71 : 70);
       return;
     }
     requireDesktop(launch.dataRoot !== undefined);
@@ -6310,8 +6350,10 @@ export async function runApplication(): Promise<void> {
     startupLocation = reachStartup('shell-root');
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const earlyUserDataSwitch = app.commandLine.getSwitchValue('user-data-dir');
-    requireDesktop(isAbsolute(earlyUserDataSwitch));
-    await requireSameCanonicalDataDirectory(shellRoot, earlyUserDataSwitch, app.getPath('userData'));
+    if (packaged === null) {
+      requireDesktop(isAbsolute(earlyUserDataSwitch));
+      await requireSameCanonicalDataDirectory(shellRoot, earlyUserDataSwitch, app.getPath('userData'));
+    }
     app.setPath('userData', shellRoot);
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // Like the service's version owner, read this application's package rather than Electron's fallback app version.
@@ -6330,7 +6372,7 @@ export async function runApplication(): Promise<void> {
     if (!app.requestSingleInstanceLock()) {
       process.stderr.write('AI7_STARTUP_FAILED/single-instance-lock\n');
       await stop();
-      app.exit(0);
+      app.exit(packaged?.selfCheck ? 1 : 0);
       return;
     }
     startupLocation = reachStartup('electron-ready');
@@ -6375,6 +6417,17 @@ export async function runApplication(): Promise<void> {
       }
     });
     requireDesktop(!serviceInterrupted);
+    if (packaged?.selfCheck) {
+      await requireWritableDataRoot(dataRoot);
+      await openProtectedSecretStore(); // Loads the carrier; never reads or writes a credential.
+      const versions = await service.call('inspectDataVersion', {});
+      requireDesktop(typeof versions.dataVersion === 'number' && versions.history.length > 0);
+      const report = { softwareVersion, channel, electron: process.versions.electron, node: process.versions.node,
+        modules: process.versions.modules, keyringCarrier: 'loaded', dataRoot, writable: true, store_versions: 'readable' };
+      await stop();
+      process.stdout.write(`${JSON.stringify(report)}\n`, () => app.exit(0));
+      return;
+    }
     app.on('before-quit', beforeQuit);
     app.on('window-all-closed', allWindowsClosed);
 
@@ -6554,7 +6607,11 @@ export async function runApplication(): Promise<void> {
         platform: windows ? 'windows' : 'macos',
         platformLabel: windows ? 'Windows' : 'macOS',
         runtimeForm: app.isPackaged ? 'packaged' : 'source-checkout',
-        runtimeFormLabel: app.isPackaged ? '安装版运行' : '源码检出运行',
+        runtimeFormLabel: app.isPackaged ? '打包运行' : '源码检出运行',
+        channel, channelLabel: CHANNEL_LABELS[channel],
+        channelDescription: channelDescription(channel, packagedLocation?.exception ?? null),
+        dataLocationException: packagedLocation?.exception ?? null,
+        syncWarning: dataLocationSyncWarning(dataRoot),
         locationLabel: '本机产品数据位置',
         canonicalRoot: dataRoot,
         footprint: {

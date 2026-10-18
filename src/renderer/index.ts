@@ -344,6 +344,7 @@ import { mountHelp } from './help.js';
 import { HELP_ENTRY, HELP_OPENED } from './help-labels.js';
 import { FIRST_RUN_CARD_LABELS, SAMPLE_GUIDANCE_LABELS } from './onboarding-labels.js';
 import { PREFERENCES_LOCAL_LINE, SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
+import { DISTRIBUTION_CHANNEL_ROW } from './distribution-channel-labels.js';
 
 function requiredElement(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -5426,6 +5427,7 @@ async function renderDataAndStorage(): Promise<void> {
     content.classList.add('data-storage-summary');
     content.dataset['platform'] = projection.platform;
     content.dataset['runtimeForm'] = projection.runtimeForm;
+    content.dataset['channel'] = projection.channel;
     content.dataset['footprintComplete'] = String(projection.footprint.complete);
     content.dataset['footprintMaximumEntries'] = String(projection.footprint.maximumEntries);
     content.append(
@@ -5443,12 +5445,16 @@ async function renderDataAndStorage(): Promise<void> {
     values.append(
       element('dt', undefined, '当前平台'), element('dd', undefined, projection.platformLabel),
       element('dt', undefined, '运行方式'), element('dd', undefined, projection.runtimeFormLabel),
+      element('dt', undefined, DISTRIBUTION_CHANNEL_ROW), element('dd', undefined, projection.channelLabel),
       element('dt', undefined, '数据保存在'), element('dd', undefined, projection.locationLabel),
       element('dt', undefined, '实际位置'), root,
       element('dt', undefined, '本机占用'), element('dd', undefined, projection.footprint.label),
     );
     // The shell's own file stays on this machine (Issue #934): it is not a record and 导出数据库 does not carry it.
     summary.append(element('h3', undefined, '产品数据位置'), values, element('p', 'field-note preferences-local-line', PREFERENCES_LOCAL_LINE));
+    summary.append(element('p', 'field-note', projection.channelDescription));
+    if (projection.dataLocationException !== null) summary.dataset['dataLocationException'] = projection.dataLocationException;
+    if (projection.syncWarning !== null) summary.append(element('p', 'field-note', projection.syncWarning));
     const credentials = element('section', 'review-section');
     credentials.append(
       element('h3', undefined, '凭据与产品数据分开'),
@@ -6981,6 +6987,8 @@ function renderLanding(
       const data = element('li');
       data.append(element('strong', undefined, labels.dataStep), element('p', 'onboarding-data-location', location.canonicalRoot),
         element('p', 'field-note', labels.dataNote), button(labels.dataOpen, 'quiet', () => void renderDataAndStorage()));
+      if (location.dataLocationException !== null) data.append(element('p', 'field-note', location.channelDescription));
+      if (location.syncWarning !== null) data.append(element('p', 'field-note', location.syncWarning));
       const model = element('li');
       model.append(element('strong', undefined, labels.modelStep), element('p', undefined, labels.modelNote),
         button(labels.modelOpen, 'secondary', () => void renderModelServiceSettings()));

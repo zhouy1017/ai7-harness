@@ -26,7 +26,8 @@
     "e2e:debug": "node e2e/debug.mjs",
     "e2e:repeat": "node e2e/repeat.mjs",
     "generate:licenses": "node tools/generate-licenses.mjs",
-    "evidence:replay": "node tools/editorial-evidence.mjs --replay fixtures"
+    "evidence:replay": "node tools/editorial-evidence.mjs --replay fixtures",
+    "package": "node tools/package.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.1",
@@ -63,9 +64,67 @@
   },
   "devDependencies": {
     "@types/node": "24.13.3",
+    "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
     "playwright-core": "1.62.1",
     "typescript": "6.0.3",
     "vitest": "4.1.11"
+  },
+  "build": {
+    "appId": "io.github.zhouy1017.ai7",
+    "productName": "AI7",
+    "asar": false,
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
+    "buildDependenciesFromSource": false,
+    "files": [
+      "dist/**",
+      "package.json",
+      "node_modules/**"
+    ],
+    "publish": null,
+    "toolsets": {
+      "nsis": "1.2.1"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false,
+      "artifactName": "AI7-${version}-win-x64-setup.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "packElevateHelper": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": false,
+      "runAfterFinish": false,
+      "differentialPackage": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "identity": null,
+      "hardenedRuntime": false,
+      "notarize": false,
+      "artifactName": "AI7-${version}-mac-arm64.dmg"
+    },
+    "dmg": {
+      "sign": false,
+      "writeUpdateInfo": false
+    }
   }
 }

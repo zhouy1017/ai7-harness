@@ -46,3 +46,6 @@ test-results/
 *.db
 *.db-*
 *.key.txt
+
+# Host-native unsigned distribution output (Issue #966)
+release/

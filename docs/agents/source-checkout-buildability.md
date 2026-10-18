@@ -133,3 +133,7 @@ Any later change to the toolchain, root commands, host prerequisites, dependency
 - Vendoring the Harness monorepo or npm dependency tree.
 - Byte-identical or formally reproducible artifacts.
 - A separate build, package, signing, notarization, release, or same-SHA gate.
+
+## Release-only unsigned packaging
+
+Issue #966 adds `pnpm run package` (`-- --list` for planned outputs) after bootstrap: Windows x64 yields an unsigned per-user NSIS installer and a pristine zip-portable folder; macOS arm64 yields an unsigned, unnotarized DMG only on a macOS host. It uses the bootstrap-verified Electron runtime and the exact electron-builder lockfile closure, plus manifest-declared, digest/size-verified NSIS, 7zip and DMG tool archives seeded into `.cache/bootstrap/electron-builder/`. Package time is offline, output stays in ignored `release/`, and the Windows portable self-check writes `release/self-check.txt` without Provider access. These are release-only mechanics outside `build`/`start-built`, not a new hosted gate or signing, notarization, publication or release authority; see [source checkout](../development/source-checkout.md#unsigned-host-native-distribution-issue-966).

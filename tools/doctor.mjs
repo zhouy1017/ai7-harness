@@ -3,6 +3,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { arch, platform, release, version } from 'node:os';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { packagerArtifacts } from './package.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXPECTED_PACKAGE_MANAGER =
@@ -190,6 +191,7 @@ export function inspectDevelopmentInputs() {
       npmrcSha256: sha256('.npmrc'),
       artifactManifestSha256: sha256('config/dependency-artifacts.json'),
       npmRegistry: 'https://registry.npmjs.org/',
+      packagerArtifacts: packagerArtifacts(artifactManifest, host.platform, host.arch),
       nodeDistribution: {
         id: nodeArtifact.id,
         fileName: nodeArtifact.fileName,
