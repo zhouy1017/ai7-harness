@@ -380,14 +380,14 @@ A merge uses the replacement's staging place:
   - The file references a merge copies are read as streams.
 - **The package's store as verified (Issue #434 review):** before a merge reads the package's store, every journal beside it is removed. Since the store stands alone with a rollback journal, a write-ahead log put beside it is never read either. Only the verified file reaches the merge.
 
-升级前备份 (Issue #433, S85b; ADR 0079 §1.1, §1.3, §1.4) is service protocol version 91 and adds no schema revision. `src/service/data-version.ts` classifies every schema revision after the one the first packaged release freezes as Data Version 1: additive stays inside the Data Version, and breaking raises it by one. `dataVersionAt` counts the breaking revisions, and the unit suite holds `DATA_VERSION` to it. Nothing is frozen before that release, so the list is empty and every revision reads as Data Version 1.
+升级前备份 (Issue #433, S85b; ADR 0079 §1.1, §1.3, §1.4) is service protocol version 91 and adds no schema revision. Since #967, `src/service/data-version.ts` classifies every schema revision after the frozen Data Version 1 baseline, revision 83 at the 1.0.0 development milestone boundary: additive stays inside the Data Version, and breaking raises it by one. `dataVersionAt` counts the breaking revisions, and the unit suite holds `DATA_VERSION` to it. No later revision exists yet, so the list is empty and every current revision reads as Data Version 1.
 
 When an open finds the store at a lower Data Version than this software's:
 - `src/service/upgrade-backup.ts` writes the store and every file beside it as the database package, origin `pre-upgrade-backup`, into the backup location as `AI7 升级前备份 <date time>.ai7db`, before anything migrates the store. It is kept until the editor deletes it.
 - The backup is put in place by the create-only publication every export uses, so a file that appeared at its name while the package was written is left as it is (`UPGRADE_BACKUP_EXISTS`, Issue #433 review).
 - A backup that cannot be made refuses the open with `UPGRADE_BACKUP_FAILED`, and nothing is migrated.
 - **The pending note (Issue #433 review):**
-  - Once the backup is in place, and before anything migrates the store, the upgrade is noted beside the store in `store/upgrade-pending.json`, written whole or not at all. `store/` moves with the store it belongs to, and no database package carries it.
+  - Once the backup is in place, and before anything migrates the store, the upgrade is noted beside the store in `store/upgrade-pending.json`, written whole or not at all. The note moves with the store it belongs to, and no database package carries that note.
   - An open stopped after its migration and before the store recorded the upgrade finds the note at the next open. That open records the upgrade then, with the backup already made, and makes no second one.
   - An open stopped before migrating anything backs the data up again, since the data could have changed since.
   - The note also names what it was for: the software, Data Version and schema revision the open was bringing the store to. Only a note of the same software bringing the store to the same revision and Data Version is this open's own. Any other note never stands in for this software's backup (Issue #433 review):
