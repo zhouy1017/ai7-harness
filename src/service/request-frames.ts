@@ -2497,6 +2497,27 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
       break;
     }
+    // Agent 工作区 (Issue #90, wave 13 slice 13a): the route's Book; a round's exact span as a dialogue names one and the
+    // instruction bounded as a dialogue question is; a held round by its identity.
+    case 'inspectAgentWorkspace': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'proposeAgentWorkspaceChangeSet': {
+      const input = requireInput(value.input, ['bookId', 'selection', 'instruction'], tentativeId);
+      if (!validUuid(input.bookId) || input.selection === null || !validKnowledgeSpan(input.selection) ||
+          !isBoundedString(input.instruction, 4 * MAX_DIALOGUE_QUESTION_CHARACTERS)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'promoteAgentWorkspaceProposals':
+    case 'discardAgentWorkspaceProposals': {
+      const input = requireInput(value.input, ['bookId', 'proposalSetId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.proposalSetId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     // 润色这段 and 基于当前稿件重新生成建议 (Issue #842): the route's Book and the exact span as a mark names one; a conflict unit by
     // its index on the basis the read answered; either request read again by its identity within the route's Book.
     case 'inspectFastInteractionRoutes': {

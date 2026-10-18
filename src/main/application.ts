@@ -36,6 +36,8 @@ import {
   VALIDATION_CASE_ARGUMENT,
   VALIDATION_DELTA_ARGUMENT,
   parseTrustedLaunchForm,
+  type AgentWorkspaceProjection,
+  type AgentWorkspaceProposalSetInput,
   type AskAboutSelectionInput,
   type UsageCsvExportResult,
   type InspectFastInteractionRequestInput,
@@ -46,6 +48,7 @@ import {
   type InspectDialogueInput,
   type InspectTaskIntentDraftsInput,
   type PromoteAnswerToTaskIntentDraftInput,
+  type ProposeAgentWorkspaceChangeSetInput,
   type PromoteTaskIntentDraftInput,
   type SaveTaskIntentDraftInput,
   type TaskIntentDraftProjection,
@@ -5296,6 +5299,69 @@ function registerRendererHandlers(
         const result = await service.call('promoteAnswerToTaskIntentDraft', { bookId: route.bookId, dialogueId: input.dialogueId, attemptId: input.attemptId });
         requireCurrentRouteGeneration(owned, routeGeneration);
         return requireDraftOfRoute(route, result);
+      });
+    }),
+  );
+  // Agent 工作区 (Issue #90, wave 13 slice 13a; UI ADR 0015): always the route's Book, never the renderer's. A round takes the
+  // exact selection of the manuscript this window holds and the instruction; promotion and 放弃 name only the held round.
+  const requireWorkspaceOfRoute = (route: { bookId: string }, result: AgentWorkspaceProjection): AgentWorkspaceProjection => {
+    if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', 'Agent 工作区不属于当前图书工作台。');
+    return result;
+  };
+  ipcMain.handle(IPC_CHANNELS.inspectAgentWorkspace, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectAgentWorkspace', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      return requireWorkspaceOfRoute(route, result);
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.proposeAgentWorkspaceChangeSet, (event, input: ProposeAgentWorkspaceChangeSetInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && input.selection !== null && typeof input.selection === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        requireManuscriptCapability(owned, input.selection);
+        const result = await service.call('proposeAgentWorkspaceChangeSet', { bookId: route.bookId, selection: input.selection, instruction: input.instruction });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return requireWorkspaceOfRoute(route, result);
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.promoteAgentWorkspaceProposals, (event, input: AgentWorkspaceProposalSetInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('promoteAgentWorkspaceProposals', { bookId: route.bookId, proposalSetId: input.proposalSetId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', 'Agent 工作区不属于当前图书工作台。');
+        requireWorkspaceOfRoute(route, result.workspace);
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.discardAgentWorkspaceProposals, (event, input: AgentWorkspaceProposalSetInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('discardAgentWorkspaceProposals', { bookId: route.bookId, proposalSetId: input.proposalSetId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return requireWorkspaceOfRoute(route, result);
       });
     }),
   );

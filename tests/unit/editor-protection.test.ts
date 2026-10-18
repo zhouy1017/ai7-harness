@@ -161,8 +161,8 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
 });
 
 describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
-  it('is protocol 156, provisional for onboarding until the merge slot', () => {
-    expect(SERVICE_PROTOCOL_VERSION).toBe(156);
+  it('is protocol 157, the final number assigned to wave 13 slice 13a', () => {
+    expect(SERVICE_PROTOCOL_VERSION).toBe(157);
   });
 
   it('arms only J-02\'s `armed` launch in the development-ci scope and refuses every other present control', () => {

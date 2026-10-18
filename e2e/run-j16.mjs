@@ -39,6 +39,14 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // and marks that paragraph alone; from the lead's 批注 the same composer opens on the marked words and stays open, and
 // 重新分析这段 prepares an analysis update over that one block and waits.
 //
+// Since Issue #90 (wave 13 slice 13a; UI ADR 0015) the Book-bound Agent 工作区: the 工作 group's own row on a Book whose
+// editorial workspace profile is not enabled at Revision 2 opens the screen with the safety state and the one sentence of what
+// opens it; on the Journey's Book it opens the workspace, which records nothing on entering and goes back with 返回. Words of
+// one paragraph and a 修改要求 make one proposal round — one dialogue turn on the J-04 adapter — listed as proposals anchored
+// inside the range, the item outside it dropped; 提交为修改建议 makes them one atomic group of 修改建议, which no member leaves
+// alone: the Mark Card's 拟采纳, the proposal workspace's decision and one batch Apply with its receipt change the manuscript.
+// A second round, discarded, records nothing beyond its dialogue turn.
+//
 // The runner writes J-16's unit-hold file, and reads the service's projections through `window.ai7` only to cross-check
 // what the panel shows — never as the oracle of what it says.
 
@@ -48,9 +56,10 @@ const SAMPLE1_BYTES = 29_550;
 const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
 /**
  * The J-04 model adapter's fixture: `sample1-baseline-happy` — every unit, the reduction and the sample of exact `sample1`
- * answered — with the one dialogue question J-16 asks answered over it (Issue #52, S17a).
+ * answered — with the one dialogue question J-16 asks answered over it (Issue #52, S17a), the retrieval stimulus (#893) and
+ * the Agent 工作区's two 修改要求 (Issue #90).
  */
-const FIXTURE_IDENTITY = 'sample1-dialogue-retrieval';
+const FIXTURE_IDENTITY = 'sample1-agent-workspace';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
@@ -324,6 +333,35 @@ async function prepareFirstBaseline(renderer, readiness, name) {
 // ---- J-16's own: the Book, the hold, and the 任务 panel as the editor reads it ------------------------------------
 
 const BOOK = Object.freeze({ title: '任务面旅程' });
+
+/** A Book made empty through 新建图书, as J-12 makes one: the product's own way to a Book with nothing enabled. */
+async function createEmptyBook(renderer, title, name) {
+  await click(renderer, '新建图书', `${name}-open`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, `${name}-form`);
+  await fill(renderer, '#empty-book-title', title, `${name}-title`);
+  await click(renderer, '复核创建', `${name}-review`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, `${name}-review-ready`);
+  await click(renderer, '新建图书', `${name}-commit`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, `${name}-created`, 120_000);
+  const created = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId ?? null`);
+  requireJourney(UUID_PATTERN.test(created ?? ''), `${name}-book-identity`);
+  return created;
+}
+
+// ---- Agent 工作区 (Issue #90, wave 13 slice 13a) ------------------------------------------------------------------------
+const WORKSPACE_GATED_BOOK = Object.freeze({ title: '工作区未启用' });
+/** The 工作 group's own row, which is no Book section. */
+const AGENT_ROW = '#app-sidebar [data-nav-agent-workspace="row"]';
+const AGENT_ROW_CLICK = `(() => { const row = document.querySelector(${JSON.stringify(AGENT_ROW)}); if (!(row instanceof HTMLElement) || row.closest('[hidden]') || row.getAttribute('aria-disabled') === 'true' || row.querySelector('.nav-label')?.textContent !== 'Agent 工作区' || row.closest('[data-nav-book-group]')?.dataset.navBookGroup !== 'work') return false; row.click(); return true; })()`;
+const WORKSPACE_SAFETY = '安全状态：未联网 · 无文件系统 · 无 shell · 不能应用修改';
+const WORKSPACE_PREREQUISITE = '在「工作概览」的编辑工作区方案中为本图书启用第 2 版后，才能打开 Agent 工作区。';
+/** The two 修改要求 `sample1-agent-workspace` answers, and the words of exact sample1 its first answer anchors on. */
+const WORKSPACE_INSTRUCTION = '请让这段的表达更凝练，给出一组修改。';
+const WORKSPACE_ONE_INSTRUCTION = '请只就最需要的一处给出修改。';
+const WORKSPACE_FIRST_ANCHOR = '其存在的意义被视为国宝中的国宝';
+const WORKSPACE_FIRST_PROPOSED = '被视为国宝中的国宝';
+const WORKSPACE_SECOND_ANCHOR = '用如此器物作为评价';
+const WORKSPACE_SECOND_PROPOSED = '以如此重器作比';
 const SAMPLE1_UNITS = 8;
 /** Exact sample1's paragraphs, as `composed-docx.mjs` records them: the reimport that drops one paragraph is composed from the other 96. */
 const SAMPLE1_BLOCKS = 97;
@@ -870,6 +908,9 @@ async function main() {
     await writeFile(holdPath, String(FIRST_HOLD), 'utf8');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'product-ready');
+    // Restacked wave 13: onboarding owns the empty library, while Agent 工作区 remains gated on an exact current Book.
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]') !== null`, 'workspace-onboarding-coexists');
+    await assertRenderer(renderer, `(() => { const row = document.querySelector(${JSON.stringify(AGENT_ROW)}); return row instanceof HTMLElement && row.closest('[hidden]') !== null && document.querySelector('[data-screen="agent-workspace"]') === null; })()`, 'workspace-empty-library-gated');
     // The 任务 panel is one read; a dialogue (Issue #52, S17a) is asked about a selection and read, stopped, answered again or
     // converted by its own operations — no chat, conversation or stream is exposed to the renderer.
     await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.inspectBookTasks === 'function' && typeof window.ai7.askAboutSelection === 'function' && Object.keys(window.ai7).filter((key)=>/dialog/i.test(key)).sort().join(',') === 'continueDialogueAnswer,convertDialogueToChangeSuggestion,inspectDialogue,regenerateDialogueAnswer,stopDialogueAnswer' && !Object.keys(window.ai7).some((key)=>/chat|conversation|stream/i.test(key))`, 'renderer-api-boundary');
@@ -1821,6 +1862,159 @@ async function main() {
     const acknowledgedAfter = await renderer.evaluate(`(() => ({ chip: ${CHIP}?.dataset.returnChip ?? null, loads: document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? '', panel: document.querySelector('#task-drawer')?.dataset.taskDrawerView ?? null }))()`);
     requireJourney(acknowledgedAfter.chip === null && await renderer.evaluate(READ_RETURN_ENTRY) === null && acknowledgedAfter.loads === goneLoadsBefore && acknowledgedAfter.panel === 'panel', 'selection-task-gone-acknowledged-nothing-moved');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-gone-panel-close');
+
+    // ---- Agent 工作区 (Issue #90, wave 13 slice 13a; UI ADR 0015; AGENT-001 to 004, APREP-001) ----------------------------
+    at('workspace-row-gated');
+    // A Book whose editorial workspace profile is not enabled at Revision 2: the 工作 group's own Agent 工作区 row opens the
+    // central screen with the visible safety state and one sentence of what opens it, and leads to the profile card. Nothing
+    // there can be asked, and nothing is recorded.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'workspace-gated-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'workspace-gated-landing');
+    const gatedBookId = await createEmptyBook(renderer, WORKSPACE_GATED_BOOK.title, 'workspace-gated');
+    await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-gated-row');
+    await waitFor(renderer, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="unavailable"]')?.dataset.bookId === ${JSON.stringify(gatedBookId)}`, 'workspace-gated-screen');
+    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="agent-workspace"] .agent-workspace'); return root.querySelector('[data-agent-workspace-prerequisite]')?.textContent === ${JSON.stringify(WORKSPACE_PREREQUISITE)} && root.querySelector('[data-agent-workspace-safety]')?.textContent === ${JSON.stringify(WORKSPACE_SAFETY)} && root.querySelector('[data-agent-workspace-field="instruction"]') === null && root.querySelector('[data-agent-workspace-action="propose"]') === null && root.querySelector('[data-agent-workspace-action="open-profile"]') instanceof HTMLButtonElement && document.querySelector(${JSON.stringify(AGENT_ROW)})?.getAttribute('aria-current') === 'page' && document.querySelector('#context-title')?.textContent === ${JSON.stringify(WORKSPACE_GATED_BOOK.title)} && document.querySelector('#context-position')?.textContent === '工作 · Agent 工作区'; })()`, 'workspace-gated-words');
+    const gatedRead = await renderer.evaluate(`window.ai7.inspectAgentWorkspace()`);
+    requireJourney(gatedRead?.bookId === gatedBookId && gatedRead.available === false && gatedRead.proposal === null && gatedRead.unavailableReason === WORKSPACE_PREREQUISITE &&
+      gatedRead.capabilities?.filesystem === false && gatedRead.capabilities.shell === false && gatedRead.capabilities.network === false && gatedRead.capabilities.apply === false, 'workspace-gated-read', gatedRead);
+    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="open-profile"]', 'workspace-gated-open-profile');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-book-id=${JSON.stringify(gatedBookId)}] .native-artifact-card [data-agent-workspace-entry="unavailable"]') !== null && document.querySelector('[data-native-artifact-book-id=${JSON.stringify(gatedBookId)}] [data-agent-workspace-action="open"]') === null`, 'workspace-gated-profile-card');
+
+    at('workspace-entry');
+    // The Journey's Book, enabled at Revision 2 since book-prerequisites: from its manuscript the row opens the workspace for
+    // exactly this Book, with its name, the safety state and 返回 — and entering is no Task, Run or route change. 返回 goes back
+    // to the manuscript; 工作概览's own entry opens it again.
+    await assertRenderer(renderer, `typeof window.ai7.proposeAgentWorkspaceChangeSet === 'function' && Object.keys(window.ai7).filter((key) => /agentworkspace/i.test(key)).sort().join(',') === 'discardAgentWorkspaceProposals,inspectAgentWorkspace,promoteAgentWorkspaceProposals,proposeAgentWorkspaceChangeSet' && !Object.keys(window.ai7).some((key) => /agentworkspace/i.test(key) && /apply|effect|export|send|session|chat|conversation|stream/i.test(key))`, 'workspace-api-boundary');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'workspace-entry-library');
+    await openManuscriptOf(renderer, bookId, 'workspace-entry');
+    const workspaceTasksBefore = await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`);
+    const workspaceRouteBefore = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then((route) => JSON.stringify(route))`);
+    await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-entry-row');
+    await waitFor(renderer, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="available"]')?.dataset.bookId === ${JSON.stringify(bookId)}`, 'workspace-entry-screen');
+    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="agent-workspace"] .agent-workspace'); const back = root.querySelector('[data-agent-workspace-action="back"]'); return root.querySelector('h2')?.textContent === 'Agent 工作区' && root.querySelector('.section-label')?.textContent === ${JSON.stringify(`《${BOOK.title}》 · Agent 工作区`)} && root.querySelector('[data-agent-workspace-safety]')?.textContent === ${JSON.stringify(WORKSPACE_SAFETY)} && back instanceof HTMLButtonElement && back.textContent === '返回' && back.dataset.shortcutCommand === 'nav.back' && document.querySelector('#context-title')?.textContent === ${JSON.stringify(BOOK.title)} && document.querySelector(${JSON.stringify(AGENT_ROW)})?.getAttribute('aria-current') === 'page'; })()`, 'workspace-entry-words');
+    requireJourney(await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`) === workspaceTasksBefore &&
+      await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then((route) => JSON.stringify(route))`) === workspaceRouteBefore, 'workspace-entry-records-nothing');
+    // Re-selecting the active row must not replace the original manuscript return with the overview fallback (#90 review).
+    await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-entry-row-again');
+    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="back"]', 'workspace-entry-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"] .editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]') !== null`, 'workspace-entry-returned', 60_000);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'workspace-entry-overview');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-book-id=${JSON.stringify(bookId)}] [data-agent-workspace-entry="available"] [data-agent-workspace-action="open"]') instanceof HTMLButtonElement`, 'workspace-entry-overview-action');
+    await clickSelector(renderer, `[data-native-artifact-book-id=${JSON.stringify(bookId)}] [data-agent-workspace-action="open"]`, 'workspace-entry-overview-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="available"]')?.dataset.bookId === ${JSON.stringify(bookId)}`, 'workspace-entry-again');
+    requireJourney(await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`) === workspaceTasksBefore, 'workspace-entry-again-records-nothing');
+
+    at('workspace-propose');
+    // A click in one paragraph chooses it whole; with a 修改要求, 提出变更集 sends one dialogue turn, answered by the J-04 adapter.
+    // The answer is listed as proposals anchored on exact words of that range — not marks — and the item whose words are not
+    // in the range is dropped with why. The manuscript and its marks are as they were.
+    // The range picker shows the manuscript a page at a time: the paragraph is found by the words the fixture anchors on, then by
+    // its block once its words have changed.
+    const pageToParagraph = async (find, name) => {
+      await waitFor(renderer, `document.querySelector('.agent-workspace-blocks [data-agent-workspace-block]') !== null`, `${name}-blocks`, 60_000);
+      for (let pageTurn = 0; pageTurn < 12; pageTurn += 1) {
+        const found = await renderer.evaluate(`Array.from(document.querySelectorAll('.agent-workspace-blocks [data-agent-workspace-block]')).find((node) => ${find})?.dataset.agentWorkspaceBlock ?? null`);
+        if (found !== null) return found;
+        const firstShown = await renderer.evaluate(`document.querySelector('.agent-workspace-blocks [data-agent-workspace-block]')?.dataset.agentWorkspaceBlock ?? null`);
+        await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="next-page"]', `${name}-next-page`);
+        await waitFor(renderer, `(document.querySelector('.agent-workspace-blocks [data-agent-workspace-block]')?.dataset.agentWorkspaceBlock ?? null) !== ${JSON.stringify(firstShown)}`, `${name}-next-page-shown`);
+      }
+      return null;
+    };
+    const workspaceBlock = await pageToParagraph(`(node.textContent ?? '').includes(${JSON.stringify(WORKSPACE_FIRST_ANCHOR)})`, 'workspace-propose');
+    requireJourney(/^blk_[0-9a-f]{24}$/.test(workspaceBlock ?? ''), 'workspace-paragraph');
+    const workspaceBinding = await renderer.evaluate(`window.ai7.getBookOverview({ bookId: ${JSON.stringify(bookId)}, historyCursor: null }).then((overview) => ({ manuscriptId: overview.manuscriptAnchor.manuscriptId, branchId: overview.manuscriptAnchor.branchId }))`);
+    const workspaceState = () => renderer.evaluate(`window.ai7.getManuscriptWindowAt({ manuscriptId: ${JSON.stringify(workspaceBinding.manuscriptId)}, branchId: ${JSON.stringify(workspaceBinding.branchId)}, target: { kind: 'block', blockId: ${JSON.stringify(workspaceBlock)} } }).then((window) => ({ digest: window.workingDigest, text: window.blocks.find((block) => block.blockId === ${JSON.stringify(workspaceBlock)})?.text ?? null, marks: window.marks.map((mark) => mark.markId).sort() }))`);
+    const proposeBefore = await workspaceState();
+    requireJourney(/^[0-9a-f]{64}$/.test(proposeBefore.digest ?? '') && proposeBefore.text?.includes(WORKSPACE_SECOND_ANCHOR), 'workspace-state-before', proposeBefore);
+    await assertRenderer(renderer, `(() => { const node = document.querySelector('.agent-workspace-blocks [data-agent-workspace-block=${JSON.stringify(workspaceBlock)}]'); if (!(node instanceof HTMLElement) || !(node.firstChild instanceof Text)) return false; const range = document.createRange(); range.setStart(node.firstChild, 3); range.collapse(true); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 })); return true; })()`, 'workspace-pick');
+    const pickedWhole = `${workspaceBlock}:0-${[...new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(proposeBefore.text)].length}`;
+    await waitFor(renderer, `document.querySelector('[data-agent-workspace-selection]')?.dataset.agentWorkspaceSelection === ${JSON.stringify(pickedWhole)} && document.querySelector('[data-agent-workspace-selection] .agent-workspace-quote')?.textContent === ${JSON.stringify(proposeBefore.text)}`, 'workspace-picked');
+    await assertRenderer(renderer, `(() => { const input = document.querySelector('[data-agent-workspace-field="instruction"]'); if (!(input instanceof HTMLTextAreaElement)) return false; input.value = ${JSON.stringify(WORKSPACE_INSTRUCTION)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`, 'workspace-instruction');
+    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="propose"]', 'workspace-propose-click');
+    await waitFor(renderer, `document.querySelector('.agent-workspace-proposal')?.dataset.agentWorkspaceProposal === 'ready'`, 'workspace-proposal-ready', 60_000);
+    const listed = await renderer.evaluate(`Array.from(document.querySelectorAll('.agent-workspace-candidates [data-agent-workspace-candidate]'), (item) => [item.dataset.agentWorkspaceCandidate, item.dataset.anchorBlock, Number(item.dataset.anchorFrom), Number(item.dataset.anchorTo), item.querySelector('.agent-workspace-anchor')?.textContent, item.querySelector('.agent-workspace-proposed')?.textContent])`);
+    const graphemes = [...new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(proposeBefore.text)].map((part) => part.segment);
+    requireJourney(Array.isArray(listed) && listed.length === 2 && listed.every(([, block, from, to, anchor]) => block === workspaceBlock && from >= 0 && to <= graphemes.length && graphemes.slice(from, to).join('') === anchor) &&
+      JSON.stringify(listed.map(([ordinal, , , , anchor, proposed]) => [ordinal, anchor, proposed])) === JSON.stringify([['1', WORKSPACE_FIRST_ANCHOR, WORKSPACE_FIRST_PROPOSED], ['2', WORKSPACE_SECOND_ANCHOR, WORKSPACE_SECOND_PROPOSED]]), 'workspace-proposal-anchors', listed);
+    await assertRenderer(renderer, `document.querySelector('[data-agent-workspace-dropped="3"]')?.textContent === '第 3 项：摘出的文字不在所选范围内' && (document.querySelector('[data-agent-workspace-label]')?.textContent ?? '').startsWith('提出了 2 项修改；它们还不是修改建议') && document.querySelector('[data-agent-workspace-action="promote"]')?.disabled === false`, 'workspace-proposal-words');
+    const proposed = await renderer.evaluate(`window.ai7.inspectAgentWorkspace()`);
+    requireJourney(proposed?.proposal?.state === 'ready' && UUID_PATTERN.test(proposed.proposal.dialogueId ?? '') && proposed.proposal.instruction === WORKSPACE_INSTRUCTION &&
+      proposed.proposal.candidates.length === 2 && proposed.proposal.dropped.length === 1, 'workspace-proposal-held', proposed);
+    const proposeAfter = await workspaceState();
+    requireJourney(JSON.stringify(proposeAfter) === JSON.stringify(proposeBefore), 'workspace-propose-nothing-moved', proposeAfter);
+
+    at('workspace-promote');
+    // 提交为修改建议: both proposals become 修改建议 marks through the produced-mark path — AI7's, from the round's dialogue Task — in
+    // one atomic group; the manuscript's words stay as they were until a decision on the existing Mark Cards.
+    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="promote"]', 'workspace-promote-click');
+    await waitFor(renderer, `document.querySelector('[data-agent-workspace-promoted]')?.dataset.agentWorkspacePromoted === '2'`, 'workspace-promoted', 60_000);
+    const promotedState = await workspaceState();
+    const newMarks = promotedState.marks.filter((markId) => !proposeBefore.marks.includes(markId));
+    requireJourney(promotedState.digest === proposeBefore.digest && promotedState.text === proposeBefore.text && newMarks.length === 2, 'workspace-promote-text-unchanged', promotedState);
+    const promotedCards = await renderer.evaluate(`Promise.all(${JSON.stringify(newMarks)}.map((markId) => window.ai7.getEditorialMarkCard({ manuscriptId: ${JSON.stringify(workspaceBinding.manuscriptId)}, branchId: ${JSON.stringify(workspaceBinding.branchId)}, markId })))`);
+    const groupId = promotedCards?.[0]?.suggestion?.atomicGroupId ?? null;
+    requireJourney(UUID_PATTERN.test(groupId ?? '') && promotedCards.every((card) => card.kind === 'change-suggestion' && card.source?.kind === 'ai7' && card.source.origin === 'task' &&
+      card.source.label === 'Agent 工作区' && card.source.taskId === proposed.proposal.dialogueId && card.suggestion?.atomicGroupId === groupId &&
+      card.suggestion.decision === null && card.suggestion.application === null) &&
+      JSON.stringify(promotedCards.map((card) => card.suggestion.currentText).sort()) === JSON.stringify([WORKSPACE_FIRST_ANCHOR, WORKSPACE_SECOND_ANCHOR].sort()), 'workspace-promoted-marks', promotedCards);
+    requireJourney(await renderer.evaluate(`window.ai7.inspectAgentWorkspace().then((workspace) => workspace.proposal === null)`), 'workspace-promoted-cleared');
+
+    at('workspace-mark-decision');
+    // A member of the group is never applied alone — the existing refusal. The group is decided as a whole through the existing
+    // owners: the Mark Card's 拟采纳 drafts every member, the proposal workspace records the decision and applies both in one
+    // batch with the receipt as today. Only that Apply changes the manuscript.
+    const firstMark = promotedCards.find((card) => card.suggestion.currentText === WORKSPACE_FIRST_ANCHOR).markId;
+    const alone = await renderer.evaluate(`window.ai7.applyChangeSuggestion({ manuscriptId: ${JSON.stringify(workspaceBinding.manuscriptId)}, branchId: ${JSON.stringify(workspaceBinding.branchId)}, windowStartBlockId: ${JSON.stringify(workspaceBlock)}, markId: ${JSON.stringify(firstMark)}, clientEffectId: crypto.randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null }).then(() => 'applied', (error) => ({ code: error?.code ?? null, message: error?.message ?? null }))`);
+    requireJourney(alone?.code === 'PROPOSAL_ATOMIC_SCOPE' && alone.message === '原子组只能作为全部精确成员一起应用。', 'workspace-member-alone-refused', alone);
+    requireJourney((await workspaceState()).digest === proposeBefore.digest, 'workspace-member-alone-nothing-moved');
+    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="open-marks"]', 'workspace-open-marks');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"] .editor-shell[data-book-id=${JSON.stringify(bookId)}]') !== null && document.querySelector('.editorial-mark-layer [data-mark-card]')?.dataset.markCard === ${JSON.stringify(firstMark)}`, 'workspace-mark-card', 60_000);
+    await waitFor(renderer, `(() => { const card = document.querySelector('.editorial-mark-layer [data-mark-card]'); return (card?.textContent ?? '').includes('本组只能记录一个整体处理；在专用提案工作区记录决定和准备应用。') && card.querySelector('[data-mark-action="draft-accepted"]') instanceof HTMLButtonElement; })()`, 'workspace-mark-card-group', 30_000);
+    await clickSelector(renderer, '.editorial-mark-layer [data-mark-card] [data-mark-action="draft-accepted"]', 'workspace-mark-draft-accept');
+    await waitFor(renderer, `(document.querySelector('.editorial-mark-layer [data-mark-card]')?.textContent ?? '').includes('拟采纳 · 草稿已保存，尚未记录决定。')`, 'workspace-mark-drafted', 30_000);
+    await clickSelector(renderer, '.editorial-mark-layer [data-mark-card] [data-mark-action="proposal-workspace"]', 'workspace-mark-proposal-workspace');
+    await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"] [data-proposal-active]') !== null && document.querySelector('.proposal-workspace')?.getAttribute('aria-busy') === 'false'`, 'workspace-proposal-workspace', 60_000);
+    // Agent entry temporarily presents another surface; 返回 must restore this exact proposal work, including its saved draft.
+    const proposalReturnMark = await renderer.evaluate(`document.querySelector('[data-proposal-active]')?.dataset.proposalActive ?? null`);
+    await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-proposal-return-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="available"]') !== null`, 'workspace-proposal-return-open');
+    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="back"]', 'workspace-proposal-return-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"] [data-proposal-active]')?.dataset.proposalActive === ${JSON.stringify(proposalReturnMark)} && document.querySelector('.proposal-workspace')?.getAttribute('aria-busy') === 'false'`, 'workspace-proposal-return-restored', 60_000);
+    await click(renderer, '记录提案决定', 'workspace-decision-record');
+    await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"]').textContent.includes('提案决定已记录；稿件未发生变化。') && document.querySelector('.proposal-workspace')?.getAttribute('aria-busy') === 'false'`, 'workspace-decision-recorded', 60_000);
+    await click(renderer, '准备应用', 'workspace-decision-prepare');
+    await waitFor(renderer, `document.querySelector('[data-proposal-action="confirm"]')?.disabled === false && document.querySelector('.proposal-controls').textContent.includes('纳入 2 项')`, 'workspace-decision-prepared', 60_000);
+    requireJourney((await workspaceState()).digest === proposeBefore.digest, 'workspace-decision-nothing-moved');
+    await clickSelector(renderer, '[data-proposal-action="confirm"]', 'workspace-decision-confirm');
+    await waitFor(renderer, `document.querySelector('.proposal-receipt')?.dataset.applyReceiptState === 'applied'`, 'workspace-decision-receipt', 120_000);
+    const applied = await workspaceState();
+    const appliedCards = await renderer.evaluate(`Promise.all(${JSON.stringify(newMarks)}.map((markId) => window.ai7.getEditorialMarkCard({ manuscriptId: ${JSON.stringify(workspaceBinding.manuscriptId)}, branchId: ${JSON.stringify(workspaceBinding.branchId)}, markId })))`);
+    requireJourney(applied.digest !== proposeBefore.digest && applied.text.includes(WORKSPACE_FIRST_PROPOSED) && applied.text.includes(WORKSPACE_SECOND_PROPOSED) &&
+      !applied.text.includes(WORKSPACE_FIRST_ANCHOR) && !applied.text.includes(WORKSPACE_SECOND_ANCHOR) && appliedCards.every((card) => card.suggestion?.application !== null && card.suggestion.decision?.disposition === 'accepted') &&
+      new Set(appliedCards.map((card) => card.suggestion.application.effectId)).size === 1, 'workspace-group-applied', { applied, appliedCards });
+    await click(renderer, '返回稿件', 'workspace-decision-return');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') !== null`, 'workspace-decision-returned', 60_000);
+
+    at('workspace-discard-records-nothing');
+    // A second round on the same paragraph, then 放弃这组提议: the round is forgotten. Its one dialogue turn stays recorded as any
+    // dialogue's does; no mark, no draft and no word of the manuscript changes, and the 任务 panel is as it was.
+    await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-discard-row');
+    requireJourney(await pageToParagraph(`node.dataset.agentWorkspaceBlock === ${JSON.stringify(workspaceBlock)}`, 'workspace-discard') === workspaceBlock, 'workspace-discard-block');
+    await assertRenderer(renderer, `(() => { const node = document.querySelector('.agent-workspace-blocks [data-agent-workspace-block=${JSON.stringify(workspaceBlock)}]'); if (!(node instanceof HTMLElement) || !(node.firstChild instanceof Text)) return false; const range = document.createRange(); range.setStart(node.firstChild, 1); range.collapse(true); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 })); const input = document.querySelector('[data-agent-workspace-field="instruction"]'); if (!(input instanceof HTMLTextAreaElement)) return false; input.value = ${JSON.stringify(WORKSPACE_ONE_INSTRUCTION)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`, 'workspace-discard-pick');
+    await waitFor(renderer, `(document.querySelector('[data-agent-workspace-selection]')?.dataset.agentWorkspaceSelection ?? '').startsWith(${JSON.stringify(`${workspaceBlock}:0-`)}) && document.querySelector('[data-agent-workspace-action="propose"]')?.disabled === false`, 'workspace-discard-picked');
+    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="propose"]', 'workspace-discard-propose');
+    await waitFor(renderer, `document.querySelector('.agent-workspace-proposal')?.dataset.agentWorkspaceProposal === 'ready' && document.querySelectorAll('.agent-workspace-candidates [data-agent-workspace-candidate]').length === 1`, 'workspace-discard-ready', 60_000);
+    const discardBefore = { state: await workspaceState(), tasks: await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`),
+      drafts: await renderer.evaluate(`window.ai7.inspectProposalWorkspace({ manuscriptId: ${JSON.stringify(workspaceBinding.manuscriptId)}, branchId: ${JSON.stringify(workspaceBinding.branchId)}, resultId: null, offset: 0 }).then((workspace) => JSON.stringify(workspace.items.map((item) => [item.markId, item.draft, item.disposition])))`) };
+    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="discard"]', 'workspace-discard-click');
+    await waitFor(renderer, `document.querySelector('.agent-workspace-proposal')?.hidden === true && (document.querySelector('#persistence-status')?.textContent ?? '') === '已放弃这组提议；没有新建修改建议，这轮提问的记录仍保留。'`, 'workspace-discarded', 30_000);
+    const discardAfter = { state: await workspaceState(), tasks: await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`),
+      drafts: await renderer.evaluate(`window.ai7.inspectProposalWorkspace({ manuscriptId: ${JSON.stringify(workspaceBinding.manuscriptId)}, branchId: ${JSON.stringify(workspaceBinding.branchId)}, resultId: null, offset: 0 }).then((workspace) => JSON.stringify(workspace.items.map((item) => [item.markId, item.draft, item.disposition])))`) };
+    requireJourney(JSON.stringify(discardAfter) === JSON.stringify(discardBefore) && discardAfter.state.marks.length === applied.marks.length &&
+      await renderer.evaluate(`window.ai7.inspectAgentWorkspace().then((workspace) => workspace.proposal === null)`), 'workspace-discard-nothing-recorded', { discardBefore, discardAfter });
+    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="back"]', 'workspace-discard-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') !== null`, 'workspace-discard-returned', 60_000);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
