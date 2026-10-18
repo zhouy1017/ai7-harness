@@ -45,6 +45,7 @@ declare module 'electron' {
     show(): void;
   }
   export const app: {
+    readonly isPackaged: boolean;
     // Diagnostics metadata and fatal-hook cleanup (Issue #938).
     getLocale(): string;
     once(event: string, listener: (...args: any[]) => void): void;
@@ -61,6 +62,8 @@ declare module 'electron' {
   };
   export const contextBridge: { exposeInMainWorld(name: string, api: unknown): void };
   export const dialog: {
+    showMessageBox(options: Record<string, unknown>): Promise<{ response: number }>;
+    showOpenDialog(options: Record<string, unknown>): Promise<{ canceled: boolean; filePaths: string[] }>;
     showOpenDialog(
       window: BrowserWindow,
       options: Record<string, unknown>,

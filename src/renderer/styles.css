@@ -2144,7 +2144,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 
 /* Issue #961: optional guidance stays within the existing landing and Book overview. */
 .onboarding-card:empty, .onboarding-guidance:empty { display: none; }
-.onboarding-card, .onboarding-guidance { margin-block: 1.5rem; padding: 1.25rem; border: 1px solid var(--border); border-radius: 12px; }
+.onboarding-card, .onboarding-guidance { margin-block: 1.5rem; padding: 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; }
 .onboarding-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; list-style: none; padding: 0; }
 .onboarding-data-location { overflow-wrap: anywhere; }
 @media (max-width: 900px) { .onboarding-steps { grid-template-columns: 1fr; } }

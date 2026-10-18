@@ -44,8 +44,8 @@ type BuiltLaunch = { parseBuiltLaunchArguments: (args: string[]) => { trustedOpe
 type ProductionLaunch = {
   DEVELOPMENT_ONLY_ARGUMENTS: string[];
   defaultProductionDataRoot: (input?: { platform?: string; env?: Record<string, string | undefined>; home?: string }) => string;
-  parseProductionLaunchArguments: (args: string[], defaults?: { platform?: string; env?: Record<string, string | undefined>; home?: string }) => { dataRoot: string; defaulted: boolean };
-  startBuiltArguments: (dataRoot: string) => string[];
+  parseProductionLaunchArguments: (args: string[], defaults?: { platform?: string; env?: Record<string, string | undefined>; home?: string }) => { dataRoot: string | null; defaulted: boolean };
+  startBuiltArguments: (dataRoot: string | null) => string[];
 };
 
 describe('the ordinary-production launch form', () => {
@@ -84,7 +84,7 @@ describe('the ordinary-production launch form', () => {
       .toBe(resolve('/Users/editor', 'Library', 'Application Support', 'ai7', 'production'));
     expect(() => wrapper.defaultProductionDataRoot({ platform: 'linux', env: {}, home: '/home/editor' })).toThrowError(/AI7_PRODUCTION_LAUNCH_INVALID/u);
     expect(() => wrapper.defaultProductionDataRoot({ platform: 'win32', env: {} })).toThrowError(/AI7_PRODUCTION_LAUNCH_INVALID/u);
-    expect(wrapper.parseProductionLaunchArguments([], windows)).toEqual({ dataRoot: wrapper.defaultProductionDataRoot(windows), defaulted: true });
+    expect(wrapper.parseProductionLaunchArguments([], windows)).toEqual({ dataRoot: null, defaulted: true });
     expect(wrapper.parseProductionLaunchArguments(['--', '--data-root', ABSOLUTE])).toEqual({ dataRoot: resolve(ABSOLUTE), defaulted: false });
     expect(wrapper.startBuiltArguments(ABSOLUTE)).toEqual(['--data-root', ABSOLUTE, '--trusted-operational-scope', 'ordinary-production']);
     expect(wrapper.DEVELOPMENT_ONLY_ARGUMENTS).toEqual(['--run-budget-ceiling', '--provider-cache-root', '--validation-case', '--validation-delta']);

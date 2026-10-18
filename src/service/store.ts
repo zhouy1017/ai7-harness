@@ -1050,7 +1050,6 @@ import {
   createCanonicalExternalDataRoot,
   ensureCanonicalDataDirectory,
   inspectCanonicalDataFile,
-  resolveDevelopmentSampleBook,
 } from '../shared/data-root.js';
 import {
   loadBuiltInManuscriptProfile,
@@ -13767,12 +13766,6 @@ export class EditorialStore {
     EDITORIAL_DIMENSIONS.forEach((dimension, index) =>
       insertDimension.run(dimensionSetId, dimension.id, dimension.label, dimension.weight, index + 1),
     );
-  }
-
-  async importBundledSampleBook(selectionToken: string, selectedPathInput: string): Promise<StagedImportProjection> {
-    const exact = await resolveDevelopmentSampleBook(resolve(this.#codeRoot, '..'), 'source-checkout');
-    requireStore(selectedPathInput === exact, 'SELECTION_INVALID', '示例书来源无效。');
-    return this.stageSelectedManuscript(selectionToken, exact);
   }
 
   async stageSelectedManuscript(selectionToken: string, selectedPathInput: string): Promise<StagedImportProjection> {

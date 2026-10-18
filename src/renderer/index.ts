@@ -3403,6 +3403,9 @@ function renderBookOverview(
       (projection) => {
         if (!analysisHost.isConnected || projection.bookId !== analysisHost.dataset['analysisBookId']) return;
         analysisHost.dataset['analysisState'] = projection.state;
+        if (projection.resultSetRevision !== null) void window.ai7.getPreferences().then((preferences) => {
+          if (guidance.isConnected && preferences.values['onboarding.state'] !== null) guidance.remove();
+        }, () => undefined);
         analysisHost.replaceChildren(
           element('h3', undefined, '分析'),
           element('p', undefined, projection.resultSetRevision === null

@@ -99,6 +99,7 @@ import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/prov
 import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
+import { chooseStartupDataRoot, type StartupLocationChoice } from './startup-data-root.js';
 import { createNotifier, NOTIFICATION_CHANNELS } from './notifications.js';
 import { isOrdinaryOutcome } from '../renderer/notification-labels.js';
 import { PREFERENCE_IPC_CHANNELS } from '../shared/preferences.js';
@@ -110,10 +111,15 @@ import {
   inspectBoundedDataFootprint,
   requireSameCanonicalDataDirectory,
   resolveDevelopmentSampleBook,
+  defaultProductionDataRoot,
+  readStartupDataChoice,
+  requireStartupChoiceOutsideDataRoot,
+  storeStartupDataChoice,
 } from '../shared/data-root.js';
 
 interface LaunchArguments {
-  dataRoot: string;
+  dataRoot: string | undefined;
+  allowFirstRunChooser: boolean;
   /** The trusted launch form (ADR 0065): scope, ceiling, and cache root exactly as the launcher passed them. */
   launchForm: TrustedLaunchForm;
   injectedPickerPath: string | undefined;
@@ -231,6 +237,7 @@ function parseArguments(argv: string[]): LaunchArguments {
         value !== undefined &&
         !values.has(key) &&
         (key === '--data-root' ||
+          key === '--allow-first-run-chooser' ||
           key === '--j01-picker-path' ||
           key === '--j02-picker-path' ||
           key === '--j08-picker-path' ||
@@ -275,7 +282,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     values.set(key, value);
   }
   const dataRoot = values.get('--data-root');
-  requireDesktop(dataRoot !== undefined && isAbsolute(dataRoot));
+  requireDesktop(dataRoot === undefined || isAbsolute(dataRoot));
   // The trusted launch form: an unknown scope, a malformed ceiling, a relative cache root, or a developer-live launch that
   // names no development validation denies startup.
   const launchForm = parseTrustedLaunchForm({
@@ -286,6 +293,10 @@ function parseArguments(argv: string[]): LaunchArguments {
     validationDelta: values.get(VALIDATION_DELTA_ARGUMENT),
   });
   requireDesktop(launchForm !== null);
+  const allowFirstRunChooser = values.get('--allow-first-run-chooser') === 'true';
+  requireDesktop(!values.has('--allow-first-run-chooser') || (allowFirstRunChooser && dataRoot === undefined && launchForm.trustedOperationalScope === 'ordinary-production'));
+  requireDesktop(dataRoot !== undefined || allowFirstRunChooser);
+  if (allowFirstRunChooser) requireDesktop([...values.keys()].every((key) => ['--allow-first-run-chooser', '--trusted-operational-scope', '--launcher-pid'].includes(key)));
   requireDesktop(launchForm.providerCacheRoot === null || isAbsolute(launchForm.providerCacheRoot));
   const j01PickerPath = values.get('--j01-picker-path');
   const j02PickerPath = values.get('--j02-picker-path');
@@ -474,6 +485,7 @@ function parseArguments(argv: string[]): LaunchArguments {
   );
   return {
     dataRoot,
+    allowFirstRunChooser,
     launchForm,
     injectedPickerPath,
     injectedSavePath,
@@ -1061,6 +1073,7 @@ function registerRendererHandlers(
       );
     }
     if (draftId !== undefined) owned.importTargets.set(draftId, importTargetFromCommittedResult(result));
+    completeOnboarding();
   };
   const captureImportRecoveryTarget = (
     owned: OwnedRendererWindow,
@@ -1857,7 +1870,6 @@ function registerRendererHandlers(
           'AI7_SERVICE_ROUTE_INVALID',
         );
         bindCommittedImport(owned, result, input.draftId);
-        completeOnboarding();
         return result;
       });
     }),
@@ -2588,7 +2600,7 @@ function registerRendererHandlers(
   }
   const completeOnboarding = (): void => {
     try {
-      if (preferences.read().values['onboarding.state'] === null) preferences.save({ key: 'onboarding.state', value: 'completed' });
+      if (preferences.read().values['onboarding.state'] !== 'completed') preferences.save({ key: 'onboarding.state', value: 'completed' });
     } catch {
       // The Book has already committed; a local preference write must never turn that success into a retry.
       process.stderr.write('AI7_ONBOARDING/preference-write-failed\n');
@@ -6180,6 +6192,48 @@ export async function runApplication(): Promise<void> {
     app.enableSandbox();
     startupLocation = reachStartup('data-root');
     const codeRoot = resolve(__dirname, '..', '..');
+    if (launch.allowFirstRunChooser) {
+      // The launcher owns the temporary sibling and cleans it only after this Electron process exits.
+      const bootstrapRoot = app.commandLine.getSwitchValue('user-data-dir');
+      requireDesktop(isAbsolute(bootstrapRoot));
+      app.setPath('userData', bootstrapRoot);
+      const defaultRoot = defaultProductionDataRoot();
+      let decision = chooseStartupDataRoot({}, await readStartupDataChoice(defaultRoot), { dataRoot: defaultRoot });
+      if (decision.kind === 'choose') {
+        await app.whenReady();
+        installChromiumDenial(session.defaultSession);
+        while (decision.kind === 'choose') {
+          const answer = await dialog.showMessageBox({
+            type: 'question', title: '选择数据位置', message: '图书、稿件与历史保存在本机',
+            detail: `默认位置：${defaultRoot}\n模型服务凭据由操作系统单独保护。`,
+            buttons: ['使用默认位置', '选择文件夹…', '取消'], defaultId: 0, cancelId: 2, noLink: true,
+          });
+          let choice: StartupLocationChoice = { kind: 'cancel' };
+          if (answer.response === 0) choice = { kind: 'default' };
+          else if (answer.response === 1) {
+            const folder = await dialog.showOpenDialog({ title: '选择产品数据位置', properties: ['openDirectory', 'createDirectory'] });
+            if (!folder.canceled && folder.filePaths.length === 1) choice = { kind: 'folder', path: folder.filePaths[0]! };
+          }
+          decision = chooseStartupDataRoot({ choice }, null, { dataRoot: defaultRoot });
+          if (decision.kind === 'ready') {
+            try {
+              requireStartupChoiceOutsideDataRoot(defaultRoot, decision.dataRoot);
+              const canonical = await createCanonicalProductionDataRoot(decision.dataRoot, codeRoot);
+              await storeStartupDataChoice(defaultRoot, canonical);
+              decision = { kind: 'ready', dataRoot: canonical };
+            } catch {
+              await dialog.showMessageBox({ type: 'error', title: '此位置不可用', message: '请选择开发目录以外的本机文件夹。', buttons: ['返回选择'] });
+              decision = { kind: 'choose', defaultRoot };
+            }
+          }
+        }
+      }
+      // 70 = chooser complete, 71 = cancelled. Only the explicitly flagged launcher consumes these codes:
+      // it survives this child's exit, reloads the choice and starts the ordinary explicit-root child, preserving its lease.
+      app.exit(decision.kind === 'quit' ? 71 : 70);
+      return;
+    }
+    requireDesktop(launch.dataRoot !== undefined);
     // An ordinary-production data root is also kept apart from the developer caches (Issue #811), as the launcher kept it.
     const dataRoot = launch.launchForm.trustedOperationalScope === 'ordinary-production'
       ? await createCanonicalProductionDataRoot(launch.dataRoot, codeRoot)

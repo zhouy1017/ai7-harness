@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { createPreferenceStore } from '../../src/main/preferences.js';
 import { showOnboardingCard, showSampleGuidance } from '../../src/shared/preferences.js';
 import { resolveDevelopmentSampleBook } from '../../src/shared/data-root.js';
+import { decodeRequest } from '../../src/service/request-frames.js';
 
 describe('first-run guidance', () => {
   it('appears only in an empty library with no saved choice', () => {
@@ -49,6 +51,14 @@ describe('development-only sample import', () => {
   it('refuses packaged or unknown runtime forms before touching files', async () => {
     for (const runtime of ['packaged', '', 'development']) {
       await expect(resolveDevelopmentSampleBook(codeRoot, runtime)).rejects.toThrow('AI7_DATA_ROOT_BOUNDARY_INVALID');
+    }
+  });
+  it('accepts only the bounded absolute-path service frame supplied by main', () => {
+    const frame = (input: unknown) => new TextEncoder().encode(JSON.stringify({ id: randomUUID(), op: 'importBundledSampleBook', input }));
+    const input = { selectionToken: randomUUID(), selectedPath: join(codeRoot, 'SampleBooks', 'sample1.docx') };
+    expect(decodeRequest(frame(input)).input).toEqual(input);
+    for (const invalid of [{}, { ...input, selectedPath: 'relative' }, { ...input, selectionToken: 'bad' }, { ...input, extra: true }]) {
+      expect(() => decodeRequest(frame(invalid))).toThrow();
     }
   });
 });

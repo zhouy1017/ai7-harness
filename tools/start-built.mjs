@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, realpath, rm, rmdir } from 'node:fs/promises';
 import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { electronExecutable } from './electron-runtime.mjs';
@@ -9,13 +10,13 @@ const READINESS = Buffer.from('AI7_READY\n', 'ascii');
 const MAX_READINESS_PREFIX_BYTES = 4;
 const READINESS_TIMEOUT_MS = 30_000;
 const STARTUP_LOCATION_PATTERN = /AI7_STARTUP_FAILED\/(network-denial|application-import|runtime|arguments|data-root|shell-root|single-instance|electron-ready|service-ready|renderer-first-paint|readiness-signal)/;
-// The launch form (ADR 0065, Issue #272): `--data-root` is required; the trusted operational scope
+// The launch form (ADR 0065, Issue #272): `--data-root` is required except for the explicitly flagged production chooser (#961); the trusted operational scope
 // defaults to `development-ci`, and the ceiling and cache root are accepted only with `developer-live`, which must name its
 // development validation (`--validation-case <family>/<case>`, optionally `--validation-delta <kind>:<rationale>`; Issue #808).
 // `ordinary-production` (Issue #811) takes none of those four: its data root is also kept apart from the developer caches.
 // Main and the service parse those two exactly; this launcher checks their shape and the scope they need.
 // The form travels as argv through Electron main to the service; no environment variable carries it.
-const LAUNCH_ARGUMENTS = new Set(['--data-root', '--trusted-operational-scope', '--run-budget-ceiling', '--provider-cache-root', '--validation-case', '--validation-delta']);
+const LAUNCH_ARGUMENTS = new Set(['--data-root', '--trusted-operational-scope', '--run-budget-ceiling', '--provider-cache-root', '--validation-case', '--validation-delta', '--allow-first-run-chooser']);
 const RUN_BUDGET_CEILING_PATTERN = /^[1-9][0-9]{0,11}$/u;
 const VALIDATION_CASE_SHAPE = /^[a-z][a-z0-9-]{0,47}\/[a-z][a-z0-9-]{0,47}$/u;
 const VALIDATION_DELTA_SHAPE = /^(?:input|retry-unknown):[a-z][a-z0-9-]{0,47}$/u;
@@ -36,9 +37,11 @@ export function parseBuiltLaunchArguments(args) {
     values.set(key, value);
   }
   const dataRoot = values.get('--data-root');
-  requireLaunch(dataRoot !== undefined && isAbsolute(dataRoot));
   const scope = values.get('--trusted-operational-scope') ?? 'development-ci';
   requireLaunch(scope === 'development-ci' || scope === 'developer-live' || scope === 'ordinary-production');
+  const chooser = values.get('--allow-first-run-chooser');
+  requireLaunch(chooser === undefined || (chooser === 'true' && scope === 'ordinary-production' && dataRoot === undefined));
+  requireLaunch((dataRoot !== undefined && isAbsolute(dataRoot)) || chooser === 'true');
   const ceiling = values.get('--run-budget-ceiling');
   const cacheRoot = values.get('--provider-cache-root');
   const validationCase = values.get('--validation-case');
@@ -55,6 +58,7 @@ export function parseBuiltLaunchArguments(args) {
   if (cacheRoot !== undefined) forwarded.push('--provider-cache-root', cacheRoot);
   if (validationCase !== undefined) forwarded.push('--validation-case', validationCase);
   if (validationDelta !== undefined) forwarded.push('--validation-delta', validationDelta);
+  if (chooser === 'true') forwarded.push('--allow-first-run-chooser', 'true');
   return { dataRoot, trustedOperationalScope: scope, runBudgetCeiling: ceiling ?? null, providerCacheRoot: cacheRoot ?? null, forwarded };
 }
 
@@ -78,18 +82,74 @@ function launchEnvironment(executable) {
   return selected;
 }
 
-async function main() {
+/** Main emits no output during the chooser. These two private exit codes never count as product readiness. */
+export function firstRunChooserExit(code, stdoutBytes) {
+  requireLaunch(stdoutBytes === 0);
+  if (code === 70) return 'relaunch';
+  if (code === 71) return 'cancelled';
+  throw new Error('AI7_BUILT_CHOOSER_FAILED');
+}
+
+async function runFirstRunChooser(executable, entry, forwarded, dataRoots) {
+  const defaultRoot = dataRoots.defaultProductionDataRoot();
+  const parent = dirname(defaultRoot);
+  const createdParent = await mkdir(parent, { recursive: true });
+  const bootstrap = await mkdtemp(resolve(parent, '.startup-shell-'));
+  const canonical = await realpath(bootstrap);
+  requireLaunch(dirname(canonical) === await realpath(parent));
+  let child;
+  const forward = () => child?.kill();
+  try {
+    child = spawn(executable, [
+      '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
+      '--disable-sync', '--metrics-recording-only', '--no-first-run', `--user-data-dir=${canonical}`, entry,
+      '--launcher-pid', String(process.pid), ...forwarded,
+    ], { cwd: ROOT, env: launchEnvironment(executable), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: false });
+    process.once('SIGINT', forward);
+    process.once('SIGTERM', forward);
+    let stdoutBytes = 0;
+    child.stdout.on('data', (chunk) => { stdoutBytes += chunk.length; child.kill(); });
+    child.stderr.on('data', (chunk) => {
+      const match = STARTUP_LOCATION_PATTERN.exec(chunk.toString('utf8'));
+      if (match) childFailureLocation = match[1];
+    });
+    // A person choosing a folder is not a stalled product startup: no product-ready deadline on this one branch.
+    const code = await new Promise((resolveExit, reject) => {
+      child.once('error', reject);
+      child.once('exit', resolveExit);
+    });
+    return firstRunChooserExit(code, stdoutBytes);
+  } finally {
+    process.removeListener('SIGINT', forward);
+    process.removeListener('SIGTERM', forward);
+    // Delete only the exact temporary sibling we created, after its Electron child has exited.
+    requireLaunch(await realpath(bootstrap) === canonical && dirname(canonical) === await realpath(parent));
+    await rm(canonical, { recursive: true, force: true });
+    if (createdParent !== undefined) await rmdir(parent).catch(() => undefined); // only if still empty after cancellation
+  }
+}
+
+async function main(argumentsOverride) {
   requireLaunch(process.versions.node === '24.18.1');
-  const args = process.argv.slice(2);
+  const args = argumentsOverride ?? process.argv.slice(2);
   if (args[0] === '--') args.shift();
   const launch = parseBuiltLaunchArguments(args);
   const executable = electronExecutable();
   const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
   const dataRootEntry = resolve(ROOT, 'dist', 'shared', 'data-root.mjs');
   requireLaunch(existsSync(executable) && existsSync(entry) && existsSync(dataRootEntry));
-  const { createCanonicalExternalDataRoot, createCanonicalProductionDataRoot, ensureCanonicalDataDirectory } = await import(
+  const dataRoots = await import(
     pathToFileURL(dataRootEntry).href
   );
+  const { createCanonicalExternalDataRoot, createCanonicalProductionDataRoot, ensureCanonicalDataDirectory } = dataRoots;
+  if (launch.dataRoot === undefined) {
+    const outcome = await runFirstRunChooser(executable, entry, launch.forwarded, dataRoots);
+    if (outcome === 'cancelled') { process.exitCode = 0; return; }
+    const selected = await dataRoots.readStartupDataChoice(dataRoots.defaultProductionDataRoot());
+    requireLaunch(selected !== null);
+    const canonical = await createCanonicalProductionDataRoot(selected, ROOT);
+    return main(['--data-root', canonical, '--trusted-operational-scope', 'ordinary-production']);
+  }
   const dataRoot = launch.trustedOperationalScope === 'ordinary-production'
     ? await createCanonicalProductionDataRoot(launch.dataRoot, ROOT)
     : await createCanonicalExternalDataRoot(launch.dataRoot, ROOT);
