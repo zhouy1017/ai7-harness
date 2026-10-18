@@ -5,11 +5,9 @@ import { homedir } from 'node:os';
 import { createCanonicalProductionDataRoot, defaultProductionDataRoot, ensureCanonicalDataDirectory,
   inspectCanonicalDataFile, readStartupDataChoice } from '../shared/data-root.js';
 import { parseTrustedLaunchForm, type DistributionChannel, type TrustedLaunchForm } from '../shared/protocol.js';
+import { CHANNEL_DESCRIPTIONS, PORTABLE_UNWRITABLE_NOTICE, SYNC_LOCATION_WARNING } from '../renderer/distribution-channel-labels.js';
 
-export const CHANNEL_LABELS = {
-  'source-checkout': '源码检出', 'windows-installer': '安装版', 'windows-portable': '便携版',
-  'macos-dmg': 'macOS 磁盘映像', packaged: '未知渠道',
-} as const;
+export { CHANNEL_LABELS } from '../renderer/distribution-channel-labels.js';
 
 /** The marker is a packaging input, never inferred from the OS or executable name. */
 export function resolveChannel(packaged: boolean, marker: unknown, platform = process.platform): DistributionChannel {
@@ -31,9 +29,11 @@ export async function readDistributionChannel(packaged: boolean, resourcesPath: 
 }
 
 /** Packaged command lines cannot supply development scope, a cache, controls or an arbitrary data root. */
-export function packagedLaunchForm(args: readonly string[]): { launchForm: TrustedLaunchForm; selfCheck: boolean } {
-  if (!(args.length === 0 || (args.length === 1 && args[0] === '--self-check'))) throw new Error('AI7_PACKAGED_ARGUMENT_INVALID');
-  return { launchForm: parseTrustedLaunchForm({ trustedOperationalScope: 'ordinary-production' })!, selfCheck: args.length === 1 };
+export function packagedLaunchForm(args: readonly string[], platform = process.platform): { launchForm: TrustedLaunchForm; selfCheck: boolean } {
+  // macOS can hand a Finder-launched app its process serial number (`-psn_0_<n>`), e.g. on a quarantined first open; it carries no control.
+  const given = platform === 'darwin' ? args.filter((value) => !/^-psn_\d+_\d+$/.test(value)) : args;
+  if (!(given.length === 0 || (given.length === 1 && given[0] === '--self-check'))) throw new Error('AI7_PACKAGED_ARGUMENT_INVALID');
+  return { launchForm: parseTrustedLaunchForm({ trustedOperationalScope: 'ordinary-production' })!, selfCheck: given.length === 1 };
 }
 
 export async function requireWritableDataRoot(root: string): Promise<void> {
@@ -101,11 +101,7 @@ export async function resolvePackagedDataLocation(options: {
 }
 
 export function channelDescription(channel: DistributionChannel, exception: PackagedDataLocation['exception']): string {
-  if (exception !== null) return '便携文件夹无法写入，产品数据已保存在本机用户数据区；复制 AI7 文件夹不会带走这些数据。';
-  if (channel === 'windows-portable') return '程序文件与产品数据分别放在 AI7 文件夹内的两个区域；移动或复制文件夹会带走产品数据，但不会带走模型服务凭据。';
-  if (channel === 'windows-installer') return '产品数据在本机用户数据区。';
-  if (channel === 'macos-dmg') return '产品数据在 macOS 的应用支持目录。';
-  return channel === 'source-checkout' ? '源码检出运行，产品数据保存在独立的本机位置。' : '未能识别分发渠道；这里显示实际使用的数据位置。';
+  return exception !== null ? PORTABLE_UNWRITABLE_NOTICE : CHANNEL_DESCRIPTIONS[channel];
 }
 
 /** Non-blocking placement awareness, with no recursive inventory or network access. */
@@ -117,5 +113,5 @@ export function dataLocationSyncWarning(root: string, env = process.env): string
     return normalized === base || normalized.startsWith(`${base}/`);
   });
   return insideKnown || /\/(?:onedrive(?: - [^/]+)?|dropbox|google drive|googledrive|icloud drive|mobile documents|cloudstorage)(?:\/|$)/i.test(normalized)
-    ? '此位置可能由同步或备份服务复制，未公开的编辑材料也可能被该服务带走；AI7 没有移动数据或公开发布内容。' : null;
+    ? SYNC_LOCATION_WARNING : null;
 }

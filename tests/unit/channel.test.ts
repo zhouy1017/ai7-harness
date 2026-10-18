@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { channelDescription, dataLocationSyncWarning, packagedLaunchForm, readDistributionChannel, resolveChannel,
+import { CHANNEL_LABELS, channelDescription, dataLocationSyncWarning, packagedLaunchForm, readDistributionChannel, resolveChannel,
   resolvePackagedDataLocation } from '../../src/main/channel.js';
 import { storeStartupDataChoice } from '../../src/shared/data-root.js';
 
@@ -41,6 +41,11 @@ describe('distribution marker and packaged authority', () => {
     expect(packagedLaunchForm(['--self-check']).selfCheck).toBe(true);
     for (const args of [['--data-root', root], ['--trusted-operational-scope', 'developer-live'], ['--launcher-pid', '1'],
       ['--self-check', '--self-check'], ['--j04-model-adapter', 'fixture']]) expect(() => packagedLaunchForm(args)).toThrow();
+    // Only macOS's Finder serial number is ignored, and only there; it never smuggles a control past the check.
+    expect(packagedLaunchForm(['-psn_0_12345'], 'darwin').selfCheck).toBe(false);
+    expect(packagedLaunchForm(['-psn_0_12345', '--self-check'], 'darwin').selfCheck).toBe(true);
+    expect(() => packagedLaunchForm(['-psn_0_12345'], 'win32')).toThrow('AI7_PACKAGED_ARGUMENT_INVALID');
+    expect(() => packagedLaunchForm(['-psn_0_12345', '--data-root', root], 'darwin')).toThrow('AI7_PACKAGED_ARGUMENT_INVALID');
   });
 });
 describe('channel-owned product data location', () => {
@@ -72,6 +77,16 @@ describe('channel-owned product data location', () => {
     const options = { channel: 'macos-dmg' as const, codeRoot, executablePath: join(root, 'AI7.app', 'Contents', 'MacOS', 'AI7'), platform: 'darwin', home: root };
     expect((await resolvePackagedDataLocation(options)).dataRoot).toBe(join(root, 'Library', 'Application Support', 'io.github.zhouy1017.ai7', 'production'));
     await expect(resolvePackagedDataLocation({ ...options, writable: async () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); } })).rejects.toThrow('denied');
+  });
+  it('names every channel and where it keeps product data in plain words, without filesystem notation', () => {
+    expect(CHANNEL_LABELS).toEqual({ 'source-checkout': '源码检出', 'windows-installer': '安装版', 'windows-portable': '便携版',
+      'macos-dmg': 'macOS 磁盘映像', packaged: '未知渠道' });
+    expect(channelDescription('windows-portable', null)).toContain('程序文件与产品数据分别放在 AI7 文件夹内的两个区域');
+    expect(channelDescription('windows-installer', null)).toBe('产品数据在本机用户数据区。');
+    expect(channelDescription('macos-dmg', null)).toBe('产品数据在 macOS 的应用支持目录。');
+    for (const channel of Object.keys(CHANNEL_LABELS) as (keyof typeof CHANNEL_LABELS)[]) {
+      expect(channelDescription(channel, null)).not.toMatch(/%LOCALAPPDATA%|[\\/]|Application Support/);
+    }
   });
   it('warns without changing a known sync location', () => {
     const synced = join(root, 'OneDrive', 'AI7', 'data');

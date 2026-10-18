@@ -344,6 +344,7 @@ import { mountHelp } from './help.js';
 import { HELP_ENTRY, HELP_OPENED } from './help-labels.js';
 import { FIRST_RUN_CARD_LABELS, SAMPLE_GUIDANCE_LABELS } from './onboarding-labels.js';
 import { PREFERENCES_LOCAL_LINE, SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
+import { DISTRIBUTION_CHANNEL_ROW } from './distribution-channel-labels.js';
 
 function requiredElement(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -5444,7 +5445,7 @@ async function renderDataAndStorage(): Promise<void> {
     values.append(
       element('dt', undefined, '当前平台'), element('dd', undefined, projection.platformLabel),
       element('dt', undefined, '运行方式'), element('dd', undefined, projection.runtimeFormLabel),
-      element('dt', undefined, '分发渠道'), element('dd', undefined, projection.channelLabel),
+      element('dt', undefined, DISTRIBUTION_CHANNEL_ROW), element('dd', undefined, projection.channelLabel),
       element('dt', undefined, '数据保存在'), element('dd', undefined, projection.locationLabel),
       element('dt', undefined, '实际位置'), root,
       element('dt', undefined, '本机占用'), element('dd', undefined, projection.footprint.label),
