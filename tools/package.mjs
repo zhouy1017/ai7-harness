@@ -137,6 +137,8 @@ function run(executable, args, options = {}) {
 }
 
 async function main(args) {
+  // `pnpm run package -- --list` hands the separator through, as it does to the Journeys.
+  if (args[0] === '--') args.shift();
   requirePackage(args.length === 0 || (args.length === 1 && args[0] === '--list'));
   const manifest = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8'));
   const outputs = plannedOutputs(manifest.version);
