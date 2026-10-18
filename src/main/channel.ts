@@ -1,8 +1,9 @@
-import { readFile, open, unlink } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { lstat, readFile, open, unlink, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { createCanonicalProductionDataRoot, defaultProductionDataRoot, readStartupDataChoice } from '../shared/data-root.js';
+import { createCanonicalProductionDataRoot, defaultProductionDataRoot, ensureCanonicalDataDirectory,
+  inspectCanonicalDataFile, readStartupDataChoice } from '../shared/data-root.js';
 import { parseTrustedLaunchForm, type DistributionChannel, type TrustedLaunchForm } from '../shared/protocol.js';
 
 export const CHANNEL_LABELS = {
@@ -64,11 +65,33 @@ export async function resolvePackagedDataLocation(options: {
     return canonical;
   };
   if (options.channel === 'windows-portable') {
-    try { return { dataRoot: await prepare(resolve(dirname(options.executablePath), '..', 'data')), exception: null }; }
+    // Remember a fallback per portable folder. Restored permissions must not silently open a new empty database.
+    const folder = resolve(dirname(options.executablePath), '..');
+    const identity = createHash('sha256').update(platform === 'win32' ? folder.toLowerCase() : folder).digest('hex');
+    const stateName = `portable-location-${identity}.json`;
+    const statePath = resolve(fallback, 'shell', stateName);
+    let stored = false;
+    try { await lstat(statePath); stored = true; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    const fallbackLocation = async (): Promise<PackagedDataLocation> => {
+      const dataRoot = await prepare(fallback);
+      const shell = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+      const state = await inspectCanonicalDataFile(dataRoot, shell, stateName);
+      if (state.exists) {
+        const value: unknown = JSON.parse(await readFile(state.path, 'utf8'));
+        if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length !== 2 ||
+            (value as Record<string, unknown>)['version'] !== 1 || (value as Record<string, unknown>)['state'] !== 'portable-unwritable') {
+          throw new Error('AI7_DATA_LOCATION_EXCEPTION_INVALID');
+        }
+      } else await writeFile(state.path, `${JSON.stringify({ version: 1, state: 'portable-unwritable' })}\n`, { flag: 'wx' });
+      return { dataRoot, exception: 'portable-unwritable' };
+    };
+    if (stored) return fallbackLocation();
+    try { return { dataRoot: await prepare(resolve(folder, 'data')), exception: null }; }
     catch (error) {
       // Boundary failures never turn a prohibited location into a portable permission fallback.
       if (!['EACCES', 'EPERM', 'EROFS', 'ENOSPC'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
-      return { dataRoot: await prepare(fallback), exception: 'portable-unwritable' };
+      return fallbackLocation();
     }
   }
   const stored = options.channel === 'windows-installer' ? await readStartupDataChoice(fallback) : null;

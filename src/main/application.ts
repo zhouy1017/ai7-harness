@@ -6349,9 +6349,6 @@ export async function runApplication(): Promise<void> {
     }
     app.setPath('userData', shellRoot);
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
-    if (packagedLocation?.exception !== null && packagedLocation !== null) {
-      await writeFile(resolve(shellRoot, 'data-location-exception.json'), `${JSON.stringify({ version: 1, state: packagedLocation.exception })}\n`);
-    }
     // Like the service's version owner, read this application's package rather than Electron's fallback app version.
     const softwareVersion = (JSON.parse(await readFile(resolve(codeRoot, 'package.json'), 'utf8')) as { version: string }).version;
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
@@ -6603,7 +6600,7 @@ export async function runApplication(): Promise<void> {
         platform: windows ? 'windows' : 'macos',
         platformLabel: windows ? 'Windows' : 'macOS',
         runtimeForm: app.isPackaged ? 'packaged' : 'source-checkout',
-        runtimeFormLabel: app.isPackaged ? '安装版运行' : '源码检出运行',
+        runtimeFormLabel: app.isPackaged ? '打包运行' : '源码检出运行',
         channel, channelLabel: CHANNEL_LABELS[channel],
         channelDescription: channelDescription(channel, packagedLocation?.exception ?? null),
         dataLocationException: packagedLocation?.exception ?? null,

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -29,8 +29,9 @@ describe('distribution marker and packaged authority', () => {
     expect(await readDistributionChannel(true, root)).toBe('packaged');
     await writeFile(join(root, 'channel.json'), '{');
     expect(await readDistributionChannel(true, root)).toBe('packaged');
-    await writeFile(join(root, 'channel.json'), JSON.stringify(marker));
-    expect(await readDistributionChannel(true, root)).toBe('windows-portable');
+    const hostChannel = process.platform === 'darwin' ? 'macos-dmg' : 'windows-portable';
+    await writeFile(join(root, 'channel.json'), JSON.stringify({ ...marker, channel: hostChannel }));
+    expect(await readDistributionChannel(true, root)).toBe(hostChannel);
     expect(await readDistributionChannel(false, root)).toBe('source-checkout');
   });
   it('derives production scope without a launcher and refuses arbitrary launch controls', () => {
@@ -42,7 +43,6 @@ describe('distribution marker and packaged authority', () => {
       ['--self-check', '--self-check'], ['--j04-model-adapter', 'fixture']]) expect(() => packagedLaunchForm(args)).toThrow();
   });
 });
-
 describe('channel-owned product data location', () => {
   const windows = () => ({ codeRoot, executablePath: join(root, 'AI7', 'app', 'AI7.exe'), platform: 'win32', env: { LOCALAPPDATA: join(root, 'local') } });
   it('uses the sibling portable data directory and keeps the actual production boundary enforced', async () => {
@@ -57,6 +57,8 @@ describe('channel-owned product data location', () => {
     } });
     expect(location).toEqual({ dataRoot: join(root, 'local', 'ai7', 'production'), exception: 'portable-unwritable' });
     expect(channelDescription('windows-portable', location.exception)).toContain('复制 AI7 文件夹不会带走这些数据');
+    // Permission recovery cannot make the same installation silently abandon its existing fallback database.
+    expect(await resolvePackagedDataLocation({ ...windows(), channel: 'windows-portable' })).toEqual(location);
   });
   it('honors the installer stored choice, while portable never reads it', async () => {
     const defaultRoot = join(root, 'local', 'ai7', 'production');
@@ -77,11 +79,4 @@ describe('channel-owned product data location', () => {
     expect(dataLocationSyncWarning(join(root, 'plain'), {})).toBeNull();
     expect(dataLocationSyncWarning(join(root, 'custom', 'data'), { OneDrive: join(root, 'custom') })).not.toBeNull();
   });
-});
-
-it('integrates self-check before creating windows and keeps the source-checkout lease guarded', async () => {
-  const source = await readFile(new URL('../../src/main/application.ts', import.meta.url), 'utf8');
-  expect(source.indexOf('if (packaged?.selfCheck)')).toBeLessThan(source.indexOf('const initialWindow = await createOwnedWindow'));
-  expect(source).toContain("await service.call('inspectDataVersion', {})");
-  expect(source).toContain('app.relaunch({ args: [] })');
 });

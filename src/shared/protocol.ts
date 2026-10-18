@@ -2139,7 +2139,7 @@ export interface ProductDataLocationProjection {
   platform: 'windows' | 'macos';
   platformLabel: 'Windows' | 'macOS';
   runtimeForm: 'source-checkout' | 'packaged';
-  runtimeFormLabel: '源码检出运行' | '安装版运行';
+  runtimeFormLabel: '源码检出运行' | '打包运行';
   channel: DistributionChannel;
   channelLabel: '源码检出' | '安装版' | '便携版' | 'macOS 磁盘映像' | '未知渠道';
   channelDescription: string;
