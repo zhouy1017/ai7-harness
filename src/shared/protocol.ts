@@ -4,7 +4,7 @@ import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-con
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 158 as const;
+export const SERVICE_PROTOCOL_VERSION = 159 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
