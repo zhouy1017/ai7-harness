@@ -132,6 +132,7 @@ import { BACKGROUND_PREPARED_PLAN_NOTE, BACKGROUND_REPORT_HEADING } from './back
 import {
   DATA_VERSION_DATA,
   DATA_VERSION_HEADING,
+  DATA_VERSION_MARKER,
   DATA_VERSION_MEANING,
   DATA_VERSION_PROMISE,
   DATA_VERSION_SOFTWARE,
@@ -144,6 +145,7 @@ import {
   dataVersionUpdateLine,
   dataVersionUpgradeBackupLine,
   dataVersionUpgradeLine,
+  dataVersionMarkerLine,
   storeVersionLine,
 } from './data-version-labels.js';
 import { mountDatabaseExport } from './database-export.js';
@@ -5527,7 +5529,8 @@ async function renderDataAndStorage(): Promise<void> {
         element('p', 'field-note data-version-promise', DATA_VERSION_PROMISE),
         rows,
         history,
-        technicalDetails(undefined, element('dt', undefined, '数据库修订'), element('dd', 'technical-identity', String(version.schemaRevision))),
+        technicalDetails(undefined, element('dt', undefined, '数据库修订'), element('dd', 'technical-identity', String(version.schemaRevision)),
+          element('dt', undefined, DATA_VERSION_MARKER), element('dd', 'data-version-marker', dataVersionMarkerLine(version.marker, localInstantLabel))),
       );
     }, (error: unknown) => {
       if (!versions.isConnected) return;

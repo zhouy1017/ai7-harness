@@ -1,9 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DIAGNOSTICS_CHANNELS, buildDiagnosticsBundle, type DiagnosticsInputs } from '../../src/main/diagnostics.js';
+import { DATA_VERSION } from '../../src/service/data-version.js';
 
 const facts: DiagnosticsInputs['facts'] = {
-  appVersion: '0.1.0', dataVersion: 83, protocol: 157, policySetVersion: 'v15', platform: 'win32',
+  appVersion: '0.1.0', dataVersion: 1, schemaRevision: 83, protocol: 158, policySetVersion: 'v15', platform: 'win32',
   arch: 'x64', electron: '42.0.0', node: '24.18.1', locale: 'zh-CN', uptimeSeconds: 42, windowCount: 2,
 };
 describe('pure diagnostics bundle', () => {
@@ -22,6 +23,10 @@ describe('pure diagnostics bundle', () => {
     }
     expect(output).toContain('<redacted-path>');
     expect(JSON.parse(files['summary.json']!)).toMatchObject({ ...facts, logs: '无日志文件' });
+    // 数据版本 and 数据库修订 named apart (Issue #967); a crash record carries the schema revision under its own name.
+    expect(files['README.txt']!.split('\n')[1]).toBe('数据版本 1 · 数据库修订 83');
+    expect(JSON.parse(files['crashes/01-uncaughtException.json']!)).toHaveProperty('schemaRevision', 0);
+    expect(JSON.parse(files['crashes/01-uncaughtException.json']!)).not.toHaveProperty('dataVersion');
   });
   it('removes secret-like preference keys recursively and redacts arbitrary strings', () => {
     const files = buildDiagnosticsBundle({ facts, crashes: [], preferences: { version: 1,
@@ -34,11 +39,13 @@ describe('pure diagnostics bundle', () => {
   it('keeps the main-process version facts and preload channels synchronized with their owners', () => {
     const source = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
     const application = source('src/main/application.ts');
-    // The data version is the service's newest schema constant; a schema bump must move the crash/summary fact with it.
+    // The schema revision is the service's newest schema constant; a schema bump must move the crash/summary fact with it, and
+    // the Data Version beside it is the service's own (Issue #967).
     const schemaVersions = readdirSync(new URL('../../src/service/', import.meta.url), { recursive: true, encoding: 'utf8' })
       .filter((name) => name.endsWith('.ts'))
       .flatMap((name) => [...source(`src/service/${name.replaceAll('\\', '/')}`).matchAll(/_SCHEMA_VERSION = (\d+);/gu)].map((match) => Number(match[1])));
-    expect(application.match(/dataVersion: (\d+), protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(Math.max(...schemaVersions)));
+    expect(application.match(/schemaRevision: (\d+), protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(Math.max(...schemaVersions)));
+    expect(application.match(/dataVersion: (\d+), schemaRevision: \d+, protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(DATA_VERSION));
     // The summary reads the same built active policy set the service's launch policy verifies.
     const activeSet = source('src/service/launch-policy.ts').match(/const ACTIVE_SET_PATH = 'docs\/policies\/([^']+)';/u)?.[1];
     expect(activeSet).toBeDefined();

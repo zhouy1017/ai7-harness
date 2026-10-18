@@ -4,6 +4,7 @@ import { PassThrough, Writable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { journeyStartupRelay, ServiceClient, type ServiceStartupStep } from '../../src/main/service-client.js';
 import { SERVICE_PROTOCOL_VERSION, type ServiceReadiness } from '../../src/shared/protocol.js';
+import { DATA_VERSION_MARKER_UNREADABLE, DATA_VERSION_MARKER_UNWRITABLE, UPGRADE_BACKUP_EXISTS, UPGRADE_BACKUP_FAILED, UPGRADE_BACKUP_UNSUPPORTED, newerDataVersionMessage } from '../../src/shared/data-version-labels.js';
 
 const childProcess = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock('node:child_process', () => ({ spawn: childProcess.spawn }));
@@ -28,7 +29,7 @@ class Peer extends EventEmitter {
     this.requests.push(JSON.parse(frame.subarray(4).toString('utf8')) as { id: string; op: string });
     done();
   } });
-  readonly kill = vi.fn(() => { this.exitCode = 1; this.emit('exit', 1, null); return true; });
+  readonly kill = vi.fn(() => { this.exitCode = 1; this.emit('exit', 1, null); this.stderr.end(); return true; });
 
   reply(request: { id: string; op: string }, result: unknown): void {
     const payload = Buffer.from(JSON.stringify({ ...request, ok: true, result }));
@@ -87,6 +88,7 @@ describe('the service startup trace (Issue #675)', () => {
     await settle();
     peer.exitCode = 1;
     peer.emit('exit', 1, null);
+    peer.stderr.end();
     expect(await started).toMatchObject({ code: 'SERVICE_STOPPED' });
     expect(steps).toEqual(['store', 'stopped']);
   });
@@ -101,7 +103,7 @@ describe('the service startup trace (Issue #675)', () => {
     expect(written).toEqual(['AI7_SERVICE_STARTUP/store\n', 'AI7_SERVICE_STARTUP/stopped\n']);
   });
 
-  it('reads nothing from the stream when no one asks for the trace', async () => {
+  it('does not retain the stderr reader after readiness when no one asks for the trace', async () => {
     const peer = new Peer();
     const resume = vi.spyOn(peer.stderr, 'resume');
     const started = start(peer);
@@ -112,5 +114,48 @@ describe('the service startup trace (Issue #675)', () => {
     expect(resume).toHaveBeenCalled();
     expect(peer.stderr.listenerCount('data')).toBe(0);
     peer.kill();
+  });
+
+  it.each([
+    ['DATA_VERSION_NEWER', newerDataVersionMessage(2, 90)],
+    ['DATA_VERSION_MARKER_UNREADABLE', DATA_VERSION_MARKER_UNREADABLE],
+    ['DATA_VERSION_MARKER_UNWRITABLE', DATA_VERSION_MARKER_UNWRITABLE],
+    ['UPGRADE_BACKUP_FAILED', UPGRADE_BACKUP_FAILED],
+    ['UPGRADE_BACKUP_EXISTS', UPGRADE_BACKUP_EXISTS],
+    ['UPGRADE_BACKUP_UNSUPPORTED', UPGRADE_BACKUP_UNSUPPORTED],
+  ])('rejects ready with the bounded %s words even without a Journey trace', async (code, message) => {
+    const peer = new Peer();
+    const started = start(peer).catch((error: unknown) => error);
+    const line = Buffer.from(`AI7_SERVICE_STOPPED/${code}/${JSON.stringify(message)}\r\n`);
+    // Split every UTF-8 sequence: parsing must preserve Chinese words across arbitrary stream boundaries.
+    for (const byte of line) peer.stderr.write(Buffer.from([byte]));
+    await settle();
+    peer.kill();
+    expect(await started).toMatchObject({ code, message });
+  });
+
+  it.each([
+    'AI7_SERVICE_STOPPED/DATA_VERSION_NEWER/"C:/private/data"',
+    'AI7_SERVICE_STOPPED/DATA_VERSION_NEWER/{"message":"private"}',
+    `AI7_SERVICE_STOPPED/DATA_VERSION_NEWER/${JSON.stringify(newerDataVersionMessage(9007199254740992, 90))}`,
+    `AI7_SERVICE_STOPPED/UNEXPECTED/${JSON.stringify(DATA_VERSION_MARKER_UNREADABLE)}`,
+    `AI7_SERVICE_STOPPED/DATA_VERSION_MARKER_UNREADABLE/${' '.repeat(4096)}${JSON.stringify(DATA_VERSION_MARKER_UNREADABLE)}`,
+  ])('keeps generic startup failure for an unrecognized reason %#', async (line) => {
+    const peer = new Peer();
+    const started = start(peer).catch((error: unknown) => error);
+    peer.stderr.write(`${line}\n`);
+    await settle();
+    peer.kill();
+    expect(await started).toMatchObject({ code: 'SERVICE_STOPPED', message: '本地业务服务已停止。' });
+  });
+
+  it('drains a storage refusal that reaches stderr after the child exit event', async () => {
+    const peer = new Peer();
+    const started = start(peer).catch((error: unknown) => error);
+    peer.exitCode = 1;
+    peer.emit('exit', 1, null);
+    await settle();
+    peer.stderr.end(`AI7_SERVICE_STOPPED/DATA_VERSION_MARKER_UNREADABLE/${JSON.stringify(DATA_VERSION_MARKER_UNREADABLE)}\n`);
+    expect(await started).toMatchObject({ code: 'DATA_VERSION_MARKER_UNREADABLE', message: DATA_VERSION_MARKER_UNREADABLE });
   });
 });

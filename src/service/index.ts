@@ -1,4 +1,5 @@
 import { ImportedExemplarError } from './imported-exemplars.js';
+import { dataVersionStartupRefusal } from '../shared/data-version-labels.js';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveDevelopmentSampleBook } from '../shared/data-root.js';
@@ -2378,10 +2379,10 @@ async function run(): Promise<void> {
 }
 
 await run().catch((error: unknown) => {
-  // A service that stops before it is ready says which refusal stopped it (Issue #433 review): its code alone, never its
-  // words or anything it read.
+  // Only the bounded storage refusal words cross startup IPC (#967 review); every other error still emits its code alone.
   const code = typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string' &&
     /^[A-Z][A-Z0-9_]{0,63}$/u.test((error as { code: string }).code) ? (error as { code: string }).code : 'UNEXPECTED';
-  process.stderr.write(`AI7_SERVICE_STOPPED/${code}\n`);
+  const refusal = error instanceof Error ? dataVersionStartupRefusal(code, error.message) : null;
+  process.stderr.write(`AI7_SERVICE_STOPPED/${code}${refusal === null ? '' : `/${JSON.stringify(refusal.message)}`}\n`);
   process.exitCode = 1;
 });

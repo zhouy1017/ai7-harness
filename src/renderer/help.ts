@@ -8,6 +8,7 @@ import {
   helpLicenseCount, type HelpTab,
 } from './help-labels.js';
 import { HELP_PRIVACY_SECTIONS, HELP_USAGE_SECTIONS, type HelpSection } from './help-text.js';
+import { dataVersionStateLine } from './data-version-labels.js';
 
 // 帮助 (Issue #939, wave 11 slice 11f; Owner decision 27; editor-surfaces §0.3): the screen the sidebar's 帮助 entry opens —
 // three tabs (使用帮助 · 隐私说明 · 第三方许可) with keyboard-complete tab switching and a filter on the generated license
@@ -35,7 +36,7 @@ export const THIRD_PARTY_LICENSES: ReadonlyArray<ThirdPartyLicense> = (licensesD
 export interface HelpSurfaceOptions {
   readonly root: HTMLElement;
   /** Reads the software version and the Data Version exactly as 设置 › 数据与存储 does. */
-  readonly loadVersions: () => Promise<Pick<DataVersionProjection, 'softwareVersion' | 'dataVersion'>>;
+  readonly loadVersions: () => Promise<Pick<DataVersionProjection, 'softwareVersion' | 'dataVersion' | 'frozen'>>;
   readonly back: () => void;
   readonly licenses?: ReadonlyArray<ThirdPartyLicense>;
   readonly protocolVersion?: number;
@@ -66,10 +67,15 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   // 关于: the same two versions 设置 › 数据与存储 shows, plus the service protocol this build speaks.
   const about = el('section', 'source-card help-about');
   const aboutLine = el('p', 'help-about-line', HELP_ABOUT_LOADING);
-  about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutLine);
+  // Whether the Data Version is frozen, in 设置 › 数据与存储's own words (Issue #967).
+  const stateLine = el('p', 'field-note help-data-version-state');
+  about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutLine, stateLine);
   root.append(about);
   void options.loadVersions().then(
-    (versions) => { aboutLine.textContent = helpAboutLine(versions.softwareVersion, versions.dataVersion, protocolVersion); },
+    (versions) => {
+      aboutLine.textContent = helpAboutLine(versions.softwareVersion, versions.dataVersion, protocolVersion);
+      stateLine.textContent = dataVersionStateLine(versions);
+    },
     () => { aboutLine.textContent = HELP_ABOUT_FAILED; },
   );
 

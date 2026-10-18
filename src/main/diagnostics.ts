@@ -16,7 +16,8 @@ export interface CrashRecord {
   reason: string;
   exitCode: number | null;
   appVersion: string;
-  dataVersion: number;
+  /** The store's schema revision (数据库修订) this build writes — not the Data Version, which is far smaller (Issue #967). */
+  schemaRevision: number;
   protocol: number;
   platform: string;
   arch: string;
@@ -60,7 +61,7 @@ export function sanitizeCrashRecord(input: Partial<CrashRecord>): CrashRecord {
     kind: CRASH_KINDS.includes(input.kind!) ? input.kind! : 'uncaughtException',
     reason: REASONS.has(input.reason ?? '') ? input.reason! : '<redacted>',
     exitCode: typeof input.exitCode === 'number' && Number.isInteger(input.exitCode) ? input.exitCode : null,
-    appVersion: version(input.appVersion), dataVersion: count(input.dataVersion), protocol: count(input.protocol),
+    appVersion: version(input.appVersion), schemaRevision: count(input.schemaRevision), protocol: count(input.protocol),
     platform: ['win32', 'darwin', 'linux'].includes(input.platform ?? '') ? input.platform! : 'unknown',
     arch: ['x64', 'arm64'].includes(input.arch ?? '') ? input.arch! : 'unknown',
     electron: version(input.electron), uptimeSeconds: count(input.uptimeSeconds),
@@ -80,7 +81,8 @@ function safePreferences(value: unknown): unknown {
 
 export interface DiagnosticsInputs {
   facts: Omit<CrashRecord, 'instant' | 'kind' | 'reason' | 'exitCode' | 'stack'> & {
-    policySetVersion: string; node: string; locale: string; windowCount: number;
+    /** The Data Version (数据版本), named apart from the schema revision (数据库修订) (Issue #967). */
+    dataVersion: number; policySetVersion: string; node: string; locale: string; windowCount: number;
   };
   crashes: readonly Partial<CrashRecord>[];
   preferences: unknown;
@@ -92,14 +94,15 @@ export function buildDiagnosticsBundle(inputs: DiagnosticsInputs): Readonly<Reco
   const facts = sanitizeCrashRecord(inputs.facts);
   const files: Record<string, string> = {
     'summary.json': JSON.stringify({
-      appVersion: facts.appVersion, dataVersion: facts.dataVersion, protocol: facts.protocol,
+      appVersion: facts.appVersion, dataVersion: count(inputs.facts.dataVersion), schemaRevision: facts.schemaRevision, protocol: facts.protocol,
       policySetVersion: /^v\d+$/u.test(inputs.facts.policySetVersion) ? inputs.facts.policySetVersion : 'unknown',
       platform: facts.platform, arch: facts.arch, electron: facts.electron, node: version(inputs.facts.node),
       locale: /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(inputs.facts.locale) ? inputs.facts.locale : 'unknown',
       uptimeSeconds: facts.uptimeSeconds, windowCount: count(inputs.facts.windowCount),
       preferences: safePreferences(inputs.preferences), logs: '无日志文件',
     }, null, 2),
-    'README.txt': 'AI7 本机诊断包\n包含软件、数据、协议与策略集版本、运行环境、脱敏的本机偏好及最多 30 条崩溃记录。\n崩溃记录仅保留错误类别与堆栈坐标；消息、函数名、路径、查询参数及任意文本均已移除。\n无日志文件。AI7 不持久化主进程或服务日志。\n不含数据库、书稿、暂存 DOCX、导出文件、模型缓存、凭据库或密钥文件。\n仅写入所选本机文件夹，不联网、不上传。\n',
+    // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is the compatibility number, the revision the store's own.
+    'README.txt': `AI7 本机诊断包\n数据版本 ${count(inputs.facts.dataVersion)} · 数据库修订 ${facts.schemaRevision}\n` + '包含软件版本、数据版本、数据库修订、协议与策略集版本、运行环境、脱敏的本机偏好及最多 30 条崩溃记录。\n崩溃记录仅保留错误类别与堆栈坐标；消息、函数名、路径、查询参数及任意文本均已移除。\n无日志文件。AI7 不持久化主进程或服务日志。\n不含数据库、书稿、暂存 DOCX、导出文件、模型缓存、凭据库或密钥文件。\n仅写入所选本机文件夹，不联网、不上传。\n',
   };
   inputs.crashes.slice(-30).map(sanitizeCrashRecord).forEach((record, index) => {
     files[`crashes/${String(index + 1).padStart(2, '0')}-${record.kind}.json`] = JSON.stringify(record, null, 2);

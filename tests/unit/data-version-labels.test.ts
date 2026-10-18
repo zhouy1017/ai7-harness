@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DATA_VERSION_PROMISE,
   DATA_VERSION_UPGRADE,
+  dataVersionMarkerLine,
   dataVersionRecordsLabel,
   dataVersionRollbackSteps,
   dataVersionStateLine,
@@ -30,7 +31,7 @@ import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { preUpgradeBackupFileName } from '../../src/service/upgrade-backup.js';
 
 // Unit suite for 数据版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1): the Data Version this software reads,
-// not yet frozen before the first packaged release; the software version read from the package it ships in; the latest
+// frozen at the 1.0.0 development milestone boundary (Issue #967); the software version read from the package it ships in; the latest
 // software update found in the store's version records; and every line 数据与存储 states.
 
 const record = (ordinal: number, softwareVersion: string, dataVersion = 1): StoredVersion => ({
@@ -38,20 +39,21 @@ const record = (ordinal: number, softwareVersion: string, dataVersion = 1): Stor
 });
 
 describe('数据版本', () => {
-  it('reads Data Version 1, not frozen before the first packaged release', () => {
-    expect([DATA_VERSION, DATA_VERSION_FROZEN]).toEqual([1, false]);
+  it('reads Data Version 1, frozen at the 1.0.0 development milestone boundary (Issue #967)', () => {
+    expect([DATA_VERSION, DATA_VERSION_FROZEN]).toEqual([1, true]);
   });
 
   it('holds the Data Version to the classification of every schema revision after the release baseline (Issue #433, S85b)', () => {
-    // Nothing is frozen before the first packaged release: no baseline, no revision classified, and every revision reads as 1.
-    expect([DATA_VERSION_BASELINE_REVISION, SCHEMA_REVISION_CLASSES]).toEqual([null, []]);
+    // Frozen at the 1.0.0 boundary (Issue #967): the baseline is the terminal revision of this slice, and none after it is
+    // classified yet, so every revision reads as 1.
+    expect([DATA_VERSION_BASELINE_REVISION, SCHEMA_REVISION_CLASSES]).toEqual([83, []]);
     // The software's Data Version is always the classification's at its terminal revision: a breaking revision added to the
     // list without raising DATA_VERSION, or DATA_VERSION raised without one, fails here.
     expect(DATA_VERSION).toBe(dataVersionAt(LATEST_SCHEMA_VERSION));
     // Classified entries lie after the baseline, one per revision, in order, and a breaking one says what it changes.
     const revisions = SCHEMA_REVISION_CLASSES.map((entry) => entry.revision);
     expect(revisions).toEqual([...new Set(revisions)].sort((left, right) => left - right));
-    expect(SCHEMA_REVISION_CLASSES.every((entry) => DATA_VERSION_BASELINE_REVISION !== null && entry.revision > DATA_VERSION_BASELINE_REVISION &&
+    expect(SCHEMA_REVISION_CLASSES.every((entry) => entry.revision > DATA_VERSION_BASELINE_REVISION &&
       entry.revision <= LATEST_SCHEMA_VERSION && (entry.class === 'additive' || (entry.change ?? '').length > 0))).toBe(true);
     // Additive revisions stay inside a Data Version; each breaking one raises it by one, and says what changed.
     const classes = [
@@ -151,6 +153,17 @@ describe('数据版本 words', () => {
     expect(dataVersionUpdateLine({ ...kept, from: '0.2.0+build.7', to: '0.2.0+build.8', direction: 'same' })).toBe('软件从 0.2.0+build.7 换为 0.2.0+build.8；数据版本仍为 1，数据无需变更。');
     expect(storeVersionLine({ softwareVersion: '0.1.0', dataVersion: 1, recordedAt: '2026-09-25T00:00:00.000Z' }, (iso) => `〔${iso.slice(0, 10)}〕`))
       .toBe('〔2026-09-25〕 · 软件 0.1.0 · 数据版本 1');
+    // The record of an upgrade names the backup made before it, and whether it is still there (Issue #967).
+    const upgraded = { softwareVersion: '1.1.0', dataVersion: 2, recordedAt: '2026-09-26T00:00:00.000Z', backup: { fileName: 'AI7 升级前备份 2026-09-26 08-00-00.ai7db', present: true } };
+    expect([storeVersionLine(upgraded, (iso) => `〔${iso.slice(0, 10)}〕`), storeVersionLine({ ...upgraded, backup: { ...upgraded.backup, present: false } }, (iso) => `〔${iso.slice(0, 10)}〕`)]).toEqual([
+      '〔2026-09-26〕 · 软件 1.1.0 · 数据版本 2 · 升级前备份「AI7 升级前备份 2026-09-26 08-00-00.ai7db」备份仍在',
+      '〔2026-09-26〕 · 软件 1.1.0 · 数据版本 2 · 升级前备份「AI7 升级前备份 2026-09-26 08-00-00.ai7db」备份已不在',
+    ]);
+    // The data root's version marker (Issue #967; ADR 0023), as the technical details state it.
+    expect([
+      dataVersionMarkerLine({ present: true, writtenAt: '2026-09-26T00:00:00.000Z', softwareVersion: '1.0.0' }, (iso) => `〔${iso.slice(0, 10)}〕`),
+      dataVersionMarkerLine({ present: false, writtenAt: null, softwareVersion: null }, (iso) => iso),
+    ]).toEqual(['已写入 · 软件 1.0.0 · 〔2026-09-26〕', '未找到：下次打开这份数据时写入。']);
     expect([dataVersionRecordsLabel(1, false), dataVersionRecordsLabel(20, true)]).toEqual(['版本记录（1）', '版本记录（最近 20 条）']);
   });
 });

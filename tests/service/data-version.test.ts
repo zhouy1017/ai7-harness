@@ -1,9 +1,11 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
-import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { replacementStagingFor } from '../../src/service/database-replacement.js';
 import {
   DATA_VERSION_TRIGGER_SQL,
   DataVersionError,
@@ -67,14 +69,16 @@ describe('数据版本 over the real store', () => {
     expect(first).toEqual({
       softwareVersion: version,
       dataVersion: 1,
-      frozen: false,
+      frozen: true,
       schemaRevision: LATEST_SCHEMA_VERSION,
       update: null,
       history: [{ softwareVersion: version, dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
       historyTruncated: false,
       upgrades: [],
       backupLocation: `${roots.dataRoot}-backups`,
+      marker: { present: true, writtenAt: first.marker.writtenAt, softwareVersion: version },
     });
+    expect(first.marker.writtenAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u);
     // The same software opening the same data again records nothing.
     expect((await reopened((store) => store.inspectDataVersion())).history).toHaveLength(1);
 
@@ -283,5 +287,154 @@ describe('数据版本 over the real store', () => {
     } finally {
       database.close();
     }
+  }, 120_000);
+});
+
+describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => {
+  const markerPath = (): string => join(roots.dataRoot, 'store', 'ai7-data-version.json');
+  const readMarker = async (): Promise<Record<string, unknown>> => JSON.parse(await readFile(markerPath(), 'utf8')) as Record<string, unknown>;
+
+  // Digest every file without opening SQLite, so the comparison includes WAL/journal bytes and replacement staging.
+  async function treeBytes(root: string): Promise<unknown> {
+    if (!existsSync(root)) return null;
+    const entries = await readdir(root, { withFileTypes: true });
+    return Promise.all(entries.sort((a, b) => a.name.localeCompare(b.name)).map(async (entry) => [entry.name,
+      entry.isDirectory() ? await treeBytes(join(root, entry.name)) : sha256Hex(await readFile(join(root, entry.name))),
+    ]));
+  }
+
+  /** What a refused open must leave as it was: the marker, the store's revision and records, the store's files, no backups. */
+  async function untouched(): Promise<unknown> {
+    const database = new DatabaseSync(databasePath(), { readOnly: true });
+    try {
+      return {
+        marker: await readFile(markerPath(), 'utf8').catch(() => null),
+        userVersion: (database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version,
+        records: (database.prepare('SELECT count(*) AS n FROM store_versions').get() as { n: number }).n,
+        lifetimes: (database.prepare('SELECT count(*) AS n FROM service_lifetimes').get() as { n: number }).n,
+        store: (await readdir(join(roots.dataRoot, 'store'))).sort(),
+        backups: existsSync(`${roots.dataRoot}-backups`),
+        bytes: await treeBytes(join(roots.dataRoot, 'store')),
+      };
+    } finally {
+      database.close();
+    }
+  }
+
+  async function refusal(): Promise<unknown> {
+    return EditorialStore.open(roots.dataRoot, roots.codeRoot).then((store) => {
+      store.close();
+      return null;
+    }, (error: unknown) => (error instanceof StoreError ? [error.code, error.message] : error));
+  }
+
+  it.each(['replace', 'merge'] as const)('refuses newer or corrupt data before a pending %s changes any bytes', async (kind) => {
+    const packagePath = join(roots.inputRoot, '版本检查.ai7db');
+    const source = await EditorialStore.open(join(roots.inputRoot, 'source-data'), roots.codeRoot);
+    try {
+      const creation = source.prepareBookCreation('版本检查', null);
+      source.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest });
+      const prepared = await source.prepareDatabaseExport(packagePath, true);
+      expect((await source.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
+    } finally { source.close(); }
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const preview = await store.inspectDatabaseImport(packagePath);
+      if (kind === 'replace') await store.prepareDatabaseReplacement(preview.previewId);
+      else await store.prepareDatabaseMerge(preview.previewId);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    const originalMarker = await readFile(markerPath(), 'utf8');
+    const snapshot = () => Promise.all([roots.dataRoot, replacementStagingFor(roots.dataRoot), `${roots.dataRoot}-backups`].map(treeBytes));
+    for (const [text, code] of [
+      [JSON.stringify({ dataVersion: 2, schemaRevision: 90, softwareVersion: '2.0.0', writtenAt: '2027-01-01T00:00:00.000Z' }), 'DATA_VERSION_NEWER'],
+      ['{', 'DATA_VERSION_MARKER_UNREADABLE'],
+    ]) {
+      await writeFile(markerPath(), text!);
+      const before = await snapshot();
+      expect(await refusal()).toEqual([code, expect.any(String)]);
+      expect(await snapshot()).toEqual(before);
+    }
+    await writeFile(markerPath(), originalMarker);
+    const opened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect((await opened.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind, outcome: 'applied' });
+      expect(opened.inspectDataVersion().marker).toMatchObject({ present: true, softwareVersion: await packageVersion() });
+    } finally { opened.close(); }
+  }, 120_000);
+
+  it('does not discard abandoned replacement staging on a marker refusal', async () => {
+    await reopened(() => undefined);
+    const staging = replacementStagingFor(roots.dataRoot);
+    await mkdir(staging);
+    await writeFile(join(staging, 'unfinished'), 'preparation');
+    await writeFile(markerPath(), '{');
+    const before = await treeBytes(staging);
+    expect(await refusal()).toEqual(['DATA_VERSION_MARKER_UNREADABLE', expect.any(String)]);
+    expect(await treeBytes(staging)).toEqual(before);
+  });
+
+  it('writes the marker after every open, create or replace, never a path, and tolerates a missing one once', async () => {
+    const version = await packageVersion();
+    await reopened(() => undefined);
+    const written = await readMarker();
+    expect(Object.keys(written).sort()).toEqual(['dataVersion', 'schemaRevision', 'softwareVersion', 'writtenAt']);
+    expect(written).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: version });
+    for (const place of [roots.dataRoot, JSON.stringify(roots.dataRoot).slice(1, -1)]) expect(await readFile(markerPath(), 'utf8')).not.toContain(place);
+    // A later software opening the data replaces it, and an earlier one of the same Data Version opens it as ever.
+    await reopened(() => undefined, '0.2.0');
+    expect(await readMarker()).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.2.0' });
+    await reopened(() => undefined, '0.1.0');
+    expect((await readMarker()).softwareVersion).toBe('0.1.0');
+    // A marker of an earlier schema revision — data an earlier AI7 of the same Data Version wrote — opens and is replaced.
+    await writeFile(markerPath(), JSON.stringify({ dataVersion: 1, schemaRevision: 60, softwareVersion: '0.0.9', writtenAt: '2026-09-01T00:00:00.000Z' }));
+    await reopened(() => undefined);
+    expect(await readMarker()).toMatchObject({ schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: version });
+    // An existing store without a marker — one from before this software, or a store a replacement brought in — opens, and
+    // that open writes it; the 版本 row says whether it is there.
+    await rm(markerPath());
+    const reopenedMarker = await reopened((store) => {
+      const present = store.inspectDataVersion().marker;
+      return present;
+    });
+    expect(reopenedMarker).toMatchObject({ present: true, softwareVersion: version });
+    expect(existsSync(markerPath())).toBe(true);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      await rm(markerPath());
+      expect(store.inspectDataVersion().marker).toEqual({ present: false, writtenAt: null, softwareVersion: null });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
+  it('refuses a newer Data Version, an unknown schema revision or a corrupt marker before anything opens, and writes nothing', async () => {
+    await reopened(() => undefined);
+    const newer = '这份数据来自更新的 AI7（数据版本 2 / 数据库修订 90），请使用更新的 AI7 打开。';
+    const unknown = `这份数据来自更新的 AI7（数据版本 1 / 数据库修订 ${LATEST_SCHEMA_VERSION + 1}），请使用更新的 AI7 打开。`;
+    const corrupt = '这份数据的数据版本标记无法读取：AI7 没有打开这份数据，也没有改动它。请使用写入这份数据的 AI7 打开，或从备份恢复。';
+    for (const [text, expected] of [
+      [JSON.stringify({ dataVersion: 2, schemaRevision: 90, softwareVersion: '2.0.0', writtenAt: '2027-01-01T00:00:00.000Z' }), ['DATA_VERSION_NEWER', newer]],
+      [JSON.stringify({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION + 1, softwareVersion: '1.1.0', writtenAt: '2027-01-01T00:00:00.000Z' }), ['DATA_VERSION_NEWER', unknown]],
+      ['{"dataVersion":1', ['DATA_VERSION_MARKER_UNREADABLE', corrupt]],
+      [JSON.stringify({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '1.0.0', writtenAt: '2027-01-01T00:00:00.000Z', dataRoot: 'C:/AI7' }), ['DATA_VERSION_MARKER_UNREADABLE', corrupt]],
+      ['x'.repeat(8192), ['DATA_VERSION_MARKER_UNREADABLE', corrupt]],
+    ] as const) {
+      await writeFile(markerPath(), text);
+      const before = await untouched();
+      expect(await refusal()).toEqual(expected);
+      expect(await untouched()).toEqual(before);
+    }
+    // Something not a file at the marker's place is refused the same way: no silent fallback.
+    await rm(markerPath());
+    await mkdir(markerPath());
+    const before = await untouched();
+    expect(await refusal()).toEqual(['DATA_VERSION_MARKER_UNREADABLE', corrupt]);
+    expect(await untouched()).toEqual(before);
+    // The marker the newer AI7 wrote taken away, this AI7 opens the data again and writes its own.
+    await rm(markerPath(), { recursive: true });
+    await reopened(() => undefined);
+    expect((await readMarker()).schemaRevision).toBe(LATEST_SCHEMA_VERSION);
   }, 120_000);
 });
