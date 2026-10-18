@@ -6250,6 +6250,13 @@ export async function runApplication(): Promise<void> {
   const allWindowsClosed = (): void => app.quit();
 
   try {
+    if (app.isPackaged) {
+      // No source launcher ships: carry its Chromium network-denial switches into this launch form.
+      for (const name of ['disable-background-networking', 'disable-client-side-phishing-detection', 'disable-component-update',
+        'disable-default-apps', 'disable-domain-reliability', 'disable-sync', 'metrics-recording-only', 'no-first-run']) {
+        app.commandLine.appendSwitch(name);
+      }
+    }
     validateRuntime();
     startupLocation = reachStartup('arguments');
     const packaged = app.isPackaged ? packagedLaunchForm(process.argv.slice(1)) : null;

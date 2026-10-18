@@ -49,7 +49,7 @@ declare module 'electron' {
     // Diagnostics metadata and fatal-hook cleanup (Issue #938).
     getLocale(): string;
     once(event: string, listener: (...args: any[]) => void): void;
-    commandLine: { getSwitchValue(name: string): string };
+    commandLine: { getSwitchValue(name: string): string; appendSwitch(name: string, value?: string): void };
     enableSandbox(): void;
     getPath(name: 'userData' | 'documents'): string;
     requestSingleInstanceLock(): boolean;

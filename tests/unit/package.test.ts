@@ -3,9 +3,16 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Plain build tooling intentionally has no TypeScript declarations.
-import { builderConfiguration, copyRuntimeClosure, packagerArtifacts, plannedOutputs } from '../../tools/package.mjs';
+import { builderConfiguration, copyRuntimeClosure, packagerArtifacts, plannedOutputs, selfCheckEnvironment } from '../../tools/package.mjs';
 
 describe('host-native offline package inputs', () => {
+  it('passes only OS prerequisites to the installed-product self-check', () => {
+    const executable = resolve('AI7', 'app', 'AI7.exe');
+    const env = selfCheckEnvironment(executable, { SystemRoot: resolve('system'), LOCALAPPDATA: resolve('local'),
+      NODE_OPTIONS: '--inspect', ELECTRON_RUN_AS_NODE: '1', NPM_CONFIG_REGISTRY: 'https://example.invalid/', UNRELATED: 'synthetic' }, 'win32');
+    expect(Object.keys(env).sort()).toEqual(['LOCALAPPDATA', 'PATH', 'SystemRoot']);
+    expect(env.PATH).not.toContain('example.invalid');
+  });
   it('lists only host-native outputs and never promises a Windows-built DMG', () => {
     expect(plannedOutputs('0.1.0', 'win32')).toEqual(['AI7-0.1.0-win-x64-setup.exe', 'AI7-0.1.0-win-x64-portable.zip', 'self-check.txt']);
     expect(plannedOutputs('0.1.0', 'darwin')).toEqual(['AI7-0.1.0-mac-arm64.dmg']);
@@ -21,6 +28,10 @@ describe('host-native offline package inputs', () => {
     expect(config.asar).toBe(false);
     expect(config.electronVersion).toBe('43.4.1');
     expect(config.electronDist).toContain('.runtime');
+    expect(config.electronDownload).toBeUndefined();
+    expect(config.toolsets).toEqual({ nsis: '1.2.1' });
+    expect(config.nsis.customNsisBinary).toBeUndefined();
+    expect(config.nsis.customNsisResources).toBeUndefined();
     expect(config.npmRebuild).toBe(false);
     expect(config.win.signAndEditExecutable).toBe(false); // No rcedit/winCodeSign acquisition.
     expect(config.mac.identity).toBeNull();

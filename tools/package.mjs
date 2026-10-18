@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import { cp, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { electronRuntimeRoot } from './electron-runtime.mjs';
@@ -106,6 +106,21 @@ export function builderConfiguration(manifest, stage) {
   };
 }
 
+/** Like start-built, the package probe passes OS prerequisites, never acquisition credentials or Node overrides. */
+export function selfCheckEnvironment(executable, env = process.env, platform = process.platform) {
+  const selected = {};
+  const names = platform === 'win32'
+    ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
+    : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
+  for (const name of names) if (env[name] !== undefined) selected[name] = env[name];
+  if (platform === 'win32') {
+    const systemRoot = env.SystemRoot ?? env.WINDIR;
+    requirePackage(systemRoot !== undefined && isAbsolute(systemRoot));
+    selected.PATH = [dirname(executable), resolve(systemRoot, 'System32'), resolve(systemRoot)].join(delimiter);
+  } else selected.PATH = [dirname(executable), '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(delimiter);
+  return selected;
+}
+
 async function resetOwnedDirectory(path) {
   requirePackage(relative(RELEASE, path) !== '' && !relative(RELEASE, path).startsWith('..') && !isAbsolute(relative(RELEASE, path)));
   if (existsSync(path)) {
@@ -191,7 +206,8 @@ async function main(args) {
     if (existsSync(archive)) await rm(archive);
     run(await getPath7za(), ['a', '-tzip', '-mx=5', archive, 'AI7'], { cwd: RELEASE });
     reachPhase('self-check');
-    const report = run(resolve(portable, 'app', 'AI7.exe'), ['--self-check']);
+    const executable = resolve(portable, 'app', 'AI7.exe');
+    const report = run(executable, ['--self-check'], { env: selfCheckEnvironment(executable) });
     const check = JSON.parse(report.trim());
     requirePackage(check.channel === 'windows-portable' && check.writable === true && check.store_versions === 'readable' && check.keyringCarrier === 'loaded');
     await writeFile(resolve(RELEASE, 'self-check.txt'), report);
