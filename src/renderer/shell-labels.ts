@@ -38,6 +38,13 @@ export const SHELL_BOOK_GROUPS: ReadonlyArray<{
   ] },
 ]);
 
+/**
+ * Agent 工作区 (Issue #90, wave 13 slice 13a; UI ADR 0015; AGENT-001, 004): the 工作 group's one row that is no Book section.
+ * It is an explicit choice of a work surface for the current Book, entered on the Book's own route; it records no recent
+ * section, and nothing opens it on its own.
+ */
+export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work', label: 'Agent 工作区', icon: 'A', state: 'agent-workspace' } as const);
+
 export const SHELL_SETTINGS = Object.freeze({ label: '设置', icon: '设' });
 
 export const SHELL_LABELS = Object.freeze({

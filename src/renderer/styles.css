@@ -2141,3 +2141,34 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 .view-control { display: grid; gap: .25rem; max-width: 26rem; font-weight: 700; }
 .view-control select, .view-control input[type="range"] { min-height: 36px; font: inherit; }
 .view-region-row { margin: .3rem 0; }
+
+/* Issue #961: optional guidance stays within the existing landing and Book overview. */
+.onboarding-card:empty, .onboarding-guidance:empty { display: none; }
+.onboarding-card, .onboarding-guidance { margin-block: 1.5rem; padding: 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; }
+.onboarding-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; list-style: none; padding: 0; }
+.onboarding-data-location { overflow-wrap: anywhere; }
+@media (max-width: 900px) { .onboarding-steps { grid-template-columns: 1fr; } }
+
+/* Agent 工作区 (Issue #90, wave 13 slice 13a; UI ADR 0015): the Book-bound workspace's central screen — its safety state, the
+   paragraphs a range is chosen in, the 修改要求 and the proposals, which read as candidates rather than marks. */
+.agent-workspace-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; }
+.agent-workspace-header > h2 { flex: 1 1 auto; margin: 0; }
+.agent-workspace-header > .section-label { flex-basis: 100%; margin: 0; }
+.agent-workspace-safety { margin: .6rem 0 0; padding: .55rem .8rem; border: 1px solid var(--boundary-strong); border-radius: 8px; background: var(--surface-subdued); font-weight: 700; }
+.agent-workspace-body { display: grid; gap: 1.1rem; margin-top: 1rem; min-width: 0; }
+.agent-workspace-pick, .agent-workspace-instruction, .agent-workspace-proposal { min-width: 0; padding: 1rem 1.15rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
+.agent-workspace-blocks { display: grid; gap: .35rem; max-height: 22rem; overflow-y: auto; padding: .3rem; border: 1px solid var(--boundary); border-radius: 8px; background: var(--surface); }
+.agent-workspace-block { margin: 0; padding: .35rem .5rem; border-left: 3px solid transparent; border-radius: 4px; overflow-wrap: anywhere; cursor: text; }
+.agent-workspace-block[data-agent-workspace-chosen] { border-left-color: var(--boundary-strong); background: var(--surface-subdued); }
+.agent-workspace-selection { overflow-wrap: anywhere; }
+.agent-workspace-instruction textarea { display: block; width: 100%; margin: .35rem 0; border: 1px solid var(--boundary); border-radius: 8px; padding: .6rem .7rem; background: var(--surface); color: var(--text); font: inherit; }
+.agent-workspace-candidates { display: grid; gap: .6rem; padding-left: 1.4rem; }
+.agent-workspace-candidate dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .2rem .8rem; margin: 0; }
+.agent-workspace-candidate dd { margin: 0; overflow-wrap: anywhere; }
+.agent-workspace-anchor { text-decoration: line-through; }
+.agent-workspace-proposed { font-weight: 700; }
+.agent-workspace-entry { margin-top: .9rem; }
+@media (forced-colors: active) {
+  .agent-workspace-safety, .agent-workspace-pick, .agent-workspace-instruction, .agent-workspace-proposal { border-color: CanvasText; }
+  .agent-workspace-block[data-agent-workspace-chosen] { border-left-color: Highlight; }
+}

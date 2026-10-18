@@ -12,6 +12,7 @@ import {
   type ShellRecentBookEntry,
 } from '../shared/preferences.js';
 import {
+  SHELL_AGENT_WORKSPACE_ROW,
   SHELL_BOOK_GROUPS,
   SHELL_DESTINATIONS,
   SHELL_LABELS,
@@ -87,6 +88,10 @@ export function screenActive(state: string, place: ShellPlace | null): ShellActi
 
 /** The context header's words for a screen: its title (a Book's in serif) and where it sits. */
 export function contextHeading(state: string, active: ShellActive, book: ShellBookEntry | null): { title: string; position: string; book: boolean } {
+  if (state === SHELL_AGENT_WORKSPACE_ROW.state && book !== null) {
+    const group = SHELL_BOOK_GROUPS.find((entry) => entry.key === SHELL_AGENT_WORKSPACE_ROW.group)!;
+    return { title: book.title, position: `${group.label} · ${SHELL_AGENT_WORKSPACE_ROW.label}`, book: true };
+  }
   if (active.kind === 'section' && book !== null) {
     return { title: book.title, position: `${shellSectionGroupLabel(active.section)} · ${shellSectionLabel(active.section)}`, book: true };
   }
@@ -262,6 +267,8 @@ export interface MountShellOptions {
   errorMessage(error: unknown, fallback: string): string;
   openDestination(destination: Exclude<ShellDestination, 'attention'>): void;
   openSection(book: ShellBookEntry, section: ShellBookSection): void;
+  /** Agent 工作区 of the current Book (Issue #90, slice 13a): its own row, never a section. */
+  openAgentWorkspace(book: ShellBookEntry): void;
   openBook(bookId: string): void;
   openSettings(): void;
 }
@@ -329,6 +336,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   const bookTitle = el('p', 'sidebar-book-title');
   bookGroup.append(bookTitle);
   const sectionLinks = new Map<ShellBookSection, HTMLAnchorElement>();
+  let agentWorkspaceLink: HTMLAnchorElement | null = null;
   for (const group of SHELL_BOOK_GROUPS) {
     const holder = el('div', 'sidebar-group');
     holder.setAttribute('role', 'group');
@@ -344,6 +352,16 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       });
       link.dataset['navBookSection'] = key;
       sectionLinks.set(key, link);
+      const item = el('li');
+      item.append(link);
+      list.append(item);
+    }
+    if (group.key === SHELL_AGENT_WORKSPACE_ROW.group) {
+      const link = navLink(SHELL_AGENT_WORKSPACE_ROW.label, SHELL_AGENT_WORKSPACE_ROW.icon, () => {
+        if (book !== null) options.openAgentWorkspace(book);
+      });
+      link.dataset['navAgentWorkspace'] = 'row';
+      agentWorkspaceLink = link;
       const item = el('li');
       item.append(link);
       list.append(item);
@@ -446,6 +464,8 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       if (active.kind === 'section' && active.section === key) node.setAttribute('aria-current', 'page');
       else node.removeAttribute('aria-current');
     }
+    if (state === SHELL_AGENT_WORKSPACE_ROW.state) agentWorkspaceLink?.setAttribute('aria-current', 'page');
+    else agentWorkspaceLink?.removeAttribute('aria-current');
     if (active.kind === 'settings') settings.setAttribute('aria-current', 'page');
     else settings.removeAttribute('aria-current');
     const helpLink = helpSlot.querySelector('[data-nav-help="hub"]');

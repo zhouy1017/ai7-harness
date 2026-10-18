@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // The local ordinary-production launch (Issue #811): a thin wrapper over `start-built` that binds the trusted
-// `ordinary-production` scope, resolves the default data location when `--data-root` is omitted, says once where the
+// `ordinary-production` scope, uses a stored data location or delegates first-run choice when `--data-root` is omitted, says once where the
 // data lives, and refuses every development-only argument. `development-ci` stays the bare default of `start-built`.
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const START_BUILT = resolve(ROOT, 'tools', 'start-built.mjs');
@@ -37,20 +37,29 @@ export function parseProductionLaunchArguments(args, defaults = {}) {
   requireLaunch(Array.isArray(args));
   const rest = args[0] === '--' ? args.slice(1) : args;
   requireLaunch(!rest.some((arg) => DEVELOPMENT_ONLY_ARGUMENTS.includes(arg) || arg === '--trusted-operational-scope'));
-  if (rest.length === 0) return { dataRoot: defaultProductionDataRoot(defaults), defaulted: true };
+  if (rest.length === 0) {
+    defaultProductionDataRoot(defaults); // validate this supported platform even before its first choice
+    return { dataRoot: null, defaulted: true };
+  }
   requireLaunch(rest.length === 2 && rest[0] === '--data-root' && typeof rest[1] === 'string' && isAbsolute(rest[1]));
   return { dataRoot: resolve(rest[1]), defaulted: false };
 }
 
 /** The `start-built` arguments this launch forwards. */
 export function startBuiltArguments(dataRoot) {
+  if (dataRoot === null) return ['--trusted-operational-scope', 'ordinary-production', '--allow-first-run-chooser', 'true'];
   return ['--data-root', dataRoot, '--trusted-operational-scope', 'ordinary-production'];
 }
 
 async function main() {
   const launch = parseProductionLaunchArguments(process.argv.slice(2));
-  process.stdout.write(`AI7 本机正式使用 · 产品数据位置：${launch.dataRoot}\n`);
-  const child = spawn(process.execPath, [START_BUILT, ...startBuiltArguments(launch.dataRoot)], {
+  let dataRoot = launch.dataRoot;
+  if (dataRoot === null) {
+    const { readStartupDataChoice } = await import(pathToFileURL(resolve(ROOT, 'dist', 'shared', 'data-root.mjs')).href);
+    dataRoot = await readStartupDataChoice(defaultProductionDataRoot());
+  }
+  process.stdout.write(dataRoot === null ? 'AI7 本机正式使用 · 首次运行请选择数据位置\n' : `AI7 本机正式使用 · 产品数据位置：${dataRoot}\n`);
+  const child = spawn(process.execPath, [START_BUILT, ...startBuiltArguments(dataRoot)], {
     cwd: ROOT,
     env: process.env,
     stdio: 'inherit',

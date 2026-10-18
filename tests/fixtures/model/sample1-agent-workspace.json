@@ -1,0 +1,40 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-agent-workspace",
+  "description": "Authored provider-free Agent 工作区 answer (Issue #90, wave 13 slice 13a) layered over sample1-dialogue-retrieval, so J-16 reads every earlier answer exactly as before. One 修改要求, 请让这段的表达更凝练，给出一组修改。, is answered under unit ordinal 0 by the dialogue contract's request digest as a change set over one paragraph of exact sample1: two anchored replacements quoting it and one whose words are not in it, which the workspace drops and discloses. It streams in two text deltas. A second 修改要求, 请只就最需要的一处给出修改。, is answered with a set of one replacement over the same paragraph.",
+  "provenance": "authored",
+  "basedOn": "sample1-dialogue-retrieval",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "aa5ef4594b21112d61aa6eb63d3c491db9efe0e2931b0c595467b74280193630",
+      "response": {
+        "kind": "answer-chunks",
+        "chunks": [
+          "{\"schema\":\"ai7.agent-workspace.change-set/1\",\"items\":[{\"anchor\":\"其存在的意义被视为国宝中的国宝\",\"proposedText\":\"被视为国宝中的国宝\",\"rationale\":\"删去「其存在的意义」，判断直接落在器物上，更凝练。\"},",
+          "{\"anchor\":\"用如此器物作为评价\",\"proposedText\":\"以如此重器作比\",\"rationale\":\"「作比」比「作为评价」更简洁，也点明器物之重。\"},{\"anchor\":\"这一句并不在所选范围之中\",\"proposedText\":\"这一句也不在\",\"rationale\":\"用来验证所选范围以外的提议会被拦下。\"}]}"
+        ],
+        "usage": {
+          "inputTokens": 260,
+          "outputTokens": 90
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "791d954ebc38a92562493357f6c557684a919e4603ac599ea88bff16bd20e67f",
+      "response": {
+        "kind": "answer-chunks",
+        "chunks": [
+          "{\"schema\":\"ai7.agent-workspace.change-set/1\",\"items\":[{\"anchor\":\"可见曾本之所谓七十小寿寿宴的确非同寻常\",\"proposedText\":\"可见曾本之这场七十小寿寿宴的确非同寻常\",\"rationale\":\"「这场」比「所谓」更贴合叙述者对寿宴的态度。\"}]}"
+        ],
+        "usage": {
+          "inputTokens": 250,
+          "outputTokens": 40
+        }
+      }
+    }
+  ]
+}

@@ -36,6 +36,8 @@ import {
   VALIDATION_CASE_ARGUMENT,
   VALIDATION_DELTA_ARGUMENT,
   parseTrustedLaunchForm,
+  type AgentWorkspaceProjection,
+  type AgentWorkspaceProposalSetInput,
   type AskAboutSelectionInput,
   type UsageCsvExportResult,
   type InspectFastInteractionRequestInput,
@@ -46,6 +48,7 @@ import {
   type InspectDialogueInput,
   type InspectTaskIntentDraftsInput,
   type PromoteAnswerToTaskIntentDraftInput,
+  type ProposeAgentWorkspaceChangeSetInput,
   type PromoteTaskIntentDraftInput,
   type SaveTaskIntentDraftInput,
   type TaskIntentDraftProjection,
@@ -99,8 +102,10 @@ import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/prov
 import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
+import { chooseStartupDataRoot, type StartupLocationChoice } from './startup-data-root.js';
 import { createNotifier, NOTIFICATION_CHANNELS } from './notifications.js';
 import { isOrdinaryOutcome } from '../renderer/notification-labels.js';
+import { STARTUP_LOCATION_LABELS } from '../renderer/onboarding-labels.js';
 import { PREFERENCE_IPC_CHANNELS } from '../shared/preferences.js';
 import { APPEARANCE_IPC_CHANNEL, type AppearanceState } from '../shared/appearance.js';
 import {
@@ -109,10 +114,16 @@ import {
   ensureCanonicalDataDirectory,
   inspectBoundedDataFootprint,
   requireSameCanonicalDataDirectory,
+  resolveDevelopmentSampleBook,
+  defaultProductionDataRoot,
+  readStartupDataChoice,
+  requireStartupChoiceOutsideDataRoot,
+  storeStartupDataChoice,
 } from '../shared/data-root.js';
 
 interface LaunchArguments {
-  dataRoot: string;
+  dataRoot: string | undefined;
+  allowFirstRunChooser: boolean;
   /** The trusted launch form (ADR 0065): scope, ceiling, and cache root exactly as the launcher passed them. */
   launchForm: TrustedLaunchForm;
   injectedPickerPath: string | undefined;
@@ -230,6 +241,7 @@ function parseArguments(argv: string[]): LaunchArguments {
         value !== undefined &&
         !values.has(key) &&
         (key === '--data-root' ||
+          key === '--allow-first-run-chooser' ||
           key === '--j01-picker-path' ||
           key === '--j02-picker-path' ||
           key === '--j08-picker-path' ||
@@ -274,7 +286,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     values.set(key, value);
   }
   const dataRoot = values.get('--data-root');
-  requireDesktop(dataRoot !== undefined && isAbsolute(dataRoot));
+  requireDesktop(dataRoot === undefined || isAbsolute(dataRoot));
   // The trusted launch form: an unknown scope, a malformed ceiling, a relative cache root, or a developer-live launch that
   // names no development validation denies startup.
   const launchForm = parseTrustedLaunchForm({
@@ -285,6 +297,10 @@ function parseArguments(argv: string[]): LaunchArguments {
     validationDelta: values.get(VALIDATION_DELTA_ARGUMENT),
   });
   requireDesktop(launchForm !== null);
+  const allowFirstRunChooser = values.get('--allow-first-run-chooser') === 'true';
+  requireDesktop(!values.has('--allow-first-run-chooser') || (allowFirstRunChooser && dataRoot === undefined && launchForm.trustedOperationalScope === 'ordinary-production'));
+  requireDesktop(dataRoot !== undefined || allowFirstRunChooser);
+  if (allowFirstRunChooser) requireDesktop([...values.keys()].every((key) => ['--allow-first-run-chooser', '--trusted-operational-scope', '--launcher-pid'].includes(key)));
   requireDesktop(launchForm.providerCacheRoot === null || isAbsolute(launchForm.providerCacheRoot));
   const j01PickerPath = values.get('--j01-picker-path');
   const j02PickerPath = values.get('--j02-picker-path');
@@ -473,6 +489,7 @@ function parseArguments(argv: string[]): LaunchArguments {
   );
   return {
     dataRoot,
+    allowFirstRunChooser,
     launchForm,
     injectedPickerPath,
     injectedSavePath,
@@ -1060,6 +1077,7 @@ function registerRendererHandlers(
       );
     }
     if (draftId !== undefined) owned.importTargets.set(draftId, importTargetFromCommittedResult(result));
+    completeOnboarding();
   };
   const captureImportRecoveryTarget = (
     owned: OwnedRendererWindow,
@@ -1723,6 +1741,21 @@ function registerRendererHandlers(
         const selectedPath = await chooseManuscript(owned);
         if (!selectedPath) return { status: 'cancelled' as const };
         const staged = await service.call('stageSelectedManuscript', { selectionToken: randomUUID(), selectedPath });
+        rememberImportDraft(owned, staged.draftId);
+        return { status: 'staged' as const, staged };
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.importBundledSampleBook, (event, ...args: unknown[]) =>
+    envelope<PickerStageResult>(async () => {
+      const owned = requireSender(event);
+      // The shared preload invoke helper sends one `undefined` for a zero-input operation.
+      requireDesktop(args.length <= 1 && args[0] === undefined, 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        claims.requireNewDraftCapacity(owned);
+        const selectedPath = await resolveDevelopmentSampleBook(resolve(__dirname, '..', '..'), app.isPackaged ? 'packaged' : 'source-checkout');
+        const staged = await service.call('importBundledSampleBook', { selectionToken: randomUUID(), selectedPath });
         rememberImportDraft(owned, staged.draftId);
         return { status: 'staged' as const, staged };
       });
@@ -2570,12 +2603,21 @@ function registerRendererHandlers(
       return serializeEffect<unknown>(() => searchOps[op](input));
     }));
   }
+  const completeOnboarding = (): void => {
+    try {
+      if (preferences.read().values['onboarding.state'] !== 'completed') preferences.save({ key: 'onboarding.state', value: 'completed' });
+    } catch {
+      // The Book has already committed; a local preference write must never turn that success into a retry.
+      process.stderr.write('AI7_ONBOARDING/preference-write-failed\n');
+    }
+  };
   ipcMain.handle(IPC_CHANNELS.commitBookCreation, (event, input: ServiceOperationMap['commitBookCreation']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
       return serializeEffect(async () => {
         requireAuthority();
         const result = await service.call('commitBookCreation', input);
+        completeOnboarding();
         bindPresentedBook(owned, result.overview.book.bookId, result.overview.book.title);
         return result;
       });
@@ -5260,6 +5302,69 @@ function registerRendererHandlers(
       });
     }),
   );
+  // Agent 工作区 (Issue #90, wave 13 slice 13a; UI ADR 0015): always the route's Book, never the renderer's. A round takes the
+  // exact selection of the manuscript this window holds and the instruction; promotion and 放弃 name only the held round.
+  const requireWorkspaceOfRoute = (route: { bookId: string }, result: AgentWorkspaceProjection): AgentWorkspaceProjection => {
+    if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', 'Agent 工作区不属于当前图书工作台。');
+    return result;
+  };
+  ipcMain.handle(IPC_CHANNELS.inspectAgentWorkspace, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectAgentWorkspace', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      return requireWorkspaceOfRoute(route, result);
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.proposeAgentWorkspaceChangeSet, (event, input: ProposeAgentWorkspaceChangeSetInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && input.selection !== null && typeof input.selection === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        requireManuscriptCapability(owned, input.selection);
+        const result = await service.call('proposeAgentWorkspaceChangeSet', { bookId: route.bookId, selection: input.selection, instruction: input.instruction });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return requireWorkspaceOfRoute(route, result);
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.promoteAgentWorkspaceProposals, (event, input: AgentWorkspaceProposalSetInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('promoteAgentWorkspaceProposals', { bookId: route.bookId, proposalSetId: input.proposalSetId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', 'Agent 工作区不属于当前图书工作台。');
+        requireWorkspaceOfRoute(route, result.workspace);
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.discardAgentWorkspaceProposals, (event, input: AgentWorkspaceProposalSetInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('discardAgentWorkspaceProposals', { bookId: route.bookId, proposalSetId: input.proposalSetId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return requireWorkspaceOfRoute(route, result);
+      });
+    }),
+  );
   // 润色这段 (Issue #842): the exact selection of the manuscript this window holds, of the route's Book; the renderer names
   // neither the Book nor anything sent. Its request, and a regeneration's, are read again bound to the route's Book.
   ipcMain.handle(IPC_CHANNELS.inspectFastInteractionRoutes, (event) =>
@@ -6155,6 +6260,48 @@ export async function runApplication(): Promise<void> {
     app.enableSandbox();
     startupLocation = reachStartup('data-root');
     const codeRoot = resolve(__dirname, '..', '..');
+    if (launch.allowFirstRunChooser) {
+      // The launcher owns the temporary sibling and cleans it only after this Electron process exits.
+      const bootstrapRoot = app.commandLine.getSwitchValue('user-data-dir');
+      requireDesktop(isAbsolute(bootstrapRoot));
+      app.setPath('userData', bootstrapRoot);
+      const defaultRoot = defaultProductionDataRoot();
+      let decision = chooseStartupDataRoot({}, await readStartupDataChoice(defaultRoot), { dataRoot: defaultRoot });
+      if (decision.kind === 'choose') {
+        await app.whenReady();
+        installChromiumDenial(session.defaultSession);
+        while (decision.kind === 'choose') {
+          const labels = STARTUP_LOCATION_LABELS;
+          const answer = await dialog.showMessageBox({
+            type: 'question', title: labels.title, message: labels.message, detail: labels.defaultLocation(defaultRoot),
+            buttons: [labels.useDefault, labels.chooseFolder, labels.cancel], defaultId: 0, cancelId: 2, noLink: true,
+          });
+          let choice: StartupLocationChoice = { kind: 'cancel' };
+          if (answer.response === 0) choice = { kind: 'default' };
+          else if (answer.response === 1) {
+            const folder = await dialog.showOpenDialog({ title: labels.folderTitle, properties: ['openDirectory', 'createDirectory'] });
+            if (!folder.canceled && folder.filePaths.length === 1) choice = { kind: 'folder', path: folder.filePaths[0]! };
+          }
+          decision = chooseStartupDataRoot({ choice }, null, { dataRoot: defaultRoot });
+          if (decision.kind === 'ready') {
+            try {
+              requireStartupChoiceOutsideDataRoot(defaultRoot, decision.dataRoot);
+              const canonical = await createCanonicalProductionDataRoot(decision.dataRoot, codeRoot);
+              await storeStartupDataChoice(defaultRoot, canonical);
+              decision = { kind: 'ready', dataRoot: canonical };
+            } catch {
+              await dialog.showMessageBox({ type: 'error', title: labels.refusedTitle, message: labels.refusedMessage, buttons: [labels.refusedBack] });
+              decision = { kind: 'choose', defaultRoot };
+            }
+          }
+        }
+      }
+      // 70 = chooser complete, 71 = cancelled. Only the explicitly flagged launcher consumes these codes:
+      // it survives this child's exit, reloads the choice and starts the ordinary explicit-root child, preserving its lease.
+      app.exit(decision.kind === 'quit' ? 71 : 70);
+      return;
+    }
+    requireDesktop(launch.dataRoot !== undefined);
     // An ordinary-production data root is also kept apart from the developer caches (Issue #811), as the launcher kept it.
     const dataRoot = launch.launchForm.trustedOperationalScope === 'ordinary-production'
       ? await createCanonicalProductionDataRoot(launch.dataRoot, codeRoot)
@@ -6404,8 +6551,8 @@ export async function runApplication(): Promise<void> {
       return {
         platform: windows ? 'windows' : 'macos',
         platformLabel: windows ? 'Windows' : 'macOS',
-        runtimeForm: 'source-checkout',
-        runtimeFormLabel: '源码检出运行',
+        runtimeForm: app.isPackaged ? 'packaged' : 'source-checkout',
+        runtimeFormLabel: app.isPackaged ? '安装版运行' : '源码检出运行',
         locationLabel: '本机产品数据位置',
         canonicalRoot: dataRoot,
         footprint: {

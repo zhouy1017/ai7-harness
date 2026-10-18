@@ -139,3 +139,39 @@ export function dialogueQuestion(value: unknown): string {
   if (questionHoldsContractMarks(question)) throw new DialogueError('DIALOGUE_QUESTION_INVALID', '问题里不能有「【所选文字】」这类标记。');
   return question;
 }
+
+/**
+ * The Agent 工作区 fragment (Issue #90, wave 13 slice 13a; ADR 0045 "Book-bound presentation and Apply"; UI ADR 0015): the
+ * frozen words one workspace turn adds to the dialogue contract above, which is otherwise unchanged. The turn is a dialogue
+ * turn of the `editorial-dialogue` kind — the selected words and the editor's instruction, as `buildDialogueMessage` writes
+ * them, under the rule the selected policy names for the dialogue — and the fragment asks for a change set: anchored
+ * replacements of words inside the selection, each with a one-line reason. The answer still changes nothing and proposes
+ * nothing on its own; it becomes 修改建议 only through the editor's own 提交为修改建议, and is applied only through the
+ * existing Mark Cards and Apply.
+ *
+ * The workspace contract is the dialogue contract with this fragment appended to its system prompt; its digest is what the
+ * workspace turn's Execution Binding records, so a workspace turn is told from a dialogue turn in the ledger.
+ */
+export const AGENT_WORKSPACE_RESULT_SCHEMA = 'ai7.agent-workspace.change-set/1' as const;
+/** The most items one change set may carry; any further one is dropped and disclosed. */
+export const MAX_AGENT_WORKSPACE_ITEMS = 12;
+/** The longest one-line reason an item may give, in characters. */
+export const MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS = 200;
+
+export const AGENT_WORKSPACE_FRAGMENT = [
+  '这是 Agent 工作区的一轮变更集提议：编辑写下的【问题】是一条修改要求，请就【所选文字】提出一组修改。',
+  '每一项必须从【所选文字】中原样摘出要替换的一小段文字（anchor），它在【所选文字】中只能出现一次；给出替换后的文字（proposedText）和一行简短理由（rationale）。',
+  `最多 ${MAX_AGENT_WORKSPACE_ITEMS} 项，各项摘出的文字互不重叠；没有需要修改的地方就返回空列表。`,
+  `只输出一个 JSON 对象，不要输出其他文字：{"schema":"${AGENT_WORKSPACE_RESULT_SCHEMA}","items":[{"anchor":"…","proposedText":"…","rationale":"…"}]}`,
+  '这些提议只是候选：是否提交为修改建议、是否采纳和应用，都由编辑决定。',
+].join('\n');
+
+export const AGENT_WORKSPACE_PROMPT_CONTRACT = {
+  ...DIALOGUE_PROMPT_CONTRACT,
+  schema: 'ai7.dialogue-prompt-contract/agent-workspace-1',
+  contractVersion: 'ai7.editorial-dialogue/agent-workspace-1',
+  systemPrompt: `${DIALOGUE_PROMPT_CONTRACT.systemPrompt}\n${AGENT_WORKSPACE_FRAGMENT}`,
+  resultSchema: AGENT_WORKSPACE_RESULT_SCHEMA,
+} as const;
+
+export const AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST = sha256Hex(canonicalJson(AGENT_WORKSPACE_PROMPT_CONTRACT));

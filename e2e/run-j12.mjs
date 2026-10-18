@@ -360,8 +360,8 @@ async function createEmptyBook(renderer, title) {
   return bookId;
 }
 
-async function importBook(renderer, title) {
-  await click(renderer, '导入稿件', 'import-open');
+async function importBook(renderer, title, bundled = false) {
+  await click(renderer, bundled ? '导入示例书' : '导入稿件', 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-new-book');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship');
@@ -664,16 +664,17 @@ async function main() {
     await mkdir(resolve(shellRoot, 'crashes'));
     await writeFile(resolve(shellRoot, 'crashes', '2026-10-17T00-00-00.000Z-render-process-gone.json'), JSON.stringify({
       instant: '2026-10-17T00:00:00.000Z', kind: 'render-process-gone', reason: 'crashed', exitCode: 1,
-      appVersion: '0.1.0', dataVersion: 83, protocol: 151, platform: process.platform, arch: process.arch,
+      appVersion: '0.1.0', dataVersion: 83, protocol: 157, platform: process.platform, arch: process.arch,
       electron: '43.4.1', uptimeSeconds: 1, stack: '    at <redacted-path>:12:3',
     }), { flag: 'wx' });
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
-    const launch = async (picker, savePath) => {
+    const launch = async (picker, savePath, startupDataRoot = dataRoot) => {
+      const startupShellRoot = await ensureCanonicalDataDirectory(startupDataRoot, 'shell');
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
-        '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
-        resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot,
+        '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${startupShellRoot}`,
+        resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', startupDataRoot,
         '--j12-observe-reveal', 'true', '--launcher-pid', String(process.pid),
         '--j12-diagnostics-folder', diagnosticsDestination,
       ];
@@ -691,6 +692,37 @@ async function main() {
     };
     launchForCleanup = launch;
     const close = closeOwnedBrowser;
+
+    at('first-run-card');
+    const onboardingRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'onboarding-data'), checkout);
+    let onboardingManager = await launch(syntheticDocx, undefined, onboardingRoot);
+    let [onboardingPage] = await waitForRendererCount(onboardingManager, 1, 'onboarding-initial-window');
+    await waitFor(onboardingPage, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'first-run-card-visible');
+    await assertRenderer(onboardingPage, `(() => { const card=document.querySelector('[data-onboarding-card]'); const labels=Array.from(document.querySelectorAll('button')).map(node=>node.textContent); return labels.includes('新建图书') && labels.includes('导入稿件') && card.textContent.includes('本地编辑与恢复不依赖模型服务') && card.querySelector('.onboarding-data-location')?.textContent===${JSON.stringify(onboardingRoot)}; })()`, 'first-run-actions-and-location');
+    at('first-run-skip-persists');
+    await click(onboardingPage, '跳过引导', 'first-run-skip');
+    await waitFor(onboardingPage, `!document.querySelector('[data-onboarding-card]')`, 'first-run-skip-hidden');
+    await close();
+    onboardingManager = await launch(undefined, undefined, onboardingRoot);
+    [onboardingPage] = await waitForRendererCount(onboardingManager, 1, 'onboarding-restart-window');
+    await waitFor(onboardingPage, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'onboarding-restart-ready');
+    await assertRenderer(onboardingPage, `(async () => (await window.ai7.getPreferences()).values['onboarding.state']==='skipped' && !document.querySelector('[data-onboarding-card]'))()`, 'first-run-skip-remembered');
+    await close();
+    at('sample-book-import');
+    const sampleRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'sample-onboarding-data'), checkout);
+    onboardingManager = await launch(undefined, undefined, sampleRoot);
+    [onboardingPage] = await waitForRendererCount(onboardingManager, 1, 'sample-onboarding-window');
+    await waitFor(onboardingPage, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'sample-onboarding-ready');
+    const sampleBook = await importBook(onboardingPage, 'J12 示例图书', true);
+    await assertRenderer(onboardingPage, `(async () => { const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(sampleBook.bookId)},historyCursor:null}); return overview.records.some(record=>record.kind==='source' && record.sourceDigest==='b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483') && (await window.ai7.getPreferences()).values['onboarding.state']==='completed'; })()`, 'sample-admitted-source-and-completion');
+    at('guided-strip');
+    await waitFor(onboardingPage, `document.querySelector('[data-onboarding-guidance="sample-book"]')`, 'guided-strip-visible');
+    await assertRenderer(onboardingPage, `(async () => { const labels=Array.from(document.querySelectorAll('[data-onboarding-step]')).map(node=>node.textContent); const tasks=await window.ai7.inspectBookTasks(); return labels.join(',')==='分析,审阅,标记,导出' && !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`, 'guided-strip-navigation-only');
+    await assertRenderer(onboardingPage, `(() => { const link=document.querySelector('[data-onboarding-guidance="sample-book"] button[data-onboarding-step="analysis"]'); if(!(link instanceof HTMLButtonElement)||link.disabled)return false; link.click(); return true; })()`, 'guided-analysis-link');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="book-analysis"]')`, 'guided-analysis-page');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card[data-analysis-state="unavailable"]')`, 'guided-analysis-prerequisite');
+    await assertRenderer(onboardingPage, `(async () => { const tasks=await window.ai7.inspectBookTasks(); return !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`, 'guided-analysis-not-started');
+    await close();
 
     at('offline-empty-and-import');
     let manager = await launch(syntheticDocx);
@@ -1254,7 +1286,7 @@ async function main() {
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
     const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v15.json'), 'utf8'));
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 83 && diagnosticsSummary.protocol === 155 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 83 && diagnosticsSummary.protocol === 157 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');

@@ -101,6 +101,9 @@ export function createPreferenceStore(directory: string, files: PreferenceFileSy
       if (!isPreferenceKey(key)) throw new PreferenceError(PREFERENCE_ERRORS.unknownKey.code, PREFERENCE_ERRORS.unknownKey.message);
       const definition: PreferenceDefinition<unknown> = PREFERENCE_KEYS[key];
       if (!definition.validate(value)) throw new PreferenceError(PREFERENCE_ERRORS.invalidValue.code, PREFERENCE_ERRORS.invalidValue.message);
+      if (key === 'onboarding.state' && value === null && load().values['onboarding.state'] !== null) {
+        throw new PreferenceError(PREFERENCE_ERRORS.invalidValue.code, PREFERENCE_ERRORS.invalidValue.message);
+      }
       const values = { ...load().values, [key]: value } as PreferenceValues;
       const envelope: PreferencesEnvelope = { version: PREFERENCES_ENVELOPE_VERSION, values };
       // Written beside the file and renamed over it: a reader sees the old file or the new one, never a part of either.
