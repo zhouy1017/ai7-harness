@@ -1,0 +1,87 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { channelDescription, dataLocationSyncWarning, packagedLaunchForm, readDistributionChannel, resolveChannel,
+  resolvePackagedDataLocation } from '../../src/main/channel.js';
+import { storeStartupDataChoice } from '../../src/shared/data-root.js';
+
+let root: string;
+let codeRoot: string;
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), 'ai7-channel-'));
+  codeRoot = join(root, 'AI7', 'app', 'resources', 'app');
+  await mkdir(codeRoot, { recursive: true });
+});
+afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+
+describe('distribution marker and packaged authority', () => {
+  it('identifies only a valid host-matching marker and preserves source-checkout identity', async () => {
+    const marker = { channel: 'windows-portable', softwareVersion: '0.1.0' };
+    expect(resolveChannel(false, marker, 'win32')).toBe('source-checkout');
+    expect(resolveChannel(true, marker, 'win32')).toBe('windows-portable');
+    expect(resolveChannel(true, { ...marker, channel: 'windows-installer' }, 'win32')).toBe('windows-installer');
+    expect(resolveChannel(true, { ...marker, channel: 'macos-dmg' }, 'darwin')).toBe('macos-dmg');
+    for (const invalid of [null, [], {}, { channel: 'windows-portable' }, { ...marker, channel: 'other' }, { ...marker, extra: true }]) {
+      expect(resolveChannel(true, invalid, 'win32')).toBe('packaged');
+    }
+    expect(resolveChannel(true, marker, 'darwin')).toBe('packaged');
+    expect(await readDistributionChannel(true, root)).toBe('packaged');
+    await writeFile(join(root, 'channel.json'), '{');
+    expect(await readDistributionChannel(true, root)).toBe('packaged');
+    await writeFile(join(root, 'channel.json'), JSON.stringify(marker));
+    expect(await readDistributionChannel(true, root)).toBe('windows-portable');
+    expect(await readDistributionChannel(false, root)).toBe('source-checkout');
+  });
+  it('derives production scope without a launcher and refuses arbitrary launch controls', () => {
+    expect(packagedLaunchForm([])).toEqual({ selfCheck: false, launchForm: {
+      trustedOperationalScope: 'ordinary-production', runBudgetCeiling: null, providerCacheRoot: null, validation: null,
+    } });
+    expect(packagedLaunchForm(['--self-check']).selfCheck).toBe(true);
+    for (const args of [['--data-root', root], ['--trusted-operational-scope', 'developer-live'], ['--launcher-pid', '1'],
+      ['--self-check', '--self-check'], ['--j04-model-adapter', 'fixture']]) expect(() => packagedLaunchForm(args)).toThrow();
+  });
+});
+
+describe('channel-owned product data location', () => {
+  const windows = () => ({ codeRoot, executablePath: join(root, 'AI7', 'app', 'AI7.exe'), platform: 'win32', env: { LOCALAPPDATA: join(root, 'local') } });
+  it('uses the sibling portable data directory and keeps the actual production boundary enforced', async () => {
+    const location = await resolvePackagedDataLocation({ ...windows(), channel: 'windows-portable' });
+    expect(location).toEqual({ dataRoot: join(root, 'AI7', 'data'), exception: null });
+    await expect(resolvePackagedDataLocation({ ...windows(), channel: 'windows-portable', codeRoot: join(root, 'AI7') }))
+      .rejects.toThrow('AI7_DATA_ROOT_BOUNDARY_INVALID');
+  });
+  it('falls back only on portable write failure and names the exception plainly', async () => {
+    const location = await resolvePackagedDataLocation({ ...windows(), channel: 'windows-portable', writable: async (path) => {
+      if (path === join(root, 'AI7', 'data')) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    } });
+    expect(location).toEqual({ dataRoot: join(root, 'local', 'ai7', 'production'), exception: 'portable-unwritable' });
+    expect(channelDescription('windows-portable', location.exception)).toContain('复制 AI7 文件夹不会带走这些数据');
+  });
+  it('honors the installer stored choice, while portable never reads it', async () => {
+    const defaultRoot = join(root, 'local', 'ai7', 'production');
+    expect((await resolvePackagedDataLocation({ ...windows(), channel: 'windows-installer' })).dataRoot).toBe(defaultRoot);
+    const chosen = join(root, 'chosen');
+    await storeStartupDataChoice(defaultRoot, chosen);
+    expect((await resolvePackagedDataLocation({ ...windows(), channel: 'windows-installer' })).dataRoot).toBe(chosen);
+    expect((await resolvePackagedDataLocation({ ...windows(), channel: 'windows-portable' })).dataRoot).toBe(join(root, 'AI7', 'data'));
+  });
+  it('uses bundle-id Application Support for DMG and never silently falls back', async () => {
+    const options = { channel: 'macos-dmg' as const, codeRoot, executablePath: join(root, 'AI7.app', 'Contents', 'MacOS', 'AI7'), platform: 'darwin', home: root };
+    expect((await resolvePackagedDataLocation(options)).dataRoot).toBe(join(root, 'Library', 'Application Support', 'io.github.zhouy1017.ai7', 'production'));
+    await expect(resolvePackagedDataLocation({ ...options, writable: async () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); } })).rejects.toThrow('denied');
+  });
+  it('warns without changing a known sync location', () => {
+    const synced = join(root, 'OneDrive', 'AI7', 'data');
+    expect(dataLocationSyncWarning(synced, {})).toContain('未公开的编辑材料');
+    expect(dataLocationSyncWarning(join(root, 'plain'), {})).toBeNull();
+    expect(dataLocationSyncWarning(join(root, 'custom', 'data'), { OneDrive: join(root, 'custom') })).not.toBeNull();
+  });
+});
+
+it('integrates self-check before creating windows and keeps the source-checkout lease guarded', async () => {
+  const source = await readFile(new URL('../../src/main/application.ts', import.meta.url), 'utf8');
+  expect(source.indexOf('if (packaged?.selfCheck)')).toBeLessThan(source.indexOf('const initialWindow = await createOwnedWindow'));
+  expect(source).toContain("await service.call('inspectDataVersion', {})");
+  expect(source).toContain('app.relaunch({ args: [] })');
+});

@@ -53,6 +53,7 @@ declare module 'electron' {
     enableSandbox(): void;
     getPath(name: 'userData' | 'documents'): string;
     requestSingleInstanceLock(): boolean;
+    relaunch(options: { args: string[] }): void;
     setPath(name: 'userData', path: string): void;
     whenReady(): Promise<void>;
     on(event: string, listener: (...args: any[]) => void): void;

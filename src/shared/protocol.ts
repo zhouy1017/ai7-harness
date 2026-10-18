@@ -2133,11 +2133,18 @@ export interface BookWorkbenchOpenProjection {
   target: 'requesting-window' | 'existing-window' | 'new-window';
 }
 
+export type DistributionChannel = 'source-checkout' | 'windows-installer' | 'windows-portable' | 'macos-dmg' | 'packaged';
+
 export interface ProductDataLocationProjection {
   platform: 'windows' | 'macos';
   platformLabel: 'Windows' | 'macOS';
   runtimeForm: 'source-checkout' | 'packaged';
   runtimeFormLabel: '源码检出运行' | '安装版运行';
+  channel: DistributionChannel;
+  channelLabel: '源码检出' | '安装版' | '便携版' | 'macOS 磁盘映像' | '未知渠道';
+  channelDescription: string;
+  dataLocationException: 'portable-unwritable' | null;
+  syncWarning: string | null;
   locationLabel: '本机产品数据位置';
   canonicalRoot: string;
   footprint: {

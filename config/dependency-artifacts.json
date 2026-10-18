@@ -40,8 +40,14 @@
       "license": "MIT and bundled third-party notices",
       "notice": "https://github.com/electron/electron/blob/v43.4.1/LICENSE",
       "requiredNoticeFiles": [
-        { "id": "electron-license", "relativePath": "LICENSE" },
-        { "id": "electron-chromium-notices", "relativePath": "LICENSES.chromium.html" }
+        {
+          "id": "electron-license",
+          "relativePath": "LICENSE"
+        },
+        {
+          "id": "electron-chromium-notices",
+          "relativePath": "LICENSES.chromium.html"
+        }
       ]
     },
     {
@@ -55,9 +61,71 @@
       "license": "MIT and bundled third-party notices",
       "notice": "https://github.com/electron/electron/blob/v43.4.1/LICENSE",
       "requiredNoticeFiles": [
-        { "id": "electron-license", "relativePath": "LICENSE" },
-        { "id": "electron-chromium-notices", "relativePath": "LICENSES.chromium.html" }
+        {
+          "id": "electron-license",
+          "relativePath": "LICENSE"
+        },
+        {
+          "id": "electron-chromium-notices",
+          "relativePath": "LICENSES.chromium.html"
+        }
       ]
+    },
+    {
+      "id": "packager-7zip-windows-x64",
+      "kind": "packager-secondary-artifact",
+      "platform": "win32",
+      "arch": "x64",
+      "fileName": "7zip-win-x64.tar.gz",
+      "url": "https://github.com/electron-userland/electron-builder-binaries/releases/download/7zip@1.0.0/7zip-win-x64.tar.gz",
+      "sha256": "be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3",
+      "size": 491982,
+      "cacheDirectory": "7zip@1.0.0",
+      "license": "LGPL-2.1-or-later with unRAR restriction",
+      "notice": "https://github.com/electron-userland/electron-builder-binaries",
+      "sha256Source": "electron-builder@26.15.3: app-builder-lib/out/toolsets/7zip.js"
+    },
+    {
+      "id": "packager-7zip-macos-arm64",
+      "kind": "packager-secondary-artifact",
+      "platform": "darwin",
+      "arch": "arm64",
+      "fileName": "7zip-darwin-arm64.tar.gz",
+      "url": "https://github.com/electron-userland/electron-builder-binaries/releases/download/7zip@1.0.0/7zip-darwin-arm64.tar.gz",
+      "sha256": "496a341abe210aae1a25bc202ee97f6de6c76a3dc80f91d96616be05502d72c1",
+      "size": 2599879,
+      "cacheDirectory": "7zip@1.0.0",
+      "license": "LGPL-2.1-or-later with unRAR restriction",
+      "notice": "https://github.com/electron-userland/electron-builder-binaries",
+      "sha256Source": "electron-builder@26.15.3: app-builder-lib/out/toolsets/7zip.js"
+    },
+    {
+      "id": "packager-nsis-windows-x64",
+      "kind": "packager-secondary-artifact",
+      "platform": "win32",
+      "arch": "x64",
+      "fileName": "nsis-bundle-3.12.tar.gz",
+      "url": "https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis@1.2.1/nsis-bundle-3.12.tar.gz",
+      "sha256": "56997fdefe25e7928a1a68b4583d08b240b66cf660234053b20131a74cc082f4",
+      "size": 4337619,
+      "cacheDirectory": "nsis@1.2.1",
+      "license": "zlib/libpng and bundled plugin notices",
+      "notice": "https://github.com/electron-userland/electron-builder-binaries",
+      "sha256Source": "electron-builder@26.15.3: app-builder-lib/out/toolsets/windows.js"
+    },
+    {
+      "id": "packager-dmg-macos-arm64",
+      "kind": "packager-secondary-artifact",
+      "platform": "darwin",
+      "arch": "arm64",
+      "fileName": "dmgbuild-bundle-arm64-75c8a6c.tar.gz",
+      "url": "https://github.com/electron-userland/electron-builder-binaries/releases/download/dmg-builder@1.2.5/dmgbuild-bundle-arm64-75c8a6c.tar.gz",
+      "sha256": "793404d0c96687e27d5ee40a668d498c92e36a64d6c2906df511031adb33cbeb",
+      "size": 22995919,
+      "cacheDirectory": "dmg-builder@1.2.5",
+      "license": "MIT and bundled tool notices",
+      "notice": "https://github.com/electron-userland/electron-builder-binaries",
+      "sha256Source": "electron-builder@26.15.3: dmg-builder/out/dmgUtil.js; GitHub release asset digest and size"
     }
   ]
 }
