@@ -1,6 +1,6 @@
 # AI7 Initial v1.0.0 Development Milestone scope
 
-Status: Owner-confirmed on 2026-10-13 (decision record kept by the Commander outside the repository); landed by wave 1's documentation slice (#832). Under [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md) the boundary is crossed only when a separately authorized completion Issue and pull request name the exact `dev` commit containing this scope, followed by the consolidated Windows/macOS re-entry validation. Promotion to `main`, tags, packaging signatures, notarization and release stay separate.
+Status: Owner-confirmed on 2026-10-13 (decision record kept by the Commander outside the repository); landed by wave 1's documentation slice (#832). Under [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md) the boundary is crossed only when a separately authorized completion Issue and pull request integrate a stable record naming the exact `dev` commit containing this scope. The consolidated Windows/macOS re-entry validation follows as a separate authorized step. Promotion to `main`, tags, packaging signatures, notarization and release stay separate.
 
 The Owner defines 1.0.0 as **every designed capability** in the PRD, `docs/ui-ux-v2/editor-surfaces.md` and `docs/ui-ux-v2/requirements.md`, except the items listed under "Outside 1.0.0". Delivery order lives in the [development plan](development-plan.md); this file only fixes what is in and what is out.
 
@@ -44,9 +44,9 @@ OCR for the Material Index; auto-update via GitHub Releases; plugin analysis kin
 
 ## Completion record (ADR 0054)
 
-This is the stable record that [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md) requires, integrated by the separately authorized completion Issue [#972](https://github.com/zhouy1017/ai7-harness/issues/972). It names one exact `dev` commit:
+This is the stable record required by [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md) under the separately authorized completion Issue [#972](https://github.com/zhouy1017/ai7-harness/issues/972). The boundary is crossed only when this record integrates into `dev`; a Draft PR or a slice merge into a wave does not cross it. It names one exact `dev` commit:
 
-**`c2f4fff3faf8b7e3033545a0e1e23c1ca29c752b`** — the squash merge of wave 14's final integration, [PR #971](https://github.com/zhouy1017/ai7-harness/pull/971). That commit contains the Owner-confirmed complete initial-v1.0.0 development scope above: every row of the "In scope" table was integrated into `dev` by waves 1–14, each through one reviewed final wave PR. The Owner's confirmation of the scope is the decision record kept outside the repository named in the status line; what follows is only what `git` proves about the integration.
+**`c2f4fff3faf8b7e3033545a0e1e23c1ca29c752b`** — the squash merge of wave 14's final integration, [PR #971](https://github.com/zhouy1017/ai7-harness/pull/971). That commit contains the Owner-confirmed complete initial-v1.0.0 development scope above: every row of the "In scope" table was integrated into `dev` by waves 1–14, through reviewed final wave PRs. The Owner's confirmation of the scope is the decision record kept outside the repository named in the status line; what follows is only what `git` proves about the integration.
 
 ### Wave integrations
 
@@ -121,4 +121,4 @@ The deferred items are open, unscheduled and labeled `post-1.0.0`:
 
 ### What this record does not do
 
-Naming this commit crosses no package version, tag, release, signing, notarization, `main` promotion or GitHub milestone. The consolidated Windows/macOS re-entry validation under ADR 0054 (a separate Issue) follows on this exact `dev` commit.
+Naming this commit crosses no package version, tag, release, signing, notarization, `main` promotion or GitHub milestone. The consolidated Windows/macOS re-entry validation under ADR 0054 follows as a separate authorized Issue on integrated `dev` after this record lands. It validates the consolidated state without retrospectively backfilling earlier PR evidence.
