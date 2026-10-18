@@ -15,8 +15,9 @@ import { ensureBackupLocation } from './scheduled-backups.js';
  * beside it — is written as the database package of S86a into the backup location, named `AI7 升级前备份 <date time>.ai7db`
  * and kept until the editor deletes it. A backup that cannot be made opens nothing, so no data is ever upgraded without one.
  *
- * Which schema revisions change the Data Version is the classification in `data-version.ts`. Nothing is frozen before the first
- * packaged release (§1.2), so no store is upgraded this way yet; the classification is what makes one do so from then on.
+ * Which schema revisions change the Data Version is the classification in `data-version.ts`. Data Version 1 is frozen at the
+ * 1.0.0 development milestone boundary (Issue #967; §1.2) and no later revision is classified breaking yet, so no store is
+ * upgraded this way yet; the classification is what makes one do so from then on. This gate runs before any schema advance.
  *
  * The upgrade is noted beside the store before anything migrates it (Issue #433 review): `store/upgrade-pending.json` names the
  * backup, what changes, and the software, Data Version and schema revision it was bringing the store to. An open of that same

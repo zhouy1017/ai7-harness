@@ -9,8 +9,8 @@ import { readSmallFile, writeAtomic } from './database-replacement.js';
 /**
  * 数据版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1). The Data Version is a compatibility contract, an
  * editor-visible integer apart from the software version: it changes only when older software could no longer read the
- * store, so an additive schema revision stays inside it. Nothing is frozen before the first packaged release (§1.2) —
- * until then development stores are disposable — and Data Version 1 is the one that release will freeze.
+ * store, so an additive schema revision stays inside it. Before the freeze (§1.2) development stores were disposable; Data
+ * Version 1 is the one the 1.0.0 development milestone boundary froze (Issue #967, below).
  *
  * Every store records it: schema revision 54 owns one ledger of the versions that opened the store — the software, the
  * Data Version and the schema revision — appended whenever one of them differs from the last, so a software update that

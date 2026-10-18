@@ -3791,7 +3791,7 @@ interface StoreControl {
   softwareVersion?: string;
   /**
    * The suites' own classification of schema revisions (Issue #433, S85b), so an upgrade to a later Data Version can be
-   * opened before the first packaged release classifies one. The service entry never sets it.
+   * opened before a later revision is classified breaking. The service entry never sets it.
    */
   schemaRevisionClasses?: ReadonlyArray<ClassifiedSchemaRevision>;
   /**
