@@ -4,7 +4,7 @@ import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-con
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 157 as const;
+export const SERVICE_PROTOCOL_VERSION = 159 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -10233,6 +10233,8 @@ export interface StoreVersionProjection {
   readonly dataVersion: number;
   readonly schemaRevision: number;
   readonly recordedAt: string;
+  /** The backup the open behind this record made before it upgraded the data (Issue #967), and whether it is still there. */
+  readonly backup?: { readonly fileName: string; readonly present: boolean };
 }
 
 /**
@@ -10259,6 +10261,11 @@ export interface DataVersionProjection {
   readonly upgrades: ReadonlyArray<DataVersionUpgradeProjection>;
   /** Where the backup made before each upgrade is kept. */
   readonly backupLocation: string;
+  /**
+   * The data root's version marker (Issue #967; ADR 0023) as it stands now: every open writes it, so an older build refuses
+   * newer data. `present` only while a marker AI7 wrote is there; never a path.
+   */
+  readonly marker: { readonly present: boolean; readonly writtenAt: string | null; readonly softwareVersion: string | null };
 }
 
 /** An upgrade of the data to a later Data Version (Issue #433, S85b; DSTO-016): what changed, and the backup made before it. */

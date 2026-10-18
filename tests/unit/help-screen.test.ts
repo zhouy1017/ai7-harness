@@ -22,7 +22,7 @@ function mounted(back = vi.fn()) {
   const root = document.createElement('section');
   mountHelp({
     root,
-    loadVersions: async () => ({ softwareVersion: '0.9.9', dataVersion: 83 }),
+    loadVersions: async () => ({ softwareVersion: '0.9.9', dataVersion: 1, frozen: true }),
     back,
     licenses: LICENSES,
   });
@@ -38,7 +38,9 @@ describe('the mounted 帮助 screen', () => {
   it('shows the 关于 line from the same versions 数据与存储 reads, protocol included', async () => {
     const { root, find } = mounted();
     expect((root as unknown as MiniElement).dataset['helpReady']).toBe('true');
-    await vi.waitFor(() => expect(find('.help-about-line').textContent).toBe(`软件版本 0.9.9 · 数据版本 83 · 服务协议 ${SERVICE_PROTOCOL_VERSION}`));
+    await vi.waitFor(() => expect(find('.help-about-line').textContent).toBe(`软件版本 0.9.9 · 数据版本 1 · 服务协议 ${SERVICE_PROTOCOL_VERSION}`));
+    // The frozen Data Version in 设置 › 数据与存储's own words (Issue #967).
+    expect(find('.help-data-version-state').textContent).toBe('数据版本 1 已冻结。');
   });
 
   it('starts on 使用帮助 and switches tabs by click and by the arrow keys', () => {

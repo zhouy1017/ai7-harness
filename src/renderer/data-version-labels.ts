@@ -43,9 +43,20 @@ export function dataVersionRecordsLabel(listed: number, truncated: boolean): str
   return truncated ? `${DATA_VERSION_RECORDS}（最近 ${listed} 条）` : `${DATA_VERSION_RECORDS}（${listed}）`;
 }
 
-/** One version record: when, which software, which Data Version. */
-export function storeVersionLine(record: Pick<StoreVersionProjection, 'softwareVersion' | 'dataVersion' | 'recordedAt'>, instant: (iso: string) => string): string {
-  return `${instant(record.recordedAt)} · 软件 ${record.softwareVersion} · 数据版本 ${record.dataVersion}`;
+/**
+ * One version record: when, which software, which Data Version — and, for the open that upgraded the data, the backup made
+ * before it and whether it is still in the backup location (Issue #967).
+ */
+export function storeVersionLine(record: Pick<StoreVersionProjection, 'softwareVersion' | 'dataVersion' | 'recordedAt' | 'backup'>, instant: (iso: string) => string): string {
+  const line = `${instant(record.recordedAt)} · 软件 ${record.softwareVersion} · 数据版本 ${record.dataVersion}`;
+  return record.backup === undefined ? line : `${line} · 升级前备份「${record.backup.fileName}」${record.backup.present ? '备份仍在' : '备份已不在'}`;
+}
+
+/** The data root's version marker (Issue #967; ADR 0023): what lets an older AI7 refuse this data rather than open it. */
+export function dataVersionMarkerLine(marker: DataVersionProjection['marker'], instant: (iso: string) => string): string {
+  return marker.present && marker.writtenAt !== null && marker.softwareVersion !== null
+    ? `已写入 · 软件 ${marker.softwareVersion} · ${instant(marker.writtenAt)}`
+    : '未找到：下次打开这份数据时写入。';
 }
 
 /** The latest upgrade of the data (Issue #433, S85b; DSTO-016): when, from which Data Version to which, and what changed. */

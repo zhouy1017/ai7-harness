@@ -6315,8 +6315,9 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // Like the service's version owner, read this application's package rather than Electron's fallback app version.
     const softwareVersion = (JSON.parse(await readFile(resolve(codeRoot, 'package.json'), 'utf8')) as { version: string }).version;
+    // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, dataVersion: 83, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, dataVersion: 1, schemaRevision: 83, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
