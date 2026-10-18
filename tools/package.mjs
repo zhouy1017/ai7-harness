@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
-import { cp, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -12,6 +12,9 @@ const RELEASE = resolve(ROOT, 'release');
 export const PACKAGER_CACHE = resolve(ROOT, '.cache', 'bootstrap', 'electron-builder');
 
 function requirePackage(condition) { if (!condition) throw new Error('AI7_PACKAGE_INPUT_INVALID'); }
+const samePath = (left, right) => process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
+let phase = 'inputs';
+function reachPhase(value) { phase = value; console.log(`PACKAGE/${value}`); }
 
 export function plannedOutputs(version, platform = process.platform) {
   requirePackage(/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(version));
@@ -34,7 +37,7 @@ export function packagerArtifacts(manifest, platform = process.platform, arch = 
 export async function verifyPackagerArchives(manifest) {
   for (const artifact of packagerArtifacts(manifest)) {
     const path = resolve(PACKAGER_CACHE, artifact.cacheDirectory, artifact.fileName);
-    requirePackage((await realpath(path)).toLowerCase() === path.toLowerCase());
+    requirePackage(samePath(await realpath(path), path));
     const hash = createHash('sha256');
     let size = 0;
     for await (const bytes of createReadStream(path)) { hash.update(bytes); size += bytes.length; }
@@ -106,7 +109,7 @@ export function builderConfiguration(manifest, stage) {
 async function resetOwnedDirectory(path) {
   requirePackage(relative(RELEASE, path) !== '' && !relative(RELEASE, path).startsWith('..') && !isAbsolute(relative(RELEASE, path)));
   if (existsSync(path)) {
-    requirePackage((await realpath(path)).toLowerCase() === path.toLowerCase());
+    requirePackage(samePath(await realpath(path), path));
     await rm(path, { recursive: true, force: true });
   }
   await mkdir(path, { recursive: true });
@@ -129,6 +132,7 @@ async function main(args) {
   const artifacts = JSON.parse(await readFile(resolve(ROOT, 'config', 'dependency-artifacts.json'), 'utf8'));
   await verifyPackagerArchives(artifacts);
   // Build remains the existing clean, provider-free source-checkout command.
+  reachPhase('build');
   run(process.execPath, [resolve(ROOT, 'tools', 'build-controller.mjs')]);
   const { installNodeNetworkDenial } = await import(pathToFileURL(resolve(ROOT, 'dist', 'shared', 'network-denial.mjs')).href);
   installNodeNetworkDenial();
@@ -144,7 +148,8 @@ async function main(args) {
   process.env.ALL_PROXY = 'http://127.0.0.1:9';
   process.env.NO_PROXY = '';
   await mkdir(RELEASE, { recursive: true });
-  requirePackage((await realpath(RELEASE)).toLowerCase() === RELEASE.toLowerCase());
+  requirePackage(samePath(await realpath(RELEASE), RELEASE));
+  reachPhase('staging');
   const stage = resolve(RELEASE, '.stage');
   await resetOwnedDirectory(stage);
   await resetOwnedDirectory(resolve(RELEASE, '.builder'));
@@ -163,10 +168,12 @@ async function main(args) {
     await cp(resolve(stage, 'node_modules'), resolve(resources, 'app', 'node_modules'), { recursive: true, dereference: true });
   };
   const platform = process.platform === 'win32' ? Platform.WINDOWS : Platform.MAC;
+  reachPhase('builder');
   await build({ projectDir: ROOT, targets: platform.createTarget(process.platform === 'win32' ? 'nsis' : 'dmg', process.platform === 'win32' ? Arch.x64 : Arch.arm64), config, publish: 'never' });
   const output = resolve(RELEASE, '.builder', outputs[0]);
   await rename(output, resolve(RELEASE, outputs[0]));
   if (process.platform === 'win32') {
+    reachPhase('portable-archive');
     const portable = resolve(RELEASE, 'AI7');
     await resetOwnedDirectory(portable);
     await cp(resolve(RELEASE, '.builder', 'win-unpacked'), resolve(portable, 'app'), { recursive: true, dereference: true });
@@ -183,6 +190,7 @@ async function main(args) {
     const archive = resolve(RELEASE, outputs[1]);
     if (existsSync(archive)) await rm(archive);
     run(await getPath7za(), ['a', '-tzip', '-mx=5', archive, 'AI7'], { cwd: RELEASE });
+    reachPhase('self-check');
     const report = run(resolve(portable, 'app', 'AI7.exe'), ['--self-check']);
     const check = JSON.parse(report.trim());
     requirePackage(check.channel === 'windows-portable' && check.writable === true && check.store_versions === 'readable' && check.keyringCarrier === 'loaded');
@@ -195,5 +203,5 @@ async function main(args) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2)).catch(() => { console.error('AI7_PACKAGE_FAILED'); process.exitCode = 1; });
+  main(process.argv.slice(2)).catch(() => { console.error(`AI7_PACKAGE_FAILED/${phase}`); process.exitCode = 1; });
 }

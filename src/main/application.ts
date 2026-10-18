@@ -6365,7 +6365,7 @@ export async function runApplication(): Promise<void> {
     if (!app.requestSingleInstanceLock()) {
       process.stderr.write('AI7_STARTUP_FAILED/single-instance-lock\n');
       await stop();
-      app.exit(0);
+      app.exit(packaged?.selfCheck ? 1 : 0);
       return;
     }
     startupLocation = reachStartup('electron-ready');
