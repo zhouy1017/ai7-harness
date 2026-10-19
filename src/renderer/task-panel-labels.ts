@@ -213,8 +213,8 @@ export function taskResultTaskLine(entry: BookTaskItemProjection): string {
 }
 
 /** An analysis read the whole manuscript as it stood at the revision it pins. */
-export function analysisResultReadLine(revision: Pick<BaselineAnalysisResultSetRevisionProjection, 'units' | 'manuscriptPin'>): string {
-  return `全书 ${revision.units.length} 个阅读范围 · 稿件修订版 ${revision.manuscriptPin.revisionLabel}`;
+export function analysisResultReadLine(revision: { units: ReadonlyArray<{ unitOrdinal: number }>; manuscriptPin: BaselineAnalysisResultSetRevisionProjection['manuscriptPin']; unitPage?: { total: number } }): string {
+  return `全书 ${revision.unitPage?.total ?? revision.units.length} 个阅读范围 · 稿件修订版 ${revision.manuscriptPin.revisionLabel}`;
 }
 export const ANALYSIS_RESULT_NOT_DONE = '没有修改稿件：分析只读稿件。';
 

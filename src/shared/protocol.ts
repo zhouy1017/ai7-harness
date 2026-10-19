@@ -5,7 +5,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 159 as const;
+export const SERVICE_PROTOCOL_VERSION = 160 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -146,6 +146,12 @@ export const IPC_CHANNELS = {
   inspectForegroundExecutionBoundary: 'ai7:j03:inspect-foreground-execution-boundary',
   prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
   authorizeTaskAuthorization: 'ai7:j03:authorize-task-authorization',
+  getBaselineAnalysisPage: 'ai7:analysis:get-baseline-analysis-page',
+  getCoverageManifestUnits: 'ai7:analysis:get-coverage-manifest-units',
+  getAnalysisRevisionUnits: 'ai7:analysis:get-analysis-revision-units',
+  getAnalysisRevisionOverview: 'ai7:analysis:get-analysis-revision-overview',
+  getAnalysisRunReportRows: 'ai7:analysis:get-analysis-run-report-rows',
+  getBaselineAnalysisRangePlan: 'ai7:analysis:get-baseline-analysis-range-plan',
   inspectBaselineAnalysis: 'ai7:j04:inspect-baseline-analysis',
   inspectBookFindings: 'ai7:inspect-book-findings',
   inspectParagraphAnalysis: 'ai7:inspect-paragraph-analysis',
@@ -2932,6 +2938,65 @@ export interface CoverageManifestProjection {
   digest: string;
 }
 
+/** Transport summaries never replace the complete, digested manifest kept by the ledger. */
+export type CoverageManifestSummaryProjection = Omit<CoverageManifestProjection, 'units'> & {
+  units: ReadonlyArray<Omit<CoverageManifestUnitProjection, 'blockIds' | 'blockDigests' | 'overlapBlockIds'> & {
+    blockCount: number; firstBlockId: string; lastBlockId: string;
+  }>;
+};
+export interface AnalysisUnitPage { shown: number; total: number; nextOrdinal: number | null }
+export type AnalysisGapSummaryProjection = Omit<AnalysisGapProjection, 'blockIds'> & {
+  blockCount: number; firstBlockId: string | null; lastBlockId: string | null;
+};
+export type BaselineAnalysisWireUnitProjection = Exclude<BaselineAnalysisUnitProjection, { state: 'gap' }> |
+  (Omit<Extract<BaselineAnalysisUnitProjection, { state: 'gap' }>, 'gap'> & { gap: AnalysisGapSummaryProjection });
+export type AnalysisRevisionWireProjection = Omit<BaselineAnalysisResultSetRevisionProjection, 'units' | 'gaps' | 'sections' | 'synthesis'> & {
+  units: ReadonlyArray<BaselineAnalysisWireUnitProjection>;
+  gaps: ReadonlyArray<AnalysisGapSummaryProjection>;
+  unitPage: AnalysisUnitPage;
+  /** Present inline for short books. D3a pages the exact canonical JSON for larger overviews. */
+  sections?: BaselineAnalysisResultSetRevisionProjection['sections'];
+  synthesis?: BaselineAnalysisResultSetRevisionProjection['synthesis'];
+  overviewPage?: { totalLength: number; sha256: string; chunkCount: number };
+};
+export type AnalysisRunReportSummaryProjection = Omit<RunReportProjection, 'unitRows'> & {
+  unitRows?: RunReportProjection['unitRows']; unitPage?: AnalysisUnitPage;
+};
+export type AnalysisReusePlanSummaryProjection = Omit<AnalysisReusePlanProjection, 'units'> & {
+  units: ReadonlyArray<Pick<AnalysisReusePlanUnitProjection, 'unitOrdinal' | 'disposition' | 'reason' | 'reusedFrom'>>;
+};
+export type BaselineAnalysisWireProjection = Omit<BaselineAnalysisProjection,
+  'coverageManifest' | 'resultSetRevision' | 'inspectedRevision' | 'update' | 'run' | 'history' | 'taskOutcome' | 'updateControls'> & {
+  listPages: Readonly<Record<string, AnalysisUnitPage & { descending?: boolean }>>;
+  coverageManifest: CoverageManifestSummaryProjection | null;
+  resultSetRevision: AnalysisRevisionWireProjection | null;
+  inspectedRevision: null | { revision: AnalysisRevisionWireProjection; current: boolean; readOnly: true };
+  update: null | (Omit<BaselineAnalysisUpdateProjection, 'reusePlan'> & { reusePlan: AnalysisReusePlanSummaryProjection | null });
+  run: null | (Omit<NonNullable<BaselineAnalysisProjection['run']>, 'attempt'> & {
+    attempt: null | (NonNullable<NonNullable<BaselineAnalysisProjection['run']>['attempt']> & { spanCount: number });
+  });
+  history: null | (Omit<BaselineAnalysisHistoryProjection, 'entries'> & { entries: ReadonlyArray<
+    Omit<BaselineAnalysisHistoryEntryProjection, 'report'> & { report: AnalysisRunReportSummaryProjection | null }> });
+  taskOutcome: null | (Omit<NonNullable<BaselineAnalysisProjection['taskOutcome']>, 'report'> & { report: AnalysisRunReportSummaryProjection | null });
+  updateControls: null | (Omit<BaselineAnalysisUpdateControlsProjection, 'actions'> & { actions:
+    Omit<BaselineAnalysisUpdateControlsProjection['actions'], 'reanalyze-range'> & {
+      'reanalyze-range': BaselineAnalysisUpdateActionProjection & { options: ReadonlyArray<
+        Pick<BaselineAnalysisRangeOptionProjection, 'unitOrdinal' | 'sectionOrdinal' | 'label' | 'startPosition' | 'endPosition'>> };
+    } });
+};
+
+/** In-process operations retain full records; main/preload consume the explicitly mapped wire output. */
+export type ServiceWireOutput<T> = T extends BaselineAnalysisProjection ? BaselineAnalysisWireProjection
+  : T extends ServiceJobProjection ? Omit<ServiceJobProjection, 'result'> & { result: ServiceWireOutput<ServiceJobProjection['result']> }
+  : T extends QuickStartBaselineAnalysisResult ? Omit<T, 'projection'> & { projection: BaselineAnalysisWireProjection }
+  : T;
+export type QuickStartBaselineAnalysisWireResult = ServiceWireOutput<QuickStartBaselineAnalysisResult>;
+export type HydratedAnalysisRevisionProjection = AnalysisRevisionWireProjection & Required<Pick<AnalysisRevisionWireProjection, 'sections' | 'synthesis'>>;
+export type ServiceWireJobProjection = ServiceWireOutput<ServiceJobProjection>;
+export type WireServiceOperationMap = { [K in keyof ServiceOperationMap]: {
+  input: ServiceOperationMap[K]['input']; output: ServiceWireOutput<ServiceOperationMap[K]['output']>;
+} };
+
 export type AnalysisEntityKind = 'person' | 'place' | 'organization' | 'object' | 'term' | 'other';
 
 export interface AnalysisSourceRangeProjection {
@@ -4297,7 +4362,7 @@ export interface BaselineAnalysisRangeOptionProjection {
   graphemes: number;
   label: string;
   /** The reuse-versus-recompute counts this choice would produce against the latest revision. */
-  expected: AnalysisReusePlanCounts;
+  expected: AnalysisReusePlanCounts | null;
 }
 
 export interface BaselineAnalysisUpdateActionProjection {
@@ -13460,6 +13525,30 @@ export interface ServiceOperationMap {
     input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
     output: TaskAuthorizationProjection;
   };
+  getBaselineAnalysisPage: {
+    input: { bookId: string; taskIntentId: string; revisionId: string | null; path: string; afterOrdinal: number };
+    output: { path: string; items: ReadonlyArray<unknown>; nextOrdinal: number | null; listPages: BaselineAnalysisWireProjection['listPages'] };
+  };
+  getCoverageManifestUnits: {
+    input: { bookId: string; taskIntentId: string; afterOrdinal: number };
+    output: { manifestDigest: string; units: ReadonlyArray<CoverageManifestUnitProjection>; next: number | null };
+  };
+  getAnalysisRevisionUnits: {
+    input: { bookId: string; revisionId: string; afterOrdinal: number };
+    output: { revisionId: string; units: ReadonlyArray<BaselineAnalysisWireUnitProjection>; next: number | null };
+  };
+  getAnalysisRevisionOverview: {
+    input: { bookId: string; revisionId: string; afterIndex: number };
+    output: { revisionId: string; text: string; next: number | null };
+  };
+  getAnalysisRunReportRows: {
+    input: { bookId: string; taskIntentId: string; afterOrdinal: number };
+    output: { reportDigest: string; rows: RunReportProjection['unitRows']; next: number | null };
+  };
+  getBaselineAnalysisRangePlan: {
+    input: { bookId: string; unitOrdinal: number };
+    output: { selectedRange: BaselineAnalysisSelectedRange; expected: AnalysisReusePlanCounts };
+  };
   inspectBaselineAnalysis: {
     input: { bookId: string; revisionId: string | null };
     output: BaselineAnalysisProjection;
@@ -14424,33 +14513,39 @@ export interface RendererApi {
     ServiceOperationMap['inspectForegroundExecutionBoundary']['input'],
     'bookId'
   >): Promise<ForegroundExecutionBoundaryProjection>;
-  prepareTaskAuthorization(input: { goal: typeof J03_TASK_GOAL }): Promise<ServiceJobProjection>;
+  prepareTaskAuthorization(input: { goal: typeof J03_TASK_GOAL }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   authorizeTaskAuthorization(input: {
     taskIntentId: string;
     planEnvelopeDigest: string;
   }): Promise<TaskAuthorizationProjection>;
-  inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisProjection>;
+  getBaselineAnalysisPage(input: Omit<ServiceOperationMap['getBaselineAnalysisPage']['input'], 'bookId'>): Promise<ServiceOperationMap['getBaselineAnalysisPage']['output']>;
+  getCoverageManifestUnits(input: Omit<ServiceOperationMap['getCoverageManifestUnits']['input'], 'bookId'>): Promise<ServiceOperationMap['getCoverageManifestUnits']['output']>;
+  getAnalysisRevisionUnits(input: Omit<ServiceOperationMap['getAnalysisRevisionUnits']['input'], 'bookId'>): Promise<ServiceOperationMap['getAnalysisRevisionUnits']['output']>;
+  getAnalysisRevisionOverview(input: Omit<ServiceOperationMap['getAnalysisRevisionOverview']['input'], 'bookId'>): Promise<ServiceOperationMap['getAnalysisRevisionOverview']['output']>;
+  getAnalysisRunReportRows(input: Omit<ServiceOperationMap['getAnalysisRunReportRows']['input'], 'bookId'>): Promise<ServiceOperationMap['getAnalysisRunReportRows']['output']>;
+  getBaselineAnalysisRangePlan(input: Omit<ServiceOperationMap['getBaselineAnalysisRangePlan']['input'], 'bookId'>): Promise<ServiceOperationMap['getBaselineAnalysisRangePlan']['output']>;
+  inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisWireProjection>;
   inspectBookFindings(input?: { offset: number }): Promise<BookFindingsProjection>;
   inspectParagraphAnalysis(input: { manuscriptId: string; blockId: string; radius: number }): Promise<ParagraphAnalysisProjection>;
-  prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; redoOf?: string | null }): Promise<ServiceJobProjection>;
+  prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; redoOf?: string | null }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /**
    * The Task Drawer bar's 开始任务 for the analysis (Issue #420, S74a): records the Run Authorization and the
    * Run Record and hands the Run to the execution owner's governor, which admits it at once while a place is
    * free, or has it wait for one — `queued`, 等待运行名额 — and admits it in its turn (Issue #49, S14).
    */
-  authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
-  startBaselineAnalysisWhenOnline(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
-  cancelWaitingBaselineAnalysis(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
+  authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisWireProjection>;
+  startBaselineAnalysisWhenOnline(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisWireProjection>;
+  cancelWaitingBaselineAnalysis(input: { taskIntentId: string }): Promise<BaselineAnalysisWireProjection>;
   /** 联网后开始任务 and its 取消 for every other kind with a plan (Issue #760, S74c), within the route's Book. */
   startTaskWhenOnline(input: Omit<StartTaskWhenOnlineInput, 'bookId'>): Promise<TaskPlanProjection>;
   cancelWaitingTask(input: Omit<CancelWaitingTaskInput, 'bookId'>): Promise<TaskPlanProjection>;
-  cancelBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
-  pauseBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
+  cancelBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisWireProjection>;
+  pauseBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisWireProjection>;
   controlTaskRun(input: Omit<ControlTaskRunInput, 'bookId'>): Promise<TaskPlanProjection>;
   editTaskPlan(input: Omit<EditTaskPlanInput, 'bookId'>): Promise<TaskPlanProjection>;
-  redoTaskPlan(input: Pick<ControlTaskRunInput, 'kind' | 'ref'>): Promise<ServiceJobProjection>;
+  redoTaskPlan(input: Pick<ControlTaskRunInput, 'kind' | 'ref'>): Promise<ServiceWireOutput<ServiceJobProjection>>;
   quickStartReviewRun(input: Omit<ServiceOperationMap['quickStartReviewRun']['input'], 'bookId'>): Promise<ServiceOperationMap['quickStartReviewRun']['output']>;
-  resumeBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
+  resumeBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisWireProjection>;
   /** 更新计划 (Issue #419): the next plan version of the Book's baseline analysis Task, as the editor left it. */
   editBaselineAnalysisPlan(input: {
     taskIntentId: string;
@@ -14459,17 +14554,17 @@ export interface RendererApi {
     disallowedAdaptations: ReadonlyArray<string>;
     askFirstAdaptations?: ReadonlyArray<string>;
     runBudgetCeiling?: { kind: 'tokens'; maxTotalTokens: number } | null;
-  }): Promise<BaselineAnalysisProjection>;
+  }): Promise<BaselineAnalysisWireProjection>;
   /** 提交回答 (Issue #422, S76d): the editor's answer to a question the Book's baseline analysis Run asked. */
   answerBaselineAnalysisClarification(input: {
     taskIntentId: string;
     requestId: string;
     optionId: ClarificationOptionId;
     note: string | null;
-  }): Promise<BaselineAnalysisProjection>;
+  }): Promise<BaselineAnalysisWireProjection>;
   runReconnectPreflight(): Promise<ReconnectPreflightProjection>;
   /** 快速开始 of the Book the window is showing, after 先看计划's preparation (Issue #421). */
-  quickStartBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string }): Promise<QuickStartBaselineAnalysisResult>;
+  quickStartBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string }): Promise<ServiceWireOutput<QuickStartBaselineAnalysisResult>>;
   setDefaultExecutionRule(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<DefaultExecutionRuleProjection>;
   inspectDefaultExecutionRules(): Promise<DefaultExecutionRulesProjection>;
   deactivateDefaultExecutionRule(input: { ruleId: string }): Promise<DefaultExecutionRuleProjection>;
@@ -14574,17 +14669,17 @@ export interface RendererApi {
   startEvaluation(input?: StartEvaluationInput): Promise<EvaluationWorkspaceProjection>;
   saveEvaluation(input: { recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean }): Promise<EvaluationWorkspaceProjection>;
   /** 准备 AI7 初评: an `initial-evaluation-preparation` job, followed with `pollServiceJob`; its plan opens in the Task Drawer. */
-  prepareInitialEvaluation(input?: { materialIds?: ReadonlyArray<string>; seriesId?: string | null }): Promise<ServiceJobProjection>;
+  prepareInitialEvaluation(input?: { materialIds?: ReadonlyArray<string>; seriesId?: string | null }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for AI7's 初评. */
   authorizeInitialEvaluation(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 起草审稿意见 (Issue #429, S81c): a `readers-report-preparation` job; its plan opens in the Task Drawer. */
-  prepareReadersReport(input: { template: ReadersReportTemplate; materialIds?: ReadonlyArray<string> }): Promise<ServiceJobProjection>;
+  prepareReadersReport(input: { template: ReadersReportTemplate; materialIds?: ReadonlyArray<string> }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for 审稿意见. */
   authorizeReadersReport(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 打开草稿: the drafted result made the template's draft document; the renderer then opens it on the editing surface. */
   createReadersReportDraft(input: { revisionId: string }): Promise<EvaluationWorkspaceProjection>;
   /** 按我的评分重写评语 (Issue #429, S81b2): an `evaluation-rewrite-preparation` job over one version; its plan opens in the Task Drawer. */
-  prepareEvaluationRewrite(input: { recordId: string }): Promise<ServiceJobProjection>;
+  prepareEvaluationRewrite(input: { recordId: string }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for 按我的评分重写评语. */
   authorizeEvaluationRewrite(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 采用 or 放弃 one rewrite of the version on show. */
@@ -14592,7 +14687,7 @@ export interface RendererApi {
   /** 新建文档 · 写作任务 of the Book the window is showing (Issue #432, S84a); the renderer never names the Book. */
   inspectWritingTask(): Promise<WritingTaskProjection>;
   /** 先看计划 of a writing Task: a `writing-preparation` job; its plan opens in the Task Drawer. */
-  prepareWritingTask(input: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> }): Promise<ServiceJobProjection>;
+  prepareWritingTask(input: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for a writing Task. */
   authorizeWritingTask(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<WritingTaskProjection>;
   quickStartWritingTask(input: { taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string }): Promise<QuickStartWritingTaskResult>;
@@ -14607,7 +14702,7 @@ export interface RendererApi {
    */
   inspectReviewWorkspace(input?: Omit<InspectReviewWorkspaceInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   /** 先看计划: a `review-run-preparation` job, followed with `pollServiceJob` and stopped with `cancelServiceJob`. */
-  prepareReviewRun(input: Omit<PrepareReviewRunInput, 'bookId'>): Promise<ServiceJobProjection>;
+  prepareReviewRun(input: Omit<PrepareReviewRunInput, 'bookId'>): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /**
    * The one approval — the Task Drawer bar's 开始任务 since Issue #420 (S74a); the Run is already being driven
    * when the answer arrives. Refused with `EXECUTION_BUSY`, before anything is written, while other Runs hold
@@ -14627,12 +14722,12 @@ export interface RendererApi {
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ManuscriptImportCommitProjection>;
   prepareSourceImportReview(input: ServiceOperationMap['prepareSourceImportReview']['input']): Promise<ReviewBeforeSourceImportProjection>;
   commitSourceImport(input: CommitSourceImportRendererInput): Promise<SourceImportCommitProjection>;
-  prepareManuscriptReimport(input: ServiceOperationMap['prepareManuscriptReimport']['input']): Promise<ServiceJobProjection>;
+  prepareManuscriptReimport(input: ServiceOperationMap['prepareManuscriptReimport']['input']): Promise<ServiceWireOutput<ServiceJobProjection>>;
   getReimportMappingPage(input: ServiceOperationMap['getReimportMappingPage']['input']): Promise<ReimportMappingPageProjection>;
   getReimportLineageSourceVersionPage(input: ServiceOperationMap['getReimportLineageSourceVersionPage']['input']): Promise<ReimportLineageSourceVersionPageProjection>;
   acceptReimportDegradation(input: ServiceOperationMap['acceptReimportDegradation']['input']): Promise<ReviewBeforeManuscriptReimportProjection>;
-  resolveReimportMapping(input: ServiceOperationMap['resolveReimportMapping']['input']): Promise<ServiceJobProjection>;
-  commitManuscriptReimport(input: CommitManuscriptReimportRendererInput): Promise<ServiceJobProjection>;
+  resolveReimportMapping(input: ServiceOperationMap['resolveReimportMapping']['input']): Promise<ServiceWireOutput<ServiceJobProjection>>;
+  commitManuscriptReimport(input: CommitManuscriptReimportRendererInput): Promise<ServiceWireOutput<ServiceJobProjection>>;
   acknowledgeImportCompletion(input: ServiceOperationMap['acknowledgeImportCompletion']['input']): Promise<{ state: 'acknowledged' }>;
   getManuscriptWindow(input: ServiceOperationMap['getManuscriptWindow']['input']): Promise<ManuscriptWindowProjection>;
   flushJournalEdit(input: JournalEditInput): Promise<JournalAcknowledgement>;
@@ -14731,14 +14826,14 @@ export interface RendererApi {
   listPriorWork(): Promise<ReadonlyArray<PriorWorkItemProjection>>;
   getManuscriptWindowAt(input: ServiceOperationMap['getManuscriptWindowAt']['input']): Promise<ManuscriptWindowProjection>;
   getOutline(input: ServiceOperationMap['getOutline']['input']): Promise<OutlineProjection>;
-  startSearch(input: ServiceOperationMap['startSearch']['input']): Promise<ServiceJobProjection>;
-  pollServiceJob(input: ServiceOperationMap['pollServiceJob']['input']): Promise<ServiceJobProjection>;
-  cancelServiceJob(input: ServiceOperationMap['cancelServiceJob']['input']): Promise<ServiceJobProjection>;
+  startSearch(input: ServiceOperationMap['startSearch']['input']): Promise<ServiceWireOutput<ServiceJobProjection>>;
+  pollServiceJob(input: ServiceOperationMap['pollServiceJob']['input']): Promise<ServiceWireOutput<ServiceJobProjection>>;
+  cancelServiceJob(input: ServiceOperationMap['cancelServiceJob']['input']): Promise<ServiceWireOutput<ServiceJobProjection>>;
   getSearchResults(input: ServiceOperationMap['getSearchResults']['input']): Promise<SearchResultsProjection>;
   prepareReplacement(input: ServiceOperationMap['prepareReplacement']['input']): Promise<ReplacementPreviewProjection>;
   freezeReplacement(input: ServiceOperationMap['freezeReplacement']['input']): Promise<ReplacementPreviewProjection>;
   dismissReplacementPreview(input: ServiceOperationMap['dismissReplacementPreview']['input']): Promise<ReplacementDismissalProjection>;
-  startReplacementCommit(input: ServiceOperationMap['startReplacementCommit']['input']): Promise<ServiceJobProjection>;
+  startReplacementCommit(input: ServiceOperationMap['startReplacementCommit']['input']): Promise<ServiceWireOutput<ServiceJobProjection>>;
   commitReplacement(input: ServiceOperationMap['commitReplacement']['input']): Promise<ReplacementCommitProjection>;
   saveMilestone(input: ServiceOperationMap['saveMilestone']['input']): Promise<MilestoneProjection>;
   /** 交付物 of the Book the window is showing (Issue #414): its Manuscript's milestones and Publication Versions. */
@@ -14794,7 +14889,7 @@ export interface RendererApi {
   /** The Task Intent Drafts of the Book this window shows (Issue #423, slice 7a): a read. */
   inspectTaskIntentDrafts(input: Omit<InspectTaskIntentDraftsInput, 'bookId'>): Promise<TaskIntentDraftsProjection>;
   saveTaskIntentDraft(input: Omit<SaveTaskIntentDraftInput, 'bookId'>): Promise<TaskIntentDraftProjection>;
-  promoteTaskIntentDraft(input: Omit<PromoteTaskIntentDraftInput, 'bookId'>): Promise<ServiceJobProjection>;
+  promoteTaskIntentDraft(input: Omit<PromoteTaskIntentDraftInput, 'bookId'>): Promise<ServiceWireOutput<ServiceJobProjection>>;
   promoteAnswerToTaskIntentDraft(input: Omit<PromoteAnswerToTaskIntentDraftInput, 'bookId'>): Promise<TaskIntentDraftProjection>;
   /** The Agent 工作区 of the Book this window shows (Issue #90, slice 13a): a read. */
   inspectAgentWorkspace(): Promise<AgentWorkspaceProjection>;

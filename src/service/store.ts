@@ -1,3 +1,4 @@
+import { analysisBytePage, revisionUnitsPage, analysisOverviewPage, baselineAnalysisSummaryPage } from './analysis/baseline-analysis-wire.js';
 import { acquireSkillPackage, ImportedSkills, ImportedSkillError, SkillAcquisitions, type AcquiredSkillPackage } from './imported-skills.js';
 import { ImportedSkillUpdates } from './imported-skill-updates.js';
 import { recommendProcedures, type RecommendationReading } from './procedure-recommendation.js';
@@ -5318,6 +5319,49 @@ export class EditorialStore {
   /** ②A's analysis; each update mode carries its quick start (Issue #421). */
   inspectBaselineAnalysis(bookId: string, progress?: ProgressReader, revisionId: string | null = null): BaselineAnalysisProjection {
     return this.#withBackgroundReport(this.#withQuickStart(this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress, revisionId)) as BaselineAnalysisProjection));
+  }
+
+  getBaselineAnalysisPage(input: { bookId: string; taskIntentId: string; revisionId: string | null; path: string; afterOrdinal: number }) {
+    const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(input.bookId, undefined, input.revisionId)) as BaselineAnalysisProjection;
+    requireStore(projection.taskIntent?.taskIntentId === input.taskIntentId, 'ANALYSIS_PAGE_STALE', '分析记录已改变，请重新打开分析。');
+    return this.#analysisCall(() => baselineAnalysisSummaryPage(projection, input.path, input.afterOrdinal));
+  }
+
+  getCoverageManifestUnits(input: { bookId: string; taskIntentId: string; afterOrdinal: number }) {
+    const manifest = this.#analysisCall(() => this.#baselineAnalysis.coverageManifestFor(input.bookId, input.taskIntentId));
+    const page = analysisBytePage(manifest.units, input.afterOrdinal, (unit) => unit.ordinal);
+    return { manifestDigest: manifest.digest, units: page.items, next: page.next };
+  }
+
+  #analysisRevisionForPage(bookId: string, revisionId: string) {
+    const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, undefined, revisionId)) as BaselineAnalysisProjection;
+    const revision = projection.inspectedRevision?.revision;
+    requireStore(revision !== undefined && revision.revisionId === revisionId && revision.manuscriptPin.bookId === bookId,
+      'ANALYSIS_REVISION_NOT_FOUND', '没有找到这本书的分析修订版。');
+    return revision;
+  }
+
+  getAnalysisRevisionUnits(input: { bookId: string; revisionId: string; afterOrdinal: number }) {
+    return revisionUnitsPage(this.#analysisRevisionForPage(input.bookId, input.revisionId), input.afterOrdinal);
+  }
+
+  getAnalysisRevisionOverview(input: { bookId: string; revisionId: string; afterIndex: number }) {
+    return analysisOverviewPage(this.#analysisRevisionForPage(input.bookId, input.revisionId), input.afterIndex);
+  }
+
+  /** The latest Task's report, or the report of the Task that produced an earlier revision in 历次分析. */
+  getAnalysisRunReportRows(input: { bookId: string; taskIntentId: string; afterOrdinal: number }) {
+    const projection = this.inspectBaselineAnalysis(input.bookId);
+    const report = projection.taskIntent?.taskIntentId === input.taskIntentId && projection.taskOutcome?.report != null
+      ? projection.taskOutcome.report
+      : [...projection.history?.entries ?? []].reverse().find((entry) => entry.producingRun.taskIntentId === input.taskIntentId)?.report ?? null;
+    requireStore(report !== null, 'ANALYSIS_REPORT_NOT_FOUND', '没有找到这项任务的运行报告。');
+    const page = analysisBytePage(report.unitRows, input.afterOrdinal, (row) => row.unitOrdinal);
+    return { reportDigest: report.reportDigest, rows: page.items, next: page.next };
+  }
+
+  getBaselineAnalysisRangePlan(input: { bookId: string; unitOrdinal: number }) {
+    return this.#analysisCall(() => this.#baselineAnalysis.rangePlan(input.bookId, input.unitOrdinal));
   }
 
   /** Read-only aggregation: the source owners derive dispositions on every read. */

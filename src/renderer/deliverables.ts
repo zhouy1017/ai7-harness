@@ -14,7 +14,7 @@ import {
   type ProductionDocumentTypeProjection,
   type PublicationVersionProjection,
   type RendererApi,
-  type ServiceJobProjection,
+  type ServiceWireJobProjection as ServiceJobProjection,
 } from '../shared/protocol.js';
 import {
   DELIVERABLES_LEDE,

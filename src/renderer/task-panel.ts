@@ -5,7 +5,7 @@ import {
   TASK_INTENT_OUTCOME_CLASSES,
   type DialogueSelectionInput,
   type SaveTaskIntentDraftInput,
-  type ServiceJobProjection,
+  type ServiceWireJobProjection as ServiceJobProjection,
   type TaskIntentDraftAnswerProjection,
   type TaskIntentDraftOption,
   type TaskIntentDraftProjection,
@@ -13,7 +13,7 @@ import {
   type TaskIntentDraftResolution,
   type TaskIntentOutcomeClass,
   type BaselineAnalysisGoal,
-  type BaselineAnalysisProjection,
+  type BaselineAnalysisWireProjection as BaselineAnalysisProjection,
   type BaselineAnalysisUpdateRequest,
   type BookTaskItemProjection,
   type BookTasksProjection,
@@ -154,7 +154,7 @@ function uid(prefix: string): string {
 }
 
 /** The whole-Book procedures the Book can take now (TASK-044): its first baseline, or the two whole-Book updates. */
-export function composeOptions(projection: BaselineAnalysisProjection): ReadonlyArray<ComposeOption> {
+export function composeOptions(projection: Pick<BaselineAnalysisProjection, 'actions'> & { updateControls: { blockedByActiveRun: boolean; blockedReason: string | null; actions: Pick<NonNullable<BaselineAnalysisProjection['updateControls']>['actions'], 'sync-current' | 'reanalyze-book'> } | null }): ReadonlyArray<ComposeOption> {
   const controls = projection.updateControls;
   if (controls === null) {
     if (!projection.actions.canPrepare) return [];
