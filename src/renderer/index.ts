@@ -4524,22 +4524,31 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
           radio.disabled = !action.available;
           radio.addEventListener('change', async () => {
             if (!radio.checked) return;
-            start.disabled = true;
-            selectedRange = null;
+            // The pick is the range at once, as before; only its expected counts are derived for it (#988), so they follow.
+            selectedRange = { startPosition: option.startPosition, endPosition: option.endPosition };
+            block.dataset['selectedRange'] = radio.value;
+            for (const key of ['expectedReused', 'expectedRecomputed', 'expectedInvalidated', 'expectedBypassed']) delete block.dataset[key];
+            expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${ANALYSIS_READING}`;
+            expectedExact.textContent = '';
+            start.disabled = !action.available;
             try {
               const picked = await window.ai7.getBaselineAnalysisRangePlan({ unitOrdinal: option.unitOrdinal });
               if (!radio.checked || !block.isConnected) return;
               if (picked.selectedRange.startPosition !== option.startPosition || picked.selectedRange.endPosition !== option.endPosition) throw new Error(ANALYSIS_READ_FAILED);
-              selectedRange = { startPosition: option.startPosition, endPosition: option.endPosition };
-              block.dataset['selectedRange'] = radio.value;
               block.dataset['expectedReused'] = String(picked.expected.reused);
               block.dataset['expectedRecomputed'] = String(picked.expected.recomputed);
               block.dataset['expectedInvalidated'] = String(picked.expected.invalidated);
               block.dataset['expectedBypassed'] = String(picked.expected.bypassed);
               expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${updateReuseReading(picked.expected, mode)}`;
               expectedExact.textContent = reuseCountsText(picked.expected);
-              start.disabled = !action.available;
-            } catch { if (radio.checked && block.isConnected) setStatus(ANALYSIS_READ_FAILED, 'error'); }
+            } catch {
+              if (!radio.checked || !block.isConnected) return;
+              // A range the current manuscript no longer derives, or whose counts cannot be read, is not started.
+              selectedRange = null;
+              delete block.dataset['selectedRange'];
+              start.disabled = true;
+              setStatus(ANALYSIS_READ_FAILED, 'error');
+            }
           });
           const label = element('label', undefined, option.label);
           label.htmlFor = radio.id;
