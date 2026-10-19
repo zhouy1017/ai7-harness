@@ -2,6 +2,48 @@ import type { AnalysisRevisionWireProjection, BaselineAnalysisWireProjection, Hy
   ServiceOperationMap } from '../shared/protocol.js';
 import { ANALYSIS_READ_FAILED } from './analysis-paging-labels.js';
 
+function mapPagePath(value: unknown, keys: string[], leaf: (current: unknown) => unknown): unknown {
+  if (keys.length === 0) return leaf(value);
+  if (value === null || typeof value !== 'object') throw new Error(ANALYSIS_READ_FAILED);
+  const record = value as Record<string, unknown>;
+  const key = keys[0]!;
+  if (!Object.hasOwn(record, key)) throw new Error(ANALYSIS_READ_FAILED);
+  const mapped = mapPagePath(record[key], keys.slice(1), leaf);
+  if (Array.isArray(value)) { const copy = [...value]; copy[Number(key)] = mapped; return copy; }
+  return { ...record, [key]: mapped };
+}
+
+/** Live reads keep already requested detail only while that exact value's digest still matches. */
+export function retainTaskPlanPages<T extends { listPages?: import('../shared/protocol.js').TaskPlanProjection['listPages'] }>(next: T, previous: T | null): T {
+  let kept = next;
+  for (const [path, meta] of Object.entries(next.listPages ?? {})) {
+    const earlier = previous?.listPages?.[path];
+    if (earlier === undefined || earlier.digest !== meta.digest || earlier.total !== meta.total || earlier.shown <= meta.shown) continue;
+    let value: unknown = previous;
+    for (const key of path.split('.')) value = (value as Record<string, unknown>)[key];
+    kept = { ...mapPagePath(kept, path.split('.'), () => value) as T,
+      listPages: { ...kept.listPages, [path]: earlier } };
+  }
+  return kept;
+}
+
+/** A page must advance the same snapshot and cannot silently replace or duplicate a range of choices. */
+export function appendTaskPlanPage<T extends { listPages?: import('../shared/protocol.js').TaskPlanProjection['listPages'] }>(
+  projection: T, page: ServiceOperationMap['getTaskPlanPage']['output']): T {
+  const meta = projection.listPages?.[page.path];
+  const count = typeof page.items === 'string' ? [...page.items].length : page.items.length;
+  const shown = (meta?.shown ?? 0) + count;
+  if (meta === undefined || page.digest !== meta.digest || meta.nextOrdinal !== meta.shown || count === 0 || shown > meta.total ||
+      page.nextOrdinal !== (shown < meta.total ? shown : null)) throw new Error(ANALYSIS_READ_FAILED);
+  const append = (value: unknown): unknown => {
+    if (typeof value === 'string' && typeof page.items === 'string') return value + page.items;
+    if (Array.isArray(value) && Array.isArray(page.items)) return [...value, ...page.items];
+    throw new Error(ANALYSIS_READ_FAILED);
+  };
+  return { ...mapPagePath(projection, page.path.split('.'), append) as T,
+    listPages: { ...projection.listPages, [page.path]: { ...meta, shown, nextOrdinal: page.nextOrdinal } } };
+}
+
 /** Short books incur no read. Larger immutable overviews are verified in full before any panel sees them. */
 export async function hydrateAnalysisRevision(api: Pick<RendererApi, 'getAnalysisRevisionOverview'>,
   revision: AnalysisRevisionWireProjection): Promise<HydratedAnalysisRevisionProjection> {

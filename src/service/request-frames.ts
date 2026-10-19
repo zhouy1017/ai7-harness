@@ -1,5 +1,6 @@
 import { AnalysisError } from './analysis/canonical.js';
 import { baselineAnalysisOutbound } from './analysis/baseline-analysis-wire.js';
+import { taskPlanOutbound } from './task-plan.js';
 import type { ServiceResponse } from '../shared/protocol.js';
 import { isAbsolute } from 'node:path';
 import { MAX_SKILL_PACKAGE_BYTES } from './imported-skills.js';
@@ -91,7 +92,7 @@ const textDecoder = new TextDecoder('utf-8', { fatal: true });
 /** Outbound mapping precedes the unchanged hard frame guard. */
 export function encodeServiceResponse(response: ServiceResponse): Buffer {
   let mapped: unknown;
-  try { mapped = baselineAnalysisOutbound(response); }
+  try { mapped = taskPlanOutbound(baselineAnalysisOutbound(response)); }
   catch (error) {
     if (!(error instanceof AnalysisError)) throw error;
     mapped = { id: response.id, ok: false, error: { code: error.code, message: error.message } };
@@ -700,6 +701,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !isBoundedString(input.digest, 64) || !/^[0-9a-f]{64}$/u.test(input.digest)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    case 'getTaskPlanPage': {
+      const input = requireInput(value.input, ['bookId', 'kind', 'ref', 'path', 'afterOrdinal', 'digest'], tentativeId);
+      if (!validUuid(input.bookId) || !(TASK_PLAN_KINDS.includes(input.kind as TaskPlanKind) || input.kind === 'task-intent-drafts') ||
+          !(validUuid(input.ref) || input.ref === null && (input.kind === 'task-intent-drafts' && input.path === 'drafts' || input.kind === 'review-run' && input.path === 'scopeOptions.chapters.chapters')) ||
+          !isBoundedString(input.path, 160) || !isSafeInteger(input.afterOrdinal, 0) ||
+          !isBoundedString(input.digest, 64) || !HEX_DIGEST_PATTERN.test(input.digest)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'getBaselineAnalysisPage': {

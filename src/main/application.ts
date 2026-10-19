@@ -2861,6 +2861,23 @@ function registerRendererHandlers(
       return result;
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.getTaskPlanPage, (event, input: Omit<ServiceOperationMap['getTaskPlanPage']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getTaskPlanPage', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      // A page answers the list it was asked for, and retained drafts are this Book's, as the whole read is checked.
+      if (result.path !== input.path || result.digest !== input.digest || input.kind === 'task-intent-drafts' &&
+          (!Array.isArray(result.items) || result.items.some((draft) => (draft as TaskIntentDraftProjection).bookId !== route.bookId))) {
+        throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务计划不属于当前图书工作台。');
+      }
+      return result;
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.getBaselineAnalysisPage, (event, input: Omit<ServiceOperationMap['getBaselineAnalysisPage']['input'], 'bookId'>) =>
     envelope(async () => {
       const owned = requireSender(event);
