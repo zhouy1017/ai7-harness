@@ -5349,11 +5349,13 @@ export class EditorialStore {
     return analysisOverviewPage(this.#analysisRevisionForPage(input.bookId, input.revisionId), input.afterIndex);
   }
 
+  /** The latest Task's report, or the report of the Task that produced an earlier revision in 历次分析. */
   getAnalysisRunReportRows(input: { bookId: string; taskIntentId: string; afterOrdinal: number }) {
     const projection = this.inspectBaselineAnalysis(input.bookId);
-    requireStore(projection.taskIntent?.taskIntentId === input.taskIntentId && projection.taskOutcome?.report != null,
-      'ANALYSIS_REPORT_NOT_FOUND', '没有找到这项任务的运行报告。');
-    const report = projection.taskOutcome.report;
+    const report = projection.taskIntent?.taskIntentId === input.taskIntentId && projection.taskOutcome?.report != null
+      ? projection.taskOutcome.report
+      : [...projection.history?.entries ?? []].reverse().find((entry) => entry.producingRun.taskIntentId === input.taskIntentId)?.report ?? null;
+    requireStore(report !== null, 'ANALYSIS_REPORT_NOT_FOUND', '没有找到这项任务的运行报告。');
     const page = analysisBytePage(report.unitRows, input.afterOrdinal, (row) => row.unitOrdinal);
     return { reportDigest: report.reportDigest, rows: page.items, next: page.next };
   }

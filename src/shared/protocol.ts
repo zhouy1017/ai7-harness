@@ -145,12 +145,12 @@ export const IPC_CHANNELS = {
   inspectForegroundExecutionBoundary: 'ai7:j03:inspect-foreground-execution-boundary',
   prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
   authorizeTaskAuthorization: 'ai7:j03:authorize-task-authorization',
-  getBaselineAnalysisPage: 'ai7:analysis:getBaselineAnalysisPage',
-  getCoverageManifestUnits: 'ai7:analysis:getCoverageManifestUnits',
-  getAnalysisRevisionUnits: 'ai7:analysis:getAnalysisRevisionUnits',
-  getAnalysisRevisionOverview: 'ai7:analysis:getAnalysisRevisionOverview',
-  getAnalysisRunReportRows: 'ai7:analysis:getAnalysisRunReportRows',
-  getBaselineAnalysisRangePlan: 'ai7:analysis:getBaselineAnalysisRangePlan',
+  getBaselineAnalysisPage: 'ai7:analysis:get-baseline-analysis-page',
+  getCoverageManifestUnits: 'ai7:analysis:get-coverage-manifest-units',
+  getAnalysisRevisionUnits: 'ai7:analysis:get-analysis-revision-units',
+  getAnalysisRevisionOverview: 'ai7:analysis:get-analysis-revision-overview',
+  getAnalysisRunReportRows: 'ai7:analysis:get-analysis-run-report-rows',
+  getBaselineAnalysisRangePlan: 'ai7:analysis:get-baseline-analysis-range-plan',
   inspectBaselineAnalysis: 'ai7:j04:inspect-baseline-analysis',
   inspectBookFindings: 'ai7:inspect-book-findings',
   inspectParagraphAnalysis: 'ai7:inspect-paragraph-analysis',
@@ -2960,7 +2960,7 @@ export type AnalysisRunReportSummaryProjection = Omit<RunReportProjection, 'unit
   unitRows?: RunReportProjection['unitRows']; unitPage?: AnalysisUnitPage;
 };
 export type AnalysisReusePlanSummaryProjection = Omit<AnalysisReusePlanProjection, 'units'> & {
-  units: ReadonlyArray<Pick<AnalysisReusePlanUnitProjection, 'unitOrdinal' | 'disposition' | 'reason'>>;
+  units: ReadonlyArray<Pick<AnalysisReusePlanUnitProjection, 'unitOrdinal' | 'disposition' | 'reason' | 'reusedFrom'>>;
 };
 export type BaselineAnalysisWireProjection = Omit<BaselineAnalysisProjection,
   'coverageManifest' | 'resultSetRevision' | 'inspectedRevision' | 'update' | 'run' | 'history' | 'taskOutcome' | 'updateControls'> & {
@@ -2978,7 +2978,7 @@ export type BaselineAnalysisWireProjection = Omit<BaselineAnalysisProjection,
   updateControls: null | (Omit<BaselineAnalysisUpdateControlsProjection, 'actions'> & { actions:
     Omit<BaselineAnalysisUpdateControlsProjection['actions'], 'reanalyze-range'> & {
       'reanalyze-range': BaselineAnalysisUpdateActionProjection & { options: ReadonlyArray<
-        Pick<BaselineAnalysisRangeOptionProjection, 'unitOrdinal' | 'label' | 'startPosition' | 'endPosition'>> };
+        Pick<BaselineAnalysisRangeOptionProjection, 'unitOrdinal' | 'sectionOrdinal' | 'label' | 'startPosition' | 'endPosition'>> };
     } });
 };
 

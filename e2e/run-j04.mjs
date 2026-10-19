@@ -1855,6 +1855,11 @@ async function main() {
     at('update-controls-disclosed');
     cancellation.throwIfRequested();
     const controlsStale = stale.updateControls;
+    // #988: an option's expected counts are derived only when it is picked, so each is read the way the chooser reads it.
+    const staleRangePlans = [];
+    for (const option of controlsStale?.actions?.['reanalyze-range']?.options ?? []) {
+      staleRangePlans.push(await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan(${JSON.stringify({ unitOrdinal: option.unitOrdinal })})`));
+    }
     requireJourney(controlsStale?.target?.revisionId === revision.revisionId && controlsStale.target.ordinal === 1 && controlsStale.target.digest === revision.digest &&
       controlsStale.target.freshness === 'stale' && controlsStale.blockedByActiveRun === false &&
       controlsStale.working?.totalBlocks === SAMPLE1_BLOCKS && controlsStale.working?.unitCount === SAMPLE1_UNITS && controlsStale.working?.sectionCount === 1 &&
@@ -1867,9 +1872,11 @@ async function main() {
       controlsStale.actions['reanalyze-range'].goal === RANGE_GOAL && controlsStale.actions['reanalyze-range'].options?.length === SAMPLE1_UNITS &&
       controlsStale.actions['reanalyze-range'].options.every((option, index) => option.unitOrdinal === index + 1 &&
         option.startPosition === SAMPLE1_UNIT_RANGES[index][0] && option.endPosition === SAMPLE1_UNIT_RANGES[index][1] && option.sectionOrdinal === 1 &&
-        typeof option.label === 'string' && option.expected.recomputed >= 2) &&
+        typeof option.label === 'string' && !('expected' in option) &&
+        sameRecord(staleRangePlans[index]?.selectedRange, { startPosition: option.startPosition, endPosition: option.endPosition }) &&
+        staleRangePlans[index].expected.recomputed >= 2) &&
       // Against revision 1 the edited unit 1 and the gap unit 2 recompute in every mode; a range over unit 3 adds units 3 and 4.
-      sameRecord((await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan({ unitOrdinal: 3 })`)).expected, { reused: 4, recomputed: 4, invalidated: 2, bypassed: 2 }) &&
+      sameRecord(staleRangePlans[2]?.expected, { reused: 4, recomputed: 4, invalidated: 2, bypassed: 2 }) &&
       controlsStale.actions['reanalyze-book']?.available === true && controlsStale.actions['reanalyze-book'].goal === BOOK_GOAL &&
       sameRecord(controlsStale.actions['reanalyze-book'].expected, { reused: 0, recomputed: 8, invalidated: 2, bypassed: 6 }) &&
       controlsStale.providerConsequence.includes('0 次实时传输') && controlsStale.providerConsequence.includes('public-or-synthetic') &&
@@ -1916,7 +1923,7 @@ async function main() {
       sameRecord(syncPlan.counts, syncExpected.counts) && sameRecord(syncPlan.counts, controlsStale.actions['sync-current'].expected) &&
       JSON.stringify(syncPlan.units.map((unit) => unit.disposition)) === JSON.stringify(syncExpected.dispositions) &&
       syncPlan.units[0].reason === 'no-compatible-predecessor' && syncPlan.units[1].reason === 'predecessor-gap' &&
-      syncPlan.units.slice(2).every((unit, index) => unit.reason === 'compatible' && unit.unitOrdinal === index + 3) &&
+      syncPlan.units.slice(2).every((unit, index) => unit.reason === 'compatible' && unit.reusedFrom?.revisionId === revision.revisionId && unit.reusedFrom?.revisionOrdinal === 1 && unit.reusedFrom?.unitOrdinal === index + 3) &&
       JSON.stringify(syncPlan.predecessorUnits.map((unit) => unit.disposition)) === JSON.stringify(['invalidated', 'invalidated', 'reused', 'reused', 'reused', 'reused', 'reused', 'reused']) &&
       JSON.stringify(preparedSync.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify(syncExpected.recomputed) &&
       JSON.stringify(preparedSync.runSourceScope?.unitScope?.reusedUnitOrdinals) === JSON.stringify([3, 4, 5, 6, 7, 8]) &&

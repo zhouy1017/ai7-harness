@@ -1,7 +1,8 @@
 import { MAX_FRAME_BYTES, BASELINE_ANALYSIS_KIND, type BaselineAnalysisProjection,
   type BaselineAnalysisWireProjection, type BaselineAnalysisResultSetRevisionProjection,
   type AnalysisRevisionWireProjection, type AnalysisGapProjection, type AnalysisGapSummaryProjection,
-  type RunReportProjection, type AnalysisRunReportSummaryProjection } from '../../shared/protocol.js';
+  type RunReportProjection, type AnalysisRunReportSummaryProjection, type CoverageManifestUnitProjection,
+  type AnalysisReusePlanUnitProjection, type BaselineAnalysisRangeOptionProjection } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex, requireAnalysis } from './canonical.js';
 
 export const ANALYSIS_PAGE_BYTES = MAX_FRAME_BYTES / 2 - 2048;
@@ -9,6 +10,23 @@ const INLINE_UNIT_BYTES = 24 * 1024;
 const INLINE_OVERVIEW_BYTES = ANALYSIS_PAGE_BYTES;
 
 export const serializedBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
+
+/** Stops at the first item past the budget, so a large list is never serialized whole just to be compared. */
+function fitsWithin(items: ReadonlyArray<unknown>, budget: number): boolean {
+  let bytes = 2;
+  for (const [index, item] of items.entries()) {
+    bytes += serializedBytes(item) + (index === 0 ? 0 : 1);
+    if (bytes > budget) return false;
+  }
+  return true;
+}
+
+const manifestUnitSummary = ({ blockIds, blockDigests: _digests, overlapBlockIds: _overlap, ...unit }: CoverageManifestUnitProjection) => ({
+  ...unit, blockCount: blockIds.length, firstBlockId: blockIds[0]!, lastBlockId: blockIds.at(-1)!,
+});
+const reuseUnitSummary = ({ unitOrdinal, disposition, reason, reusedFrom }: AnalysisReusePlanUnitProjection) => ({ unitOrdinal, disposition, reason, reusedFrom });
+const rangeOptionSummary = ({ unitOrdinal, sectionOrdinal, label, startPosition, endPosition }: BaselineAnalysisRangeOptionProjection) =>
+  ({ unitOrdinal, sectionOrdinal, label, startPosition, endPosition });
 
 /** The cursor is exclusive. Never split an item or return a non-advancing page. */
 export function analysisBytePage<T>(items: ReadonlyArray<T>, after: number, ordinal: (item: T) => number,
@@ -89,18 +107,20 @@ export function analysisOverviewPage(revision: BaselineAnalysisResultSetRevision
     next: chunk.end < transfer.totalLength ? chunk.end : null };
 }
 
+const HISTORY_REPORT_ROW_BYTES = 8 * 1024;
 function reportSummary(report: RunReportProjection | null, history: boolean): AnalysisRunReportSummaryProjection | null {
   if (report === null) return null;
   const { unitRows, ...summary } = report;
-  if (history) return summary;
-  if (serializedBytes(unitRows) <= 64 * 1024) return report;
+  if (fitsWithin(unitRows, history ? HISTORY_REPORT_ROW_BYTES : 64 * 1024)) return report;
+  // A history entry's rows are read through its producing Task's report; short books keep them inline.
+  if (history) return { ...summary, unitPage: { shown: 0, total: unitRows.length, nextOrdinal: 0 } };
   const page = analysisBytePage(unitRows, 0, (row) => row.unitOrdinal, 32 * 1024);
   return { ...summary, unitRows: page.items, unitPage: { shown: page.items.length, total: unitRows.length, nextOrdinal: page.next } };
 }
 
 export function analysisRevisionWire(revision: BaselineAnalysisResultSetRevisionProjection, overviewBudget = INLINE_OVERVIEW_BYTES): AnalysisRevisionWireProjection {
   const { units, gaps, sections, synthesis, ...rest } = revision;
-  const page = revisionUnitsPage(revision, 0, serializedBytes(units) <= 96 * 1024 ? 96 * 1024 : INLINE_UNIT_BYTES, true);
+  const page = revisionUnitsPage(revision, 0, fitsWithin(units, 96 * 1024) ? 96 * 1024 : INLINE_UNIT_BYTES, true);
   const overview = overviewTransfer(revision);
   const totalLength = overview.totalLength;
   const chunkCount = overview.bytes <= overviewBudget ? 0 : overview.chunks.length;
@@ -116,14 +136,11 @@ export function analysisRevisionWire(revision: BaselineAnalysisResultSetRevision
 export function baselineAnalysisWire(projection: BaselineAnalysisProjection, bounded = true, replyBudget = MAX_FRAME_BYTES - 72 * 1024): BaselineAnalysisWireProjection {
   const wire: BaselineAnalysisWireProjection = { ...projection, listPages: {},
     coverageManifest: projection.coverageManifest === null ? null : { ...projection.coverageManifest,
-      units: projection.coverageManifest.units.map(({ blockIds, blockDigests: _digests, overlapBlockIds: _overlap, ...unit }) => ({
-        ...unit, blockCount: blockIds.length, firstBlockId: blockIds[0]!, lastBlockId: blockIds.at(-1)!,
-      })),
-    },
+      units: projection.coverageManifest.units.map(manifestUnitSummary) },
     resultSetRevision: projection.resultSetRevision === null ? null : analysisRevisionWire(projection.resultSetRevision),
     inspectedRevision: projection.inspectedRevision === null ? null : { ...projection.inspectedRevision, revision: analysisRevisionWire(projection.inspectedRevision.revision) },
     update: projection.update === null ? null : { ...projection.update, reusePlan: projection.update.reusePlan === null ? null : {
-      ...projection.update.reusePlan, units: projection.update.reusePlan.units.map(({ unitOrdinal, disposition, reason }) => ({ unitOrdinal, disposition, reason })),
+      ...projection.update.reusePlan, units: projection.update.reusePlan.units.map(reuseUnitSummary),
     } },
     run: projection.run === null ? null : { ...projection.run, attempt: projection.run.attempt === null ? null : {
       ...projection.run.attempt, spans: projection.run.attempt.spans.slice(-20), spanCount: projection.run.attempt.spans.length,
@@ -134,7 +151,7 @@ export function baselineAnalysisWire(projection: BaselineAnalysisProjection, bou
     },
     updateControls: projection.updateControls === null ? null : { ...projection.updateControls, actions: {
       ...projection.updateControls.actions, 'reanalyze-range': { ...projection.updateControls.actions['reanalyze-range'],
-        options: projection.updateControls.actions['reanalyze-range'].options.map(({ unitOrdinal, label, startPosition, endPosition }) => ({ unitOrdinal, label, startPosition, endPosition })),
+        options: projection.updateControls.actions['reanalyze-range'].options.map(rangeOptionSummary),
       },
     } },
   };
@@ -145,11 +162,11 @@ export function baselineAnalysisWire(projection: BaselineAnalysisProjection, bou
   }
   if (serializedBytes(wire) <= replyBudget) return wire;
   // Two individually small overviews can still exhaust the one enclosing reply when history is open.
-  if (serializedBytes(wire) > replyBudget) {
-    if (projection.resultSetRevision !== null) wire.resultSetRevision = analysisRevisionWire(projection.resultSetRevision, 0);
-    if (projection.inspectedRevision !== null) wire.inspectedRevision = { ...projection.inspectedRevision,
-      revision: analysisRevisionWire(projection.inspectedRevision.revision, 0) };
-  }
+  if (projection.resultSetRevision !== null) wire.resultSetRevision = analysisRevisionWire(projection.resultSetRevision, 0);
+  if (projection.inspectedRevision !== null) wire.inspectedRevision = { ...projection.inspectedRevision,
+    revision: analysisRevisionWire(projection.inspectedRevision.revision, 0) };
+  // Lists stay whole whenever paging the overviews alone is enough.
+  if (serializedBytes(wire) <= replyBudget) return wire;
   let share = 12 * 1024;
   for (;;) {
     const paged = boundSummaryLists(wire, share);
@@ -199,15 +216,6 @@ function replaceList(value: unknown, path: string, items: ReadonlyArray<unknown>
   for (const key of keys.slice(0, -1)) current = current[key] as Record<string, unknown>;
   current[keys.at(-1)!] = items;
 }
-function ordinalOf(item: unknown, index: number): number {
-  if (typeof item === 'number') return item;
-  if (item !== null && typeof item === 'object') {
-    const row = item as Record<string, unknown>;
-    if (typeof row['ordinal'] === 'number') return row['ordinal'];
-    if (typeof row['unitOrdinal'] === 'number') return row['unitOrdinal'];
-  }
-  return index + 1;
-}
 function boundSummaryLists(wire: BaselineAnalysisWireProjection, budget: number): BaselineAnalysisWireProjection {
   const paged = structuredClone(wire);
   const pages = { ...wire.listPages };
@@ -224,25 +232,25 @@ function boundSummaryLists(wire: BaselineAnalysisWireProjection, budget: number)
       selected.push(item); bytes += size;
     }
     replaceList(paged, path, selected);
+    // Cursors are one-based list positions (a newest-first list names the oldest position shown): a field such as a
+    // reused lineage entry's unitOrdinal names its predecessor's unit and need not increase along the list.
     pages[path] = { shown: selected.length, total: list.length,
-      nextOrdinal: selected.length === 0 ? 0 : ordinalOf(selected.at(-1), selected.length - 1), ...(descending ? { descending: true } : {}) };
+      nextOrdinal: selected.length === 0 ? 0 : descending ? list.length - selected.length + 1 : selected.length, ...(descending ? { descending: true } : {}) };
   }
   paged.listPages = pages;
   return paged;
 }
 
-/** Reads only a declared list of the same Task/revision snapshot; anonymous lists use one-based row ordinals. */
+/** Reads only a declared list of the same Task/revision snapshot by one-based list position; spans by their attempt ordinal. */
 export function baselineAnalysisSummaryPage(projection: BaselineAnalysisProjection, path: string, afterOrdinal: number) {
   requireAnalysis(path === 'run.attempt.spans' || BASELINE_SUMMARY_LIST_PATHS.some((candidate) => candidate === path),
     'ANALYSIS_PAGE_PATH_INVALID', '分析读取范围无效。');
   let list: ReadonlyArray<unknown> | null;
   switch (path) {
     case 'run.attempt.spans': list = projection.run?.attempt?.spans ?? []; break;
-    case 'coverageManifest.units': list = projection.coverageManifest?.units.map(({ blockIds, blockDigests: _digests, overlapBlockIds: _overlap, ...unit }) => ({
-      ...unit, blockCount: blockIds.length, firstBlockId: blockIds[0]!, lastBlockId: blockIds.at(-1)!,
-    })) ?? []; break;
-    case 'update.reusePlan.units': list = projection.update?.reusePlan?.units.map(({ unitOrdinal, disposition, reason }) => ({ unitOrdinal, disposition, reason })) ?? []; break;
-    case 'updateControls.actions.reanalyze-range.options': list = projection.updateControls?.actions['reanalyze-range'].options.map(({ unitOrdinal, label, startPosition, endPosition }) => ({ unitOrdinal, label, startPosition, endPosition })) ?? []; break;
+    case 'coverageManifest.units': list = projection.coverageManifest?.units.map(manifestUnitSummary) ?? []; break;
+    case 'update.reusePlan.units': list = projection.update?.reusePlan?.units.map(reuseUnitSummary) ?? []; break;
+    case 'updateControls.actions.reanalyze-range.options': list = projection.updateControls?.actions['reanalyze-range'].options.map(rangeOptionSummary) ?? []; break;
     case 'history.entries': list = projection.history?.entries.map((entry) => ({ ...entry, report: reportSummary(entry.report, true) })) ?? []; break;
     default: {
       list = listAt(projection, path);
@@ -251,7 +259,7 @@ export function baselineAnalysisSummaryPage(projection: BaselineAnalysisProjecti
   }
   requireAnalysis(list !== null, 'ANALYSIS_PAGE_PATH_INVALID', '分析读取范围无效。');
   const descending = path === 'history.entries' || path === 'run.attempt.spans';
-  const indexed = list.map((item, index) => ({ item, ordinal: ordinalOf(item, index) }));
+  const indexed = list.map((item, index) => ({ item, ordinal: path === 'run.attempt.spans' ? (item as { ordinal: number }).ordinal : index + 1 }));
   const remaining = descending ? indexed.filter((row) => afterOrdinal === 0 || row.ordinal < afterOrdinal).reverse()
     : indexed.filter((row) => row.ordinal > afterOrdinal);
   const page = analysisBytePage(remaining, 0, (_row) => 1);

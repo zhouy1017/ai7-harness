@@ -26,7 +26,7 @@ it('bounds every baseline reply envelope for 400-unit prepared, settled and mult
       expect(wire.run.attempt.spanCount).toBe(400);
       expect(wire.run.attempt.spans).toHaveLength(20);
     }
-    expect(wire.history?.entries.every((entry) => entry.report !== null && !('unitRows' in entry.report))).not.toBe(false);
+    expect(wire.history?.entries.every((entry) => entry.report !== null && !('unitRows' in entry.report) && entry.report.unitPage?.total === 400)).not.toBe(false);
   }
 }, 60_000);
 
@@ -140,6 +140,52 @@ it('validates all readonly page cursors through the real request decoder', () =>
     const cursor = 'afterIndex' in request.input ? 'afterIndex' : 'unitOrdinal' in request.input ? 'unitOrdinal' : 'afterOrdinal';
     expect(() => decodeRequest(Buffer.from(JSON.stringify({ ...frame, input: { ...frame.input, [cursor]: -1 } })))).toThrow(ProtocolError);
   }
+});
+
+it('pages a summary list by position when its items carry ordinals that repeat or fall back', () => {
+  const full = longSettledAnalysis(longPreparedAnalysis(), 1, false);
+  const revision = full.resultSetRevision!;
+  // A moved chapter: the second half reuses the predecessor's first-half units, so a reused lineage entry's unitOrdinal
+  // (the predecessor's unit) restarts at 1 halfway down the list.
+  revision.lineage = revision.lineage.map((entry, index) => index < 200 ? entry
+    : { unitOrdinal: index - 199, kind: 'reused', revisionId: revision.revisionId, revisionOrdinal: 1 });
+  const wire = baselineAnalysisWire(full, true, 96 * 1024);
+  const meta = wire.listPages['resultSetRevision.lineage']!;
+  expect(meta.total).toBe(400);
+  const collected = [...wire.resultSetRevision!.lineage];
+  let cursor = meta.nextOrdinal;
+  while (cursor !== null) {
+    const page = baselineAnalysisSummaryPage(full, 'resultSetRevision.lineage', cursor);
+    collected.push(...page.items as typeof collected);
+    cursor = page.nextOrdinal;
+  }
+  expect(collected).toEqual(revision.lineage);
+  const twelve = longSettledAnalysis(longPreparedAnalysis(), 12);
+  const history = baselineAnalysisWire(twelve, true, 96 * 1024);
+  const entries = [...history.history!.entries];
+  cursor = history.listPages['history.entries']!.nextOrdinal;
+  while (cursor !== null) {
+    const page = baselineAnalysisSummaryPage(twelve, 'history.entries', cursor);
+    entries.push(...page.items as typeof entries);
+    cursor = page.nextOrdinal;
+  }
+  expect(entries.map((entry) => entry.ordinal)).toEqual([12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+});
+
+it('keeps short-book history reports, range options and reuse sources as they were', () => {
+  const short = baselineAnalysisWire(longSettledAnalysis(longPreparedAnalysis(120), 12));
+  expect(short.listPages).toEqual({});
+  expect(short.history!.entries.every((entry) => entry.report?.unitRows?.length === 8 && entry.report.unitPage === undefined)).toBe(true);
+  const full = longSettledAnalysis(longPreparedAnalysis(120));
+  const wire = baselineAnalysisWire(full);
+  const option = full.updateControls!.actions['reanalyze-range'].options[0]!;
+  expect(wire.updateControls!.actions['reanalyze-range'].options[0]).toEqual({ unitOrdinal: option.unitOrdinal, sectionOrdinal: option.sectionOrdinal,
+    label: option.label, startPosition: option.startPosition, endPosition: option.endPosition });
+  const unit = full.update!.reusePlan!.units[0]!;
+  expect(wire.update!.reusePlan!.units[0]).toEqual({ unitOrdinal: unit.unitOrdinal, disposition: unit.disposition, reason: unit.reason, reusedFrom: unit.reusedFrom });
+  const long = baselineAnalysisWire(longSettledAnalysis(longPreparedAnalysis(), 12));
+  expect(long.history!.entries.every((entry) => entry.report?.unitRows === undefined &&
+    JSON.stringify(entry.report?.unitPage) === JSON.stringify({ shown: 0, total: 400, nextOrdinal: 0 }))).toBe(true);
 });
 
 it('pages older spans by attempt ordinal when retries repeat a unit and reducer spans name no unit', () => {

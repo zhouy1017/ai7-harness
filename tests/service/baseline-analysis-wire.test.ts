@@ -2,6 +2,7 @@ import { longSettledAnalysis, BASELINE_REPLY_OPERATIONS, baselineReplyResult } f
 import { analysisOverviewText, baselineAnalysisOutbound, serializedBytes } from '../../src/service/analysis/baseline-analysis-wire.js';
 import { manifestDigestIsExact } from '../../src/service/analysis/coverage-manifest.js';
 import { baselineAnalysisWire } from '../../src/service/analysis/baseline-analysis-wire.js';
+import { encodeServiceResponse } from '../../src/service/request-frames.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
@@ -39,6 +40,16 @@ it('keeps the prepared long-book reply below the frame budget', async () => {
     const full = work.projection!;
     expect(full.coverageManifest!.totalBlocks).toBeGreaterThanOrEqual(6_000);
     expect(full.coverageManifest!.units.length).toBeGreaterThanOrEqual(330);
+    // The Commander's reproduction: the completed preparation job's whole reply used to exceed the frame and came back as
+    // RESPONSE_TOO_LARGE; through the real response encoder it is now an ok frame carrying the same manifest digest.
+    const job = { jobId: randomUUID(), kind: 'baseline-analysis-preparation', state: 'completed',
+      progress: { completed: 1, total: 1, label: '基线分析的任务计划已准备' }, result: full, failure: null } as const;
+    expect(serializedBytes({ id: randomUUID(), ok: true, op: 'pollServiceJob', result: job })).toBeGreaterThan(MAX_FRAME_BYTES);
+    const frame = encodeServiceResponse({ id: randomUUID(), ok: true, op: 'pollServiceJob', result: job });
+    expect(frame.readUInt32BE(0)).toBe(frame.length - 4);
+    const reply = JSON.parse(frame.subarray(4).toString('utf8')) as { ok: boolean; result: { result: { coverageManifest: { digest: string } } } };
+    expect(reply.ok).toBe(true);
+    expect(reply.result.result.coverageManifest.digest).toBe(full.coverageManifest!.digest);
     const members = [];
     let cursor: number | null = 0;
     do {
@@ -98,6 +109,27 @@ it('keeps the prepared long-book reply below the frame budget', async () => {
       } while (afterOrdinal !== null);
       expect(rows).toEqual(settled.taskOutcome!.report!.unitRows);
     } finally { inspect.mockRestore(); }
+    // 历次分析: an earlier revision's report rows are read through the Task that produced it; an unknown Task is refused.
+    const history = longSettledAnalysis(full, 12);
+    const earlierTask = randomUUID();
+    const earlier = history.history!.entries[0]!;
+    history.history = { ...history.history!, entries: [{ ...earlier, producingRun: { ...earlier.producingRun, taskIntentId: earlierTask } },
+      ...history.history!.entries.slice(1)] };
+    const inspectHistory = vi.spyOn(store.baselineAnalysisLedger, 'inspect').mockImplementation(() => history);
+    try {
+      const wire = baselineAnalysisWire(history);
+      expect(wire.history!.entries[0]!.report!.unitPage).toEqual({ shown: 0, total: earlier.report!.unitRows.length, nextOrdinal: 0 });
+      const rows = [];
+      let afterOrdinal: number | null = 0;
+      do {
+        const page = store.getAnalysisRunReportRows({ bookId: full.bookId, taskIntentId: earlierTask, afterOrdinal });
+        expect(page.reportDigest).toBe(earlier.report!.reportDigest);
+        rows.push(...page.rows);
+        afterOrdinal = page.next;
+      } while (afterOrdinal !== null);
+      expect(rows).toEqual(earlier.report!.unitRows);
+      expect(() => store.getAnalysisRunReportRows({ bookId: full.bookId, taskIntentId: randomUUID(), afterOrdinal: 0 })).toThrowError(/运行报告/u);
+    } finally { inspectHistory.mockRestore(); }
   } finally {
     store.close();
     await roots.dispose();

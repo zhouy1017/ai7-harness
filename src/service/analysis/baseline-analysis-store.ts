@@ -3238,16 +3238,6 @@ export class BaselineAnalysisStore {
     return this.#updateControls(bookId, revision, activeRun);
   }
 
-  /**
-   * The Analysis Update Controls: the preview manifest is derived over the current working blocks of
-   * the primary branch (exactly what the next Task Input checkpoint would pin), and every expected
-   * count is a real reuse-plan derivation against the latest revision, never an estimate.
-   *
-   * The controls are keyed by the kind's own update modes and offered by what each mode means to
-   * read: a mode that reads only what changed is on offer once something has, a range-bound mode
-   * carries one option per structural unit, and a mode that reads everything always stands. For the
-   * baseline kind that is exactly the three actions it has always had, in the order it declares them.
-   */
   /** Read one immutable Task's complete manifest, including historical Tasks. */
   coverageManifestFor(bookId: string, taskIntentId: string): CoverageManifestProjection {
     const row = this.#db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ? AND book_id = ? AND kind = ?')
@@ -3273,6 +3263,17 @@ export class BaselineAnalysisStore {
     return { selectedRange, expected: this.#derivePlan('reanalyze-range', selectedRange, preview, predecessor).counts };
   }
 
+  /**
+   * The Analysis Update Controls: the preview manifest is derived over the current working blocks of
+   * the primary branch (exactly what the next Task Input checkpoint would pin), and every expected
+   * count is a real reuse-plan derivation against the latest revision, never an estimate. The
+   * baseline kind's range options carry none: `rangePlan` derives the one the editor picks (#988).
+   *
+   * The controls are keyed by the kind's own update modes and offered by what each mode means to
+   * read: a mode that reads only what changed is on offer once something has, a range-bound mode
+   * carries one option per structural unit, and a mode that reads everything always stands. For the
+   * baseline kind that is exactly the three actions it has always had, in the order it declares them.
+   */
   #updateControls(
     bookId: string,
     latest: BaselineAnalysisResultSetRevisionProjection,
