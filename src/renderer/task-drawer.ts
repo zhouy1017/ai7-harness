@@ -2101,7 +2101,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     // A stopped Run: nothing is in flight, and what it kept is its continuation point (CONT-015).
     if (run.continuation !== null) {
       section.dataset['taskPlanActivityProgress'] = `${run.continuation.unitsSettled ?? 'unreadable'}/${run.continuation.unitsTotal}`;
-      section.append(el('p', 'field-note', taskBarContinuationNote(run.continuation.unitsSettled, run.continuation.unitsTotal, run.continuation.pendingAnswerUnits)));
+      section.append(el('p', 'field-note', taskBarContinuationNote(run.continuation.unitsSettled, run.continuation.unitsTotal, run.continuation.pendingAnswerUnits,
+        plan?.listPages?.['runControl.continuation.pendingAnswerUnits']?.total)));
       return section;
     }
     if (activity === null) {

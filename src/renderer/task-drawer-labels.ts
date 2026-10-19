@@ -481,10 +481,13 @@ export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boo
  * A stopped Run's continuation point, as the bar states it beside 续行; `null` when its kept progress no longer reads back.
  * Ranges whose answer the editor gave and nothing has carried out yet are handled first (Issue #784).
  */
-export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number, pendingAnswerUnits: ReadonlyArray<number> = []): string {
+export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number, pendingAnswerUnits: ReadonlyArray<number> = [],
+  pendingTotal = pendingAnswerUnits.length): string {
   if (unitsSettled === null) return '已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始';
-  if (pendingAnswerUnits.length > 0 && unitsSettled < unitsTotal) {
-    return `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时先按你的回答处理第 ${pendingAnswerUnits.join('、')} 个，再继续未完成的部分，不重复已读完的部分`;
+  if (pendingTotal > 0 && unitsSettled < unitsTotal) {
+    // A list read only in part is counted, never named as though it were all of them (Issue #996).
+    const which = pendingTotal > pendingAnswerUnits.length ? ` ${pendingTotal} 个阅读范围` : `第 ${pendingAnswerUnits.join('、')} 个`;
+    return `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时先按你的回答处理${which}，再继续未完成的部分，不重复已读完的部分`;
   }
   return unitsSettled >= unitsTotal
     ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样`
@@ -655,17 +658,22 @@ export const TASK_PLAN_CLARIFICATION_RECORD = '问过你的问题';
 export const TASK_BAR_AWAITING_ANSWER = '等你回答';
 
 /** 暂不回答's quiet line, and the bar's note while questions wait (CLAR-007: quiet, never a repeated dialog). */
-export function taskBarQuestionsNote(count: number): string {
-  return `有 ${count} 个问题等你回答`;
+export function taskBarQuestionsNote(count: number, more = false): string {
+  return `${more ? '至少' : ''}有 ${count} 个问题等你回答`;
 }
-export function taskBarAwaitingAnswerNote(settled: number, total: number, count: number): string {
+export function taskBarAwaitingAnswerNote(settled: number, total: number, count: number, more = false): string {
   return count === 0
     ? `已读完 ${settled} / ${total} 个阅读范围；你已回答，另一项任务结束后就接着做`
-    : `已读完 ${settled} / ${total} 个阅读范围；${count} 个问题等你回答，回答后接着做`;
+    : `已读完 ${settled} / ${total} 个阅读范围；${more ? '至少 ' : ''}${count} 个问题等你回答，回答后接着做`;
 }
 
-function openQuestions(plan: TaskPlanProjection): number {
-  return plan.clarifications.filter((card) => card.state === 'open').length;
+/**
+ * Open questions come first (Issue #996): a list read only in part whose cards read so far are all open may hold more, so
+ * its count is stated as a floor, never as the whole.
+ */
+function openQuestions(plan: TaskPlanProjection): { count: number; more: boolean } {
+  const count = plan.clarifications.filter((card) => card.state === 'open').length;
+  return { count, more: plan.listPages?.['clarifications']?.nextOrdinal != null && count === plan.clarifications.length };
 }
 
 export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBarView {
@@ -756,9 +764,9 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           statement: null,
           // A kept progress that no longer reads back is never stated as a count: the questions are.
           note: continuation === null || continuation.unitsSettled === null
-            ? (asked === 0 ? null : taskBarQuestionsNote(asked))
-            : taskBarAwaitingAnswerNote(continuation.unitsSettled, continuation.unitsTotal, asked),
-          status: asked === 0 ? plan.state.label : TASK_BAR_AWAITING_ANSWER,
+            ? (asked.count === 0 ? null : taskBarQuestionsNote(asked.count, asked.more))
+            : taskBarAwaitingAnswerNote(continuation.unitsSettled, continuation.unitsTotal, asked.count, asked.more),
+          status: asked.count === 0 ? plan.state.label : TASK_BAR_AWAITING_ANSWER,
           actions: [
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
             { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
@@ -820,7 +828,8 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           readiness,
           summary,
           statement: null,
-          note: continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits),
+          note: continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits,
+            plan.listPages?.['runControl.continuation.pendingAnswerUnits']?.total),
           status: plan.state.label,
           actions: [
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
@@ -837,7 +846,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: asked === 0 ? null : taskBarQuestionsNote(asked),
+        note: asked.count === 0 ? null : taskBarQuestionsNote(asked.count, asked.more),
         status: plan.state.label,
         actions: [
           { name: 'pause', label: TASK_BAR_PAUSE, tone: 'secondary', disabledReason: control.pause.reason },

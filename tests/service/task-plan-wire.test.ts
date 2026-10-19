@@ -4,11 +4,11 @@ import { expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_FRAME_BYTES, EVALUATION_REWRITE_KIND, EVALUATION_REWRITE_CONTRACT_VERSION,
-  EVALUATION_REWRITE_EXPECTED_OUTCOME, EVALUATION_REWRITE_MODE_GOALS,
+  EVALUATION_REWRITE_EXPECTED_OUTCOME, EVALUATION_REWRITE_MODE_GOALS, MAX_TASK_INTENT_GOAL_LENGTH,
   type EvaluationRewriteProjection, type TaskPlanProjection, type ServiceResponse } from '../../src/shared/protocol.js';
 import { serializedBytes } from '../../src/service/analysis/baseline-analysis-wire.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
-import { baselineAnalysisPlan, evaluationRewritePlan, taskPlanOutbound, taskPlanWire, withAnswerBlockers, withResend } from '../../src/service/task-plan.js';
+import { baselineAnalysisPlan, evaluationRewritePlan, reviewWorkspaceWire, taskPlanOutbound, taskPlanWire, withAnswerBlockers, withResend } from '../../src/service/task-plan.js';
 import { encodeServiceResponse } from '../../src/service/request-frames.js';
 import { appendTaskPlanPage } from '../../src/renderer/analysis-paging.js';
 import { longSettledAnalysis } from '../support/long-baseline-analysis.js';
@@ -29,9 +29,33 @@ function sweep(shape: string, state: string, op: string, result: unknown): void 
   expect(JSON.parse(frame.subarray(4).toString('utf8')).ok).toBe(true);
 }
 
-function completePages(store: EditorialStore, original: TaskPlanProjection): void {
-  let wire = taskPlanWire(original);
-  const inspect = vi.spyOn(store, 'inspectTaskPlan').mockReturnValue(original);
+const REPLY_BUDGET = MAX_FRAME_BYTES - 72 * 1024;
+/** An inline page never empties a list or text that holds entries, however far the guard shrank it. */
+function expectNonEmptyPages(listPages: TaskPlanProjection['listPages']): void {
+  for (const [path, meta] of Object.entries(listPages ?? {})) expect(meta.total === 0 || meta.shown >= 1, path).toBe(true);
+}
+
+const PAGEABLE_PATHS = ['drift.entries', 'edit.lastEdit.entries', 'resend.units', 'resend.statement', 'unconfirmed.ranges',
+  'runControl.outcomeUnknown.units', 'runControl.continuation.pendingAnswerUnits', 'clarifications'];
+function largestPageable(plan: TaskPlanProjection): number {
+  const lists = PAGEABLE_PATHS.map((path) => path.split('.').reduce<unknown>((value, key) =>
+    value === null || typeof value !== 'object' ? undefined : (value as Record<string, unknown>)[key], plan));
+  return Math.max(...[...lists, ...plan.technical.map((row) => row.value)].map((value) => value === undefined ? 0 : serializedBytes(value)));
+}
+
+/**
+ * Pages every state that holds a value worth paging, whether or not its whole reply fits: one byte under that size forces the
+ * guard to page. A plan the store derives is read back through its real derivation, which must pin the same digests; only a
+ * state the store cannot reach provider-free (`generated`) replaces that one read with the generated plan. A plan that fits
+ * is returned unchanged.
+ */
+function completePages(store: EditorialStore, original: TaskPlanProjection, generated: boolean): void {
+  if (serializedBytes(original) <= REPLY_BUDGET) expect(taskPlanWire(original)).toBe(original);
+  if (largestPageable(original) < 16 * 1024) return;
+  let wire = taskPlanWire(original, Math.min(serializedBytes(original) - 1, REPLY_BUDGET));
+  expect(Object.keys(wire.listPages ?? {}).length).toBeGreaterThan(0);
+  expectNonEmptyPages(wire.listPages);
+  const inspect = generated ? vi.spyOn(store, 'inspectTaskPlan').mockReturnValue(original) : null;
   try {
     for (const path of Object.keys(wire.listPages ?? {})) {
       const visited = new Set<number>();
@@ -48,7 +72,17 @@ function completePages(store: EditorialStore, original: TaskPlanProjection): voi
     }
     const { listPages: _pages, ...rest } = wire;
     expect(rest).toEqual(original);
-  } finally { inspect.mockRestore(); }
+  } finally { inspect?.mockRestore(); }
+}
+
+async function generatedBook(store: EditorialStore, inputRoot: string, paragraphs: ReadonlyArray<{ text: string; style?: string }>) {
+  const inputPath = join(inputRoot, 'generated.docx');
+  await writeSyntheticDocx(inputPath, { paragraphs: [...paragraphs] });
+  const staged = await store.stageSelectedManuscript(randomUUID(), inputPath);
+  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+    { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '生成测试' }, false);
+  return store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
+    reviewDigest: review.reviewDigest!, commitId: randomUUID() });
 }
 
 for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies for ${shape}`, async () => {
@@ -58,16 +92,10 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null,
   });
   try {
-    const inputPath = join(roots.inputRoot, 'generated.docx');
-    await writeSyntheticDocx(inputPath, { paragraphs: Array.from({ length: shape === 'headings' ? 6000 : 1200 }, (_, index) => ({
+    const commit = await generatedBook(store, roots.inputRoot, Array.from({ length: shape === 'headings' ? 6000 : 1200 }, (_, index) => ({
       text: shape === 'headings' ? `生成标题${index}` : '甲乙丙丁戊己庚辛壬癸'.repeat(125),
       ...(shape === 'headings' ? { style: 'Heading1' } : {}),
-    })) });
-    const staged = await store.stageSelectedManuscript(randomUUID(), inputPath);
-    const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
-      { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '生成测试' }, false);
-    const commit = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
-      reviewDigest: review.reviewDigest!, commitId: randomUUID() });
+    })));
     const connection = store.saveModelServiceConnection('generated local setup', null, 'needs-attention', 'opencode-go');
     const binding = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: connection.credentialReference };
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding);
@@ -98,10 +126,17 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
         unitsSettled: 0, unitsClosed: 0, unitsTotal: units.length, blockers: [], bindingHolds: true,
         outcomeUnknown: { units: units.map((unitOrdinal) => ({ unitOrdinal, attempts: 1, reason: '生成原因' })), stopped: true } } });
     stopped.edit = { ...stopped.edit, lastEdit: { ordinal: 2, recordedAt: '2026-10-19T00:00:00.000Z', entries: drift.drift.entries } };
+    // The prepared plan is the store's own; the later states are #988's generated settled analysis through the real plan
+    // factories (`withResend`, `baselineAnalysisPlan`), with drift lines, unconfirmed ranges and questions generated one per unit.
     for (const [state, next] of Object.entries({ prepared: plan, 'settled-update': settledPlan, resend, drift, 'stopped-clarifications': stopped })) {
       for (const op of PLAN_OPS) sweep(shape, `baseline-analysis/${state}`, op, next);
-      completePages(store, next);
+      completePages(store, next, state !== 'prepared');
     }
+    // A reply that fits is the plan itself, unchanged (as #988's): only a larger one is paged.
+    expect(serializedBytes(plan)).toBeLessThanOrEqual(REPLY_BUDGET);
+    expect(largestPageable(plan), 'the store-derived plan was paged and read back for real').toBeGreaterThanOrEqual(16 * 1024);
+    expect(serializedBytes(stopped)).toBeGreaterThan(REPLY_BUDGET);
+    expect(taskPlanWire(stopped).listPages, 'a reply past the budget is paged').toBeDefined();
     let evaluation = store.createInitialEvaluationPreparationWork(commit.bookId, policy);
     while (!evaluation.done) evaluation = store.advanceInitialEvaluationPreparationWork(evaluation.workId!);
     // The rewrite cannot be stored before a settled 初评. Exercise its real plan factory over a generated frozen
@@ -113,7 +148,7 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
     const rewritePlan = evaluationRewritePlan({ projection: rewriteProjection, bookTitle: '生成测试', blocks,
       task: { recordOrdinal: 1, entryOrdinal: 2, profile: { title: '生成评估', version: '1' }, scored: [{ label: '生成评分项', score: 10, fullMarks: 20 }] } });
     for (const op of PLAN_OPS) sweep(shape, 'evaluation-rewrite/generated-prepared', op, rewritePlan);
-    completePages(store, rewritePlan);
+    completePages(store, rewritePlan, true);
     let writing = store.createWritingPreparationWork(commit.bookId, { typeId: 'news-release', audience: '测试读者', channel: '测试渠道', requirements: null }, policy);
     while (!writing.done) writing = store.advanceWritingPreparationWork(writing.workId!);
     let reviewing = store.createReviewRunPreparationWork(commit.bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
@@ -121,7 +156,7 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
     for (const kind of ['initial-evaluation', 'writing', 'review-run'] as const) {
       const next = store.inspectTaskPlan({ bookId: commit.bookId, kind, ref: kind === 'review-run' ? reviewing.projection!.run!.reviewRunId : null });
       for (const op of PLAN_OPS) sweep(shape, `${kind}/prepared`, op, next);
-      completePages(store, next);
+      completePages(store, next, false);
     }
     for (const [kind, preparationOp, projection] of [
       ['initial-evaluation', 'prepareInitialEvaluation', store.inspectEvaluation(commit.bookId, null)],
@@ -137,16 +172,23 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
       sweep(shape, 'review-run/prepared', op, workspace);
     }
     sweep(shape, 'review-run/prepared', 'quickStartReviewRun', { outcome: 'fell-back', reasons: [], projection: workspace });
-    let wire = taskPlanOutbound(workspace) as typeof workspace;
+    // The chapter choices are paged whenever the workspace is (forced one byte under its size when it would fit), and read
+    // back through the store's own workspace read, before and after the Run, until they equal the complete choices.
     const path = 'scopeOptions.chapters.chapters';
-    while (wire.listPages?.[path]?.nextOrdinal != null) {
-      const meta = wire.listPages[path]!;
-      const page = store.getTaskPlanPage({ bookId: commit.bookId, kind: 'review-run', ref: workspace.run!.reviewRunId,
-        path, afterOrdinal: meta.nextOrdinal!, digest: meta.digest });
-      expect(serializedBytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES / 2);
-      wire = appendTaskPlanPage(wire, page);
+    for (const ref of [workspace.run!.reviewRunId, null]) {
+      let wire = reviewWorkspaceWire(workspace, Math.min(serializedBytes(workspace) - 1, REPLY_BUDGET));
+      expect(wire.listPages?.[path]?.nextOrdinal).not.toBeNull();
+      expectNonEmptyPages(wire.listPages);
+      while (wire.listPages?.[path]?.nextOrdinal != null) {
+        const meta = wire.listPages[path]!;
+        const page = store.getTaskPlanPage({ bookId: commit.bookId, kind: 'review-run', ref, path, afterOrdinal: meta.nextOrdinal!, digest: meta.digest });
+        expect(serializedBytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES / 2);
+        wire = appendTaskPlanPage(wire, page);
+      }
+      expect(wire.scopeOptions).toEqual(workspace.scopeOptions);
     }
-    expect(wire.scopeOptions).toEqual(workspace.scopeOptions);
+    expect(() => store.getTaskPlanPage({ bookId: commit.bookId, kind: 'review-run', ref: null, path, afterOrdinal: 1, digest: '0'.repeat(64) }))
+      .toThrow(/章节已变化/u);
     sweep(shape, 'prepared', 'inspectBookTasks', store.inspectBookTasks(commit.bookId, () => null));
     sweep(shape, 'prepared', 'inspectTaskIntentDrafts', store.inspectTaskIntentDrafts({ bookId: commit.bookId, draftId: null }));
     const record = store.startEvaluation(commit.bookId).record!;
@@ -157,7 +199,7 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
     while (!readers.done) readers = store.advanceReadersReportPreparationWork(readers.workId!);
     const readersPlan = store.inspectTaskPlan({ bookId: commit.bookId, kind: 'readers-report', ref: readers.projection!.taskIntent!.taskIntentId });
     for (const op of PLAN_OPS) sweep(shape, 'readers-report/prepared', op, readersPlan);
-    completePages(store, readersPlan);
+    completePages(store, readersPlan, false);
     for (const op of ['prepareReadersReport', 'pollServiceJob', 'cancelServiceJob', 'redoTaskPlan']) sweep(shape, 'readers-report/prepared', op, {
       jobId: ID, kind: 'readers-report-preparation', state: 'completed', progress: { completed: 1, total: 1, label: '生成准备' },
       result: store.inspectEvaluation(commit.bookId, null), failure: null,
@@ -170,10 +212,18 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
       clarifications: stopped.clarifications.slice(0, 1000),
       technical: Array.from({ length: 32 }, (_, index) => ({ key: `generated-${index}`, label: '生成详情', value: '甲😀"\\'.repeat(6000) })) };
     sweep(shape, 'aggregate-guard', 'inspectTaskPlan', stressed);
-    completePages(store, stressed);
+    completePages(store, stressed, true);
     if (shape === 'headings') for (const path of ['drift.entries', 'edit.lastEdit.entries', 'resend.units', 'resend.statement',
       'unconfirmed.ranges', 'runControl.outcomeUnknown.units', 'runControl.continuation.pendingAnswerUnits', 'clarifications']) {
       expect(taskPlanWire(stressed).listPages?.[path], path).toBeDefined();
+    }
+    // Down the guard's whole ladder, every inline page keeps its first entry, until a budget below what the plan needs
+    // even then is refused plainly instead of a reply that would not fit.
+    for (let budget = serializedBytes(drift) - 1; ; budget = Math.floor(budget / 2)) {
+      let wire: TaskPlanProjection;
+      try { wire = taskPlanWire(drift, budget); } catch (error) { expect(String(error)).toMatch(/任务计划摘要超出可读取范围/u); break; }
+      expect(serializedBytes(wire)).toBeLessThanOrEqual(budget);
+      expectNonEmptyPages(wire.listPages);
     }
     const connected = withAnswerBlockers(stopped, ['生成连接未就绪']);
     const clarificationPage = taskPlanWire(connected).listPages!.clarifications!;
@@ -182,28 +232,46 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
     expect(connectedPage.digest).toBe(clarificationPage.digest);
     expect(() => store.getTaskPlanPage({ bookId: plan.bookId, kind: plan.kind, ref: plan.ref, path: 'technical.0.value', afterOrdinal: 0, digest: '0'.repeat(64) })).toThrow(/变化/u);
     if (shape === 'headings') {
-      const first = store.saveTaskIntentDraft({ bookId: commit.bookId, draftId: null, expectedOrdinal: null,
+      store.saveTaskIntentDraft({ bookId: commit.bookId, draftId: null, expectedOrdinal: null,
         origin: 'composer-book', goal: '生成目标'.repeat(100), target: { kind: 'book' }, outcomeClass: null });
-      const drafts = { ...store.inspectTaskIntentDrafts({ bookId: commit.bookId, draftId: null }),
-        drafts: Array.from({ length: 500 }, () => ({ ...first, draftId: randomUUID(), resolution: null })) };
-      // Only replace the retained-list read with a generated 500-draft snapshot. Saving each would repeatedly derive
-      // every long-book preparation and dominate this frame test; the store's save/resolve behavior has its own suite.
-      const inspect = vi.spyOn(store, 'inspectTaskIntentDrafts').mockReturnValue(drafts);
-      try {
-        sweep(shape, '500-drafts', 'inspectTaskIntentDrafts', drafts);
-        let wire = taskPlanOutbound(drafts) as typeof drafts;
-        while (wire.listPages?.drafts?.nextOrdinal != null) {
-          const meta = wire.listPages.drafts;
-          const page = store.getTaskPlanPage({ bookId: commit.bookId, kind: 'task-intent-drafts', ref: null,
-            path: 'drafts', afterOrdinal: meta.nextOrdinal!, digest: meta.digest });
-          expect(serializedBytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES / 2);
-          wire = appendTaskPlanPage(wire, page);
-        }
-        expect(wire.drafts).toEqual(drafts.drafts);
-        expect(wire.listPages!.drafts!.shown).toBe(500);
-      } finally { inspect.mockRestore(); }
+      sweep(shape, 'one-draft', 'inspectTaskIntentDrafts', store.inspectTaskIntentDrafts({ bookId: commit.bookId, draftId: null }));
       sweep(shape, 'one-draft', 'inspectBookTasks', store.inspectBookTasks(commit.bookId, () => null));
     }
+  } finally { store.close(); await roots.dispose(); }
+}, 120_000);
+
+it('pages the 500 retained drafts a Book lists, each saved for real, and refuses a page once the list moved', async () => {
+  const roots = await createServiceTestRoots('ai7-task-drafts-wire-');
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+    induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+    induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null,
+  });
+  try {
+    // A short Book keeps each save cheap; the list's size is its drafts', and the read lists at most 500 not yet promoted.
+    const { bookId } = await generatedBook(store, roots.inputRoot, Array.from({ length: 3 }, (_, index) => ({ text: `生成段落${index}` })));
+    const save = (index: number) => store.saveTaskIntentDraft({ bookId, draftId: null, expectedOrdinal: null,
+      origin: 'composer-book', goal: `生成目标${index}`.padEnd(MAX_TASK_INTENT_GOAL_LENGTH, '甲'), target: { kind: 'book' }, outcomeClass: null });
+    for (let index = 0; index < 500; index += 1) save(index);
+    const drafts = store.inspectTaskIntentDrafts({ bookId, draftId: null });
+    expect(drafts.drafts).toHaveLength(500);
+    sweep('short-generated', '500-drafts', 'inspectTaskIntentDrafts', drafts);
+    sweep('short-generated', '500-drafts', 'inspectBookTasks', store.inspectBookTasks(bookId, () => null));
+    const first = taskPlanOutbound(drafts) as typeof drafts;
+    expectNonEmptyPages(first.listPages);
+    let wire = first;
+    while (wire.listPages?.drafts?.nextOrdinal != null) {
+      const meta = wire.listPages.drafts;
+      const page = store.getTaskPlanPage({ bookId, kind: 'task-intent-drafts', ref: null, path: 'drafts', afterOrdinal: meta.nextOrdinal!, digest: meta.digest });
+      expect(serializedBytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES / 2);
+      wire = appendTaskPlanPage(wire, page);
+    }
+    expect(wire.drafts).toEqual(drafts.drafts);
+    expect(wire.listPages!.drafts!.shown).toBe(500);
+    // One more save moves the list (the newest leads, the oldest leaves the read): the earlier snapshot is refused plainly.
+    save(500);
+    const stale = first.listPages!.drafts!;
+    expect(() => store.getTaskPlanPage({ bookId, kind: 'task-intent-drafts', ref: null, path: 'drafts', afterOrdinal: stale.nextOrdinal!, digest: stale.digest }))
+      .toThrow(/任务草稿已变化/u);
   } finally { store.close(); await roots.dispose(); }
 }, 120_000);
 

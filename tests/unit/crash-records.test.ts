@@ -12,7 +12,7 @@ function records() {
   const root = mkdtempSync(join(tmpdir(), 'ai7-crash-unit-'));
   roots.push(root);
   let time = 0;
-  return new CrashRecords(root, () => ({ appVersion: '0.1.0', schemaRevision: 83, protocol: 160,
+  return new CrashRecords(root, () => ({ appVersion: '0.1.0', schemaRevision: 83, protocol: 161,
     platform: 'win32', arch: 'x64', electron: '42.0.0', uptimeSeconds: 5 }), () => new Date(time++));
 }
 describe('local crash records', () => {
@@ -45,7 +45,7 @@ describe('local crash records', () => {
     let followed = false;
     const hook = crashHook(store, kind, () => {
       expect(store.list()).toHaveLength(1);
-      expect(store.list()[0]).toMatchObject({ kind, reason: 'crashed', exitCode: 1, schemaRevision: 83, protocol: 160 });
+      expect(store.list()[0]).toMatchObject({ kind, reason: 'crashed', exitCode: 1, schemaRevision: 83, protocol: 161 });
       followed = true;
     });
     hook({ reason: 'crashed', exitCode: 1, stack: 'Error: SYNTHETIC_PRIVATE_TEXT\n    at private (C:\\Users\\Synthetic\\private.key.txt:3:4)' });
