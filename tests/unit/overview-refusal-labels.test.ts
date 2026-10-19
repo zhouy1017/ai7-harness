@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createContext, runInContext } from 'node:vm';
-import { createSourceFile, forEachChild, isArrowFunction, isFunctionDeclaration, ModuleKind, ScriptTarget, transpileModule, type Node } from 'typescript';
+import { createSourceFile, forEachChild, isArrowFunction, isCallExpression, isFunctionDeclaration, isNoSubstitutionTemplateLiteral, isStringLiteral, ModuleKind, ScriptTarget, transpileModule, type Node } from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 import { miniDocument } from '../support/mini-dom.js';
 import { TASK_DRAWER_TITLE } from '../../src/renderer/task-drawer-labels.js';
@@ -30,6 +30,18 @@ function extract(node: Node): void {
   forEachChild(node, extract);
 }
 extract(parsed);
+const journey = createSourceFile('run-j01.mjs', readFileSync(new URL('../../e2e/run-j01.mjs', import.meta.url), 'utf8'), ScriptTarget.ES2022, true);
+const recoveryPredicates: string[] = [];
+function extractRecoveryPredicate(node: Node): void {
+  if (isCallExpression(node) && node.expression.getText(journey) === 'waitFor') {
+    const predicate = node.arguments[1];
+    const stage = node.arguments[2];
+    if (stage !== undefined && isStringLiteral(stage) && stage.text === 'before-paint-recovery-acknowledged' &&
+        predicate !== undefined && isNoSubstitutionTemplateLiteral(predicate)) recoveryPredicates.push(predicate.text);
+  }
+  forEachChild(node, extractRecoveryPredicate);
+}
+extractRecoveryPredicate(journey);
 const compile = (source: string): string => transpileModule(source, {
   compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.None },
 }).outputText;
@@ -108,6 +120,37 @@ describe('工作概览 refusals (#992)', () => {
     const { host } = refusalHarness('task', 'TASK_ARTIFACT_PIN_UNAVAILABLE');
     expect(host.querySelector('.task-authorization-card[data-task-authorization-state="unavailable"]')).not.toBeNull();
     expect(host.textContent).toContain('原有拒绝说明。');
+  });
+
+  it.each(['TASK_LINEAGE_UNAVAILABLE', 'TASK_POLICY_UNAVAILABLE'])('J-01 recognizes painted recovery with the task card suppressed for %s (#992)', (code) => {
+    const { host } = refusalHarness('task', code);
+    const imported = miniDocument.createElement('section');
+    imported.dataset['screen'] = 'imported';
+    const commit = miniDocument.createElement('section');
+    commit.dataset['importCommitId'] = 'recovered-commit';
+    imported.append(commit, host);
+    miniDocument.body.append(imported);
+    const dataset: Record<string, string> = {
+      ai7ProductReady: 'true', ai7ImportCompletionPainted: 'true', ai7ImportCompletionAcknowledged: 'true',
+    };
+    const document = {
+      visibilityState: 'visible', documentElement: { dataset },
+      querySelector: (selector: string) => miniDocument.body.querySelector(selector),
+    };
+    expect(document.querySelector('[data-task-authorization-state]')).toBeNull();
+    expect(recoveryPredicates).toHaveLength(1);
+    const recovered = () => runInContext(recoveryPredicates[0]!, createContext({ document }));
+    expect(recovered()).toBe(true);
+    for (const flag of ['ai7ImportCompletionPainted', 'ai7ImportCompletionAcknowledged']) {
+      delete dataset[flag];
+      expect(recovered()).toBe(false);
+      dataset[flag] = 'true';
+    }
+    document.visibilityState = 'hidden';
+    expect(recovered()).toBe(false);
+    document.visibilityState = 'visible';
+    commit.remove();
+    expect(recovered()).toBe(false);
   });
 
   it.each(['overview', 'analysis'] as const)('renders the profile next step on %s and only navigates or focuses on click', async (surface) => {
