@@ -1407,8 +1407,8 @@ async function main() {
         firstConnection.binding?.credentialSlot === 'deepseek-api-key' &&
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
-        // Synchronized delta with Issue #920: selected active set v15; Provider Processing remains v1.
-        firstConnection.policy?.activePolicySetVersion === 'v15' &&
+        // Synchronized delta with Issue #990: selected active set v16; Provider Processing remains v1.
+        firstConnection.policy?.activePolicySetVersion === 'v16' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&
