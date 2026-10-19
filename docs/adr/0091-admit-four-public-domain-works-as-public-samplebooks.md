@@ -1,5 +1,5 @@
 ---
-status: accepted — decided by the Owner on 2026-10-19 in the wave-15 Commander session; the Commander recorded the Owner's answers in Issue #989, quoted in Context, and this record names that decision as its acceptance
+status: accepted
 date: 2026-10-19
 deciders: Owner
 supersedes: for exactly the four files of §1 — ADR 0079 §5.1 (the repository admission of exact `sample1.docx` alone) and §5.3 (the `developer-live` transmittable set of exact `sample1`); ADR 0043 "Boundaries that remain closed", the bullet "make a live model/provider call …", for `developer-live` transmission only
@@ -7,6 +7,8 @@ amends: `SampleBooks/README.md` (the allowlist), `.gitignore` (the `SampleBooks/
 ---
 
 # 0091 · Admit four public-domain works as Public SampleBooks
+
+Accepted by the Owner on 2026-10-19 in the wave-15 Commander session. The Commander recorded the Owner's answers in Issue #989, quoted in Context; that decision is this record's acceptance.
 
 ## Context
 
@@ -37,7 +39,7 @@ Each file is admitted by its exact byte count and SHA-256, which [`SampleBooks/R
 
 - **Source.** zh.wikisource.org, each page at its pinned revision, read through `action=parse&oldid=<revid>&variant=zh-hans`. The simplified text is MediaWiki's own LanguageConverter output; no character is edited by hand. Where the conversion leaves a traditional form, as it can for classical text, the file keeps it, and the README states the residual count of the check it ran.
 - **Original text only.** Navigation and header templates, the 上一回/下一回 bars, license boxes, sister-project boxes, categories, images, edit links, reference markers and every 注释 section are dropped. Modern annotation may carry copyright, so a page whose original text could not be separated from it would stop the designation; none did.
-- **Declared drops.** Each page's manifest entry declares what it loses beyond that furniture — its footnote markers (whose texts are never copied), every Wikisource note (另作 readings, glosses, compiler's labels) and, where a page carries one closing paragraph per edition, the edition kept — and a build that would drop anything undeclared refuses. `儒林外史/第55回` keeps its 五十六回版本 paragraph and drops the 五十五回版本 one, consistent with the designation's 第01回 to 第56回; the Commander chose this for #989.
+- **Declared drops.** Each page's manifest entry declares what it loses beyond that furniture — its footnote markers (whose texts are never copied), an ordered SHA-256 digest for every Wikisource note (另作 readings, glosses, compiler's labels), never its text and, where a page carries one closing paragraph per edition, the edition kept — and a build that would drop anything undeclared refuses. `儒林外史/第55回` keeps its 五十六回版本 paragraph and drops the 五十五回版本 one, consistent with the designation's 第01回 to 第56回; the Commander chose this for #989.
 - **Shape.** A `Title` paragraph with the work's title; per page a `Heading1` with the section's own title (a 回 novel's chapter line, an essay's or story's title); then one body paragraph per source paragraph, and a `Heading2` where the original text has a heading of its own. No inline style, no page setup, so each file imports through the ordinary path with an all-zero fidelity report.
 - **Generator.** `tools/build-public-samplebook.mjs` writes the four files from the manifest — development-only, never run by CI, `build`, `package` or any test. Its archive time is the fixed instant of `src/shared/archive-time.ts`, so a second run from the same responses yields byte-identical files; the raw API responses it fetches stay in a cache directory outside every checkout and never enter the repository.
 

@@ -27,7 +27,7 @@ designation, and a history purge on the protected lines is a separate Owner acti
 ## What the five files are now
 
 They are **local-only test material**. A developer who has them keeps them in the untracked source
-directory named under "The admitted file" below — or, equivalently, beside `sample1.docx` in this
+directory named under "The admitted files" below — or, equivalently, beside `sample1.docx` in this
 directory, which Git now refuses — and the tests and Journey runners that can only be shown on one
 of them look for it there:
 
@@ -128,7 +128,7 @@ refuses a build in which a page loses anything its entry does not declare:
 
 - `footnotes` — the reference markers of modern annotations, whose texts are never copied: 10 on
   `父亲的病`, the only page that has any, together with its reference list.
-- `editorNotes` — every Wikisource note dropped, in order: the 另作 readings shown on hover
+- `editorNoteDigests` — SHA-256 of every Wikisource note dropped, in order, without copying the note text: the 另作 readings shown on hover
   (`朝花夕拾/小引` 1, `一件小事` 1, `社戲` 5, `儒林外史/第03回` 1, `儒林外史/第55回` 7), one
   pronunciation gloss in `儒林外史/第01回`, and two compiler's edition labels in `儒林外史/第55回`.
 - `variantChoice` — `儒林外史/第55回` closes with two alternative final paragraphs, one per edition,

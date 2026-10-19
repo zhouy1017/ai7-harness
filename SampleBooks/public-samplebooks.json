@@ -13,8 +13,8 @@
         {
           "page": "朝花夕拾/小引",
           "revid": 2323066,
-          "editorNotes": [
-            "一作“五月一日，广州。”"
+          "editorNoteDigests": [
+            "79f5ab821e96eeb0f44e9c001c5aab3e546a45717dc5ea9d09dc7d07cbd769f8"
           ],
           "transcludes": []
         },
@@ -124,8 +124,8 @@
         {
           "page": "一件小事",
           "revid": 10675925,
-          "editorNotes": [
-            "初次发表时无此文，为《呐喊》编集时所加。"
+          "editorNoteDigests": [
+            "2db4ea74561701fe18e68a3c8d658c186cb5c7bfbb4fe3c93e26dd8170038881"
           ],
           "transcludes": [
             { "page": "Page:魯迅全集01 (1948).pdf/342", "revid": 2676114 },
@@ -307,12 +307,12 @@
         {
           "page": "社戲",
           "revid": 10605419,
-          "editorNotes": [
-            "一作「耸」",
-            "一作「即便」",
-            "一作「觉得」",
-            "一作「蒙胧」",
-            "一作「明天」"
+          "editorNoteDigests": [
+            "1b2bbd3eff582aaf4fdfae1c822e70f462410da3c9627d01cddc697867196f7a",
+            "ca8a3948da600a586c30cb7691502094a204086222456a8480dbe2ede928d851",
+            "6be963b17845664cc4f633d4f3bd939b63093e70ac8a65adc28fe530799d87f9",
+            "159c901ee7f75a68857efdbe7b11b041a80b49618edd47974154fee046e4fae6",
+            "70d2b6b56843cd29719d731b746449bc42e030573d63d28ce7fe86c0e49d4c23"
           ],
           "transcludes": [
             { "page": "Page:魯迅全集01 (1948).pdf/470", "revid": 9458823 },
@@ -371,8 +371,8 @@
         {
           "page": "儒林外史/第01回",
           "revid": 2648156,
-          "editorNotes": [
-            "〈(音:只)〉"
+          "editorNoteDigests": [
+            "fe41d8e1de5d2722786c2d848b2416a430bbbd0354d6946d5bb1a5f57ae60683"
           ],
           "transcludes": []
         },
@@ -380,8 +380,8 @@
         {
           "page": "儒林外史/第03回",
           "revid": 1565054,
-          "editorNotes": [
-            "一作“泡”"
+          "editorNoteDigests": [
+            "2dcb17158620ca81a61e6f091bc20b06e3dad49de6c3089d7d9422d4c2270fcf"
           ],
           "transcludes": []
         },
@@ -440,16 +440,16 @@
           "page": "儒林外史/第55回",
           "revid": 1565106,
           "variantChoice": "五十六回版本",
-          "editorNotes": [
-            "一作“消”",
-            "一作“名士高谈”",
-            "一作“也是”",
-            "一作“哪”",
-            "一作“小”",
-            "一作“穿”",
-            "一作“天”",
-            "〈(维基编入者著: 五十五回版本)〉",
-            "〈(维基编入者著: 五十六回版本)〉"
+          "editorNoteDigests": [
+            "fcecd981f70a40bbb76599c6299caeb2aec7a74bf3516236e39943d39869bff8",
+            "6d5fd2697c307b0e64530a47e597ba8f28e88c0d61a66f3edafd6289186ba476",
+            "7426375890713677431ee7f533e8ca7c71b0811ffff073ecdae165dc37176d88",
+            "83f160b5a11413052ee0fd5b595f4057c2f1e2d424488788355c73f498bfb6cc",
+            "72e87189a830a5dc1af0901326c40db365f114ce02057fd8221c04c48e8fe2d7",
+            "97e0d7181aca852ab936b37ed20ac16ecbe18dd525dde81ce0e2d06f3096f3b7",
+            "ae6d0ea7e1cecb15814227451f2c5b781c561cf24fe12a108ddd9befb63acbaa",
+            "bd845c306fd25d2a5f11d7e53ff110149612dc90b4912f156e86a951056c201b",
+            "f923ddc98cb338c0cfdd02c5c200c1715c0e0e1aa8164a01a3ec607f8ea568fa"
           ],
           "transcludes": []
         },

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +17,7 @@ interface Tally {
   readonly noteSections: number; readonly furniture: number;
 }
 type SampleBookTool = {
+  readonly PublicSampleBookError: new (code: string, detail: string) => Error;
   readonly MANIFEST_FORMAT: string;
   readonly WIKISOURCE_API: string;
   readonly VARIANT: string;
@@ -28,12 +30,34 @@ type SampleBookTool = {
   checkDeclarations(section: Record<string, unknown>, extracted: { notes: readonly string[]; tally: { referenceMarkers: number } }): void;
   buildSampleBookDocx(work: { title: string; author: string; sections: readonly Section[] }): Uint8Array;
   fixedArchiveTime(): Date;
+  diagnosticCode(error: unknown): string;
+  resolveCacheDirectory(cacheArgument: string, root?: string): string;
 };
 
 // @ts-expect-error tools/*.mjs carry no declarations; the tool is exercised as the plain module it is.
 const tool = (await import('../../tools/build-public-samplebook.mjs')) as unknown as SampleBookTool;
 
 const IDEOGRAPHIC_SPACE = String.fromCharCode(0x3000);
+
+describe('the generator material boundary', () => {
+  it('refuses cache paths inside the checkout, including names starting with two dots', () => {
+    const root = join(tmpdir(), 'synthetic-checkout');
+    for (const path of [root, join(root, 'cache'), join(root, '..cache'), join(root, '..cache', 'nested')]) {
+      expect(() => tool.resolveCacheDirectory(path, root)).toThrow(/^SAMPLEBOOK\/usage/);
+    }
+    expect(tool.resolveCacheDirectory(tmpdir(), root)).toBe(tmpdir());
+    expect(tool.resolveCacheDirectory(join(tmpdir(), 'synthetic-cache'), root)).toBe(join(tmpdir(), 'synthetic-cache'));
+    expect(() => tool.resolveCacheDirectory('relative-cache', root)).toThrow(/^SAMPLEBOOK\/usage/);
+  });
+
+  it('reports structural codes without source-bearing details or arbitrary exception messages', () => {
+    const detail = 'synthetic source-bearing diagnostic';
+    expect(tool.diagnosticCode(new tool.PublicSampleBookError('SAMPLEBOOK/unhandled-block', detail))).toBe('SAMPLEBOOK/unhandled-block');
+    expect(tool.diagnosticCode(new SyntaxError(detail))).toBe('SAMPLEBOOK/unclassified');
+    expect(tool.diagnosticCode(new tool.PublicSampleBookError(`SAMPLEBOOK/invalid\n${detail}`, detail))).toBe('SAMPLEBOOK/unclassified');
+    expect(tool.diagnosticCode({ code: 'SAMPLEBOOK/forged', message: detail })).toBe('SAMPLEBOOK/unclassified');
+  });
+});
 
 function manifest(): Record<string, unknown> {
   return {
@@ -90,7 +114,9 @@ describe('the public SampleBook manifest', () => {
     ['a transclusion outside the Page namespace', (m: any) => { m.works[0].sections[1].transcludes[0].page = 'Template:x'; }],
     ['a page listed twice', (m: any) => { m.works[0].sections.push({ ...m.works[0].sections[0] }); }],
     ['no pin date', (m: any) => { m.pinnedOn = null; }],
-    ['an empty editorNotes list', (m: any) => { m.works[0].sections[0].editorNotes = []; }],
+    ['an empty editorNoteDigests list', (m: any) => { m.works[0].sections[0].editorNoteDigests = []; }],
+    ['raw editorial note text', (m: any) => { m.works[0].sections[0].editorNotes = ['synthetic note']; }],
+    ['a malformed note digest', (m: any) => { m.works[0].sections[0].editorNoteDigests = ['synthetic note']; }],
     ['an empty variantChoice', (m: any) => { m.works[0].sections[0].variantChoice = ''; }],
     ['a zero footnotes count', (m: any) => { m.works[0].sections[0].footnotes = 0; }],
   ])('refuses %s', (_label, mutate) => {
@@ -200,10 +226,11 @@ describe('extracting a pinned page', () => {
 
   it('holds every dropped note and footnote marker to its manifest declaration', () => {
     const extracted = { notes: ['一作“异文”'], tally: { referenceMarkers: 2 } };
-    expect(() => tool.checkDeclarations({ page: 'x', editorNotes: ['一作“异文”'], footnotes: 2 }, extracted)).not.toThrow();
+    const digest = (note: string) => createHash('sha256').update(note).digest('hex');
+    expect(() => tool.checkDeclarations({ page: 'x', editorNoteDigests: [digest('一作“异文”')], footnotes: 2 }, extracted)).not.toThrow();
     expect(() => tool.checkDeclarations({ page: 'x', footnotes: 2 }, extracted)).toThrow(/^SAMPLEBOOK\/notes-undeclared/);
-    expect(() => tool.checkDeclarations({ page: 'x', editorNotes: ['一作“异文”'] }, extracted)).toThrow(/^SAMPLEBOOK\/notes-undeclared/);
-    expect(() => tool.checkDeclarations({ page: 'x', editorNotes: ['一作“他文”'], footnotes: 2 }, extracted)).toThrow(/^SAMPLEBOOK\/notes-undeclared/);
+    expect(() => tool.checkDeclarations({ page: 'x', editorNoteDigests: [digest('一作“异文”')] }, extracted)).toThrow(/^SAMPLEBOOK\/notes-undeclared/);
+    expect(() => tool.checkDeclarations({ page: 'x', editorNoteDigests: [digest('一作“他文”')], footnotes: 2 }, extracted)).toThrow(/^SAMPLEBOOK\/notes-undeclared/);
   });
 
   it('refuses what its rules do not name instead of guessing', () => {

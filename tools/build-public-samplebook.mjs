@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
 
@@ -20,7 +20,7 @@ import { strToU8, zipSync } from 'fflate';
  * Navigation and header templates, license boxes, images, reference markers and every 注释 section are
  * dropped; an element the rules below do not name refuses the build rather than being guessed at. What a
  * page loses beyond that furniture — its footnote markers, every Wikisource note, the paragraph of an edition
- * not kept — must be declared in its manifest entry (`footnotes`, `editorNotes`, `variantChoice`), or the
+ * not kept — must be declared in its manifest entry (`footnotes`, `editorNoteDigests`, `variantChoice`), or the
  * build refuses.
  *
  * `--cache` names a directory outside the checkout where the raw API responses are kept, so a second build
@@ -53,6 +53,13 @@ export class PublicSampleBookError extends Error {
 
 function refuse(code, detail) {
   throw new PublicSampleBookError(code, detail);
+}
+
+/** CLI diagnostics carry only a structural code, never HTML, API responses or exception text. */
+export function diagnosticCode(error) {
+  return error instanceof PublicSampleBookError && /^SAMPLEBOOK\/[a-z][a-z-]{0,63}$/.test(error.code)
+    ? error.code
+    : 'SAMPLEBOOK/unclassified';
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -100,8 +107,9 @@ export function validateManifest(manifest, { pinned = true } = {}) {
       }
       if (section.variantChoice !== undefined && !nonEmptyString(section.variantChoice)) fail(`${work.id}: ${section.page} has a malformed variantChoice`);
       if (section.footnotes !== undefined && !isPositiveInteger(section.footnotes)) fail(`${work.id}: ${section.page} has a malformed footnotes count`);
-      if (section.editorNotes !== undefined && (!Array.isArray(section.editorNotes) || section.editorNotes.length === 0 || !section.editorNotes.every(nonEmptyString))) {
-        fail(`${work.id}: ${section.page} has a malformed editorNotes list`);
+      if (section.editorNotes !== undefined) fail(`${work.id}: ${section.page} must declare note digests, not note text`);
+      if (section.editorNoteDigests !== undefined && (!Array.isArray(section.editorNoteDigests) || section.editorNoteDigests.length === 0 || !section.editorNoteDigests.every((digest) => typeof digest === 'string' && /^[a-f0-9]{64}$/.test(digest)))) {
+        fail(`${work.id}: ${section.page} has a malformed editorNoteDigests list`);
       }
       if (section.transcludes === undefined) {
         if (pinned) fail(`${work.id}: ${section.page} has no transcludes list`);
@@ -568,7 +576,7 @@ function apiRequest(parameters) {
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join('&');
   const args = ['-sS', '--fail', '--retry', '4', '--retry-delay', '10', '-A', USER_AGENT, `${WIKISOURCE_API}?${query}`];
-  const body = execFileSync('curl', args, { maxBuffer: 256 * 1024 * 1024, windowsHide: true });
+  const body = execFileSync('curl', args, { maxBuffer: 256 * 1024 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const response = JSON.parse(body.toString('utf8'));
   if (response.error) refuse('SAMPLEBOOK/api-error', `${response.error.code}: ${response.error.info}`);
   return { body, response };
@@ -661,12 +669,13 @@ function pin(manifest) {
 
 /**
  * What a page loses beyond furniture is declared in its manifest entry, so the designation record shows it:
- * every editorial note dropped (`editorNotes`, in order), the count of footnote markers (`footnotes`), and,
+ * every editorial note dropped (SHA-256 `editorNoteDigests`, in order; never the note text), the count of footnote markers (`footnotes`), and,
  * where a page carries one paragraph per edition, the edition kept (`variantChoice`).
  */
 export function checkDeclarations(section, extracted) {
-  const declaredNotes = section.editorNotes ?? [];
-  if (JSON.stringify(extracted.notes) !== JSON.stringify(declaredNotes)) {
+  const declaredNotes = section.editorNoteDigests ?? [];
+  const noteDigests = extracted.notes.map((note) => createHash('sha256').update(note).digest('hex'));
+  if (JSON.stringify(noteDigests) !== JSON.stringify(declaredNotes)) {
     refuse('SAMPLEBOOK/notes-undeclared', `${section.page} drops ${extracted.notes.length} editorial notes and its entry declares ${declaredNotes.length} that differ`);
   }
   if (extracted.tally.referenceMarkers !== (section.footnotes ?? 0)) {
@@ -704,12 +713,18 @@ function argumentValues(argv, flag) {
   return values;
 }
 
-function main(argv) {
-  const [cacheArgument] = argumentValues(argv, '--cache');
+/** Resolve the external cache without mistaking an in-checkout `..cache` name for a parent path. */
+export function resolveCacheDirectory(cacheArgument, root = ROOT) {
   if (!cacheArgument || !isAbsolute(cacheArgument)) refuse('SAMPLEBOOK/usage', '--cache <absolute directory outside the checkout> is required');
   const cache = resolve(cacheArgument);
-  const inside = relative(ROOT, cache);
-  if (!inside.startsWith('..') && !isAbsolute(inside)) refuse('SAMPLEBOOK/usage', 'the cache must lie outside the checkout');
+  const inside = relative(root, cache);
+  if (inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside)) refuse('SAMPLEBOOK/usage', 'the cache must lie outside the checkout');
+  return cache;
+}
+
+function main(argv) {
+  const [cacheArgument] = argumentValues(argv, '--cache');
+  const cache = resolveCacheDirectory(cacheArgument);
   mkdirSync(cache, { recursive: true });
   const manifestPath = join(ROOT, MANIFEST_RELATIVE_PATH);
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -747,8 +762,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     main(process.argv.slice(2));
   } catch (error) {
-    if (!(error instanceof PublicSampleBookError)) throw error;
-    console.error(error.message);
+    console.error(diagnosticCode(error));
     process.exitCode = 1;
   }
 }
