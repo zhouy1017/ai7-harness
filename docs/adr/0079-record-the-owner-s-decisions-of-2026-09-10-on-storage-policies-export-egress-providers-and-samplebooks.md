@@ -8,6 +8,8 @@ amends: ADR 0066 §Research budget and ADR 0074 §2, §3 (read under §4.3 for t
 
 > Amended by [ADR 0084](./0084-admit-the-legacy-doc-to-the-background-test-guests-for-j-01.md): §5.1's "keeps them as local-only test material in the untracked source directory" additionally lets a background test guest on the development host hold the one legacy `.doc`, outside its checkout, for J-01's `.doc` scenario. The repository admission, the no-derivative rule and the `developer-live` transmittable set are unchanged.
 
+> Superseded in part by [ADR 0091](./0091-admit-four-public-domain-works-as-public-samplebooks.md) (2026-10-19), for exactly four public-domain files: §5.1's "`SampleBooks/sample1.docx` is the only manuscript file admitted to the repository, CI and fixtures" now admits them beside `sample1.docx`, and §5.3's `developer-live` transmittable set gains them when slice 15c (#990) lands. §5.2, §5.4 and the five local-only files are unchanged.
+
 # 0079 · Record the Owner's decisions of 2026-09-10 on storage, policy revisions, export objects, network egress, provider assignment and the repository SampleBooks
 
 ## Context
