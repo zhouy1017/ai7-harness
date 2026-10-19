@@ -4010,7 +4010,8 @@ function renderBaselineAnalysisOverview(
   card.dataset['resultRevisionDigest'] = projection.resultSetRevision?.digest ?? revision.digest;
   card.dataset['resultRevisionOrdinal'] = String(projection.resultSetRevision?.ordinal ?? revision.ordinal);
   card.dataset['gapCount'] = String(revision.coverage.gapCount);
-  card.dataset['conflictCount'] = String(revision.conflicts.length);
+  card.dataset['conflictCount'] = String(projection.listPages[`${projection.inspectedRevision === null ? 'resultSetRevision' : 'inspectedRevision.revision'}.conflicts`]?.total
+    ?? revision.conflicts.length);
   card.dataset['freshnessState'] = revision.freshness.state;
   card.dataset['updateMode'] = revision.update.mode;
   card.dataset['reusedCount'] = String(revision.update.counts.reused);
@@ -4170,7 +4171,8 @@ function renderBaselineAnalysisOverview(
         if (!more.isConnected) return;
         if (page.revisionId !== revision.revisionId || page.next !== null && page.next <= afterOrdinal) throw new Error(ANALYSIS_READ_FAILED);
         let manifestCursor = afterOrdinal;
-        while (page.units.some((unit) => !manifestUnits.has(unit.unitOrdinal))) {
+        // A read-only earlier revision names its ranges by ordinal on every page, as its first page does.
+        while (!view.historical && page.units.some((unit) => !manifestUnits.has(unit.unitOrdinal))) {
           const manifestPage = await window.ai7.getCoverageManifestUnits({ taskIntentId: revision.provenance.taskIntentId, afterOrdinal: manifestCursor });
           if (manifestPage.manifestDigest !== revision.coverageManifestDigest) throw new Error(ANALYSIS_READ_FAILED);
           for (const unit of manifestPage.units) {
@@ -4983,21 +4985,24 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
     // When the Run last changed state, in the Decision Layer's local time with the exact instant beside
     // it (V2-UX-LAYER-004). It reads from the transitions rather than from `progress`, so it stays
     // legible after the Run settles and `progress` is gone — a settled Run still answers "when".
-    const lastTransition = run.transitions[run.transitions.length - 1]!;
-    const lastTransitionValue = element('dd');
-    lastTransitionValue.dataset['runLastTransitionAt'] = lastTransition.recordedAt;
-    lastTransitionValue.append(
-      `${localInstantLabel(lastTransition.recordedAt)} · ${lastTransition.state}`,
-      element('span', 'technical-identity', lastTransition.recordedAt),
-    );
-    runFacts.append(element('dt', undefined, '上次状态更新'), lastTransitionValue);
+    // A transition list the reply paged (#988) does not end at the latest one, so it names none rather than an older one.
+    const lastTransition = projection.listPages['run.transitions'] === undefined ? run.transitions.at(-1) : undefined;
+    if (lastTransition !== undefined) {
+      const lastTransitionValue = element('dd');
+      lastTransitionValue.dataset['runLastTransitionAt'] = lastTransition.recordedAt;
+      lastTransitionValue.append(
+        `${localInstantLabel(lastTransition.recordedAt)} · ${lastTransition.state}`,
+        element('span', 'technical-identity', lastTransition.recordedAt),
+      );
+      runFacts.append(element('dt', undefined, '上次状态更新'), lastTransitionValue);
+    }
     runSection.dataset['runAdaptations'] = String(run.adaptations.length);
     if (run.attempt) {
       // That the credential readiness check released no value is a Provider decision the editor is owed
       // at full rank; the attempt's identity and binding digest are the technical half of the same fact.
       runFacts.append(
         element('dt', undefined, '凭据就绪检查'), element('dd', undefined, `${run.attempt.credentialReadinessCheck.readiness} · 未释放任何值`),
-        element('dt', undefined, 'Harness 执行区段'), element('dd', undefined, `${run.attempt.spans.length} 个区段（按标识引用，不复制内容）`),
+        element('dt', undefined, 'Harness 执行区段'), element('dd', undefined, `${run.attempt.spanCount} 个区段（按标识引用，不复制内容）`),
       );
     }
     runSection.append(runFacts, technicalDetails(

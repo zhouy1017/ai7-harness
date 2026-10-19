@@ -240,7 +240,6 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
       });
       body.append(more);
     }
-
   }
 
   function showReview(run: ReviewRunProjection): void {
