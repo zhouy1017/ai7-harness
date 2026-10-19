@@ -1,6 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
+import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
@@ -2221,19 +2222,20 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ordinary-production';
 /**
- * Historical v5, v9, v10, v11, v12, v14, v16, v18, v20 and the superseded web reservation v8 remain readable identities; selected v22 admits
+ * Historical v5, v9, v10, v11, v12, v14, v16, v18, v20, v22 and the superseded web reservation v8 remain readable identities; selected v24 admits
  * baseline analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable
  * consistency and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and
  * 润色 and conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules, and AI7's platform
  * tools (websearch through the user-selected backend, webfetch) on review, writing and evaluation, and AI7's local targeted-retrieval
  * tool on every rule but enrolled background analysis, material translation and custom analysis; v22 adds the custom analysis rule (the family
- * `custom-analysis/*` over an editor-authored question template) and Series Knowledge on the review rule. A type member does not select or activate a policy.
+ * `custom-analysis/*` over an editor-authored question template) and Series Knowledge on the review rule; v24 admits the four ADR 0091
+ * Public SampleBooks beside exact sample1 and changes nothing else. A type member does not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22' | 'v24';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
 export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23';
-/** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13 and v14, and selected v15. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15';
+/** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
@@ -2811,7 +2813,8 @@ export interface TaskAuthorizationProjection {
     revisionId: string;
     revisionDigest: string;
     sourceVersionId: string;
-    sourceDigest: 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
+    /** One of the five Public SampleBooks' source digests (Issue #990); this development-ci authorization surface still pins exact sample1. */
+    sourceDigest: PublicSampleBookSourceDigest;
   };
   runSourceScope: null | {
     bookId: string;
@@ -3680,7 +3683,7 @@ export const MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES = 6_000;
 export const MAX_WRITING_MATERIAL_OFFERS = 50;
 /**
  * Under a live scope no Provider Processing policy admits a 资料库 item: an item is the editor's own material, and developer-live
- * transmits only the Owner-designated Public SampleBooks (provider-processing-policy v7, ADR 0065). A plan that lists one is
+ * transmits only the Owner-designated Public SampleBooks (provider-processing-policy v7, ADR 0065; since v24 the five of ADR 0043 and ADR 0091). A plan that lists one is
  * never prepared or started there.
  */
 export const WRITING_MATERIAL_LIVE_UNAVAILABLE =

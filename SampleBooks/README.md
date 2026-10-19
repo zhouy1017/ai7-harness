@@ -57,8 +57,9 @@ Gate admits no untracked source or personal path as an input
 
 No derivative of the five ever enters the repository: not a fixture, not a cache export, not any
 generated text carrying their content. Local tests may read the local files. The `developer-live`
-transmittable set stays exact `sample1` alone until slice 15c adds the four ADR 0091 works, and none
-of the five local-only files may be transmitted to a model under any scope.
+transmittable set is the five admitted files below — exact `sample1` and, since slice 15c (Provider Processing
+v24, active-set v16), the four ADR 0091 works — each only by its exact digest, and none of the five local-only
+files may be transmitted to a model under any scope.
 
 ## What still composes from admitted content
 

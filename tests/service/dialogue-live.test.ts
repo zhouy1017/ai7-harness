@@ -15,6 +15,7 @@ import {
 } from '../../src/service/dialogue/dialogue-ledger.js';
 import { admittedDialogueRoute } from '../../src/service/dialogue/dialogue-route.js';
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
+import { ADR_0091_PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -387,6 +388,8 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     expect(dialogueRouteRefusal({ fixture: null, live: unadmitted }, SAMPLE1_SOURCE_DIGEST)).toMatch(/没有准许对话使用实时模型/u);
     const admitted = liveRoute(stubTransport(calls, () => ANSWER));
     expect(dialogueRouteRefusal({ fixture: null, live: admitted }, SAMPLE1_SOURCE_DIGEST)).toBeNull();
+    // The four ADR 0091 Public SampleBooks are admitted exactly as sample1 is (Issue #990).
+    for (const book of ADR_0091_PUBLIC_SAMPLEBOOKS) expect(dialogueRouteRefusal({ fixture: null, live: admitted }, book.sha256), book.path).toBeNull();
     expect(dialogueRouteRefusal({ fixture: null, live: admitted }, '0'.repeat(64))).toMatch(/公开样书范围/u);
     expect(dialogueRouteRefusal({ fixture: null, live: admitted }, null)).toMatch(/公开样书范围/u);
     const store = await openStore();

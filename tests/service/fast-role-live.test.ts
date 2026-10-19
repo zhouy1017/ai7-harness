@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
+import { ADR_0091_PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
 import { FastRoleExecutionOwner, fastRoleLiveRoutes, fastRoleRouteRefusal, type FastRoleLiveRoutes } from '../../src/service/fast-role/fast-role-execution.js';
 import { FastRoleRequests, fastInteractionRoutes, polishWordsOf, regenerationRegionOf } from '../../src/service/fast-role/fast-role-suggestions.js';
 import { EDITORIAL_POLISH_PROMPT_CONTRACT, buildEditorialPolishMessage } from '../../src/service/fast-role/polish-contract.js';
@@ -111,6 +112,11 @@ describe('the fast-role routes under developer-live', () => {
     expect(admitted.routes['editorial-polish']!.ruleId).toBe('developer-live-public-samplebook-editorial-polish');
     expect(admitted.routes['conflict-regenerate']!.ruleId).toBe('developer-live-public-samplebook-conflict-regenerate');
     expect(fastRoleRouteRefusal({ fixture: null, live: admitted }, 'editorial-polish', SAMPLE1_SOURCE_DIGEST)).toBeNull();
+    // The four ADR 0091 Public SampleBooks are admitted exactly as sample1 is, for both kinds (Issue #990).
+    for (const book of ADR_0091_PUBLIC_SAMPLEBOOKS) {
+      expect(fastRoleRouteRefusal({ fixture: null, live: admitted }, 'editorial-polish', book.sha256), book.path).toBeNull();
+      expect(fastRoleRouteRefusal({ fixture: null, live: admitted }, 'conflict-regenerate', book.sha256), book.path).toBeNull();
+    }
     expect(fastRoleRouteRefusal({ fixture: null, live: admitted }, 'editorial-polish', '0'.repeat(64)))
       .toBe('当前运行范围未允许润色这段：这本书不在开发者实时可发送的公开样书范围内。');
     // A policy that names neither kind — v10's rules, here — refuses both with the route-aware reason.
