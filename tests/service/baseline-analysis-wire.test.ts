@@ -1,6 +1,10 @@
+import { longSettledAnalysis } from '../support/long-baseline-analysis.js';
+import { analysisOverviewText, baselineAnalysisOutbound, serializedBytes } from '../../src/service/analysis/baseline-analysis-wire.js';
+import { manifestDigestIsExact } from '../../src/service/analysis/coverage-manifest.js';
+import { baselineAnalysisWire } from '../../src/service/analysis/baseline-analysis-wire.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, MAX_FRAME_BYTES } from '../../src/shared/protocol.js';
@@ -35,8 +39,68 @@ it('keeps the prepared long-book reply below the frame budget', async () => {
     const full = work.projection!;
     expect(full.coverageManifest!.totalBlocks).toBeGreaterThanOrEqual(6_000);
     expect(full.coverageManifest!.units.length).toBeGreaterThanOrEqual(330);
-    expect(Buffer.byteLength(JSON.stringify({ id: 1, ok: true, op: 'inspectBaselineAnalysis', result: full })))
+    const members = [];
+    let cursor: number | null = 0;
+    do {
+      const page = store.getCoverageManifestUnits({ bookId: commit.bookId, taskIntentId: full.taskIntent!.taskIntentId, afterOrdinal: cursor });
+      expect(page.manifestDigest).toBe(full.coverageManifest!.digest);
+      expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(MAX_FRAME_BYTES / 2);
+      members.push(...page.units);
+      cursor = page.next;
+    } while (cursor !== null);
+    expect(members).toEqual(full.coverageManifest!.units);
+    expect(Buffer.byteLength(JSON.stringify({ id: 1, ok: true, op: 'inspectBaselineAnalysis', result: baselineAnalysisWire(full) })))
       .toBeLessThanOrEqual(MAX_FRAME_BYTES - 64 * 1024);
+    expect(manifestDigestIsExact({ ...full.coverageManifest!, units: members })).toBe(true);
+    const ops = ['inspectBaselineAnalysis', 'authorizeBaselineAnalysis', 'startBaselineAnalysisWhenOnline',
+      'cancelWaitingBaselineAnalysis', 'cancelBaselineAnalysisRun', 'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun',
+      'editBaselineAnalysisPlan', 'answerBaselineAnalysisClarification', 'quickStartBaselineAnalysis', 'pollServiceJob'];
+    for (const [state, projection] of Object.entries({ prepared: full, settled: longSettledAnalysis(full), history: longSettledAnalysis(full, 12) })) {
+      const sizes = ops.map((op) => {
+        const result = op === 'pollServiceJob' ? { kind: 'baseline-analysis-preparation', result: projection }
+          : op === 'quickStartBaselineAnalysis' ? { outcome: 'fell-back', reasons: [], projection } : projection;
+        const response = { id: '00000000-0000-4000-8000-000000000000', ok: true, op, result };
+        const after = serializedBytes(baselineAnalysisOutbound(response));
+        expect(after).toBeLessThanOrEqual(MAX_FRAME_BYTES - 64 * 1024);
+        return { op, before: serializedBytes(response), after };
+      });
+      console.info('ANALYSIS_REPLY_BYTES', state, JSON.stringify(sizes));
+    }
+    // Inject only the synthetic settled result at the ledger read seam. Import, preparation,
+    // manifest storage, paging ownership and outbound serialization remain the real implementations.
+    const settled = longSettledAnalysis(full);
+    const revision = settled.resultSetRevision!;
+    const inspect = vi.spyOn(store.baselineAnalysisLedger, 'inspect').mockImplementation(() => ({ ...settled,
+      inspectedRevision: { revision, current: true, readOnly: true } }));
+    try {
+      const detailUnits = [];
+      let afterOrdinal: number | null = 0;
+      do {
+        const page = store.getAnalysisRevisionUnits({ bookId: full.bookId, revisionId: revision.revisionId, afterOrdinal });
+        expect(serializedBytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES / 2);
+        detailUnits.push(...page.units);
+        afterOrdinal = page.next;
+      } while (afterOrdinal !== null);
+      expect(detailUnits).toEqual(revision.units);
+      const text = [];
+      let afterIndex: number | null = 0;
+      do {
+        const page = store.getAnalysisRevisionOverview({ bookId: full.bookId, revisionId: revision.revisionId, afterIndex });
+        expect(serializedBytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES / 2);
+        text.push(page.text);
+        afterIndex = page.next;
+      } while (afterIndex !== null);
+      expect(text.join('')).toBe(analysisOverviewText(revision));
+      const rows = [];
+      afterOrdinal = 0;
+      do {
+        const page = store.getAnalysisRunReportRows({ bookId: full.bookId, taskIntentId: full.taskIntent!.taskIntentId, afterOrdinal });
+        expect(serializedBytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES / 2);
+        rows.push(...page.rows);
+        afterOrdinal = page.next;
+      } while (afterOrdinal !== null);
+      expect(rows).toEqual(settled.taskOutcome!.report!.unitRows);
+    } finally { inspect.mockRestore(); }
   } finally {
     store.close();
     await roots.dispose();

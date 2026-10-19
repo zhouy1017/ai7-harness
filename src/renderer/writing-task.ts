@@ -2,7 +2,7 @@ import type {
   DefaultExecutionRuleReference,
   ProductionDocumentProjection,
   RendererApi,
-  ServiceJobProjection,
+  ServiceWireJobProjection as ServiceJobProjection,
   WritingTaskProjection,
   WritingTaskTypeProjection,
 } from '../shared/protocol.js';

@@ -9,7 +9,7 @@ import type {
   GlobalAttentionTarget,
   RendererApi,
   RunBudgetCeilingState,
-  ServiceJobProjection,
+  ServiceWireJobProjection as ServiceJobProjection,
   TaskPlanClarificationProjection,
   TaskPlanKind,
   TaskPlanProjection,

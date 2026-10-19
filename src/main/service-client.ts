@@ -18,7 +18,7 @@ import {
   type J04ModelAdapterControl,
   type J08RecoveryControl,
   type ServiceOperation,
-  type ServiceOperationMap,
+  type WireServiceOperationMap as ServiceOperationMap,
   type ServiceReadiness,
   type ServiceResponse,
   type TrustedLaunchForm,
@@ -168,7 +168,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 159 &&
+    value.protocolVersion === 160 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&

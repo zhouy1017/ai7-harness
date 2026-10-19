@@ -89,8 +89,8 @@ import {
   type ReviewBeforeManuscriptReimportProjection,
   type ReviewFindingPageRequest,
   type ReviewWorkspaceProjection,
-  type ServiceJobProjection,
-  type ServiceOperationMap,
+  type ServiceWireJobProjection as ServiceJobProjection,
+  type WireServiceOperationMap as ServiceOperationMap,
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
 import { usageCsv } from '../shared/usage.js';
@@ -2858,6 +2858,66 @@ function registerRendererHandlers(
       const result = await service.call('inspectParagraphAnalysis', { manuscriptId: input?.manuscriptId, blockId: input?.blockId, radius: input?.radius, bookId: route.bookId });
       requireCurrentRouteReadEpoch(owned, generation, sequence);
       if (result.bookId !== route.bookId || result.manuscriptId !== input.manuscriptId || result.blockId !== input.blockId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '段落分析不属于当前稿件。');
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getCoverageManifestUnits, (event, input: Omit<ServiceOperationMap['getCoverageManifestUnits']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getCoverageManifestUnits', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getAnalysisRevisionUnits, (event, input: Omit<ServiceOperationMap['getAnalysisRevisionUnits']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getAnalysisRevisionUnits', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getAnalysisRevisionOverview, (event, input: Omit<ServiceOperationMap['getAnalysisRevisionOverview']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getAnalysisRevisionOverview', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getAnalysisRunReportRows, (event, input: Omit<ServiceOperationMap['getAnalysisRunReportRows']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getAnalysisRunReportRows', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getBaselineAnalysisRangePlan, (event, input: Omit<ServiceOperationMap['getBaselineAnalysisRangePlan']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getBaselineAnalysisRangePlan', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
       return result;
     }),
   );

@@ -3248,6 +3248,31 @@ export class BaselineAnalysisStore {
    * carries one option per structural unit, and a mode that reads everything always stands. For the
    * baseline kind that is exactly the three actions it has always had, in the order it declares them.
    */
+  /** Read one immutable Task's complete manifest, including historical Tasks. */
+  coverageManifestFor(bookId: string, taskIntentId: string): CoverageManifestProjection {
+    const row = this.#db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ? AND book_id = ? AND kind = ?')
+      .get(taskIntentId, bookId, this.#definition.kind) as SqlRow | undefined;
+    requireAnalysis(row !== undefined, 'ANALYSIS_TASK_NOT_FOUND', '没有找到这项分析任务。');
+    const version = this.#planVersionFacts(taskIntentId).at(-1);
+    requireAnalysis(version !== undefined, 'ANALYSIS_PLAN_MISSING', '分析计划尚未准备。');
+    return this.#planRecords(taskIntentId, 'any', version.ordinal)['coverage-manifest'] as CoverageManifestProjection;
+  }
+
+  /** Derive only the range the editor actually selected; no plan is written. */
+  rangePlan(bookId: string, unitOrdinal: number): { selectedRange: BaselineAnalysisSelectedRange; expected: AnalysisReusePlanCounts } {
+    const latest = this.inspect(bookId).resultSetRevision as BaselineAnalysisResultSetRevisionProjection | null;
+    requireAnalysis(latest !== null, 'ANALYSIS_REVISION_NOT_FOUND', '还没有可更新的分析结果。');
+    const head = this.#workingHead(latest.manuscriptPin.manuscriptId, bookId);
+    const preview = deriveCoverageManifest({ bookId, manuscriptId: latest.manuscriptPin.manuscriptId,
+      branchId: head.branchId, revisionId: head.currentRevisionId, revisionLabel: head.currentRevisionLabel,
+      revisionDigest: head.currentWorkingDigest, blocks: this.readWorkingBlocks(head.branchId) });
+    const unit = preview.units.find((entry) => entry.ordinal === unitOrdinal);
+    requireAnalysis(unit !== undefined, 'ANALYSIS_RANGE_INVALID', '所选阅读范围已改变，请重新选择。');
+    const selectedRange = { startPosition: unit.startPosition, endPosition: unit.endPosition };
+    const predecessor = this.#planPredecessor(this.#revisionRowById(latest.revisionId));
+    return { selectedRange, expected: this.#derivePlan('reanalyze-range', selectedRange, preview, predecessor).counts };
+  }
+
   #updateControls(
     bookId: string,
     latest: BaselineAnalysisResultSetRevisionProjection,
@@ -3289,7 +3314,7 @@ export class BaselineAnalysisStore {
       endPosition: unit.endPosition,
       graphemes: unit.graphemes,
       label: `结构段 ${unit.sectionOrdinal}${unit.headingText === null ? '' : `「${unit.headingText}」`} · 单元 ${unit.ordinal}/${preview.units.length}（${unit.subUnitIndex}/${unit.subUnitCount}）· 内容块 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`,
-      expected: expected(mode, { startPosition: unit.startPosition, endPosition: unit.endPosition }),
+      expected: this.#definition.kind === BASELINE_ANALYSIS_KIND ? null : expected(mode, { startPosition: unit.startPosition, endPosition: unit.endPosition }),
     }));
     const actions = Object.fromEntries(this.#definition.updateModes.map((mode) => {
       const definition = this.#definition.mode(mode);

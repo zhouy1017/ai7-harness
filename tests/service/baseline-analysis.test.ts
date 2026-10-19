@@ -1003,8 +1003,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       const rangeB = { startPosition: options[7]!.startPosition, endPosition: options[7]!.endPosition };
       /** A third range, so a later proposal and a stale one are each something other than A or B. */
       const rangeC = { startPosition: options[4]!.startPosition, endPosition: options[4]!.endPosition };
-      expect(options[2]!.expected).toEqual({ reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 });
-      expect(options[7]!.expected).toEqual({ reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 });
+      expect(store.getBaselineAnalysisRangePlan({ bookId, unitOrdinal: options[2]!.unitOrdinal }).expected).toEqual({ reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 });
+      expect(store.getBaselineAnalysisRangePlan({ bookId, unitOrdinal: options[7]!.unitOrdinal }).expected).toEqual({ reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 });
 
       // Version 1 of a `重新分析所选范围` Task over unit 3.
       const prepared = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeA });

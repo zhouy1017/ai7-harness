@@ -44,7 +44,7 @@ import {
 } from './launch-policy.js';
 import { readSoftwareVersion } from './data-version.js';
 import { BACKUP_CHECK_INTERVAL_MS } from './scheduled-backups.js';
-import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
+import { decodeRequest, encodeServiceResponse, isSafeInteger, ProtocolError } from './request-frames.js';
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
 import type { WaitingFor } from './task-plan.js';
 import { controlledAnswerHold, controlledUnitHold } from './unit-hold.js';
@@ -119,20 +119,7 @@ function failureResponse(
 }
 
 async function writeResponse(response: ServiceResponse): Promise<void> {
-  let selected: ServiceResponse = response;
-  let payload = Buffer.from(JSON.stringify(selected), 'utf8');
-  if (payload.length > MAX_FRAME_BYTES && response.ok) {
-    selected = {
-      id: response.id,
-      ok: false,
-      error: { code: 'RESPONSE_TOO_LARGE', message: '服务响应超出安全范围。' },
-    };
-    payload = Buffer.from(JSON.stringify(selected), 'utf8');
-  }
-  if (payload.length === 0 || payload.length > MAX_FRAME_BYTES) throw new ProtocolError(response.id);
-  const frame = Buffer.allocUnsafe(4 + payload.length);
-  frame.writeUInt32BE(payload.length, 0);
-  payload.copy(frame, 4);
+  const frame = encodeServiceResponse(response);
   await new Promise<void>((resolve, reject) => {
     process.stdout.write(frame, (error) => (error ? reject(error) : resolve()));
   });
@@ -449,6 +436,16 @@ async function dispatch(
           request.input.planEnvelopeDigest,
         ),
       };
+    case 'getCoverageManifestUnits':
+      return { id: request.id, ok: true, op: request.op, result: store.getCoverageManifestUnits(request.input) };
+    case 'getAnalysisRevisionUnits':
+      return { id: request.id, ok: true, op: request.op, result: store.getAnalysisRevisionUnits(request.input) };
+    case 'getAnalysisRevisionOverview':
+      return { id: request.id, ok: true, op: request.op, result: store.getAnalysisRevisionOverview(request.input) };
+    case 'getAnalysisRunReportRows':
+      return { id: request.id, ok: true, op: request.op, result: store.getAnalysisRunReportRows(request.input) };
+    case 'getBaselineAnalysisRangePlan':
+      return { id: request.id, ok: true, op: request.op, result: store.getBaselineAnalysisRangePlan(request.input) };
     case 'inspectBaselineAnalysis':
       return {
         id: request.id,

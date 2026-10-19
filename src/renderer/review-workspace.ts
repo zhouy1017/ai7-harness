@@ -22,7 +22,7 @@ import {
   type ReviewWorkspaceProjection,
   type RendererApi,
   type ResearchEvidenceBookProjection,
-  type ServiceJobProjection,
+  type ServiceWireJobProjection as ServiceJobProjection,
   type WritingTaskMaterialProjection,
 } from '../shared/protocol.js';
 import { findingResearchLines, readFindingResearch } from './research-evidence-labels.js';

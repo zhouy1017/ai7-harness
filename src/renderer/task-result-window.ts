@@ -1,5 +1,7 @@
+import { hydrateAnalysisRevision } from './analysis-paging.js';
+import { ANALYSIS_MORE_RANGES } from './analysis-paging-labels.js';
 import type {
-  BaselineAnalysisResultSetRevisionProjection,
+  HydratedAnalysisRevisionProjection as BaselineAnalysisResultSetRevisionProjection,
   BookTaskItemProjection,
   DialogueProjection,
   GlobalAttentionTarget,
@@ -47,7 +49,7 @@ import {
 export interface TaskResultWindowOptions {
   /** The finished Task, as the 任务 panel lists it. */
   readonly entry: BookTaskItemProjection;
-  readonly api: Pick<RendererApi, 'inspectBaselineAnalysis' | 'inspectReviewWorkspace' | 'inspectDialogue'>;
+  readonly api: Pick<RendererApi, 'inspectBaselineAnalysis' | 'getAnalysisRevisionUnits' | 'getAnalysisRevisionOverview' | 'inspectReviewWorkspace' | 'inspectDialogue'>;
   /**
    * While the manuscript is on screen, its text column and the pane it scrolls in: the window takes the column's width and
    * stands at the top of the pane. `null` elsewhere, where the window stands in the middle of the screen.
@@ -85,7 +87,7 @@ function uid(prefix: string): string {
 
 /** Where a reading range's result stands: its first cited place, or where an unread range begins. */
 function unitBlockOf(unit: BaselineAnalysisResultSetRevisionProjection['units'][number]): string | null {
-  if (unit.state === 'gap') return unit.gap.blockIds[0] ?? null;
+  if (unit.state === 'gap') return unit.gap.firstBlockId;
   return unit.entities.flatMap((entity) => entity.sourceRanges)[0]?.blockId
     ?? unit.events.flatMap((event) => event.sourceRanges)[0]?.blockId
     ?? unit.settingClaims.flatMap((claim) => claim.sourceRanges)[0]?.blockId
@@ -223,6 +225,22 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
       return row;
     });
     body.replaceChildren(meta(analysisResultReadLine(revision), ANALYSIS_RESULT_NOT_DONE), table(TASK_RESULT_COLUMNS.analysis, rows));
+    if (revision.unitPage.nextOrdinal !== null) {
+      const more = el('button', 'secondary', ANALYSIS_MORE_RANGES);
+      more.type = 'button';
+      more.addEventListener('click', async () => {
+        more.disabled = true;
+        try {
+          const page = await options.api.getAnalysisRevisionUnits({ revisionId: revision.revisionId, afterOrdinal: revision.unitPage.nextOrdinal! });
+          if (closed || !more.isConnected) return;
+          if (page.revisionId !== revision.revisionId || page.next !== null && page.next <= revision.unitPage.nextOrdinal!) throw new Error(TASK_RESULT_UNAVAILABLE);
+          showAnalysis({ ...revision, units: [...revision.units, ...page.units], unitPage: {
+            ...revision.unitPage, shown: revision.units.length + page.units.length, nextOrdinal: page.next } });
+        } catch { if (!closed) body.replaceChildren(el('p', 'field-note', TASK_RESULT_UNAVAILABLE)); }
+      });
+      body.append(more);
+    }
+
   }
 
   function showReview(run: ReviewRunProjection): void {
@@ -287,7 +305,9 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
         if (closed) return;
         if (revision === null || revision.revisionId !== result.revisionId) throw new Error(TASK_RESULT_UNAVAILABLE);
         manuscriptId = revision.manuscriptPin.manuscriptId;
-        showAnalysis(revision);
+        const hydrated = await hydrateAnalysisRevision(options.api, revision);
+        if (closed) return;
+        showAnalysis(hydrated);
       } else {
         const workspace = await options.api.inspectReviewWorkspace({ reviewRunId: result.reviewRunId });
         if (closed) return;

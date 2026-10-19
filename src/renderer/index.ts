@@ -1,3 +1,5 @@
+import { hydrateAnalysisRevision } from './analysis-paging.js';
+import { ANALYSIS_MORE_RANGES, ANALYSIS_READ_FAILED, ANALYSIS_READING, ANALYSIS_MORE_REPORT_ROWS } from './analysis-paging-labels.js';
 import { createAppearance } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { mountAgentWorkspace } from './agent-workspace.js';
@@ -31,18 +33,18 @@ import { consumeReturnPlace, preserveReturnPlace, readReturnPlace, type ReadingP
 import type {
   AgentWorkspacePromotionProjection,
   AnalysisReusePlanCounts,
-  AnalysisReusePlanProjection,
+  AnalysisReusePlanSummaryProjection as AnalysisReusePlanProjection,
   BaselineAnalysisPlanRevisionProjection,
   BaselineAnalysisGoal,
-  BaselineAnalysisProjection,
+  BaselineAnalysisWireProjection as BaselineAnalysisProjection,
   BookTaskItemProjection,
   DefaultExecutionRuleReference,
   DefaultExecutionRulesProjection,
   ExemplarBookProjection,
   ExemplarsProjection,
   KnowledgeProceduresProjection,
-  QuickStartBaselineAnalysisResult,
-  BaselineAnalysisResultSetRevisionProjection,
+  QuickStartBaselineAnalysisWireResult as QuickStartBaselineAnalysisResult,
+  HydratedAnalysisRevisionProjection as BaselineAnalysisResultSetRevisionProjection,
   BaselineAnalysisSelectedRange,
   BaselineAnalysisUpdateMode,
   BaselineAnalysisUpdateRequest,
@@ -86,9 +88,9 @@ import type {
   ReviewBeforeImportProjection,
   ReviewBeforeManuscriptReimportProjection,
   ReviewBeforeSourceImportProjection,
-  RunReportProjection,
+  AnalysisRunReportSummaryProjection as RunReportProjection,
   SearchResultsProjection,
-  ServiceJobProjection,
+  ServiceWireJobProjection as ServiceJobProjection,
   SourceImportCommitProjection,
   StagedImportProjection,
   StartupProjection,
@@ -3947,9 +3949,24 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
       ...usageRows,
       element('dt', undefined, '发现分类'), element('dd', 'technical-identity', report.findingCounts.length === 0 ? '无' : report.findingCounts.map((entry) => `${entry.kind} ${entry.count}`).join('；')),
       element('dt', undefined, '抽样'), element('dd', 'technical-identity', `${sample.state} · seed ${sample.seed ?? '无'} · ${sample.size}/${sample.candidateCount}`),
-      element('dt', undefined, '逐范围账目'), element('dd', 'technical-identity', report.unitRows.map((row) => `单元 ${row.unitOrdinal} ${row.state}/${row.lineage} · ${row.attempts} 回合 · ${row.wallMs ?? '—'} ms${row.usage === null ? '' : ` · ${row.usage.inputTokens}/${row.usage.outputTokens}`}${row.gapCode === null ? '' : ` · ${row.gapCode}`}`).join('；')),
+      element('dt', undefined, '逐范围账目'), element('dd', 'technical-identity', (report.unitRows ?? []).map((row) => `单元 ${row.unitOrdinal} ${row.state}/${row.lineage} · ${row.attempts} 回合 · ${row.wallMs ?? '—'} ms${row.usage === null ? '' : ` · ${row.usage.inputTokens}/${row.usage.outputTokens}`}${row.gapCode === null ? '' : ` · ${row.gapCode}`}`).join('；')),
     ),
   );
+  if (report.unitPage?.nextOrdinal != null) {
+    const more = button(ANALYSIS_MORE_REPORT_ROWS, 'secondary', async () => {
+      more.disabled = true;
+      try {
+        const page = await window.ai7.getAnalysisRunReportRows({ taskIntentId: report.taskIntentId, afterOrdinal: report.unitPage!.nextOrdinal! });
+        if (!more.isConnected) return;
+        if (page.reportDigest !== report.reportDigest) throw new Error(ANALYSIS_READ_FAILED);
+        const updated = renderRunReport({ ...report, unitRows: [...(report.unitRows ?? []), ...page.rows],
+          unitPage: { shown: (report.unitRows?.length ?? 0) + page.rows.length, total: report.unitPage!.total, nextOrdinal: page.next } });
+        if (updated instanceof HTMLDetailsElement) updated.open = true;
+        disclosure.replaceWith(updated);
+      } catch { setStatus(ANALYSIS_READ_FAILED, 'error'); more.disabled = false; }
+    });
+    disclosure.append(more);
+  }
   return disclosure;
 }
 
@@ -4089,7 +4106,8 @@ function renderBaselineAnalysisOverview(
   const manifestUnits = view.historical ? null : projection.coverageManifest?.units ?? null;
   const adaptedUnits = revision.provenance.adaptations?.unitOrdinals ?? [];
   const units = element('ul', 'analysis-unit-list');
-  for (const unit of revision.units) {
+  const appendUnits = (rows: typeof revision.units): void => {
+  for (const unit of rows) {
     const item = element('li', 'analysis-unit');
     item.dataset['analysisUnit'] = String(unit.unitOrdinal);
     item.dataset['analysisUnitState'] = unit.state;
@@ -4108,7 +4126,7 @@ function renderBaselineAnalysisOverview(
       if (firstRange !== undefined) item.append(returnButton(firstRange.blockId));
     } else {
       item.append(element('p', 'attention-note', `尚未分析：${unit.gap.reason}`));
-      if (unit.gap.blockIds[0] !== undefined) item.append(returnButton(unit.gap.blockIds[0]));
+      if (unit.gap.firstBlockId !== null) item.append(returnButton(unit.gap.firstBlockId));
     }
     item.append(technicalDetails(
       'analysis-facts',
@@ -4123,6 +4141,8 @@ function renderBaselineAnalysisOverview(
     ));
     units.append(item);
   }
+  };
+  appendUnits(revision.units);
   // The unread ranges once more as their own list, so the editor sees what is missing without reading
   // every chapter to find it; each returns to the manuscript range it names.
   const gaps = element('ul', 'analysis-list analysis-gap-list');
@@ -4132,13 +4152,32 @@ function renderBaselineAnalysisOverview(
     item.dataset['analysisGapUnit'] = String(gap.unitOrdinal);
     item.dataset['analysisGapCode'] = gap.code;
     item.append(element('span', undefined, `第 ${gap.unitOrdinal} 个阅读范围 · 内容块 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
-    if (gap.blockIds[0] !== undefined) item.append(returnButton(gap.blockIds[0]));
+    if (gap.firstBlockId !== null) item.append(returnButton(gap.firstBlockId));
     gaps.append(item);
   }
   chapters.append(
     element('h4', undefined, `尚未分析的范围 · ${revision.gaps.length}`), gaps,
-    element('h4', undefined, `各章 · ${revision.units.length} 个阅读范围`), units,
+    element('h4', undefined, `各章 · ${revision.unitPage.total} 个阅读范围`), units,
   );
+
+  let afterOrdinal = revision.unitPage.nextOrdinal;
+  if (afterOrdinal !== null) {
+    const more = button(ANALYSIS_MORE_RANGES, 'secondary', async () => {
+      if (afterOrdinal === null) return;
+      more.disabled = true;
+      try {
+        const page = await window.ai7.getAnalysisRevisionUnits({ revisionId: revision.revisionId, afterOrdinal });
+        if (!more.isConnected) return;
+        if (page.revisionId !== revision.revisionId || page.next !== null && page.next <= afterOrdinal) throw new Error(ANALYSIS_READ_FAILED);
+        appendUnits(page.units);
+        afterOrdinal = page.next;
+        if (afterOrdinal === null) more.remove();
+      } catch { setStatus(ANALYSIS_READ_FAILED, 'error'); }
+      finally { more.disabled = false; }
+    });
+    more.dataset['analysisAction'] = 'more-ranges';
+    chapters.append(more);
+  }
 
   // The technical half of the whole revision, closed by default and complete (V2-UX-LAYER-001, 007).
   const runAdaptations = projection.run !== null && projection.run.runRecordId === revision.provenance.runRecordId ? projection.run.adaptations : [];
@@ -4445,19 +4484,26 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
         radio.id = `analysis-range-${option.unitOrdinal}`;
         radio.value = `${option.startPosition}-${option.endPosition}`;
         radio.disabled = !action.available;
-        radio.addEventListener('change', () => {
+        radio.addEventListener('change', async () => {
           if (!radio.checked) return;
+          start.disabled = true;
+          selectedRange = null;
+          try {
+          const picked = await window.ai7.getBaselineAnalysisRangePlan({ unitOrdinal: option.unitOrdinal });
+          if (!radio.checked || !block.isConnected) return;
+          if (picked.selectedRange.startPosition !== option.startPosition || picked.selectedRange.endPosition !== option.endPosition) throw new Error(ANALYSIS_READ_FAILED);
           selectedRange = { startPosition: option.startPosition, endPosition: option.endPosition };
           block.dataset['selectedRange'] = radio.value;
-          block.dataset['expectedReused'] = String(option.expected.reused);
-          block.dataset['expectedRecomputed'] = String(option.expected.recomputed);
-          block.dataset['expectedInvalidated'] = String(option.expected.invalidated);
-          block.dataset['expectedBypassed'] = String(option.expected.bypassed);
-          expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${updateReuseReading(option.expected, mode)}`;
-          expectedExact.textContent = reuseCountsText(option.expected);
+          block.dataset['expectedReused'] = String(picked.expected.reused);
+          block.dataset['expectedRecomputed'] = String(picked.expected.recomputed);
+          block.dataset['expectedInvalidated'] = String(picked.expected.invalidated);
+          block.dataset['expectedBypassed'] = String(picked.expected.bypassed);
+          expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${updateReuseReading(picked.expected, mode)}`;
+          expectedExact.textContent = reuseCountsText(picked.expected);
           start.disabled = !action.available;
+          } catch { if (radio.checked && block.isConnected) setStatus(ANALYSIS_READ_FAILED, 'error'); }
         });
-        const label = element('label', undefined, `${option.label} · 重新分析 ${option.expected.recomputed} 个阅读范围，沿用 ${option.expected.reused} 个`);
+        const label = element('label', undefined, option.label);
         label.htmlFor = radio.id;
         row.append(radio, label);
         fieldset.append(row);
@@ -4602,10 +4648,30 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
 }
 
 function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisProjection, bookTitle: string): void {
+  const generation = analysisFollower.drawn(host);
+  const pending = [projection.resultSetRevision, projection.inspectedRevision?.revision].filter((revision) =>
+    revision != null && (revision.sections === undefined || revision.synthesis === undefined));
+  if (pending.length > 0) {
+    const loading = element('p', 'field-note', ANALYSIS_READING);
+    host.replaceChildren(loading);
+    void Promise.all(pending.map((revision) => {
+      if (revision == null) throw new Error(ANALYSIS_READ_FAILED);
+      return hydrateAnalysisRevision(window.ai7, revision);
+    })).then((overviews) => {
+      if (!host.contains(loading)) return;
+      const hydrate = (revision: BaselineAnalysisProjection['resultSetRevision']) => revision === null ? null : {
+        ...revision, ...overviews.find((overview) => overview.revisionId === revision.revisionId),
+      };
+      renderBaselineAnalysis(host, { ...projection, resultSetRevision: hydrate(projection.resultSetRevision),
+        inspectedRevision: projection.inspectedRevision === null ? null : { ...projection.inspectedRevision,
+          revision: hydrate(projection.inspectedRevision.revision)! } }, bookTitle);
+    }).catch(() => { if (host.contains(loading)) host.replaceChildren(element('p', 'attention-note', ANALYSIS_READ_FAILED)); });
+    return;
+  }
+
   // A draw replaces what the card follows (Issue #539): a follow-up an earlier draw armed — of a revision the editor has
   // since left — never draws over this one, whether its read was still to be sent or already out, and this draw arms its
   // own if it needs one.
-  const generation = analysisFollower.drawn(host);
   const card = element('section', 'baseline-analysis-card');
   card.dataset['analysisState'] = projection.state;
   card.dataset['analysisBookId'] = projection.bookId;
@@ -4662,7 +4728,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     projection.state === 'awaiting-clarification';
   const { panels, select } = analysisTabs(card, projection.bookId, revision === null || taskInFlight ? 'history' : 'synopsis');
   if (revision !== null) {
-    renderBaselineAnalysisOverview(card, panels, select, projection, revision, bookTitle, projection.inspectedRevision !== null
+    renderBaselineAnalysisOverview(card, panels, select, projection, revision as BaselineAnalysisResultSetRevisionProjection, bookTitle, projection.inspectedRevision !== null
       ? { historical: true, current: projection.inspectedRevision.current }
       : { historical: false, current: true });
   } else {

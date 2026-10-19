@@ -1,3 +1,5 @@
+import { baselineAnalysisOutbound } from './analysis/baseline-analysis-wire.js';
+import type { ServiceResponse } from '../shared/protocol.js';
 import { isAbsolute } from 'node:path';
 import { MAX_SKILL_PACKAGE_BYTES } from './imported-skills.js';
 import { clarificationGraphemes } from './analysis/clarifications.js';
@@ -84,6 +86,20 @@ import { CONFLICT_RESOLUTIONS, type ConflictResolution } from '../shared/conflic
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
+
+/** Outbound mapping precedes the unchanged hard frame guard. */
+export function encodeServiceResponse(response: ServiceResponse): Buffer {
+  let payload = Buffer.from(JSON.stringify(baselineAnalysisOutbound(response)), 'utf8');
+  if (payload.length > MAX_FRAME_BYTES && response.ok) {
+    payload = Buffer.from(JSON.stringify({ id: response.id, ok: false,
+      error: { code: 'RESPONSE_TOO_LARGE', message: '服务响应超出安全范围。' } }), 'utf8');
+  }
+  if (payload.length === 0 || payload.length > MAX_FRAME_BYTES) throw new ProtocolError(response.id);
+  const frame = Buffer.allocUnsafe(4 + payload.length);
+  frame.writeUInt32BE(payload.length, 0);
+  payload.copy(frame, 4);
+  return frame;
+}
 
 export class ProtocolError extends Error {
   readonly code = 'PROTOCOL_INVALID';
@@ -677,6 +693,24 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !isBoundedString(input.digest, 64) || !/^[0-9a-f]{64}$/u.test(input.digest)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    case 'getCoverageManifestUnits':
+    case 'getAnalysisRunReportRows': {
+      const input = requireInput(value.input, ['bookId', 'taskIntentId', 'afterOrdinal'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !isSafeInteger(input.afterOrdinal, 0)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'getAnalysisRevisionUnits':
+    case 'getAnalysisRevisionOverview': {
+      const cursor = value.op === 'getAnalysisRevisionUnits' ? 'afterOrdinal' : 'afterIndex';
+      const input = requireInput(value.input, ['bookId', 'revisionId', cursor], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.revisionId) || !isSafeInteger(input[cursor], 0)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'getBaselineAnalysisRangePlan': {
+      const input = requireInput(value.input, ['bookId', 'unitOrdinal'], tentativeId);
+      if (!validUuid(input.bookId) || !isSafeInteger(input.unitOrdinal, 1)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectBaselineAnalysis': {
