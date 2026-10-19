@@ -114,7 +114,7 @@ it('leaves a large first unit for the detail read instead of failing the enclosi
   const full = longSettledAnalysis(longPreparedAnalysis(120), 1, false);
   const first = full.resultSetRevision!.units[0]!;
   if (first.state !== 'closed') throw new Error('closed synthetic unit required');
-  first.synopsis = '甲'.repeat(50_000);
+  first.synopsis = '甲'.repeat(70_000);
   const wire = baselineAnalysisWire(full);
   expect(wire.resultSetRevision!.unitPage).toEqual({ shown: 0, total: 8, nextOrdinal: 0 });
   expect(serializedBytes(wire)).toBeLessThanOrEqual(MAX_FRAME_BYTES - 64 * 1024);
@@ -183,6 +183,16 @@ it('keeps short-book history reports, range options and reuse sources as they we
     label: option.label, startPosition: option.startPosition, endPosition: option.endPosition });
   const unit = full.update!.reusePlan!.units[0]!;
   expect(wire.update!.reusePlan!.units[0]).toEqual({ unitOrdinal: unit.unitOrdinal, disposition: unit.disposition, reason: unit.reason, reusedFrom: unit.reusedFrom });
+  // Recorded sample1 results run to ~14 KiB a range (J-04's recorded Run): all eight stay inline, with history open too.
+  const recordedSize = longSettledAnalysis(longPreparedAnalysis(120), 12);
+  for (const revision of [recordedSize.resultSetRevision!, recordedSize.inspectedRevision!.revision]) {
+    revision.units = revision.units.map((unit) => unit.state === 'closed' ? { ...unit, synopsis: '乙'.repeat(4_600) } : unit);
+  }
+  expect(serializedBytes(recordedSize.resultSetRevision!.units)).toBeGreaterThan(96 * 1024);
+  const recordedWire = baselineAnalysisWire(recordedSize);
+  expect(recordedWire.resultSetRevision!.unitPage).toEqual({ shown: 8, total: 8, nextOrdinal: null });
+  expect(recordedWire.inspectedRevision!.revision.unitPage).toEqual({ shown: 8, total: 8, nextOrdinal: null });
+  expect(recordedWire.resultSetRevision!.units).toEqual(recordedSize.resultSetRevision!.units);
   const long = baselineAnalysisWire(longSettledAnalysis(longPreparedAnalysis(), 12));
   expect(long.history!.entries.every((entry) => entry.report?.unitRows === undefined &&
     JSON.stringify(entry.report?.unitPage) === JSON.stringify({ shown: 0, total: 400, nextOrdinal: 0 }))).toBe(true);

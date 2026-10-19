@@ -6,7 +6,10 @@ import { MAX_FRAME_BYTES, BASELINE_ANALYSIS_KIND, type BaselineAnalysisProjectio
 import { canonicalJson, sha256Hex, requireAnalysis } from './canonical.js';
 
 export const ANALYSIS_PAGE_BYTES = MAX_FRAME_BYTES / 2 - 2048;
-const INLINE_UNIT_BYTES = 24 * 1024;
+// Real recorded sample1 unit results are ~110 KiB for eight ranges, so a short book keeps every range inline; a reply
+// that still does not fit once its overviews are paged shrinks to the first ranges.
+const INLINE_UNIT_BYTES = 192 * 1024;
+const SHRUNK_UNIT_BYTES = 24 * 1024;
 const INLINE_OVERVIEW_BYTES = ANALYSIS_PAGE_BYTES;
 
 export const serializedBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
@@ -118,9 +121,10 @@ function reportSummary(report: RunReportProjection | null, history: boolean): An
   return { ...summary, unitRows: page.items, unitPage: { shown: page.items.length, total: unitRows.length, nextOrdinal: page.next } };
 }
 
-export function analysisRevisionWire(revision: BaselineAnalysisResultSetRevisionProjection, overviewBudget = INLINE_OVERVIEW_BYTES): AnalysisRevisionWireProjection {
+export function analysisRevisionWire(revision: BaselineAnalysisResultSetRevisionProjection, overviewBudget = INLINE_OVERVIEW_BYTES,
+  unitBudget = INLINE_UNIT_BYTES): AnalysisRevisionWireProjection {
   const { units, gaps, sections, synthesis, ...rest } = revision;
-  const page = revisionUnitsPage(revision, 0, fitsWithin(units, 96 * 1024) ? 96 * 1024 : INLINE_UNIT_BYTES, true);
+  const page = revisionUnitsPage(revision, 0, unitBudget, true);
   const overview = overviewTransfer(revision);
   const totalLength = overview.totalLength;
   const chunkCount = overview.bytes <= overviewBudget ? 0 : overview.chunks.length;
@@ -161,11 +165,16 @@ export function baselineAnalysisWire(projection: BaselineAnalysisProjection, bou
       total: projection.run.attempt.spans.length, nextOrdinal: wire.run!.attempt!.spans[0]!.ordinal, descending: true } };
   }
   if (serializedBytes(wire) <= replyBudget) return wire;
-  // Two individually small overviews can still exhaust the one enclosing reply when history is open.
-  if (projection.resultSetRevision !== null) wire.resultSetRevision = analysisRevisionWire(projection.resultSetRevision, 0);
-  if (projection.inspectedRevision !== null) wire.inspectedRevision = { ...projection.inspectedRevision,
-    revision: analysisRevisionWire(projection.inspectedRevision.revision, 0) };
-  // Lists stay whole whenever paging the overviews alone is enough.
+  const revisions = (unitBudget: number): void => {
+    if (projection.resultSetRevision !== null) wire.resultSetRevision = analysisRevisionWire(projection.resultSetRevision, 0, unitBudget);
+    if (projection.inspectedRevision !== null) wire.inspectedRevision = { ...projection.inspectedRevision,
+      revision: analysisRevisionWire(projection.inspectedRevision.revision, 0, unitBudget) };
+  };
+  // Two individually small overviews can still exhaust the one enclosing reply when history is open; then the inline
+  // ranges shrink. Lists stay whole whenever either step alone is enough.
+  revisions(INLINE_UNIT_BYTES);
+  if (serializedBytes(wire) <= replyBudget) return wire;
+  revisions(SHRUNK_UNIT_BYTES);
   if (serializedBytes(wire) <= replyBudget) return wire;
   let share = 12 * 1024;
   for (;;) {
