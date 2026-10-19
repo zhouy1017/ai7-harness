@@ -17,7 +17,7 @@ The document identity moves with it (`version`, `predecessorVersion` v22, the ca
 
 ## What it means in the product
 
-Under `developer-live` a Book whose source is one of the five exact files may be planned and sent under any of the ten rules — baseline analysis, enrolled background analysis, editorial dialogue, review, writing, evaluation, 润色这段, conflict regeneration, 来源译文 and custom analysis — exactly as `sample1` could under v22. Any other Book, including a Book composed from one of the five, a renamed or edited copy, and every local-only manuscript `SampleBooks/README.md` lists, is still refused before dispatch with nothing sent. The five files stay out of every application package, installer and release asset, and development onboarding still imports exact `sample1`.
+Under `developer-live` a Book whose imported source digest is one of the five admitted digests passes the shared source gate — exactly as `sample1` did under v22. Each rule's other admission conditions remain unchanged, including the separate 来源译文 input set. Renaming identical source bytes preserves their digest; an altered source file, a composed file or a local-only manuscript whose digest is outside the five is refused before dispatch with nothing sent. Allowed tester edits within an imported `sample1` Book retain their existing treatment under ADR 0088; pasting another manuscript into it remains protected material. The five files stay out of every application package, installer and release asset, and development onboarding still imports exact `sample1`.
 
 ## What stays refused
 

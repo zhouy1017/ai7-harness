@@ -3,7 +3,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ANALYSIS_LINEAGE_UNAVAILABLE_REASON, SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
+import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
+import { ANALYSIS_LINEAGE_UNAVAILABLE_REASON } from '../../src/shared/public-samplebook-labels.js';
 import { BaselineAnalysisExecutionOwner, DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../../src/service/analysis/execution.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { EditorialStore } from '../../src/service/store.js';
@@ -19,11 +20,13 @@ import {
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 
 // Issue #990: the four ADR 0091 Public SampleBooks pass the two gates exact sample1 passes — the analysis lineage check under
 // development-ci and developer-live, and the developer-live transmittable set the execution owner checks before dispatch.
 // Everything is real but the transport, a stub that records each call and refuses it; no socket is opened and no credential
 // value beyond a local placeholder exists. Only counts, states and digests are asserted: no manuscript text is read here.
+installNodeNetworkDenial();
 
 let roots: ServiceTestRoots;
 let cacheRoot: string;
@@ -117,16 +120,16 @@ function refusingTransport(calls: string[]): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
-function liveOwner(store: EditorialStore, calls: string[]): BaselineAnalysisExecutionOwner {
+function executionOwner(store: EditorialStore, calls: string[], policy: LaunchPolicyProjection = livePolicy): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger,
-    launchPolicy: livePolicy,
+    launchPolicy: policy,
     fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' },
-    developerLive: {
+    developerLive: policy.operationalScope === 'developer-live' ? {
       launch: { runBudgetCeiling: CEILING, providerCacheRoot: cacheRoot, validation: { family: 'baseline-analysis', case: 'samplebook-admission', delta: null } },
       nativeFetch: refusingTransport(calls),
-    },
+    } : null,
   });
 }
 
@@ -183,10 +186,24 @@ describe('the ADR 0091 Public SampleBooks under the analysis lineage check (Issu
       expect(PUBLIC_SAMPLEBOOK_SOURCE_DIGESTS.has(sourceDigest)).toBe(false);
       await pinEditorialWorkspaceProfileRevision2(store, bookId);
       recordMissingCredentialConnection(store, `${scope} 主编辑角色连接`);
-      expect(refusal(() => store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, policy)))
-        .toEqual({ code: 'ANALYSIS_LINEAGE_UNAVAILABLE', message: ANALYSIS_LINEAGE_UNAVAILABLE_REASON });
-      // No Task is recorded: reading the Book's analysis meets the same refusal.
-      expect(refusal(() => store.inspectBaselineAnalysis(bookId))).toMatchObject({ code: 'ANALYSIS_LINEAGE_UNAVAILABLE' });
+      const calls: string[] = [];
+      const execution = executionOwner(store, calls, policy);
+      const dispatch = vi.spyOn(execution, 'admitAndDispatch');
+      try {
+        expect(refusal(() => {
+          const prepared = prepare(store, bookId, policy);
+          const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+          execution.admitAndDispatch(authorized.dispatchRunRecordId!);
+        })).toEqual({ code: 'ANALYSIS_LINEAGE_UNAVAILABLE', message: ANALYSIS_LINEAGE_UNAVAILABLE_REASON });
+        await execution.whenIdle();
+        expect(dispatch).not.toHaveBeenCalled();
+        expect(calls).toHaveLength(0);
+        // Reading the Book's analysis meets the same early refusal.
+        expect(refusal(() => store.inspectBaselineAnalysis(bookId))).toMatchObject({ code: 'ANALYSIS_LINEAGE_UNAVAILABLE' });
+      } finally {
+        dispatch.mockRestore();
+        await execution.dispose();
+      }
       await store.close();
       opened = opened.filter((candidate) => candidate !== store);
       await rm(roots.dataRoot, { recursive: true, force: true });
@@ -195,8 +212,8 @@ describe('the ADR 0091 Public SampleBooks under the analysis lineage check (Issu
 });
 
 describe('the developer-live transmittable set before dispatch (Issue #990)', { timeout: 180_000 }, () => {
-  it('admits a Run over 《老残游记》 past the transmittable check to the transport, where exact sample1 already went', async () => {
-    const book = ADR_0091_PUBLIC_SAMPLEBOOKS.find((entry) => entry.path === 'liue-laocan-youji.docx')!;
+  it.each(ADR_0091_PUBLIC_SAMPLEBOOKS.map((book) => [book.path, book] as const))(
+    'admits a Run over %s past the transmittable check to the stub transport', async (_path, book) => {
     const store = await openStore('developer-live');
     const { bookId } = await importBook(store, samplePath(book));
     await pinEditorialWorkspaceProfileRevision2(store, bookId);
@@ -205,7 +222,7 @@ describe('the developer-live transmittable set before dispatch (Issue #990)', { 
     const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
     expect(store.baselineAnalysisLedger.loadExecutionPlan(authorized.dispatchRunRecordId!).sourceDigest).toBe(book.sha256);
     const calls: string[] = [];
-    const execution = liveOwner(store, calls);
+    const execution = executionOwner(store, calls);
     try {
       // Admission itself does not throw EXECUTION_SOURCE_NOT_TRANSMITTABLE: the Run reaches the (refusing) transport.
       expect(refusal(() => execution.admitAndDispatch(authorized.dispatchRunRecordId!))).toBe('no-throw');

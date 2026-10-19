@@ -160,13 +160,12 @@ import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provide
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
 import { PLAN_MOVED_LABEL, type WaitingRunBlockCause } from '../reconnect-preflight.js';
 import { isPublicSampleBookSourceDigest, SAMPLE1_PUBLIC_SAMPLEBOOK } from '../../shared/public-samplebooks.js';
+import { ANALYSIS_LINEAGE_UNAVAILABLE_REASON } from '../../shared/public-samplebook-labels.js';
 
 type SqlRow = Record<string, SQLOutputValue>;
 
 /** The exact `sample1` source digest, the ADR 0044 baseline among the Public SampleBooks every non-production analysis Task requires. */
 export const SAMPLE1_SOURCE_DIGEST = SAMPLE1_PUBLIC_SAMPLEBOOK.sha256;
-/** Why a Book outside the Public SampleBooks cannot be analysed outside ordinary production (Issue #990). */
-export const ANALYSIS_LINEAGE_UNAVAILABLE_REASON = '当前图书不是已登记的公开示例书（sample1 或 ADR 0091 所列公版作品）主稿件血缘。' as const;
 const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d' as const;
 const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' as const;
 const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
