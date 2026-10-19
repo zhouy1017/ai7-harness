@@ -461,11 +461,11 @@ export function unconfirmedWhat(ranges: number, steps: ReadonlyArray<Unconfirmed
   return [...(ranges === 0 ? [] : [`${ranges} 个阅读范围`]), ...steps.map((stage) => UNCONFIRMED_STAGE_LABELS[stage])].join('、');
 }
 /** What the block says above its list: what is known and what is missing, and what 保留为缺口 does and does not do. */
-export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection): string {
-  const what = unconfirmedWhat(listed.ranges.length, [...new Set(listed.steps.map((step) => step.stage))]);
+export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection, rangesTotal = listed.ranges.length): string {
+  const what = unconfirmedWhat(rangesTotal, [...new Set(listed.steps.map((step) => step.stage))]);
   // A step is never sent again by a later Task as the same request, so only ranges carry the re-send sentence (#763 review).
   return `${what}的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。` +
-    `保留为缺口只记下你的确认：不发送任何内容，不改变结果${listed.ranges.length === 0 ? '。' : '；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。'}`;
+    `保留为缺口只记下你的确认：不发送任何内容，不改变结果${rangesTotal === 0 ? '。' : '；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。'}`;
 }
 /**
  * One line of the list: the category in a Review Run, the range or the step, and that its request was sent. A range counted in a
@@ -778,7 +778,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           // A kept progress that no longer reads back is never stated as a count.
           note: continuation === null || continuation.unitsSettled === null
             ? null
-            : taskBarOutcomeUnknownNote(control.outcomeUnknown.units.length, continuation.unitsSettled, continuation.unitsTotal),
+            : taskBarOutcomeUnknownNote(plan.listPages?.['runControl.outcomeUnknown.units']?.total ?? control.outcomeUnknown.units.length, continuation.unitsSettled, continuation.unitsTotal),
           status: plan.state.label,
           actions: [
             { name: 'view-unconfirmed', label: TASK_BAR_VIEW_UNCONFIRMED, tone: 'primary', disabledReason: null },

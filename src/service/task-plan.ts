@@ -2,7 +2,52 @@ import { housePreferenceLabel } from './house-review-preference.js';
 import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
 import { canonicalJson, requireAnalysis, sha256Hex } from './analysis/canonical.js';
 import { MAX_FRAME_BYTES } from '../shared/protocol.js';
-import type { FrozenSeriesScope, ReviewWorkspaceProjection } from '../shared/protocol.js';
+import type { FrozenSeriesScope, ReviewWorkspaceProjection, TaskIntentDraftsProjection } from '../shared/protocol.js';
+
+import { researchDecisionLine } from '../shared/research-status.js';
+import { SEARCH_BACKENDS } from './provider/search-backends.js';
+import { materialSettledReason, taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
+
+import type {
+  AnalysisReusePlanCounts,
+  BaselineAnalysisPlanRevisionProjection,
+  DefaultExecutionRuleBinding,
+  BaselineAnalysisProjection,
+  InitialEvaluationProjection,
+  InitialEvaluationTaskMode,
+  ReadersReportProjection,
+  ReadersReportTemplate,
+  EvaluationRewriteProjection,
+  WritingProjection,
+  BaselineAnalysisSelectedRange,
+  PlanRevisionDiffEntryProjection,
+  PlanRevisionDiffValue,
+  ProviderProcessingPin,
+  RunBudgetCeilingState,
+  TaskAuthorizationProjection,
+  TaskPlanDefaultRuleProjection,
+  TaskPlanDriftEntryProjection,
+  TaskPlanProjection,
+  TaskPlanClarificationProjection,
+  TaskPlanRedoProjection,
+  TaskPlanReprepareProjection,
+  TaskPlanRunControlProjection,
+  TaskPlanStartProjection,
+  TaskPlanStepProjection,
+} from '../shared/protocol.js';
+import { MODEL_SERVICE_ROUTES, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, READERS_REPORT_TEMPLATE_LABELS, LEARNING_INFLUENCE_WITHDRAWN_LABEL, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
+import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, EVIDENCE_ASSURANCE_LEVEL_LABELS, type EvidenceAssuranceLevel } from '../shared/protocol.js';
+import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
+import type { ClarificationFacts } from './analysis/clarifications.js';
+import { namedNonEffects } from './analysis/baseline-analysis-store.js';
+import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
+import { PLAN_CEILING_LAUNCH_REASON, PLAN_EDITABLE_ADAPTATIONS, PLAN_EDIT_ADAPTATION_LABELS, PLAN_EDIT_STEP_LABELS } from './analysis/plan-edits.js';
+import type { Connectivity } from './connectivity.js';
+import { PLAN_MOVED_LABEL } from './reconnect-preflight.js';
+import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
+import type { ReviewRunPlanFacts } from './review/review-runs.js';
+import { WRITING_COPY_SIZES, WRITING_COPY_SIZES_V1, WRITING_EXEMPLAR_MOVED, type WritingCopyRules, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
+import type { WritingMaterialSource } from './writing-tasks.js';
 
 const TASK_PLAN_LIST_PATHS = ['drift.entries', 'edit.lastEdit.entries', 'resend.units', 'unconfirmed.ranges',
   'runControl.outcomeUnknown.units', 'runControl.continuation.pendingAnswerUnits', 'clarifications'] as const;
@@ -82,6 +127,21 @@ export function reviewWorkspaceWire(workspace: ReviewWorkspaceProjection): Revie
   }
 }
 
+export function taskDraftsPage(projection: TaskIntentDraftsProjection, afterOrdinal: number, digest: string) {
+  const value = projection.drafts;
+  requireAnalysis(sha256Hex(canonicalJson(value)) === digest, 'TASK_PLAN_PAGE_CHANGED', '任务草稿已变化，请重新读取。');
+  const page = planValuePage(value, afterOrdinal, 64 * 1024);
+  requireAnalysis(afterOrdinal <= page.total, 'TASK_PLAN_PAGE_INVALID', '任务草稿读取位置无效。');
+  return { path: 'drafts', items: page.items, nextOrdinal: page.nextOrdinal, digest };
+}
+
+function taskDraftsWire(projection: TaskIntentDraftsProjection): TaskIntentDraftsProjection {
+  if (serializedBytes(projection) <= MAX_FRAME_BYTES / 2) return projection;
+  const page = planValuePage(projection.drafts, 0, 64 * 1024, true);
+  return { ...projection, drafts: page.items as TaskIntentDraftsProjection['drafts'],
+    listPages: { drafts: { shown: page.shown, total: page.total, nextOrdinal: page.nextOrdinal, digest: sha256Hex(canonicalJson(projection.drafts)) } } };
+}
+
 /** The transport edge alone bounds large values; short-book values are returned byte for byte. */
 export function taskPlanWire(plan: TaskPlanProjection): TaskPlanProjection {
   let share = 32 * 1024;
@@ -106,56 +166,12 @@ export function taskPlanOutbound(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value;
   if ('technical' in value && 'start' in value && 'edit' in value && 'ref' in value) return taskPlanWire(value as TaskPlanProjection);
   if ('scopeOptions' in value && 'categories' in value && 'bookId' in value) return reviewWorkspaceWire(value as ReviewWorkspaceProjection);
+  if ('drafts' in value && 'bookTitle' in value && 'bookId' in value) return taskDraftsWire(value as TaskIntentDraftsProjection);
   const record = value as Record<string, unknown>;
   let mapped = record;
   for (const key of ['result', 'projection'] as const) if (key in record) mapped = { ...mapped, [key]: taskPlanOutbound(record[key]) };
   return mapped;
 }
-
-import { researchDecisionLine } from '../shared/research-status.js';
-import { SEARCH_BACKENDS } from './provider/search-backends.js';
-import { materialSettledReason, taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
-
-import type {
-  AnalysisReusePlanCounts,
-  BaselineAnalysisPlanRevisionProjection,
-  DefaultExecutionRuleBinding,
-  BaselineAnalysisProjection,
-  InitialEvaluationProjection,
-  InitialEvaluationTaskMode,
-  ReadersReportProjection,
-  ReadersReportTemplate,
-  EvaluationRewriteProjection,
-  WritingProjection,
-  BaselineAnalysisSelectedRange,
-  PlanRevisionDiffEntryProjection,
-  PlanRevisionDiffValue,
-  ProviderProcessingPin,
-  RunBudgetCeilingState,
-  TaskAuthorizationProjection,
-  TaskPlanDefaultRuleProjection,
-  TaskPlanDriftEntryProjection,
-  TaskPlanProjection,
-  TaskPlanClarificationProjection,
-  TaskPlanRedoProjection,
-  TaskPlanReprepareProjection,
-  TaskPlanRunControlProjection,
-  TaskPlanStartProjection,
-  TaskPlanStepProjection,
-} from '../shared/protocol.js';
-import { MODEL_SERVICE_ROUTES, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, READERS_REPORT_TEMPLATE_LABELS, LEARNING_INFLUENCE_WITHDRAWN_LABEL, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
-import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, EVIDENCE_ASSURANCE_LEVEL_LABELS, type EvidenceAssuranceLevel } from '../shared/protocol.js';
-import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
-import type { ClarificationFacts } from './analysis/clarifications.js';
-import { namedNonEffects } from './analysis/baseline-analysis-store.js';
-import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
-import { PLAN_CEILING_LAUNCH_REASON, PLAN_EDITABLE_ADAPTATIONS, PLAN_EDIT_ADAPTATION_LABELS, PLAN_EDIT_STEP_LABELS } from './analysis/plan-edits.js';
-import type { Connectivity } from './connectivity.js';
-import { PLAN_MOVED_LABEL } from './reconnect-preflight.js';
-import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
-import type { ReviewRunPlanFacts } from './review/review-runs.js';
-import { WRITING_COPY_SIZES, WRITING_COPY_SIZES_V1, WRITING_EXEMPLAR_MOVED, type WritingCopyRules, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
-import type { WritingMaterialSource } from './writing-tasks.js';
 
 export function seriesScopePlan(plan: TaskPlanProjection, scopes?: ReadonlyArray<FrozenSeriesScope>): TaskPlanProjection {
   if (scopes === undefined || scopes.length === 0) return plan;

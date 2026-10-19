@@ -705,8 +705,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'getTaskPlanPage': {
       const input = requireInput(value.input, ['bookId', 'kind', 'ref', 'path', 'afterOrdinal', 'digest'], tentativeId);
-      if (!validUuid(input.bookId) || !TASK_PLAN_KINDS.includes(input.kind as TaskPlanKind) ||
-          !(validUuid(input.ref) || input.ref === null && input.kind === 'review-run' && input.path === 'scopeOptions.chapters.chapters') ||
+      if (!validUuid(input.bookId) || !(TASK_PLAN_KINDS.includes(input.kind as TaskPlanKind) || input.kind === 'task-intent-drafts') ||
+          !(validUuid(input.ref) || input.ref === null && (input.kind === 'task-intent-drafts' && input.path === 'drafts' || input.kind === 'review-run' && input.path === 'scopeOptions.chapters.chapters')) ||
           !isBoundedString(input.path, 160) || !isSafeInteger(input.afterOrdinal, 0) ||
           !isBoundedString(input.digest, 64) || !HEX_DIGEST_PATTERN.test(input.digest)) throw new ProtocolError(tentativeId);
       break;

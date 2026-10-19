@@ -692,7 +692,7 @@ import { FACTUAL_VERIFICATION_POLICY_VERSION, sliceGraphemes } from './analysis/
 import { factualFindingId } from './analysis/factual-review-reducers.js';
 import type { FactualCorrectionEntry, FactualEvidenceRelation, FactualUnitAssertionV2 } from './analysis/factual-review-contract-v2.js';
 import { planEditAssuranceLevel, planEditsOf } from './analysis/plan-edits.js';
-import { assuranceSelector, taskPlanPage, reviewWorkspacePage, REVIEW_CHAPTER_PAGE_PATH } from './task-plan.js';
+import { assuranceSelector, taskPlanPage, taskDraftsPage, reviewWorkspacePage, REVIEW_CHAPTER_PAGE_PATH } from './task-plan.js';
 import {
   CORRECTION_ASSURANCE_INCOMPLETE_LABEL,
   FACTUAL_VERIFICATION_OUTCOMES,
@@ -6145,15 +6145,21 @@ export class EditorialStore {
     return this.#taskPlanWithRoute(input, progress).plan;
   }
 
-  getTaskPlanPage(input: import('../shared/protocol.js').ServiceOperationMap['getTaskPlanPage']['input']) {
+  getTaskPlanPage(input: import('../shared/protocol.js').ServiceOperationMap['getTaskPlanPage']['input'], connectedPlan?: TaskPlanProjection) {
     return this.#analysisCall(() => {
       requireStore(Number.isSafeInteger(input.afterOrdinal) && input.afterOrdinal >= 0, 'TASK_PLAN_PAGE_INVALID', '任务计划读取位置无效。');
+      if (input.kind === 'task-intent-drafts') {
+        requireStore(input.path === 'drafts', 'TASK_PLAN_PAGE_INVALID', '任务草稿读取范围无效。');
+        return taskDraftsPage(this.inspectTaskIntentDrafts({ bookId: input.bookId, draftId: input.ref }), input.afterOrdinal, input.digest);
+      }
       if (input.path === REVIEW_CHAPTER_PAGE_PATH) {
         requireStore(input.kind === 'review-run', 'TASK_PLAN_PAGE_INVALID', '章节读取范围无效。');
         return reviewWorkspacePage(this.inspectReviewWorkspace(input.bookId, input.ref), input.afterOrdinal, input.digest);
       }
       requireStore(input.ref !== null, 'TASK_PLAN_PAGE_INVALID', '任务计划读取范围无效。');
-      return taskPlanPage(this.inspectTaskPlan(input), input.path, input.afterOrdinal, input.digest);
+      const plan = connectedPlan ?? this.inspectTaskPlan({ ...input, kind: input.kind });
+      requireStore(plan.bookId === input.bookId && plan.kind === input.kind && plan.ref === input.ref, 'TASK_PLAN_PAGE_INVALID', '任务计划读取范围无效。');
+      return taskPlanPage(plan, input.path, input.afterOrdinal, input.digest);
     });
   }
 

@@ -383,8 +383,11 @@ async function dispatch(
     // The Task Drawer (Issue #418, plan slice S72): a read of the Task's plan in the editor's words. Its
     // authorization bar (Issue #420, S74a) is route-aware: a plan whose route sends to a model service is
     // offered 开始任务 only while the credential that route resolves is present.
-    case 'getTaskPlanPage':
-      return { id: request.id, ok: true, op: request.op, result: store.getTaskPlanPage(request.input) };
+    case 'getTaskPlanPage': {
+      const plan = request.input.path === 'scopeOptions.chapters.chapters' || request.input.kind === 'task-intent-drafts' ? undefined
+        : await store.inspectTaskPlanWithConnection({ ...request.input, kind: request.input.kind }, (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress);
+      return { id: request.id, ok: true, op: request.op, result: store.getTaskPlanPage(request.input, plan) };
+    }
     case 'inspectTaskPlan':
       return {
         id: request.id,

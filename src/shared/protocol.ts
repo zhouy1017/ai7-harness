@@ -12797,6 +12797,7 @@ export interface TaskIntentDraftProjection {
 }
 
 export interface TaskIntentDraftsProjection {
+  readonly listPages?: TaskPlanProjection['listPages'];
   readonly bookId: string;
   readonly bookTitle: string;
   /**
@@ -13513,7 +13514,7 @@ export interface ServiceOperationMap {
    */
   inspectTaskPlan: { input: InspectTaskPlanInput; output: TaskPlanProjection };
   getTaskPlanPage: {
-    input: InspectTaskPlanInput & { path: string; afterOrdinal: number; digest: string };
+    input: Omit<InspectTaskPlanInput, 'kind'> & { kind: TaskPlanKind | 'task-intent-drafts'; path: string; afterOrdinal: number; digest: string };
     output: { path: string; items: ReadonlyArray<unknown> | string; nextOrdinal: number | null; digest: string };
   };
   /**

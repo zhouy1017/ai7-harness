@@ -15,8 +15,8 @@ import type {
   TaskPlanProjection,
   TaskPlanRunControlProjection,
 } from '../shared/protocol.js';
-import { appendTaskPlanPage } from './analysis-paging.js';
-import { TASK_PAGE_FAILED, TASK_PAGE_NAMES, taskPageMore } from './task-paging-labels.js';
+import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
+import { TASK_PAGE_FAILED, TASK_PAGE_NAMES, taskPageMore, taskResendSummary } from './analysis-paging-labels.js';
 import { isStartWhenOnlineTaskKind } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { mountTaskComposer, mountTaskPanel, type ComposerRange, type TaskComposerSeed } from './task-panel.js';
@@ -670,7 +670,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         if (mine !== ticket || request !== asked || root.hidden) return;
         // The first answer names the Task a `null` ref meant, so later reads ask for that Task.
         request = { ...asked, ref: next.ref };
-        paint(next, false);
+        paint(retainTaskPlanPages(next, plan), false);
       },
       (error) => {
         if (mine !== ticket || request !== asked || root.hidden) return;
@@ -820,7 +820,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const heading = el('h4', undefined, UNCONFIRMED_HEADING);
     heading.id = uid('unconfirmed-record');
     section.setAttribute('aria-labelledby', heading.id);
-    section.append(heading, el('p', 'attention-note', unconfirmedStatement(listed)));
+    section.append(heading, el('p', 'attention-note', unconfirmedStatement(listed, plan?.listPages?.['unconfirmed.ranges']?.total)));
     const listId = uid('unconfirmed-list');
     const actions = el('div', 'button-row');
     const view = document.createElement('button');
@@ -882,7 +882,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   }
 
   function resendNote(resend: NonNullable<TaskPlanProjection['resend']>): HTMLElement {
-    const note = el('p', 'attention-note task-plan-resend', resend.statement);
+    const statement = plan?.listPages?.['resend.statement']?.nextOrdinal != null
+      ? taskResendSummary(plan.listPages['resend.units']?.total ?? resend.units.length) : resend.statement;
+    const note = el('p', 'attention-note task-plan-resend', statement);
     note.dataset['taskPlanResend'] = resend.units.join(',');
     return note;
   }
@@ -1182,8 +1184,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const value = el('dd', 'technical-identity', row.value);
       value.dataset['taskPlanTechnical'] = row.key;
       const more = pageControl(next, `technical.${index}.value`, row.label);
-      if (more !== null) value.append(more);
       rows.push(el('dt', undefined, row.label), value);
+      if (more !== null) {
+        const action = el('dd');
+        action.append(more);
+        rows.push(el('dt'), action);
+      }
     }
     const notDo = el('dd', 'technical-identity', next.notDo.technical.join('；'));
     notDo.dataset['taskPlanTechnical'] = 'not-do';
@@ -1203,8 +1209,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (plan !== next) return;
       button.disabled = true;
       clearPoll();
+      ticket += 1;
       void api.getTaskPlanPage({ kind: next.kind, ref: next.ref, path, afterOrdinal: meta.nextOrdinal!, digest: meta.digest }).then((page) => {
         if (plan !== next || root.hidden) return;
+        if (page.path !== path) throw new Error(TASK_PAGE_FAILED);
         paint(appendTaskPlanPage(next, page), true);
       }).catch((error: unknown) => {
         if (plan !== next || root.hidden) return;

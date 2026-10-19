@@ -14,3 +14,14 @@ export const ANALYSIS_PAGED_LIST_LABELS: Readonly<Record<string, string>> = {
   'resultSetRevision.provenance.adaptations.unitOrdinals': '计划内调整',
   'inspectedRevision.revision.provenance.adaptations.unitOrdinals': '历史分析中的计划内调整',
 };
+
+export const TASK_PAGE_FAILED = '无法继续读取，请重新打开计划。';
+export const TASK_PAGE_NAMES: Readonly<Record<string, string>> = {
+  'drift.entries': '计划变化', 'edit.lastEdit.entries': '修改记录', 'resend.units': '再次发送的范围',
+  'resend.statement': '再次发送说明', 'unconfirmed.ranges': '未确认的范围',
+  'runControl.outcomeUnknown.units': '未确认的范围', 'runControl.continuation.pendingAnswerUnits': '待续行的范围',
+  clarifications: '任务说明', 'scopeOptions.chapters.chapters': '章节',
+};
+export const taskPageMore = (name: string, shown: number, total: number): string => `继续读取${name}（已显示 ${shown} / ${total}）`;
+export const taskResendSummary = (total: number): string => `共 ${total} 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。`;
+export const TASK_SELECTED_CHAPTER_NOT_LOADED = '已选章节（继续读取章节以查看）';

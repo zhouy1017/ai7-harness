@@ -1,6 +1,6 @@
 import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSizeText, similarMaterialsField } from './task-material-selection.js';
-import { appendTaskPlanPage } from './analysis-paging.js';
-import { TASK_PAGE_FAILED, taskPageMore } from './task-paging-labels.js';
+import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
+import { TASK_PAGE_FAILED, TASK_SELECTED_CHAPTER_NOT_LOADED, taskPageMore } from './analysis-paging-labels.js';
 import { LEARNING_AUDIT_KIND_LABELS } from './learning-audit-labels.js';
 import {
   MAX_BATCH_APPLY_SUGGESTIONS,
@@ -576,6 +576,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   function show(next: ReviewWorkspaceProjection): void {
     const previous = projection;
+    next = retainTaskPlanPages(next, previous);
     projection = next;
     // The drawer beside 审阅 states where the Run stands; it reads the plan again when that changes.
     if (previous?.run !== null && previous?.run !== undefined && previous.run.reviewRunId === next.run?.reviewRunId &&
@@ -2133,6 +2134,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       scopes.append(label);
       scopeInputs.set(kind, input);
     }
+    const path = 'scopeOptions.chapters.chapters';
     const chapterOptions = workspace.scopeOptions.chapters.chapters;
     const range = el('div', 'review-chapter-range');
     const chapterSelect = (which: 'from' | 'to'): HTMLSelectElement => {
@@ -2142,6 +2144,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       select.dataset['reviewChapter'] = which;
       select.append(new Option(REVIEW_CHAPTER_PLACEHOLDER, ''));
       for (const chapter of chapterOptions) select.append(new Option(reviewChapterOptionLabel(chapter), chapter.blockId));
+      const selected = which === 'from' ? state.from : state.to;
+      if (workspace.listPages?.[path]?.nextOrdinal != null && selected !== null && !chapterOptions.some((chapter) => chapter.blockId === selected)) {
+        select.append(new Option(TASK_SELECTED_CHAPTER_NOT_LOADED, selected));
+      }
       select.value = (which === 'from' ? state.from : state.to) ?? '';
       select.addEventListener('change', () => {
         const value = select.value === '' ? null : select.value;
@@ -2156,7 +2162,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
     const fromSelect = chapterSelect('from');
     const toSelect = chapterSelect('to');
-    const path = 'scopeOptions.chapters.chapters';
     const chapterPage = workspace.listPages?.[path];
     if (chapterPage !== undefined && chapterPage.nextOrdinal !== null) {
       const more = el('button', 'secondary', taskPageMore('章节', chapterPage.shown, chapterPage.total));
@@ -2167,6 +2172,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         void api.getTaskPlanPage({ kind: 'review-run', ref: workspace.run?.reviewRunId ?? null, path,
           afterOrdinal: chapterPage.nextOrdinal!, digest: chapterPage.digest }).then((page) => {
           if (destroyed || sheetState !== state || projection !== workspace) return;
+          if (page.path !== path) throw new Error(TASK_PAGE_FAILED);
           projection = appendTaskPlanPage(workspace, page);
           renderSheet(projection, state);
           sheet.querySelector<HTMLElement>('[data-review-chapter-page]')?.focus();
