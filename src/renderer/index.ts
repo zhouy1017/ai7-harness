@@ -4107,40 +4107,40 @@ function renderBaselineAnalysisOverview(
   const adaptedUnits = revision.provenance.adaptations?.unitOrdinals ?? [];
   const units = element('ul', 'analysis-unit-list');
   const appendUnits = (rows: typeof revision.units): void => {
-  for (const unit of rows) {
-    const item = element('li', 'analysis-unit');
-    item.dataset['analysisUnit'] = String(unit.unitOrdinal);
-    item.dataset['analysisUnitState'] = unit.state;
-    item.dataset['analysisUnitLineage'] = unit.lineage.kind;
-    if (unit.lineage.kind === 'reused') item.dataset['analysisUnitReusedFrom'] = `${unit.lineage.revisionOrdinal}/${unit.lineage.unitOrdinal}`;
-    if (adaptedUnits.includes(unit.unitOrdinal)) item.dataset['analysisUnitAdaptations'] = '1';
-    const manifestUnit = manifestUnits.get(unit.unitOrdinal);
-    const title = manifestUnit === undefined
-      ? `第 ${unit.unitOrdinal} 个阅读范围`
-      : `${manifestUnit.headingText === null ? `第 ${unit.unitOrdinal} 个阅读范围` : `「${manifestUnit.headingText}」`}${manifestUnit.subUnitCount > 1 ? `（第 ${manifestUnit.subUnitIndex}/${manifestUnit.subUnitCount} 部分）` : ''} · 内容块 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
-    item.append(element('h5', undefined, title));
-    const lineage = unit.lineage.kind === 'reused' ? `复用自 Revision ${unit.lineage.revisionOrdinal} / 单元 ${unit.lineage.unitOrdinal}` : '本次重算';
-    if (unit.state === 'closed') {
-      item.append(element('p', undefined, unit.synopsis));
-      const firstRange = unit.entities.flatMap((entity) => entity.sourceRanges)[0] ?? unit.events.flatMap((event) => event.sourceRanges)[0];
-      if (firstRange !== undefined) item.append(returnButton(firstRange.blockId));
-    } else {
-      item.append(element('p', 'attention-note', `尚未分析：${unit.gap.reason}`));
-      if (unit.gap.firstBlockId !== null) item.append(returnButton(unit.gap.firstBlockId));
+    for (const unit of rows) {
+      const item = element('li', 'analysis-unit');
+      item.dataset['analysisUnit'] = String(unit.unitOrdinal);
+      item.dataset['analysisUnitState'] = unit.state;
+      item.dataset['analysisUnitLineage'] = unit.lineage.kind;
+      if (unit.lineage.kind === 'reused') item.dataset['analysisUnitReusedFrom'] = `${unit.lineage.revisionOrdinal}/${unit.lineage.unitOrdinal}`;
+      if (adaptedUnits.includes(unit.unitOrdinal)) item.dataset['analysisUnitAdaptations'] = '1';
+      const manifestUnit = manifestUnits.get(unit.unitOrdinal);
+      const title = manifestUnit === undefined
+        ? `第 ${unit.unitOrdinal} 个阅读范围`
+        : `${manifestUnit.headingText === null ? `第 ${unit.unitOrdinal} 个阅读范围` : `「${manifestUnit.headingText}」`}${manifestUnit.subUnitCount > 1 ? `（第 ${manifestUnit.subUnitIndex}/${manifestUnit.subUnitCount} 部分）` : ''} · 内容块 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
+      item.append(element('h5', undefined, title));
+      const lineage = unit.lineage.kind === 'reused' ? `复用自 Revision ${unit.lineage.revisionOrdinal} / 单元 ${unit.lineage.unitOrdinal}` : '本次重算';
+      if (unit.state === 'closed') {
+        item.append(element('p', undefined, unit.synopsis));
+        const firstRange = unit.entities.flatMap((entity) => entity.sourceRanges)[0] ?? unit.events.flatMap((event) => event.sourceRanges)[0];
+        if (firstRange !== undefined) item.append(returnButton(firstRange.blockId));
+      } else {
+        item.append(element('p', 'attention-note', `尚未分析：${unit.gap.reason}`));
+        if (unit.gap.firstBlockId !== null) item.append(returnButton(unit.gap.firstBlockId));
+      }
+      item.append(technicalDetails(
+        'analysis-facts',
+        element('dt', undefined, '分析单元'), element('dd', 'technical-identity', unit.state === 'closed'
+          ? `单元 ${unit.unitOrdinal} · 已闭合 · 置信 ${unit.confidence} · ${lineage}`
+          : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code} · ${lineage}`),
+        element('dt', undefined, '请求摘要'), element('dd', 'technical-identity', unit.requestDigest),
+        ...(unit.state !== 'closed' ? [] : [
+          element('dt', undefined, '单元内计数'),
+          element('dd', 'technical-identity', `实体 ${unit.entities.length} · 事件 ${unit.events.length} · 关系 ${unit.relationships.length} · 设定声明 ${unit.settingClaims.length} · 单元内冲突 ${unit.conflicts.length} · 未解决 ${unit.unresolved.length}${unit.usage === null ? '' : ` · 用量 ${unit.usage.inputTokens}/${unit.usage.outputTokens}`}`),
+        ]),
+      ));
+      units.append(item);
     }
-    item.append(technicalDetails(
-      'analysis-facts',
-      element('dt', undefined, '分析单元'), element('dd', 'technical-identity', unit.state === 'closed'
-        ? `单元 ${unit.unitOrdinal} · 已闭合 · 置信 ${unit.confidence} · ${lineage}`
-        : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code} · ${lineage}`),
-      element('dt', undefined, '请求摘要'), element('dd', 'technical-identity', unit.requestDigest),
-      ...(unit.state !== 'closed' ? [] : [
-        element('dt', undefined, '单元内计数'),
-        element('dd', 'technical-identity', `实体 ${unit.entities.length} · 事件 ${unit.events.length} · 关系 ${unit.relationships.length} · 设定声明 ${unit.settingClaims.length} · 单元内冲突 ${unit.conflicts.length} · 未解决 ${unit.unresolved.length}${unit.usage === null ? '' : ` · 用量 ${unit.usage.inputTokens}/${unit.usage.outputTokens}`}`),
-      ]),
-    ));
-    units.append(item);
-  }
   };
   appendUnits(revision.units);
   // The unread ranges once more as their own list, so the editor sees what is missing without reading
@@ -4486,41 +4486,41 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
       const fieldset = element('fieldset', 'analysis-range-options');
       fieldset.append(element('legend', undefined, '选择要重新分析的连续范围（未预选；按当前稿件将派生的结构单元列出）'));
       const appendOptions = (options: typeof controls.actions['reanalyze-range']['options']): void => {
-      for (const option of options) {
-        const row = element('div', 'analysis-range-option');
-        row.dataset['rangeOption'] = String(option.unitOrdinal);
-        row.dataset['rangeStart'] = String(option.startPosition);
-        row.dataset['rangeEnd'] = String(option.endPosition);
-        const radio = element('input');
-        radio.type = 'radio';
-        radio.name = 'analysis-range';
-        radio.id = `analysis-range-${option.unitOrdinal}`;
-        radio.value = `${option.startPosition}-${option.endPosition}`;
-        radio.disabled = !action.available;
-        radio.addEventListener('change', async () => {
-          if (!radio.checked) return;
-          start.disabled = true;
-          selectedRange = null;
-          try {
-          const picked = await window.ai7.getBaselineAnalysisRangePlan({ unitOrdinal: option.unitOrdinal });
-          if (!radio.checked || !block.isConnected) return;
-          if (picked.selectedRange.startPosition !== option.startPosition || picked.selectedRange.endPosition !== option.endPosition) throw new Error(ANALYSIS_READ_FAILED);
-          selectedRange = { startPosition: option.startPosition, endPosition: option.endPosition };
-          block.dataset['selectedRange'] = radio.value;
-          block.dataset['expectedReused'] = String(picked.expected.reused);
-          block.dataset['expectedRecomputed'] = String(picked.expected.recomputed);
-          block.dataset['expectedInvalidated'] = String(picked.expected.invalidated);
-          block.dataset['expectedBypassed'] = String(picked.expected.bypassed);
-          expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${updateReuseReading(picked.expected, mode)}`;
-          expectedExact.textContent = reuseCountsText(picked.expected);
-          start.disabled = !action.available;
-          } catch { if (radio.checked && block.isConnected) setStatus(ANALYSIS_READ_FAILED, 'error'); }
-        });
-        const label = element('label', undefined, option.label);
-        label.htmlFor = radio.id;
-        row.append(radio, label);
-        fieldset.append(row);
-      }
+        for (const option of options) {
+          const row = element('div', 'analysis-range-option');
+          row.dataset['rangeOption'] = String(option.unitOrdinal);
+          row.dataset['rangeStart'] = String(option.startPosition);
+          row.dataset['rangeEnd'] = String(option.endPosition);
+          const radio = element('input');
+          radio.type = 'radio';
+          radio.name = 'analysis-range';
+          radio.id = `analysis-range-${option.unitOrdinal}`;
+          radio.value = `${option.startPosition}-${option.endPosition}`;
+          radio.disabled = !action.available;
+          radio.addEventListener('change', async () => {
+            if (!radio.checked) return;
+            start.disabled = true;
+            selectedRange = null;
+            try {
+              const picked = await window.ai7.getBaselineAnalysisRangePlan({ unitOrdinal: option.unitOrdinal });
+              if (!radio.checked || !block.isConnected) return;
+              if (picked.selectedRange.startPosition !== option.startPosition || picked.selectedRange.endPosition !== option.endPosition) throw new Error(ANALYSIS_READ_FAILED);
+              selectedRange = { startPosition: option.startPosition, endPosition: option.endPosition };
+              block.dataset['selectedRange'] = radio.value;
+              block.dataset['expectedReused'] = String(picked.expected.reused);
+              block.dataset['expectedRecomputed'] = String(picked.expected.recomputed);
+              block.dataset['expectedInvalidated'] = String(picked.expected.invalidated);
+              block.dataset['expectedBypassed'] = String(picked.expected.bypassed);
+              expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${updateReuseReading(picked.expected, mode)}`;
+              expectedExact.textContent = reuseCountsText(picked.expected);
+              start.disabled = !action.available;
+            } catch { if (radio.checked && block.isConnected) setStatus(ANALYSIS_READ_FAILED, 'error'); }
+          });
+          const label = element('label', undefined, option.label);
+          label.htmlFor = radio.id;
+          row.append(radio, label);
+          fieldset.append(row);
+        }
       };
       appendOptions(controls.actions['reanalyze-range'].options);
       let after = projection.listPages['updateControls.actions.reanalyze-range.options']?.nextOrdinal ?? null;
@@ -4637,40 +4637,40 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
   };
   const list = element('ol', 'analysis-history-list');
   const appendHistory = (entries: typeof history.entries): void => {
-  for (const entry of entries) {
-    const item = element('li', 'analysis-history-entry');
-    item.dataset['historyOrdinal'] = String(entry.ordinal);
-    item.dataset['historyRevisionId'] = entry.revisionId;
-    item.dataset['historyMode'] = entry.mode;
-    item.dataset['historyCurrent'] = entry.current ? 'true' : 'false';
-    item.dataset['historyFreshness'] = entry.freshness;
-    item.dataset['historyPredecessorOrdinal'] = entry.predecessor === null ? '' : String(entry.predecessor.ordinal);
-    // What the entry is and what it cost stay at full rank; its identities — the revision's own and
-    // the Run that produced it — travel together in the entry's one disclosure, in the order they read
-    // in before (V2-UX-LAYER-001).
-    item.append(
-      element('p', undefined, `第 ${entry.ordinal} 份 · ${entry.modeLabel} · 读的是 ${entry.manuscriptPin.revisionLabel} · ${localInstantLabel(entry.createdAt)} · ${entry.current ? '当前最新' : '已被后来的分析取代 · 按原样保留'}`),
-      element('p', 'field-note', `沿用上一份 ${entry.counts.reused} 个阅读范围，重新分析 ${entry.counts.recomputed} 个；读完 ${entry.unitsClosed} 个，${entry.gapCount} 个没有读成。`),
-      technicalDetails('analysis-facts',
-        element('dt', undefined, '修订版'),
-        element('dd', 'technical-identity', `Revision ${entry.ordinal} · ${entry.freshnessLabel} · 前一修订版 ${entry.predecessor === null ? '无' : `Revision ${entry.predecessor.ordinal}`} · 创建于 ${entry.createdAt}`),
-        element('dt', undefined, '单元血缘与计数'),
-        element('dd', 'technical-identity', `${reuseCountsText(entry.counts)} · 缺口 ${entry.gapCount} · 冲突 ${entry.conflictCount} · 覆盖 ${entry.unitsClosed}/${entry.unitsTotal}`),
-        element('dt', undefined, '修订版身份'),
-        element('dd', 'technical-identity', `${entry.revisionId} · 摘要 ${entry.digest} · 稿件 pin ${entry.manuscriptPin.revisionId} · ${entry.manuscriptPin.revisionDigest}`),
-        element('dt', undefined, '产出 Run 与用量'),
-        element('dd', 'technical-identity', `Run ${entry.producingRun.runRecordId} · ${entry.producingRun.classification ?? '无结果'} · ${entry.usage.requests} 次模型请求 · 输入 ${entry.usage.inputTokens} · 输出 ${entry.usage.outputTokens}`),
-      ),
-    );
-    item.append(runReportOrReason(entry.report, entry.reportAbsentReason));
-    const view = button('查看这一份（只读）', 'quiet', () => open(entry.revisionId));
-    view.dataset['analysisAction'] = 'open-revision';
-    view.dataset['analysisRevisionId'] = entry.revisionId;
-    view.dataset['analysisRevisionOrdinal'] = String(entry.ordinal);
-    if (projection.inspectedRevision?.revision.revisionId === entry.revisionId) view.disabled = true;
-    item.append(view);
-    list.append(item);
-  }
+    for (const entry of entries) {
+      const item = element('li', 'analysis-history-entry');
+      item.dataset['historyOrdinal'] = String(entry.ordinal);
+      item.dataset['historyRevisionId'] = entry.revisionId;
+      item.dataset['historyMode'] = entry.mode;
+      item.dataset['historyCurrent'] = entry.current ? 'true' : 'false';
+      item.dataset['historyFreshness'] = entry.freshness;
+      item.dataset['historyPredecessorOrdinal'] = entry.predecessor === null ? '' : String(entry.predecessor.ordinal);
+      // What the entry is and what it cost stay at full rank; its identities — the revision's own and
+      // the Run that produced it — travel together in the entry's one disclosure, in the order they read
+      // in before (V2-UX-LAYER-001).
+      item.append(
+        element('p', undefined, `第 ${entry.ordinal} 份 · ${entry.modeLabel} · 读的是 ${entry.manuscriptPin.revisionLabel} · ${localInstantLabel(entry.createdAt)} · ${entry.current ? '当前最新' : '已被后来的分析取代 · 按原样保留'}`),
+        element('p', 'field-note', `沿用上一份 ${entry.counts.reused} 个阅读范围，重新分析 ${entry.counts.recomputed} 个；读完 ${entry.unitsClosed} 个，${entry.gapCount} 个没有读成。`),
+        technicalDetails('analysis-facts',
+          element('dt', undefined, '修订版'),
+          element('dd', 'technical-identity', `Revision ${entry.ordinal} · ${entry.freshnessLabel} · 前一修订版 ${entry.predecessor === null ? '无' : `Revision ${entry.predecessor.ordinal}`} · 创建于 ${entry.createdAt}`),
+          element('dt', undefined, '单元血缘与计数'),
+          element('dd', 'technical-identity', `${reuseCountsText(entry.counts)} · 缺口 ${entry.gapCount} · 冲突 ${entry.conflictCount} · 覆盖 ${entry.unitsClosed}/${entry.unitsTotal}`),
+          element('dt', undefined, '修订版身份'),
+          element('dd', 'technical-identity', `${entry.revisionId} · 摘要 ${entry.digest} · 稿件 pin ${entry.manuscriptPin.revisionId} · ${entry.manuscriptPin.revisionDigest}`),
+          element('dt', undefined, '产出 Run 与用量'),
+          element('dd', 'technical-identity', `Run ${entry.producingRun.runRecordId} · ${entry.producingRun.classification ?? '无结果'} · ${entry.usage.requests} 次模型请求 · 输入 ${entry.usage.inputTokens} · 输出 ${entry.usage.outputTokens}`),
+        ),
+      );
+      item.append(runReportOrReason(entry.report, entry.reportAbsentReason));
+      const view = button('查看这一份（只读）', 'quiet', () => open(entry.revisionId));
+      view.dataset['analysisAction'] = 'open-revision';
+      view.dataset['analysisRevisionId'] = entry.revisionId;
+      view.dataset['analysisRevisionOrdinal'] = String(entry.ordinal);
+      if (projection.inspectedRevision?.revision.revisionId === entry.revisionId) view.disabled = true;
+      item.append(view);
+      list.append(item);
+    }
   };
   appendHistory(history.entries);
   let before = projection.listPages['history.entries']?.nextOrdinal ?? null;
