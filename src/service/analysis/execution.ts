@@ -7,6 +7,7 @@ import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, markInBookExactFetch, type Factua
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
 import { admitTicketHost } from '../../shared/network-denial.js';
+import { PUBLIC_SAMPLEBOOK_SOURCE_DIGESTS } from '../../shared/public-samplebooks.js';
 import { randomUUID } from 'node:crypto';
 import { backgroundAnalysisShare, backgroundShareFullReason } from '../background-analysis-enrollments.js';
 import { BASELINE_ANALYSIS_KIND, LEARNING_INFLUENCE_STOP_SUMMARY, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
@@ -54,7 +55,7 @@ import {
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
 import { canonicalRecord, sha256Hex } from './canonical.js';
-import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
+import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
@@ -495,12 +496,12 @@ export function unparsableAssuranceSamplingAnswerGapReason(code: AssuranceSampli
 }
 
 /**
- * The transmittable set under developer-live: exact `sample1` and nothing else (settlement l). ADR 0065 admits
- * only Owner-designated Public SampleBooks, and this slice fixes the set to the one Book whose
- * lineage the plan already pins. Any other Book refuses before dispatch rather than at the gate, so
+ * The transmittable set under developer-live: the five Public SampleBooks — exact `sample1` and the four ADR 0091 works
+ * (Provider Processing v24, Issue #990) — and nothing else. ADR 0065 admits only Owner-designated Public SampleBooks, and
+ * the set is the one the analysis lineage check reads. Any other Book refuses before dispatch rather than at the gate, so
  * no unadmitted manuscript is ever assembled into a payload at all.
  */
-export const DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS: ReadonlySet<string> = new Set([SAMPLE1_SOURCE_DIGEST]);
+export const DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS: ReadonlySet<string> = PUBLIC_SAMPLEBOOK_SOURCE_DIGESTS;
 
 export class BaselineAnalysisExecutionOwner {
   readonly #deps: ExecutionOwnerDependencies;

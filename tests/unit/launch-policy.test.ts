@@ -23,7 +23,7 @@ import type { AdmittedLocalTools, AdmittedPlatformTools, AdmittedProviderRule, L
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v15.json';
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v16.json';
 const CARRIED_PATHS = [
   CARRIER_PATH,
   ACTIVE_SET_PATH,
@@ -31,19 +31,19 @@ const CARRIED_PATHS = [
   'docs/policies/provider-processing-policy.v2.json',
   'docs/policies/provider-processing-policy.v3.json',
   'docs/policies/provider-processing-policy.v4.json',
-  'docs/policies/provider-processing-policy.v22.json',
   'docs/policies/provider-processing-policy.v23.json',
+  'docs/policies/provider-processing-policy.v24.json',
   'docs/policies/external-export-policy.v1.json',
   'docs/policies/external-export-policy.v2.json',
 ] as const;
-/** The exact pins active-set v15 records; the resolver and the carrier must agree with the bytes. */
+/** The exact pins active-set v16 records; the resolver and the carrier must agree with the bytes. */
 const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
   'ordinary-production': ['v23', 'docs/policies/provider-processing-policy.v23.json', '311f60232c6e3424e64e0a0f760402c2fe07f4bca71a0299b37d295a7baa6dcb'],
-  'developer-live': ['v22', 'docs/policies/provider-processing-policy.v22.json', 'dc78f4517ec8135edb4fdcc759d1c230fc4db5ef7f5c42f217c12aac4173c90b'],
+  'developer-live': ['v24', 'docs/policies/provider-processing-policy.v24.json', '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6'],
 } as const;
-/** Every immutable predecessor asset keeps its exact bytes: v6, v13, v15, v17, v19 and v21 (the old ordinary-production), v11, v12, v14, v16, v18 and v20 (the old developer-live), and sets v9 to v14. */
+/** Every immutable predecessor asset keeps its exact bytes: v6, v13, v15, v17, v19 and v21 (the old ordinary-production), v11, v12, v14, v16, v18, v20 and v22 (the old developer-live), and sets v9 to v15. */
 const RETAINED_PREDECESSOR_DIGESTS = {
   'docs/policies/provider-processing-policy.v6.json': '10e69a5d7b027d077728ec1bc7393dc0583b99a05246b4e883098b9d96b221a4',
   'docs/policies/provider-processing-policy.v11.json': '38cc8044f10517bd3c152237256cd0cd7fe6cf8a4ef7ad340099a087ac8a8634',
@@ -57,16 +57,18 @@ const RETAINED_PREDECESSOR_DIGESTS = {
   'docs/policies/provider-processing-policy.v19.json': 'f13c6f412adebf863f63b14640799fb7ffcbafcf05d6ace5437b806a0d4ccf16',
   'docs/policies/provider-processing-policy.v20.json': 'd9cd34ed6e945760657345ed7e7bf4eae4489e5367ac7eb2400af413cc28f757',
   'docs/policies/provider-processing-policy.v21.json': 'd1199f4c110d0c6598e6910c1784e5c612c18866387abdfe6e45b1c7593c6263',
+  'docs/policies/provider-processing-policy.v22.json': 'dc78f4517ec8135edb4fdcc759d1c230fc4db5ef7f5c42f217c12aac4173c90b',
   'docs/policies/active-policy-set.v9.json': 'b13013bbd0b9b1cb0fdd7b88d0d349d9c010d3043e867c547a81f37ed3d5cb0b',
   'docs/policies/active-policy-set.v10.json': 'e1bb81956a46fc9dad3f761943d94f1b68802549ed6838fde7efa7e711584487',
   'docs/policies/active-policy-set.v11.json': 'fba12d9b8da7b826b620ac33c0b34eadd92da86d6da88f610e480af9aee5328c',
   'docs/policies/active-policy-set.v12.json': 'e841b438da109d866d990cc788ffd7c45edcb38a5121d8b18c41a0345e75693e',
   'docs/policies/active-policy-set.v13.json': '8d3536cf67989693a395c3699d60db3a508acaa3b7f7db6ab147bfb04e15338d',
   'docs/policies/active-policy-set.v14.json': '1e9f3c4736a0f7b0ac8066978637e3dc813aee6f51d1f98673fe1fba3564a6e9',
+  'docs/policies/active-policy-set.v15.json': '99fd7156d98b12e7cad81d0ac6e81d3481380f5b25c096dafa9b1ec6ffdc8865',
 } as const;
-/** ADR 0079 §3 decides External Export v2; active-set v15 pins its exact bytes, unchanged since v7. */
+/** ADR 0079 §3 decides External Export v2; active-set v16 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = '99fd7156d98b12e7cad81d0ac6e81d3481380f5b25c096dafa9b1ec6ffdc8865';
+const ACTIVE_SET_SHA256 = '7fd78fa81eb2f4bb1b6c723558b178c02b0a904872e28d1a58a360dd6708d5e3';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -325,6 +327,8 @@ const V19_PATH = 'docs/policies/provider-processing-policy.v19.json';
 const V20_PATH = 'docs/policies/provider-processing-policy.v20.json';
 const V21_PATH = 'docs/policies/provider-processing-policy.v21.json';
 const V22_PATH = 'docs/policies/provider-processing-policy.v22.json';
+/** The selected developer-live document since active-set v16 (Issue #990): v22 with only ADR 0091 in the authority basis and the admitted inputs. */
+const V24_PATH = 'docs/policies/provider-processing-policy.v24.json';
 const V23_PATH = 'docs/policies/provider-processing-policy.v23.json';
 const BASELINE = 0;
 const DIALOGUE = 1;
@@ -337,7 +341,7 @@ const BACKGROUND = 7;
 const TRANSLATION = 8;
 const CUSTOM = 9;
 
-async function readPolicy(path: string = V22_PATH): Promise<Record<string, unknown>> {
+async function readPolicy(path: string = V24_PATH): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(join(REPO_ROOT, ...path.split('/')), 'utf8')) as Record<string, unknown>;
 }
 
@@ -424,10 +428,10 @@ afterEach(async () => {
   await rm(sandbox, { recursive: true, force: true });
 });
 
-describe('active policy set v15', () => {
+describe('active policy set v16', () => {
   it('is the sole active set: the carrier pins it, it maps all four scopes, and every pin matches the exact bytes', async () => {
-    expect(ACTIVE_SET_VERSION).toBe('v15');
-    expect(DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION).toBe('v22');
+    expect(ACTIVE_SET_VERSION).toBe('v16');
+    expect(DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION).toBe('v24');
     expect(ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION).toBe('v23');
     const carrier = JSON.parse(await readFile(join(REPO_ROOT, ...CARRIER_PATH.split('/')), 'utf8')) as Record<string, unknown>;
     expect(carrier).toEqual({
@@ -436,7 +440,7 @@ describe('active policy set v15', () => {
       runtimeForm: 'source-checkout',
       trustedOperationalScope: 'development-ci',
       launchSelectableScopes: ['development-ci', 'developer-live', 'ordinary-production'],
-      activePolicySet: { version: 'v15', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
+      activePolicySet: { version: 'v16', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
     });
     expect(LAUNCH_SELECTABLE_SCOPES).toEqual(carrier.launchSelectableScopes);
     expect(await sha256Of(ACTIVE_SET_PATH)).toBe(ACTIVE_SET_SHA256);
@@ -448,8 +452,8 @@ describe('active policy set v15', () => {
         'external-export-policy': { version: string; canonicalPath: string; sha256: string };
       };
     };
-    expect(activeSet.version).toBe('v15');
-    expect(activeSet.predecessorVersion).toBe('v14');
+    expect(activeSet.version).toBe('v16');
+    expect(activeSet.predecessorVersion).toBe('v15');
     const pins = activeSet.activePolicies['provider-processing-policy'].scopePins;
     expect(Object.keys(pins)).toEqual(Object.keys(EXPECTED_PINS));
     for (const [scope, [version, canonicalPath, sha256]] of Object.entries(EXPECTED_PINS)) {
@@ -561,8 +565,8 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('development-ci');
-    // One active set per launch: development-ci reports v15 while its Provider Processing pin stays v1.
-    expect(projection.activePolicySetVersion).toBe('v15');
+    // One active set per launch: development-ci reports v16 while its Provider Processing pin stays v1.
+    expect(projection.activePolicySetVersion).toBe('v16');
     expect(projection.providerProcessing.version).toBe('v1');
     expect(projection.providerProcessing.label).toBe('开发与持续集成：零次实时传输');
     expect(projection.providerProcessing.bindingState).toBeUndefined();
@@ -571,16 +575,16 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(await resolveSourceCheckoutLaunchPolicy(codeRoot, 'development-ci')).toEqual(projection);
   });
 
-  it('binds the developer-live scope to Provider Processing v22 as eligible-only with its ten admitted rules', async () => {
+  it('binds the developer-live scope to Provider Processing v24 as eligible-only with its ten admitted rules', async () => {
     await placeValidCheckout();
     const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'developer-live');
 
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('developer-live');
-    expect(projection.activePolicySetVersion).toBe('v15');
+    expect(projection.activePolicySetVersion).toBe('v16');
     expect(projection.providerProcessing).toEqual({
-      version: 'v22',
+      version: 'v24',
       decision: 'eligible-only',
       authorizedLiveTransmissionCount: 'bounded-by-run',
       liveTransmissionAllowed: true,
@@ -619,12 +623,12 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(denied.providerProcessing.admittedRules).toEqual([]);
   });
 
-  it('reads N allow rules: the exact v22 bytes yield ten, and the immutable v20, v16, v14, v12 and v11 bytes are no longer the pinned reading', async () => {
+  it('reads N allow rules: the exact v24 bytes yield ten, and the immutable v20, v16, v14, v12 and v11 bytes are no longer the pinned reading', async () => {
     expect(verifyDeveloperLivePolicy(await readPolicy())).toEqual({
       crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true,
       admittedRules: V16_ADMITTED_RULES,
     });
-    // v20, v16, v14, v12 and v11 stay immutable predecessors but this launch reads v22 alone.
+    // v20, v16, v14, v12 and v11 stay immutable predecessors and are no longer a reading; v22 carries the same ten rules as v24, but only v24's pinned bytes are selected.
     expect(() => verifyDeveloperLivePolicy(structuredClone(readPolicySync(V20_PATH)))).toThrow('LAUNCH_POLICY_INVALID');
     expect(() => verifyDeveloperLivePolicy(structuredClone(readPolicySync(V16_PATH)))).toThrow('LAUNCH_POLICY_INVALID');
     expect(() => verifyDeveloperLivePolicy(structuredClone(readPolicySync(V14_PATH)))).toThrow('LAUNCH_POLICY_INVALID');
@@ -663,7 +667,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     }
   });
 
-  it('refuses a dialogue or review reading that is not the pinned v22 bytes', async () => {
+  it('refuses a dialogue or review reading that is not the pinned v24 bytes', async () => {
     for (const [index, block, overrides] of [
       [DIALOGUE, 'transmissions', { webSearchToolAllowed: true }],
       [DIALOGUE, 'transmissions', { automaticResendInsideStoppedSessionAllowed: true }],
@@ -774,9 +778,9 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     }
   });
 
-  it('denies a developer-live launch whose v22 policy bytes drifted, while development-ci still verifies', async () => {
+  it('denies a developer-live launch whose v24 policy bytes drifted, while development-ci still verifies', async () => {
     await placeValidCheckout();
-    const target = join(codeRoot, ...V22_PATH.split('/'));
+    const target = join(codeRoot, ...V24_PATH.split('/'));
     await writeFile(target, `${await readFile(target, 'utf8')}\n`);
 
     const live = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'developer-live');
@@ -1168,7 +1172,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
   });
 
   it('does not read the developer-live document as ordinary production, nor this document as developer-live', async () => {
-    expect(() => verifyOrdinaryProductionPolicy(readPolicySync(V22_PATH))).toThrow('LAUNCH_POLICY_INVALID');
+    expect(() => verifyOrdinaryProductionPolicy(readPolicySync(V24_PATH))).toThrow('LAUNCH_POLICY_INVALID');
     expect(() => verifyDeveloperLivePolicy(readPolicySync(V23_PATH))).toThrow('LAUNCH_POLICY_INVALID');
   });
 
@@ -1181,7 +1185,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
       expect(projection.integrityState).toBe('verified');
       expect(projection.denialReason).toBeNull();
       expect(projection.operationalScope).toBe('ordinary-production');
-      expect(projection.activePolicySetVersion).toBe('v15');
+      expect(projection.activePolicySetVersion).toBe('v16');
       expect(projection.providerProcessing).toEqual({
         version: 'v23',
         decision: 'eligible-only',
@@ -1311,7 +1315,7 @@ const RUN_BASED = [BASELINE, REVIEW, WRITING, EVALUATION, BACKGROUND, CUSTOM];
 
 describe('Provider Processing v22 and v23: enrolled background analysis and model-initiated clarification (Issue #863)', () => {
   const documents = [
-    ['v22 (developer-live)', V22_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
+    ['v24 (developer-live)', V24_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
     ['v23 (ordinary-production)', V23_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
   ] as const;
   const flip = (value: unknown): unknown => (typeof value === 'boolean' ? !value : typeof value === 'number' ? value + 1 : `${String(value)}-tampered`);
@@ -1527,7 +1531,7 @@ describe('Provider Processing v22 and v23: platform tools on the research rules 
   });
 
   const documents = [
-    ['v22 (developer-live)', V22_PATH, false, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
+    ['v24 (developer-live)', V24_PATH, false, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
     ['v23 (ordinary-production)', V23_PATH, true, (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)],
   ] as const;
   const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped);
@@ -1641,7 +1645,7 @@ describe('Provider Processing v22 and v23: platform tools on the research rules 
   });
 
   it('refuses the other scope\'s block: a developer-live block under production and a production block under developer-live', () => {
-    const v16 = readPolicySync(V22_PATH);
+    const v16 = readPolicySync(V24_PATH);
     const v17 = readPolicySync(V23_PATH);
     const crossed16 = structuredClone(v16);
     rulesOf(crossed16)[REVIEW]!.platformTools = structuredClone(rulesOf(v17)[REVIEW]!.platformTools);
@@ -1652,7 +1656,7 @@ describe('Provider Processing v22 and v23: platform tools on the research rules 
   });
 
   it.each([
-    ['developer-live', V22_PATH],
+    ['developer-live', V24_PATH],
     ['ordinary-production', V23_PATH],
   ] as const)('denies a %s launch after a one-byte change inside a backend host of its pinned bytes', async (scope, path) => {
     await placeValidCheckout();
@@ -1672,11 +1676,11 @@ describe('Provider Processing v22 and v23: platform tools on the research rules 
 
 describe('Provider Processing v22 and v23: local targeted retrieval on every rule (Issue #891, slice 7d)', () => {
   const documents = [
-    ['v22 (developer-live)', V22_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
+    ['v24 (developer-live)', V24_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy).admittedRules],
     ['v23 (ordinary-production)', V23_PATH, (policy: Record<string, unknown>) => bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING)!],
   ] as const;
   const verifiers = [
-    ['v22 (developer-live)', V22_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
+    ['v24 (developer-live)', V24_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
     ['v23 (ordinary-production)', V23_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
   ] as const;
   /** The rules that admit no model-initiated retrieval: enrolled background analysis and the 来源译文 rule. */
@@ -1748,7 +1752,7 @@ describe('Provider Processing v22 and v23: local targeted retrieval on every rul
     }
   });
 
-  it.each([['developer-live', V22_PATH], ['ordinary-production', V23_PATH]] as const)('denies a %s launch after a one-byte change inside the local tools block of its pinned bytes (%s)', async (scope, path) => {
+  it.each([['developer-live', V24_PATH], ['ordinary-production', V23_PATH]] as const)('denies a %s launch after a one-byte change inside the local tools block of its pinned bytes (%s)', async (scope, path) => {
     for (const [from, to] of [['"callsPerUnit": 5', '"callsPerUnit": 6'], ['"candidatesPerCall": 8', '"candidatesPerCall": 9'], ['"scope": "no-egress"', '"scope": "no-egrexs"'], ['"allowed": false', '"allowed": true']] as const) {
       await placeValidCheckout();
       const target = join(codeRoot, ...path.split('/'));
@@ -1766,7 +1770,7 @@ describe('Provider Processing v22 and v23: local targeted retrieval on every rul
 
 describe('Provider Processing v22 and v23: 来源译文 and the source translation term (Issue #891, revisions 2 and 3)', () => {
   const verifiers = [
-    ['v22 (developer-live)', V22_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
+    ['v24 (developer-live)', V24_PATH, (policy: Record<string, unknown>) => verifyDeveloperLivePolicy(policy)],
     ['v23 (ordinary-production)', V23_PATH, (policy: Record<string, unknown>) => verifyOrdinaryProductionPolicy(policy)],
   ] as const;
   const refuseEach = (path: string, verify: (policy: Record<string, unknown>) => unknown, label: string, mutate: (policy: Record<string, unknown>, index: number) => void, indexes: readonly number[]): void => {
@@ -1836,7 +1840,7 @@ describe('Provider Processing v22 and v23: 来源译文 and the source translati
   });
 
   it('projects the 来源译文 rule on the Fast Interaction Role under both scopes, selected by its kind alone', () => {
-    const live = verifyDeveloperLivePolicy(readPolicySync(V22_PATH)).admittedRules;
+    const live = verifyDeveloperLivePolicy(readPolicySync(V24_PATH)).admittedRules;
     const production = bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(readPolicySync(V23_PATH)), GO_PRODUCTION_BINDING)!;
     for (const rules of [live, production]) {
       expect(rules.filter((rule) => rule.taskKinds.includes('material-translation'))).toHaveLength(1);
@@ -2090,7 +2094,7 @@ describe('Provider Processing v22 and v23: custom analysis dimensions and Series
 
   it('lists a kind family entry in the custom analysis rule alone, in every policy document of the repository', () => {
     const families: string[] = [];
-    for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19', 'v20', 'v21', 'v22', 'v23']) {
+    for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19', 'v20', 'v21', 'v22', 'v23', 'v24']) {
       const policy = readPolicySync(`docs/policies/provider-processing-policy.${version}.json`);
       for (const rule of rulesOf(policy)) {
         for (const kind of (rule.allowedTaskKinds as string[] | undefined) ?? []) if (kind.includes('*')) families.push(`${version} ${String(rule.ruleId)} ${kind}`);
@@ -2099,6 +2103,7 @@ describe('Provider Processing v22 and v23: custom analysis dimensions and Series
     expect(families).toEqual([
       `v22 ${CUSTOM_RULE_ID} custom-analysis/*`,
       'v23 ordinary-production-custom-analysis custom-analysis/*',
+      `v24 ${CUSTOM_RULE_ID} custom-analysis/*`,
     ]);
   });
 
@@ -2153,10 +2158,42 @@ describe('Provider Processing v22 and v23: custom analysis dimensions and Series
     expect(() => verify(readPolicySync(path))).not.toThrow();
   });
 
-  it('keeps the selection plumbing in step: the build carries v22, v23 and set v15 beside every predecessor', () => {
+  it('keeps the selection plumbing in step: the build carries v24, v23 and set v16 beside every predecessor', () => {
     const build = readFileSync(join(REPO_ROOT, 'tools', 'build.mjs'), 'utf8');
-    for (const path of ['docs/policies/active-policy-set.v15.json', 'docs/policies/provider-processing-policy.v22.json', 'docs/policies/provider-processing-policy.v23.json']) {
+    for (const path of ['docs/policies/active-policy-set.v15.json', 'docs/policies/active-policy-set.v16.json', 'docs/policies/provider-processing-policy.v22.json',
+      'docs/policies/provider-processing-policy.v23.json', 'docs/policies/provider-processing-policy.v24.json']) {
       expect(build.split(`'${path}'`).length - 1, path).toBe(3);
     }
+  });
+});
+
+describe('Provider Processing v24: the ADR 0091 Public SampleBooks (Issue #990)', () => {
+  const ADR_0091 = 'docs/adr/0091-admit-four-public-domain-works-as-public-samplebooks.md';
+  const IDENTITY = ['schemaPath', 'version', 'predecessorVersion', 'predecessorCanonicalPath', 'canonicalPath', 'humanProjectionPath'] as const;
+
+  it('directly succeeds v22: only its identity, ADR 0091 in the authority basis and every rule\'s admitted inputs differ', async () => {
+    const now = await readPolicy(V24_PATH);
+    const before = await readPolicy(V22_PATH);
+    expect(now.version).toBe('v24');
+    expect(now.predecessorVersion).toBe('v22');
+    expect(now.predecessorCanonicalPath).toBe(V22_PATH);
+    expect(now.canonicalPath).toBe(V24_PATH);
+    expect(now.authorityBasis).toEqual([...(before.authorityBasis as string[]), ADR_0091]);
+    expect(rulesOf(now)).toHaveLength(10);
+    for (const rule of rulesOf(now)) {
+      expect((rule.source as Record<string, unknown>).admittedInputs, String(rule.ruleId)).toBe('owner-designated-public-samplebooks-under-adr-0043-and-adr-0091');
+    }
+    // Put v22's identity, basis and inputs back and nothing else differs.
+    const restored = structuredClone(now);
+    for (const key of IDENTITY) restored[key] = before[key];
+    restored.authorityBasis = before.authorityBasis;
+    for (const rule of rulesOf(restored)) (rule.source as Record<string, unknown>).admittedInputs = 'owner-designated-public-samplebooks-under-adr-0043';
+    expect(restored).toEqual(before);
+  });
+
+  it('reads the same ten rules as v22', async () => {
+    const now = verifyDeveloperLivePolicy(await readPolicy(V24_PATH));
+    expect(now).toEqual(verifyDeveloperLivePolicy(await readPolicy(V22_PATH)));
+    expect(now.admittedRules).toEqual(V16_ADMITTED_RULES);
   });
 });

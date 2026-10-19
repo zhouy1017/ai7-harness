@@ -14,9 +14,9 @@ import { OPENCODE_GO_V41_FLASH_PROFILE } from '../../src/service/provider/model-
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
 describe('platform tool registration admission', () => {
-  it('admits local retrieval from the selected v22 rule for every foreground model kind, never for covered baseline or background (#893)', async () => {
+  it('admits local retrieval from the selected v24 rule for every foreground model kind, never for covered baseline or background (#893)', async () => {
     const policy = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live');
-    expect(policy.providerProcessing.version).toBe('v22');
+    expect(policy.providerProcessing.version).toBe('v24');
     const rules = policy.providerProcessing.admittedRules;
     for (const rule of rules) {
       // The test helper states exactly the terms the launch verified; only background, material translation and custom analysis refuse retrieval.
@@ -45,7 +45,7 @@ describe('platform tool registration admission', () => {
   });
   it('requires a declaring research rule and the exact factual research contract', async () => {
     const policy = await resolveSourceCheckoutLaunchPolicy(root, 'developer-live');
-    expect(policy.providerProcessing.version).toBe('v22');
+    expect(policy.providerProcessing.version).toBe('v24');
     const researchRule = policy.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes('factual-review'))!;
     const template = researchRule;
     const base = factualReviewKindDefinition();

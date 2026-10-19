@@ -159,11 +159,13 @@ import { kindLocalTools } from './live-kind-admission.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
 import { PLAN_MOVED_LABEL, type WaitingRunBlockCause } from '../reconnect-preflight.js';
+import { isPublicSampleBookSourceDigest, SAMPLE1_PUBLIC_SAMPLEBOOK } from '../../shared/public-samplebooks.js';
+import { ANALYSIS_LINEAGE_UNAVAILABLE_REASON } from '../../shared/public-samplebook-labels.js';
 
 type SqlRow = Record<string, SQLOutputValue>;
 
-/** The exact `sample1` source digest: the Public SampleBook lineage every baseline-analysis Task requires. */
-export const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
+/** The exact `sample1` source digest, the ADR 0044 baseline among the Public SampleBooks every non-production analysis Task requires. */
+export const SAMPLE1_SOURCE_DIGEST = SAMPLE1_PUBLIC_SAMPLEBOOK.sha256;
 const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d' as const;
 const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' as const;
 const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
@@ -5200,7 +5202,8 @@ export class BaselineAnalysisStore {
     requireAnalysis(UUID_PATTERN.test(bookId), 'ANALYSIS_BOOK_INVALID', '任务所属图书无效。');
     this.#refreshClarificationDefinition();
     // Under ordinary production (Issue #811) the Book is the editor's own manuscript, of any source, and the connection whose
-    // credential a plan names is the configured route's; under every other scope exact sample1 and the official row, as before.
+    // credential a plan names is the configured route's; under every other scope one of the five Public SampleBooks (exact sample1 or an
+    // ADR 0091 work, Issue #990) and the official row.
     const live = this.#launch.live;
     const production = this.#launch.operationalScope === 'ordinary-production';
     const connectionId = live !== null && live.scope === 'ordinary-production' && live.route === 'opencode-go'
@@ -5226,8 +5229,8 @@ export class BaselineAnalysisStore {
     ).get(...(checkpoint === undefined ? [connectionId, bookId] : [checkpoint.revisionId, connectionId, bookId])) as SqlRow | undefined;
     requireAnalysis(row !== undefined && (production
       ? typeof row.source_digest === 'string' && DIGEST_PATTERN.test(row.source_digest)
-      : row.source_digest === SAMPLE1_SOURCE_DIGEST),
-    'ANALYSIS_LINEAGE_UNAVAILABLE', '当前图书不是精确 sample1 主稿件血缘。');
+      : isPublicSampleBookSourceDigest(row.source_digest)),
+    'ANALYSIS_LINEAGE_UNAVAILABLE', ANALYSIS_LINEAGE_UNAVAILABLE_REASON);
     requireAnalysis(row.native_carrier_sha256 === NATIVE_CARRIER_DIGEST && row.sidecar_revision === 2 && row.sidecar_sha256 === SIDECAR_DIGEST,
       'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案 Revision 2。');
     // Ordinary production with no connection yet: 模型服务需设置, naming both routes (Issue #811).

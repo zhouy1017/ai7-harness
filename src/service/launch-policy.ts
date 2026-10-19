@@ -14,20 +14,20 @@ import { SEARCH_BACKENDS } from './provider/search-backends.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v15, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v16, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
- * Provider Processing v22; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
+ * Provider Processing v24; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
  * and binds v23, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v15' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v15.json';
-const ACTIVE_SET_SHA256 = '99fd7156d98b12e7cad81d0ac6e81d3481380f5b25c096dafa9b1ec6ffdc8865';
+export const ACTIVE_SET_VERSION = 'v16' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v16.json';
+const ACTIVE_SET_SHA256 = '7fd78fa81eb2f4bb1b6c723558b178c02b0a904872e28d1a58a360dd6708d5e3';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -45,9 +45,9 @@ const PROVIDER_PINS = {
     sha256: '311f60232c6e3424e64e0a0f760402c2fe07f4bca71a0299b37d295a7baa6dcb',
   },
   'developer-live': {
-    version: 'v22',
-    canonicalPath: 'docs/policies/provider-processing-policy.v22.json',
-    sha256: 'dc78f4517ec8135edb4fdcc759d1c230fc4db5ef7f5c42f217c12aac4173c90b',
+    version: 'v24',
+    canonicalPath: 'docs/policies/provider-processing-policy.v24.json',
+    sha256: '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6',
   },
 } as const;
 /**
@@ -1017,8 +1017,8 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
 };
 
 /**
- * Provider Processing v22 (and v20, v18, v16, v14, v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one
- * this launch can read and each bound exactly to the one Go route. All ten rules of v22 must be present, the three that may research
+ * Provider Processing v24 (and v22, v20, v18, v16, v14, v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one
+ * this launch can read and each bound exactly to the one Go route. All ten rules of v24 (as of v22) must be present, the three that may research
  * (review, writing, evaluation) each with the platform tools block the search backend registry implies. The baseline analysis rule must be among them; its three
  * declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling default of ADR 0070, and the house-people
  * redaction rule of ADR 0079 §4.4 are read as v9 read them. Every other rule is read from its own entry of
