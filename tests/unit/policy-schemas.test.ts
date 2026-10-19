@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all thirty-eight current and historical pairs and validates every one at this base', () => {
+  it('discovers all forty current and historical pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(38);
+    expect(pairs).toHaveLength(40);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(38);
+    expect(results).toHaveLength(40);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -787,5 +787,65 @@ describe('Provider Processing v22, v23 and active-set v15 schemas: custom analys
       expect(policyData.activePolicies['provider-processing-policy'].scopePins[scope]).toEqual(v14.activePolicies['provider-processing-policy'].scopePins[scope]);
     }
     expect(policyData.activePolicies['external-export-policy']).toEqual(v14.activePolicies['external-export-policy']);
+  });
+});
+
+describe('Provider Processing v24 and active-set v16 schemas: the ADR 0091 Public SampleBooks (Issue #990)', () => {
+  const INPUTS = 'owner-designated-public-samplebooks-under-adr-0043-and-adr-0091';
+
+  it('validates v24 and rejects the v22 admitted inputs, a dropped ADR 0091 basis or a v22 identity', () => {
+    const { policyData, schemaData } = readPair('provider-processing-policy.v24.json', 'provider-processing-policy.v24.schema.json');
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    expect(policyData.decision.providerAllowRules.map((rule: any) => rule.source.admittedInputs)).toEqual(Array(10).fill(INPUTS));
+    const oldInputs = structuredClone(policyData) as any;
+    oldInputs.decision.providerAllowRules[0].source.admittedInputs = 'owner-designated-public-samplebooks-under-adr-0043';
+    expect(() => validatePolicyDocument(oldInputs, schemaData)).toThrow();
+    const noBasis = structuredClone(policyData) as any;
+    noBasis.authorityBasis.pop();
+    expect(() => validatePolicyDocument(noBasis, schemaData)).toThrow();
+    const oldVersion = structuredClone(policyData) as any;
+    oldVersion.version = 'v22';
+    expect(() => validatePolicyDocument(oldVersion, schemaData)).toThrow();
+    // v22 itself still validates against its own schema and not against v24's.
+    const v22 = readPair('provider-processing-policy.v22.json', 'provider-processing-policy.v22.schema.json');
+    expect(() => validatePolicyDocument(v22.policyData, v22.schemaData)).not.toThrow();
+    expect(() => validatePolicyDocument(v22.policyData, schemaData)).toThrow();
+  });
+
+  it('keeps v24 on the role, credential, authority-separation and selection consts of v22', () => {
+    const successor = readPair('provider-processing-policy.v24.json', 'provider-processing-policy.v24.schema.json');
+    const predecessor = readPair('provider-processing-policy.v22.json', 'provider-processing-policy.v22.schema.json');
+    for (const key of ['roleBindings', 'credentialBoundary', 'authoritySeparations', 'trustedSelection', 'operationalScope'] as const) {
+      expect(successor.schemaData.properties[key], key).toBeDefined();
+      expect(successor.schemaData.properties[key], key).toEqual(predecessor.schemaData.properties[key]);
+    }
+    // Past the title, description, identity consts and authority basis, the schemas differ only in the admitted inputs const.
+    const rest = (schema: any, inputs: string) => {
+      const copy = JSON.parse(JSON.stringify(schema).split(inputs).join('<inputs>'));
+      delete copy.title;
+      delete copy.description;
+      for (const key of ['schemaPath', 'version', 'predecessorVersion', 'predecessorCanonicalPath', 'canonicalPath', 'humanProjectionPath', 'authorityBasis']) delete copy.properties[key];
+      return copy;
+    };
+    expect(JSON.stringify(successor.schemaData.definitions).split(INPUTS).length - 1).toBe(10);
+    expect(rest(successor.schemaData, INPUTS)).toEqual(rest(predecessor.schemaData, 'owner-designated-public-samplebooks-under-adr-0043'));
+  });
+
+  it('validates active-set v16 and rejects a developer-live pin that is not the exact v24 document', () => {
+    const { policyData, schemaData } = readPair('active-policy-set.v16.json', 'active-policy-set.v16.schema.json');
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    expect(policyData.predecessorVersion).toBe('v15');
+    const moved = structuredClone(policyData) as any;
+    moved.activePolicies['provider-processing-policy'].scopePins['developer-live'].version = 'v22';
+    expect(() => validatePolicyDocument(moved, schemaData)).toThrow();
+    const unpinned = structuredClone(policyData) as any;
+    unpinned.activePolicies['provider-processing-policy'].scopePins['developer-live'].sha256 = '0'.repeat(64);
+    expect(() => validatePolicyDocument(unpinned, schemaData)).toThrow();
+    // Every other pin and External Export v2 carry over from v15 unchanged.
+    const v15 = readPair('active-policy-set.v15.json', 'active-policy-set.v15.schema.json').policyData;
+    for (const scope of ['development-ci', 'fixture-recording', 'ordinary-production']) {
+      expect(policyData.activePolicies['provider-processing-policy'].scopePins[scope]).toEqual(v15.activePolicies['provider-processing-policy'].scopePins[scope]);
+    }
+    expect(policyData.activePolicies['external-export-policy']).toEqual(v15.activePolicies['external-export-policy']);
   });
 });
