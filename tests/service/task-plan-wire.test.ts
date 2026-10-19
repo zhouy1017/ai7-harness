@@ -123,8 +123,12 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
       for (const op of PLAN_OPS) sweep(shape, `${kind}/prepared`, op, next);
       completePages(store, next);
     }
-    for (const [kind, projection] of Object.entries({ initialEvaluation: store.inspectEvaluation(commit.bookId, null), writingTask: store.inspectWritingTask(commit.bookId), reviewRun: reviewing.projection })) {
-      for (const op of [`prepare${kind[0]!.toUpperCase()}${kind.slice(1)}`, 'pollServiceJob', 'cancelServiceJob', 'redoTaskPlan']) sweep(shape, `${kind}/prepared`, op, {
+    for (const [kind, preparationOp, projection] of [
+      ['initial-evaluation', 'prepareInitialEvaluation', store.inspectEvaluation(commit.bookId, null)],
+      ['writing', 'prepareWritingTask', store.inspectWritingTask(commit.bookId)],
+      ['review-run', 'prepareReviewRun', reviewing.projection],
+    ] as const) {
+      for (const op of [preparationOp, 'pollServiceJob', 'cancelServiceJob', 'redoTaskPlan']) sweep(shape, `${kind}/prepared`, op, {
         jobId: ID, kind: `${kind}-preparation`, state: 'completed', progress: { completed: 1, total: 1, label: '生成准备' }, result: projection, failure: null,
       });
     }
