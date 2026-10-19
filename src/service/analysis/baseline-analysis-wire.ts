@@ -203,8 +203,8 @@ function ordinalOf(item: unknown, index: number): number {
   if (typeof item === 'number') return item;
   if (item !== null && typeof item === 'object') {
     const row = item as Record<string, unknown>;
-    if (typeof row['unitOrdinal'] === 'number') return row['unitOrdinal'];
     if (typeof row['ordinal'] === 'number') return row['ordinal'];
+    if (typeof row['unitOrdinal'] === 'number') return row['unitOrdinal'];
   }
   return index + 1;
 }

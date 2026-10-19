@@ -141,3 +141,15 @@ it('validates all readonly page cursors through the real request decoder', () =>
     expect(() => decodeRequest(Buffer.from(JSON.stringify({ ...frame, input: { ...frame.input, [cursor]: -1 } })))).toThrow(ProtocolError);
   }
 });
+
+it('pages older spans by attempt ordinal when retries repeat a unit and reducer spans name no unit', () => {
+  const full = longSettledAnalysis(longPreparedAnalysis(600), 1, false);
+  const attempt = full.run!.attempt!;
+  attempt.spans = attempt.spans.map((span, index) => ({ ...span, unitOrdinal: index % 3 === 0 ? null : Math.floor(index / 2) + 1 }));
+  const wire = baselineAnalysisWire(full);
+  const older = baselineAnalysisSummaryPage(full, 'run.attempt.spans', wire.listPages['run.attempt.spans']!.nextOrdinal!);
+  const all = [...wire.run!.attempt!.spans, ...older.items];
+  expect(all.map((item) => (item as { ordinal: number }).ordinal).sort((left, right) => left - right))
+    .toEqual(attempt.spans.map((span) => span.ordinal));
+  expect(older.nextOrdinal).toBeNull();
+});
