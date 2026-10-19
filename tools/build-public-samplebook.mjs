@@ -1,0 +1,661 @@
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { strToU8, zipSync } from 'fflate';
+
+/**
+ * Build the four public-domain Public SampleBooks ADR 0091 admits from their pinned Wikisource revisions.
+ *
+ *   node tools/build-public-samplebook.mjs --cache <dir> [--offline] [--check] [--work <id>]...
+ *   node tools/build-public-samplebook.mjs --pin --cache <dir>
+ *
+ * Development-only: never run by CI, `build`, `package` or any test, and never imported by product code.
+ * `SampleBooks/public-samplebooks.json` is the designation record: for every work its title, file name and
+ * the ordered Wikisource pages with each page's pinned revision id, and for a page that transcludes scanned
+ * `Page:` pages (ProofreadPage) the revision of each one. A build fetches every pinned revision through
+ * `action=parse&oldid=<revid>&variant=zh-hans` — MediaWiki's own LanguageConverter does the simplified
+ * conversion — keeps the section's title and its original paragraphs, and writes the DOCX deterministically.
+ * Navigation and header templates, license boxes, reference markers and every 注释 section are dropped; an
+ * element the rules below do not name refuses the build rather than being guessed at.
+ *
+ * `--cache` names a directory outside the checkout where the raw API responses are kept, so a second build
+ * reads them instead of the network and yields byte-identical files; raw responses never enter the
+ * repository. `--offline` refuses a missing response instead of fetching it. `--check` builds in memory and
+ * compares with the committed files. `--pin` fills in the revision ids a manifest entry lacks, and the
+ * transcluded pages' revisions, from the pages' current revisions.
+ *
+ * The network is reached through `curl`, which honours the host proxy (Node's `fetch` does not), and only
+ * `https://zh.wikisource.org/w/api.php`.
+ */
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const MANIFEST_RELATIVE_PATH = 'SampleBooks/public-samplebooks.json';
+export const MANIFEST_FORMAT = 'ai7.public-samplebooks/1';
+export const WIKISOURCE_API = 'https://zh.wikisource.org/w/api.php';
+export const VARIANT = 'zh-hans';
+const USER_AGENT = 'ai7-harness-public-samplebook-generator/1 (https://github.com/zhouy1017/ai7-harness)';
+const PAGE_NAMESPACE = 104;
+const QUERY_BATCH = 50;
+const REQUEST_SPACING_MS = 1200;
+
+export class PublicSampleBookError extends Error {
+  constructor(code, detail) {
+    super(`${code}: ${detail}`);
+    this.name = 'PublicSampleBookError';
+    this.code = code;
+  }
+}
+
+function refuse(code, detail) {
+  throw new PublicSampleBookError(code, detail);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Manifest
+
+function isPositiveInteger(value) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+function nonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * Validates a manifest. A build needs every revision pinned; `--pin` validates with `{ pinned: false }`
+ * so that the entries it is about to fill in may still lack them.
+ */
+export function validateManifest(manifest, { pinned = true } = {}) {
+  const fail = (detail) => refuse('SAMPLEBOOK/manifest-invalid', detail);
+  if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) fail('not an object');
+  if (manifest.format !== MANIFEST_FORMAT) fail(`format is not ${MANIFEST_FORMAT}`);
+  const source = manifest.source;
+  if (source?.api !== WIKISOURCE_API) fail(`source.api is not ${WIKISOURCE_API}`);
+  if (source?.variant !== VARIANT) fail(`source.variant is not ${VARIANT}`);
+  if (pinned && !/^\d{4}-\d{2}-\d{2}$/.test(manifest.pinnedOn ?? '')) fail('pinnedOn is not a date');
+  if (!Array.isArray(manifest.works) || manifest.works.length === 0) fail('works is empty');
+  const files = new Set();
+  for (const work of manifest.works) {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(work?.id ?? '')) fail('a work id is not lower-case ASCII words');
+    if (work.file !== `${work.id}.docx`) fail(`${work.id}: file is not ${work.id}.docx`);
+    if (files.has(work.file)) fail(`${work.id}: duplicate file`);
+    files.add(work.file);
+    if (!nonEmptyString(work.title) || !nonEmptyString(work.author)) fail(`${work.id}: title and author are required`);
+    if (!Array.isArray(work.sections) || work.sections.length === 0) fail(`${work.id}: sections is empty`);
+    const keys = new Set();
+    for (const section of work.sections) {
+      if (!nonEmptyString(section?.page)) fail(`${work.id}: a section has no page`);
+      const key = `${section.page}#${section.section ?? ''}`;
+      if (keys.has(key)) fail(`${work.id}: ${key} appears twice`);
+      keys.add(key);
+      if (section.revid !== undefined ? !isPositiveInteger(section.revid) : pinned) fail(`${work.id}: ${section.page} has no pinned revid`);
+      if ((section.section === undefined) !== (section.sectionTitle === undefined)) fail(`${work.id}: ${section.page} needs section and sectionTitle together`);
+      if (section.section !== undefined && (!isPositiveInteger(section.section) || !nonEmptyString(section.sectionTitle))) {
+        fail(`${work.id}: ${section.page} has a malformed section`);
+      }
+      if (section.transcludes === undefined) {
+        if (pinned) fail(`${work.id}: ${section.page} has no transcludes list`);
+        continue;
+      }
+      if (!Array.isArray(section.transcludes)) fail(`${work.id}: ${section.page} transcludes is not a list`);
+      for (const page of section.transcludes) {
+        if (!/^Page:./.test(page?.page ?? '') || !isPositiveInteger(page.revid)) fail(`${work.id}: ${section.page} has a malformed transclusion`);
+      }
+    }
+  }
+  return manifest;
+}
+
+/** Serializes with two-space indentation and every object of plain values (or empty lists) on one line, so the record reads as a list. */
+export function serializeManifest(manifest) {
+  const plain = (entry) => entry === null || typeof entry !== 'object' || (Array.isArray(entry) && entry.length === 0);
+  const flat = (value) => value !== null && typeof value === 'object' && Object.values(value).every(plain);
+  const write = (value, indent) => {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (!Array.isArray(value) && flat(value)) {
+      return `{ ${Object.entries(value).map(([key, entry]) => `${JSON.stringify(key)}: ${JSON.stringify(entry)}`).join(', ')} }`;
+    }
+    const inner = `${indent}  `;
+    if (Array.isArray(value)) {
+      if (value.length === 0) return '[]';
+      return `[\n${value.map((entry) => inner + write(entry, inner)).join(',\n')}\n${indent}]`;
+    }
+    const entries = Object.entries(value).map(([key, entry]) => `${inner}${JSON.stringify(key)}: ${write(entry, inner)}`);
+    return `{\n${entries.join(',\n')}\n${indent}}`;
+  };
+  return `${write(manifest, '')}\n`;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// HTML: a small tree builder for MediaWiki's balanced parser output
+
+const VOID_ELEMENTS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
+const RAW_TEXT_ELEMENTS = new Set(['script', 'style']);
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: String.fromCharCode(0xa0) };
+const TAG = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?)*)\s*(\/?)>/g;
+const ATTRIBUTE = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+
+export function decodeEntities(text) {
+  return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole, name) => {
+    if (name[0] === '#') {
+      const code = name[1] === 'x' || name[1] === 'X' ? Number.parseInt(name.slice(2), 16) : Number.parseInt(name.slice(1), 10);
+      return String.fromCodePoint(code);
+    }
+    if (!Object.hasOwn(NAMED_ENTITIES, name)) refuse('SAMPLEBOOK/html-entity', `unknown entity &${name};`);
+    return NAMED_ENTITIES[name];
+  });
+}
+
+function parseAttributes(raw) {
+  const attributes = {};
+  for (const match of raw.matchAll(ATTRIBUTE)) {
+    attributes[match[1].toLowerCase()] = decodeEntities(match[2] ?? match[3] ?? match[4] ?? '');
+  }
+  return attributes;
+}
+
+/** Text nodes are decoded strings; elements are `{ tag, attributes, children }`. Unbalanced markup refuses. */
+export function parseHtml(html) {
+  const root = { tag: '#root', attributes: {}, children: [] };
+  const stack = [root];
+  const pushText = (text) => {
+    if (text.length > 0) stack.at(-1).children.push(decodeEntities(text));
+  };
+  let last = 0;
+  TAG.lastIndex = 0;
+  for (let match = TAG.exec(html); match !== null; match = TAG.exec(html)) {
+    pushText(html.slice(last, match.index));
+    last = TAG.lastIndex;
+    if (match[0].startsWith('<!--')) continue;
+    const [, closing, rawTag, rawAttributes, selfClosing] = match;
+    const tag = rawTag.toLowerCase();
+    if (closing) {
+      const open = stack.at(-1);
+      if (open.tag !== tag) refuse('SAMPLEBOOK/html-unbalanced', `</${tag}> closes <${open.tag}>`);
+      stack.pop();
+      continue;
+    }
+    const element = { tag, attributes: parseAttributes(rawAttributes), children: [] };
+    stack.at(-1).children.push(element);
+    if (RAW_TEXT_ELEMENTS.has(tag)) {
+      const end = html.indexOf(`</${tag}>`, last);
+      if (end < 0) refuse('SAMPLEBOOK/html-unbalanced', `<${tag}> is never closed`);
+      element.children.push(html.slice(last, end));
+      last = end + tag.length + 3;
+      TAG.lastIndex = last;
+      continue;
+    }
+    if (selfClosing || VOID_ELEMENTS.has(tag)) continue;
+    stack.push(element);
+  }
+  pushText(html.slice(last));
+  if (stack.length !== 1) refuse('SAMPLEBOOK/html-unbalanced', `<${stack.at(-1).tag}> is never closed`);
+  return root;
+}
+
+function classes(element) {
+  return (element.attributes.class ?? '').split(/\s+/).filter(Boolean);
+}
+
+function hasClass(element, ...names) {
+  const own = classes(element);
+  return names.some((name) => own.includes(name));
+}
+
+function describe(element) {
+  const own = classes(element);
+  return `<${element.tag}${own.length > 0 ? `.${own.join('.')}` : ''}${element.attributes.id ? `#${element.attributes.id}` : ''}>`;
+}
+
+function elementChildren(element) {
+  return element.children.filter((child) => typeof child !== 'string');
+}
+
+function find(element, predicate) {
+  for (const child of elementChildren(element)) {
+    if (predicate(child)) return child;
+    const nested = find(child, predicate);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+function findAll(element, predicate, found = []) {
+  for (const child of elementChildren(element)) {
+    if (predicate(child)) found.push(child);
+    else findAll(child, predicate, found);
+  }
+  return found;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Extraction: the section's own title and its original paragraphs
+
+const IDEOGRAPHIC_SPACE = String.fromCharCode(0x3000);
+const LINE_BREAK = String.fromCharCode(0xe000);
+
+/** Navigation, header and license furniture, and the machinery around references: dropped with everything inside. */
+function isFurniture(element) {
+  if (['style', 'script', 'link', 'meta', 'hr'].includes(element.tag)) return true;
+  if (element.attributes.id === 'headerContainer') return true;
+  return hasClass(element, 'ws-header', 'ws-footer', 'ws-noexport', 'noprint', 'licenseContainer', 'licensetpl',
+    'mw-editsection', 'mw-empty-elt', 'catlinks', 'navbox', 'ws-pagenum', 'pagenum', 'mw-references-wrap', 'reflist');
+}
+
+function isReferenceMarker(element) {
+  return element.tag === 'sup' && hasClass(element, 'reference');
+}
+
+function isReferenceList(element) {
+  return element.tag === 'ol' && hasClass(element, 'references');
+}
+
+function headingLevel(element) {
+  const own = /^h([1-6])$/.exec(element.tag);
+  if (own) return Number(own[1]);
+  if (element.tag === 'div' && hasClass(element, 'mw-heading')) {
+    const inner = find(element, (child) => /^h[1-6]$/.test(child.tag));
+    return inner ? Number(inner.tag[1]) : undefined;
+  }
+  return undefined;
+}
+
+/** A heading that opens editorial apparatus rather than the work: annotations, notes, references, collation. */
+export const NOTE_HEADING = /^(?:注|註|脚注|腳注|尾注|参考|參考|参见|參見|校勘|校记|校記|编者|編者|外部链接|外部連結|延伸阅读|延伸閱讀)/;
+
+const INLINE_ELEMENTS = new Set(['a', 'b', 'strong', 'i', 'em', 'span', 'font', 'u', 's', 'big', 'sub', 'sup', 'abbr', 'ruby', 'rb', 'bdi', 'q', 'cite', 'var', 'mark', 'wbr', 'small']);
+const RUBY_ANNOTATION = new Set(['rt', 'rp']);
+
+function inlineText(element, tally) {
+  let text = '';
+  for (const child of element.children) {
+    if (typeof child === 'string') {
+      text += child;
+      continue;
+    }
+    if (isReferenceMarker(child)) {
+      tally.referenceMarkers += 1;
+      continue;
+    }
+    if (isFurniture(child) || RUBY_ANNOTATION.has(child.tag)) continue;
+    if (child.tag === 'br') {
+      text += LINE_BREAK;
+      continue;
+    }
+    if (!INLINE_ELEMENTS.has(child.tag)) refuse('SAMPLEBOOK/unhandled-inline', `${describe(child)} inside a paragraph`);
+    text += inlineText(child, tally);
+  }
+  return text;
+}
+
+/** HTML whitespace collapses to one space; each `<br>` ends a paragraph; leading indentation and trailing space go. */
+export function paragraphLines(text) {
+  return text
+    .replace(/[\t\n\f\r ]+/g, ' ')
+    .split(LINE_BREAK)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function headingText(element, tally) {
+  return paragraphLines(inlineText(element, tally)).join(IDEOGRAPHIC_SPACE);
+}
+
+/** The header's own title for the page: a 回 novel's chapter line (row two of `ws-header`), else the bold title. */
+function pageTitle(output, tally) {
+  const wsHeader = find(output, (element) => element.tag === 'table' && hasClass(element, 'ws-header'));
+  if (wsHeader) {
+    const rows = findAll(wsHeader, (element) => element.tag === 'tr');
+    for (const row of [rows[1], rows[0]]) {
+      const cells = row ? elementChildren(row).filter((cell) => cell.tag === 'td') : [];
+      const middle = cells.length === 3 ? headingText(cells[1], tally) : '';
+      if (middle.length > 0) return middle;
+    }
+  }
+  const container = find(output, (element) => element.attributes.id === 'headerContainer');
+  if (container) {
+    const bold = find(container, (element) => element.tag === 'b');
+    const title = bold ? headingText(bold, tally) : '';
+    if (title.length > 0) return title;
+  }
+  return refuse('SAMPLEBOOK/title-absent', 'the page has neither a ws-header chapter line nor a header title');
+}
+
+function walkBlocks(container, state) {
+  for (const child of container.children) {
+    if (state.stopped) return;
+    if (typeof child === 'string') {
+      if (child.trim().length > 0) refuse('SAMPLEBOOK/unhandled-text', `bare text directly inside ${describe(container)}`);
+      continue;
+    }
+    if (isReferenceList(child)) {
+      state.tally.referenceLists += 1;
+      continue;
+    }
+    if (isFurniture(child)) {
+      state.tally.furniture += 1;
+      continue;
+    }
+    const level = headingLevel(child);
+    if (level !== undefined) {
+      const text = headingText(child.tag === 'div' ? find(child, (nested) => /^h[1-6]$/.test(nested.tag)) : child, state.tally);
+      if (NOTE_HEADING.test(text)) {
+        // Annotations close a page: the heading and everything after it at this level go.
+        state.tally.noteSections += 1;
+        state.stopped = true;
+        return;
+      }
+      if (state.sectionTitle !== undefined && state.heading === undefined) {
+        if (text !== state.sectionTitle) refuse('SAMPLEBOOK/section-mismatch', `the section opens with a heading other than its pinned title`);
+        state.heading = text;
+        continue;
+      }
+      state.blocks.push({ style: 'Heading2', text });
+      continue;
+    }
+    switch (child.tag) {
+      case 'p':
+      case 'dd':
+      case 'dt':
+        if (child.tag !== 'p' && elementChildren(child).some((nested) => nested.tag === 'dl')) {
+          walkBlocks(child, state);
+          break;
+        }
+        for (const line of paragraphLines(inlineText(child, state.tally))) state.blocks.push({ style: null, text: line });
+        break;
+      case 'div':
+      case 'dl':
+      case 'center':
+      case 'blockquote':
+        walkBlocks(child, state);
+        break;
+      default:
+        refuse('SAMPLEBOOK/unhandled-block', `${describe(child)} inside ${describe(container)}`);
+    }
+  }
+}
+
+/**
+ * Extracts one pinned page (or one numbered section of it) from MediaWiki parser output. Returns the
+ * section's heading, its body blocks in order, and the tally of what was dropped — counts only, so the
+ * caller can report them without carrying any of the text.
+ */
+export function extractSection(html, { sectionTitle } = {}) {
+  const root = parseHtml(html);
+  const output = find(root, (element) => element.tag === 'div' && hasClass(element, 'mw-parser-output'));
+  if (!output) refuse('SAMPLEBOOK/output-absent', 'no mw-parser-output container');
+  const tally = { referenceMarkers: 0, referenceLists: 0, noteSections: 0, furniture: 0 };
+  const state = { blocks: [], tally, sectionTitle, heading: undefined, stopped: false };
+  walkBlocks(output, state);
+  const heading = sectionTitle === undefined ? pageTitle(output, tally) : state.heading;
+  if (heading === undefined) refuse('SAMPLEBOOK/section-mismatch', 'the section has no heading');
+  if (!state.blocks.some((block) => block.style === null)) refuse('SAMPLEBOOK/section-empty', 'no body paragraph survived extraction');
+  return { heading, blocks: state.blocks, tally };
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// DOCX: a minimal WordprocessingML package with fixed bytes for fixed input
+
+/** The same instant as `src/shared/archive-time.ts`'s `fixedArchiveTime()`, built from local fields for the same reason. */
+export function fixedArchiveTime() {
+  return new Date(2026, 0, 1, 8, 0, 0);
+}
+
+function escapeXml(value) {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+const XML_PROLOG = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+const WORDML = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+const CONTENT_TYPES_XML = XML_PROLOG
+  + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+  + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+  + '<Default Extension="xml" ContentType="application/xml"/>'
+  + '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+  + '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+  + '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+  + '</Types>';
+
+const PACKAGE_RELS_XML = XML_PROLOG
+  + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+  + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
+  + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>'
+  + '</Relationships>';
+
+const DOCUMENT_RELS_XML = XML_PROLOG
+  + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+  + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+  + '</Relationships>';
+
+function styleXml(id, name, size, extra = '') {
+  return `<w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${name}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/>`
+    + `<w:qFormat/><w:pPr><w:keepNext/>${extra}</w:pPr><w:rPr><w:b/><w:sz w:val="${size}"/></w:rPr></w:style>`;
+}
+
+const STYLES_XML = XML_PROLOG
+  + `<w:styles xmlns:w="${WORDML}">`
+  + '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/>'
+  + '<w:pPr><w:spacing w:after="120"/><w:ind w:firstLineChars="200"/></w:pPr><w:rPr><w:sz w:val="24"/></w:rPr></w:style>'
+  + styleXml('Title', 'Title', 44, '<w:jc w:val="center"/><w:ind w:firstLineChars="0"/>')
+  + styleXml('Heading1', 'heading 1', 32, '<w:spacing w:before="480" w:after="240"/><w:ind w:firstLineChars="0"/><w:outlineLvl w:val="0"/>')
+  + styleXml('Heading2', 'heading 2', 28, '<w:spacing w:before="240" w:after="120"/><w:ind w:firstLineChars="0"/><w:outlineLvl w:val="1"/>')
+  + '</w:styles>';
+
+function coreXml(title, author) {
+  return XML_PROLOG
+    + '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"'
+    + ' xmlns:dc="http://purl.org/dc/elements/1.1/">'
+    + `<dc:title>${escapeXml(title)}</dc:title><dc:creator>${escapeXml(author)}</dc:creator>`
+    + '</cp:coreProperties>';
+}
+
+function paragraphXml(style, text) {
+  const properties = style === null ? '' : `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>`;
+  return `<w:p>${properties}<w:r><w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
+}
+
+/**
+ * The DOCX for one work: a `Title` paragraph, then per section a `Heading1` and its blocks. The terminal
+ * section properties stay bare, so the file carries no page setup the import would have to degrade.
+ */
+export function buildSampleBookDocx({ title, author, sections }) {
+  const body = [paragraphXml('Title', title)];
+  for (const section of sections) {
+    body.push(paragraphXml('Heading1', section.heading));
+    for (const block of section.blocks) body.push(paragraphXml(block.style, block.text));
+  }
+  const documentXml = `${XML_PROLOG}<w:document xmlns:w="${WORDML}"><w:body>${body.join('')}<w:sectPr/></w:body></w:document>`;
+  return zipSync({
+    '[Content_Types].xml': strToU8(CONTENT_TYPES_XML),
+    '_rels/.rels': strToU8(PACKAGE_RELS_XML),
+    'docProps/core.xml': strToU8(coreXml(title, author)),
+    'word/_rels/document.xml.rels': strToU8(DOCUMENT_RELS_XML),
+    'word/styles.xml': strToU8(STYLES_XML),
+    'word/document.xml': strToU8(documentXml),
+  }, { level: 9, mtime: fixedArchiveTime() });
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Wikisource access: curl, one request at a time, raw responses cached outside the checkout
+
+function pause(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function apiRequest(parameters) {
+  pause(REQUEST_SPACING_MS);
+  // The query is percent-encoded here, as UTF-8, so curl's command line stays ASCII: on Windows curl would
+  // otherwise re-encode a non-ASCII argument to the console code page before sending it.
+  const query = Object.entries({ format: 'json', formatversion: '2', ...parameters })
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join('&');
+  const args = ['-sS', '--fail', '--retry', '4', '--retry-delay', '10', '-A', USER_AGENT, `${WIKISOURCE_API}?${query}`];
+  const body = execFileSync('curl', args, { maxBuffer: 256 * 1024 * 1024, windowsHide: true });
+  const response = JSON.parse(body.toString('utf8'));
+  if (response.error) refuse('SAMPLEBOOK/api-error', `${response.error.code}: ${response.error.info}`);
+  return { body, response };
+}
+
+function parseParameters(section) {
+  return {
+    action: 'parse',
+    oldid: String(section.revid),
+    variant: VARIANT,
+    prop: 'text|revid|displaytitle|templates',
+    ...(section.section === undefined ? {} : { section: String(section.section) }),
+  };
+}
+
+function transcludedPages(parse) {
+  return (parse.templates ?? []).filter((template) => template.ns === PAGE_NAMESPACE).map((template) => template.title).sort();
+}
+
+function currentRevisions(titles) {
+  const revisions = new Map();
+  for (let start = 0; start < titles.length; start += QUERY_BATCH) {
+    const batch = titles.slice(start, start + QUERY_BATCH);
+    const { response } = apiRequest({ action: 'query', prop: 'info', titles: batch.join('|') });
+    const normalized = new Map((response.query.normalized ?? []).map((entry) => [entry.to, entry.from]));
+    for (const page of response.query.pages) {
+      const asked = normalized.get(page.title) ?? page.title;
+      if (page.missing || page.invalid) refuse('SAMPLEBOOK/page-missing', `${asked} does not exist`);
+      if (page.redirect) refuse('SAMPLEBOOK/page-redirect', `${asked} is a redirect; name its target`);
+      revisions.set(asked, page.lastrevid);
+    }
+  }
+  return revisions;
+}
+
+function cachePath(cache, section) {
+  return join(cache, `parse-${section.revid}${section.section === undefined ? '' : `-s${section.section}`}.json`);
+}
+
+function loadParse(section, { cache, offline }) {
+  const path = cachePath(cache, section);
+  if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf8')).parse;
+  if (offline) refuse('SAMPLEBOOK/cache-miss', `${section.page} revision ${section.revid} is not cached`);
+  const { body, response } = apiRequest(parseParameters(section));
+  const parse = response.parse;
+  if (parse?.revid !== section.revid) refuse('SAMPLEBOOK/revid-disappeared', `${section.page} revision ${section.revid} was not served`);
+  const pinned = section.transcludes.map((page) => page.page).sort();
+  const served = transcludedPages(parse);
+  if (JSON.stringify(pinned) !== JSON.stringify(served)) refuse('SAMPLEBOOK/transclusion-moved', `${section.page} transcludes other pages than its pin`);
+  if (served.length > 0) {
+    const current = currentRevisions(served);
+    for (const page of section.transcludes) {
+      if (current.get(page.page) !== page.revid) refuse('SAMPLEBOOK/transclusion-moved', `${page.page} moved past revision ${page.revid}`);
+    }
+  }
+  writeFileSync(path, body);
+  return parse;
+}
+
+function pin(manifest) {
+  const unpinned = manifest.works.flatMap((work) => work.sections).filter((section) => section.revid === undefined);
+  const titles = [...new Set(unpinned.map((section) => section.page))];
+  const current = titles.length > 0 ? currentRevisions(titles) : new Map();
+  let changed = false;
+  for (const work of manifest.works) {
+    for (const section of work.sections) {
+      if (section.revid === undefined) {
+        section.revid = current.get(section.page);
+        changed = true;
+      }
+      if (section.transcludes === undefined) {
+        const { response } = apiRequest({ ...parseParameters(section), prop: 'revid|templates' });
+        const pages = transcludedPages(response.parse);
+        const revisions = pages.length > 0 ? currentRevisions(pages) : new Map();
+        section.transcludes = pages.map((page) => ({ page, revid: revisions.get(page) }));
+        changed = true;
+      }
+      // Normalized key order: page, section, sectionTitle, revid, transcludes.
+      const { page, section: number, sectionTitle, revid, transcludes } = section;
+      for (const key of Object.keys(section)) delete section[key];
+      Object.assign(section, { page, ...(number === undefined ? {} : { section: number, sectionTitle }), revid, transcludes });
+    }
+  }
+  if (changed) manifest.pinnedOn = new Date().toISOString().slice(0, 10);
+  return changed;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Command line
+
+export function buildWork(work, options) {
+  const sections = [];
+  const tally = { referenceMarkers: 0, referenceLists: 0, noteSections: 0, furniture: 0 };
+  for (const section of work.sections) {
+    const parse = loadParse(section, options);
+    let extracted;
+    try {
+      extracted = extractSection(parse.text, { sectionTitle: section.sectionTitle });
+    } catch (error) {
+      if (error instanceof PublicSampleBookError) error.message = `${error.message} (${work.id}: ${section.page})`;
+      throw error;
+    }
+    sections.push({ heading: extracted.heading, blocks: extracted.blocks });
+    for (const key of Object.keys(tally)) tally[key] += extracted.tally[key];
+  }
+  const bytes = buildSampleBookDocx({ title: work.title, author: work.author, sections });
+  return { bytes, sections, tally };
+}
+
+function argumentValues(argv, flag) {
+  const values = [];
+  argv.forEach((value, index) => {
+    if (value === flag) values.push(argv[index + 1]);
+  });
+  return values;
+}
+
+function main(argv) {
+  const [cacheArgument] = argumentValues(argv, '--cache');
+  if (!cacheArgument || !isAbsolute(cacheArgument)) refuse('SAMPLEBOOK/usage', '--cache <absolute directory outside the checkout> is required');
+  const cache = resolve(cacheArgument);
+  const inside = relative(ROOT, cache);
+  if (!inside.startsWith('..') && !isAbsolute(inside)) refuse('SAMPLEBOOK/usage', 'the cache must lie outside the checkout');
+  mkdirSync(cache, { recursive: true });
+  const manifestPath = join(ROOT, MANIFEST_RELATIVE_PATH);
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  if (argv.includes('--pin')) {
+    validateManifest(manifest, { pinned: false });
+    if (pin(manifest)) writeFileSync(manifestPath, serializeManifest(validateManifest(manifest)));
+    console.log(`Pinned ${MANIFEST_RELATIVE_PATH}.`);
+    return;
+  }
+  validateManifest(manifest);
+  const only = argumentValues(argv, '--work');
+  const check = argv.includes('--check');
+  const options = { cache, offline: argv.includes('--offline') || check };
+  let stale = false;
+  for (const work of manifest.works) {
+    if (only.length > 0 && !only.includes(work.id)) continue;
+    const { bytes, sections, tally } = buildWork(work, options);
+    const target = join(ROOT, 'SampleBooks', work.file);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    const paragraphs = sections.reduce((sum, section) => sum + section.blocks.length, 0);
+    if (check) {
+      const same = existsSync(target) && Buffer.compare(readFileSync(target), Buffer.from(bytes)) === 0;
+      if (!same) stale = true;
+      console.log(`${work.file}: ${same ? 'matches' : 'DIFFERS'} (${bytes.length} bytes, sha256 ${digest})`);
+      continue;
+    }
+    writeFileSync(target, bytes);
+    console.log(`${work.file}: ${bytes.length} bytes, sha256 ${digest}; ${sections.length} sections, ${paragraphs} body paragraphs; `
+      + `dropped ${tally.referenceMarkers} reference markers, ${tally.referenceLists} reference lists, ${tally.noteSections} note sections, ${tally.furniture} furniture elements`);
+  }
+  if (stale) process.exitCode = 1;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main(process.argv.slice(2));
+  } catch (error) {
+    if (!(error instanceof PublicSampleBookError)) throw error;
+    console.error(error.message);
+    process.exitCode = 1;
+  }
+}
