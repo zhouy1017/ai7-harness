@@ -1,0 +1,460 @@
+{
+  "format": "ai7.public-samplebooks/1",
+  "designation": { "issue": 989, "adr": "0091", "decidedBy": "Owner", "decidedOn": "2026-10-19" },
+  "source": { "site": "zh.wikisource.org", "api": "https://zh.wikisource.org/w/api.php", "request": "action=parse&oldid=<revid>&variant=zh-hans&prop=text|revid|displaytitle|templates&formatversion=2", "variant": "zh-hans", "conversion": "MediaWiki LanguageConverter (variant zh-hans)", "license": "public domain (author died 1936, 1909 and 1754)" },
+  "pinnedOn": "2026-10-19",
+  "works": [
+    {
+      "id": "luxun-zhaohua-xishi",
+      "file": "luxun-zhaohua-xishi.docx",
+      "title": "朝花夕拾",
+      "author": "鲁迅",
+      "sections": [
+        {
+          "page": "朝花夕拾/小引",
+          "revid": 2323066,
+          "editorNoteDigests": [
+            "79f5ab821e96eeb0f44e9c001c5aab3e546a45717dc5ea9d09dc7d07cbd769f8"
+          ],
+          "transcludes": []
+        },
+        { "page": "狗·猫·鼠", "revid": 8657586, "transcludes": [] },
+        { "page": "阿長與《山海經》", "revid": 2563428, "transcludes": [] },
+        { "page": "二十四孝圖", "revid": 2563431, "transcludes": [] },
+        { "page": "五猖會", "revid": 2563954, "transcludes": [] },
+        { "page": "无常", "revid": 2637162, "transcludes": [] },
+        { "page": "從百草園到三味書屋", "revid": 7903272, "transcludes": [] },
+        { "page": "父亲的病", "revid": 2563957, "footnotes": 10, "transcludes": [] },
+        { "page": "琐记", "revid": 2563958, "transcludes": [] },
+        { "page": "藤野先生", "revid": 2607921, "transcludes": [] },
+        { "page": "范愛農", "revid": 2563960, "transcludes": [] },
+        { "page": "朝花夕拾/後記", "revid": 2563961, "transcludes": [] }
+      ]
+    },
+    {
+      "id": "luxun-nahan",
+      "file": "luxun-nahan.docx",
+      "title": "呐喊",
+      "author": "鲁迅",
+      "sections": [
+        {
+          "page": "吶喊",
+          "section": 2,
+          "sectionTitle": "自序",
+          "revid": 11120768,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/290", "revid": 6881215 },
+            { "page": "Page:魯迅全集01 (1948).pdf/291", "revid": 2490154 },
+            { "page": "Page:魯迅全集01 (1948).pdf/292", "revid": 2524383 },
+            { "page": "Page:魯迅全集01 (1948).pdf/293", "revid": 2571281 },
+            { "page": "Page:魯迅全集01 (1948).pdf/294", "revid": 2491028 },
+            { "page": "Page:魯迅全集01 (1948).pdf/295", "revid": 2571626 },
+            { "page": "Page:魯迅全集01 (1948).pdf/296", "revid": 2571283 },
+            { "page": "Page:魯迅全集01 (1948).pdf/297", "revid": 2571622 }
+          ]
+        },
+        {
+          "page": "狂人日記",
+          "revid": 2605391,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/298", "revid": 2571660 },
+            { "page": "Page:魯迅全集01 (1948).pdf/299", "revid": 2571694 },
+            { "page": "Page:魯迅全集01 (1948).pdf/300", "revid": 7908441 },
+            { "page": "Page:魯迅全集01 (1948).pdf/301", "revid": 2570806 },
+            { "page": "Page:魯迅全集01 (1948).pdf/302", "revid": 2570810 },
+            { "page": "Page:魯迅全集01 (1948).pdf/303", "revid": 2570523 },
+            { "page": "Page:魯迅全集01 (1948).pdf/304", "revid": 2570813 },
+            { "page": "Page:魯迅全集01 (1948).pdf/305", "revid": 2570525 },
+            { "page": "Page:魯迅全集01 (1948).pdf/306", "revid": 2570804 },
+            { "page": "Page:魯迅全集01 (1948).pdf/307", "revid": 2570530 },
+            { "page": "Page:魯迅全集01 (1948).pdf/308", "revid": 2570531 },
+            { "page": "Page:魯迅全集01 (1948).pdf/309", "revid": 2570811 },
+            { "page": "Page:魯迅全集01 (1948).pdf/310", "revid": 2570797 },
+            { "page": "Page:魯迅全集01 (1948).pdf/311", "revid": 2570799 },
+            { "page": "Page:魯迅全集01 (1948).pdf/312", "revid": 2571618 }
+          ]
+        },
+        {
+          "page": "孔乙己",
+          "revid": 2605389,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/313", "revid": 2570484 },
+            { "page": "Page:魯迅全集01 (1948).pdf/314", "revid": 2570494 },
+            { "page": "Page:魯迅全集01 (1948).pdf/315", "revid": 2570496 },
+            { "page": "Page:魯迅全集01 (1948).pdf/316", "revid": 2570497 },
+            { "page": "Page:魯迅全集01 (1948).pdf/317", "revid": 2570498 },
+            { "page": "Page:魯迅全集01 (1948).pdf/318", "revid": 2571619 }
+          ]
+        },
+        {
+          "page": "藥",
+          "revid": 2523886,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/319", "revid": 2571423 },
+            { "page": "Page:魯迅全集01 (1948).pdf/320", "revid": 2571424 },
+            { "page": "Page:魯迅全集01 (1948).pdf/321", "revid": 2571454 },
+            { "page": "Page:魯迅全集01 (1948).pdf/322", "revid": 2571427 },
+            { "page": "Page:魯迅全集01 (1948).pdf/323", "revid": 2571453 },
+            { "page": "Page:魯迅全集01 (1948).pdf/324", "revid": 2571455 },
+            { "page": "Page:魯迅全集01 (1948).pdf/325", "revid": 2571436 },
+            { "page": "Page:魯迅全集01 (1948).pdf/326", "revid": 2571440 },
+            { "page": "Page:魯迅全集01 (1948).pdf/327", "revid": 2571441 },
+            { "page": "Page:魯迅全集01 (1948).pdf/328", "revid": 2571445 },
+            { "page": "Page:魯迅全集01 (1948).pdf/329", "revid": 2571448 },
+            { "page": "Page:魯迅全集01 (1948).pdf/330", "revid": 2571449 },
+            { "page": "Page:魯迅全集01 (1948).pdf/331", "revid": 2571620 }
+          ]
+        },
+        {
+          "page": "明天",
+          "revid": 2524371,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/332", "revid": 2524194 },
+            { "page": "Page:魯迅全集01 (1948).pdf/333", "revid": 2524195 },
+            { "page": "Page:魯迅全集01 (1948).pdf/334", "revid": 2524196 },
+            { "page": "Page:魯迅全集01 (1948).pdf/335", "revid": 2524197 },
+            { "page": "Page:魯迅全集01 (1948).pdf/336", "revid": 2524199 },
+            { "page": "Page:魯迅全集01 (1948).pdf/337", "revid": 2524200 },
+            { "page": "Page:魯迅全集01 (1948).pdf/338", "revid": 2524230 },
+            { "page": "Page:魯迅全集01 (1948).pdf/339", "revid": 2524368 },
+            { "page": "Page:魯迅全集01 (1948).pdf/340", "revid": 2524369 },
+            { "page": "Page:魯迅全集01 (1948).pdf/341", "revid": 2524370 }
+          ]
+        },
+        {
+          "page": "一件小事",
+          "revid": 10675925,
+          "editorNoteDigests": [
+            "2db4ea74561701fe18e68a3c8d658c186cb5c7bfbb4fe3c93e26dd8170038881"
+          ],
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/342", "revid": 2676114 },
+            { "page": "Page:魯迅全集01 (1948).pdf/343", "revid": 2676115 },
+            { "page": "Page:魯迅全集01 (1948).pdf/344", "revid": 2676116 },
+            { "page": "Page:魯迅全集01 (1948).pdf/345", "revid": 2666446 }
+          ]
+        },
+        {
+          "page": "頭髮的故事",
+          "revid": 2525914,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/346", "revid": 2525161 },
+            { "page": "Page:魯迅全集01 (1948).pdf/347", "revid": 2525869 },
+            { "page": "Page:魯迅全集01 (1948).pdf/348", "revid": 2525885 },
+            { "page": "Page:魯迅全集01 (1948).pdf/349", "revid": 2525882 },
+            { "page": "Page:魯迅全集01 (1948).pdf/350", "revid": 2525884 },
+            { "page": "Page:魯迅全集01 (1948).pdf/351", "revid": 2525909 },
+            { "page": "Page:魯迅全集01 (1948).pdf/352", "revid": 2525886 }
+          ]
+        },
+        {
+          "page": "風波",
+          "revid": 2629202,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/353", "revid": 2527053 },
+            { "page": "Page:魯迅全集01 (1948).pdf/354", "revid": 2527054 },
+            { "page": "Page:魯迅全集01 (1948).pdf/355", "revid": 2528193 },
+            { "page": "Page:魯迅全集01 (1948).pdf/356", "revid": 2527113 },
+            { "page": "Page:魯迅全集01 (1948).pdf/357", "revid": 2527114 },
+            { "page": "Page:魯迅全集01 (1948).pdf/358", "revid": 2527117 },
+            { "page": "Page:魯迅全集01 (1948).pdf/359", "revid": 2528194 },
+            { "page": "Page:魯迅全集01 (1948).pdf/360", "revid": 2527140 },
+            { "page": "Page:魯迅全集01 (1948).pdf/361", "revid": 2527335 },
+            { "page": "Page:魯迅全集01 (1948).pdf/362", "revid": 2528183 },
+            { "page": "Page:魯迅全集01 (1948).pdf/363", "revid": 2528188 },
+            { "page": "Page:魯迅全集01 (1948).pdf/364", "revid": 2525931 }
+          ]
+        },
+        {
+          "page": "故鄉",
+          "revid": 2570945,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/365", "revid": 2570865 },
+            { "page": "Page:魯迅全集01 (1948).pdf/366", "revid": 2570868 },
+            { "page": "Page:魯迅全集01 (1948).pdf/367", "revid": 2570872 },
+            { "page": "Page:魯迅全集01 (1948).pdf/368", "revid": 2570873 },
+            { "page": "Page:魯迅全集01 (1948).pdf/369", "revid": 2570874 },
+            { "page": "Page:魯迅全集01 (1948).pdf/370", "revid": 2570875 },
+            { "page": "Page:魯迅全集01 (1948).pdf/371", "revid": 2570876 },
+            { "page": "Page:魯迅全集01 (1948).pdf/372", "revid": 2570877 },
+            { "page": "Page:魯迅全集01 (1948).pdf/373", "revid": 2570878 },
+            { "page": "Page:魯迅全集01 (1948).pdf/374", "revid": 2570879 },
+            { "page": "Page:魯迅全集01 (1948).pdf/375", "revid": 2570880 },
+            { "page": "Page:魯迅全集01 (1948).pdf/376", "revid": 2570882 },
+            { "page": "Page:魯迅全集01 (1948).pdf/377", "revid": 2570883 },
+            { "page": "Page:魯迅全集01 (1948).pdf/378", "revid": 2570889 },
+            { "page": "Page:魯迅全集01 (1948).pdf/379", "revid": 2571621 }
+          ]
+        },
+        {
+          "page": "阿Q正傳",
+          "revid": 2633268,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/380", "revid": 2628111 },
+            { "page": "Page:魯迅全集01 (1948).pdf/381", "revid": 2629141 },
+            { "page": "Page:魯迅全集01 (1948).pdf/382", "revid": 2629142 },
+            { "page": "Page:魯迅全集01 (1948).pdf/383", "revid": 2629144 },
+            { "page": "Page:魯迅全集01 (1948).pdf/384", "revid": 2629147 },
+            { "page": "Page:魯迅全集01 (1948).pdf/385", "revid": 2629148 },
+            { "page": "Page:魯迅全集01 (1948).pdf/386", "revid": 2629150 },
+            { "page": "Page:魯迅全集01 (1948).pdf/387", "revid": 2629574 },
+            { "page": "Page:魯迅全集01 (1948).pdf/388", "revid": 2629155 },
+            { "page": "Page:魯迅全集01 (1948).pdf/389", "revid": 2629157 },
+            { "page": "Page:魯迅全集01 (1948).pdf/390", "revid": 2633153 },
+            { "page": "Page:魯迅全集01 (1948).pdf/391", "revid": 2629440 },
+            { "page": "Page:魯迅全集01 (1948).pdf/392", "revid": 2629449 },
+            { "page": "Page:魯迅全集01 (1948).pdf/393", "revid": 2629502 },
+            { "page": "Page:魯迅全集01 (1948).pdf/394", "revid": 2629508 },
+            { "page": "Page:魯迅全集01 (1948).pdf/395", "revid": 2629512 },
+            { "page": "Page:魯迅全集01 (1948).pdf/396", "revid": 2629515 },
+            { "page": "Page:魯迅全集01 (1948).pdf/397", "revid": 2633157 },
+            { "page": "Page:魯迅全集01 (1948).pdf/398", "revid": 2629527 },
+            { "page": "Page:魯迅全集01 (1948).pdf/399", "revid": 2629531 },
+            { "page": "Page:魯迅全集01 (1948).pdf/400", "revid": 2629571 },
+            { "page": "Page:魯迅全集01 (1948).pdf/401", "revid": 2633160 },
+            { "page": "Page:魯迅全集01 (1948).pdf/402", "revid": 2629575 },
+            { "page": "Page:魯迅全集01 (1948).pdf/403", "revid": 2629576 },
+            { "page": "Page:魯迅全集01 (1948).pdf/404", "revid": 2629577 },
+            { "page": "Page:魯迅全集01 (1948).pdf/405", "revid": 2629578 },
+            { "page": "Page:魯迅全集01 (1948).pdf/406", "revid": 2629925 },
+            { "page": "Page:魯迅全集01 (1948).pdf/407", "revid": 2629929 },
+            { "page": "Page:魯迅全集01 (1948).pdf/408", "revid": 2629930 },
+            { "page": "Page:魯迅全集01 (1948).pdf/409", "revid": 2629957 },
+            { "page": "Page:魯迅全集01 (1948).pdf/410", "revid": 2629943 },
+            { "page": "Page:魯迅全集01 (1948).pdf/411", "revid": 2629955 },
+            { "page": "Page:魯迅全集01 (1948).pdf/412", "revid": 2629956 },
+            { "page": "Page:魯迅全集01 (1948).pdf/413", "revid": 2690831 },
+            { "page": "Page:魯迅全集01 (1948).pdf/414", "revid": 2629959 },
+            { "page": "Page:魯迅全集01 (1948).pdf/415", "revid": 2629960 },
+            { "page": "Page:魯迅全集01 (1948).pdf/416", "revid": 2629961 },
+            { "page": "Page:魯迅全集01 (1948).pdf/417", "revid": 2629962 },
+            { "page": "Page:魯迅全集01 (1948).pdf/418", "revid": 2629963 },
+            { "page": "Page:魯迅全集01 (1948).pdf/419", "revid": 2629964 },
+            { "page": "Page:魯迅全集01 (1948).pdf/420", "revid": 2629965 },
+            { "page": "Page:魯迅全集01 (1948).pdf/421", "revid": 2629966 },
+            { "page": "Page:魯迅全集01 (1948).pdf/422", "revid": 2629969 },
+            { "page": "Page:魯迅全集01 (1948).pdf/423", "revid": 2632738 },
+            { "page": "Page:魯迅全集01 (1948).pdf/424", "revid": 2632787 },
+            { "page": "Page:魯迅全集01 (1948).pdf/425", "revid": 2632801 },
+            { "page": "Page:魯迅全集01 (1948).pdf/426", "revid": 2632809 },
+            { "page": "Page:魯迅全集01 (1948).pdf/427", "revid": 2632818 },
+            { "page": "Page:魯迅全集01 (1948).pdf/428", "revid": 2632819 },
+            { "page": "Page:魯迅全集01 (1948).pdf/429", "revid": 2632820 },
+            { "page": "Page:魯迅全集01 (1948).pdf/430", "revid": 2632821 },
+            { "page": "Page:魯迅全集01 (1948).pdf/431", "revid": 2632822 },
+            { "page": "Page:魯迅全集01 (1948).pdf/432", "revid": 2632823 },
+            { "page": "Page:魯迅全集01 (1948).pdf/433", "revid": 2632826 },
+            { "page": "Page:魯迅全集01 (1948).pdf/434", "revid": 2633131 },
+            { "page": "Page:魯迅全集01 (1948).pdf/435", "revid": 2633133 },
+            { "page": "Page:魯迅全集01 (1948).pdf/436", "revid": 2633225 },
+            { "page": "Page:魯迅全集01 (1948).pdf/437", "revid": 2628124 }
+          ]
+        },
+        {
+          "page": "端午節",
+          "revid": 2673910,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/438", "revid": 2676071 },
+            { "page": "Page:魯迅全集01 (1948).pdf/439", "revid": 2676073 },
+            { "page": "Page:魯迅全集01 (1948).pdf/440", "revid": 2676074 },
+            { "page": "Page:魯迅全集01 (1948).pdf/441", "revid": 2676075 },
+            { "page": "Page:魯迅全集01 (1948).pdf/442", "revid": 2673712 },
+            { "page": "Page:魯迅全集01 (1948).pdf/443", "revid": 2676076 },
+            { "page": "Page:魯迅全集01 (1948).pdf/444", "revid": 2676077 },
+            { "page": "Page:魯迅全集01 (1948).pdf/445", "revid": 2676078 },
+            { "page": "Page:魯迅全集01 (1948).pdf/446", "revid": 2676079 },
+            { "page": "Page:魯迅全集01 (1948).pdf/447", "revid": 2676080 },
+            { "page": "Page:魯迅全集01 (1948).pdf/448", "revid": 2676081 },
+            { "page": "Page:魯迅全集01 (1948).pdf/449", "revid": 2666542 }
+          ]
+        },
+        {
+          "page": "白光",
+          "revid": 2687312,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/450", "revid": 2687293 },
+            { "page": "Page:魯迅全集01 (1948).pdf/451", "revid": 2687313 },
+            { "page": "Page:魯迅全集01 (1948).pdf/452", "revid": 2687306 },
+            { "page": "Page:魯迅全集01 (1948).pdf/453", "revid": 2687307 },
+            { "page": "Page:魯迅全集01 (1948).pdf/454", "revid": 2687308 },
+            { "page": "Page:魯迅全集01 (1948).pdf/455", "revid": 2687309 },
+            { "page": "Page:魯迅全集01 (1948).pdf/456", "revid": 2687310 },
+            { "page": "Page:魯迅全集01 (1948).pdf/457", "revid": 2687299 }
+          ]
+        },
+        {
+          "page": "兔和貓",
+          "revid": 8736224,
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/458", "revid": 8736211 },
+            { "page": "Page:魯迅全集01 (1948).pdf/459", "revid": 8736214 },
+            { "page": "Page:魯迅全集01 (1948).pdf/460", "revid": 8736215 },
+            { "page": "Page:魯迅全集01 (1948).pdf/461", "revid": 8736216 },
+            { "page": "Page:魯迅全集01 (1948).pdf/462", "revid": 8736219 },
+            { "page": "Page:魯迅全集01 (1948).pdf/463", "revid": 8736225 },
+            { "page": "Page:魯迅全集01 (1948).pdf/464", "revid": 2693007 }
+          ]
+        },
+        {
+          "page": "鴨的喜劇",
+          "revid": 9458356,
+          "transcludes": [
+            { "page": "Page:NLC404-01J002598-50083 婦女雜誌 1922年8卷12期.pdf/106", "revid": 9458343 },
+            { "page": "Page:NLC404-01J002598-50083 婦女雜誌 1922年8卷12期.pdf/107", "revid": 9458346 },
+            { "page": "Page:NLC404-01J002598-50083 婦女雜誌 1922年8卷12期.pdf/108", "revid": 9458354 }
+          ]
+        },
+        {
+          "page": "社戲",
+          "revid": 10605419,
+          "editorNoteDigests": [
+            "1b2bbd3eff582aaf4fdfae1c822e70f462410da3c9627d01cddc697867196f7a",
+            "ca8a3948da600a586c30cb7691502094a204086222456a8480dbe2ede928d851",
+            "6be963b17845664cc4f633d4f3bd939b63093e70ac8a65adc28fe530799d87f9",
+            "159c901ee7f75a68857efdbe7b11b041a80b49618edd47974154fee046e4fae6",
+            "70d2b6b56843cd29719d731b746449bc42e030573d63d28ce7fe86c0e49d4c23"
+          ],
+          "transcludes": [
+            { "page": "Page:魯迅全集01 (1948).pdf/470", "revid": 9458823 },
+            { "page": "Page:魯迅全集01 (1948).pdf/471", "revid": 9685158 },
+            { "page": "Page:魯迅全集01 (1948).pdf/472", "revid": 9829220 },
+            { "page": "Page:魯迅全集01 (1948).pdf/473", "revid": 9829801 },
+            { "page": "Page:魯迅全集01 (1948).pdf/474", "revid": 10145939 },
+            { "page": "Page:魯迅全集01 (1948).pdf/475", "revid": 10146689 },
+            { "page": "Page:魯迅全集01 (1948).pdf/476", "revid": 10147567 },
+            { "page": "Page:魯迅全集01 (1948).pdf/477", "revid": 10148281 },
+            { "page": "Page:魯迅全集01 (1948).pdf/478", "revid": 10595524 },
+            { "page": "Page:魯迅全集01 (1948).pdf/479", "revid": 10596089 },
+            { "page": "Page:魯迅全集01 (1948).pdf/480", "revid": 10596975 },
+            { "page": "Page:魯迅全集01 (1948).pdf/481", "revid": 10598095 },
+            { "page": "Page:魯迅全集01 (1948).pdf/482", "revid": 10604837 },
+            { "page": "Page:魯迅全集01 (1948).pdf/483", "revid": 9458824 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "liue-laocan-youji",
+      "file": "liue-laocan-youji.docx",
+      "title": "老残游记",
+      "author": "刘鹗",
+      "sections": [
+        { "page": "老殘遊記/自敘", "revid": 2598346, "transcludes": [] },
+        { "page": "老殘遊記/第01回", "revid": 2367222, "transcludes": [] },
+        { "page": "老殘遊記/第02回", "revid": 2367223, "transcludes": [] },
+        { "page": "老殘遊記/第03回", "revid": 2367233, "transcludes": [] },
+        { "page": "老殘遊記/第04回", "revid": 2367238, "transcludes": [] },
+        { "page": "老殘遊記/第05回", "revid": 2367240, "transcludes": [] },
+        { "page": "老殘遊記/第06回", "revid": 2367239, "transcludes": [] },
+        { "page": "老殘遊記/第07回", "revid": 2367225, "transcludes": [] },
+        { "page": "老殘遊記/第08回", "revid": 2367237, "transcludes": [] },
+        { "page": "老殘遊記/第09回", "revid": 2367229, "transcludes": [] },
+        { "page": "老殘遊記/第10回", "revid": 2367227, "transcludes": [] },
+        { "page": "老殘遊記/第11回", "revid": 2367228, "transcludes": [] },
+        { "page": "老殘遊記/第12回", "revid": 2367226, "transcludes": [] },
+        { "page": "老殘遊記/第13回", "revid": 2367234, "transcludes": [] },
+        { "page": "老殘遊記/第14回", "revid": 2367224, "transcludes": [] },
+        { "page": "老殘遊記/第15回", "revid": 2367235, "transcludes": [] },
+        { "page": "老殘遊記/第16回", "revid": 2367231, "transcludes": [] },
+        { "page": "老殘遊記/第17回", "revid": 2367236, "transcludes": [] },
+        { "page": "老殘遊記/第18回", "revid": 2367232, "transcludes": [] },
+        { "page": "老殘遊記/第19回", "revid": 2367230, "transcludes": [] },
+        { "page": "老殘遊記/第20回", "revid": 2367241, "transcludes": [] }
+      ]
+    },
+    {
+      "id": "wujingzi-rulin-waishi",
+      "file": "wujingzi-rulin-waishi.docx",
+      "title": "儒林外史",
+      "author": "吴敬梓",
+      "sections": [
+        {
+          "page": "儒林外史/第01回",
+          "revid": 2648156,
+          "editorNoteDigests": [
+            "fe41d8e1de5d2722786c2d848b2416a430bbbd0354d6946d5bb1a5f57ae60683"
+          ],
+          "transcludes": []
+        },
+        { "page": "儒林外史/第02回", "revid": 1565053, "transcludes": [] },
+        {
+          "page": "儒林外史/第03回",
+          "revid": 1565054,
+          "editorNoteDigests": [
+            "2dcb17158620ca81a61e6f091bc20b06e3dad49de6c3089d7d9422d4c2270fcf"
+          ],
+          "transcludes": []
+        },
+        { "page": "儒林外史/第04回", "revid": 1565055, "transcludes": [] },
+        { "page": "儒林外史/第05回", "revid": 1565056, "transcludes": [] },
+        { "page": "儒林外史/第06回", "revid": 1565057, "transcludes": [] },
+        { "page": "儒林外史/第07回", "revid": 1565058, "transcludes": [] },
+        { "page": "儒林外史/第08回", "revid": 1565059, "transcludes": [] },
+        { "page": "儒林外史/第09回", "revid": 1565060, "transcludes": [] },
+        { "page": "儒林外史/第10回", "revid": 1565061, "transcludes": [] },
+        { "page": "儒林外史/第11回", "revid": 1565062, "transcludes": [] },
+        { "page": "儒林外史/第12回", "revid": 1565063, "transcludes": [] },
+        { "page": "儒林外史/第13回", "revid": 2329825, "transcludes": [] },
+        { "page": "儒林外史/第14回", "revid": 1565065, "transcludes": [] },
+        { "page": "儒林外史/第15回", "revid": 1565066, "transcludes": [] },
+        { "page": "儒林外史/第16回", "revid": 1565067, "transcludes": [] },
+        { "page": "儒林外史/第17回", "revid": 1565068, "transcludes": [] },
+        { "page": "儒林外史/第18回", "revid": 1565069, "transcludes": [] },
+        { "page": "儒林外史/第19回", "revid": 1565070, "transcludes": [] },
+        { "page": "儒林外史/第20回", "revid": 1565071, "transcludes": [] },
+        { "page": "儒林外史/第21回", "revid": 1565072, "transcludes": [] },
+        { "page": "儒林外史/第22回", "revid": 1565073, "transcludes": [] },
+        { "page": "儒林外史/第23回", "revid": 1565074, "transcludes": [] },
+        { "page": "儒林外史/第24回", "revid": 1565075, "transcludes": [] },
+        { "page": "儒林外史/第25回", "revid": 1565076, "transcludes": [] },
+        { "page": "儒林外史/第26回", "revid": 1565077, "transcludes": [] },
+        { "page": "儒林外史/第27回", "revid": 2413606, "transcludes": [] },
+        { "page": "儒林外史/第28回", "revid": 1565080, "transcludes": [] },
+        { "page": "儒林外史/第29回", "revid": 1565081, "transcludes": [] },
+        { "page": "儒林外史/第30回", "revid": 1565082, "transcludes": [] },
+        { "page": "儒林外史/第31回", "revid": 1565083, "transcludes": [] },
+        { "page": "儒林外史/第32回", "revid": 1565084, "transcludes": [] },
+        { "page": "儒林外史/第33回", "revid": 1565085, "transcludes": [] },
+        { "page": "儒林外史/第34回", "revid": 1565086, "transcludes": [] },
+        { "page": "儒林外史/第35回", "revid": 1565087, "transcludes": [] },
+        { "page": "儒林外史/第36回", "revid": 1565088, "transcludes": [] },
+        { "page": "儒林外史/第37回", "revid": 1565089, "transcludes": [] },
+        { "page": "儒林外史/第38回", "revid": 1565090, "transcludes": [] },
+        { "page": "儒林外史/第39回", "revid": 1565091, "transcludes": [] },
+        { "page": "儒林外史/第40回", "revid": 1565092, "transcludes": [] },
+        { "page": "儒林外史/第41回", "revid": 2157954, "transcludes": [] },
+        { "page": "儒林外史/第42回", "revid": 1565094, "transcludes": [] },
+        { "page": "儒林外史/第43回", "revid": 1565095, "transcludes": [] },
+        { "page": "儒林外史/第44回", "revid": 1565096, "transcludes": [] },
+        { "page": "儒林外史/第45回", "revid": 1565097, "transcludes": [] },
+        { "page": "儒林外史/第46回", "revid": 1565107, "transcludes": [] },
+        { "page": "儒林外史/第47回", "revid": 1565098, "transcludes": [] },
+        { "page": "儒林外史/第48回", "revid": 1565099, "transcludes": [] },
+        { "page": "儒林外史/第49回", "revid": 1565100, "transcludes": [] },
+        { "page": "儒林外史/第50回", "revid": 1565101, "transcludes": [] },
+        { "page": "儒林外史/第51回", "revid": 1565102, "transcludes": [] },
+        { "page": "儒林外史/第52回", "revid": 1565103, "transcludes": [] },
+        { "page": "儒林外史/第53回", "revid": 1565105, "transcludes": [] },
+        { "page": "儒林外史/第54回", "revid": 1567662, "transcludes": [] },
+        {
+          "page": "儒林外史/第55回",
+          "revid": 1565106,
+          "variantChoice": "五十六回版本",
+          "editorNoteDigests": [
+            "fcecd981f70a40bbb76599c6299caeb2aec7a74bf3516236e39943d39869bff8",
+            "6d5fd2697c307b0e64530a47e597ba8f28e88c0d61a66f3edafd6289186ba476",
+            "7426375890713677431ee7f533e8ca7c71b0811ffff073ecdae165dc37176d88",
+            "83f160b5a11413052ee0fd5b595f4057c2f1e2d424488788355c73f498bfb6cc",
+            "72e87189a830a5dc1af0901326c40db365f114ce02057fd8221c04c48e8fe2d7",
+            "97e0d7181aca852ab936b37ed20ac16ecbe18dd525dde81ce0e2d06f3096f3b7",
+            "ae6d0ea7e1cecb15814227451f2c5b781c561cf24fe12a108ddd9befb63acbaa",
+            "bd845c306fd25d2a5f11d7e53ff110149612dc90b4912f156e86a951056c201b",
+            "f923ddc98cb338c0cfdd02c5c200c1715c0e0e1aa8164a01a3ec607f8ea568fa"
+          ],
+          "transcludes": []
+        },
+        { "page": "儒林外史/第56回", "revid": 1567657, "transcludes": [] }
+      ]
+    }
+  ]
+}
