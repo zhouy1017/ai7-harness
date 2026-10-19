@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createContext, runInContext } from 'node:vm';
-import { createSourceFile, forEachChild, isArrowFunction, isCallExpression, isFunctionDeclaration, isNoSubstitutionTemplateLiteral, isStringLiteral, ModuleKind, ScriptTarget, transpileModule, type Node } from 'typescript';
+import { createSourceFile, forEachChild, isArrowFunction, isCallExpression, isFunctionDeclaration, isNoSubstitutionTemplateLiteral, isStringLiteral, isVariableDeclaration, ModuleKind, ScriptTarget, transpileModule, type Node } from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 import { miniDocument } from '../support/mini-dom.js';
 import { TASK_DRAWER_TITLE } from '../../src/renderer/task-drawer-labels.js';
@@ -10,7 +10,6 @@ import {
   ANALYSIS_PROFILE_NEXT_STEP,
   ANALYSIS_PROFILE_PIN_CODE,
   analysisRefusalView,
-  taskCardRefusalShown,
 } from '../../src/renderer/overview-refusal-labels.js';
 
 const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts', import.meta.url)), 'utf8');
@@ -20,13 +19,16 @@ const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts
 const parsed = createSourceFile('index.ts', RENDERER, ScriptTarget.ES2022, true);
 const helpers = new Map<string, string>();
 const refusals: string[] = [];
+const taskInspections: string[] = [];
 function extract(node: Node): void {
   if (isFunctionDeclaration(node) && node.name !== undefined && [
     'element', 'button', 'rendererErrorData', 'rendererErrorCode', 'rendererErrorMessage',
     'openAgentWorkspaceProfile', 'focusEditorialProfileCard',
   ].includes(node.name.text)) helpers.set(node.name.text, node.getText(parsed));
   if (isArrowFunction(node) && node.parameters[0]?.name.getText(parsed) === 'error' &&
-      /taskCardRefusalShown|analysisRefusalView/u.test(node.body.getText(parsed))) refusals.push(node.getText(parsed));
+      /analysisRefusalView/u.test(node.body.getText(parsed))) refusals.push(node.getText(parsed));
+  if (isVariableDeclaration(node) && node.name.getText(parsed) === 'inspectTaskAuthorization' &&
+      node.initializer !== undefined && isArrowFunction(node.initializer)) taskInspections.push(node.initializer.getText(parsed));
   forEachChild(node, extract);
 }
 extract(parsed);
@@ -46,7 +48,8 @@ const compile = (source: string): string => transpileModule(source, {
   compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.None },
 }).outputText;
 
-function refusalHarness(surface: 'task' | 'overview' | 'analysis', code: string) {
+async function refusalHarness(surface: 'task' | 'overview' | 'analysis', code: string,
+  scope: 'development-ci' | 'ordinary-production' | 'developer-live' | null | 'read-failed' = 'development-ci') {
   miniDocument.body.replaceChildren();
   miniDocument.activeElement = null;
   const host = miniDocument.createElement('div');
@@ -62,38 +65,30 @@ function refusalHarness(surface: 'task' | 'overview' | 'analysis', code: string)
   const scroll = vi.spyOn(card, 'scrollIntoView');
   const navigate = vi.fn(async () => undefined);
   const serviceRead = vi.fn(() => { throw new Error('The next-step button must not call a service operation.'); });
+  const inspectTaskAuthorization = vi.fn(async () => { throw { code, message: '原有拒绝说明。' }; });
+  const getModelServiceSettings = vi.fn(async () => {
+    if (scope === 'read-failed') throw new Error('scope unavailable');
+    return { launchPolicy: { operationalScope: scope } };
+  });
   const context = createContext({
     document: miniDocument, screen: miniDocument.body, performance,
-    window: { setTimeout, ai7: new Proxy({}, { get: serviceRead }) },
+    window: { setTimeout, ai7: surface === 'task' ? { getModelServiceSettings, inspectTaskAuthorization } : new Proxy({}, { get: serviceRead }) },
     host, taskHost: host, analysisHost: host, first: true,
-    bookId: 'book-1', bookTitle: '测试图书', overview: { book: { bookId: 'book-1' } },
+    bookId: 'book-1', bookTitle: '测试图书', overview: { book: { bookId: 'book-1' }, manuscriptState: { state: 'populated' } },
     error: { code, message: '原有拒绝说明。' },
-    analysisRefusalView, taskCardRefusalShown, TASK_DRAWER_TITLE,
+    analysisRefusalView, TASK_DRAWER_TITLE,
     researchUnavailableLine: (_code: string, message: string) => message,
     openBookSection: navigate,
   });
-  const marker = surface === 'task' ? 'taskCardRefusalShown' : surface === 'overview' ? 'analysisHost' : 'host.replaceChildren';
-  const handler = refusals.filter((source) => source.includes(marker));
+  const marker = surface === 'overview' ? 'analysisHost' : 'host.replaceChildren';
+  const handler = surface === 'task' ? taskInspections : refusals.filter((source) => source.includes(marker));
   expect(handler).toHaveLength(1);
   expect(helpers.size).toBe(7);
-  runInContext(compile([...helpers.values(), `const refuse = ${handler[0]}; refuse(error);`].join('\n')), context);
-  return { host, heading, scroll, navigate, serviceRead };
+  await runInContext(compile([...helpers.values(), `const refuse = ${handler[0]}; refuse(error);`].join('\n')), context);
+  return { host, heading, scroll, navigate, serviceRead, inspectTaskAuthorization, getModelServiceSettings };
 }
 
 describe('工作概览 refusals (#992)', () => {
-  it('hides the fixed task card where the development-ci baseline does not apply', () => {
-    expect(taskCardRefusalShown('TASK_LINEAGE_UNAVAILABLE')).toBe(false);
-    expect(taskCardRefusalShown('TASK_POLICY_UNAVAILABLE')).toBe(false);
-  });
-
-  it('keeps the unavailable note for every other refusal and for an error without a code', () => {
-    expect(taskCardRefusalShown('TASK_ARTIFACT_PIN_UNAVAILABLE')).toBe(true);
-    expect(taskCardRefusalShown('TASK_PROVIDER_BINDING_UNAVAILABLE')).toBe(true);
-    expect(taskCardRefusalShown('SERVICE_UNAVAILABLE')).toBe(true);
-    expect(taskCardRefusalShown(null)).toBe(true);
-    expect(taskCardRefusalShown(undefined)).toBe(true);
-  });
-
   it('turns the missing profile pin into a plain next step with one button', () => {
     expect(ANALYSIS_PROFILE_PIN_CODE).toBe('ANALYSIS_ARTIFACT_PIN_UNAVAILABLE');
     const view = analysisRefusalView(ANALYSIS_PROFILE_PIN_CODE, '当前图书尚未固定编辑工作区方案 Revision 2。');
@@ -110,20 +105,32 @@ describe('工作概览 refusals (#992)', () => {
       .toEqual({ text: '无法读取本地图书的基线稿件分析记录。', actionLabel: null });
   });
 
-  it.each(['TASK_LINEAGE_UNAVAILABLE', 'TASK_POLICY_UNAVAILABLE'])('renders no task card or note for %s', (code) => {
-    const { host } = refusalHarness('task', code);
-    expect(host.children).toHaveLength(0);
-    expect(host.textContent).toBe('');
+  it.each(['ordinary-production', 'developer-live'] as const)('does not request or render the baseline task in %s', async (scope) => {
+    for (const code of ['TASK_LINEAGE_UNAVAILABLE', 'TASK_POLICY_UNAVAILABLE']) {
+      const { host, inspectTaskAuthorization, getModelServiceSettings } = await refusalHarness('task', code, scope);
+      expect(getModelServiceSettings).toHaveBeenCalledOnce();
+      expect(inspectTaskAuthorization).not.toHaveBeenCalled();
+      expect(host.children).toHaveLength(0);
+    }
   });
 
-  it('keeps the development-ci sample1 prerequisite card and its refusal text', () => {
-    const { host } = refusalHarness('task', 'TASK_ARTIFACT_PIN_UNAVAILABLE');
-    expect(host.querySelector('.task-authorization-card[data-task-authorization-state="unavailable"]')).not.toBeNull();
-    expect(host.textContent).toContain('原有拒绝说明。');
+  it.each(['TASK_LINEAGE_UNAVAILABLE', 'TASK_POLICY_UNAVAILABLE', 'TASK_ARTIFACT_PIN_UNAVAILABLE', 'SERVICE_UNAVAILABLE'])(
+    'keeps the development-ci prerequisite note for %s (J-03 exact reuse)', async (code) => {
+      const { host, inspectTaskAuthorization } = await refusalHarness('task', code);
+      expect(inspectTaskAuthorization).toHaveBeenCalledOnce();
+      expect(host.querySelector('.task-authorization-card[data-task-authorization-state="unavailable"]')).not.toBeNull();
+      expect(host.textContent).toContain('原有拒绝说明。');
+    },
+  );
+
+  it.each([null, 'read-failed'] as const)('keeps the original task behaviour when scope is %s', async (scope) => {
+    const { host, inspectTaskAuthorization } = await refusalHarness('task', 'TASK_LINEAGE_UNAVAILABLE', scope);
+    expect(inspectTaskAuthorization).toHaveBeenCalledOnce();
+    expect(host.querySelector('[data-task-authorization-state="unavailable"]')).not.toBeNull();
   });
 
-  it.each(['TASK_LINEAGE_UNAVAILABLE', 'TASK_POLICY_UNAVAILABLE'])('J-01 recognizes painted recovery with the task card suppressed for %s (#992)', (code) => {
-    const { host } = refusalHarness('task', code);
+  it('J-01 recognizes painted recovery with the development-ci task note (#992)', async () => {
+    const { host } = await refusalHarness('task', 'TASK_LINEAGE_UNAVAILABLE');
     const imported = miniDocument.createElement('section');
     imported.dataset['screen'] = 'imported';
     const commit = miniDocument.createElement('section');
@@ -137,7 +144,7 @@ describe('工作概览 refusals (#992)', () => {
       visibilityState: 'visible', documentElement: { dataset },
       querySelector: (selector: string) => miniDocument.body.querySelector(selector),
     };
-    expect(document.querySelector('[data-task-authorization-state]')).toBeNull();
+    expect(document.querySelector('[data-task-authorization-state]')).not.toBeNull();
     expect(recoveryPredicates).toHaveLength(1);
     const recovered = () => runInContext(recoveryPredicates[0]!, createContext({ document }));
     expect(recovered()).toBe(true);
@@ -149,12 +156,12 @@ describe('工作概览 refusals (#992)', () => {
     document.visibilityState = 'hidden';
     expect(recovered()).toBe(false);
     document.visibilityState = 'visible';
-    commit.remove();
+    host.replaceChildren();
     expect(recovered()).toBe(false);
   });
 
   it.each(['overview', 'analysis'] as const)('renders the profile next step on %s and only navigates or focuses on click', async (surface) => {
-    const { host, heading, scroll, navigate, serviceRead } = refusalHarness(surface, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE');
+    const { host, heading, scroll, navigate, serviceRead } = await refusalHarness(surface, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE');
     expect(host.textContent).toContain(ANALYSIS_PROFILE_NEXT_STEP);
     expect(host.textContent).not.toContain('原有拒绝说明。');
     const buttons = host.querySelectorAll('button');
@@ -170,8 +177,8 @@ describe('工作概览 refusals (#992)', () => {
     expect(serviceRead).not.toHaveBeenCalled();
   });
 
-  it.each(['overview', 'analysis'] as const)('keeps other refusal text without a next-step button on %s', (surface) => {
-    const { host, navigate, serviceRead } = refusalHarness(surface, 'ANALYSIS_LINEAGE_UNAVAILABLE');
+  it.each(['overview', 'analysis'] as const)('keeps other refusal text without a next-step button on %s', async (surface) => {
+    const { host, navigate, serviceRead } = await refusalHarness(surface, 'ANALYSIS_LINEAGE_UNAVAILABLE');
     expect(host.textContent).toContain('原有拒绝说明。');
     expect(host.querySelector('button')).toBeNull();
     expect(navigate).not.toHaveBeenCalled();

@@ -4301,11 +4301,9 @@ async function main() {
       `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入')`,
       'before-paint-exact-completion',
     );
-    // Issue #992: the development-only Task card is absent where its baseline does not apply.
-    // Recover the painted import presentation regardless of whether that ancillary card is shown.
     await waitFor(
       renderer,
-      `document.visibilityState === 'visible' && document.documentElement.dataset.ai7ImportCompletionPainted === 'true' && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]'))`,
+      `document.visibilityState === 'visible' && document.documentElement.dataset.ai7ImportCompletionPainted === 'true' && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && Boolean(document.querySelector('[data-task-authorization-state]'))`,
       'before-paint-recovery-acknowledged',
     );
     await closeProduct();

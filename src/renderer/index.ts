@@ -280,7 +280,7 @@ import {
   type GlobalAttentionSurface,
 } from './global-attention.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
-import { analysisRefusalView, taskCardRefusalShown } from './overview-refusal-labels.js';
+import { analysisRefusalView } from './overview-refusal-labels.js';
 import {
   SELECTION_TASK_STATUS,
   selectionProcedureEntries,
@@ -3407,9 +3407,20 @@ function renderBookOverview(
 
   const taskHost = element('div');
   taskHost.dataset['taskAuthorizationBookId'] = overview.book.bookId;
-  const inspectTaskAuthorization = (): void => {
+  const inspectTaskAuthorization = async (): Promise<void> => {
     if (!taskHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    void window.ai7.inspectTaskAuthorization().then(
+    // The fixed Task belongs only to the development-ci baseline (ADR 0044, J-03).
+    // Reuse the existing settings projection; an unknown scope retains the original surface (#992).
+    const scope = await window.ai7.getModelServiceSettings().then(
+      (projection) => projection.launchPolicy.operationalScope,
+      () => null,
+    );
+    if (!taskHost.isConnected) return;
+    if (scope === 'ordinary-production' || scope === 'developer-live') {
+      taskHost.replaceChildren();
+      return;
+    }
+    await window.ai7.inspectTaskAuthorization().then(
       (projection) => {
         if (taskHost.isConnected && projection.bookId === taskHost.dataset['taskAuthorizationBookId']) {
           renderTaskAuthorization(taskHost, projection);
@@ -3417,12 +3428,6 @@ function renderBookOverview(
       },
       (error) => {
         if (!taskHost.isConnected) return;
-        // The fixed task is the development-ci baseline surface (ADR 0044, J-03): where that baseline does not
-        // apply there is no card, rather than a note quoting the refusal (Issue #992).
-        if (!taskCardRefusalShown(rendererErrorCode(error))) {
-          taskHost.replaceChildren();
-          return;
-        }
         const unavailable = element('section', 'task-authorization-card attention-note');
         unavailable.dataset['taskAuthorizationState'] = 'unavailable';
         unavailable.append(
