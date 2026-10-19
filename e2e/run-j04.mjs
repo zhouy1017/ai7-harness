@@ -383,6 +383,7 @@ async function startUpdate(renderer, mode, label, name) {
   // The three modes live under 历史与更新, so the editor goes there first, as they would.
   await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const tab=card?.querySelector('[role="tab"][data-analysis-tab="history"]'); if(!(tab instanceof HTMLButtonElement))return false; tab.click(); return tab.getAttribute('aria-selected')==='true' && !card.querySelector('[data-analysis-panel="history"]').hidden; })()`, `${name}-history-tab`);
   await click(renderer, label, `${name}-choose`);
+  if (mode === 'reanalyze-range') await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] [data-analysis-action="reanalyze-range"]')?.disabled===false`, `${name}-selected-plan-ready`);
   await assertRenderer(renderer, `(() => {
     const block=document.querySelector('.baseline-analysis-card [data-update-action=${JSON.stringify(mode)}]');
     const chooser=block?.querySelector('[data-analysis-action=${JSON.stringify(`choose-${mode}`)}]');
@@ -2013,7 +2014,14 @@ async function main() {
       const radio=block?.querySelector('#analysis-range-3');
       const start=block?.querySelector('[data-analysis-action="reanalyze-range"]');
       if(!(radio instanceof HTMLInputElement)||radios.length!==8||radios.some((item)=>item.checked)||!(start instanceof HTMLButtonElement)||!start.disabled||block.dataset.selectedRange) return false;
-      radio.click();
+      radio.click(); return radio.checked && radios.filter((item)=>item.checked).length===1;
+    })()`, 'range-select-input');
+    await waitFor(renderer, `(() => {
+      const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
+      const radios=Array.from(block?.querySelectorAll('input[name="analysis-range"]')??[]);
+      const radio=block?.querySelector('#analysis-range-3');
+      const start=block?.querySelector('[data-analysis-action="reanalyze-range"]');
+      if(!(radio instanceof HTMLInputElement)||!(start instanceof HTMLButtonElement)) return false;
       return radio.checked && radios.filter((item)=>item.checked).length===1 && block.dataset.selectedRange===${JSON.stringify(`${selectedRange.startPosition}-${selectedRange.endPosition}`)} &&
         block.dataset.expectedReused==='5' && block.dataset.expectedRecomputed==='3' && block.dataset.expectedInvalidated==='1' && block.dataset.expectedBypassed==='2' && !start.disabled &&
         block.textContent.includes(${JSON.stringify(`内容块 ${selectedRange.startPosition}–${selectedRange.endPosition}`)});
@@ -3515,7 +3523,12 @@ async function main() {
       const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
       const radio=block?.querySelector('#analysis-range-1');
       if(!(radio instanceof HTMLInputElement)) return false;
-      radio.click();
+      radio.click(); return radio.checked;
+    })()`, 'range-recorded-select-input');
+    await waitFor(renderer, `(() => {
+      const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
+      const radio=block?.querySelector('#analysis-range-1');
+      if(!(radio instanceof HTMLInputElement)) return false;
       return radio.checked && block.dataset.selectedRange===${JSON.stringify(`${SAMPLE1_UNIT_RANGES[0][0]}-${SAMPLE1_UNIT_RANGES[0][1]}`)};
     })()`, 'range-recorded-select');
 
