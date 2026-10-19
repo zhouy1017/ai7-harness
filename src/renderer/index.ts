@@ -282,6 +282,7 @@ import {
   type GlobalAttentionSurface,
 } from './global-attention.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
+import { analysisRefusalView } from './overview-refusal-labels.js';
 import {
   SELECTION_TASK_STATUS,
   selectionProcedureEntries,
@@ -1140,6 +1141,10 @@ function rendererErrorData(error: unknown): RendererErrorData | null {
 
 function hasErrorCode(error: unknown, code: string): boolean {
   return rendererErrorData(error)?.code === code;
+}
+
+function rendererErrorCode(error: unknown): string | null {
+  return rendererErrorData(error)?.code ?? null;
 }
 
 function rendererErrorMessage(error: unknown, fallback: string): string {
@@ -2861,10 +2866,13 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
         }
         const unavailable = element('section', 'baseline-analysis-card attention-note');
         unavailable.dataset['analysisState'] = 'unavailable';
-        unavailable.append(
-          element('h3', undefined, '基线稿件分析'),
-          element('p', undefined, rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。')),
-        );
+        const refusal = analysisRefusalView(rendererErrorCode(error), rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。'));
+        unavailable.append(element('h3', undefined, '基线稿件分析'), element('p', undefined, refusal.text));
+        if (refusal.actionLabel !== null) {
+          const toProfile = button(refusal.actionLabel, 'secondary', () => void openAgentWorkspaceProfile(bookId, bookTitle));
+          toProfile.dataset['profileAction'] = 'go-to-profile';
+          unavailable.append(toProfile);
+        }
         host.replaceChildren(unavailable);
       },
     );
@@ -3401,9 +3409,20 @@ function renderBookOverview(
 
   const taskHost = element('div');
   taskHost.dataset['taskAuthorizationBookId'] = overview.book.bookId;
-  const inspectTaskAuthorization = (): void => {
+  const inspectTaskAuthorization = async (): Promise<void> => {
     if (!taskHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    void window.ai7.inspectTaskAuthorization().then(
+    // The fixed Task belongs only to the development-ci baseline (ADR 0044, J-03).
+    // Reuse the existing settings projection; an unknown scope retains the original surface (#992).
+    const scope = await window.ai7.getModelServiceSettings().then(
+      (projection) => projection.launchPolicy.operationalScope,
+      () => null,
+    );
+    if (!taskHost.isConnected) return;
+    if (scope === 'ordinary-production' || scope === 'developer-live') {
+      taskHost.replaceChildren();
+      return;
+    }
+    await window.ai7.inspectTaskAuthorization().then(
       (projection) => {
         if (taskHost.isConnected && projection.bookId === taskHost.dataset['taskAuthorizationBookId']) {
           renderTaskAuthorization(taskHost, projection);
@@ -3447,10 +3466,14 @@ function renderBookOverview(
       (error) => {
         if (!analysisHost.isConnected) return;
         analysisHost.dataset['analysisState'] = 'unavailable';
-        analysisHost.replaceChildren(
-          element('h3', undefined, '分析'),
-          element('p', 'attention-note', rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。')),
-        );
+        const refusal = analysisRefusalView(rendererErrorCode(error), rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。'));
+        analysisHost.replaceChildren(element('h3', undefined, '分析'), element('p', 'attention-note', refusal.text));
+        if (refusal.actionLabel !== null) {
+          // Already on 工作概览: the profile card is on this screen, so the button only brings it into view.
+          const toProfile = button(refusal.actionLabel, 'secondary', () => void focusEditorialProfileCard(overview.book.bookId));
+          toProfile.dataset['profileAction'] = 'go-to-profile';
+          analysisHost.append(toProfile);
+        }
       },
     );
   };
@@ -6897,6 +6920,11 @@ async function openAgentWorkspaceMarks(promotion: AgentWorkspacePromotionProject
 /** 前往编辑工作区方案: 工作概览 with the profile card, where Revision 2 is enabled for the Book, in view. */
 async function openAgentWorkspaceProfile(bookId: string, bookTitle: string): Promise<void> {
   await openBookSection({ bookId, title: bookTitle }, 'overview');
+  await focusEditorialProfileCard(bookId);
+}
+
+/** The profile card of the 工作概览 on screen, focused by its heading and scrolled into view once it has been drawn. */
+async function focusEditorialProfileCard(bookId: string): Promise<void> {
   const card = await new Promise<HTMLElement | null>((resolveCard) => {
     const started = performance.now();
     const look = (): void => {
