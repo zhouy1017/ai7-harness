@@ -9,7 +9,7 @@ import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_FRAME_BYTES, EVALUATION
 import { serializedBytes } from '../../src/service/analysis/baseline-analysis-wire.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
 import { baselineAnalysisPlan, evaluationRewritePlan, reviewWorkspaceWire, taskPlanOutbound, taskPlanWire, withAnswerBlockers, withResend } from '../../src/service/task-plan.js';
-import { encodeServiceResponse } from '../../src/service/request-frames.js';
+import { decodeRequest, encodeServiceResponse, ProtocolError } from '../../src/service/request-frames.js';
 import { appendTaskPlanPage } from '../../src/renderer/analysis-paging.js';
 import { longSettledAnalysis } from '../support/long-baseline-analysis.js';
 import type { ClarificationFacts } from '../../src/service/analysis/clarifications.js';
@@ -274,6 +274,19 @@ it('pages the 500 retained drafts a Book lists, each saved for real, and refuses
       .toThrow(/任务草稿已变化/u);
   } finally { store.close(); await roots.dispose(); }
 }, 120_000);
+
+it('admits a page read only of a declared kind, naming its Task unless it reads a Book-wide list', () => {
+  const frame = (input: Record<string, unknown>) => new TextEncoder().encode(JSON.stringify({ id: ID, op: 'getTaskPlanPage', input }));
+  const read = { bookId: ID, kind: 'baseline-analysis', ref: ID, path: 'technical.0.value', afterOrdinal: 0, digest: 'a'.repeat(64) };
+  expect(decodeRequest(frame(read))).toEqual({ id: ID, op: 'getTaskPlanPage', input: read });
+  for (const bookWide of [{ kind: 'task-intent-drafts', path: 'drafts' }, { kind: 'review-run', path: 'scopeOptions.chapters.chapters' }]) {
+    expect(decodeRequest(frame({ ...read, ...bookWide, ref: null })).op).toBe('getTaskPlanPage');
+  }
+  for (const refused of [{ ...read, ref: null }, { ...read, kind: 'review-run', ref: null }, { ...read, kind: 'unknown' },
+    { ...read, digest: 'A'.repeat(64) }, { ...read, afterOrdinal: -1 }, { ...read, extra: true }]) {
+    expect(() => decodeRequest(frame(refused))).toThrow(ProtocolError);
+  }
+});
 
 it('keeps sample1 plan and chapter projections byte-identical without additional reads', async () => {
   const roots = await createServiceTestRoots('ai7-short-task-wire-');
