@@ -15,6 +15,8 @@ import type {
   TaskPlanProjection,
   TaskPlanRunControlProjection,
 } from '../shared/protocol.js';
+import { appendTaskPlanPage } from './analysis-paging.js';
+import { TASK_PAGE_FAILED, TASK_PAGE_NAMES, taskPageMore } from './task-paging-labels.js';
 import { isStartWhenOnlineTaskKind } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { mountTaskComposer, mountTaskPanel, type ComposerRange, type TaskComposerSeed } from './task-panel.js';
@@ -211,6 +213,7 @@ type DrawerApi = Pick<
   | 'inspectBookTasks'
   | 'inspectBaselineAnalysis'
   | 'inspectTaskPlan'
+  | 'getTaskPlanPage'
   | 'resolveUnconfirmedOutcomes'
   | 'authorizeTaskAuthorization'
   | 'authorizeBaselineAnalysis'
@@ -754,6 +757,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
       ...(next.edit.lastEdit === null ? [] : [el('p', 'field-note task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit))]),
       mode === 'compact' ? compactBlock(next) : fullBlock(next),
+      ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.')).flatMap((path) => {
+        const button = pageControl(next, path, TASK_PAGE_NAMES[path] ?? path);
+        return button === null ? [] : [button];
+      }),
     );
     if (technicalOpen) {
       const details = body.querySelector<HTMLDetailsElement>('details.task-plan-technical');
@@ -1171,9 +1178,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
 
   function technicalBlock(next: TaskPlanProjection): HTMLElement {
     const rows: HTMLElement[] = [];
-    for (const row of next.technical) {
+    for (const [index, row] of next.technical.entries()) {
       const value = el('dd', 'technical-identity', row.value);
       value.dataset['taskPlanTechnical'] = row.key;
+      const more = pageControl(next, `technical.${index}.value`, row.label);
+      if (more !== null) value.append(more);
       rows.push(el('dt', undefined, row.label), value);
     }
     const notDo = el('dd', 'technical-identity', next.notDo.technical.join('；'));
@@ -1183,6 +1192,28 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     disclosure.classList.add('task-plan-technical');
     disclosure.querySelector('summary')?.setAttribute('data-task-drawer-control', 'technical');
     return disclosure;
+  }
+
+  function pageControl(next: TaskPlanProjection, path: string, name: string): HTMLButtonElement | null {
+    const meta = next.listPages?.[path];
+    if (meta === undefined || meta.nextOrdinal === null) return null;
+    const button = control(taskPageMore(name, meta.shown, meta.total), 'secondary', `page-${path.replaceAll('.', '-')}`);
+    button.disabled = working || interrupted;
+    button.addEventListener('click', () => {
+      if (plan !== next) return;
+      button.disabled = true;
+      clearPoll();
+      void api.getTaskPlanPage({ kind: next.kind, ref: next.ref, path, afterOrdinal: meta.nextOrdinal!, digest: meta.digest }).then((page) => {
+        if (plan !== next || root.hidden) return;
+        paint(appendTaskPlanPage(next, page), true);
+      }).catch((error: unknown) => {
+        if (plan !== next || root.hidden) return;
+        button.disabled = false;
+        options.setStatus(options.errorMessage(error, TASK_PAGE_FAILED), 'error');
+        schedulePoll(next);
+      });
+    });
+    return button;
   }
 
   // ---- the authorization bar (Issue #420, S74a) -------------------------------------------------------

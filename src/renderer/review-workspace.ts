@@ -1,4 +1,6 @@
 import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSizeText, similarMaterialsField } from './task-material-selection.js';
+import { appendTaskPlanPage } from './analysis-paging.js';
+import { TASK_PAGE_FAILED, taskPageMore } from './task-paging-labels.js';
 import { LEARNING_AUDIT_KIND_LABELS } from './learning-audit-labels.js';
 import {
   MAX_BATCH_APPLY_SUGGESTIONS,
@@ -234,7 +236,7 @@ export interface ReviewWorkspaceSurface {
 type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries'>> & Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' |
-  'inspectTaskPlan' | 'quickStartReviewRun' | 'searchReferableMaterials' |
+  'inspectTaskPlan' | 'getTaskPlanPage' | 'quickStartReviewRun' | 'searchReferableMaterials' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
@@ -2154,6 +2156,28 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
     const fromSelect = chapterSelect('from');
     const toSelect = chapterSelect('to');
+    const path = 'scopeOptions.chapters.chapters';
+    const chapterPage = workspace.listPages?.[path];
+    if (chapterPage !== undefined && chapterPage.nextOrdinal !== null) {
+      const more = el('button', 'secondary', taskPageMore('章节', chapterPage.shown, chapterPage.total));
+      more.type = 'button';
+      more.dataset['reviewChapterPage'] = '';
+      more.addEventListener('click', () => {
+        more.disabled = true;
+        void api.getTaskPlanPage({ kind: 'review-run', ref: workspace.run?.reviewRunId ?? null, path,
+          afterOrdinal: chapterPage.nextOrdinal!, digest: chapterPage.digest }).then((page) => {
+          if (destroyed || sheetState !== state || projection !== workspace) return;
+          projection = appendTaskPlanPage(workspace, page);
+          renderSheet(projection, state);
+          sheet.querySelector<HTMLElement>('[data-review-chapter-page]')?.focus();
+        }).catch((error: unknown) => {
+          if (destroyed || sheetState !== state) return;
+          more.disabled = false;
+          options.setStatus(options.errorMessage(error, TASK_PAGE_FAILED), 'error');
+        });
+      });
+      range.append(more);
+    }
     scopes.append(range);
 
     const { field: materialField, inputs: materialInputs, items: materialItems } = reviewMaterialsField(workspace.materials, state, updateSheet);

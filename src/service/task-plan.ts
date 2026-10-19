@@ -1,5 +1,116 @@
 import { housePreferenceLabel } from './house-review-preference.js';
-import type { FrozenSeriesScope } from '../shared/protocol.js';
+import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
+import { canonicalJson, requireAnalysis, sha256Hex } from './analysis/canonical.js';
+import { MAX_FRAME_BYTES } from '../shared/protocol.js';
+import type { FrozenSeriesScope, ReviewWorkspaceProjection } from '../shared/protocol.js';
+
+const TASK_PLAN_LIST_PATHS = ['drift.entries', 'edit.lastEdit.entries', 'resend.units', 'unconfirmed.ranges',
+  'runControl.outcomeUnknown.units', 'runControl.continuation.pendingAnswerUnits', 'clarifications'] as const;
+
+function taskPlanValue(plan: unknown, path: string): unknown {
+  let value = plan;
+  for (const key of path.split('.')) {
+    if (value === null || typeof value !== 'object' || !Object.hasOwn(value, key)) return undefined;
+    value = (value as Record<string, unknown>)[key];
+  }
+  return value;
+}
+
+function replaceTaskPlanValue(plan: unknown, path: string, value: unknown): void {
+  const keys = path.split('.');
+  let parent = plan as Record<string, unknown>;
+  for (const key of keys.slice(0, -1)) parent = parent[key] as Record<string, unknown>;
+  parent[keys.at(-1)!] = value;
+}
+
+function taskPlanPaths(plan: TaskPlanProjection): string[] {
+  return [...TASK_PLAN_LIST_PATHS, ...plan.technical.map((_, index) => `technical.${index}.value`), 'resend.statement'];
+}
+
+function planValuePage(value: ReadonlyArray<unknown> | string, afterOrdinal: number, budget: number, inline = false) {
+  if (typeof value === 'string') {
+    const points = [...value];
+    const selected: string[] = [];
+    let bytes = 2;
+    for (const point of points.slice(afterOrdinal)) {
+      const size = serializedBytes(point) - 2;
+      if (bytes + size > budget) break;
+      selected.push(point); bytes += size;
+    }
+    const end = afterOrdinal + selected.length;
+    return { items: selected.join(''), shown: selected.length, total: points.length, nextOrdinal: end < points.length ? end : null };
+  }
+  const indexed = value.map((item, index) => ({ item, ordinal: index + 1 }));
+  const page = analysisBytePage(indexed, afterOrdinal, (row) => row.ordinal, budget, inline);
+  return { items: page.items.map((row) => row.item),
+    shown: page.items.length, total: indexed.length, nextOrdinal: page.next };
+}
+
+/** Snapshot-pinned, read-only paging of the drawer's own complete derivation. */
+export function taskPlanPage(plan: TaskPlanProjection, path: string, afterOrdinal: number, digest: string) {
+  requireAnalysis(taskPlanPaths(plan).includes(path), 'TASK_PLAN_PAGE_INVALID', '任务计划读取范围无效。');
+  const value = taskPlanValue(plan, path);
+  requireAnalysis(typeof value === 'string' || Array.isArray(value), 'TASK_PLAN_PAGE_INVALID', '任务计划读取范围无效。');
+  requireAnalysis(sha256Hex(canonicalJson(value)) === digest, 'TASK_PLAN_PAGE_CHANGED', '任务计划已变化，请重新打开计划。');
+  const page = planValuePage(value, afterOrdinal, 64 * 1024);
+  requireAnalysis(afterOrdinal <= page.total, 'TASK_PLAN_PAGE_INVALID', '任务计划读取位置无效。');
+  return { path, items: page.items, nextOrdinal: page.nextOrdinal, digest };
+}
+
+export const REVIEW_CHAPTER_PAGE_PATH = 'scopeOptions.chapters.chapters';
+export function reviewWorkspacePage(workspace: ReviewWorkspaceProjection, afterOrdinal: number, digest: string) {
+  const value = workspace.scopeOptions.chapters.chapters;
+  requireAnalysis(sha256Hex(canonicalJson(value)) === digest, 'TASK_PLAN_PAGE_CHANGED', '章节已变化，请重新打开审阅。');
+  const page = planValuePage(value, afterOrdinal, 64 * 1024);
+  requireAnalysis(afterOrdinal <= page.total, 'TASK_PLAN_PAGE_INVALID', '章节读取位置无效。');
+  return { path: REVIEW_CHAPTER_PAGE_PATH, items: page.items, nextOrdinal: page.nextOrdinal, digest };
+}
+
+export function reviewWorkspaceWire(workspace: ReviewWorkspaceProjection): ReviewWorkspaceProjection {
+  const chapters = workspace.scopeOptions.chapters.chapters;
+  if (serializedBytes(chapters) <= 64 * 1024 && serializedBytes(workspace) <= MAX_FRAME_BYTES - 72 * 1024) return workspace;
+  let share = 32 * 1024;
+  for (;;) {
+    const page = planValuePage(chapters, 0, share, true);
+    const wire = { ...workspace, scopeOptions: { ...workspace.scopeOptions, chapters: { ...workspace.scopeOptions.chapters,
+      chapters: page.items as ReviewWorkspaceProjection['scopeOptions']['chapters']['chapters'] } },
+      listPages: { [REVIEW_CHAPTER_PAGE_PATH]: { shown: page.shown, total: page.total, nextOrdinal: page.nextOrdinal,
+        digest: sha256Hex(canonicalJson(chapters)) } } };
+    if (serializedBytes(wire) <= MAX_FRAME_BYTES - 72 * 1024) return wire;
+    requireAnalysis(share > 0, 'TASK_PLAN_SUMMARY_TOO_LARGE', '审阅摘要超出可读取范围。');
+    share = share < 256 ? 0 : Math.floor(share / 2);
+  }
+}
+
+/** The transport edge alone bounds large values; short-book values are returned byte for byte. */
+export function taskPlanWire(plan: TaskPlanProjection): TaskPlanProjection {
+  let share = 32 * 1024;
+  for (;;) {
+    const wire = structuredClone(plan);
+    const pages: Record<string, NonNullable<TaskPlanProjection['listPages']>[string]> = {};
+    for (const path of taskPlanPaths(plan)) {
+      const value = taskPlanValue(plan, path);
+      if (!(typeof value === 'string' || Array.isArray(value)) || serializedBytes(value) <= share) continue;
+      const page = planValuePage(value, 0, share, true);
+      replaceTaskPlanValue(wire, path, page.items);
+      pages[path] = { shown: page.shown, total: page.total, nextOrdinal: page.nextOrdinal, digest: sha256Hex(canonicalJson(value)) };
+    }
+    if (Object.keys(pages).length > 0) wire.listPages = pages;
+    if (serializedBytes(wire) <= MAX_FRAME_BYTES - 72 * 1024) return wire;
+    requireAnalysis(share > 0, 'TASK_PLAN_SUMMARY_TOO_LARGE', '任务计划摘要超出可读取范围。');
+    share = share < 256 ? 0 : Math.floor(share / 2);
+  }
+}
+
+export function taskPlanOutbound(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if ('technical' in value && 'start' in value && 'edit' in value && 'ref' in value) return taskPlanWire(value as TaskPlanProjection);
+  if ('scopeOptions' in value && 'categories' in value && 'bookId' in value) return reviewWorkspaceWire(value as ReviewWorkspaceProjection);
+  const record = value as Record<string, unknown>;
+  let mapped = record;
+  for (const key of ['result', 'projection'] as const) if (key in record) mapped = { ...mapped, [key]: taskPlanOutbound(record[key]) };
+  return mapped;
+}
 
 import { researchDecisionLine } from '../shared/research-status.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';

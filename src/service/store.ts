@@ -692,7 +692,7 @@ import { FACTUAL_VERIFICATION_POLICY_VERSION, sliceGraphemes } from './analysis/
 import { factualFindingId } from './analysis/factual-review-reducers.js';
 import type { FactualCorrectionEntry, FactualEvidenceRelation, FactualUnitAssertionV2 } from './analysis/factual-review-contract-v2.js';
 import { planEditAssuranceLevel, planEditsOf } from './analysis/plan-edits.js';
-import { assuranceSelector } from './task-plan.js';
+import { assuranceSelector, taskPlanPage, reviewWorkspacePage, REVIEW_CHAPTER_PAGE_PATH } from './task-plan.js';
 import {
   CORRECTION_ASSURANCE_INCOMPLETE_LABEL,
   FACTUAL_VERIFICATION_OUTCOMES,
@@ -6143,6 +6143,18 @@ export class EditorialStore {
    */
   inspectTaskPlan(input: InspectTaskPlanInput, progress?: ProgressReader): TaskPlanProjection {
     return this.#taskPlanWithRoute(input, progress).plan;
+  }
+
+  getTaskPlanPage(input: import('../shared/protocol.js').ServiceOperationMap['getTaskPlanPage']['input']) {
+    return this.#analysisCall(() => {
+      requireStore(Number.isSafeInteger(input.afterOrdinal) && input.afterOrdinal >= 0, 'TASK_PLAN_PAGE_INVALID', '任务计划读取位置无效。');
+      if (input.path === REVIEW_CHAPTER_PAGE_PATH) {
+        requireStore(input.kind === 'review-run', 'TASK_PLAN_PAGE_INVALID', '章节读取范围无效。');
+        return reviewWorkspacePage(this.inspectReviewWorkspace(input.bookId, input.ref), input.afterOrdinal, input.digest);
+      }
+      requireStore(input.ref !== null, 'TASK_PLAN_PAGE_INVALID', '任务计划读取范围无效。');
+      return taskPlanPage(this.inspectTaskPlan(input), input.path, input.afterOrdinal, input.digest);
+    });
   }
 
   /**

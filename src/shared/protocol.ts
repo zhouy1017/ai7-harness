@@ -5,7 +5,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 160 as const;
+export const SERVICE_PROTOCOL_VERSION = 161 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -142,6 +142,7 @@ export const IPC_CHANNELS = {
   enableEditorialWorkspaceProfile: 'ai7:j15:enable-editorial-workspace-profile',
   inspectTaskAuthorization: 'ai7:j03:inspect-task-authorization',
   inspectTaskPlan: 'ai7:j03:inspect-task-plan',
+  getTaskPlanPage: 'ai7:tasks:get-task-plan-page',
   resolveUnconfirmedOutcomes: 'ai7:j10:resolve-unconfirmed-outcomes',
   inspectForegroundExecutionBoundary: 'ai7:j03:inspect-foreground-execution-boundary',
   prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
@@ -6755,6 +6756,7 @@ export interface TaskMaterialOffersProjection {
  * basis, the coverage matrix, the scope options, the 审阅记录, and the opened Run.
  */
 export interface ReviewWorkspaceProjection {
+  listPages?: TaskPlanProjection['listPages'];
   /** Eligible local references offered separately from manuscript scope (Issue #428). */
   materials?: TaskMaterialOffersProjection;
   bookId: string;
@@ -7223,6 +7225,8 @@ export interface TaskPlanDriftEntryProjection {
  * drawer's authorization bar offers, and only the bar's own activation records anything (Issue #420).
  */
 export interface TaskPlanProjection {
+  /** Transport-only pages; derivation and authority records remain complete. String cursors count Unicode code points. */
+  listPages?: Readonly<Record<string, { shown: number; total: number; nextOrdinal: number | null; digest: string }>>;
   readonly seriesScopes?: ReadonlyArray<FrozenSeriesScope>;
   bookId: string;
   kind: TaskPlanKind;
@@ -13508,6 +13512,10 @@ export interface ServiceOperationMap {
    * the baseline analysis, or a Review Run — in the editor's words. A read; it records nothing.
    */
   inspectTaskPlan: { input: InspectTaskPlanInput; output: TaskPlanProjection };
+  getTaskPlanPage: {
+    input: InspectTaskPlanInput & { path: string; afterOrdinal: number; digest: string };
+    output: { path: string; items: ReadonlyArray<unknown> | string; nextOrdinal: number | null; digest: string };
+  };
   /**
    * 保留为缺口 (Issue #757; Manual Outcome Resolution): the editor keeps as gaps exactly the 结果待确认 the plan of this kind
    * listed, by its digest; the answer is that plan read again.
@@ -14508,6 +14516,7 @@ export interface RendererApi {
   inspectTaskAuthorization(): Promise<TaskAuthorizationProjection>;
   /** The Task Drawer's plan of one Task of the Book the window is showing (Issue #418). */
   inspectTaskPlan(input: Omit<InspectTaskPlanInput, 'bookId'>): Promise<TaskPlanProjection>;
+  getTaskPlanPage(input: Omit<ServiceOperationMap['getTaskPlanPage']['input'], 'bookId'>): Promise<ServiceOperationMap['getTaskPlanPage']['output']>;
   resolveUnconfirmedOutcomes(input: Omit<InspectTaskPlanInput, 'bookId'> & { digest: string }): Promise<TaskPlanProjection>;
   inspectForegroundExecutionBoundary(input: Omit<
     ServiceOperationMap['inspectForegroundExecutionBoundary']['input'],
