@@ -12,18 +12,18 @@ export const serializedBytes = (value: unknown): number => Buffer.byteLength(JSO
 
 /** The cursor is exclusive. Never split an item or return a non-advancing page. */
 export function analysisBytePage<T>(items: ReadonlyArray<T>, after: number, ordinal: (item: T) => number,
-  budget = ANALYSIS_PAGE_BYTES): { items: T[]; next: number | null } {
+  budget = ANALYSIS_PAGE_BYTES, allowEmpty = false): { items: T[]; next: number | null } {
   const remaining = items.filter((item) => ordinal(item) > after);
   const selected: T[] = [];
   let bytes = 2;
   for (const item of remaining) {
     const size = serializedBytes(item) + (selected.length === 0 ? 0 : 1);
-    if (selected.length > 0 && bytes + size > budget) break;
+    if ((selected.length > 0 || allowEmpty) && bytes + size > budget) break;
     requireAnalysis(size + 2 <= ANALYSIS_PAGE_BYTES, 'ANALYSIS_PAGE_ITEM_TOO_LARGE', '这个阅读范围的分析结果超出可读取范围。');
     selected.push(item);
     bytes += size;
   }
-  return { items: selected, next: selected.length < remaining.length ? ordinal(selected.at(-1)!) : null };
+  return { items: selected, next: selected.length < remaining.length ? (selected.length === 0 ? after : ordinal(selected.at(-1)!)) : null };
 }
 
 function gapSummary(gap: AnalysisGapProjection): AnalysisGapSummaryProjection {
@@ -32,9 +32,9 @@ function gapSummary(gap: AnalysisGapProjection): AnalysisGapSummaryProjection {
 }
 
 export function revisionUnitsPage(revision: BaselineAnalysisResultSetRevisionProjection, afterOrdinal: number,
-  budget = ANALYSIS_PAGE_BYTES) {
+  budget = ANALYSIS_PAGE_BYTES, inline = false) {
   const units = revision.units.map((unit) => unit.state === 'gap' ? { ...unit, gap: gapSummary(unit.gap) } : unit);
-  const page = analysisBytePage(units, afterOrdinal, (unit) => unit.unitOrdinal, budget);
+  const page = analysisBytePage(units, afterOrdinal, (unit) => unit.unitOrdinal, budget, inline);
   return { revisionId: revision.revisionId, units: page.items, next: page.next };
 }
 
@@ -100,7 +100,7 @@ function reportSummary(report: RunReportProjection | null, history: boolean): An
 
 export function analysisRevisionWire(revision: BaselineAnalysisResultSetRevisionProjection, overviewBudget = INLINE_OVERVIEW_BYTES): AnalysisRevisionWireProjection {
   const { units, gaps, sections, synthesis, ...rest } = revision;
-  const page = revisionUnitsPage(revision, 0, serializedBytes(units) <= 96 * 1024 ? 96 * 1024 : INLINE_UNIT_BYTES);
+  const page = revisionUnitsPage(revision, 0, serializedBytes(units) <= 96 * 1024 ? 96 * 1024 : INLINE_UNIT_BYTES, true);
   const overview = overviewTransfer(revision);
   const totalLength = overview.totalLength;
   const chunkCount = overview.bytes <= overviewBudget ? 0 : overview.chunks.length;

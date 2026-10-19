@@ -1,3 +1,4 @@
+import { AnalysisError } from './analysis/canonical.js';
 import { baselineAnalysisOutbound } from './analysis/baseline-analysis-wire.js';
 import type { ServiceResponse } from '../shared/protocol.js';
 import { isAbsolute } from 'node:path';
@@ -89,7 +90,13 @@ const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
 /** Outbound mapping precedes the unchanged hard frame guard. */
 export function encodeServiceResponse(response: ServiceResponse): Buffer {
-  let payload = Buffer.from(JSON.stringify(baselineAnalysisOutbound(response)), 'utf8');
+  let mapped: unknown;
+  try { mapped = baselineAnalysisOutbound(response); }
+  catch (error) {
+    if (!(error instanceof AnalysisError)) throw error;
+    mapped = { id: response.id, ok: false, error: { code: error.code, message: error.message } };
+  }
+  let payload = Buffer.from(JSON.stringify(mapped), 'utf8');
   if (payload.length > MAX_FRAME_BYTES && response.ok) {
     payload = Buffer.from(JSON.stringify({ id: response.id, ok: false,
       error: { code: 'RESPONSE_TOO_LARGE', message: '服务响应超出安全范围。' } }), 'utf8');

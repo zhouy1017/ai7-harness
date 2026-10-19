@@ -1,4 +1,4 @@
-import { encodeServiceResponse } from '../../src/service/request-frames.js';
+import { decodeRequest, encodeServiceResponse, ProtocolError } from '../../src/service/request-frames.js';
 import { expect, it } from 'vitest';
 import { MAX_FRAME_BYTES } from '../../src/shared/protocol.js';
 import { baselineAnalysisOutbound, baselineAnalysisWire, baselineAnalysisSummaryPage, analysisOverviewPage, analysisOverviewText, revisionUnitsPage,
@@ -108,4 +108,36 @@ it('shrinks inline lists further when they compete for the same reply budget', (
   expect(serializedBytes(reduced)).toBeLessThanOrEqual(96 * 1024);
   expect(reduced.resultSetRevision!.unitPage.total).toBe(normal.resultSetRevision!.unitPage.total);
   expect(reduced.listPages['coverageManifest.units']!.total).toBe(400);
+});
+
+it('leaves a large first unit for the detail read instead of failing the enclosing analysis reply', () => {
+  const full = longSettledAnalysis(longPreparedAnalysis(120), 1, false);
+  const first = full.resultSetRevision!.units[0]!;
+  if (first.state !== 'closed') throw new Error('closed synthetic unit required');
+  first.synopsis = '甲'.repeat(50_000);
+  const wire = baselineAnalysisWire(full);
+  expect(wire.resultSetRevision!.unitPage).toEqual({ shown: 0, total: 8, nextOrdinal: 0 });
+  expect(serializedBytes(wire)).toBeLessThanOrEqual(MAX_FRAME_BYTES - 64 * 1024);
+  expect(revisionUnitsPage(full.resultSetRevision!, 0).units[0]).toEqual(first);
+});
+
+it('validates all readonly page cursors through the real request decoder', () => {
+  const bookId = '00000000-0000-4000-8000-000000000001';
+  const taskIntentId = '00000000-0000-4000-8000-000000000002';
+  const revisionId = '00000000-0000-4000-8000-000000000003';
+  const requests = [
+    { op: 'getCoverageManifestUnits', input: { bookId, taskIntentId, afterOrdinal: 0 } },
+    { op: 'getAnalysisRevisionUnits', input: { bookId, revisionId, afterOrdinal: 0 } },
+    { op: 'getAnalysisRevisionOverview', input: { bookId, revisionId, afterIndex: 0 } },
+    { op: 'getAnalysisRunReportRows', input: { bookId, taskIntentId, afterOrdinal: 0 } },
+    { op: 'getBaselineAnalysisRangePlan', input: { bookId, unitOrdinal: 1 } },
+    { op: 'getBaselineAnalysisPage', input: { bookId, taskIntentId, revisionId: null, path: 'history.entries', afterOrdinal: 0 } },
+  ];
+  for (const request of requests) {
+    const frame = { id: taskIntentId, ...request };
+    expect(decodeRequest(Buffer.from(JSON.stringify(frame)))).toEqual(frame);
+    expect(() => decodeRequest(Buffer.from(JSON.stringify({ ...frame, input: { ...frame.input, bookId: 'foreign' } })))).toThrow(ProtocolError);
+    const cursor = 'afterIndex' in request.input ? 'afterIndex' : 'unitOrdinal' in request.input ? 'unitOrdinal' : 'afterOrdinal';
+    expect(() => decodeRequest(Buffer.from(JSON.stringify({ ...frame, input: { ...frame.input, [cursor]: -1 } })))).toThrow(ProtocolError);
+  }
 });

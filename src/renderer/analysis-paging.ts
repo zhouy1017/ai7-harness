@@ -19,7 +19,9 @@ export async function hydrateAnalysisRevision(api: Pick<RendererApi, 'getAnalysi
   const text = chunks.join('');
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))),
     (value) => value.toString(16).padStart(2, '0')).join('');
-  if (cursor !== null || chunks.length !== expected.chunkCount || Array.from(text).length !== expected.totalLength || digest !== expected.sha256) {
+  let totalLength = 0;
+  for (const _point of text) totalLength += 1;
+  if (cursor !== null || chunks.length !== expected.chunkCount || totalLength !== expected.totalLength || digest !== expected.sha256) {
     throw new Error(ANALYSIS_READ_FAILED);
   }
   const overview = JSON.parse(text) as Pick<HydratedAnalysisRevisionProjection, 'sections' | 'synthesis'>;
