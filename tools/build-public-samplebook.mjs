@@ -17,8 +17,11 @@ import { strToU8, zipSync } from 'fflate';
  * `Page:` pages (ProofreadPage) the revision of each one. A build fetches every pinned revision through
  * `action=parse&oldid=<revid>&variant=zh-hans` — MediaWiki's own LanguageConverter does the simplified
  * conversion — keeps the section's title and its original paragraphs, and writes the DOCX deterministically.
- * Navigation and header templates, license boxes, reference markers and every 注释 section are dropped; an
- * element the rules below do not name refuses the build rather than being guessed at.
+ * Navigation and header templates, license boxes, images, reference markers and every 注释 section are
+ * dropped; an element the rules below do not name refuses the build rather than being guessed at. What a
+ * page loses beyond that furniture — its footnote markers, every Wikisource note, the paragraph of an edition
+ * not kept — must be declared in its manifest entry (`footnotes`, `editorNotes`, `variantChoice`), or the
+ * build refuses.
  *
  * `--cache` names a directory outside the checkout where the raw API responses are kept, so a second build
  * reads them instead of the network and yields byte-identical files; raw responses never enter the
@@ -94,6 +97,11 @@ export function validateManifest(manifest, { pinned = true } = {}) {
       if ((section.section === undefined) !== (section.sectionTitle === undefined)) fail(`${work.id}: ${section.page} needs section and sectionTitle together`);
       if (section.section !== undefined && (!isPositiveInteger(section.section) || !nonEmptyString(section.sectionTitle))) {
         fail(`${work.id}: ${section.page} has a malformed section`);
+      }
+      if (section.variantChoice !== undefined && !nonEmptyString(section.variantChoice)) fail(`${work.id}: ${section.page} has a malformed variantChoice`);
+      if (section.footnotes !== undefined && !isPositiveInteger(section.footnotes)) fail(`${work.id}: ${section.page} has a malformed footnotes count`);
+      if (section.editorNotes !== undefined && (!Array.isArray(section.editorNotes) || section.editorNotes.length === 0 || !section.editorNotes.every(nonEmptyString))) {
+        fail(`${work.id}: ${section.page} has a malformed editorNotes list`);
       }
       if (section.transcludes === undefined) {
         if (pinned) fail(`${work.id}: ${section.page} has no transcludes list`);
@@ -195,6 +203,10 @@ export function parseHtml(html) {
   return root;
 }
 
+function plainText(element) {
+  return element.children.map((child) => (typeof child === 'string' ? child : plainText(child))).join('');
+}
+
 function classes(element) {
   return (element.attributes.class ?? '').split(/\s+/).filter(Boolean);
 }
@@ -235,10 +247,12 @@ function findAll(element, predicate, found = []) {
 
 const IDEOGRAPHIC_SPACE = String.fromCharCode(0x3000);
 const LINE_BREAK = String.fromCharCode(0xe000);
+// ProofreadPage joins scanned pages with zero-width spaces; they are no part of the text.
+const ZERO_WIDTH = new RegExp(`[${String.fromCharCode(0x200b)}${String.fromCharCode(0xfeff)}]`, 'g');
 
-/** Navigation, header and license furniture, and the machinery around references: dropped with everything inside. */
+/** Navigation, header and license furniture, images, and the machinery around references: dropped with everything inside. */
 function isFurniture(element) {
-  if (['style', 'script', 'link', 'meta', 'hr'].includes(element.tag)) return true;
+  if (['style', 'script', 'link', 'meta', 'hr', 'figure'].includes(element.tag)) return true;
   if (element.attributes.id === 'headerContainer') return true;
   return hasClass(element, 'ws-header', 'ws-footer', 'ws-noexport', 'noprint', 'licenseContainer', 'licensetpl',
     'mw-editsection', 'mw-empty-elt', 'catlinks', 'navbox', 'ws-pagenum', 'pagenum', 'mw-references-wrap', 'reflist');
@@ -246,6 +260,21 @@ function isFurniture(element) {
 
 function isReferenceMarker(element) {
   return element.tag === 'sup' && hasClass(element, 'reference');
+}
+
+/** Wikisource's 另作 note: another edition's reading, shown on hover beside the text it annotates. */
+function isVariantNote(element) {
+  return element.tag === 'span' && hasClass(element, 'variant-tooltip');
+}
+
+/** A compiler's note or gloss set in small type as `〈(…)〉`, such as a pronunciation or an edition label. */
+function isEditorNote(element) {
+  return element.tag === 'small' && /^〈\(.*\)〉$/s.test(plainText(element).trim());
+}
+
+/** A link into the wiki's own discussion pages, never part of a work. */
+function isDiscussionLink(element) {
+  return element.tag === 'a' && /^Talk:/.test(element.attributes.title ?? '');
 }
 
 function isReferenceList(element) {
@@ -268,7 +297,12 @@ export const NOTE_HEADING = /^(?:注|註|脚注|腳注|尾注|参考|參考|参�
 const INLINE_ELEMENTS = new Set(['a', 'b', 'strong', 'i', 'em', 'span', 'font', 'u', 's', 'big', 'sub', 'sup', 'abbr', 'ruby', 'rb', 'bdi', 'q', 'cite', 'var', 'mark', 'wbr', 'small']);
 const RUBY_ANNOTATION = new Set(['rt', 'rp']);
 
-function inlineText(element, tally) {
+function noteText(element) {
+  return plainText(element).replace(ZERO_WIDTH, '').replace(/\s+/g, ' ').trim();
+}
+
+/** A paragraph's text; every editorial note it drops is appended to `notes`, in order. */
+function inlineText(element, tally, notes = []) {
   let text = '';
   for (const child of element.children) {
     if (typeof child === 'string') {
@@ -279,13 +313,21 @@ function inlineText(element, tally) {
       tally.referenceMarkers += 1;
       continue;
     }
+    if (isVariantNote(child) || isEditorNote(child)) {
+      notes.push(noteText(child));
+      continue;
+    }
+    if (isDiscussionLink(child)) {
+      tally.furniture += 1;
+      continue;
+    }
     if (isFurniture(child) || RUBY_ANNOTATION.has(child.tag)) continue;
     if (child.tag === 'br') {
       text += LINE_BREAK;
       continue;
     }
     if (!INLINE_ELEMENTS.has(child.tag)) refuse('SAMPLEBOOK/unhandled-inline', `${describe(child)} inside a paragraph`);
-    text += inlineText(child, tally);
+    text += inlineText(child, tally, notes);
   }
   return text;
 }
@@ -293,6 +335,7 @@ function inlineText(element, tally) {
 /** HTML whitespace collapses to one space; each `<br>` ends a paragraph; leading indentation and trailing space go. */
 export function paragraphLines(text) {
   return text
+    .replace(ZERO_WIDTH, '')
     .replace(/[\t\n\f\r ]+/g, ' ')
     .split(LINE_BREAK)
     .map((line) => line.trim())
@@ -323,11 +366,36 @@ function pageTitle(output, tally) {
   return refuse('SAMPLEBOOK/title-absent', 'the page has neither a ws-header chapter line nor a header title');
 }
 
+/** A compiler's edition label, `〈(…: 五十六回版本)〉`: the paragraph it heads belongs to that edition alone. */
+const VERSION_NOTE = /^〈\([^:：]*[:：]\s*(\S+版本)\)〉$/;
+
+function pushParagraphs(element, state) {
+  const notes = [];
+  const lines = paragraphLines(inlineText(element, state.tally, notes));
+  state.notes.push(...notes);
+  const versions = notes.map((note) => VERSION_NOTE.exec(note)?.[1]).filter((version) => version !== undefined);
+  if (versions.length > 0) {
+    if (state.variantChoice === undefined) refuse('SAMPLEBOOK/variant-choice-required', `a paragraph is labelled as one edition's (${versions.join(', ')}) and the manifest declares no variantChoice`);
+    for (const version of versions) state.versionsSeen.add(version);
+    if (!versions.includes(state.variantChoice)) {
+      state.tally.otherVersionParagraphs += lines.length;
+      return;
+    }
+  }
+  for (const line of lines) state.blocks.push({ style: null, text: line });
+}
+
 function walkBlocks(container, state) {
+  // Text and inline elements standing directly among blocks render as one anonymous paragraph, as in HTML.
+  let run = [];
+  const flush = () => {
+    if (run.length > 0) pushParagraphs({ tag: '#run', attributes: {}, children: run }, state);
+    run = [];
+  };
   for (const child of container.children) {
-    if (state.stopped) return;
-    if (typeof child === 'string') {
-      if (child.trim().length > 0) refuse('SAMPLEBOOK/unhandled-text', `bare text directly inside ${describe(container)}`);
+    if (state.stopped) break;
+    if (typeof child === 'string' || child.tag === 'br' || INLINE_ELEMENTS.has(child.tag)) {
+      run.push(child);
       continue;
     }
     if (isReferenceList(child)) {
@@ -338,6 +406,7 @@ function walkBlocks(container, state) {
       state.tally.furniture += 1;
       continue;
     }
+    flush();
     const level = headingLevel(child);
     if (level !== undefined) {
       const text = headingText(child.tag === 'div' ? find(child, (nested) => /^h[1-6]$/.test(nested.tag)) : child, state.tally);
@@ -345,7 +414,7 @@ function walkBlocks(container, state) {
         // Annotations close a page: the heading and everything after it at this level go.
         state.tally.noteSections += 1;
         state.stopped = true;
-        return;
+        break;
       }
       if (state.sectionTitle !== undefined && state.heading === undefined) {
         if (text !== state.sectionTitle) refuse('SAMPLEBOOK/section-mismatch', `the section opens with a heading other than its pinned title`);
@@ -363,7 +432,7 @@ function walkBlocks(container, state) {
           walkBlocks(child, state);
           break;
         }
-        for (const line of paragraphLines(inlineText(child, state.tally))) state.blocks.push({ style: null, text: line });
+        pushParagraphs(child, state);
         break;
       case 'div':
       case 'dl':
@@ -375,6 +444,7 @@ function walkBlocks(container, state) {
         refuse('SAMPLEBOOK/unhandled-block', `${describe(child)} inside ${describe(container)}`);
     }
   }
+  if (!state.stopped) flush();
 }
 
 /**
@@ -382,17 +452,22 @@ function walkBlocks(container, state) {
  * section's heading, its body blocks in order, and the tally of what was dropped — counts only, so the
  * caller can report them without carrying any of the text.
  */
-export function extractSection(html, { sectionTitle } = {}) {
+export function extractSection(html, { sectionTitle, variantChoice } = {}) {
   const root = parseHtml(html);
   const output = find(root, (element) => element.tag === 'div' && hasClass(element, 'mw-parser-output'));
   if (!output) refuse('SAMPLEBOOK/output-absent', 'no mw-parser-output container');
-  const tally = { referenceMarkers: 0, referenceLists: 0, noteSections: 0, furniture: 0 };
-  const state = { blocks: [], tally, sectionTitle, heading: undefined, stopped: false };
+  const tally = { referenceMarkers: 0, otherVersionParagraphs: 0, referenceLists: 0, noteSections: 0, furniture: 0 };
+  const state = { blocks: [], tally, notes: [], sectionTitle, variantChoice, versionsSeen: new Set(), heading: undefined, stopped: false };
   walkBlocks(output, state);
+  if (variantChoice !== undefined && !state.versionsSeen.has(variantChoice)) {
+    refuse('SAMPLEBOOK/variant-choice-unmatched', `no paragraph is labelled ${variantChoice}`);
+  }
   const heading = sectionTitle === undefined ? pageTitle(output, tally) : state.heading;
   if (heading === undefined) refuse('SAMPLEBOOK/section-mismatch', 'the section has no heading');
+  // A body that opens by repeating the header's title would carry it twice.
+  if (state.blocks[0]?.style === 'Heading2' && state.blocks[0].text === heading) state.blocks.shift();
   if (!state.blocks.some((block) => block.style === null)) refuse('SAMPLEBOOK/section-empty', 'no body paragraph survived extraction');
-  return { heading, blocks: state.blocks, tally };
+  return { heading, blocks: state.blocks, notes: state.notes, tally };
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -571,10 +646,10 @@ function pin(manifest) {
         section.transcludes = pages.map((page) => ({ page, revid: revisions.get(page) }));
         changed = true;
       }
-      // Normalized key order: page, section, sectionTitle, revid, transcludes.
-      const { page, section: number, sectionTitle, revid, transcludes } = section;
+      // Normalized key order: page, section, sectionTitle, revid, the declarations, transcludes.
+      const { page, section: number, sectionTitle, revid, transcludes, ...declarations } = section;
       for (const key of Object.keys(section)) delete section[key];
-      Object.assign(section, { page, ...(number === undefined ? {} : { section: number, sectionTitle }), revid, transcludes });
+      Object.assign(section, { page, ...(number === undefined ? {} : { section: number, sectionTitle }), revid, ...declarations, transcludes });
     }
   }
   if (changed) manifest.pinnedOn = new Date().toISOString().slice(0, 10);
@@ -584,23 +659,41 @@ function pin(manifest) {
 // ---------------------------------------------------------------------------------------------------------
 // Command line
 
+/**
+ * What a page loses beyond furniture is declared in its manifest entry, so the designation record shows it:
+ * every editorial note dropped (`editorNotes`, in order), the count of footnote markers (`footnotes`), and,
+ * where a page carries one paragraph per edition, the edition kept (`variantChoice`).
+ */
+export function checkDeclarations(section, extracted) {
+  const declaredNotes = section.editorNotes ?? [];
+  if (JSON.stringify(extracted.notes) !== JSON.stringify(declaredNotes)) {
+    refuse('SAMPLEBOOK/notes-undeclared', `${section.page} drops ${extracted.notes.length} editorial notes and its entry declares ${declaredNotes.length} that differ`);
+  }
+  if (extracted.tally.referenceMarkers !== (section.footnotes ?? 0)) {
+    refuse('SAMPLEBOOK/notes-undeclared', `${section.page} drops ${extracted.tally.referenceMarkers} footnote markers and its entry declares ${section.footnotes ?? 0}`);
+  }
+}
+
 export function buildWork(work, options) {
   const sections = [];
-  const tally = { referenceMarkers: 0, referenceLists: 0, noteSections: 0, furniture: 0 };
+  const tally = { referenceMarkers: 0, otherVersionParagraphs: 0, referenceLists: 0, noteSections: 0, furniture: 0 };
+  let notes = 0;
   for (const section of work.sections) {
     const parse = loadParse(section, options);
     let extracted;
     try {
-      extracted = extractSection(parse.text, { sectionTitle: section.sectionTitle });
+      extracted = extractSection(parse.text, { sectionTitle: section.sectionTitle, variantChoice: section.variantChoice });
+      checkDeclarations(section, extracted);
     } catch (error) {
       if (error instanceof PublicSampleBookError) error.message = `${error.message} (${work.id}: ${section.page})`;
       throw error;
     }
     sections.push({ heading: extracted.heading, blocks: extracted.blocks });
     for (const key of Object.keys(tally)) tally[key] += extracted.tally[key];
+    notes += extracted.notes.length;
   }
   const bytes = buildSampleBookDocx({ title: work.title, author: work.author, sections });
-  return { bytes, sections, tally };
+  return { bytes, sections, tally, notes };
 }
 
 function argumentValues(argv, flag) {
@@ -633,7 +726,7 @@ function main(argv) {
   let stale = false;
   for (const work of manifest.works) {
     if (only.length > 0 && !only.includes(work.id)) continue;
-    const { bytes, sections, tally } = buildWork(work, options);
+    const { bytes, sections, tally, notes } = buildWork(work, options);
     const target = join(ROOT, 'SampleBooks', work.file);
     const digest = createHash('sha256').update(bytes).digest('hex');
     const paragraphs = sections.reduce((sum, section) => sum + section.blocks.length, 0);
@@ -645,7 +738,7 @@ function main(argv) {
     }
     writeFileSync(target, bytes);
     console.log(`${work.file}: ${bytes.length} bytes, sha256 ${digest}; ${sections.length} sections, ${paragraphs} body paragraphs; `
-      + `dropped ${tally.referenceMarkers} reference markers, ${tally.referenceLists} reference lists, ${tally.noteSections} note sections, ${tally.furniture} furniture elements`);
+      + `dropped ${tally.referenceMarkers} reference markers, ${notes} editorial notes, ${tally.otherVersionParagraphs} other-edition paragraphs, ${tally.referenceLists} reference lists, ${tally.noteSections} note sections, ${tally.furniture} furniture elements`);
   }
   if (stale) process.exitCode = 1;
 }

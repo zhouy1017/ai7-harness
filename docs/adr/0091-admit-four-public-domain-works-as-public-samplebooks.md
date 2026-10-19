@@ -36,7 +36,8 @@ Each file is admitted by its exact byte count and SHA-256, which [`SampleBooks/R
 ### 2 · Source and shape
 
 - **Source.** zh.wikisource.org, each page at its pinned revision, read through `action=parse&oldid=<revid>&variant=zh-hans`. The simplified text is MediaWiki's own LanguageConverter output; no character is edited by hand. Where the conversion leaves a traditional form, as it can for classical text, the file keeps it, and the README states the residual count of the check it ran.
-- **Original text only.** Navigation and header templates, the 上一回/下一回 bars, license boxes, sister-project boxes, categories, edit links, reference markers and every 注释 section are dropped. Modern annotation may carry copyright, so a page whose original text could not be separated from it would stop the designation; none did.
+- **Original text only.** Navigation and header templates, the 上一回/下一回 bars, license boxes, sister-project boxes, categories, images, edit links, reference markers and every 注释 section are dropped. Modern annotation may carry copyright, so a page whose original text could not be separated from it would stop the designation; none did.
+- **Declared drops.** Each page's manifest entry declares what it loses beyond that furniture — its footnote markers (whose texts are never copied), every Wikisource note (另作 readings, glosses, compiler's labels) and, where a page carries one closing paragraph per edition, the edition kept — and a build that would drop anything undeclared refuses. `儒林外史/第55回` keeps its 五十六回版本 paragraph and drops the 五十五回版本 one, consistent with the designation's 第01回 to 第56回; the Commander chose this for #989.
 - **Shape.** A `Title` paragraph with the work's title; per page a `Heading1` with the section's own title (a 回 novel's chapter line, an essay's or story's title); then one body paragraph per source paragraph, and a `Heading2` where the original text has a heading of its own. No inline style, no page setup, so each file imports through the ordinary path with an all-zero fidelity report.
 - **Generator.** `tools/build-public-samplebook.mjs` writes the four files from the manifest — development-only, never run by CI, `build`, `package` or any test. Its archive time is the fixed instant of `src/shared/archive-time.ts`, so a second run from the same responses yields byte-identical files; the raw API responses it fetches stay in a cache directory outside every checkout and never enter the repository.
 
@@ -73,7 +74,7 @@ Each file is admitted by its exact byte count and SHA-256, which [`SampleBooks/R
 
 - Long-book behaviour has public inputs: 《儒林外史》 is the long case at more than 300,000 characters, beside three shorter books of different shape — essays, short stories and a 回 novel with a preface.
 - A defect found on a private manuscript can now usually be reproduced on public text, in tests, on the guests, in hosted CI and — once 15c lands — against the live model, without anyone's manuscript leaving its owner.
-- The repository carries four more DOCX files, about 1.2 MB together; they never reach a package, because the build and packaging paths already exclude `SampleBooks/`.
+- The repository carries four more DOCX files, 737,778 bytes together; they never reach a package, because the build and packaging paths already exclude `SampleBooks/`.
 - Reviewers verify a change to any of the four against the manifest and the README row: the generator, run on the pinned revisions, must reproduce the committed bytes.
 
 ## Rejected alternatives
