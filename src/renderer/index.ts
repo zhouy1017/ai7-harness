@@ -1,5 +1,5 @@
-import { hydrateAnalysisRevision } from './analysis-paging.js';
-import { ANALYSIS_MORE_RANGES, ANALYSIS_READ_FAILED, ANALYSIS_READING, ANALYSIS_MORE_REPORT_ROWS } from './analysis-paging-labels.js';
+import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
+import { ANALYSIS_MORE_RANGES, ANALYSIS_READ_FAILED, ANALYSIS_READING, ANALYSIS_MORE_REPORT_ROWS, ANALYSIS_MORE_CHOICES, ANALYSIS_EARLIER_HISTORY, ANALYSIS_PAGED_LIST_LABELS } from './analysis-paging-labels.js';
 import { createAppearance } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { mountAgentWorkspace } from './agent-workspace.js';
@@ -4009,7 +4009,7 @@ function renderBaselineAnalysisOverview(
   card.dataset['resultRevisionId'] = projection.resultSetRevision?.revisionId ?? revision.revisionId;
   card.dataset['resultRevisionDigest'] = projection.resultSetRevision?.digest ?? revision.digest;
   card.dataset['resultRevisionOrdinal'] = String(projection.resultSetRevision?.ordinal ?? revision.ordinal);
-  card.dataset['gapCount'] = String(revision.gaps.length);
+  card.dataset['gapCount'] = String(revision.coverage.gapCount);
   card.dataset['conflictCount'] = String(revision.conflicts.length);
   card.dataset['freshnessState'] = revision.freshness.state;
   card.dataset['updateMode'] = revision.update.mode;
@@ -4103,7 +4103,7 @@ function renderBaselineAnalysisOverview(
   // or, where it made nothing, that the range is still unread and why (ANALYSIS-004). The unit's own
   // name, state, lineage, confidence, request digest and usage are its technical half.
   const chapters = panels.chapters;
-  const manifestUnits = view.historical ? null : projection.coverageManifest?.units ?? null;
+  const manifestUnits = new Map((view.historical ? [] : projection.coverageManifest?.units ?? []).map((unit) => [unit.ordinal, unit]));
   const adaptedUnits = revision.provenance.adaptations?.unitOrdinals ?? [];
   const units = element('ul', 'analysis-unit-list');
   const appendUnits = (rows: typeof revision.units): void => {
@@ -4114,7 +4114,7 @@ function renderBaselineAnalysisOverview(
     item.dataset['analysisUnitLineage'] = unit.lineage.kind;
     if (unit.lineage.kind === 'reused') item.dataset['analysisUnitReusedFrom'] = `${unit.lineage.revisionOrdinal}/${unit.lineage.unitOrdinal}`;
     if (adaptedUnits.includes(unit.unitOrdinal)) item.dataset['analysisUnitAdaptations'] = '1';
-    const manifestUnit = manifestUnits?.[unit.unitOrdinal - 1];
+    const manifestUnit = manifestUnits.get(unit.unitOrdinal);
     const title = manifestUnit === undefined
       ? `第 ${unit.unitOrdinal} 个阅读范围`
       : `${manifestUnit.headingText === null ? `第 ${unit.unitOrdinal} 个阅读范围` : `「${manifestUnit.headingText}」`}${manifestUnit.subUnitCount > 1 ? `（第 ${manifestUnit.subUnitIndex}/${manifestUnit.subUnitCount} 部分）` : ''} · 内容块 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
@@ -4146,7 +4146,7 @@ function renderBaselineAnalysisOverview(
   // The unread ranges once more as their own list, so the editor sees what is missing without reading
   // every chapter to find it; each returns to the manuscript range it names.
   const gaps = element('ul', 'analysis-list analysis-gap-list');
-  if (revision.gaps.length === 0) gaps.append(element('li', undefined, '没有尚未分析的范围。'));
+  if (revision.coverage.gapCount === 0) gaps.append(element('li', undefined, '没有尚未分析的范围。'));
   for (const gap of revision.gaps) {
     const item = element('li');
     item.dataset['analysisGapUnit'] = String(gap.unitOrdinal);
@@ -4156,7 +4156,7 @@ function renderBaselineAnalysisOverview(
     gaps.append(item);
   }
   chapters.append(
-    element('h4', undefined, `尚未分析的范围 · ${revision.gaps.length}`), gaps,
+    element('h4', undefined, `尚未分析的范围 · ${revision.coverage.gapCount}`), gaps,
     element('h4', undefined, `各章 · ${revision.unitPage.total} 个阅读范围`), units,
   );
 
@@ -4169,6 +4169,18 @@ function renderBaselineAnalysisOverview(
         const page = await window.ai7.getAnalysisRevisionUnits({ revisionId: revision.revisionId, afterOrdinal });
         if (!more.isConnected) return;
         if (page.revisionId !== revision.revisionId || page.next !== null && page.next <= afterOrdinal) throw new Error(ANALYSIS_READ_FAILED);
+        let manifestCursor = afterOrdinal;
+        while (page.units.some((unit) => !manifestUnits.has(unit.unitOrdinal))) {
+          const manifestPage = await window.ai7.getCoverageManifestUnits({ taskIntentId: revision.provenance.taskIntentId, afterOrdinal: manifestCursor });
+          if (manifestPage.manifestDigest !== revision.coverageManifestDigest) throw new Error(ANALYSIS_READ_FAILED);
+          for (const unit of manifestPage.units) {
+            const { blockIds, blockDigests: _digests, overlapBlockIds: _overlap, ...summary } = unit;
+            manifestUnits.set(unit.ordinal, { ...summary, blockCount: blockIds.length, firstBlockId: blockIds[0]!, lastBlockId: blockIds.at(-1)! });
+          }
+          if (manifestPage.next === null) break;
+          manifestCursor = manifestPage.next;
+        }
+        if (!more.isConnected) return;
         appendUnits(page.units);
         afterOrdinal = page.next;
         if (afterOrdinal === null) more.remove();
@@ -4253,9 +4265,9 @@ function markReusePlan(card: HTMLElement, projection: BaselineAnalysisProjection
  */
 function renderPlanVersions(card: HTMLElement, projection: BaselineAnalysisProjection): void {
   const section = element('section', 'analysis-plan-versions');
-  section.dataset['planVersionCount'] = String(projection.planVersions.length);
-  section.dataset['planRevisionCount'] = String(projection.planRevisions.length);
-  section.append(element('h4', undefined, `计划版本 · ${projection.planVersions.length} 个`));
+  section.dataset['planVersionCount'] = String(projection.listPages['planVersions']?.total ?? projection.planVersions.length);
+  section.dataset['planRevisionCount'] = String(projection.listPages['planRevisions']?.total ?? projection.planRevisions.length);
+  section.append(element('h4', undefined, `计划版本 · ${projection.listPages['planVersions']?.total ?? projection.planVersions.length} 个`));
   const versions = element('ol', 'analysis-list analysis-plan-version-list');
   for (const version of projection.planVersions) {
     const state = version.state === 'bound' ? '已被运行授权绑定' : version.state === 'current' ? '当前 · 尚未开始' : '已被取代';
@@ -4473,7 +4485,8 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
     if (mode === 'reanalyze-range') {
       const fieldset = element('fieldset', 'analysis-range-options');
       fieldset.append(element('legend', undefined, '选择要重新分析的连续范围（未预选；按当前稿件将派生的结构单元列出）'));
-      for (const option of controls.actions['reanalyze-range'].options) {
+      const appendOptions = (options: typeof controls.actions['reanalyze-range']['options']): void => {
+      for (const option of options) {
         const row = element('div', 'analysis-range-option');
         row.dataset['rangeOption'] = String(option.unitOrdinal);
         row.dataset['rangeStart'] = String(option.startPosition);
@@ -4507,6 +4520,25 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
         label.htmlFor = radio.id;
         row.append(radio, label);
         fieldset.append(row);
+      }
+      };
+      appendOptions(controls.actions['reanalyze-range'].options);
+      let after = projection.listPages['updateControls.actions.reanalyze-range.options']?.nextOrdinal ?? null;
+      if (after !== null) {
+        const more = button(ANALYSIS_MORE_CHOICES, 'secondary', async () => {
+          more.disabled = true;
+          try {
+            const page = await window.ai7.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
+              revisionId: null, path: 'updateControls.actions.reanalyze-range.options', afterOrdinal: after! });
+            if (!more.isConnected) return;
+            if (page.path !== 'updateControls.actions.reanalyze-range.options' || page.nextOrdinal !== null && page.nextOrdinal <= after!) throw new Error(ANALYSIS_READ_FAILED);
+            appendOptions(page.items as typeof controls.actions['reanalyze-range']['options']);
+            after = page.nextOrdinal;
+            if (after === null) more.remove(); else fieldset.append(more);
+          } catch { setStatus(ANALYSIS_READ_FAILED, 'error'); }
+          finally { more.disabled = false; }
+        });
+        fieldset.append(more);
       }
       block.append(fieldset);
     }
@@ -4581,13 +4613,13 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
   if (history === null) return;
   const section = element('section', 'analysis-history');
   section.dataset['historyLatestOrdinal'] = String(history.latestOrdinal);
-  section.dataset['historyCount'] = String(history.entries.length);
+  section.dataset['historyCount'] = String(projection.listPages['history.entries']?.total ?? history.entries.length);
   section.dataset['historyResultSetId'] = history.resultSetId;
   // How many revisions there are and which one is latest are decisions, not identities: they stay at
   // full rank, and only the result set's own identity and kind step down into the disclosure.
   section.append(
     element('h4', undefined, '历次分析'),
-    element('p', 'field-note', `共 ${history.entries.length} 份分析 · 最新的是第 ${history.latestOrdinal} 份`),
+    element('p', 'field-note', `共 ${projection.listPages['history.entries']?.total ?? history.entries.length} 份分析 · 最新的是第 ${history.latestOrdinal} 份`),
     technicalDetails('analysis-facts',
       element('dt', undefined, '结果集'), element('dd', 'technical-identity', `${history.resultSetId} · ${history.kind}`)),
   );
@@ -4604,7 +4636,8 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
     }
   };
   const list = element('ol', 'analysis-history-list');
-  for (const entry of history.entries) {
+  const appendHistory = (entries: typeof history.entries): void => {
+  for (const entry of entries) {
     const item = element('li', 'analysis-history-entry');
     item.dataset['historyOrdinal'] = String(entry.ordinal);
     item.dataset['historyRevisionId'] = entry.revisionId;
@@ -4637,6 +4670,25 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
     if (projection.inspectedRevision?.revision.revisionId === entry.revisionId) view.disabled = true;
     item.append(view);
     list.append(item);
+  }
+  };
+  appendHistory(history.entries);
+  let before = projection.listPages['history.entries']?.nextOrdinal ?? null;
+  if (before !== null) {
+    const more = button(ANALYSIS_EARLIER_HISTORY, 'secondary', async () => {
+      more.disabled = true;
+      try {
+        const page = await window.ai7.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
+          revisionId: projection.inspectedRevision?.revision.revisionId ?? null, path: 'history.entries', afterOrdinal: before! });
+        if (!more.isConnected) return;
+        if (page.path !== 'history.entries' || before !== 0 && page.nextOrdinal !== null && page.nextOrdinal >= before!) throw new Error(ANALYSIS_READ_FAILED);
+        appendHistory(page.items as typeof history.entries);
+        before = page.nextOrdinal;
+        if (before === null) more.remove();
+      } catch { setStatus(ANALYSIS_READ_FAILED, 'error'); }
+      finally { more.disabled = false; }
+    });
+    section.append(more);
   }
   section.append(list);
   if (projection.inspectedRevision !== null) {
@@ -4679,12 +4731,12 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   if (projection.planEnvelope) card.dataset['planEnvelopeDigest'] = projection.planEnvelope.digest;
   if (projection.planVersion) {
     card.dataset['planVersion'] = String(projection.planVersion.ordinal);
-    card.dataset['planVersionCount'] = String(projection.planVersions.length);
+    card.dataset['planVersionCount'] = String(projection.listPages['planVersions']?.total ?? projection.planVersions.length);
     card.dataset['planRevisionPending'] = projection.planRevision === null ? 'false' : 'true';
   }
   if (projection.coverageManifest) {
     card.dataset['coverageManifestDigest'] = projection.coverageManifest.digest;
-    card.dataset['analysisUnits'] = String(projection.coverageManifest.units.length);
+    card.dataset['analysisUnits'] = String(projection.listPages['coverageManifest.units']?.total ?? projection.coverageManifest.units.length);
   }
   if (projection.run) card.dataset['runState'] = projection.run.state;
   if (projection.taskOutcome) {
@@ -4803,6 +4855,22 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     records.append(restart);
   }
 
+  for (const [path, meta] of Object.entries(projection.listPages)) {
+    const label = ANALYSIS_PAGED_LIST_LABELS[path];
+    if (label === undefined || meta.nextOrdinal === null) continue;
+    const more = button(`${label} · ${ANALYSIS_MORE_CHOICES}`, 'secondary', async () => {
+      more.disabled = true;
+      try {
+        const page = await window.ai7.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
+          revisionId: projection.inspectedRevision?.revision.revisionId ?? null, path, afterOrdinal: meta.nextOrdinal! });
+        if (!more.isConnected) return;
+        if (page.path !== path || page.nextOrdinal !== null && page.nextOrdinal <= meta.nextOrdinal!) throw new Error(ANALYSIS_READ_FAILED);
+        renderBaselineAnalysis(host, appendBaselineSummaryPage(projection, page), bookTitle);
+      } catch { setStatus(ANALYSIS_READ_FAILED, 'error'); more.disabled = false; }
+    });
+    records.append(more);
+  }
+
   // §10: 明确不会发生 reads 不会做 in the editor's words, and the engineer's statements — every one of them,
   // unabridged — are one step away in 查看技术详情.
   const notDo = element('ul', 'analysis-list analysis-not-do');
@@ -4871,7 +4939,7 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
     element('p', 'task-plan-summary-line', taskPlanSummaryLine([
       projection.taskIntent!.modeLabel,
       range === null ? '全书' : `第 ${range.startPosition}–${range.endPosition} 段`,
-      counts === null ? `${manifest.units.length} 个阅读范围` : `重新分析 ${counts.recomputed} 个阅读范围，沿用 ${counts.reused} 个`,
+      counts === null ? `${projection.listPages['coverageManifest.units']?.total ?? manifest.units.length} 个阅读范围` : `重新分析 ${counts.recomputed} 个阅读范围，沿用 ${counts.reused} 个`,
       `任务输入修订版 ${checkpoint.revisionLabel}`,
       projection.planVersion === null ? '' : `计划版本 ${projection.planVersion.ordinal}`,
     ])),

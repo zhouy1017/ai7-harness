@@ -1,13 +1,11 @@
 import { encodeServiceResponse } from '../../src/service/request-frames.js';
 import { expect, it } from 'vitest';
 import { MAX_FRAME_BYTES } from '../../src/shared/protocol.js';
-import { baselineAnalysisOutbound, baselineAnalysisWire, analysisOverviewPage, analysisOverviewText, revisionUnitsPage,
+import { baselineAnalysisOutbound, baselineAnalysisWire, baselineAnalysisSummaryPage, analysisOverviewPage, analysisOverviewText, revisionUnitsPage,
   serializedBytes } from '../../src/service/analysis/baseline-analysis-wire.js';
-import { longPreparedAnalysis, longSettledAnalysis } from '../support/long-baseline-analysis.js';
+import { longPreparedAnalysis, longSettledAnalysis, BASELINE_REPLY_OPERATIONS, baselineReplyResult } from '../support/long-baseline-analysis.js';
 
-const operations = ['inspectBaselineAnalysis', 'authorizeBaselineAnalysis', 'startBaselineAnalysisWhenOnline',
-  'cancelWaitingBaselineAnalysis', 'cancelBaselineAnalysisRun', 'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun',
-  'editBaselineAnalysisPlan', 'answerBaselineAnalysisClarification', 'quickStartBaselineAnalysis', 'pollServiceJob'] as const;
+const operations = BASELINE_REPLY_OPERATIONS;
 
 it('bounds every baseline reply envelope for 400-unit prepared, settled and multi-revision states without mutating records', () => {
   const prepared = longPreparedAnalysis();
@@ -16,8 +14,7 @@ it('bounds every baseline reply envelope for 400-unit prepared, settled and mult
   for (const [state, projection] of Object.entries(states)) {
     const before = JSON.stringify(projection);
     for (const op of operations) {
-      const result = op === 'pollServiceJob' ? { kind: 'baseline-analysis-preparation', result: projection }
-        : op === 'quickStartBaselineAnalysis' ? { outcome: 'fell-back', reasons: [], projection } : projection;
+      const result = baselineReplyResult(op, projection);
       const response = { id: '00000000-0000-4000-8000-000000000000', ok: true, op, result };
       const wire = baselineAnalysisOutbound(response);
       expect(serializedBytes(wire), `${state}/${op}`).toBeLessThanOrEqual(MAX_FRAME_BYTES - 64 * 1024);
@@ -64,4 +61,51 @@ it('still surfaces RESPONSE_TOO_LARGE for an oversized reply outside the baselin
   expect(frame.readUInt32BE(0)).toBe(frame.length - 4);
   expect(JSON.parse(frame.subarray(4).toString('utf8'))).toEqual({ id: 'synthetic-frame', ok: false,
     error: { code: 'RESPONSE_TOO_LARGE', message: '服务响应超出安全范围。' } });
+});
+
+it.each([{ paragraphs: 18000, headings: false, units: 1200, dense: true },
+  { paragraphs: 6000, headings: true, units: 6000, dense: false }])(
+  'bounds $units-unit replies and reads every summary-list page exactly once', ({ paragraphs, headings, units, dense }) => {
+    const prepared = longPreparedAnalysis(paragraphs, headings);
+    expect(prepared.coverageManifest!.units).toHaveLength(units);
+    const readPath = (value: unknown, path: string): ReadonlyArray<unknown> => {
+      let selected = value;
+      for (const key of path.split('.')) selected = (selected as Record<string, unknown>)[key];
+      return selected as ReadonlyArray<unknown>;
+    };
+    for (const make of [() => prepared, () => longSettledAnalysis(prepared, 1, dense), () => longSettledAnalysis(prepared, 12, dense)]) {
+      const projection = make();
+      const raw = baselineAnalysisWire(projection, false);
+      const wire = baselineAnalysisWire(projection);
+      console.info('ANALYSIS_D8_BYTES', JSON.stringify({ units, state: projection.state, revisions: projection.history?.entries.length ?? 0,
+        before: serializedBytes(projection), after: serializedBytes(wire) }));
+      for (const op of operations) {
+        const result = baselineReplyResult(op, wire);
+        expect(serializedBytes({ id: '00000000-0000-4000-8000-000000000000', ok: true, op, result }), op)
+          .toBeLessThanOrEqual(MAX_FRAME_BYTES - 64 * 1024);
+      }
+      for (const [path, meta] of Object.entries(wire.listPages)) {
+        const expected = path === 'run.attempt.spans' ? projection.run!.attempt!.spans : readPath(raw, path);
+        const collected = [...readPath(wire, path)];
+        let cursor = meta.nextOrdinal;
+        while (cursor !== null) {
+          const page = baselineAnalysisSummaryPage(projection, path, cursor);
+          expect(serializedBytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES / 2);
+          collected.push(...page.items);
+          cursor = page.nextOrdinal;
+        }
+        expect(collected).toHaveLength(expected.length);
+        expect(collected.map((item) => JSON.stringify(item)).sort(), path)
+          .toEqual(expected.map((item) => JSON.stringify(item)).sort());
+      }
+    }
+  }, 120_000);
+
+it('shrinks inline lists further when they compete for the same reply budget', () => {
+  const full = longSettledAnalysis(longPreparedAnalysis(), 12);
+  const normal = baselineAnalysisWire(full);
+  const reduced = baselineAnalysisWire(full, true, 96 * 1024);
+  expect(serializedBytes(reduced)).toBeLessThanOrEqual(96 * 1024);
+  expect(reduced.resultSetRevision!.unitPage.total).toBe(normal.resultSetRevision!.unitPage.total);
+  expect(reduced.listPages['coverageManifest.units']!.total).toBe(400);
 });

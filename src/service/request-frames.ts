@@ -695,6 +695,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'getBaselineAnalysisPage': {
+      const input = requireInput(value.input, ['bookId', 'taskIntentId', 'revisionId', 'path', 'afterOrdinal'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !(input.revisionId === null || validUuid(input.revisionId)) ||
+        !isBoundedString(input.path, 160) || !isSafeInteger(input.afterOrdinal, 0)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'getCoverageManifestUnits':
     case 'getAnalysisRunReportRows': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'afterOrdinal'], tentativeId);

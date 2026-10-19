@@ -145,6 +145,7 @@ export const IPC_CHANNELS = {
   inspectForegroundExecutionBoundary: 'ai7:j03:inspect-foreground-execution-boundary',
   prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
   authorizeTaskAuthorization: 'ai7:j03:authorize-task-authorization',
+  getBaselineAnalysisPage: 'ai7:analysis:getBaselineAnalysisPage',
   getCoverageManifestUnits: 'ai7:analysis:getCoverageManifestUnits',
   getAnalysisRevisionUnits: 'ai7:analysis:getAnalysisRevisionUnits',
   getAnalysisRevisionOverview: 'ai7:analysis:getAnalysisRevisionOverview',
@@ -2963,6 +2964,7 @@ export type AnalysisReusePlanSummaryProjection = Omit<AnalysisReusePlanProjectio
 };
 export type BaselineAnalysisWireProjection = Omit<BaselineAnalysisProjection,
   'coverageManifest' | 'resultSetRevision' | 'inspectedRevision' | 'update' | 'run' | 'history' | 'taskOutcome' | 'updateControls'> & {
+  listPages: Readonly<Record<string, AnalysisUnitPage & { descending?: boolean }>>;
   coverageManifest: CoverageManifestSummaryProjection | null;
   resultSetRevision: AnalysisRevisionWireProjection | null;
   inspectedRevision: null | { revision: AnalysisRevisionWireProjection; current: boolean; readOnly: true };
@@ -13520,6 +13522,10 @@ export interface ServiceOperationMap {
     input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
     output: TaskAuthorizationProjection;
   };
+  getBaselineAnalysisPage: {
+    input: { bookId: string; taskIntentId: string; revisionId: string | null; path: string; afterOrdinal: number };
+    output: { path: string; items: ReadonlyArray<unknown>; nextOrdinal: number | null; listPages: BaselineAnalysisWireProjection['listPages'] };
+  };
   getCoverageManifestUnits: {
     input: { bookId: string; taskIntentId: string; afterOrdinal: number };
     output: { manifestDigest: string; units: ReadonlyArray<CoverageManifestUnitProjection>; next: number | null };
@@ -14509,6 +14515,7 @@ export interface RendererApi {
     taskIntentId: string;
     planEnvelopeDigest: string;
   }): Promise<TaskAuthorizationProjection>;
+  getBaselineAnalysisPage(input: Omit<ServiceOperationMap['getBaselineAnalysisPage']['input'], 'bookId'>): Promise<ServiceOperationMap['getBaselineAnalysisPage']['output']>;
   getCoverageManifestUnits(input: Omit<ServiceOperationMap['getCoverageManifestUnits']['input'], 'bookId'>): Promise<ServiceOperationMap['getCoverageManifestUnits']['output']>;
   getAnalysisRevisionUnits(input: Omit<ServiceOperationMap['getAnalysisRevisionUnits']['input'], 'bookId'>): Promise<ServiceOperationMap['getAnalysisRevisionUnits']['output']>;
   getAnalysisRevisionOverview(input: Omit<ServiceOperationMap['getAnalysisRevisionOverview']['input'], 'bookId'>): Promise<ServiceOperationMap['getAnalysisRevisionOverview']['output']>;

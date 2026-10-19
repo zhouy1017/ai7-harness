@@ -250,6 +250,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['prepareTaskAuthorization']['output']>(IPC_CHANNELS.prepareTaskAuthorization, input),
   authorizeTaskAuthorization: (input: Omit<ServiceOperationMap['authorizeTaskAuthorization']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['authorizeTaskAuthorization']['output']>(IPC_CHANNELS.authorizeTaskAuthorization, input),
+  getBaselineAnalysisPage: (input: Omit<ServiceOperationMap['getBaselineAnalysisPage']['input'], 'bookId'>) => invoke<ServiceOperationMap['getBaselineAnalysisPage']['output']>(IPC_CHANNELS.getBaselineAnalysisPage, input),
   getCoverageManifestUnits: (input: Omit<ServiceOperationMap['getCoverageManifestUnits']['input'], 'bookId'>) => invoke<ServiceOperationMap['getCoverageManifestUnits']['output']>(IPC_CHANNELS.getCoverageManifestUnits, input),
   getAnalysisRevisionUnits: (input: Omit<ServiceOperationMap['getAnalysisRevisionUnits']['input'], 'bookId'>) => invoke<ServiceOperationMap['getAnalysisRevisionUnits']['output']>(IPC_CHANNELS.getAnalysisRevisionUnits, input),
   getAnalysisRevisionOverview: (input: Omit<ServiceOperationMap['getAnalysisRevisionOverview']['input'], 'bookId'>) => invoke<ServiceOperationMap['getAnalysisRevisionOverview']['output']>(IPC_CHANNELS.getAnalysisRevisionOverview, input),

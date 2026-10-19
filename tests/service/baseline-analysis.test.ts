@@ -1345,7 +1345,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(controls1.actions['reanalyze-range'].options.map((option) => [option.unitOrdinal, option.startPosition, option.endPosition])).toEqual(
         first.prepared.coverageManifest!.units.map((unit) => [unit.ordinal, unit.startPosition, unit.endPosition]),
       );
-      expect(controls1.actions['reanalyze-range'].options[2]).toMatchObject({ unitOrdinal: 3, expected: { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 } });
+      expect(controls1.actions['reanalyze-range'].options[2]).toMatchObject({ unitOrdinal: 3, expected: null });
+      expect(store.getBaselineAnalysisRangePlan({ bookId, unitOrdinal: 3 }).expected).toEqual({ reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 });
       expect(controls1.providerConsequence).toContain('0 次实时传输');
       expect(() => prepare(store, bookId, { mode: 'sync-current', selectedRange: null })).toThrowError(/已过期/u);
       expect(() => prepare(store, bookId)).toThrowError(/已存在结果集修订版/u);
@@ -1400,7 +1401,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
 
       // Revision 3: 重新分析所选范围 over unit 3's range (the range chooser's third option).
       const option = sync.settled.updateControls!.actions['reanalyze-range'].options[2]!;
-      expect(option).toMatchObject({ unitOrdinal: 3, expected: { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 } });
+      expect(option).toMatchObject({ unitOrdinal: 3, expected: null });
+      expect(store.getBaselineAnalysisRangePlan({ bookId, unitOrdinal: 3 }).expected).toEqual({ reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 });
       const range = await runToSettled(store, owner, bookId, { mode: 'reanalyze-range', selectedRange: { startPosition: option.startPosition, endPosition: option.endPosition } });
       const plan3 = range.prepared.update!.reusePlan!;
       expect(range.prepared.update!.selectedRange).toEqual({ startPosition: option.startPosition, endPosition: option.endPosition });

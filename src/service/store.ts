@@ -1,4 +1,4 @@
-import { analysisBytePage, revisionUnitsPage, analysisOverviewPage } from './analysis/baseline-analysis-wire.js';
+import { analysisBytePage, revisionUnitsPage, analysisOverviewPage, baselineAnalysisSummaryPage } from './analysis/baseline-analysis-wire.js';
 import { acquireSkillPackage, ImportedSkills, ImportedSkillError, SkillAcquisitions, type AcquiredSkillPackage } from './imported-skills.js';
 import { ImportedSkillUpdates } from './imported-skill-updates.js';
 import { recommendProcedures, type RecommendationReading } from './procedure-recommendation.js';
@@ -5319,6 +5319,12 @@ export class EditorialStore {
   /** ②A's analysis; each update mode carries its quick start (Issue #421). */
   inspectBaselineAnalysis(bookId: string, progress?: ProgressReader, revisionId: string | null = null): BaselineAnalysisProjection {
     return this.#withBackgroundReport(this.#withQuickStart(this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress, revisionId)) as BaselineAnalysisProjection));
+  }
+
+  getBaselineAnalysisPage(input: { bookId: string; taskIntentId: string; revisionId: string | null; path: string; afterOrdinal: number }) {
+    const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(input.bookId, undefined, input.revisionId)) as BaselineAnalysisProjection;
+    requireStore(projection.taskIntent?.taskIntentId === input.taskIntentId, 'ANALYSIS_PAGE_STALE', '分析记录已改变，请重新打开分析。');
+    return this.#analysisCall(() => baselineAnalysisSummaryPage(projection, input.path, input.afterOrdinal));
   }
 
   getCoverageManifestUnits(input: { bookId: string; taskIntentId: string; afterOrdinal: number }) {

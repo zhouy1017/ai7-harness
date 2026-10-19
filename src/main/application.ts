@@ -2861,6 +2861,18 @@ function registerRendererHandlers(
       return result;
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.getBaselineAnalysisPage, (event, input: Omit<ServiceOperationMap['getBaselineAnalysisPage']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getBaselineAnalysisPage', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      return result;
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.getCoverageManifestUnits, (event, input: Omit<ServiceOperationMap['getCoverageManifestUnits']['input'], 'bookId'>) =>
     envelope(async () => {
       const owned = requireSender(event);

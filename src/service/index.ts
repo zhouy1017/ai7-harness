@@ -436,6 +436,8 @@ async function dispatch(
           request.input.planEnvelopeDigest,
         ),
       };
+    case 'getBaselineAnalysisPage':
+      return { id: request.id, ok: true, op: request.op, result: store.getBaselineAnalysisPage(request.input) };
     case 'getCoverageManifestUnits':
       return { id: request.id, ok: true, op: request.op, result: store.getCoverageManifestUnits(request.input) };
     case 'getAnalysisRevisionUnits':

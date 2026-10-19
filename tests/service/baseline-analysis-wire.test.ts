@@ -1,4 +1,4 @@
-import { longSettledAnalysis } from '../support/long-baseline-analysis.js';
+import { longSettledAnalysis, BASELINE_REPLY_OPERATIONS, baselineReplyResult } from '../support/long-baseline-analysis.js';
 import { analysisOverviewText, baselineAnalysisOutbound, serializedBytes } from '../../src/service/analysis/baseline-analysis-wire.js';
 import { manifestDigestIsExact } from '../../src/service/analysis/coverage-manifest.js';
 import { baselineAnalysisWire } from '../../src/service/analysis/baseline-analysis-wire.js';
@@ -52,13 +52,10 @@ it('keeps the prepared long-book reply below the frame budget', async () => {
     expect(Buffer.byteLength(JSON.stringify({ id: 1, ok: true, op: 'inspectBaselineAnalysis', result: baselineAnalysisWire(full) })))
       .toBeLessThanOrEqual(MAX_FRAME_BYTES - 64 * 1024);
     expect(manifestDigestIsExact({ ...full.coverageManifest!, units: members })).toBe(true);
-    const ops = ['inspectBaselineAnalysis', 'authorizeBaselineAnalysis', 'startBaselineAnalysisWhenOnline',
-      'cancelWaitingBaselineAnalysis', 'cancelBaselineAnalysisRun', 'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun',
-      'editBaselineAnalysisPlan', 'answerBaselineAnalysisClarification', 'quickStartBaselineAnalysis', 'pollServiceJob'];
+    const ops = BASELINE_REPLY_OPERATIONS;
     for (const [state, projection] of Object.entries({ prepared: full, settled: longSettledAnalysis(full), history: longSettledAnalysis(full, 12) })) {
       const sizes = ops.map((op) => {
-        const result = op === 'pollServiceJob' ? { kind: 'baseline-analysis-preparation', result: projection }
-          : op === 'quickStartBaselineAnalysis' ? { outcome: 'fell-back', reasons: [], projection } : projection;
+        const result = baselineReplyResult(op, projection);
         const response = { id: '00000000-0000-4000-8000-000000000000', ok: true, op, result };
         const after = serializedBytes(baselineAnalysisOutbound(response));
         expect(after).toBeLessThanOrEqual(MAX_FRAME_BYTES - 64 * 1024);

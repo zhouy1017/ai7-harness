@@ -6,13 +6,27 @@ import { buildRunReport, runReportReflectionNotRun, runReportDigest } from '../.
 import { deriveCoverageManifest } from '../../src/service/analysis/coverage-manifest.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
 
-export function longPreparedAnalysis(paragraphs = 6000): BaselineAnalysisProjection {
+export const BASELINE_REPLY_OPERATIONS = ['inspectBaselineAnalysis', 'authorizeBaselineAnalysis', 'startBaselineAnalysisWhenOnline',
+  'cancelWaitingBaselineAnalysis', 'cancelBaselineAnalysisRun', 'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun',
+  'editBaselineAnalysisPlan', 'answerBaselineAnalysisClarification', 'quickStartBaselineAnalysis', 'prepareBaselineAnalysis',
+  'pollServiceJob', 'cancelServiceJob', 'redoTaskPlan', 'promoteTaskIntentDraft'] as const;
+
+export function baselineReplyResult(op: string, projection: unknown): unknown {
+  if (op === 'quickStartBaselineAnalysis') return { outcome: 'fell-back', reasons: [], projection };
+  if (['prepareBaselineAnalysis', 'pollServiceJob', 'cancelServiceJob', 'redoTaskPlan', 'promoteTaskIntentDraft'].includes(op)) {
+    return { jobId: '00000000-0000-4000-8000-000000000000', kind: 'baseline-analysis-preparation', state: 'completed',
+      progress: { completed: 6000, total: 6000, label: '基线分析的任务计划已准备' }, result: projection, failure: null };
+  }
+  return projection;
+}
+
+export function longPreparedAnalysis(paragraphs = 6000, headings = false): BaselineAnalysisProjection {
   const bookId = randomUUID();
   const manuscriptId = randomUUID();
   const revisionId = randomUUID();
   const manifest = deriveCoverageManifest({ bookId, manuscriptId, revisionId, branchId: randomUUID(), revisionLabel: 'r1',
     revisionDigest: '0'.repeat(64), blocks: Array.from({ length: paragraphs }, (_, index) => ({
-      blockId: `blk_${(index + 1).toString(16).padStart(24, '0')}`, position: index + 1, kind: 'paragraph', level: null,
+      blockId: `blk_${(index + 1).toString(16).padStart(24, '0')}`, position: index + 1, kind: headings ? 'heading' : 'paragraph', level: headings ? 1 : null,
       text: '甲'.repeat(80), graphemes: 80, digest: sha256Hex('甲'.repeat(80)),
     })) });
   return { bookId, kind: 'baseline-manuscript-analysis', contractVersion: 'ai7.baseline-manuscript-analysis/1',
@@ -27,15 +41,15 @@ export function longPreparedAnalysis(paragraphs = 6000): BaselineAnalysisProject
 }
 
 /** Generated model-shaped results over a real imported/prepared Book; no model or transport is involved. */
-export function longSettledAnalysis(prepared: BaselineAnalysisProjection, revisions = 1): BaselineAnalysisProjection {
+export function longSettledAnalysis(prepared: BaselineAnalysisProjection, revisions = 1, dense = true): BaselineAnalysisProjection {
   const manifest = prepared.coverageManifest!;
   const outcomes: UnitOutcome[] = manifest.units.map((unit) => {
     const sourceRanges = [{ blockId: unit.blockIds[0]!, fromGrapheme: 0, toGrapheme: 1 }];
     return { unitOrdinal: unit.ordinal, state: 'closed', result: {
       schema: BASELINE_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal, synopsis: '生成梗概甲乙丙丁'.repeat(90),
       confidence: 'medium', relationships: [], settingClaims: [], conflicts: [], unresolved: [],
-      entities: Array.from({ length: 20 }, (_, index) => ({ name: `生成实体${unit.ordinal}-${index}`, kind: 'person', aliases: [], note: null, sourceRanges })),
-      events: Array.from({ length: 20 }, (_, index) => ({ ordinal: index + 1, summary: `生成事件${unit.ordinal}-${index}`, chronology: null, participants: [], sourceRanges })),
+      entities: Array.from({ length: dense ? 20 : 0 }, (_, index) => ({ name: `生成实体${unit.ordinal}-${index}`, kind: 'person', aliases: [], note: null, sourceRanges })),
+      events: Array.from({ length: dense ? 20 : 0 }, (_, index) => ({ ordinal: index + 1, summary: `生成事件${unit.ordinal}-${index}`, chronology: null, participants: [], sourceRanges })),
     } };
   });
   const reduction = reduceBaselineAnalysis(manifest, outcomes);
