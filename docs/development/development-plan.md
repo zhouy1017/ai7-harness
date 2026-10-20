@@ -2,6 +2,8 @@
 
 Status: Owner-approved order of 2026-10-12 under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md); #808 delivered to dev at `c194482eb09479299a9c95fea173ea0bcd17db53` (tree `e27e9e86`), after #806's delivery at `c7b646bf` and protection activation. #807 was delivered to dev at `c5fcf114be2bdc105f89c90a0d3fd2de47bae9a4` (tree `77898a22`) through [PR #824](https://github.com/zhouy1017/ai7-harness/pull/824), including independently reviewed product #823 and the required J-16 repair #825. This is the sole delivery-order owner. [PROGRESS](../../PROGRESS.md) reports implementation; each Issue owns bounded acceptance. [PR #820](https://github.com/zhouy1017/ai7-harness/pull/820) records #808's cumulative verification and dev delivery. The Owner-confirmed Initial v1.0.0 Development Milestone scope is recorded in [milestone-1.0.0-scope.md](milestone-1.0.0-scope.md).
 
+Wave 16 / 16a: [#1002](https://github.com/zhouy1017/ai7-harness/issues/1002), brief revision 2, implements the Owner’s 2026-10-20 UI direction under ADR 0092: warm paper/night ink, accessible motion and technical disclosure, comfortable manuscript reading and current-catalog Book switching. The slice targets `codex/integration-16` from `30c55f047fba2fcb42a7bfee37a9dc2aa775c65a`; review, committed-head guest validation and final dev integration remain pending.
+
 ## Delivery approach
 
 The editor, manuscript history, marks, delivery records and many AI task surfaces already exist. Fixture success does not establish real execution or editorial usefulness. Deliver the smallest usable real-model loop, measure its quality and document fidelity, then expand retrieval, learning and orchestration.

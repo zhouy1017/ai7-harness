@@ -1046,6 +1046,7 @@ const shell = mountShell({
   preferenceNotice: requiredElement('#preferences-notice'),
   preferences: shellPreferences,
   pinLimit: MAX_PINNED_BOOKS,
+  listBooks: (input) => window.ai7.listBooks(input),
   setStatus,
   errorMessage: rendererErrorMessage,
   openDestination: (destination) => {
@@ -8774,9 +8775,13 @@ function renderEditorWindow(
   const position = element('span', undefined, initialWindow.position.label);
   const revision = element('span', undefined, revisionWords(initialWindow));
   const journal = element('span', undefined, `修订日志序号 ${initialWindow.journalSequence}`);
+  journal.dataset['editorTechnical'] = 'true';
   const recoveredState = element('strong', 'recovered-state-marker', '当前为恢复的工作状态');
   recoveredState.hidden = initialWindow.recoveredStateReview === null;
-  meta.append(position, revision, journal, recoveredState);
+  const journalDetails = element('details', 'editor-technical-details');
+  journalDetails.dataset['editorTechnicalDisclosure'] = 'journal';
+  journalDetails.append(element('summary', undefined, '查看技术详情'), journal);
+  meta.append(position, revision, journalDetails, recoveredState);
   // 回到<位置> (Issue #423, S77a; TASK-045): the way back a jump left, in the context header until it is used.
   const chipHost = element('div', 'return-chip-host');
   chipHost.hidden = true;

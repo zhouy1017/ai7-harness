@@ -1,35 +1,35 @@
 :root {
   color-scheme: light;
-  --shell: #f2f4f7;
-  --surface: #f8f9fb;
-  --surface-subdued: #edf0f4;
+  --shell: #f3f0ea;
+  --surface: #faf8f5;
+  --surface-subdued: #ebe6dd;
   --manuscript: #fbf9f4;
-  --text: #252c35;
-  --text-subdued: #535f6d;
-  --boundary: #cbd2dc;
-  --boundary-strong: #778496;
-  --focus: #2f5d8a;
-  --selection: #dce8f5;
-  --selection-text: #20364d;
-  --selection-boundary: #2f5d8a;
-  --status-neutral: #4c5968;
-  --status-neutral-surface: #e9edf2;
-  --status-good: #28533a;
-  --status-good-surface: #e5f1e7;
-  --status-attention: #76530f;
-  --status-attention-surface: #fff0cf;
-  --status-blocked: #842f28;
-  --status-blocked-surface: #f3e4e0;
-  --status-progress: #2f4a6b;
-  --status-progress-surface: #e3ecf6;
-  --action-primary: #2f5d8a;
-  --action-primary-hover: #234b72;
-  --action-primary-text: #f8f9fb;
-  --action-secondary: #f8f9fb;
-  --action-text: #2f5d8a;
-  --action-danger: #842f28;
-  --shadow: rgba(31, 36, 41, .12);
-  --backdrop: rgba(36, 39, 32, .35);
+  --text: #23201c;
+  --text-subdued: #5c5346;
+  --boundary: #d5cec2;
+  --boundary-strong: #7b7062;
+  --focus: #7a3e28;
+  --selection: #f2e4dc;
+  --selection-text: #3b2016;
+  --selection-boundary: #7a3e28;
+  --status-neutral: #4f483f;
+  --status-neutral-surface: #eae5dc;
+  --status-good: #245237;
+  --status-good-surface: #e4f0e6;
+  --status-attention: #6e4c0d;
+  --status-attention-surface: #fcedcc;
+  --status-blocked: #7d2b24;
+  --status-blocked-surface: #f3e2de;
+  --status-progress: #2b4a68;
+  --status-progress-surface: #e2ecf5;
+  --action-primary: #7a3e28;
+  --action-primary-hover: #612f1d;
+  --action-primary-text: #faf8f5;
+  --action-secondary: #faf8f5;
+  --action-text: #7a3e28;
+  --action-danger: #7d2b24;
+  --shadow: rgba(35, 32, 28, .1);
+  --backdrop: rgba(35, 32, 28, .35);
 
   font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
   color: var(--text);
@@ -52,36 +52,36 @@
 /* Complete semantic mapping; the existing dark editorial mark palette is retained (§0.3). */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --shell: #20252c;
-  --surface: #292f38;
-  --surface-subdued: #252b33;
-  --manuscript: #2b3037;
-  --text: #e1e5eb;
-  --text-subdued: #b2bdcb;
-  --boundary: #566171;
-  --boundary-strong: #8795a8;
-  --focus: #9fc9fb;
-  --selection: #355273;
-  --selection-text: #edf3fa;
-  --selection-boundary: #8fb8e6;
-  --status-neutral: #bfc9d6;
-  --status-neutral-surface: #323b47;
-  --status-good: #acdab9;
-  --status-good-surface: #233a2d;
-  --status-attention: #efd295;
-  --status-attention-surface: #443923;
-  --status-blocked: #f4b6b0;
-  --status-blocked-surface: #462e30;
-  --status-progress: #b6d5fa;
-  --status-progress-surface: #2b3c51;
-  --action-primary: #a8cdf6;
-  --action-primary-hover: #bedbfa;
-  --action-primary-text: #172433;
-  --action-secondary: #303945;
-  --action-text: #a8cdf6;
-  --action-danger: #f4b6b0;
-  --shadow: rgba(12, 17, 24, .3);
-  --backdrop: rgba(12, 17, 24, .6);
+  --shell: #1e1e22;
+  --surface: #27272c;
+  --surface-subdued: #222227;
+  --manuscript: #292826;
+  --text: #eae6df;
+  --text-subdued: #b8b0a4;
+  --boundary: #56534e;
+  --boundary-strong: #968e82;
+  --focus: #e29b82;
+  --selection: #4a332b;
+  --selection-text: #f7efe9;
+  --selection-boundary: #d88f75;
+  --status-neutral: #cfc8be;
+  --status-neutral-surface: #35343a;
+  --status-good: #a8d8b6;
+  --status-good-surface: #22382b;
+  --status-attention: #efd092;
+  --status-attention-surface: #423721;
+  --status-blocked: #f4b4ae;
+  --status-blocked-surface: #452c2e;
+  --status-progress: #b4d4fa;
+  --status-progress-surface: #293a4f;
+  --action-primary: #e0987e;
+  --action-primary-hover: #ebb09b;
+  --action-primary-text: #1f1612;
+  --action-secondary: #2f2f36;
+  --action-text: #e0987e;
+  --action-danger: #f4b4ae;
+  --shadow: rgba(12, 14, 18, .32);
+  --backdrop: rgba(12, 14, 18, .62);
 
   --mark-suggestion: #e58fa0;
   --mark-suggestion-fill: #4a2530;
@@ -1489,7 +1489,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .milestone-purpose-note, .milestone-save-reason { margin-top: 0; }
 .milestone-save-reason[hidden] { display: none; }
 .manuscript-surface { min-width: 0; background: var(--manuscript); }
-.editor-window { position: relative; max-height: min(70vh, 760px); overflow: auto; padding: 2.2rem clamp(1.5rem, 5vw, 5rem) 3rem; background: var(--manuscript); }
+.editor-window { position: relative; max-height: min(82vh, 960px); overflow: auto; padding: 2.2rem clamp(1.5rem, 5vw, 5rem) 3rem; background: var(--manuscript); }
 /* Manuscript reading typography (Issue #951; VIEW-004/005): the face, size, leading, column and alignment come from the local
    reading preferences as custom properties, with the former values as the fallback. The column counts fullwidth characters. */
 .ProseMirror {
@@ -2171,4 +2171,179 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 @media (forced-colors: active) {
   .agent-workspace-safety, .agent-workspace-pick, .agent-workspace-instruction, .agent-workspace-proposal { border-color: CanvasText; }
   .agent-workspace-block[data-agent-workspace-chosen] { border-left-color: Highlight; }
+}
+
+/* ---- Wave 16 Slice 16a (Issue #1002, ADR 0092): Spring motion, searchable multi-book switcher, and progressive technical disclosure ---- */
+/* Only presentation properties interpolate; safety/status visibility remains immediate. */
+body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right .2s cubic-bezier(.22, 1, .36, 1); }
+.app-sidebar { transition: width .2s cubic-bezier(.22, 1, .36, 1), padding .2s cubic-bezier(.22, 1, .36, 1); }
+.sidebar-book-switcher-toggle, .shell-book-picker-option { transition: background-color .15s ease-out, border-color .15s ease-out; }
+.sidebar-books-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .4rem;
+  padding: 0 .35rem 0 0;
+}
+.sidebar-books-header .sidebar-group-label {
+  margin-bottom: 0;
+}
+.sidebar-book-switcher-toggle {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: .2rem .55rem;
+  border: 1px solid var(--boundary);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--action-text);
+  font-size: .76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sidebar-book-switcher-toggle:hover:not(:disabled) {
+  background: var(--surface-subdued);
+  border-color: var(--boundary-strong);
+}
+.sidebar-book-switcher-toggle[aria-expanded="true"] {
+  border-color: var(--selection-boundary);
+  background: var(--selection);
+  color: var(--selection-text);
+}
+.shell-book-picker-popover {
+  position: fixed;
+  z-index: 40;
+  top: 1rem;
+  left: calc(var(--sidebar-width) + .4rem);
+  width: min(24rem, calc(100vw - var(--sidebar-width) - .8rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  display: grid;
+  gap: .45rem;
+  margin: 0;
+  padding: .55rem;
+  border: 1px solid var(--boundary-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 10px 28px var(--shadow);
+}
+.shell-book-picker-popover[hidden] {
+  display: none;
+}
+.shell-book-picker-search {
+  width: 100%;
+  min-height: 32px;
+  padding: .3rem .55rem;
+  border: 1px solid var(--boundary);
+  border-radius: 7px;
+  background: var(--manuscript);
+  color: var(--text);
+  font-size: .82rem;
+}
+.shell-book-picker-list {
+  display: grid;
+  gap: .2rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.shell-book-picker-option {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  width: 100%;
+  min-height: 36px;
+  padding: .3rem .45rem;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.shell-book-picker-option:hover:not(:disabled) {
+  background: var(--surface-subdued);
+}
+.shell-book-picker-option[aria-current="true"] {
+  border-color: var(--selection-boundary);
+  background: var(--selection);
+  color: var(--selection-text);
+}
+.shell-book-picker-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border: 1px solid var(--boundary);
+  border-radius: 6px;
+  background: var(--surface-subdued);
+  color: var(--action-text);
+  font-family: "Noto Serif CJK SC", "Songti SC", serif;
+  font-size: .85rem;
+  font-weight: 700;
+}
+.shell-book-picker-meta {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.shell-book-picker-title {
+  font-family: "Noto Serif CJK SC", "Songti SC", serif;
+  font-size: .86rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.shell-book-picker-state {
+  color: var(--text-subdued);
+  font-size: .74rem;
+}
+.shell-book-picker-library {
+  width: 100%;
+  min-height: 32px;
+  padding: .25rem .4rem;
+  font-size: .78rem;
+  text-align: center;
+}
+:root[data-sidebar="icons"] .sidebar-book-switcher-toggle { width: 100%; padding-inline: .1rem; font-size: 0; }
+:root[data-sidebar="icons"] .sidebar-book-switcher-toggle::before { content: '切'; font-size: .85rem; }
+.shell-book-picker-popover button, .shell-book-picker-search { border-color: var(--boundary-strong); }
+.shell-book-picker-popover :focus-visible, .sidebar-book-switcher-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.editor-technical-details { font-size: .8rem; color: var(--text-subdued); }
+.editor-technical-details summary { cursor: pointer; }
+@media (prefers-reduced-motion: reduce) {
+  body,
+  .app-sidebar,
+  .task-drawer,
+  .manuscript-navigator,
+  .panel,
+  .editorial-mark-card,
+  .sidebar-link,
+  .primary,
+  .secondary,
+  .quiet,
+  .sidebar-book-switcher-toggle,
+  .shell-book-picker-option {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+@media (forced-colors: active) {
+  .sidebar-book-switcher-toggle,
+  .shell-book-picker-popover,
+  .shell-book-picker-search,
+  .shell-book-picker-option,
+  .shell-book-picker-icon {
+    color: ButtonText;
+    background: ButtonFace;
+    border-color: ButtonText;
+    forced-color-adjust: auto;
+  }
+  .sidebar-book-switcher-toggle[aria-expanded="true"],
+  .shell-book-picker-option[aria-current="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }

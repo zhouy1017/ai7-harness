@@ -773,6 +773,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'keyboard-ime-guard',
     'keyboard-remap-dispatch',
     'keyboard-restore-default',
+    'editorial-book-switcher',
+    'editorial-disclosure-motion',
     'acknowledged-edit',
     'j14-ime-focus',
     'j14-reflow-forced-colors',

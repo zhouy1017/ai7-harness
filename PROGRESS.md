@@ -4,6 +4,8 @@ Checkpoint for wave 15, the post-1.0.0 wave on the [1.0.0 boundary record](https
 
 The [development plan](docs/development/development-plan.md) owns delivery order. [Orca dispatch](docs/agents/orca-dispatch.md) owns repository roles and integration; [ADR 0089](docs/adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) owns the development-test/business boundary and Go model target. The replaced checkpoint and its instructions remain in Git history, not a duplicate active archive.
 
+Wave 16 / 16a is pending in [#1002](https://github.com/zhouy1017/ai7-harness/issues/1002): ADR 0092 and the editorial UI refinement are being implemented on `codex/1002-editorial-ui` for `codex/integration-16`, based on `30c55f047fba2fcb42a7bfee37a9dc2aa775c65a`. This is no dev integration claim; the Commander owns the final checkpoint.
+
 ## What the editor can use now
 
 - Long manuscripts in the 40万字 class and heading-heavy files open 分析, start 基线稿件分析, read its results a page at a time through 显示更多阅读范围, and work in the task drawer and 审阅 chapter choices without ending in 服务响应超出安全范围.

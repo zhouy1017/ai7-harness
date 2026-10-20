@@ -800,11 +800,53 @@ async function main() {
     cancellation.throwIfRequested();
     await runSettingsPages(renderer, cancellation);
     const crossBookId = await createEmptyBook(renderer, cancellation);
+    at('editorial-book-switcher');
+    // The catalog was empty at startup; opening now must re-read both newly created Books.
+    await assertRenderer(renderer, `(() => { const trigger=document.querySelector('[data-shell-book-switcher]'); trigger.focus(); return document.activeElement===trigger; })()`, 'book-switcher-trigger-focus');
+    await pressKey(renderer, ENTER_KEY);
+    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2 && document.activeElement?.matches('[data-shell-book-search]')`, 'book-switcher-current-catalog');
+    await assertRenderer(renderer, `(() => { const ids=Array.from(document.querySelectorAll('[data-shell-picker-book]')).map((n)=>n.dataset.shellPickerBook); return new Set(ids).size===2 && ids.includes(${JSON.stringify(imported.bookId)}) && ids.includes(${JSON.stringify(crossBookId)}); })()`, 'book-switcher-unique-books');
+    await fill(renderer, '[data-shell-book-search]', 'J-03 路由边界图书', 'book-switcher-filter');
+    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===1 && document.querySelector('[data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)}`, 'book-switcher-filtered');
+    await pressKey(renderer, ESCAPE_KEY);
+    await assertRenderer(renderer, `document.querySelector('[data-shell-book-picker="panel"]').hidden && document.activeElement?.matches('[data-shell-book-switcher]')`, 'book-switcher-escape-focus');
+    await pressKey(renderer, ENTER_KEY);
+    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2`, 'book-switcher-reopen-refresh');
+    await clickSelector(renderer, `[data-shell-picker-book="${crossBookId}"]`, 'book-switcher-open-book');
+    await waitFor(renderer, `document.querySelector('.book-overview')?.dataset.bookId===${JSON.stringify(crossBookId)}`, 'book-switcher-book-route');
+    await clickSelector(renderer, '[data-shell-book-switcher]', 'book-switcher-current-open');
+    await waitFor(renderer, `document.querySelector('[data-shell-picker-book][aria-current="true"]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)}`, 'book-switcher-current-book');
+    await clickSelector(renderer, '[data-shell-book-library]', 'book-switcher-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'book-switcher-library-route');
+
     cancellation.throwIfRequested();
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'book-reopen');
     // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
+    at('editorial-disclosure-motion');
+    await assertRenderer(renderer, `(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); if(!details||!journal||details.open||journal.getClientRects().length!==0)return false; const summary=details.querySelector('summary'); summary.focus(); return document.activeElement===summary && summary.textContent==='查看技术详情' && document.querySelector('#persistence-status')?.getClientRects().length>0; })()`, 'journal-disclosure-closed');
+    await pressKey(renderer, ENTER_KEY);
+    await assertRenderer(renderer, `(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); return details.open && details.querySelector('[data-editor-technical]').getClientRects().length>0; })()`, 'journal-disclosure-keyboard-open');
+    await pressKey(renderer, ENTER_KEY);
+    await assertRenderer(renderer, `!document.querySelector('[data-editor-technical-disclosure="journal"]').open`, 'journal-disclosure-keyboard-close');
+    // A real width changes between endpoints; do not confuse a transition declaration with visible motion.
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+    await assertRenderer(renderer, `(async () => { const sidebar=document.querySelector('#app-sidebar'); const toggle=document.querySelector('#sidebar-toggle'); if(!toggle)return false; const before=sidebar.getBoundingClientRect().width; const mode=document.documentElement.dataset.sidebar; toggle.click(); const deadline=Date.now()+3000; while(document.documentElement.dataset.sidebar===mode && Date.now()<deadline)await new Promise((r)=>setTimeout(r,5)); const samples=[]; for(let i=0;i<24;i++){ await new Promise(requestAnimationFrame); samples.push(sidebar.getBoundingClientRect().width); } const after=sidebar.getBoundingClientRect().width; return Math.abs(before-after)>50 && samples.some((middle)=>middle>Math.min(before,after)+1 && middle<Math.max(before,after)-1); })()`, 'sidebar-visible-transition');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await assertRenderer(renderer, `getComputedStyle(document.querySelector('#app-sidebar')).transitionDuration.split(',').every((v)=>parseFloat(v)===0)`, 'sidebar-reduced-motion');
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }, { name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await clickSelector(renderer, '[data-shell-book-switcher]', 'book-switcher-narrow-open');
+    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2`, 'book-switcher-narrow-ready');
+    await assertRenderer(renderer, `(() => { const panel=document.querySelector('[data-shell-book-picker="panel"]'), trigger=document.querySelector('[data-shell-book-switcher]'), editor=document.querySelector('.editor-window'); const box=panel.getBoundingClientRect(); const style=getComputedStyle(panel); return trigger.getClientRects().length>0 && box.left>=0 && box.right<=innerWidth+2 && panel.scrollWidth<=panel.clientWidth+2 && document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && editor.clientHeight>120 && editor.scrollWidth<=editor.clientWidth+2 && style.borderStyle!=='none' && style.color!==style.backgroundColor; })()`, 'book-switcher-zoom-forced-colors');
+    await pressKey(renderer, ESCAPE_KEY);
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [] });
+    // Restore the expanded preference before the pre-existing Journey proceeds.
+    await assertRenderer(renderer, `(() => { if(document.documentElement.dataset.sidebar==='icons')document.querySelector('#sidebar-toggle').click(); return true; })()`, 'sidebar-restore-expanded');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'book-reopened-to-overview');
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened');
 
