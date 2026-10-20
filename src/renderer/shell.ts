@@ -1,3 +1,4 @@
+import type { BookSummaryCursor } from '../shared/protocol.js';
 import {
   MAX_RECENT_BOOKS,
   MAX_SHELL_BOOK_TITLE_CHARACTERS,
@@ -26,11 +27,11 @@ import {
 } from './shell-labels.js';
 import { HELP_ENTRY } from './help-labels.js';
 
-// The shell around every screen (Issue #934, wave 11 slice 11a; editor-surfaces §0.3; IA-006 to IA-013, ADR 0076): a
-// two-level sidebar — the five global destinations, 置顶 and 最近打开 Books, the current Book's three groups and 设置 — and
-// a context header naming where the window is. The screens stay their own owners: they still replace `#screen`, and they
-// tell the shell which Book and section they show through `follow`. The shell owns no record: pinning, recency and the
-// collapsed state are preferences, written through the main process's file and nothing else.
+// The shell around every screen (Issue #934, wave 11 slice 11a; Issue #1002, wave 16 slice 16a; editor-surfaces §0.3; IA-006 to IA-013, ADR 0076, ADR 0092):
+// a two-level sidebar — the five global destinations, 置顶 and 最近打开 Books (with an inline searchable 切换书稿 ▾ list),
+// the current Book's three groups and 设置 — and a context header naming where the window is. The screens stay their own
+// owners: they still replace `#screen`, and they tell the shell which Book and section they show through `follow`. The
+// shell owns no record: pinning, recency and the collapsed state are preferences, written through the main process's file and nothing else.
 
 /** Where a Book screen is: its Book and the section of the current-Book groups it belongs to. */
 export interface ShellPlace {
@@ -150,6 +151,34 @@ export function sidebarBookRows(
   return { pinned: pinnedRows, recent: recentRows };
 }
 
+/** Catalog identities and full titles are authoritative; preferences only order current entries. */
+export function bookPickerRows(
+  catalog: ReadonlyArray<ShellBookEntry>,
+  pinned: ReadonlyArray<ShellBookEntry>,
+  recent: ReadonlyArray<ShellRecentBookEntry>,
+  currentBookId: string | null,
+  query = '',
+): ReadonlyArray<SidebarBookRow & { readonly group: 'pinned' | 'recent' | 'remaining' }> {
+  const available = new Map(catalog.map((entry) => [entry.bookId, entry]));
+  const visits = new Map(recent.map((entry) => [entry.bookId, entry]));
+  const pinnedIds = new Set(pinned.map((entry) => entry.bookId));
+  const seen = new Set<string>();
+  const rows: Array<SidebarBookRow & { group: 'pinned' | 'recent' | 'remaining' }> = [];
+  const normalized = query.trim().toLowerCase();
+  for (const candidate of [...pinned, ...recent, ...catalog]) {
+    const entry = available.get(candidate.bookId);
+    if (entry === undefined || seen.has(entry.bookId)) continue;
+    seen.add(entry.bookId);
+    if (normalized && !entry.title.toLowerCase().includes(normalized) && !entry.bookId.toLowerCase().includes(normalized)) continue;
+    const visit = visits.get(entry.bookId);
+    const isPinned = pinnedIds.has(entry.bookId);
+    rows.push({ ...entry, pinned: isPinned, current: entry.bookId === currentBookId,
+      state: visit ? shellRecentStateLine(visit.section) : isPinned ? SHELL_LABELS.pinned : SHELL_LABELS.catalogBookState,
+      group: isPinned ? 'pinned' : visit ? 'recent' : 'remaining' });
+  }
+  return rows;
+}
+
 /** The first character a collapsed row shows for a Book: its title's, as the editor reads it. */
 export function bookIcon(title: string): string {
   return [...title.trim()][0] ?? SHELL_LABELS.bookIcon;
@@ -263,6 +292,10 @@ export interface MountShellOptions {
   readonly preferenceNotice: HTMLElement;
   readonly preferences: ShellPreferences;
   readonly pinLimit: number;
+  /** Read pages of the current Book catalog in the searchable 切换书稿 ▾ switcher (Issue #1002, ADR 0092). */
+  readonly listBooks?: (input: { after: BookSummaryCursor | null }) => Promise<{
+    items: ReadonlyArray<ShellBookEntry>; nextCursor: BookSummaryCursor | null;
+  }>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
   openDestination(destination: Exclude<ShellDestination, 'attention'>): void;
@@ -300,6 +333,11 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   let active: ShellActive = { kind: 'none' };
   let state = '';
   let interrupted = false;
+  let catalogBooks: ReadonlyArray<ShellBookEntry> = [];
+  let pickerOpen = false;
+  let pickerQuery = '';
+  let catalogState: 'loading' | 'ready' | 'failed' = 'loading';
+  let catalogRequest = 0;
   const narrowQuery = window.matchMedia(`(max-width: ${SIDEBAR_ICONS_ONLY_BELOW_PX - 0.02}px)`);
 
   sidebar.setAttribute('aria-label', SHELL_LABELS.navigation);
@@ -330,6 +368,168 @@ export function mountShell(options: MountShellOptions): ShellSurface {
 
   const books = el('section', 'sidebar-books');
   books.setAttribute('aria-label', SHELL_LABELS.books);
+
+  // One disclosure with ordinary buttons and grouped lists: native Tab/Enter behavior, no faux listbox.
+  const switcherHeader = el('div', 'sidebar-books-header');
+  const switcherToggle = el('button', 'sidebar-book-switcher-toggle', SHELL_LABELS.switchBookTrigger);
+  switcherToggle.type = 'button';
+  switcherToggle.dataset['shellBookSwitcher'] = 'toggle';
+  switcherToggle.dataset['navIcon'] = bookIcon(SHELL_LABELS.switchBook);
+  switcherToggle.setAttribute('aria-expanded', 'false');
+  switcherToggle.setAttribute('aria-controls', 'shell-book-picker');
+  switcherToggle.setAttribute('aria-label', SHELL_LABELS.switchBook);
+  switcherHeader.append(switcherToggle);
+  const pickerPopover = el('section', 'shell-book-picker-popover');
+  pickerPopover.id = 'shell-book-picker';
+  pickerPopover.setAttribute('aria-label', SHELL_LABELS.switchBook);
+  pickerPopover.dataset['shellBookPicker'] = 'panel';
+  pickerPopover.hidden = true;
+  const pickerSearch = el('input', 'shell-book-picker-search');
+  pickerSearch.type = 'search';
+  pickerSearch.placeholder = SHELL_LABELS.bookSearchPlaceholder;
+  pickerSearch.setAttribute('aria-label', SHELL_LABELS.bookSearchLabel);
+  pickerSearch.dataset['shellBookSearch'] = 'input';
+  const pickerStatus = el('p', 'field-note');
+  pickerStatus.setAttribute('role', 'status');
+  pickerStatus.dataset['shellBookPickerStatus'] = 'state';
+  const pickerList = el('div', 'shell-book-picker-list');
+  pickerList.dataset['shellBookPickerList'] = 'items';
+  const retry = el('button', 'quiet', SHELL_LABELS.retryCatalog);
+  retry.type = 'button';
+  retry.dataset['shellBookRetry'] = 'retry';
+  const pickerLibraryBtn = el('button', 'shell-book-picker-library quiet', SHELL_LABELS.openLibraryDirectory);
+  pickerLibraryBtn.type = 'button';
+  pickerLibraryBtn.dataset['shellBookLibrary'] = 'open';
+  pickerPopover.append(pickerSearch, pickerStatus, pickerList, retry, pickerLibraryBtn);
+  const bookRows = el('div');
+  books.append(switcherHeader, pickerPopover, bookRows);
+
+  const closePicker = (restoreFocus: boolean): void => {
+    if (!pickerOpen) return;
+    pickerOpen = false;
+    catalogRequest += 1;
+    pickerPopover.hidden = true;
+    switcherToggle.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) switcherToggle.focus({ preventScroll: true });
+  };
+  const renderPickerList = (): void => {
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusedId = focused?.dataset['shellPickerBook'];
+    pickerList.replaceChildren();
+    retry.hidden = catalogState !== 'failed';
+    pickerList.setAttribute('aria-busy', String(catalogState === 'loading'));
+    if (catalogState !== 'ready') {
+      pickerStatus.textContent = catalogState === 'loading' ? SHELL_LABELS.loadingCatalog : SHELL_LABELS.catalogFailed;
+    } else {
+      const entries = bookPickerRows(catalogBooks, preferences.current['shell.pinnedBooks'], preferences.current['shell.recentBooks'], book?.bookId ?? null, pickerQuery);
+      pickerStatus.textContent = entries.length ? SHELL_LABELS.catalogCount(entries.length) : catalogBooks.length ? SHELL_LABELS.noMatchingBooks : SHELL_LABELS.emptyCatalog;
+      for (const group of ['pinned', 'recent', 'remaining'] as const) {
+        const rows = entries.filter((entry) => entry.group === group);
+        if (!rows.length) continue;
+        const label = group === 'pinned' ? SHELL_LABELS.pinnedHeading : group === 'recent' ? SHELL_LABELS.recentHeading : SHELL_LABELS.remainingHeading;
+        const section = el('section');
+        section.dataset['shellPickerGroup'] = group;
+        section.setAttribute('aria-label', label);
+        section.append(el('h3', 'shell-book-picker-heading', label));
+        const list = el('ul');
+        for (const row of rows) {
+          const item = el('li');
+          const pick = el('button', 'shell-book-picker-option');
+          pick.type = 'button';
+          pick.dataset['shellPickerBook'] = row.bookId;
+          pick.setAttribute('aria-label', SHELL_LABELS.bookRowName(row.title, row.current ? SHELL_LABELS.currentBook : row.state));
+          if (row.current) pick.setAttribute('aria-current', 'true');
+          const icon = el('span', 'shell-book-picker-icon', bookIcon(row.title));
+          icon.setAttribute('aria-hidden', 'true');
+          const text = el('span', 'shell-book-picker-meta');
+          text.append(el('span', 'shell-book-picker-title', row.title), el('span', 'shell-book-picker-state', row.current ? SHELL_LABELS.currentBook : row.state));
+          pick.append(icon, text);
+          pick.addEventListener('click', () => {
+            if (interrupted) return;
+            closePicker(true);
+            options.openBook(row.bookId);
+          });
+          item.append(pick);
+          list.append(item);
+        }
+        section.append(list);
+        pickerList.append(section);
+      }
+    }
+    if (focusedId !== undefined) {
+      const replacement = [...pickerList.querySelectorAll<HTMLElement>('[data-shell-picker-book]')].find((node) => node.dataset['shellPickerBook'] === focusedId);
+      (replacement ?? pickerSearch).focus({ preventScroll: true });
+    }
+  };
+  const refreshCatalog = async (): Promise<void> => {
+    const request = ++catalogRequest;
+    catalogState = 'loading';
+    renderPickerList();
+    try {
+      const fetched: ShellBookEntry[] = [];
+      const cursors = new Set<string>();
+      let after: BookSummaryCursor | null = null;
+      do {
+        const page: { items: ReadonlyArray<ShellBookEntry>; nextCursor: BookSummaryCursor | null } =
+          await options.listBooks?.({ after }) ?? { items: [], nextCursor: null };
+        if (!pickerOpen || interrupted || request !== catalogRequest) return;
+        fetched.push(...page.items);
+        after = page.nextCursor;
+        if (after !== null) {
+          const key = JSON.stringify([after.bookId, after.title]);
+          if (cursors.has(key)) throw new Error('Book catalog cursor did not advance');
+          cursors.add(key);
+        }
+      } while (after !== null);
+      catalogBooks = fetched;
+      catalogState = 'ready';
+    } catch {
+      if (!pickerOpen || interrupted || request !== catalogRequest) return;
+      catalogState = 'failed';
+    }
+    renderPickerList();
+  };
+  switcherToggle.addEventListener('click', () => {
+    if (interrupted) return;
+    if (pickerOpen) { closePicker(true); return; }
+    pickerOpen = true;
+    pickerQuery = '';
+    pickerSearch.value = '';
+    pickerPopover.hidden = false;
+    switcherToggle.setAttribute('aria-expanded', 'true');
+    pickerSearch.focus({ preventScroll: true });
+    void refreshCatalog();
+  });
+  retry.addEventListener('click', () => {
+    if (interrupted) return;
+    pickerSearch.focus({ preventScroll: true });
+    void refreshCatalog();
+  });
+  pickerLibraryBtn.addEventListener('click', () => {
+    if (interrupted) return;
+    closePicker(true);
+    options.openDestination('library');
+  });
+  pickerSearch.addEventListener('input', () => {
+    pickerQuery = pickerSearch.value;
+    renderPickerList();
+  });
+  books.addEventListener('keydown', (event) => {
+    if (!pickerOpen || event.key !== 'Escape' || event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closePicker(true);
+  });
+  document.addEventListener('pointerdown', (event) => {
+    if (pickerOpen && !pickerPopover.contains(event.target as Node) && !switcherToggle.contains(event.target as Node)) {
+      // A pointer may target non-focusable text. Return to the trigger before the browser focuses a clicked control.
+      closePicker(pickerPopover.contains(document.activeElement));
+    }
+  });
+  document.addEventListener('focusin', (event) => {
+    if (pickerOpen && !pickerPopover.contains(event.target as Node) && !switcherToggle.contains(event.target as Node)) closePicker(false);
+  });
+
   const bookGroup = el('section', 'sidebar-book');
   bookGroup.setAttribute('aria-label', SHELL_LABELS.currentBook);
   bookGroup.hidden = true;
@@ -379,7 +579,9 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   foot.append(settings, helpSlot);
   sidebar.replaceChildren(destinations, books, bookGroup, foot);
 
-  const allLinks = (): ReadonlyArray<HTMLElement> => [...sidebar.querySelectorAll<HTMLElement>('a.sidebar-link, button.sidebar-pin')];
+  const allLinks = (): ReadonlyArray<HTMLElement> => [
+    ...sidebar.querySelectorAll<HTMLElement>('a.sidebar-link, button.sidebar-pin, button.sidebar-book-switcher-toggle, button.shell-book-picker-option, button.shell-book-picker-library, button[data-shell-book-retry]'),
+  ];
 
   const paintBooks = (values: PreferenceValues): void => {
     const focused = document.activeElement instanceof HTMLElement && books.contains(document.activeElement) ? document.activeElement : null;
@@ -421,7 +623,8 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     };
     const blocks = [list(SHELL_LABELS.pinnedHeading, rows.pinned, 'pinned'), list(SHELL_LABELS.recentHeading, rows.recent, 'recent')].filter((node): node is HTMLElement => node !== null);
     if (blocks.length === 0) blocks.push(el('p', 'sidebar-empty field-note', SHELL_LABELS.noBooks));
-    books.replaceChildren(...blocks);
+    bookRows.replaceChildren(...blocks);
+    if (pickerOpen) renderPickerList();
     applyMode();
     // Pin/unpin moves the row between lists. Keep keyboard focus on that same control after painting it.
     if (focusBook !== undefined) {
@@ -503,6 +706,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
 
   return {
     follow: (nextState, place) => {
+      closePicker(pickerPopover.contains(document.activeElement));
       state = nextState;
       if (place !== null) book = { bookId: place.bookId, title: place.title };
       active = screenActive(nextState, place);
@@ -518,13 +722,16 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       visit({ ...book, section });
     },
     leaveBook: () => {
+      closePicker(pickerPopover.contains(document.activeElement));
       book = null;
       paintActive();
       paintBooks(preferences.current);
     },
     currentBook: () => book,
     interrupt: () => {
+      closePicker(pickerPopover.contains(document.activeElement));
       interrupted = true;
+      pickerSearch.disabled = true;
       for (const link of allLinks()) disable(link);
     },
     setContextActions: (...nodes) => options.actions.replaceChildren(...nodes),

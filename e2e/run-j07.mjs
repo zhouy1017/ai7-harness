@@ -397,7 +397,7 @@ const PAGE_HELPERS = `(() => {
     status: () => document.querySelector('#persistence-status')?.textContent ?? '',
     tone: () => document.querySelector('#persistence-status')?.dataset.tone ?? '',
     journal: () => {
-      const node = Array.from(document.querySelectorAll('.editor-meta > span')).find((item) => (item.textContent ?? '').startsWith('修订日志序号 '));
+      const node = Array.from(document.querySelectorAll('.editor-meta [data-editor-technical]')).find((item) => (item.textContent ?? '').startsWith('修订日志序号 '));
       return node === undefined ? null : Number((node.textContent ?? '').slice('修订日志序号 '.length));
     },
     milestoneSave: () => Array.from(document.querySelectorAll('details.milestone-section button')).find((item) => item.textContent === '保存里程碑版本') ?? null,
