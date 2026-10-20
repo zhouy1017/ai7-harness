@@ -513,8 +513,8 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     pickerQuery = pickerSearch.value;
     renderPickerList();
   });
-  pickerPopover.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229) return;
+  books.addEventListener('keydown', (event) => {
+    if (!pickerOpen || event.key !== 'Escape' || event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
     event.stopPropagation();
     closePicker(true);

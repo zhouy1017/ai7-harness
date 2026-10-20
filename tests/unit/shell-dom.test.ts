@@ -190,6 +190,15 @@ describe('current-catalog Book switcher (#1002)', () => {
     expect(sidebar.querySelector('[data-shell-picker-book="book-a"]')).toBeNull();
   });
 
+  it('dismisses from the trigger after Shift+Tab, but lets an IME finish Escape first', async () => {
+    const { sidebar } = mounted(); const ui = picker(sidebar);
+    ui.toggle.click(); await Promise.resolve(); ui.toggle.focus();
+    dispatch(ui.toggle, { type: 'keydown', key: 'Escape', isComposing: true, bubbles: true });
+    expect(ui.panel.hidden).toBe(false);
+    dispatch(ui.toggle, { type: 'keydown', key: 'Escape', bubbles: true });
+    expect(ui.panel.hidden).toBe(true); expect(document.activeElement).toBe(ui.toggle);
+  });
+
   it('dismisses on outside pointer or focus without stealing an outside control’s focus', async () => {
     const { sidebar } = mounted(); const ui = picker(sidebar);
     ui.toggle.click(); await Promise.resolve();

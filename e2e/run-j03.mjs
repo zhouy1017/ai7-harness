@@ -808,6 +808,12 @@ async function main() {
     await pressKey(renderer, ENTER_KEY);
     await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2 && document.activeElement?.matches('[data-shell-book-search]')`, 'book-switcher-current-catalog');
     await assertRenderer(renderer, `(() => { const ids=Array.from(document.querySelectorAll('[data-shell-picker-book]')).map((n)=>n.dataset.shellPickerBook); return document.querySelector('[data-shell-picker-group="pinned"] [data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(imported.bookId)} && document.querySelector('[data-shell-picker-group="recent"] [data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)} && new Set(ids).size===2 && ids.includes(${JSON.stringify(imported.bookId)}) && ids.includes(${JSON.stringify(crossBookId)}); })()`, 'book-switcher-unique-books');
+    await pressKey(renderer, { ...TAB_KEY, modifiers: 1 });
+    await assertRenderer(renderer, `document.activeElement?.matches('[data-shell-book-switcher]')`, 'book-switcher-shift-tab-trigger');
+    await pressKey(renderer, ESCAPE_KEY);
+    await assertRenderer(renderer, `document.querySelector('[data-shell-book-picker="panel"]').hidden && document.activeElement?.matches('[data-shell-book-switcher]')`, 'book-switcher-trigger-escape');
+    await pressKey(renderer, ENTER_KEY);
+    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2 && document.activeElement?.matches('[data-shell-book-search]')`, 'book-switcher-trigger-reopen');
     await fill(renderer, '[data-shell-book-search]', 'J-03 路由边界图书', 'book-switcher-filter');
     await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===1 && document.querySelector('[data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)}`, 'book-switcher-filtered');
     await pressKey(renderer, ESCAPE_KEY);
