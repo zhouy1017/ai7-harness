@@ -802,10 +802,12 @@ async function main() {
     const crossBookId = await createEmptyBook(renderer, cancellation);
     at('editorial-book-switcher');
     // The catalog was empty at startup; opening now must re-read both newly created Books.
+    await clickSelector(renderer, `[data-nav-pin="${imported.bookId}"]`, 'book-switcher-pin');
+    await waitFor(renderer, `document.querySelector('[data-nav-books="pinned"] [data-nav-pin="${imported.bookId}"]')`, 'book-switcher-pinned');
     await assertRenderer(renderer, `(() => { const trigger=document.querySelector('[data-shell-book-switcher]'); trigger.focus(); return document.activeElement===trigger; })()`, 'book-switcher-trigger-focus');
     await pressKey(renderer, ENTER_KEY);
     await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2 && document.activeElement?.matches('[data-shell-book-search]')`, 'book-switcher-current-catalog');
-    await assertRenderer(renderer, `(() => { const ids=Array.from(document.querySelectorAll('[data-shell-picker-book]')).map((n)=>n.dataset.shellPickerBook); return new Set(ids).size===2 && ids.includes(${JSON.stringify(imported.bookId)}) && ids.includes(${JSON.stringify(crossBookId)}); })()`, 'book-switcher-unique-books');
+    await assertRenderer(renderer, `(() => { const ids=Array.from(document.querySelectorAll('[data-shell-picker-book]')).map((n)=>n.dataset.shellPickerBook); return document.querySelector('[data-shell-picker-group="pinned"] [data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(imported.bookId)} && document.querySelector('[data-shell-picker-group="recent"] [data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)} && new Set(ids).size===2 && ids.includes(${JSON.stringify(imported.bookId)}) && ids.includes(${JSON.stringify(crossBookId)}); })()`, 'book-switcher-unique-books');
     await fill(renderer, '[data-shell-book-search]', 'J-03 路由边界图书', 'book-switcher-filter');
     await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===1 && document.querySelector('[data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)}`, 'book-switcher-filtered');
     await pressKey(renderer, ESCAPE_KEY);
@@ -840,7 +842,7 @@ async function main() {
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }, { name: 'prefers-reduced-motion', value: 'reduce' }] });
     await clickSelector(renderer, '[data-shell-book-switcher]', 'book-switcher-narrow-open');
     await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2`, 'book-switcher-narrow-ready');
-    await assertRenderer(renderer, `(() => { const panel=document.querySelector('[data-shell-book-picker="panel"]'), trigger=document.querySelector('[data-shell-book-switcher]'), editor=document.querySelector('.editor-window'); const box=panel.getBoundingClientRect(); const style=getComputedStyle(panel); return trigger.getClientRects().length>0 && box.left>=0 && box.right<=innerWidth+2 && panel.scrollWidth<=panel.clientWidth+2 && document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && editor.clientHeight>120 && editor.scrollWidth<=editor.clientWidth+2 && style.borderStyle!=='none' && style.color!==style.backgroundColor; })()`, 'book-switcher-zoom-forced-colors');
+    await assertRenderer(renderer, `(() => { const panel=document.querySelector('[data-shell-book-picker="panel"]'), trigger=document.querySelector('[data-shell-book-switcher]'), editor=document.querySelector('.editor-window'); const box=panel.getBoundingClientRect(); const style=getComputedStyle(panel); return Array.from(panel.querySelectorAll('.shell-book-picker-heading')).every((heading)=>getComputedStyle(heading).position==='static' && heading.getBoundingClientRect().height>5) && trigger.getClientRects().length>0 && box.left>=0 && box.right<=innerWidth+2 && panel.scrollWidth<=panel.clientWidth+2 && document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && editor.clientHeight>120 && editor.scrollWidth<=editor.clientWidth+2 && style.borderStyle!=='none' && style.color!==style.backgroundColor; })()`, 'book-switcher-zoom-forced-colors');
     await pressKey(renderer, ESCAPE_KEY);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');

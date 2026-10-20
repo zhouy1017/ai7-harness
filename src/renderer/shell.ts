@@ -429,7 +429,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
         const section = el('section');
         section.dataset['shellPickerGroup'] = group;
         section.setAttribute('aria-label', label);
-        section.append(el('h3', 'sidebar-group-label', label));
+        section.append(el('h3', 'shell-book-picker-heading', label));
         const list = el('ul');
         for (const row of rows) {
           const item = el('li');
