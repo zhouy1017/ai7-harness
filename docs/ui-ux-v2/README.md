@@ -410,6 +410,10 @@ On 2026-09-08 the Owner said the tracer surfaces still read as an engineer's con
 
 On 2026-09-09 the Owner closed the design session with every screen decided and asked for the result to be written as the execution standard rather than a handoff, and for the backend to be aligned to the confirmed flows. [`editor-surfaces.md`](./editor-surfaces.md) now states each screen's final form, states, wording, data and backend needs; the task plan gains `精简` and `完整` modes, in-place editing into a new plan version and the `开始任务` action, with `快速开始` running under a Default Execution Rule; the knowledge base gains `范例` by Book, `资料库` and `外部来源留存` with a five-layer index; a Book carries 作者 / 责编 / 相关人; settings show the Data Version and offer database export, import and optional backup; DOCX content is retained by default on import; and deliverables separate 发稿 (manuscript), 交付 (production documents) and the 图书交付包. See [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md).
 
+### D-091 — Warm paper, night ink and accessible Book switching
+
+[ADR 0092](../adr/0092-refine-editor-facing-gui-aesthetics-motion-and-book-switcher.md) records the Owner’s 2026-10-20 design instruction: warm-paper/night-ink semantic palettes, reduced-motion-safe spatial feedback, current-catalog grouped Book switching, comfortable manuscript reading and actual technical disclosure. It changes only its named clauses and asserts no implementation or integration completion.
+
 ## Current documents
 
 - [UI/UX context](./CONTEXT.md) — accepted package-local presentation language subordinate to root domain contexts.
