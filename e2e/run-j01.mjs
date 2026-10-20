@@ -79,6 +79,7 @@ function launchTraceNow() {
   trace.start = launchInFlight.start;
   trace.stall = launchInFlight.stall;
   if (browserLogPath !== null && existsSync(browserLogPath)) readBrowserLog(trace, readFileSync(browserLogPath, 'utf8'));
+  if (launchInFlight.close !== undefined) Object.assign(trace.close, launchInFlight.close);
   return trace;
 }
 
@@ -2121,6 +2122,15 @@ async function main() {
       browserLifecycleIncomplete = true;
       throw BROWSER_DISCONNECTED;
     }
+    const closingLaunch = launchInFlight;
+    if (closingLaunch !== null) {
+      closingLaunch.close ??= {};
+      closingLaunch.close.request ??= Date.now() - closingLaunch.startedAt;
+    }
+    const disconnected = () => {
+      if (closingLaunch !== null) closingLaunch.close.disconnect ??= Date.now() - closingLaunch.startedAt;
+    };
+    ownedBrowser.once('disconnected', disconnected);
     const closePromise = ownedBrowser.close();
     closePromise.catch(() => undefined);
     let timeout;
@@ -2140,6 +2150,7 @@ async function main() {
       throw error;
     } finally {
       clearTimeout(timeout);
+      ownedBrowser.off('disconnected', disconnected);
       if (activeBrowserClose === boundedClose) activeBrowserClose = undefined;
     }
   };
