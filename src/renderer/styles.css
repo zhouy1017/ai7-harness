@@ -2173,7 +2173,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
   .agent-workspace-block[data-agent-workspace-chosen] { border-left-color: Highlight; }
 }
 
-/* ---- Wave 16 Slice 16a (Issue #1002, ADR 0092): Spring motion, searchable multi-book switcher, and progressive technical disclosure ---- */
+/* ---- Wave 16 slice 16a (Issue #1002, ADR 0092): restrained motion, searchable multi-book switcher, and progressive technical disclosure ---- */
 /* Only presentation properties interpolate; safety/status visibility remains immediate. */
 body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right .2s cubic-bezier(.22, 1, .36, 1); }
 .app-sidebar { transition: width .2s cubic-bezier(.22, 1, .36, 1), padding .2s cubic-bezier(.22, 1, .36, 1); }
@@ -2237,6 +2237,7 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
   color: var(--text);
   font-size: .82rem;
 }
+.shell-book-picker-search::placeholder { color: var(--text-subdued); opacity: 1; }
 .shell-book-picker-list {
   display: grid;
   gap: .2rem;
@@ -2306,24 +2307,13 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
   text-align: center;
 }
 :root[data-sidebar="icons"] .sidebar-book-switcher-toggle { width: 100%; padding-inline: .1rem; font-size: 0; }
-:root[data-sidebar="icons"] .sidebar-book-switcher-toggle::before { content: '切'; font-size: .85rem; }
+:root[data-sidebar="icons"] .sidebar-book-switcher-toggle::before { content: attr(data-nav-icon); font-size: .85rem; }
 .shell-book-picker-popover button, .shell-book-picker-search { border-color: var(--boundary-strong); }
 .shell-book-picker-popover :focus-visible, .sidebar-book-switcher-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .editor-technical-details { font-size: .8rem; color: var(--text-subdued); }
 .editor-technical-details summary { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
-  body,
-  .app-sidebar,
-  .task-drawer,
-  .manuscript-navigator,
-  .panel,
-  .editorial-mark-card,
-  .sidebar-link,
-  .primary,
-  .secondary,
-  .quiet,
-  .sidebar-book-switcher-toggle,
-  .shell-book-picker-option {
+  *, *::before, *::after {
     transition: none !important;
     animation: none !important;
   }

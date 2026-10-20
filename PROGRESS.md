@@ -9,7 +9,6 @@ Wave 16 / 16a source checkpoint, based on `dev@30c55f047fba2fcb42a7bfee37a9dc2aa
 ## What the editor can use now
 
 - Wave 16 source adds warm-paper/night-ink appearance, reduced-motion-safe sidebar feedback, on-demand journal details and grouped Book switching with search, refresh/retry and keyboard focus continuity (#1002; integration evidence above).
-
 - Long manuscripts in the 40万字 class and heading-heavy files open 分析, start 基线稿件分析, read its results a page at a time through 显示更多阅读范围, and work in the task drawer and 审阅 chapter choices without ending in 服务响应超出安全范围.
 - Every product Book's 工作概览 no longer shows the development-only fixed-task card, and 分析 says how to enable the 编辑工作区方案 instead of reporting its pin as an error.
 - Create/import Books and edit manuscripts with bounded views, revision history, recovery, marks, suggestions and explicit adoption. Delivery/export retain their own decision and receipt boundaries.

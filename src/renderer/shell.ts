@@ -374,6 +374,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   const switcherToggle = el('button', 'sidebar-book-switcher-toggle', SHELL_LABELS.switchBookTrigger);
   switcherToggle.type = 'button';
   switcherToggle.dataset['shellBookSwitcher'] = 'toggle';
+  switcherToggle.dataset['navIcon'] = bookIcon(SHELL_LABELS.switchBook);
   switcherToggle.setAttribute('aria-expanded', 'false');
   switcherToggle.setAttribute('aria-controls', 'shell-book-picker');
   switcherToggle.setAttribute('aria-label', SHELL_LABELS.switchBook);
