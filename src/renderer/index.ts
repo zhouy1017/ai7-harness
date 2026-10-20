@@ -1,3 +1,5 @@
+import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
+import { ANALYSIS_MORE_RANGES, ANALYSIS_READ_FAILED, ANALYSIS_READING, ANALYSIS_MORE_REPORT_ROWS, ANALYSIS_MORE_CHOICES, ANALYSIS_EARLIER_HISTORY, ANALYSIS_PAGED_LIST_LABELS } from './analysis-paging-labels.js';
 import { createAppearance } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { mountAgentWorkspace } from './agent-workspace.js';
@@ -31,18 +33,18 @@ import { consumeReturnPlace, preserveReturnPlace, readReturnPlace, type ReadingP
 import type {
   AgentWorkspacePromotionProjection,
   AnalysisReusePlanCounts,
-  AnalysisReusePlanProjection,
+  AnalysisReusePlanSummaryProjection as AnalysisReusePlanProjection,
   BaselineAnalysisPlanRevisionProjection,
   BaselineAnalysisGoal,
-  BaselineAnalysisProjection,
+  BaselineAnalysisWireProjection as BaselineAnalysisProjection,
   BookTaskItemProjection,
   DefaultExecutionRuleReference,
   DefaultExecutionRulesProjection,
   ExemplarBookProjection,
   ExemplarsProjection,
   KnowledgeProceduresProjection,
-  QuickStartBaselineAnalysisResult,
-  BaselineAnalysisResultSetRevisionProjection,
+  QuickStartBaselineAnalysisWireResult as QuickStartBaselineAnalysisResult,
+  HydratedAnalysisRevisionProjection as BaselineAnalysisResultSetRevisionProjection,
   BaselineAnalysisSelectedRange,
   BaselineAnalysisUpdateMode,
   BaselineAnalysisUpdateRequest,
@@ -86,9 +88,9 @@ import type {
   ReviewBeforeImportProjection,
   ReviewBeforeManuscriptReimportProjection,
   ReviewBeforeSourceImportProjection,
-  RunReportProjection,
+  AnalysisRunReportSummaryProjection as RunReportProjection,
   SearchResultsProjection,
-  ServiceJobProjection,
+  ServiceWireJobProjection as ServiceJobProjection,
   SourceImportCommitProjection,
   StagedImportProjection,
   StartupProjection,
@@ -280,6 +282,7 @@ import {
   type GlobalAttentionSurface,
 } from './global-attention.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
+import { analysisRefusalView } from './overview-refusal-labels.js';
 import {
   SELECTION_TASK_STATUS,
   selectionProcedureEntries,
@@ -1138,6 +1141,10 @@ function rendererErrorData(error: unknown): RendererErrorData | null {
 
 function hasErrorCode(error: unknown, code: string): boolean {
   return rendererErrorData(error)?.code === code;
+}
+
+function rendererErrorCode(error: unknown): string | null {
+  return rendererErrorData(error)?.code ?? null;
 }
 
 function rendererErrorMessage(error: unknown, fallback: string): string {
@@ -2859,10 +2866,13 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
         }
         const unavailable = element('section', 'baseline-analysis-card attention-note');
         unavailable.dataset['analysisState'] = 'unavailable';
-        unavailable.append(
-          element('h3', undefined, '基线稿件分析'),
-          element('p', undefined, rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。')),
-        );
+        const refusal = analysisRefusalView(rendererErrorCode(error), rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。'));
+        unavailable.append(element('h3', undefined, '基线稿件分析'), element('p', undefined, refusal.text));
+        if (refusal.actionLabel !== null) {
+          const toProfile = button(refusal.actionLabel, 'secondary', () => void openAgentWorkspaceProfile(bookId, bookTitle));
+          toProfile.dataset['profileAction'] = 'go-to-profile';
+          unavailable.append(toProfile);
+        }
         host.replaceChildren(unavailable);
       },
     );
@@ -3399,9 +3409,20 @@ function renderBookOverview(
 
   const taskHost = element('div');
   taskHost.dataset['taskAuthorizationBookId'] = overview.book.bookId;
-  const inspectTaskAuthorization = (): void => {
+  const inspectTaskAuthorization = async (): Promise<void> => {
     if (!taskHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    void window.ai7.inspectTaskAuthorization().then(
+    // The fixed Task belongs only to the development-ci baseline (ADR 0044, J-03).
+    // Reuse the existing settings projection; an unknown scope retains the original surface (#992).
+    const scope = await window.ai7.getModelServiceSettings().then(
+      (projection) => projection.launchPolicy.operationalScope,
+      () => null,
+    );
+    if (!taskHost.isConnected) return;
+    if (scope === 'ordinary-production' || scope === 'developer-live') {
+      taskHost.replaceChildren();
+      return;
+    }
+    await window.ai7.inspectTaskAuthorization().then(
       (projection) => {
         if (taskHost.isConnected && projection.bookId === taskHost.dataset['taskAuthorizationBookId']) {
           renderTaskAuthorization(taskHost, projection);
@@ -3445,10 +3466,14 @@ function renderBookOverview(
       (error) => {
         if (!analysisHost.isConnected) return;
         analysisHost.dataset['analysisState'] = 'unavailable';
-        analysisHost.replaceChildren(
-          element('h3', undefined, '分析'),
-          element('p', 'attention-note', rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。')),
-        );
+        const refusal = analysisRefusalView(rendererErrorCode(error), rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。'));
+        analysisHost.replaceChildren(element('h3', undefined, '分析'), element('p', 'attention-note', refusal.text));
+        if (refusal.actionLabel !== null) {
+          // Already on 工作概览: the profile card is on this screen, so the button only brings it into view.
+          const toProfile = button(refusal.actionLabel, 'secondary', () => void focusEditorialProfileCard(overview.book.bookId));
+          toProfile.dataset['profileAction'] = 'go-to-profile';
+          analysisHost.append(toProfile);
+        }
       },
     );
   };
@@ -3947,9 +3972,24 @@ function renderRunReport(report: RunReportProjection): HTMLElement {
       ...usageRows,
       element('dt', undefined, '发现分类'), element('dd', 'technical-identity', report.findingCounts.length === 0 ? '无' : report.findingCounts.map((entry) => `${entry.kind} ${entry.count}`).join('；')),
       element('dt', undefined, '抽样'), element('dd', 'technical-identity', `${sample.state} · seed ${sample.seed ?? '无'} · ${sample.size}/${sample.candidateCount}`),
-      element('dt', undefined, '逐范围账目'), element('dd', 'technical-identity', report.unitRows.map((row) => `单元 ${row.unitOrdinal} ${row.state}/${row.lineage} · ${row.attempts} 回合 · ${row.wallMs ?? '—'} ms${row.usage === null ? '' : ` · ${row.usage.inputTokens}/${row.usage.outputTokens}`}${row.gapCode === null ? '' : ` · ${row.gapCode}`}`).join('；')),
+      element('dt', undefined, '逐范围账目'), element('dd', 'technical-identity', (report.unitRows ?? []).map((row) => `单元 ${row.unitOrdinal} ${row.state}/${row.lineage} · ${row.attempts} 回合 · ${row.wallMs ?? '—'} ms${row.usage === null ? '' : ` · ${row.usage.inputTokens}/${row.usage.outputTokens}`}${row.gapCode === null ? '' : ` · ${row.gapCode}`}`).join('；')),
     ),
   );
+  if (report.unitPage?.nextOrdinal != null) {
+    const more = button(ANALYSIS_MORE_REPORT_ROWS, 'secondary', async () => {
+      more.disabled = true;
+      try {
+        const page = await window.ai7.getAnalysisRunReportRows({ taskIntentId: report.taskIntentId, afterOrdinal: report.unitPage!.nextOrdinal! });
+        if (!more.isConnected) return;
+        if (page.reportDigest !== report.reportDigest) throw new Error(ANALYSIS_READ_FAILED);
+        const updated = renderRunReport({ ...report, unitRows: [...(report.unitRows ?? []), ...page.rows],
+          unitPage: { shown: (report.unitRows?.length ?? 0) + page.rows.length, total: report.unitPage!.total, nextOrdinal: page.next } });
+        if (updated instanceof HTMLDetailsElement) updated.open = true;
+        disclosure.replaceWith(updated);
+      } catch { setStatus(ANALYSIS_READ_FAILED, 'error'); more.disabled = false; }
+    });
+    disclosure.append(more);
+  }
   return disclosure;
 }
 
@@ -3992,8 +4032,9 @@ function renderBaselineAnalysisOverview(
   card.dataset['resultRevisionId'] = projection.resultSetRevision?.revisionId ?? revision.revisionId;
   card.dataset['resultRevisionDigest'] = projection.resultSetRevision?.digest ?? revision.digest;
   card.dataset['resultRevisionOrdinal'] = String(projection.resultSetRevision?.ordinal ?? revision.ordinal);
-  card.dataset['gapCount'] = String(revision.gaps.length);
-  card.dataset['conflictCount'] = String(revision.conflicts.length);
+  card.dataset['gapCount'] = String(revision.coverage.gapCount);
+  card.dataset['conflictCount'] = String(projection.listPages[`${projection.inspectedRevision === null ? 'resultSetRevision' : 'inspectedRevision.revision'}.conflicts`]?.total
+    ?? revision.conflicts.length);
   card.dataset['freshnessState'] = revision.freshness.state;
   card.dataset['updateMode'] = revision.update.mode;
   card.dataset['reusedCount'] = String(revision.update.counts.reused);
@@ -4086,59 +4127,94 @@ function renderBaselineAnalysisOverview(
   // or, where it made nothing, that the range is still unread and why (ANALYSIS-004). The unit's own
   // name, state, lineage, confidence, request digest and usage are its technical half.
   const chapters = panels.chapters;
-  const manifestUnits = view.historical ? null : projection.coverageManifest?.units ?? null;
+  const manifestUnits = new Map((view.historical ? [] : projection.coverageManifest?.units ?? []).map((unit) => [unit.ordinal, unit]));
   const adaptedUnits = revision.provenance.adaptations?.unitOrdinals ?? [];
   const units = element('ul', 'analysis-unit-list');
-  for (const unit of revision.units) {
-    const item = element('li', 'analysis-unit');
-    item.dataset['analysisUnit'] = String(unit.unitOrdinal);
-    item.dataset['analysisUnitState'] = unit.state;
-    item.dataset['analysisUnitLineage'] = unit.lineage.kind;
-    if (unit.lineage.kind === 'reused') item.dataset['analysisUnitReusedFrom'] = `${unit.lineage.revisionOrdinal}/${unit.lineage.unitOrdinal}`;
-    if (adaptedUnits.includes(unit.unitOrdinal)) item.dataset['analysisUnitAdaptations'] = '1';
-    const manifestUnit = manifestUnits?.[unit.unitOrdinal - 1];
-    const title = manifestUnit === undefined
-      ? `第 ${unit.unitOrdinal} 个阅读范围`
-      : `${manifestUnit.headingText === null ? `第 ${unit.unitOrdinal} 个阅读范围` : `「${manifestUnit.headingText}」`}${manifestUnit.subUnitCount > 1 ? `（第 ${manifestUnit.subUnitIndex}/${manifestUnit.subUnitCount} 部分）` : ''} · 内容块 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
-    item.append(element('h5', undefined, title));
-    const lineage = unit.lineage.kind === 'reused' ? `复用自 Revision ${unit.lineage.revisionOrdinal} / 单元 ${unit.lineage.unitOrdinal}` : '本次重算';
-    if (unit.state === 'closed') {
-      item.append(element('p', undefined, unit.synopsis));
-      const firstRange = unit.entities.flatMap((entity) => entity.sourceRanges)[0] ?? unit.events.flatMap((event) => event.sourceRanges)[0];
-      if (firstRange !== undefined) item.append(returnButton(firstRange.blockId));
-    } else {
-      item.append(element('p', 'attention-note', `尚未分析：${unit.gap.reason}`));
-      if (unit.gap.blockIds[0] !== undefined) item.append(returnButton(unit.gap.blockIds[0]));
+  const appendUnits = (rows: typeof revision.units): void => {
+    for (const unit of rows) {
+      const item = element('li', 'analysis-unit');
+      item.dataset['analysisUnit'] = String(unit.unitOrdinal);
+      item.dataset['analysisUnitState'] = unit.state;
+      item.dataset['analysisUnitLineage'] = unit.lineage.kind;
+      if (unit.lineage.kind === 'reused') item.dataset['analysisUnitReusedFrom'] = `${unit.lineage.revisionOrdinal}/${unit.lineage.unitOrdinal}`;
+      if (adaptedUnits.includes(unit.unitOrdinal)) item.dataset['analysisUnitAdaptations'] = '1';
+      const manifestUnit = manifestUnits.get(unit.unitOrdinal);
+      const title = manifestUnit === undefined
+        ? `第 ${unit.unitOrdinal} 个阅读范围`
+        : `${manifestUnit.headingText === null ? `第 ${unit.unitOrdinal} 个阅读范围` : `「${manifestUnit.headingText}」`}${manifestUnit.subUnitCount > 1 ? `（第 ${manifestUnit.subUnitIndex}/${manifestUnit.subUnitCount} 部分）` : ''} · 内容块 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
+      item.append(element('h5', undefined, title));
+      const lineage = unit.lineage.kind === 'reused' ? `复用自 Revision ${unit.lineage.revisionOrdinal} / 单元 ${unit.lineage.unitOrdinal}` : '本次重算';
+      if (unit.state === 'closed') {
+        item.append(element('p', undefined, unit.synopsis));
+        const firstRange = unit.entities.flatMap((entity) => entity.sourceRanges)[0] ?? unit.events.flatMap((event) => event.sourceRanges)[0];
+        if (firstRange !== undefined) item.append(returnButton(firstRange.blockId));
+      } else {
+        item.append(element('p', 'attention-note', `尚未分析：${unit.gap.reason}`));
+        if (unit.gap.firstBlockId !== null) item.append(returnButton(unit.gap.firstBlockId));
+      }
+      item.append(technicalDetails(
+        'analysis-facts',
+        element('dt', undefined, '分析单元'), element('dd', 'technical-identity', unit.state === 'closed'
+          ? `单元 ${unit.unitOrdinal} · 已闭合 · 置信 ${unit.confidence} · ${lineage}`
+          : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code} · ${lineage}`),
+        element('dt', undefined, '请求摘要'), element('dd', 'technical-identity', unit.requestDigest),
+        ...(unit.state !== 'closed' ? [] : [
+          element('dt', undefined, '单元内计数'),
+          element('dd', 'technical-identity', `实体 ${unit.entities.length} · 事件 ${unit.events.length} · 关系 ${unit.relationships.length} · 设定声明 ${unit.settingClaims.length} · 单元内冲突 ${unit.conflicts.length} · 未解决 ${unit.unresolved.length}${unit.usage === null ? '' : ` · 用量 ${unit.usage.inputTokens}/${unit.usage.outputTokens}`}`),
+        ]),
+      ));
+      units.append(item);
     }
-    item.append(technicalDetails(
-      'analysis-facts',
-      element('dt', undefined, '分析单元'), element('dd', 'technical-identity', unit.state === 'closed'
-        ? `单元 ${unit.unitOrdinal} · 已闭合 · 置信 ${unit.confidence} · ${lineage}`
-        : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code} · ${lineage}`),
-      element('dt', undefined, '请求摘要'), element('dd', 'technical-identity', unit.requestDigest),
-      ...(unit.state !== 'closed' ? [] : [
-        element('dt', undefined, '单元内计数'),
-        element('dd', 'technical-identity', `实体 ${unit.entities.length} · 事件 ${unit.events.length} · 关系 ${unit.relationships.length} · 设定声明 ${unit.settingClaims.length} · 单元内冲突 ${unit.conflicts.length} · 未解决 ${unit.unresolved.length}${unit.usage === null ? '' : ` · 用量 ${unit.usage.inputTokens}/${unit.usage.outputTokens}`}`),
-      ]),
-    ));
-    units.append(item);
-  }
+  };
+  appendUnits(revision.units);
   // The unread ranges once more as their own list, so the editor sees what is missing without reading
   // every chapter to find it; each returns to the manuscript range it names.
   const gaps = element('ul', 'analysis-list analysis-gap-list');
-  if (revision.gaps.length === 0) gaps.append(element('li', undefined, '没有尚未分析的范围。'));
+  if (revision.coverage.gapCount === 0) gaps.append(element('li', undefined, '没有尚未分析的范围。'));
   for (const gap of revision.gaps) {
     const item = element('li');
     item.dataset['analysisGapUnit'] = String(gap.unitOrdinal);
     item.dataset['analysisGapCode'] = gap.code;
     item.append(element('span', undefined, `第 ${gap.unitOrdinal} 个阅读范围 · 内容块 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
-    if (gap.blockIds[0] !== undefined) item.append(returnButton(gap.blockIds[0]));
+    if (gap.firstBlockId !== null) item.append(returnButton(gap.firstBlockId));
     gaps.append(item);
   }
   chapters.append(
-    element('h4', undefined, `尚未分析的范围 · ${revision.gaps.length}`), gaps,
-    element('h4', undefined, `各章 · ${revision.units.length} 个阅读范围`), units,
+    element('h4', undefined, `尚未分析的范围 · ${revision.coverage.gapCount}`), gaps,
+    element('h4', undefined, `各章 · ${revision.unitPage.total} 个阅读范围`), units,
   );
+
+  let afterOrdinal = revision.unitPage.nextOrdinal;
+  if (afterOrdinal !== null) {
+    const more = button(ANALYSIS_MORE_RANGES, 'secondary', async () => {
+      if (afterOrdinal === null) return;
+      more.disabled = true;
+      try {
+        const page = await window.ai7.getAnalysisRevisionUnits({ revisionId: revision.revisionId, afterOrdinal });
+        if (!more.isConnected) return;
+        if (page.revisionId !== revision.revisionId || page.next !== null && page.next <= afterOrdinal) throw new Error(ANALYSIS_READ_FAILED);
+        let manifestCursor = afterOrdinal;
+        // A read-only earlier revision names its ranges by ordinal on every page, as its first page does.
+        while (!view.historical && page.units.some((unit) => !manifestUnits.has(unit.unitOrdinal))) {
+          const manifestPage = await window.ai7.getCoverageManifestUnits({ taskIntentId: revision.provenance.taskIntentId, afterOrdinal: manifestCursor });
+          if (manifestPage.manifestDigest !== revision.coverageManifestDigest) throw new Error(ANALYSIS_READ_FAILED);
+          for (const unit of manifestPage.units) {
+            const { blockIds, blockDigests: _digests, overlapBlockIds: _overlap, ...summary } = unit;
+            manifestUnits.set(unit.ordinal, { ...summary, blockCount: blockIds.length, firstBlockId: blockIds[0]!, lastBlockId: blockIds.at(-1)! });
+          }
+          if (manifestPage.next === null) break;
+          manifestCursor = manifestPage.next;
+        }
+        if (!more.isConnected) return;
+        appendUnits(page.units);
+        afterOrdinal = page.next;
+        if (afterOrdinal === null) more.remove();
+      } catch { setStatus(ANALYSIS_READ_FAILED, 'error'); }
+      finally { more.disabled = false; }
+    });
+    more.dataset['analysisAction'] = 'more-ranges';
+    chapters.append(more);
+  }
 
   // The technical half of the whole revision, closed by default and complete (V2-UX-LAYER-001, 007).
   const runAdaptations = projection.run !== null && projection.run.runRecordId === revision.provenance.runRecordId ? projection.run.adaptations : [];
@@ -4214,9 +4290,9 @@ function markReusePlan(card: HTMLElement, projection: BaselineAnalysisProjection
  */
 function renderPlanVersions(card: HTMLElement, projection: BaselineAnalysisProjection): void {
   const section = element('section', 'analysis-plan-versions');
-  section.dataset['planVersionCount'] = String(projection.planVersions.length);
-  section.dataset['planRevisionCount'] = String(projection.planRevisions.length);
-  section.append(element('h4', undefined, `计划版本 · ${projection.planVersions.length} 个`));
+  section.dataset['planVersionCount'] = String(projection.listPages['planVersions']?.total ?? projection.planVersions.length);
+  section.dataset['planRevisionCount'] = String(projection.listPages['planRevisions']?.total ?? projection.planRevisions.length);
+  section.append(element('h4', undefined, `计划版本 · ${projection.listPages['planVersions']?.total ?? projection.planVersions.length} 个`));
   const versions = element('ol', 'analysis-list analysis-plan-version-list');
   for (const version of projection.planVersions) {
     const state = version.state === 'bound' ? '已被运行授权绑定' : version.state === 'current' ? '当前 · 尚未开始' : '已被取代';
@@ -4434,33 +4510,69 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
     if (mode === 'reanalyze-range') {
       const fieldset = element('fieldset', 'analysis-range-options');
       fieldset.append(element('legend', undefined, '选择要重新分析的连续范围（未预选；按当前稿件将派生的结构单元列出）'));
-      for (const option of controls.actions['reanalyze-range'].options) {
-        const row = element('div', 'analysis-range-option');
-        row.dataset['rangeOption'] = String(option.unitOrdinal);
-        row.dataset['rangeStart'] = String(option.startPosition);
-        row.dataset['rangeEnd'] = String(option.endPosition);
-        const radio = element('input');
-        radio.type = 'radio';
-        radio.name = 'analysis-range';
-        radio.id = `analysis-range-${option.unitOrdinal}`;
-        radio.value = `${option.startPosition}-${option.endPosition}`;
-        radio.disabled = !action.available;
-        radio.addEventListener('change', () => {
-          if (!radio.checked) return;
-          selectedRange = { startPosition: option.startPosition, endPosition: option.endPosition };
-          block.dataset['selectedRange'] = radio.value;
-          block.dataset['expectedReused'] = String(option.expected.reused);
-          block.dataset['expectedRecomputed'] = String(option.expected.recomputed);
-          block.dataset['expectedInvalidated'] = String(option.expected.invalidated);
-          block.dataset['expectedBypassed'] = String(option.expected.bypassed);
-          expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${updateReuseReading(option.expected, mode)}`;
-          expectedExact.textContent = reuseCountsText(option.expected);
-          start.disabled = !action.available;
+      const appendOptions = (options: typeof controls.actions['reanalyze-range']['options']): void => {
+        for (const option of options) {
+          const row = element('div', 'analysis-range-option');
+          row.dataset['rangeOption'] = String(option.unitOrdinal);
+          row.dataset['rangeStart'] = String(option.startPosition);
+          row.dataset['rangeEnd'] = String(option.endPosition);
+          const radio = element('input');
+          radio.type = 'radio';
+          radio.name = 'analysis-range';
+          radio.id = `analysis-range-${option.unitOrdinal}`;
+          radio.value = `${option.startPosition}-${option.endPosition}`;
+          radio.disabled = !action.available;
+          radio.addEventListener('change', async () => {
+            if (!radio.checked) return;
+            // The pick is the range at once, as before; only its expected counts are derived for it (#988), so they follow.
+            selectedRange = { startPosition: option.startPosition, endPosition: option.endPosition };
+            block.dataset['selectedRange'] = radio.value;
+            for (const key of ['expectedReused', 'expectedRecomputed', 'expectedInvalidated', 'expectedBypassed']) delete block.dataset[key];
+            expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${ANALYSIS_READING}`;
+            expectedExact.textContent = '';
+            start.disabled = !action.available;
+            try {
+              const picked = await window.ai7.getBaselineAnalysisRangePlan({ unitOrdinal: option.unitOrdinal });
+              if (!radio.checked || !block.isConnected) return;
+              if (picked.selectedRange.startPosition !== option.startPosition || picked.selectedRange.endPosition !== option.endPosition) throw new Error(ANALYSIS_READ_FAILED);
+              block.dataset['expectedReused'] = String(picked.expected.reused);
+              block.dataset['expectedRecomputed'] = String(picked.expected.recomputed);
+              block.dataset['expectedInvalidated'] = String(picked.expected.invalidated);
+              block.dataset['expectedBypassed'] = String(picked.expected.bypassed);
+              expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${updateReuseReading(picked.expected, mode)}`;
+              expectedExact.textContent = reuseCountsText(picked.expected);
+            } catch {
+              if (!radio.checked || !block.isConnected) return;
+              // A range the current manuscript no longer derives, or whose counts cannot be read, is not started.
+              selectedRange = null;
+              delete block.dataset['selectedRange'];
+              start.disabled = true;
+              setStatus(ANALYSIS_READ_FAILED, 'error');
+            }
+          });
+          const label = element('label', undefined, option.label);
+          label.htmlFor = radio.id;
+          row.append(radio, label);
+          fieldset.append(row);
+        }
+      };
+      appendOptions(controls.actions['reanalyze-range'].options);
+      let after = projection.listPages['updateControls.actions.reanalyze-range.options']?.nextOrdinal ?? null;
+      if (after !== null) {
+        const more = button(ANALYSIS_MORE_CHOICES, 'secondary', async () => {
+          more.disabled = true;
+          try {
+            const page = await window.ai7.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
+              revisionId: null, path: 'updateControls.actions.reanalyze-range.options', afterOrdinal: after! });
+            if (!more.isConnected) return;
+            if (page.path !== 'updateControls.actions.reanalyze-range.options' || page.nextOrdinal !== null && page.nextOrdinal <= after!) throw new Error(ANALYSIS_READ_FAILED);
+            appendOptions(page.items as typeof controls.actions['reanalyze-range']['options']);
+            after = page.nextOrdinal;
+            if (after === null) more.remove(); else fieldset.append(more);
+          } catch { setStatus(ANALYSIS_READ_FAILED, 'error'); }
+          finally { more.disabled = false; }
         });
-        const label = element('label', undefined, `${option.label} · 重新分析 ${option.expected.recomputed} 个阅读范围，沿用 ${option.expected.reused} 个`);
-        label.htmlFor = radio.id;
-        row.append(radio, label);
-        fieldset.append(row);
+        fieldset.append(more);
       }
       block.append(fieldset);
     }
@@ -4535,13 +4647,13 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
   if (history === null) return;
   const section = element('section', 'analysis-history');
   section.dataset['historyLatestOrdinal'] = String(history.latestOrdinal);
-  section.dataset['historyCount'] = String(history.entries.length);
+  section.dataset['historyCount'] = String(projection.listPages['history.entries']?.total ?? history.entries.length);
   section.dataset['historyResultSetId'] = history.resultSetId;
   // How many revisions there are and which one is latest are decisions, not identities: they stay at
   // full rank, and only the result set's own identity and kind step down into the disclosure.
   section.append(
     element('h4', undefined, '历次分析'),
-    element('p', 'field-note', `共 ${history.entries.length} 份分析 · 最新的是第 ${history.latestOrdinal} 份`),
+    element('p', 'field-note', `共 ${projection.listPages['history.entries']?.total ?? history.entries.length} 份分析 · 最新的是第 ${history.latestOrdinal} 份`),
     technicalDetails('analysis-facts',
       element('dt', undefined, '结果集'), element('dd', 'technical-identity', `${history.resultSetId} · ${history.kind}`)),
   );
@@ -4558,39 +4670,59 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
     }
   };
   const list = element('ol', 'analysis-history-list');
-  for (const entry of history.entries) {
-    const item = element('li', 'analysis-history-entry');
-    item.dataset['historyOrdinal'] = String(entry.ordinal);
-    item.dataset['historyRevisionId'] = entry.revisionId;
-    item.dataset['historyMode'] = entry.mode;
-    item.dataset['historyCurrent'] = entry.current ? 'true' : 'false';
-    item.dataset['historyFreshness'] = entry.freshness;
-    item.dataset['historyPredecessorOrdinal'] = entry.predecessor === null ? '' : String(entry.predecessor.ordinal);
-    // What the entry is and what it cost stay at full rank; its identities — the revision's own and
-    // the Run that produced it — travel together in the entry's one disclosure, in the order they read
-    // in before (V2-UX-LAYER-001).
-    item.append(
-      element('p', undefined, `第 ${entry.ordinal} 份 · ${entry.modeLabel} · 读的是 ${entry.manuscriptPin.revisionLabel} · ${localInstantLabel(entry.createdAt)} · ${entry.current ? '当前最新' : '已被后来的分析取代 · 按原样保留'}`),
-      element('p', 'field-note', `沿用上一份 ${entry.counts.reused} 个阅读范围，重新分析 ${entry.counts.recomputed} 个；读完 ${entry.unitsClosed} 个，${entry.gapCount} 个没有读成。`),
-      technicalDetails('analysis-facts',
-        element('dt', undefined, '修订版'),
-        element('dd', 'technical-identity', `Revision ${entry.ordinal} · ${entry.freshnessLabel} · 前一修订版 ${entry.predecessor === null ? '无' : `Revision ${entry.predecessor.ordinal}`} · 创建于 ${entry.createdAt}`),
-        element('dt', undefined, '单元血缘与计数'),
-        element('dd', 'technical-identity', `${reuseCountsText(entry.counts)} · 缺口 ${entry.gapCount} · 冲突 ${entry.conflictCount} · 覆盖 ${entry.unitsClosed}/${entry.unitsTotal}`),
-        element('dt', undefined, '修订版身份'),
-        element('dd', 'technical-identity', `${entry.revisionId} · 摘要 ${entry.digest} · 稿件 pin ${entry.manuscriptPin.revisionId} · ${entry.manuscriptPin.revisionDigest}`),
-        element('dt', undefined, '产出 Run 与用量'),
-        element('dd', 'technical-identity', `Run ${entry.producingRun.runRecordId} · ${entry.producingRun.classification ?? '无结果'} · ${entry.usage.requests} 次模型请求 · 输入 ${entry.usage.inputTokens} · 输出 ${entry.usage.outputTokens}`),
-      ),
-    );
-    item.append(runReportOrReason(entry.report, entry.reportAbsentReason));
-    const view = button('查看这一份（只读）', 'quiet', () => open(entry.revisionId));
-    view.dataset['analysisAction'] = 'open-revision';
-    view.dataset['analysisRevisionId'] = entry.revisionId;
-    view.dataset['analysisRevisionOrdinal'] = String(entry.ordinal);
-    if (projection.inspectedRevision?.revision.revisionId === entry.revisionId) view.disabled = true;
-    item.append(view);
-    list.append(item);
+  const appendHistory = (entries: typeof history.entries): void => {
+    for (const entry of entries) {
+      const item = element('li', 'analysis-history-entry');
+      item.dataset['historyOrdinal'] = String(entry.ordinal);
+      item.dataset['historyRevisionId'] = entry.revisionId;
+      item.dataset['historyMode'] = entry.mode;
+      item.dataset['historyCurrent'] = entry.current ? 'true' : 'false';
+      item.dataset['historyFreshness'] = entry.freshness;
+      item.dataset['historyPredecessorOrdinal'] = entry.predecessor === null ? '' : String(entry.predecessor.ordinal);
+      // What the entry is and what it cost stay at full rank; its identities — the revision's own and
+      // the Run that produced it — travel together in the entry's one disclosure, in the order they read
+      // in before (V2-UX-LAYER-001).
+      item.append(
+        element('p', undefined, `第 ${entry.ordinal} 份 · ${entry.modeLabel} · 读的是 ${entry.manuscriptPin.revisionLabel} · ${localInstantLabel(entry.createdAt)} · ${entry.current ? '当前最新' : '已被后来的分析取代 · 按原样保留'}`),
+        element('p', 'field-note', `沿用上一份 ${entry.counts.reused} 个阅读范围，重新分析 ${entry.counts.recomputed} 个；读完 ${entry.unitsClosed} 个，${entry.gapCount} 个没有读成。`),
+        technicalDetails('analysis-facts',
+          element('dt', undefined, '修订版'),
+          element('dd', 'technical-identity', `Revision ${entry.ordinal} · ${entry.freshnessLabel} · 前一修订版 ${entry.predecessor === null ? '无' : `Revision ${entry.predecessor.ordinal}`} · 创建于 ${entry.createdAt}`),
+          element('dt', undefined, '单元血缘与计数'),
+          element('dd', 'technical-identity', `${reuseCountsText(entry.counts)} · 缺口 ${entry.gapCount} · 冲突 ${entry.conflictCount} · 覆盖 ${entry.unitsClosed}/${entry.unitsTotal}`),
+          element('dt', undefined, '修订版身份'),
+          element('dd', 'technical-identity', `${entry.revisionId} · 摘要 ${entry.digest} · 稿件 pin ${entry.manuscriptPin.revisionId} · ${entry.manuscriptPin.revisionDigest}`),
+          element('dt', undefined, '产出 Run 与用量'),
+          element('dd', 'technical-identity', `Run ${entry.producingRun.runRecordId} · ${entry.producingRun.classification ?? '无结果'} · ${entry.usage.requests} 次模型请求 · 输入 ${entry.usage.inputTokens} · 输出 ${entry.usage.outputTokens}`),
+        ),
+      );
+      item.append(runReportOrReason(entry.report, entry.reportAbsentReason));
+      const view = button('查看这一份（只读）', 'quiet', () => open(entry.revisionId));
+      view.dataset['analysisAction'] = 'open-revision';
+      view.dataset['analysisRevisionId'] = entry.revisionId;
+      view.dataset['analysisRevisionOrdinal'] = String(entry.ordinal);
+      if (projection.inspectedRevision?.revision.revisionId === entry.revisionId) view.disabled = true;
+      item.append(view);
+      list.append(item);
+    }
+  };
+  appendHistory(history.entries);
+  let before = projection.listPages['history.entries']?.nextOrdinal ?? null;
+  if (before !== null) {
+    const more = button(ANALYSIS_EARLIER_HISTORY, 'secondary', async () => {
+      more.disabled = true;
+      try {
+        const page = await window.ai7.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
+          revisionId: projection.inspectedRevision?.revision.revisionId ?? null, path: 'history.entries', afterOrdinal: before! });
+        if (!more.isConnected) return;
+        if (page.path !== 'history.entries' || before !== 0 && page.nextOrdinal !== null && page.nextOrdinal >= before!) throw new Error(ANALYSIS_READ_FAILED);
+        appendHistory(page.items as typeof history.entries);
+        before = page.nextOrdinal;
+        if (before === null) more.remove();
+      } catch { setStatus(ANALYSIS_READ_FAILED, 'error'); }
+      finally { more.disabled = false; }
+    });
+    section.append(more);
   }
   section.append(list);
   if (projection.inspectedRevision !== null) {
@@ -4602,10 +4734,30 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
 }
 
 function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisProjection, bookTitle: string): void {
+  const generation = analysisFollower.drawn(host);
+  const pending = [projection.resultSetRevision, projection.inspectedRevision?.revision].filter((revision) =>
+    revision != null && (revision.sections === undefined || revision.synthesis === undefined));
+  if (pending.length > 0) {
+    const loading = element('p', 'field-note', ANALYSIS_READING);
+    host.replaceChildren(loading);
+    void Promise.all(pending.map((revision) => {
+      if (revision == null) throw new Error(ANALYSIS_READ_FAILED);
+      return hydrateAnalysisRevision(window.ai7, revision);
+    })).then((overviews) => {
+      if (!host.contains(loading)) return;
+      const hydrate = (revision: BaselineAnalysisProjection['resultSetRevision']) => revision === null ? null : {
+        ...revision, ...overviews.find((overview) => overview.revisionId === revision.revisionId),
+      };
+      renderBaselineAnalysis(host, { ...projection, resultSetRevision: hydrate(projection.resultSetRevision),
+        inspectedRevision: projection.inspectedRevision === null ? null : { ...projection.inspectedRevision,
+          revision: hydrate(projection.inspectedRevision.revision)! } }, bookTitle);
+    }).catch(() => { if (host.contains(loading)) host.replaceChildren(element('p', 'attention-note', ANALYSIS_READ_FAILED)); });
+    return;
+  }
+
   // A draw replaces what the card follows (Issue #539): a follow-up an earlier draw armed — of a revision the editor has
   // since left — never draws over this one, whether its read was still to be sent or already out, and this draw arms its
   // own if it needs one.
-  const generation = analysisFollower.drawn(host);
   const card = element('section', 'baseline-analysis-card');
   card.dataset['analysisState'] = projection.state;
   card.dataset['analysisBookId'] = projection.bookId;
@@ -4613,12 +4765,12 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   if (projection.planEnvelope) card.dataset['planEnvelopeDigest'] = projection.planEnvelope.digest;
   if (projection.planVersion) {
     card.dataset['planVersion'] = String(projection.planVersion.ordinal);
-    card.dataset['planVersionCount'] = String(projection.planVersions.length);
+    card.dataset['planVersionCount'] = String(projection.listPages['planVersions']?.total ?? projection.planVersions.length);
     card.dataset['planRevisionPending'] = projection.planRevision === null ? 'false' : 'true';
   }
   if (projection.coverageManifest) {
     card.dataset['coverageManifestDigest'] = projection.coverageManifest.digest;
-    card.dataset['analysisUnits'] = String(projection.coverageManifest.units.length);
+    card.dataset['analysisUnits'] = String(projection.listPages['coverageManifest.units']?.total ?? projection.coverageManifest.units.length);
   }
   if (projection.run) card.dataset['runState'] = projection.run.state;
   if (projection.taskOutcome) {
@@ -4662,7 +4814,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     projection.state === 'awaiting-clarification';
   const { panels, select } = analysisTabs(card, projection.bookId, revision === null || taskInFlight ? 'history' : 'synopsis');
   if (revision !== null) {
-    renderBaselineAnalysisOverview(card, panels, select, projection, revision, bookTitle, projection.inspectedRevision !== null
+    renderBaselineAnalysisOverview(card, panels, select, projection, revision as BaselineAnalysisResultSetRevisionProjection, bookTitle, projection.inspectedRevision !== null
       ? { historical: true, current: projection.inspectedRevision.current }
       : { historical: false, current: true });
   } else {
@@ -4737,6 +4889,22 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     records.append(restart);
   }
 
+  for (const [path, meta] of Object.entries(projection.listPages)) {
+    const label = ANALYSIS_PAGED_LIST_LABELS[path];
+    if (label === undefined || meta.nextOrdinal === null) continue;
+    const more = button(`${label} · ${ANALYSIS_MORE_CHOICES}`, 'secondary', async () => {
+      more.disabled = true;
+      try {
+        const page = await window.ai7.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
+          revisionId: projection.inspectedRevision?.revision.revisionId ?? null, path, afterOrdinal: meta.nextOrdinal! });
+        if (!more.isConnected) return;
+        if (page.path !== path || page.nextOrdinal !== null && page.nextOrdinal <= meta.nextOrdinal!) throw new Error(ANALYSIS_READ_FAILED);
+        renderBaselineAnalysis(host, appendBaselineSummaryPage(projection, page), bookTitle);
+      } catch { setStatus(ANALYSIS_READ_FAILED, 'error'); more.disabled = false; }
+    });
+    records.append(more);
+  }
+
   // §10: 明确不会发生 reads 不会做 in the editor's words, and the engineer's statements — every one of them,
   // unabridged — are one step away in 查看技术详情.
   const notDo = element('ul', 'analysis-list analysis-not-do');
@@ -4805,7 +4973,7 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
     element('p', 'task-plan-summary-line', taskPlanSummaryLine([
       projection.taskIntent!.modeLabel,
       range === null ? '全书' : `第 ${range.startPosition}–${range.endPosition} 段`,
-      counts === null ? `${manifest.units.length} 个阅读范围` : `重新分析 ${counts.recomputed} 个阅读范围，沿用 ${counts.reused} 个`,
+      counts === null ? `${projection.listPages['coverageManifest.units']?.total ?? manifest.units.length} 个阅读范围` : `重新分析 ${counts.recomputed} 个阅读范围，沿用 ${counts.reused} 个`,
       `任务输入修订版 ${checkpoint.revisionLabel}`,
       projection.planVersion === null ? '' : `计划版本 ${projection.planVersion.ordinal}`,
     ])),
@@ -4849,21 +5017,24 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
     // When the Run last changed state, in the Decision Layer's local time with the exact instant beside
     // it (V2-UX-LAYER-004). It reads from the transitions rather than from `progress`, so it stays
     // legible after the Run settles and `progress` is gone — a settled Run still answers "when".
-    const lastTransition = run.transitions[run.transitions.length - 1]!;
-    const lastTransitionValue = element('dd');
-    lastTransitionValue.dataset['runLastTransitionAt'] = lastTransition.recordedAt;
-    lastTransitionValue.append(
-      `${localInstantLabel(lastTransition.recordedAt)} · ${lastTransition.state}`,
-      element('span', 'technical-identity', lastTransition.recordedAt),
-    );
-    runFacts.append(element('dt', undefined, '上次状态更新'), lastTransitionValue);
+    // A transition list the reply paged (#988) does not end at the latest one, so it names none rather than an older one.
+    const lastTransition = projection.listPages['run.transitions'] === undefined ? run.transitions.at(-1) : undefined;
+    if (lastTransition !== undefined) {
+      const lastTransitionValue = element('dd');
+      lastTransitionValue.dataset['runLastTransitionAt'] = lastTransition.recordedAt;
+      lastTransitionValue.append(
+        `${localInstantLabel(lastTransition.recordedAt)} · ${lastTransition.state}`,
+        element('span', 'technical-identity', lastTransition.recordedAt),
+      );
+      runFacts.append(element('dt', undefined, '上次状态更新'), lastTransitionValue);
+    }
     runSection.dataset['runAdaptations'] = String(run.adaptations.length);
     if (run.attempt) {
       // That the credential readiness check released no value is a Provider decision the editor is owed
       // at full rank; the attempt's identity and binding digest are the technical half of the same fact.
       runFacts.append(
         element('dt', undefined, '凭据就绪检查'), element('dd', undefined, `${run.attempt.credentialReadinessCheck.readiness} · 未释放任何值`),
-        element('dt', undefined, 'Harness 执行区段'), element('dd', undefined, `${run.attempt.spans.length} 个区段（按标识引用，不复制内容）`),
+        element('dt', undefined, 'Harness 执行区段'), element('dd', undefined, `${run.attempt.spanCount} 个区段（按标识引用，不复制内容）`),
       );
     }
     runSection.append(runFacts, technicalDetails(
@@ -6758,6 +6929,11 @@ async function openAgentWorkspaceMarks(promotion: AgentWorkspacePromotionProject
 /** 前往编辑工作区方案: 工作概览 with the profile card, where Revision 2 is enabled for the Book, in view. */
 async function openAgentWorkspaceProfile(bookId: string, bookTitle: string): Promise<void> {
   await openBookSection({ bookId, title: bookTitle }, 'overview');
+  await focusEditorialProfileCard(bookId);
+}
+
+/** The profile card of the 工作概览 on screen, focused by its heading and scrolled into view once it has been drawn. */
+async function focusEditorialProfileCard(bookId: string): Promise<void> {
   const card = await new Promise<HTMLElement | null>((resolveCard) => {
     const started = performance.now();
     const look = (): void => {

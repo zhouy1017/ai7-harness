@@ -1,6 +1,20 @@
 # Public SampleBooks
 
-The repository admits exactly one manuscript file: `sample1.docx`.
+The repository admits exactly five manuscript files: `sample1.docx`, and the four public-domain
+works [ADR 0091](../docs/adr/0091-admit-four-public-domain-works-as-public-samplebooks.md) admits —
+`luxun-zhaohua-xishi.docx` 《朝花夕拾》, `luxun-nahan.docx` 《呐喊》, `liue-laocan-youji.docx`
+《老残游记》 and `wujingzi-rulin-waishi.docx` 《儒林外史》, the long-book case — each by the exact
+bytes and SHA-256 listed under "The admitted files" below. Beside them sits
+`public-samplebooks.json`, the designation record the four are generated from.
+
+Under ADR 0091, decided by the Owner on 2026-10-19
+([Issue #989](https://github.com/zhouy1017/ai7-harness/issues/989)), the four are Public SampleBooks
+exactly as `sample1` is: tracked, and provider-free input to local tests, the background test guests
+and hosted CI. ADR 0091 also authorizes their `developer-live` transmission exactly as `sample1`'s;
+they become transmittable when slice 15c ([#990](https://github.com/zhouy1017/ai7-harness/issues/990))
+lands their digests and the policy revision that names them. None of the four ever enters an
+application package, installer, portable zip or release asset — packaged builds keep 示例书尚未提供 —
+and development onboarding keeps importing exact `sample1`.
 
 Under [ADR 0079](../docs/adr/0079-record-the-owner-s-decisions-of-2026-09-10-on-storage-policies-export-egress-providers-and-samplebooks.md) §5, decided by the Owner on 2026-09-10, the admission
 [ADR 0043](../docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md) granted to the six files
@@ -13,7 +27,7 @@ designation, and a history purge on the protected lines is a separate Owner acti
 ## What the five files are now
 
 They are **local-only test material**. A developer who has them keeps them in the untracked source
-directory named under "The admitted file" below — or, equivalently, beside `sample1.docx` in this
+directory named under "The admitted files" below — or, equivalently, beside `sample1.docx` in this
 directory, which Git now refuses — and the tests and Journey runners that can only be shown on one
 of them look for it there:
 
@@ -43,8 +57,9 @@ Gate admits no untracked source or personal path as an input
 
 No derivative of the five ever enters the repository: not a fixture, not a cache export, not any
 generated text carrying their content. Local tests may read the local files. The `developer-live`
-transmittable set stays exact `sample1` alone, and none of the five may be transmitted to a model
-under any scope.
+transmittable set is the five admitted files below — exact `sample1` and, since slice 15c (Provider Processing
+v24, active-set v16), the four ADR 0091 works — each only by its exact digest, and none of the five local-only
+files may be transmitted to a model under any scope.
 
 ## What still composes from admitted content
 
@@ -55,19 +70,96 @@ Every composed manuscript fixture and every content-bearing Journey input now ex
 produce `sample1`: the builder writes its own container, whose digest is pinned as never equal to
 `sample1`'s, so a composed input can never stand in for the ADR 0044 baseline.
 
-## The admitted file
+## The admitted files
+
+| Exact path under `SampleBooks/` | Admitted by | Bytes | SHA-256 | Blocks | Characters |
+| --- | --- | ---: | --- | ---: | ---: |
+| `sample1.docx` | ADR 0043, ADR 0044, ADR 0079 §5 | 29550 | `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483` | 97 | 8289 |
+| `luxun-zhaohua-xishi.docx` | ADR 0091 | 61890 | `9d515a2245a158bbbcbdb8139e3877d5ee36437ce25a0924b92516c90f973cc7` | 372 | 40747 |
+| `luxun-nahan.docx` | ADR 0091 | 98880 | `13afe4783cd2c82f77c99582c62df0fcf13e3aa72ef562fe1d023bf11f1182d3` | 1006 | 69574 |
+| `liue-laocan-youji.docx` | ADR 0091 | 151564 | `db25d1a9afe8d3672a789ae8d37a84bc1f8464b014d8621f2403795814cacb8f` | 590 | 109766 |
+| `wujingzi-rulin-waishi.docx` | ADR 0091 | 425444 | `2d59edf22ecdb3dbcb7a62c0d7b56daadd066c3349dbeee78bf92f7d59074581` | 868 | 327716 |
+
+Total in the repository: 5 manuscript files, 767,328 bytes, beside this README and the designation
+record `public-samplebooks.json`. Blocks and characters are what the ordinary import counts
+(`parseDocx`, parser identity `ai7-docx-fflate-saxes/3`); see "Import verdicts".
+
+### `sample1.docx`
 
 The original source is the ignored, untracked `SampleBooks/` directory in the local
 worktree `C:\Users\Chooo\codebase\ai7-harness` beside
 `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`. Because those files were not Git
 objects, their source identity is the Owner designation plus the exact path, size,
-and SHA-256 allowlist below. The repository copy of `sample1.docx` is byte-for-byte identical.
+and SHA-256 allowlist above. The repository copy of `sample1.docx` is byte-for-byte identical.
 
-| Exact path under `SampleBooks/` | Bytes | SHA-256 |
-| --- | ---: | --- |
-| `sample1.docx` | 29550 | `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483` |
+### The four ADR 0091 works
 
-Total in the repository: 1 file, 29,550 bytes.
+Their source identity is the designation record `public-samplebooks.json`: for every work the ordered
+zh.wikisource.org pages, each pinned by its revision id; for a page that transcludes scanned `Page:`
+pages (all fifteen of 《呐喊》's), the revision of each of those 192 pages; the pin date (2026-10-19);
+the request `action=parse&oldid=<revid>&variant=zh-hans`; and the conversion, MediaWiki's own
+LanguageConverter. No character was edited by hand.
+
+| File | Work | Author (died) | Pages | Revisions |
+| --- | --- | --- | ---: | --- |
+| `luxun-zhaohua-xishi.docx` | 《朝花夕拾》 | 鲁迅 (1936) | 12 | 2323066–8657586 |
+| `luxun-nahan.docx` | 《呐喊》 | 鲁迅 (1936) | 15, transcluding 192 scan pages | 2523886–11120768 |
+| `liue-laocan-youji.docx` | 《老残游记》 | 刘鹗 (1909) | 21 | 2367222–2598346 |
+| `wujingzi-rulin-waishi.docx` | 《儒林外史》 | 吴敬梓 (1754) | 56 | 1565053–2648156 |
+
+<details><summary>Every page and its pinned revision</summary>
+
+- 《朝花夕拾》: `朝花夕拾/小引` 2323066 · `狗·猫·鼠` 8657586 · `阿長與《山海經》` 2563428 · `二十四孝圖` 2563431 · `五猖會` 2563954 · `无常` 2637162 · `從百草園到三味書屋` 7903272 · `父亲的病` 2563957 · `琐记` 2563958 · `藤野先生` 2607921 · `范愛農` 2563960 · `朝花夕拾/後記` 2563961
+- 《呐喊》: `吶喊` section 2 (自序) 11120768 · `狂人日記` 2605391 · `孔乙己` 2605389 · `藥` 2523886 · `明天` 2524371 · `一件小事` 10675925 · `頭髮的故事` 2525914 · `風波` 2629202 · `故鄉` 2570945 · `阿Q正傳` 2633268 · `端午節` 2673910 · `白光` 2687312 · `兔和貓` 8736224 · `鴨的喜劇` 9458356 · `社戲` 10605419
+- 《老残游记》: `老殘遊記/自敘` 2598346 · `老殘遊記/第01回` 2367222 · `/第02回` 2367223 · `/第03回` 2367233 · `/第04回` 2367238 · `/第05回` 2367240 · `/第06回` 2367239 · `/第07回` 2367225 · `/第08回` 2367237 · `/第09回` 2367229 · `/第10回` 2367227 · `/第11回` 2367228 · `/第12回` 2367226 · `/第13回` 2367234 · `/第14回` 2367224 · `/第15回` 2367235 · `/第16回` 2367231 · `/第17回` 2367236 · `/第18回` 2367232 · `/第19回` 2367230 · `/第20回` 2367241
+- 《儒林外史》: `儒林外史/第01回` 2648156 · `/第02回` 1565053 · `/第03回` 1565054 · `/第04回` 1565055 · `/第05回` 1565056 · `/第06回` 1565057 · `/第07回` 1565058 · `/第08回` 1565059 · `/第09回` 1565060 · `/第10回` 1565061 · `/第11回` 1565062 · `/第12回` 1565063 · `/第13回` 2329825 · `/第14回` 1565065 · `/第15回` 1565066 · `/第16回` 1565067 · `/第17回` 1565068 · `/第18回` 1565069 · `/第19回` 1565070 · `/第20回` 1565071 · `/第21回` 1565072 · `/第22回` 1565073 · `/第23回` 1565074 · `/第24回` 1565075 · `/第25回` 1565076 · `/第26回` 1565077 · `/第27回` 2413606 · `/第28回` 1565080 · `/第29回` 1565081 · `/第30回` 1565082 · `/第31回` 1565083 · `/第32回` 1565084 · `/第33回` 1565085 · `/第34回` 1565086 · `/第35回` 1565087 · `/第36回` 1565088 · `/第37回` 1565089 · `/第38回` 1565090 · `/第39回` 1565091 · `/第40回` 1565092 · `/第41回` 2157954 · `/第42回` 1565094 · `/第43回` 1565095 · `/第44回` 1565096 · `/第45回` 1565097 · `/第46回` 1565107 · `/第47回` 1565098 · `/第48回` 1565099 · `/第49回` 1565100 · `/第50回` 1565101 · `/第51回` 1565102 · `/第52回` 1565103 · `/第53回` 1565105 · `/第54回` 1567662 · `/第55回` 1565106 · `/第56回` 1567657
+
+</details>
+
+**Shape.** A `Title` paragraph with the work's title; per page a `Heading1` with the page's own title
+(a 回 novel's chapter line; an essay's or a story's title; 自序 for 《呐喊》's preface); a `Heading2`
+where the original text has a heading of its own (the numbered parts of 《狂人日记》 and 《药》, the
+nine chapters of 《阿Q正传》); and one body paragraph per source paragraph or verse line. No inline
+style and no page setup.
+
+**What was dropped, and where the record declares it.** Header and navigation templates, the
+上一回/下一回 bars, license and sister-project boxes, images, edit links and the discussion link are
+dropped everywhere. Beyond that, each page's manifest entry declares what it loses, and the generator
+refuses a build in which a page loses anything its entry does not declare:
+
+- `footnotes` — the reference markers of modern annotations, whose texts are never copied: 10 on
+  `父亲的病`, the only page that has any, together with its reference list.
+- `editorNoteDigests` — SHA-256 of every Wikisource note dropped, in order, without copying the note text: the 另作 readings shown on hover
+  (`朝花夕拾/小引` 1, `一件小事` 1, `社戲` 5, `儒林外史/第03回` 1, `儒林外史/第55回` 7), one
+  pronunciation gloss in `儒林外史/第01回`, and two compiler's edition labels in `儒林外史/第55回`.
+- `variantChoice` — `儒林外史/第55回` closes with two alternative final paragraphs, one per edition,
+  each headed by a compiler's label. The file keeps the 五十六回版本 paragraph and drops the
+  五十五回版本 one, consistent with the designation's 第01回 to 第56回; the Commander chose this for
+  #989.
+
+No page needed a 注释 section removed. `老殘遊記/自敘`'s body repeats its title as a heading, which is
+dropped once rather than kept twice.
+
+**Spot checks** (measured by a throwaway probe over the extracted text; counts only):
+
+- Simplified characters: none of 68 traditional-only characters
+  (這們說國來時會為與還過對開見關點經發學問題實現讓間氣當從應種長門頭東車書將個裡麼樣後給聽話覺錢買賣兒燈讀寫舊亂雖聲紙無兩邊塊歲難幾親愛藥)
+  occurs in any of the four. MediaWiki's conversion is not perfect for classical text in general;
+  for these pages the check found no residue.
+- Navigation and annotation strings: 上一回, 下一回, 目錄, 维基, Wikisource, Discuss, 公有领域, 注释,
+  註釋, 脚注, `[1]`, `〈(`, 一作, `http`, `Category`, `Page:` and `Author:` occur nowhere. The few hits
+  of 编辑, 注解, 姊妹 and 目录 all sit mid-paragraph in long prose blocks of the works themselves.
+- Coverage: per page, the CJK characters of everything MediaWiki rendered minus those kept equals the
+  header, license box and declared drops alone — 22 on every 回 page beyond its declared drops, 143 to 159 on the 朝花夕拾 pages
+  (298 on `父亲的病` with its footnotes), 98 to 511 on the 呐喊 pages, whose license box names the
+  1938 全集's editors — so no paragraph of the works was lost.
+
+**Regenerating.** `node tools/build-public-samplebook.mjs --cache <a directory outside the checkout>`
+fetches the pinned revisions through `curl` (only `https://zh.wikisource.org/w/api.php`), keeps the raw
+responses in that cache and rewrites the four files; `--check` rebuilds from the cache and compares
+with the committed bytes. The tool is development-only: CI, `build`, `package` and the tests never run
+it. A pinned revision that disappears, or a transcluded scan page that moved past its pinned revision,
+refuses the build rather than producing different text.
 
 ### History: the six-file allowlist ADR 0043 admitted
 
@@ -89,7 +181,9 @@ Under [ADR 0044](../docs/adr/0044-use-sample1-as-compatibility-and-recording-bas
 
 Exact `sample1.docx` may be used as provider-free input to local and hosted-CI
 tests, including authoring synthetic test data. A consuming scenario must still
-bind the exact admitted input in its own authorized Change Brief. The five
+bind the exact admitted input in its own authorized Change Brief. The four ADR 0091 works may be
+used exactly the same way, and their test-time compositions stay in disposable test roots as
+`sample1`'s do. The five
 local-only files may be read by local tests alone: no hosted occurrence, no
 fixture, no derivative, and no transmission. A background test guest that holds the legacy `.doc`
 under ADR 0084 is, for that file, a local test host within this sentence, not a hosted occurrence or
@@ -107,7 +201,39 @@ production learning, export, external delivery, publication, Public Release
 Permission, or release-asset use. Runtime derivatives remain confined to
 disposable external test data roots under the existing cleanup lifecycle.
 
+The four ADR 0091 works carry the same closed boundaries: no raw text in logs, diagnostics,
+screenshots, traces, videos, uploaded artifacts, Issues, pull requests or commit messages, and no
+distribution, production learning, export, external delivery or publication. Their `developer-live`
+transmission is authorized by ADR 0091 §3.2 and implemented by slice 15c; until then they are
+admitted but not transmittable. A model fixture derived from one of them enters only through its own
+reviewed fixture pull request (ADR 0091 §3.3); the fixture generator's manuscript-echo exemption is
+still `sample1`'s alone.
+
 ## Import verdicts
+
+### The four ADR 0091 works
+
+Measured for [Issue #989](https://github.com/zhouy1017/ai7-harness/issues/989) on its pull request's
+head over base `dev@ae5d2c1e`, with parser identity `ai7-docx-fflate-saxes/3`: a throwaway probe,
+deleted before the commit as #297's was, read each file once through `parseDocx` and staged it through
+`EditorialStore.stageSelectedManuscript` on a temporary data root. Only counters were captured. Every
+file imports without refusal, as an editable import whose title comes from the DOCX title metadata.
+
+| Exact path under `SampleBooks/` | Bytes | Blocks | Title / Heading1 / Heading2 / body | Characters | Longest block | Fidelity | Plan | Staged blocks |
+| --- | ---: | ---: | --- | ---: | ---: | --- | --- | ---: |
+| `luxun-zhaohua-xishi.docx` | 61890 | 372 | 1 / 12 / 0 / 359 | 40747 | 983 | all categories 0 | `clean-import-no-round-trip` | 372 |
+| `luxun-nahan.docx` | 98880 | 1006 | 1 / 15 / 26 / 964 | 69574 | 489 | all categories 0 | `clean-import-no-round-trip` | 1006 |
+| `liue-laocan-youji.docx` | 151564 | 590 | 1 / 21 / 0 / 568 | 109766 | 700 | all categories 0 | `clean-import-no-round-trip` | 590 |
+| `wujingzi-rulin-waishi.docx` | 425444 | 868 | 1 / 56 / 0 / 811 | 327716 | 1931 | all categories 0 | `clean-import-no-round-trip` | 868 |
+| `sample1.docx` — **control** | 29550 | 97 | 0 / 0 / 0 / 97 | 8289 | 506 | `inline-styles` 266, `sections` 1, all other categories 0 | `clean-import-no-round-trip` | 97 |
+
+Characters are the parser's count, punctuation included. 《儒林外史》 is the long case at 327,716
+characters. Every count is below the Issue's rounded estimates (about 5万, 8万, 13万 and 40万), by
+13 to 19 per cent; the coverage check above shows that this is the pinned pages' own length, not
+text lost in extraction. The control row reproduces `sample1`'s known 97 blocks and 8,289
+characters, which is what shows the probe read the parser correctly.
+
+### History: the readings of #297, #352 and #351
 
 History, kept as the record these measurements were taken as. Every row but exact
 `sample1`'s now describes local-only material, and the `Test input today` column is

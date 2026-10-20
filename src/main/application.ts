@@ -89,8 +89,8 @@ import {
   type ReviewBeforeManuscriptReimportProjection,
   type ReviewFindingPageRequest,
   type ReviewWorkspaceProjection,
-  type ServiceJobProjection,
-  type ServiceOperationMap,
+  type ServiceWireJobProjection as ServiceJobProjection,
+  type WireServiceOperationMap as ServiceOperationMap,
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
 import { usageCsv } from '../shared/usage.js';
@@ -2858,6 +2858,95 @@ function registerRendererHandlers(
       const result = await service.call('inspectParagraphAnalysis', { manuscriptId: input?.manuscriptId, blockId: input?.blockId, radius: input?.radius, bookId: route.bookId });
       requireCurrentRouteReadEpoch(owned, generation, sequence);
       if (result.bookId !== route.bookId || result.manuscriptId !== input.manuscriptId || result.blockId !== input.blockId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '段落分析不属于当前稿件。');
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getTaskPlanPage, (event, input: Omit<ServiceOperationMap['getTaskPlanPage']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getTaskPlanPage', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      // A page answers the list it was asked for, and retained drafts are this Book's, as the whole read is checked.
+      if (result.path !== input.path || result.digest !== input.digest || input.kind === 'task-intent-drafts' &&
+          (!Array.isArray(result.items) || result.items.some((draft) => (draft as TaskIntentDraftProjection).bookId !== route.bookId))) {
+        throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务计划不属于当前图书工作台。');
+      }
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getBaselineAnalysisPage, (event, input: Omit<ServiceOperationMap['getBaselineAnalysisPage']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getBaselineAnalysisPage', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getCoverageManifestUnits, (event, input: Omit<ServiceOperationMap['getCoverageManifestUnits']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getCoverageManifestUnits', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getAnalysisRevisionUnits, (event, input: Omit<ServiceOperationMap['getAnalysisRevisionUnits']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getAnalysisRevisionUnits', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getAnalysisRevisionOverview, (event, input: Omit<ServiceOperationMap['getAnalysisRevisionOverview']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getAnalysisRevisionOverview', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getAnalysisRunReportRows, (event, input: Omit<ServiceOperationMap['getAnalysisRunReportRows']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getAnalysisRunReportRows', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getBaselineAnalysisRangePlan, (event, input: Omit<ServiceOperationMap['getBaselineAnalysisRangePlan']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const sequence = owned.routeRequestSequence;
+      const result = await service.call('getBaselineAnalysisRangePlan', { ...input, bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, generation, sequence);
       return result;
     }),
   );
@@ -6663,7 +6752,7 @@ export async function runApplication(): Promise<void> {
       }
       requireDesktop(parent !== undefined && isAbsolute(parent));
       // Read the shipped policy set, never infer its version from the source branch or preferences.
-      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v15.json'), 'utf8')) as { version: string };
+      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v16.json'), 'utf8')) as { version: string };
       await writeDiagnosticsBundle(parent, {
         facts: { ...crashFacts(), policySetVersion: policySet.version, node: process.versions.node,
           locale: app.getLocale(), windowCount: ownedWindows.size },

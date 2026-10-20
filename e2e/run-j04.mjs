@@ -342,6 +342,25 @@ async function createRendererManager(browser) {
   };
 }
 
+/** #988: wire summaries keep their digest; exact membership is fetched through the bounded read op. */
+async function readBaseline(renderer, revisionId = null) {
+  const projection = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis(${revisionId === null ? '' : JSON.stringify({ revisionId })})`);
+  if (projection.coverageManifest !== null) {
+    const units = [];
+    let afterOrdinal = 0;
+    do {
+      const page = await renderer.evaluate(`window.ai7.getCoverageManifestUnits(${JSON.stringify({ taskIntentId: projection.taskIntent.taskIntentId, afterOrdinal })})`);
+      requireJourney(page.manifestDigest === projection.coverageManifest.digest && page.units.length > 0, 'coverage-manifest-page');
+      units.push(...page.units);
+      afterOrdinal = page.next;
+    } while (afterOrdinal !== null);
+    projection.coverageManifest = { ...projection.coverageManifest, units };
+    const { digest, ...body } = projection.coverageManifest;
+    requireJourney(sha256Hex(canonicalJson(body)) === digest, 'coverage-manifest-page-digest');
+  }
+  return projection;
+}
+
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
 }
@@ -364,6 +383,7 @@ async function startUpdate(renderer, mode, label, name) {
   // The three modes live under 历史与更新, so the editor goes there first, as they would.
   await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const tab=card?.querySelector('[role="tab"][data-analysis-tab="history"]'); if(!(tab instanceof HTMLButtonElement))return false; tab.click(); return tab.getAttribute('aria-selected')==='true' && !card.querySelector('[data-analysis-panel="history"]').hidden; })()`, `${name}-history-tab`);
   await click(renderer, label, `${name}-choose`);
+  if (mode === 'reanalyze-range') await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] [data-analysis-action="reanalyze-range"]')?.disabled===false`, `${name}-selected-plan-ready`);
   await assertRenderer(renderer, `(() => {
     const block=document.querySelector('.baseline-analysis-card [data-update-action=${JSON.stringify(mode)}]');
     const chooser=block?.querySelector('[data-analysis-action=${JSON.stringify(`choose-${mode}`)}]');
@@ -543,8 +563,9 @@ async function startFromBar(renderer, name) {
  */
 function readSpansLabel(reusePlan, manifest) {
   const spans = reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => {
-    const overlap = manifest.units.find((entry) => entry.ordinal === unit.unitOrdinal)?.overlapBlockIds.length ?? 0;
-    return [Math.max(1, unit.startPosition - overlap), unit.endPosition];
+    const range = manifest.units.find((entry) => entry.ordinal === unit.unitOrdinal);
+    const overlap = range?.overlapBlockIds.length ?? 0;
+    return [Math.max(1, range.startPosition - overlap), range.endPosition];
   }).sort((left, right) => left[0] - right[0] || left[1] - right[1]);
   const merged = [];
   for (const [start, end] of spans) {
@@ -694,8 +715,8 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.harnessSessionId === attempt.executionBinding.harnessSessionId &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    // Synchronized delta with Issue #920: selected active set v15; Provider Processing remains v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v15', liveTransmissions: 0 }) &&
+    // Synchronized delta with Issue #990: selected active set v16; Provider Processing remains v1.
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v16', liveTransmissions: 0 }) &&
     revision?.provenance?.taskIntentId === prepared.taskIntent.taskIntentId && revision?.provenance?.attemptId === attempt.attemptId &&
     // Synchronized delta (#274, #275): eight unit turns, the reduction's, and the sample's.
     revision?.usage?.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
@@ -710,8 +731,8 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     !JSON.stringify(revision).includes('"complete":'), `${name}-axes`, { coverage: revision.coverage, reducerClosure: revision.reducerClosure, freshness: revision.freshness, assurance: revision.assurance });
   requireJourney(revision.gaps?.length === 1 && revision.gaps[0].unitOrdinal === 2 && revision.gaps[0].code === 'adapter-failure' &&
     revision.gaps[0].startPosition === SAMPLE1_UNIT_RANGES[1][0] && revision.gaps[0].endPosition === SAMPLE1_UNIT_RANGES[1][1] &&
-    revision.gaps[0].blockIds.length === SAMPLE1_UNIT_RANGES[1][1] - SAMPLE1_UNIT_RANGES[1][0] + 1 &&
-    JSON.stringify(revision.gaps[0].blockIds) === JSON.stringify(manifest.units[1].blockIds) &&
+    revision.gaps[0].blockCount === SAMPLE1_UNIT_RANGES[1][1] - SAMPLE1_UNIT_RANGES[1][0] + 1 &&
+    revision.gaps[0].blockCount === manifest.units[1].blockIds.length && revision.gaps[0].firstBlockId === manifest.units[1].blockIds[0] && revision.gaps[0].lastBlockId === manifest.units[1].blockIds.at(-1) &&
     JSON.stringify(revision.conflicts?.map((conflict) => conflict.kind)) === JSON.stringify(['unit-reported', 'alias-collision', 'entity-kind-divergence', 'setting-claim-divergence']) &&
     revision.conflicts.every((conflict) => conflict.sourceRanges.every((range) => manifest.units.some((unit) => unit.blockIds.includes(range.blockId)))) &&
     JSON.stringify(revision.units?.map((unit) => unit.state)) === JSON.stringify(['closed', 'gap', 'closed', 'closed', 'closed', 'closed', 'closed', 'closed']) &&
@@ -790,8 +811,8 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     revision?.adapterPin?.fixtureIdentity === FIXTURE_IDENTITY && revision?.adapterPin?.fixtureSha256 === fixtureDigest &&
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    // Synchronized delta with Issue #920: selected active set v15; Provider Processing remains v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v15', liveTransmissions: 0 }) &&
+    // Synchronized delta with Issue #990: selected active set v16; Provider Processing remains v1.
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v16', liveTransmissions: 0 }) &&
     revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
     sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
     sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
@@ -828,7 +849,7 @@ async function settleAuthorizedRun(renderer, name) {
   await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, `${name}-settled`, 180_000);
   await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, `${name}-settled-state`);
   await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && document.querySelector('#task-drawer .task-bar-status')?.textContent==='已完成' && document.querySelector('#task-drawer [data-task-drawer-control="run-link"]')?.textContent==='查看运行' && !document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, `${name}-bar-settled`);
-  return renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+  return readBaseline(renderer);
 }
 
 async function main() {
@@ -1218,7 +1239,7 @@ async function main() {
     await click(renderer, '开始基线稿件分析', 'prepare-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'prepared', 120_000);
     cancellation.throwIfRequested();
-    const prepared = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const prepared = await readBaseline(renderer);
     const manifest = prepared?.coverageManifest;
     requireJourney(prepared?.state === 'prepared' && prepared.bookId === imported.bookId && prepared.kind === 'baseline-manuscript-analysis' &&
       prepared.contractVersion === 'ai7.baseline-manuscript-analysis/1' && UUID_PATTERN.test(prepared.taskIntent?.taskIntentId) &&
@@ -1330,7 +1351,7 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('result-set-revision');
-    const settled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const settled = await readBaseline(renderer);
     requireJourney(settled?.state === 'settled' && settled.stateLabel === '已形成结果集修订版' && settled.taskIntent?.taskIntentId === prepared.taskIntent.taskIntentId &&
       settled.checkpoint?.revisionId === prepared.checkpoint.revisionId && settled.planEnvelope?.digest === prepared.planEnvelope.digest &&
       UUID_PATTERN.test(settled.authorization?.authorizationId) && settled.authorization?.origin === 'standard-direct' &&
@@ -1650,7 +1671,7 @@ async function main() {
 
     // No finding was edited, deleted, reordered, or re-ranked by a disposition, and the axis state the
     // reducers gave this Run is untouched: a sample is evidence about findings, never a verdict.
-    const revisionAgain = (await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`)).resultSetRevision;
+    const revisionAgain = (await readBaseline(renderer)).resultSetRevision;
     requireJourney(JSON.stringify(revisionAgain.crossUnitFindings) === findingsBeforeSampling &&
       revisionAgain.assurance.state === 'qualified-with-open-conflicts' &&
       revisionAgain.assurance.crossUnitFindingCount === revision.crossUnitFindings.length &&
@@ -1777,7 +1798,7 @@ async function main() {
 
     at('return-to-range');
     cancellation.throwIfRequested();
-    const gapBlockId = revision.gaps[0].blockIds[0];
+    const gapBlockId = revision.gaps[0].firstBlockId;
     await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-analysis-gap-unit="2"] [data-analysis-action="return-to-range"]'); if(!(button instanceof HTMLButtonElement)||button.disabled||button.dataset.analysisBlockId!==${JSON.stringify(gapBlockId)})return false; button.click(); return true; })()`, 'return-to-range-click');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id=${JSON.stringify(gapBlockId)}]')`, 'return-to-range-editor', 120_000);
     // Synchronized delta with Issue #409: the manuscript's position rail marks the range this analysis left
@@ -1786,7 +1807,7 @@ async function main() {
     cancellation.throwIfRequested();
     await openAnalysisDestination(renderer, 'return-to-range-back');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'return-to-range-overview');
-    const afterReturn = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const afterReturn = await readBaseline(renderer);
     requireJourney(JSON.stringify(afterReturn) === JSON.stringify(settled), 'return-to-range-read-only');
 
     at('restart-immutable');
@@ -1800,7 +1821,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'restart-open-book-manuscript');
     await openAnalysisDestination(renderer, 'restart-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'restart-record-visible');
-    const restarted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const restarted = await readBaseline(renderer);
     requireJourney(JSON.stringify(restarted) === JSON.stringify(settled), 'restart-record-immutable');
     // Synchronized delta (#276): the Run Report is durable state, not a live computation, so it reads
     // back byte for byte — its own digest included — after the product has been closed and reopened.
@@ -1814,7 +1835,7 @@ async function main() {
     at('acknowledged-edit-stale');
     await saveEditorSuffix(renderer, '，J-04 结果集形成后的确认编辑', 1, cancellation);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('.baseline-analysis-card')?.dataset.freshnessState==='stale'`, 'stale-after-edit');
-    const stale = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const stale = await readBaseline(renderer);
     const staleRevision = stale?.resultSetRevision;
     requireRevisionShape(staleRevision, prepared, attempt, fixtureDigest, 'stale-revision');
     requireJourney(stale.checkpoint?.revisionId === settled.checkpoint.revisionId && stale.checkpoint?.revisionDigest === settled.checkpoint.revisionDigest &&
@@ -1834,6 +1855,11 @@ async function main() {
     at('update-controls-disclosed');
     cancellation.throwIfRequested();
     const controlsStale = stale.updateControls;
+    // #988: an option's expected counts are derived only when it is picked, so each is read the way the chooser reads it.
+    const staleRangePlans = [];
+    for (const option of controlsStale?.actions?.['reanalyze-range']?.options ?? []) {
+      staleRangePlans.push(await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan(${JSON.stringify({ unitOrdinal: option.unitOrdinal })})`));
+    }
     requireJourney(controlsStale?.target?.revisionId === revision.revisionId && controlsStale.target.ordinal === 1 && controlsStale.target.digest === revision.digest &&
       controlsStale.target.freshness === 'stale' && controlsStale.blockedByActiveRun === false &&
       controlsStale.working?.totalBlocks === SAMPLE1_BLOCKS && controlsStale.working?.unitCount === SAMPLE1_UNITS && controlsStale.working?.sectionCount === 1 &&
@@ -1846,9 +1872,11 @@ async function main() {
       controlsStale.actions['reanalyze-range'].goal === RANGE_GOAL && controlsStale.actions['reanalyze-range'].options?.length === SAMPLE1_UNITS &&
       controlsStale.actions['reanalyze-range'].options.every((option, index) => option.unitOrdinal === index + 1 &&
         option.startPosition === SAMPLE1_UNIT_RANGES[index][0] && option.endPosition === SAMPLE1_UNIT_RANGES[index][1] && option.sectionOrdinal === 1 &&
-        typeof option.label === 'string' && option.expected.recomputed >= 2) &&
+        typeof option.label === 'string' && !('expected' in option) &&
+        sameRecord(staleRangePlans[index]?.selectedRange, { startPosition: option.startPosition, endPosition: option.endPosition }) &&
+        staleRangePlans[index].expected.recomputed >= 2) &&
       // Against revision 1 the edited unit 1 and the gap unit 2 recompute in every mode; a range over unit 3 adds units 3 and 4.
-      sameRecord(controlsStale.actions['reanalyze-range'].options[2].expected, { reused: 4, recomputed: 4, invalidated: 2, bypassed: 2 }) &&
+      sameRecord(staleRangePlans[2]?.expected, { reused: 4, recomputed: 4, invalidated: 2, bypassed: 2 }) &&
       controlsStale.actions['reanalyze-book']?.available === true && controlsStale.actions['reanalyze-book'].goal === BOOK_GOAL &&
       sameRecord(controlsStale.actions['reanalyze-book'].expected, { reused: 0, recomputed: 8, invalidated: 2, bypassed: 6 }) &&
       controlsStale.providerConsequence.includes('0 次实时传输') && controlsStale.providerConsequence.includes('public-or-synthetic') &&
@@ -1877,7 +1905,7 @@ async function main() {
     cancellation.throwIfRequested();
     await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'sync-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'sync-prepared', 120_000);
-    const preparedSync = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const preparedSync = await readBaseline(renderer);
     const syncManifest = preparedSync?.coverageManifest;
     const syncExpected = deriveExpectedPlan(manifest, revision.units.map((unit) => unit.state), syncManifest, 'sync-current', null);
     const syncPlan = preparedSync?.update?.reusePlan;
@@ -1956,7 +1984,7 @@ async function main() {
       revision2.freshness.currentRevisionId === preparedSync.checkpoint.revisionId && revision2.manuscriptPin.revisionDigest === staleRevision.freshness.currentWorkingDigest &&
       revision2.usage.inputTokens < revision.usage.inputTokens, 'sync-reused-unit-copy', { reused: revision2.units[2], usage: revision2.usage });
     // The predecessor is unchanged and reachable read-only while the latest stays the latest.
-    const olderView = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis({ revisionId: ${JSON.stringify(revision.revisionId)} })`);
+    const olderView = await readBaseline(renderer, revision.revisionId);
     requireJourney(olderView?.inspectedRevision?.readOnly === true && olderView.inspectedRevision.current === false &&
       olderView.inspectedRevision.revision?.freshness?.state === 'superseded' && olderView.inspectedRevision.revision.freshness.boundRevisionId === revision.manuscriptPin.revisionId &&
       JSON.stringify(withoutKey(olderView.inspectedRevision.revision, 'freshness')) === JSON.stringify(withoutKey(revision, 'freshness')) &&
@@ -1981,6 +2009,7 @@ async function main() {
     at('reanalyze-range-select');
     cancellation.throwIfRequested();
     const rangeOption = settledSync.updateControls?.actions?.['reanalyze-range']?.options?.[2];
+    if (rangeOption) Object.assign(rangeOption, await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan(${JSON.stringify({ unitOrdinal: rangeOption.unitOrdinal })})`));
     requireJourney(settledSync.updateControls?.target?.ordinal === 2 && settledSync.updateControls.target.revisionId === revision2.revisionId &&
       settledSync.updateControls.target.freshness === 'current' && settledSync.updateControls.actions['sync-current'].available === false &&
       rangeOption?.unitOrdinal === 3 && rangeOption.startPosition === SAMPLE1_UNIT_RANGES[2][0] && rangeOption.endPosition === SAMPLE1_UNIT_RANGES[2][1] &&
@@ -1992,7 +2021,14 @@ async function main() {
       const radio=block?.querySelector('#analysis-range-3');
       const start=block?.querySelector('[data-analysis-action="reanalyze-range"]');
       if(!(radio instanceof HTMLInputElement)||radios.length!==8||radios.some((item)=>item.checked)||!(start instanceof HTMLButtonElement)||!start.disabled||block.dataset.selectedRange) return false;
-      radio.click();
+      radio.click(); return radio.checked && radios.filter((item)=>item.checked).length===1;
+    })()`, 'range-select-input');
+    await waitFor(renderer, `(() => {
+      const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
+      const radios=Array.from(block?.querySelectorAll('input[name="analysis-range"]')??[]);
+      const radio=block?.querySelector('#analysis-range-3');
+      const start=block?.querySelector('[data-analysis-action="reanalyze-range"]');
+      if(!(radio instanceof HTMLInputElement)||!(start instanceof HTMLButtonElement)) return false;
       return radio.checked && radios.filter((item)=>item.checked).length===1 && block.dataset.selectedRange===${JSON.stringify(`${selectedRange.startPosition}-${selectedRange.endPosition}`)} &&
         block.dataset.expectedReused==='5' && block.dataset.expectedRecomputed==='3' && block.dataset.expectedInvalidated==='1' && block.dataset.expectedBypassed==='2' && !start.disabled &&
         block.textContent.includes(${JSON.stringify(`内容块 ${selectedRange.startPosition}–${selectedRange.endPosition}`)});
@@ -2002,7 +2038,7 @@ async function main() {
     cancellation.throwIfRequested();
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'range-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'range-prepared', 120_000);
-    const preparedRange = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const preparedRange = await readBaseline(renderer);
     const rangeManifest = preparedRange?.coverageManifest;
     const rangeExpected = deriveExpectedPlan(syncManifest, revision2.units.map((unit) => unit.state), rangeManifest, 'reanalyze-range', selectedRange);
     const rangePlan = preparedRange?.update?.reusePlan;
@@ -2061,7 +2097,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const whole=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-book"]'); return whole?.dataset.updateAvailable==='true' && whole.dataset.expectedReused==='0' && whole.dataset.expectedRecomputed==='8' && whole.dataset.expectedInvalidated==='1' && whole.dataset.expectedBypassed==='7' && !whole.querySelector('[data-analysis-action="reanalyze-book"]').disabled; })()`, 'book-control');
     await startUpdate(renderer, 'reanalyze-book', '重新分析全书', 'book-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'book-prepared', 120_000);
-    const preparedBook = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const preparedBook = await readBaseline(renderer);
     const bookManifest = preparedBook?.coverageManifest;
     const bookExpected = deriveExpectedPlan(rangeManifest, revision3.units.map((unit) => unit.state), bookManifest, 'reanalyze-book', null);
     const bookPlan = preparedBook?.update?.reusePlan;
@@ -2170,7 +2206,7 @@ async function main() {
     cancellation.throwIfRequested();
     await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-analysis-action="open-revision"][data-analysis-revision-ordinal="1"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'history-open-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.inspectedRevisionOrdinal==='1'`, 'history-open-rendered');
-    const historical = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis({ revisionId: ${JSON.stringify(revision.revisionId)} })`);
+    const historical = await readBaseline(renderer, revision.revisionId);
     requireJourney(historical?.inspectedRevision?.readOnly === true && historical.inspectedRevision.current === false &&
       historical.inspectedRevision.revision?.ordinal === 1 && historical.inspectedRevision.revision.digest === revision.digest &&
       historical.inspectedRevision.revision.freshness.state === 'superseded' && historical.inspectedRevision.revision.freshness.boundRevisionId === revision.manuscriptPin.revisionId &&
@@ -2201,7 +2237,7 @@ async function main() {
     // Synchronized delta (#406): the action speaks of 份, as the history it sits under does.
     await click(renderer, '返回最新的一份', 'history-close-click');
     await waitFor(renderer, `!document.querySelector('.baseline-analysis-card')?.dataset.inspectedRevisionOrdinal && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='4' && document.querySelector('.baseline-analysis-card')?.dataset.updateMode==='reanalyze-book'`, 'history-closed');
-    const afterHistory = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const afterHistory = await readBaseline(renderer);
     requireJourney(JSON.stringify(afterHistory) === JSON.stringify(settledBook), 'history-read-only');
 
     at('restart-history');
@@ -2215,10 +2251,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'restart-history-open-book-manuscript');
     await openAnalysisDestination(renderer, 'restart-history-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='4'`, 'restart-history-visible');
-    const restartedHistory = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const restartedHistory = await readBaseline(renderer);
     requireJourney(JSON.stringify(restartedHistory) === JSON.stringify(settledBook), 'restart-history-immutable');
     for (const [ordinal, expectedRevision] of [[1, revision], [2, revision2], [3, revision3]]) {
-      const reopened = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis({ revisionId: ${JSON.stringify(expectedRevision.revisionId)} })`);
+      const reopened = await readBaseline(renderer, expectedRevision.revisionId);
       requireJourney(reopened?.inspectedRevision?.revision?.ordinal === ordinal && reopened.inspectedRevision.current === false &&
         reopened.inspectedRevision.revision.freshness.state === 'superseded' &&
         JSON.stringify(withoutKey(reopened.inspectedRevision.revision, 'freshness')) === JSON.stringify(withoutKey(expectedRevision, 'freshness')),
@@ -2241,20 +2277,21 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'safe-retry-open-book-manuscript');
     await openAnalysisDestination(renderer, 'safe-retry-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='4'`, 'safe-retry-book-visible');
-    const relaunched = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const relaunched = await readBaseline(renderer);
     requireJourney(JSON.stringify(relaunched) === JSON.stringify(settledBook), 'safe-retry-relaunch-immutable');
 
     at('safe-retry-prepare');
     cancellation.throwIfRequested();
     // 重新分析所选范围 over unit 5 against revision 4: its closure [5, 6] plus the predecessor gap unit 2 recompute.
     const retryOption = settledBook.updateControls?.actions?.['reanalyze-range']?.options?.[4];
+    if (retryOption) Object.assign(retryOption, await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan(${JSON.stringify({ unitOrdinal: retryOption.unitOrdinal })})`));
     requireJourney(retryOption?.unitOrdinal === 5 && retryOption.startPosition === SAMPLE1_UNIT_RANGES[4][0] && retryOption.endPosition === SAMPLE1_UNIT_RANGES[4][1] &&
       sameRecord(retryOption.expected, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }), 'safe-retry-option', settledBook.updateControls);
     const retryRange = { startPosition: retryOption.startPosition, endPosition: retryOption.endPosition };
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-5'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'safe-retry-range-select');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'safe-retry-range-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'safe-retry-prepared', 120_000);
-    const preparedRetry = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const preparedRetry = await readBaseline(renderer);
     const retryBoundary = preparedRetry?.planEnvelope?.boundary;
     requireJourney(preparedRetry?.state === 'prepared' && preparedRetry.taskIntent?.mode === 'reanalyze-range' && sameRecord(preparedRetry.update?.selectedRange, retryRange) &&
       preparedRetry.update?.predecessor?.revisionId === revision4.revisionId && sameRecord(preparedRetry.update?.reusePlan?.counts, retryOption.expected) &&
@@ -2348,7 +2385,9 @@ async function main() {
     cancellation.throwIfRequested();
     // A new 重新分析所选范围 Task (the previous one has a Run) over unit 3 against revision 5; unit 8 is the later material change.
     const driftOptionA = settledRetry.updateControls?.actions?.['reanalyze-range']?.options?.[2];
+    if (driftOptionA) Object.assign(driftOptionA, await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan(${JSON.stringify({ unitOrdinal: driftOptionA.unitOrdinal })})`));
     const driftOptionB = settledRetry.updateControls?.actions?.['reanalyze-range']?.options?.[7];
+    if (driftOptionB) Object.assign(driftOptionB, await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan(${JSON.stringify({ unitOrdinal: driftOptionB.unitOrdinal })})`));
     requireJourney(driftOptionA?.unitOrdinal === 3 && sameRecord(driftOptionA.expected, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }) &&
       driftOptionB?.unitOrdinal === 8 && sameRecord(driftOptionB.expected, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }), 'plan-revision-options', settledRetry.updateControls);
     const rangeA = { startPosition: driftOptionA.startPosition, endPosition: driftOptionA.endPosition };
@@ -2356,7 +2395,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-a');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-prepare-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId!==${JSON.stringify(preparedRetry.taskIntent.taskIntentId)}`, 'plan-revision-prepared', 120_000);
-    const preparedDrift = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const preparedDrift = await readBaseline(renderer);
     const v1Digest = preparedDrift?.planEnvelope?.digest;
     requireJourney(preparedDrift?.state === 'prepared' && preparedDrift.taskIntent?.taskIntentId !== preparedRetry.taskIntent.taskIntentId && sameRecord(preparedDrift.update?.selectedRange, rangeA) &&
       preparedDrift.update?.predecessor?.revisionId === revision5.revisionId && DIGEST_PATTERN.test(v1Digest) && preparedDrift.planVersion?.ordinal === 1 && preparedDrift.planVersion?.state === 'current' &&
@@ -2371,7 +2410,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-b');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-drift-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-pending', 120_000);
-    const drifted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const drifted = await readBaseline(renderer);
     // Rebound by the revert stage below, which settles this revision and drifts the plan again.
     let pendingRevision = drifted?.planRevision;
     requireJourney(drifted?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && drifted.state === 'prepared' && drifted.planEnvelope?.digest === v1Digest &&
@@ -2439,7 +2478,7 @@ async function main() {
     // Authorizing the stale version through the renderer API is refused with the safe reason and creates no Run Record.
     const refusal = await renderer.evaluate(`window.ai7.authorizeBaselineAnalysis({ taskIntentId: ${JSON.stringify(preparedDrift.taskIntent.taskIntentId)}, planEnvelopeDigest: ${JSON.stringify(v1Digest)} }).then(()=>null,(error)=>({ code: error?.code ?? null, message: String(error?.message ?? error) }))`);
     requireJourney(refusal !== null && refusal.code === 'ANALYSIS_PLAN_REVISION_REQUIRED' && refusal.message.includes('plan-revision-required'), 'plan-revision-refusal', refusal);
-    const afterRefusal = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const afterRefusal = await readBaseline(renderer);
     requireJourney(afterRefusal?.authorization === null && afterRefusal.run === null && afterRefusal.planRevision?.planRevisionId === pendingRevision.planRevisionId &&
       afterRefusal.planVersions?.length === 1 && afterRefusal.planEnvelope?.digest === v1Digest, 'plan-revision-no-run');
 
@@ -2451,7 +2490,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-a');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-revert-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='false'`, 'plan-revision-reverted', 120_000);
-    const reverted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const reverted = await readBaseline(renderer);
     const supersededRevision = reverted?.planRevisions?.[0];
     const revertRevision = reverted?.planRevisions?.[1];
     requireJourney(reverted?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && reverted.state === 'prepared' && reverted.planEnvelope?.digest === v1Digest &&
@@ -2496,7 +2535,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-b');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-redrift-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-redrift-pending', 120_000);
-    const redrifted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const redrifted = await readBaseline(renderer);
     pendingRevision = redrifted?.planRevision;
     requireJourney(redrifted?.planRevisions?.length === 3 && UUID_PATTERN.test(pendingRevision?.planRevisionId) &&
       pendingRevision.planRevisionId !== supersededRevision.planRevisionId && pendingRevision.planRevisionId !== revertRevision.planRevisionId &&
@@ -2514,7 +2553,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(preparedDrift.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='changed' && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.disabled===false`, 'plan-revision-reconfirm-ready');
     await reviewAction(renderer, '#task-drawer [data-task-drawer-control="reconfirm-plan"]', 'plan-revision-reconfirm-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planVersion==='2'`, 'plan-revision-version-2', 120_000);
-    const reconfirmed = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const reconfirmed = await readBaseline(renderer);
     const v2Digest = reconfirmed?.planEnvelope?.digest;
     requireJourney(reconfirmed?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && reconfirmed.state === 'prepared' && DIGEST_PATTERN.test(v2Digest) && v2Digest !== v1Digest &&
       reconfirmed.planEnvelope?.planVersion === 2 && reconfirmed.planVersion?.ordinal === 2 && reconfirmed.planVersion?.state === 'current' && reconfirmed.planVersion?.planRevisionId === pendingRevision.planRevisionId &&
@@ -2580,7 +2619,7 @@ async function main() {
       { id: 'assurance-sampling', removed: true, tag: '你改的 · 不做', control: 'restore', name: '恢复' },
       { id: 'safe-retry', removed: true, tag: '你改的 · 不允许', control: 'restore', name: '恢复' },
     ]), 'plan-edit-pending-items', pendingItems?.items);
-    const unrecordedEdit = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const unrecordedEdit = await readBaseline(renderer);
     requireJourney(unrecordedEdit?.planVersion?.ordinal === 2 && unrecordedEdit.planVersions?.length === 2 && unrecordedEdit.planRevisions?.length === 3, 'plan-edit-nothing-recorded');
 
     at('plan-edit-discard');
@@ -2611,7 +2650,7 @@ async function main() {
     // inputs as they were; the envelope the Run will bind leaves the retry out, and the drawer says who changed what.
     await reviewAction(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'plan-edit-update-click');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='3' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'plan-edit-version-3', 60_000);
-    const edited = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const edited = await readBaseline(renderer);
     const v3Digest = edited?.planEnvelope?.digest;
     const editRevision = edited?.planRevisions?.at(-1);
     const PLAN_EDITS = { removedSteps: ['assurance-sampling'], disallowedAdaptations: ['safe-retry'] };
@@ -2668,7 +2707,7 @@ async function main() {
     const nextSequence = settledDrift.updateControls.working.journalSequence + 1;
     await saveEditorSuffix(renderer, '，J-04 计划版本形成后的确认编辑', nextSequence, cancellation);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('.baseline-analysis-card')?.dataset.freshnessState==='stale'`, 'plan-revision-edit-stale');
-    const afterEdit = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const afterEdit = await readBaseline(renderer);
     requireJourney(afterEdit?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && afterEdit.planEnvelope?.digest === v3Digest &&
       JSON.stringify(afterEdit.planVersions?.map((version) => [version.ordinal, version.state])) === JSON.stringify([[1, 'superseded'], [2, 'superseded'], [3, 'bound']]) &&
       afterEdit.planRevisions?.length === 4 && afterEdit.planRevision === null && afterEdit.authorization?.planEnvelopeDigest === v3Digest &&
@@ -2686,7 +2725,7 @@ async function main() {
     await writeFile(connectivityPath, 'offline');
     await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'offline-sync-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'offline-sync-prepared', 120_000);
-    const preparedOffline = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const preparedOffline = await readBaseline(renderer);
     requireJourney(preparedOffline?.state === 'prepared' && preparedOffline.taskIntent?.mode === 'sync-current' && preparedOffline.actions?.canAuthorize === true &&
       preparedOffline.authorization === null && preparedOffline.run === null, 'offline-sync-plan', { state: preparedOffline?.state, mode: preparedOffline?.taskIntent?.mode });
     const offlineIntent = preparedOffline.taskIntent.taskIntentId;
@@ -2709,7 +2748,7 @@ async function main() {
       waitingDrawer.bar.note === '已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容' &&
       barActions(waitingDrawer) === 'cancel-wait:取消:enabled|run-link:查看运行:enabled' && waitingDrawer.bar.statement === null,
     'waiting-bar', waitingDrawer?.bar);
-    const waitingAnalysis = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const waitingAnalysis = await readBaseline(renderer);
     // The exact authorization 开始任务 records, and a Run that has sent nothing: no attempt, no binding, no usage.
     requireJourney(waitingAnalysis?.state === 'waiting' && waitingAnalysis.authorization?.origin === 'standard-direct' &&
       waitingAnalysis.authorization?.authority === 'standard-direct-dispatch' && waitingAnalysis.run?.state === 'awaiting-connectivity' &&
@@ -2726,7 +2765,7 @@ async function main() {
     const cancelledDrawer = await drawerShowing(renderer, offlineIntent, 'cancelled', 'cancelled-drawer');
     requireJourney(cancelledDrawer?.pill === '已取消' && cancelledDrawer.bar?.status === '已取消 · 未发送任何内容' &&
       barActions(cancelledDrawer) === 'run-link:查看运行:enabled', 'cancelled-bar', cancelledDrawer?.bar);
-    const cancelledAnalysis = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const cancelledAnalysis = await readBaseline(renderer);
     // Terminal, before any dispatch, without provider work — and never 已中断, which OFF-012 keeps for a Run that can resume.
     requireJourney(cancelledAnalysis?.state === 'cancelled' && cancelledAnalysis.run?.state === 'cancelled' && cancelledAnalysis.run.stateLabel === '已取消 · 未启动' &&
       cancelledAnalysis.run.attempt === null && cancelledAnalysis.taskOutcome === null &&
@@ -2739,7 +2778,7 @@ async function main() {
     // Cancelling freed the Book: the same mode is prepared again, and started again to wait for the network.
     await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'again-sync-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'again-sync-prepared', 120_000);
-    const preparedAgain = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const preparedAgain = await readBaseline(renderer);
     requireJourney(preparedAgain?.state === 'prepared' && preparedAgain.taskIntent?.taskIntentId !== offlineIntent, 'again-sync-plan');
     const againIntent = preparedAgain.taskIntent.taskIntentId;
     await drawerShowing(renderer, againIntent, 'offline', 'again-offline-drawer');
@@ -2752,7 +2791,7 @@ async function main() {
     // bound still stands and a place of the governor is free, so the Run is admitted and runs to its end (OFF-008).
     await writeFile(connectivityPath, 'online');
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'online-settled', 180_000);
-    const onlineSettled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const onlineSettled = await readBaseline(renderer);
     const onlineStates = onlineSettled?.run?.transitions?.map((transition) => transition.state) ?? [];
     requireJourney(onlineSettled?.state === 'settled' && onlineSettled.taskIntent?.taskIntentId === againIntent &&
       JSON.stringify(onlineStates.slice(0, 4)) === JSON.stringify(['authorized', 'awaiting-connectivity', 'admitted', 'executing']) &&
@@ -2800,7 +2839,7 @@ async function main() {
       JSON.stringify(Object.fromEntries(rule.binds.map((row) => [row.label, row.value]))) === JSON.stringify(ruleBinds) &&
       rulesAfterSet.statement === '默认执行规则只在你点快速开始时使用：它不会自己开始任何任务；每次开始都会留下那一次的计划和运行授权，并写明按哪一版规则开始。',
     'rule-set-record', rulesAfterSet);
-    const ruleSettled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const ruleSettled = await readBaseline(renderer);
     // The manuscript has not moved since the sync, so 同步 has nothing to read: its quick start names the rule and waits.
     const syncQuick = ruleSettled?.updateControls?.actions?.['sync-current']?.quickStart;
     requireJourney(syncQuick?.available === false && syncQuick.reason === '结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可同步到当前稿件。' &&
@@ -2814,7 +2853,7 @@ async function main() {
     await writeFile(connectivityPath, 'offline');
     await quickStart(renderer, 'sync-current', '同步到当前稿件', '开始同步 · 第 1 版', 'quick-offline');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('#task-drawer .task-bar-refusal')`, 'quick-offline-prepared', 120_000);
-    const fellBack = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const fellBack = await readBaseline(renderer);
     // It stopped at the plan and recorded nothing: no authorization, no Run (TASK-026).
     requireJourney(fellBack?.state === 'prepared' && fellBack.taskIntent?.mode === 'sync-current' && fellBack.authorization === null && fellBack.run === null,
       'quick-offline-nothing-recorded', { state: fellBack?.state, authorization: fellBack?.authorization, run: fellBack?.run });
@@ -2829,7 +2868,7 @@ async function main() {
     await writeFile(connectivityPath, 'online');
     await quickStart(renderer, 'sync-current', '同步到当前稿件', '开始同步 · 第 1 版', 'quick-online');
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState) && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='8'`, 'quick-settled', 180_000);
-    const quickSettled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const quickSettled = await readBaseline(renderer);
     const quickStates = quickSettled?.run?.transitions?.map((transition) => transition.state) ?? [];
     // The Task the stop left prepared is prepared again — unchanged, so revised in place (#48) — and started exactly as
     // 开始任务 records it: its own authorization, its origin the rule, naming the version the editor started under
@@ -3389,7 +3428,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="available"]')`, 'recorded-analysis-available');
     await reviewAction(renderer, '[data-analysis-action="prepare"]', 'recorded-prepare');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'recorded-prepared', 120_000);
-    const recordedPrepared = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const recordedPrepared = await readBaseline(renderer);
     // The replay asks what the recorded Run asked: prompt contract /1, whose plan pins no sampling contract (sampling /1).
     requireJourney(recordedPrepared?.bookId === recordedBook.bookId && recordedPrepared.coverageManifest?.units?.length === 8 &&
       recordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_FIXTURE_IDENTITY &&
@@ -3399,7 +3438,7 @@ async function main() {
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'recorded-settled', 180_000);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'recorded-settled-state');
     at('result-set-revision');
-    const recorded = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const recorded = await readBaseline(renderer);
     const realRevision = recorded?.resultSetRevision;
     const realReport = recorded?.taskOutcome?.report;
     requireJourney(recorded?.run?.state === 'completed-with-gaps' && recorded.taskOutcome?.classification === 'completed-with-gaps' &&
@@ -3444,7 +3483,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'recorded-restart-manuscript');
     await openAnalysisDestination(renderer, 'recorded-restart-analysis');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'recorded-restart-visible');
-    const recordedReopened = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const recordedReopened = await readBaseline(renderer);
     requireJourney(JSON.stringify(recordedReopened) === JSON.stringify(recorded) && loopback.healthy() && loopback.observedRequests() === 0,
       'recorded-restart-preserves-result-and-report');
 
@@ -3478,9 +3517,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'range-recorded-manuscript');
     await openAnalysisDestination(renderer, 'range-recorded-analysis');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'range-recorded-predecessor-visible');
-    const rangeBefore = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const rangeBefore = await readBaseline(renderer);
     // The /1 revision reads exactly as it was recorded under the launch that asks /2.
     const recordedRangeOption = rangeBefore?.updateControls?.actions?.['reanalyze-range']?.options?.[0];
+    if (recordedRangeOption) Object.assign(recordedRangeOption, await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan(${JSON.stringify({ unitOrdinal: recordedRangeOption.unitOrdinal })})`));
     requireJourney(JSON.stringify(rangeBefore?.resultSetRevision) === JSON.stringify(realRevision) &&
       rangeBefore.updateControls?.target?.revisionId === realRevision.revisionId && recordedRangeOption?.unitOrdinal === 1 &&
       recordedRangeOption.startPosition === SAMPLE1_UNIT_RANGES[0][0] && recordedRangeOption.endPosition === SAMPLE1_UNIT_RANGES[0][1] &&
@@ -3490,14 +3530,19 @@ async function main() {
       const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
       const radio=block?.querySelector('#analysis-range-1');
       if(!(radio instanceof HTMLInputElement)) return false;
-      radio.click();
+      radio.click(); return radio.checked;
+    })()`, 'range-recorded-select-input');
+    await waitFor(renderer, `(() => {
+      const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
+      const radio=block?.querySelector('#analysis-range-1');
+      if(!(radio instanceof HTMLInputElement)) return false;
       return radio.checked && block.dataset.selectedRange===${JSON.stringify(`${SAMPLE1_UNIT_RANGES[0][0]}-${SAMPLE1_UNIT_RANGES[0][1]}`)};
     })()`, 'range-recorded-select');
 
     at('reanalyze-range-prepare');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'range-recorded-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'range-recorded-prepared', 120_000);
-    const rangeRecordedPrepared = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const rangeRecordedPrepared = await readBaseline(renderer);
     const rangeRecordedPlan = rangeRecordedPrepared?.update?.reusePlan;
     requireJourney(rangeRecordedPrepared?.state === 'prepared' && rangeRecordedPrepared.taskIntent?.mode === 'reanalyze-range' &&
       sameRecord(rangeRecordedPrepared.update?.selectedRange, recordedSelectedRange) &&
@@ -3557,7 +3602,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'range-recorded-restart-manuscript');
     await openAnalysisDestination(renderer, 'range-recorded-restart-analysis');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'range-recorded-restart-visible');
-    const rangeReopened = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const rangeReopened = await readBaseline(renderer);
     requireJourney(JSON.stringify(rangeReopened?.resultSetRevision) === JSON.stringify(rangeRevision) &&
       JSON.stringify(rangeReopened.taskOutcome) === JSON.stringify(rangeRecorded.taskOutcome) && loopback.healthy() && loopback.observedRequests() === 0,
     'range-recorded-restart-preserves-result');

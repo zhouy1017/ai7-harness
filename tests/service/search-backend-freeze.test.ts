@@ -32,7 +32,7 @@ describe('a review Run freezes its search backend', () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
-      expect(policy.providerProcessing.version).toBe('v22');
+      expect(policy.providerProcessing.version).toBe('v24');
       const launch = { operationalScope: 'developer-live' as const, policy, live: {
         ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
         runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 500_000 },

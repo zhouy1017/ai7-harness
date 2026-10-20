@@ -508,7 +508,8 @@ describe('task authorization over the real store on exact sample1', () => {
   // store: the `development-ci` row above, read back after a reopen, and the `developer-live` row
   // here. Neither is ever validated against the scope the launch reading it happens to bind.
   it.each([DEVELOPER_LIVE_PIN, { ...DEVELOPER_LIVE_PIN, version: 'v11' as const }, { ...DEVELOPER_LIVE_PIN, version: 'v9' as const }, { ...DEVELOPER_LIVE_PIN, version: 'v5' as const },
-    { ...DEVELOPER_LIVE_PIN, version: 'v18' as const }, { ...DEVELOPER_LIVE_PIN, version: 'v20' as const }])('reads a stored plan against its own immutable pin ($version)', async (pin) => {
+    { ...DEVELOPER_LIVE_PIN, version: 'v18' as const }, { ...DEVELOPER_LIVE_PIN, version: 'v20' as const },
+    { ...DEVELOPER_LIVE_PIN, version: 'v22' as const }])('reads a stored plan against its own immutable pin ($version)', async (pin) => {
     await requireExactSample1();
     let bookId: string;
 
@@ -542,16 +543,16 @@ describe('task authorization over the real store on exact sample1', () => {
       // v1 as a whole token: the selected developer-live version v10 is not the development-ci v1.
       expect(live.executionPlan?.stopCondition).not.toMatch(/\bv1(?!\d)/);
       expect(live.planEnvelope?.summary).not.toMatch(/\bv1(?!\d)/);
-      if (pin.version === 'v18' || pin.version === 'v20') {
-        // #920 rev 4: predecessor records retain their exact pin while new plans select v22.
+      if (pin.version === 'v18' || pin.version === 'v20' || pin.version === 'v22') {
+        // #920 rev 4, #990: predecessor records retain their exact pin while new plans select v24.
         const selected = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
-        expect(selected.activePolicySetVersion).toBe('v15');
-        expect(selected.providerProcessing.version).toBe('v22');
+        expect(selected.activePolicySetVersion).toBe('v16');
+        expect(selected.providerProcessing.version).toBe('v24');
         const authorized = reopened.authorizeTaskAuthorization(bookId, live.taskIntent!.taskIntentId, live.planEnvelope!.digest);
         expect(authorized.state).toBe('authorized');
         expect(authorized.providerResolutionPlan?.providerProcessing).toEqual(pin);
         expect(authorized.runRecord?.dispatched).toBe(false);
-        expect((await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live')).providerProcessing.version).toBe('v22');
+        expect((await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live')).providerProcessing.version).toBe('v24');
       }
       reopened.markCleanShutdown();
     } finally {

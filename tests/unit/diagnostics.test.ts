@@ -4,7 +4,7 @@ import { DIAGNOSTICS_CHANNELS, buildDiagnosticsBundle, type DiagnosticsInputs } 
 import { DATA_VERSION } from '../../src/service/data-version.js';
 
 const facts: DiagnosticsInputs['facts'] = {
-  appVersion: '0.1.0', dataVersion: 1, schemaRevision: 83, protocol: 159, policySetVersion: 'v15', platform: 'win32',
+  appVersion: '0.1.0', dataVersion: 1, schemaRevision: 83, protocol: 161, policySetVersion: 'v15', platform: 'win32',
   arch: 'x64', electron: '42.0.0', node: '24.18.1', locale: 'zh-CN', uptimeSeconds: 42, windowCount: 2,
 };
 describe('pure diagnostics bundle', () => {

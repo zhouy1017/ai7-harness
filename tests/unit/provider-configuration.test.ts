@@ -345,7 +345,7 @@ describe('recorded evidence and the Provider Test Ledger (Issue #715, ADR 0067)'
     expect(recordedEvidence.data.frozenRequestBaselines).toEqual([{ since: 'adapter revision 1', route: 'deepseek-open-platform', models: ['deepseek-v4-pro'], issue: '#310' }]);
     const resolved = generator.resolveProviderConfiguration(freshInput());
     expect(resolved.recordedEvidence.liveTestItems.map((item) => item.itemId)).toEqual(recordedEvidence.data.liveTestItems.map((item) => item.itemId));
-    expect(recordedEvidence.data.liveTestItems.filter((item) => item.model === 'deepseek-v4.1-flash')).toHaveLength(16);
+    expect(recordedEvidence.data.liveTestItems.filter((item) => item.model === 'deepseek-v4.1-flash')).toHaveLength(19);
     // In the generated profiles, an item or a baseline appears as evidence only on the row the record names for it.
     const itemRow = new Map(recordedEvidence.data.liveTestItems.map((item) => [item.itemId, `${item.route}/${item.model}`]));
     const baselineRows = new Map(recordedEvidence.data.frozenRequestBaselines.map((baseline) => [baseline.since, baseline.models.map((model) => `${baseline.route}/${model}`)]));

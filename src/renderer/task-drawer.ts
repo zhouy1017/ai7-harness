@@ -9,12 +9,14 @@ import type {
   GlobalAttentionTarget,
   RendererApi,
   RunBudgetCeilingState,
-  ServiceJobProjection,
+  ServiceWireJobProjection as ServiceJobProjection,
   TaskPlanClarificationProjection,
   TaskPlanKind,
   TaskPlanProjection,
   TaskPlanRunControlProjection,
 } from '../shared/protocol.js';
+import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
+import { TASK_PAGE_FAILED, TASK_PAGE_NAMES, taskPageMore, taskResendSummary } from './analysis-paging-labels.js';
 import { isStartWhenOnlineTaskKind } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { mountTaskComposer, mountTaskPanel, type ComposerRange, type TaskComposerSeed } from './task-panel.js';
@@ -211,6 +213,7 @@ type DrawerApi = Pick<
   | 'inspectBookTasks'
   | 'inspectBaselineAnalysis'
   | 'inspectTaskPlan'
+  | 'getTaskPlanPage'
   | 'resolveUnconfirmedOutcomes'
   | 'authorizeTaskAuthorization'
   | 'authorizeBaselineAnalysis'
@@ -667,7 +670,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         if (mine !== ticket || request !== asked || root.hidden) return;
         // The first answer names the Task a `null` ref meant, so later reads ask for that Task.
         request = { ...asked, ref: next.ref };
-        paint(next, false);
+        paint(retainTaskPlanPages(next, plan), false);
       },
       (error) => {
         if (mine !== ticket || request !== asked || root.hidden) return;
@@ -754,6 +757,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
       ...(next.edit.lastEdit === null ? [] : [el('p', 'field-note task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit))]),
       mode === 'compact' ? compactBlock(next) : fullBlock(next),
+      ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.')).flatMap((path) => {
+        const button = pageControl(next, path, TASK_PAGE_NAMES[path] ?? path);
+        return button === null ? [] : [button];
+      }),
     );
     if (technicalOpen) {
       const details = body.querySelector<HTMLDetailsElement>('details.task-plan-technical');
@@ -813,7 +820,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const heading = el('h4', undefined, UNCONFIRMED_HEADING);
     heading.id = uid('unconfirmed-record');
     section.setAttribute('aria-labelledby', heading.id);
-    section.append(heading, el('p', 'attention-note', unconfirmedStatement(listed)));
+    section.append(heading, el('p', 'attention-note', unconfirmedStatement(listed, plan?.listPages?.['unconfirmed.ranges']?.total)));
     const listId = uid('unconfirmed-list');
     const actions = el('div', 'button-row');
     const view = document.createElement('button');
@@ -875,7 +882,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   }
 
   function resendNote(resend: NonNullable<TaskPlanProjection['resend']>): HTMLElement {
-    const note = el('p', 'attention-note task-plan-resend', resend.statement);
+    const statement = plan?.listPages?.['resend.statement']?.nextOrdinal != null
+      ? taskResendSummary(plan.listPages['resend.units']?.total ?? resend.units.length) : resend.statement;
+    const note = el('p', 'attention-note task-plan-resend', statement);
     note.dataset['taskPlanResend'] = resend.units.join(',');
     return note;
   }
@@ -1171,10 +1180,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
 
   function technicalBlock(next: TaskPlanProjection): HTMLElement {
     const rows: HTMLElement[] = [];
-    for (const row of next.technical) {
+    for (const [index, row] of next.technical.entries()) {
       const value = el('dd', 'technical-identity', row.value);
       value.dataset['taskPlanTechnical'] = row.key;
+      const more = pageControl(next, `technical.${index}.value`, row.label);
       rows.push(el('dt', undefined, row.label), value);
+      if (more !== null) {
+        const action = el('dd');
+        action.append(more);
+        rows.push(el('dt'), action);
+      }
     }
     const notDo = el('dd', 'technical-identity', next.notDo.technical.join('；'));
     notDo.dataset['taskPlanTechnical'] = 'not-do';
@@ -1183,6 +1198,30 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     disclosure.classList.add('task-plan-technical');
     disclosure.querySelector('summary')?.setAttribute('data-task-drawer-control', 'technical');
     return disclosure;
+  }
+
+  function pageControl(next: TaskPlanProjection, path: string, name: string): HTMLButtonElement | null {
+    const meta = next.listPages?.[path];
+    if (meta === undefined || meta.nextOrdinal === null) return null;
+    const button = control(taskPageMore(name, meta.shown, meta.total), 'secondary', `page-${path.replaceAll('.', '-')}`);
+    button.disabled = working || interrupted;
+    button.addEventListener('click', () => {
+      if (plan !== next) return;
+      button.disabled = true;
+      clearPoll();
+      ticket += 1;
+      void api.getTaskPlanPage({ kind: next.kind, ref: next.ref, path, afterOrdinal: meta.nextOrdinal!, digest: meta.digest }).then((page) => {
+        if (plan !== next || root.hidden) return;
+        if (page.path !== path) throw new Error(TASK_PAGE_FAILED);
+        paint(appendTaskPlanPage(next, page), true);
+      }).catch((error: unknown) => {
+        if (plan !== next || root.hidden) return;
+        button.disabled = false;
+        options.setStatus(options.errorMessage(error, TASK_PAGE_FAILED), 'error');
+        schedulePoll(next);
+      });
+    });
+    return button;
   }
 
   // ---- the authorization bar (Issue #420, S74a) -------------------------------------------------------
@@ -2062,7 +2101,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     // A stopped Run: nothing is in flight, and what it kept is its continuation point (CONT-015).
     if (run.continuation !== null) {
       section.dataset['taskPlanActivityProgress'] = `${run.continuation.unitsSettled ?? 'unreadable'}/${run.continuation.unitsTotal}`;
-      section.append(el('p', 'field-note', taskBarContinuationNote(run.continuation.unitsSettled, run.continuation.unitsTotal, run.continuation.pendingAnswerUnits)));
+      section.append(el('p', 'field-note', taskBarContinuationNote(run.continuation.unitsSettled, run.continuation.unitsTotal, run.continuation.pendingAnswerUnits,
+        plan?.listPages?.['runControl.continuation.pendingAnswerUnits']?.total)));
       return section;
     }
     if (activity === null) {

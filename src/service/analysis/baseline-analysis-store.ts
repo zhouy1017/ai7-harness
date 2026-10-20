@@ -159,11 +159,13 @@ import { kindLocalTools } from './live-kind-admission.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
 import { PLAN_MOVED_LABEL, type WaitingRunBlockCause } from '../reconnect-preflight.js';
+import { isPublicSampleBookSourceDigest, SAMPLE1_PUBLIC_SAMPLEBOOK } from '../../shared/public-samplebooks.js';
+import { ANALYSIS_LINEAGE_UNAVAILABLE_REASON } from '../../shared/public-samplebook-labels.js';
 
 type SqlRow = Record<string, SQLOutputValue>;
 
-/** The exact `sample1` source digest: the Public SampleBook lineage every baseline-analysis Task requires. */
-export const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
+/** The exact `sample1` source digest, the ADR 0044 baseline among the Public SampleBooks every non-production analysis Task requires. */
+export const SAMPLE1_SOURCE_DIGEST = SAMPLE1_PUBLIC_SAMPLEBOOK.sha256;
 const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d' as const;
 const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' as const;
 const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
@@ -3238,10 +3240,36 @@ export class BaselineAnalysisStore {
     return this.#updateControls(bookId, revision, activeRun);
   }
 
+  /** Read one immutable Task's complete manifest, including historical Tasks. */
+  coverageManifestFor(bookId: string, taskIntentId: string): CoverageManifestProjection {
+    const row = this.#db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ? AND book_id = ? AND kind = ?')
+      .get(taskIntentId, bookId, this.#definition.kind) as SqlRow | undefined;
+    requireAnalysis(row !== undefined, 'ANALYSIS_TASK_NOT_FOUND', '没有找到这项分析任务。');
+    const version = this.#planVersionFacts(taskIntentId).at(-1);
+    requireAnalysis(version !== undefined, 'ANALYSIS_PLAN_MISSING', '分析计划尚未准备。');
+    return this.#planRecords(taskIntentId, 'any', version.ordinal)['coverage-manifest'] as CoverageManifestProjection;
+  }
+
+  /** Derive only the range the editor actually selected; no plan is written. */
+  rangePlan(bookId: string, unitOrdinal: number): { selectedRange: BaselineAnalysisSelectedRange; expected: AnalysisReusePlanCounts } {
+    const latest = this.inspect(bookId).resultSetRevision as BaselineAnalysisResultSetRevisionProjection | null;
+    requireAnalysis(latest !== null, 'ANALYSIS_REVISION_NOT_FOUND', '还没有可更新的分析结果。');
+    const head = this.#workingHead(latest.manuscriptPin.manuscriptId, bookId);
+    const preview = deriveCoverageManifest({ bookId, manuscriptId: latest.manuscriptPin.manuscriptId,
+      branchId: head.branchId, revisionId: head.currentRevisionId, revisionLabel: head.currentRevisionLabel,
+      revisionDigest: head.currentWorkingDigest, blocks: this.readWorkingBlocks(head.branchId) });
+    const unit = preview.units.find((entry) => entry.ordinal === unitOrdinal);
+    requireAnalysis(unit !== undefined, 'ANALYSIS_RANGE_INVALID', '所选阅读范围已改变，请重新选择。');
+    const selectedRange = { startPosition: unit.startPosition, endPosition: unit.endPosition };
+    const predecessor = this.#planPredecessor(this.#revisionRowById(latest.revisionId));
+    return { selectedRange, expected: this.#derivePlan('reanalyze-range', selectedRange, preview, predecessor).counts };
+  }
+
   /**
    * The Analysis Update Controls: the preview manifest is derived over the current working blocks of
    * the primary branch (exactly what the next Task Input checkpoint would pin), and every expected
-   * count is a real reuse-plan derivation against the latest revision, never an estimate.
+   * count is a real reuse-plan derivation against the latest revision, never an estimate. The
+   * baseline kind's range options carry none: `rangePlan` derives the one the editor picks (#988).
    *
    * The controls are keyed by the kind's own update modes and offered by what each mode means to
    * read: a mode that reads only what changed is on offer once something has, a range-bound mode
@@ -3289,7 +3317,7 @@ export class BaselineAnalysisStore {
       endPosition: unit.endPosition,
       graphemes: unit.graphemes,
       label: `结构段 ${unit.sectionOrdinal}${unit.headingText === null ? '' : `「${unit.headingText}」`} · 单元 ${unit.ordinal}/${preview.units.length}（${unit.subUnitIndex}/${unit.subUnitCount}）· 内容块 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`,
-      expected: expected(mode, { startPosition: unit.startPosition, endPosition: unit.endPosition }),
+      expected: this.#definition.kind === BASELINE_ANALYSIS_KIND ? null : expected(mode, { startPosition: unit.startPosition, endPosition: unit.endPosition }),
     }));
     const actions = Object.fromEntries(this.#definition.updateModes.map((mode) => {
       const definition = this.#definition.mode(mode);
@@ -5200,7 +5228,8 @@ export class BaselineAnalysisStore {
     requireAnalysis(UUID_PATTERN.test(bookId), 'ANALYSIS_BOOK_INVALID', '任务所属图书无效。');
     this.#refreshClarificationDefinition();
     // Under ordinary production (Issue #811) the Book is the editor's own manuscript, of any source, and the connection whose
-    // credential a plan names is the configured route's; under every other scope exact sample1 and the official row, as before.
+    // credential a plan names is the configured route's; under every other scope one of the five Public SampleBooks (exact sample1 or an
+    // ADR 0091 work, Issue #990) and the official row.
     const live = this.#launch.live;
     const production = this.#launch.operationalScope === 'ordinary-production';
     const connectionId = live !== null && live.scope === 'ordinary-production' && live.route === 'opencode-go'
@@ -5226,8 +5255,8 @@ export class BaselineAnalysisStore {
     ).get(...(checkpoint === undefined ? [connectionId, bookId] : [checkpoint.revisionId, connectionId, bookId])) as SqlRow | undefined;
     requireAnalysis(row !== undefined && (production
       ? typeof row.source_digest === 'string' && DIGEST_PATTERN.test(row.source_digest)
-      : row.source_digest === SAMPLE1_SOURCE_DIGEST),
-    'ANALYSIS_LINEAGE_UNAVAILABLE', '当前图书不是精确 sample1 主稿件血缘。');
+      : isPublicSampleBookSourceDigest(row.source_digest)),
+    'ANALYSIS_LINEAGE_UNAVAILABLE', ANALYSIS_LINEAGE_UNAVAILABLE_REASON);
     requireAnalysis(row.native_carrier_sha256 === NATIVE_CARRIER_DIGEST && row.sidecar_revision === 2 && row.sidecar_sha256 === SIDECAR_DIGEST,
       'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案 Revision 2。');
     // Ordinary production with no connection yet: 模型服务需设置, naming both routes (Issue #811).

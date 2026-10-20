@@ -962,6 +962,31 @@ describe('Clarification Requests in the drawer (S76d)', () => {
       clarifications: [question],
     }));
     expect(reading).toMatchObject({ status: '运行中', note: '有 1 个问题等你回答' });
+    // A long Run's questions read only in part (Issue #996): open ones come first, so what was read is stated as a floor.
+    const page = (shown: number, total: number) => ({ clarifications: { shown, total, nextOrdinal: shown, digest: 'd'.repeat(64) } });
+    const paged = taskBarView(plan({
+      state: { key: 'awaiting-clarification', label: '任务等待你的说明' },
+      start: { ...plan().start, readiness: 'started' },
+      runControl: control as never,
+      clarifications: [question, question],
+      listPages: page(2, 40),
+    }));
+    expect(paged).toMatchObject({ status: '等你回答', note: '已读完 7 / 8 个阅读范围；至少 2 个问题等你回答，回答后接着做' });
+    expect(taskBarView(plan({ state: { key: 'running', label: '运行中' }, start: { ...plan().start, readiness: 'started' },
+      runControl: { ...control, pause: { reason: null }, redo: { reason: '先暂停，再改计划重做' }, continuation: null } as never,
+      clarifications: [question], listPages: page(1, 9) })).note).toBe('至少有 1 个问题等你回答');
+    // Once an answered card is among those read, every open one is too: the count is exact again.
+    const exact = taskBarView(plan({
+      state: { key: 'awaiting-clarification', label: '任务等待你的说明' },
+      start: { ...plan().start, readiness: 'started' },
+      runControl: control as never,
+      clarifications: [question, { state: 'answered' } as never],
+      listPages: page(2, 40),
+    }));
+    expect(exact.note).toBe('已读完 7 / 8 个阅读范围；1 个问题等你回答，回答后接着做');
+    // Answered ranges read only in part are counted, never named as though they were all of them.
+    expect(taskBarContinuationNote(7, 8, [5, 6], 300)).toBe('已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理 300 个阅读范围，再继续未完成的部分，不重复已读完的部分');
+    expect(taskBarContinuationNote(7, 8, [5, 6], 2)).toContain('先按你的回答处理第 5、6 个，再继续未完成的部分');
   });
 });
 

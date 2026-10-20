@@ -1,4 +1,6 @@
 import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSizeText, similarMaterialsField } from './task-material-selection.js';
+import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
+import { TASK_PAGE_FAILED, TASK_SELECTED_CHAPTER_NOT_LOADED, taskPageMore } from './analysis-paging-labels.js';
 import { LEARNING_AUDIT_KIND_LABELS } from './learning-audit-labels.js';
 import {
   MAX_BATCH_APPLY_SUGGESTIONS,
@@ -22,7 +24,7 @@ import {
   type ReviewWorkspaceProjection,
   type RendererApi,
   type ResearchEvidenceBookProjection,
-  type ServiceJobProjection,
+  type ServiceWireJobProjection as ServiceJobProjection,
   type WritingTaskMaterialProjection,
 } from '../shared/protocol.js';
 import { findingResearchLines, readFindingResearch } from './research-evidence-labels.js';
@@ -234,7 +236,7 @@ export interface ReviewWorkspaceSurface {
 type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries'>> & Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' |
-  'inspectTaskPlan' | 'quickStartReviewRun' | 'searchReferableMaterials' |
+  'inspectTaskPlan' | 'getTaskPlanPage' | 'quickStartReviewRun' | 'searchReferableMaterials' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
@@ -351,6 +353,8 @@ const FILTER_KEYS: Readonly<Record<FilterName, keyof Filters>> = {
   status: 'status',
   chapter: 'chapterBlockId',
 };
+/** The 章节 choices a long Book's workspace carries in part (Issue #996), read on by the sheet's range and the findings filter. */
+const CHAPTER_PAGE_PATH = 'scopeOptions.chapters.chapters';
 /** A finding's mark that 回到原文 can open a card on: it still stands on the manuscript. */
 const LIVE_MARK_STATUSES: ReadonlySet<string> = new Set(['open', 'resolved', 'applied']);
 const CAPABILITY_CODE = 'AI7_EDITOR_CAPABILITY_INVALID';
@@ -572,8 +576,19 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     );
   }
 
+  /** The next 章节 choices of the same snapshot (Issue #996), appended exactly once; a changed snapshot is refused. */
+  async function readChapterPage(workspace: ReviewWorkspaceProjection): Promise<ReviewWorkspaceProjection> {
+    const meta = workspace.listPages?.[CHAPTER_PAGE_PATH];
+    if (meta === undefined || meta.nextOrdinal === null) throw new Error(TASK_PAGE_FAILED);
+    const page = await api.getTaskPlanPage({ kind: 'review-run', ref: workspace.run?.reviewRunId ?? null, path: CHAPTER_PAGE_PATH,
+      afterOrdinal: meta.nextOrdinal, digest: meta.digest });
+    if (page.path !== CHAPTER_PAGE_PATH) throw new Error(TASK_PAGE_FAILED);
+    return appendTaskPlanPage(workspace, page);
+  }
+
   function show(next: ReviewWorkspaceProjection): void {
     const previous = projection;
+    next = retainTaskPlanPages(next, previous);
     projection = next;
     // The drawer beside 审阅 states where the Run stands; it reads the plan again when that changes.
     if (previous?.run !== null && previous?.run !== undefined && previous.run.reviewRunId === next.run?.reviewRunId &&
@@ -1107,12 +1122,42 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       label.append(select);
       return label;
     };
+    const chapterPage = next.listPages?.[CHAPTER_PAGE_PATH];
+    const chapterChoices: Array<readonly [string, string]> = next.scopeOptions.chapters.chapters.map((chapter) => [chapter.blockId, chapter.title] as const);
+    // A chapter chosen from a later page stays chosen while the choices here are read only in part (Issue #996).
+    const chosenChapter = query.filters.chapterBlockId;
+    if (chapterPage?.nextOrdinal != null && chosenChapter !== null && !chapterChoices.some(([blockId]) => blockId === chosenChapter)) {
+      chapterChoices.push([chosenChapter, TASK_SELECTED_CHAPTER_NOT_LOADED]);
+    }
     filters.append(
       filterSelect('category', run.categories.map((category) => [category.categoryId, category.label] as const)),
       filterSelect('severity', REVIEW_FINDING_SEVERITIES.map((severity) => [severity, REVIEW_FINDING_SEVERITY_LABELS[severity]] as const)),
       filterSelect('status', REVIEW_FINDING_STATUSES.map((status) => [status, REVIEW_FINDING_STATUS_LABELS[status]] as const)),
-      filterSelect('chapter', next.scopeOptions.chapters.chapters.map((chapter) => [chapter.blockId, chapter.title] as const)),
+      filterSelect('chapter', chapterChoices),
     );
+    if (chapterPage !== undefined && chapterPage.nextOrdinal !== null) {
+      const more = el('button', 'secondary', taskPageMore('章节', chapterPage.shown, chapterPage.total));
+      more.type = 'button';
+      more.dataset['reviewFilter'] = 'chapter-page';
+      more.disabled = working;
+      more.addEventListener('click', () => {
+        const current = projection;
+        if (current === null) return;
+        more.disabled = true;
+        void readChapterPage(current).then((loaded) => {
+          if (destroyed || projection !== current) return;
+          projection = loaded;
+          stableKey = stableKeyOf(loaded);
+          renderCard(loaded);
+          if (card?.contains(document.activeElement) !== true) card?.querySelector<HTMLElement>('[data-review-filter="chapter"]')?.focus();
+        }).catch((error: unknown) => {
+          if (destroyed || projection !== current) return;
+          more.disabled = false;
+          options.setStatus(options.errorMessage(error, TASK_PAGE_FAILED), 'error');
+        });
+      });
+      filters.append(more);
+    }
     section.append(filters, el('p', 'field-note', REVIEW_FILTER_NOTE));
     const filtered = Object.values(query.filters).some((value) => value !== null);
     if (filtered) section.append(el('p', 'field-note review-filtered', reviewFilteredLine(run.findingsTotal)));
@@ -2140,6 +2185,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       select.dataset['reviewChapter'] = which;
       select.append(new Option(REVIEW_CHAPTER_PLACEHOLDER, ''));
       for (const chapter of chapterOptions) select.append(new Option(reviewChapterOptionLabel(chapter), chapter.blockId));
+      const selected = which === 'from' ? state.from : state.to;
+      if (workspace.listPages?.[CHAPTER_PAGE_PATH]?.nextOrdinal != null && selected !== null && !chapterOptions.some((chapter) => chapter.blockId === selected)) {
+        select.append(new Option(TASK_SELECTED_CHAPTER_NOT_LOADED, selected));
+      }
       select.value = (which === 'from' ? state.from : state.to) ?? '';
       select.addEventListener('change', () => {
         const value = select.value === '' ? null : select.value;
@@ -2154,6 +2203,27 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
     const fromSelect = chapterSelect('from');
     const toSelect = chapterSelect('to');
+    const chapterPage = workspace.listPages?.[CHAPTER_PAGE_PATH];
+    if (chapterPage !== undefined && chapterPage.nextOrdinal !== null) {
+      const more = el('button', 'secondary', taskPageMore('章节', chapterPage.shown, chapterPage.total));
+      more.type = 'button';
+      more.dataset['reviewChapterPage'] = '';
+      more.addEventListener('click', () => {
+        more.disabled = true;
+        void readChapterPage(workspace).then((loaded) => {
+          if (destroyed || sheetState !== state || projection !== workspace) return;
+          projection = loaded;
+          renderSheet(projection, state);
+          // Once the last choices are read the control is gone, so focus stays in the range it extended.
+          (sheet.querySelector<HTMLElement>('[data-review-chapter-page]') ?? sheet.querySelector<HTMLElement>('[data-review-chapter="from"]'))?.focus();
+        }).catch((error: unknown) => {
+          if (destroyed || sheetState !== state) return;
+          more.disabled = false;
+          options.setStatus(options.errorMessage(error, TASK_PAGE_FAILED), 'error');
+        });
+      });
+      range.append(more);
+    }
     scopes.append(range);
 
     const { field: materialField, inputs: materialInputs, items: materialItems } = reviewMaterialsField(workspace.materials, state, updateSheet);

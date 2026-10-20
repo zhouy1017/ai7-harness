@@ -4,7 +4,7 @@ import type {
   DialogueSelectionInput,
   PromoteTaskIntentDraftInput,
   SaveTaskIntentDraftInput,
-  ServiceJobProjection,
+  ServiceWireJobProjection as ServiceJobProjection,
   TaskIntentDraftProjection,
   TaskIntentDraftsProjection,
 } from '../../src/shared/protocol.js';

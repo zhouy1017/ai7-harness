@@ -1,6 +1,6 @@
 import type {
   BaselineAnalysisGoal,
-  BaselineAnalysisProjection,
+  BaselineAnalysisWireProjection as BaselineAnalysisProjection,
   CapturedProcedureApplicabilityEntryProjection,
   CapturedProcedureApplicabilityProjection,
   ReviewWorkspaceProjection,

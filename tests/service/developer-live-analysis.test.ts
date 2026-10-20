@@ -47,6 +47,7 @@ import {
   providerRequestDigest,
 } from '../../src/service/provider/provider-result-cache.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
+import { PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -1270,8 +1271,9 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     );
   });
 
-  it('admits exactly the one Public SampleBook of this slice as transmittable', () => {
-    expect([...DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS]).toEqual([SAMPLE1_SOURCE_DIGEST]);
+  it('admits exactly the five Public SampleBooks as transmittable, exact sample1 first (Issue #990)', () => {
+    expect([...DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS]).toEqual(PUBLIC_SAMPLEBOOKS.map((book) => book.sha256));
+    expect([...DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS][0]).toBe(SAMPLE1_SOURCE_DIGEST);
   });
 
   it('offers 开始任务 on a live plan only while the credential its route resolves is present (Issue #420, S74a A3)', async () => {
@@ -1316,7 +1318,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     }
   });
 
-  it('refuses to prepare a baseline analysis Task whose lineage is not exact sample1, before any transport, workspace-profile pin, or credential is touched', async () => {
+  it('refuses to prepare a baseline analysis Task whose lineage is not a Public SampleBook, before any transport, workspace-profile pin, or credential is touched', async () => {
     // A manuscript composed from an excerpt of the one admitted Public SampleBook: real prose, and a
     // lineage that must never reach a Run Authorization, let alone dispatch. Composing from exact
     // sample1 does not make the result exact sample1 — the composed container carries its own digest,
@@ -1324,8 +1326,8 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     // assertion below reads that digest back before anything else happens. This is the earlier,
     // always-reached refusal — deleting it would leave every other test in this file green while the
     // transmit guarantee it exists to protect is gone. Nothing composed here can be transmitted: the
-    // refusal fires at preparation, and the transmittable set the case above pins still admits exact
-    // sample1 alone.
+    // refusal fires at preparation, and the transmittable set the case above pins admits only the five
+    // Public SampleBooks by their exact digests.
     const store = await openLiveStore(roots.dataRoot);
     const selectedPath = join(roots.inputRoot, 'non-sample1.docx');
     await composeManuscriptDocx(selectedPath, {

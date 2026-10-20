@@ -936,6 +936,9 @@ The evidence no page can supply — the live test items the ADR 0067 Provider Te
 | `S17c/editorial-dialogue/3` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-14 | #833 |
 | `S40/whole-manuscript/1` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-15 | #473 |
 | `S40/whole-manuscript/2` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-15 | #473 |
+| `S17c/editorial-dialogue/15` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-19 | #990 |
+| `S17c/editorial-dialogue/16` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-19 | #990 |
+| `S17c/editorial-dialogue/17` | `opencode-go` | `deepseek-v4.1-flash` | 2026-10-19 | #990 |
 
 | Baseline | Route | Models | Stated on |
 | --- | --- | --- | --- |

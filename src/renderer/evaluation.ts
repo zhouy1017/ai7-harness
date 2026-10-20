@@ -10,7 +10,7 @@ import type {
   ProductionDocumentProjection,
   ReadersReportTemplate,
   RendererApi,
-  ServiceJobProjection,
+  ServiceWireJobProjection as ServiceJobProjection,
 } from '../shared/protocol.js';
 import { READERS_REPORT_TEMPLATE_LABELS } from '../shared/protocol.js';
 import { mountManuscriptExport } from './manuscript-export.js';
