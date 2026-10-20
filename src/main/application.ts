@@ -99,7 +99,7 @@ import { developerProposalFileName } from '../shared/developer-proposal.js';
 import { CrashRecords, crashHook, installCrashHooks } from './crash-records.js';
 import { DIAGNOSTICS_CHANNELS, writeDiagnosticsBundle } from './diagnostics.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
-import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
+import { journeyClose, journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { DATA_VERSION_STARTUP_CLOSE, DATA_VERSION_STARTUP_TITLE, dataVersionStartupRefusal } from '../shared/data-version-labels.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
@@ -6306,12 +6306,14 @@ export async function runApplication(): Promise<void> {
   };
   const stop = (): Promise<void> =>
     (shutdown ??= (async () => {
+      journeyClose('stop-entry');
       if (launcherLease) clearInterval(launcherLease);
       launcherLease = undefined;
       unregisterHandlers?.();
       unregisterHandlers = undefined;
       await service?.stop();
       quitReady = true;
+      journeyClose('stop-complete');
     })());
   const terminate = (): void => {
     if (quitting) return;
@@ -6323,18 +6325,34 @@ export async function runApplication(): Promise<void> {
     );
   };
   const beforeQuit = (event: ElectronEvent): void => {
-    if (quitReady) return;
+    journeyClose('before-quit');
+    if (quitReady) {
+      journeyClose('quit-ready');
+      return;
+    }
     event.preventDefault();
     const riskyWindows = [...ownedWindows.values()].filter(
       (owned) => owned.closeRisk && !owned.window.isDestroyed(),
     );
     if (!quitting && riskyWindows.length > 0) {
+      journeyClose('close-risk-blocked');
       for (const owned of riskyWindows) owned.window.webContents.send(MAIN_EVENTS.closeBlocked);
       return;
     }
-    if (quitting) return;
+    // The existing guard allowed this close, including a quit already in progress.
+    journeyClose('close-risk-allowed');
+    if (quitting) {
+      journeyClose('quit-pending');
+      return;
+    }
     quitting = true;
-    void stop().then(() => app.quit(), () => app.exit(1));
+    void stop().then(() => {
+      journeyClose('app-quit');
+      app.quit();
+    }, () => {
+      journeyClose('app-exit');
+      app.exit(1);
+    });
   };
   const allWindowsClosed = (): void => app.quit();
 
@@ -6518,6 +6536,7 @@ export async function runApplication(): Promise<void> {
       return;
     }
     app.on('before-quit', beforeQuit);
+    app.once('will-quit', () => journeyClose('will-quit'));
     app.on('window-all-closed', allWindowsClosed);
 
     const getOwnedWindow = (event: IpcMainInvokeEvent | IpcMainEvent): OwnedRendererWindow => {

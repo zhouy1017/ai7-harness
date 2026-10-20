@@ -58,6 +58,22 @@ export function journeyStartupRelay(
   return (step) => write(`AI7_SERVICE_STARTUP/${step}\n`);
 }
 
+/** Issue #1004: fixed shutdown facts on the existing Journey-only readiness trace channel. */
+export type JourneyCloseStep =
+  | 'before-quit' | 'quit-ready' | 'close-risk-blocked' | 'close-risk-allowed' | 'quit-pending'
+  | 'stop-entry' | 'stop-complete' | 'app-quit' | 'will-quit' | 'app-exit'
+  | 'service-stop-entry' | 'service-already-stopped' | 'service-shutdown-request' | 'service-shutdown-answer'
+  | 'service-shutdown-failed' | 'service-faulted' | 'service-input-ended' | 'service-exited'
+  | 'service-force' | 'service-stop-timeout' | 'service-stop-complete';
+
+export function journeyClose(
+  step: JourneyCloseStep,
+  env: NodeJS.ProcessEnv = process.env,
+  write: (line: string) => void = (line) => { process.stderr.write(line); },
+): void {
+  if (env.AI7_E2E_JOURNEY !== undefined) write(`AI7_CLOSE/${step}\n`);
+}
+
 /**
  * How long one request may take before the service is treated as hung and stopped: startup's readiness, the operations
  * whose work grows with a file or a manuscript, and every other request, each as the reason beside it says.
@@ -405,26 +421,43 @@ export class ServiceClient {
   }
 
   async stop(): Promise<void> {
-    if (this.#stopped) return;
+    journeyClose('service-stop-entry');
+    if (this.#stopped) {
+      journeyClose('service-already-stopped');
+      return;
+    }
     this.#expectedExit = true;
     try {
-      if (!this.#faulted) await this.call('shutdown', {});
+      if (!this.#faulted) {
+        journeyClose('service-shutdown-request');
+        await this.call('shutdown', {});
+        journeyClose('service-shutdown-answer');
+      } else journeyClose('service-faulted');
     } catch {
+      journeyClose('service-shutdown-failed');
       // The exact child remains scoped below and is terminated after its grace interval.
     }
     this.#child.stdin.end();
+    journeyClose('service-input-ended');
     if (this.#stopped || this.#child.exitCode !== null || this.#child.signalCode !== null) {
       this.#stopped = true;
+      journeyClose('service-exited');
       return;
     }
-    const exited = once(this.#child, 'exit').then(() => true as const);
+    const exited = once(this.#child, 'exit').then(() => {
+      journeyClose('service-exited');
+      return true as const;
+    });
     if (!(await exitsBefore(exited, SERVICE_STOP_GRACE_MS))) {
+      journeyClose('service-force');
       this.#child.kill('SIGKILL');
       if (!(await exitsBefore(exited, SERVICE_STOP_FORCE_MS))) {
+        journeyClose('service-stop-timeout');
         throw new ServiceCallError('SERVICE_STOP_TIMEOUT', '本地业务服务未能在强制终止期限内停止。');
       }
     }
     this.#stopped = true;
+    journeyClose('service-stop-complete');
   }
 
   #acceptStdout(chunk: Buffer): void {
