@@ -69,7 +69,7 @@ describe('the readiness trace (Issue #518)', () => {
     const end = source.indexOf('  const closeOwnedBrowser = async () => {', start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
-    const timeoutMs = Number(/const BROWSER_CLOSE_TIMEOUT_MS = ([\d_]+);/u.exec(source)![1].replaceAll('_', ''));
+    const timeoutMs = Number(/const BROWSER_CLOSE_TIMEOUT_MS = ([\d_]+);/u.exec(source)![1]!.replaceAll('_', ''));
     expect(timeoutMs).toBe(25_000);
     const launch: { startedAt: number; close?: { request?: number; disconnect?: number } } = { startedAt: 1_000 };
     const failure = new Error('close timeout');
