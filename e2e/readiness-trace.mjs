@@ -36,6 +36,16 @@ export const STARTUP_LOCATIONS = Object.freeze([
  */
 export const SERVICE_STARTUP_STEPS = Object.freeze(['spawned', 'process', 'store', 'owners', 'serving', 'stopped']);
 
+// Issue #1004: one first-observed time per closed phase, in a fixed bounded report. Times retain observation order even
+// when main enters before-quit again. `request` and `disconnect` are runner observations; all others come from main.
+export const CLOSE_STEPS = Object.freeze([
+  'request', 'before-quit', 'quit-ready', 'close-risk-blocked', 'close-risk-allowed', 'quit-pending',
+  'stop-entry', 'stop-complete', 'app-quit', 'will-quit', 'app-exit',
+  'service-stop-entry', 'service-already-stopped', 'service-shutdown-request', 'service-shutdown-answer',
+  'service-shutdown-failed', 'service-faulted', 'service-input-ended', 'service-exited',
+  'service-force', 'service-stop-timeout', 'service-stop-complete', 'disconnect',
+]);
+
 const LOCATION = new Set(STARTUP_LOCATIONS);
 const SCENARIO = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
@@ -57,6 +67,7 @@ export function createLaunchTrace(scenario, startedAt = Date.now()) {
     exitCode: null,
     target: false,
     other: 0,
+    close: {},
     // What the Journey saw of the launch's user-data-dir and the host just before the launch began, and what a probe of a
     // launch never acquired found (Issue #675): `observeLaunchStart` and `probeStalledProduct`, `null` when not taken.
     start: null,
@@ -90,6 +101,11 @@ export function observeBrowserLog(trace, message, now = Date.now()) {
       return;
     }
     if (stream[2] === 'err') {
+      const close = /^AI7_CLOSE\/([a-z-]+)$/u.exec(line);
+      if (close !== null && CLOSE_STEPS.includes(close[1]) && !['request', 'disconnect'].includes(close[1])) {
+        trace.close[close[1]] ??= at;
+        return;
+      }
       const reached = /^AI7_STARTUP\/([a-z-]+)$/u.exec(line);
       if (reached !== null && LOCATION.has(reached[1])) {
         trace.last = reached[1];
@@ -157,6 +173,11 @@ export function formatReadinessTrace(journey, trace, now = Date.now()) {
     `age=${ms(now - trace.startedAt)}`,
     ...(trace.start === null || trace.start === undefined ? [] : [`start=${formatLaunchStart(trace.start)}`]),
     ...(trace.stall === null || trace.stall === undefined ? [] : [`stall=${formatStalledProduct(trace.stall)}`]),
+    ...(CLOSE_STEPS.some((step) => trace.close?.[step] !== undefined)
+      ? [`close=${CLOSE_STEPS.map((step) => {
+        const time = trace.close?.[step];
+        return `${step}:${typeof time === 'number' && Number.isFinite(time) ? ms(time) : 'none'}`;
+      }).join(',')}`] : []),
   ].join(';');
 }
 
@@ -212,7 +233,8 @@ const STALL =
   `files:(?:none|unknown|(?:${STARTUP_FILES.join('|')})(?:\\+(?:${STARTUP_FILES.join('|')}))*),log:${COUNT(6)}:${TOKEN}:${TOKEN}`;
 const FIELDS = new RegExp(
   `^launch=[a-z0-9]+(?:-[a-z0-9]+)*;launched=${MS};last=${LOCATION_WORD}@${MS};service=${SERVICE_WORD}@${MS};ready=${MS};failed=${LOCATION_WORD};` +
-    `exit=(?:-?\\d{1,10}|null|none)@${MS};target=(?:yes|no);other=\\d{1,6};age=\\d{1,9}(?:${START})?(?:${STALL})?$`,
+    `exit=(?:-?\\d{1,10}|null|none)@${MS};target=(?:yes|no);other=\\d{1,6};age=\\d{1,9}(?:${START})?(?:${STALL})?` +
+    `(?:;close=${CLOSE_STEPS.map((step) => `${step}:${MS}`).join(',')})?$`,
   'u',
 );
 

@@ -8,7 +8,7 @@ AI7 should be recognizably its own Chinese professional editorial product while 
 
 ## Qualities to retain from the reference
 
-- a calm low-noise desktop shell whose light theme uses subtle cool-neutral separation;
+- a calm low-noise desktop shell whose light theme uses subtle warm-paper separation (ADR 0092);
 - restrained application chrome, borders, radii, shadows, and iconography;
 - a persistent but collapsible navigation surface;
 - one visually dominant central work surface;
@@ -44,7 +44,7 @@ Issue #86 adds Agent Workspace, native DSH artifact lifecycle, coverage-aware an
 
 ## Theme and color roles
 
-`跟随系统` is the default Application Theme Preference, with manual `浅色` and `深色` alternatives. The choice applies to all AI7 windows and changes presentation only. Light mode keeps the reference's cool-neutral shell and slightly warm manuscript surface; dark mode uses low-glare charcoal shell chrome and a neutral reading surface, avoiding pure black/white glare and saturated decoration during long professional sessions.
+`跟随系统` is the default Application Theme Preference, with manual `浅色` and `深色` alternatives. The choice applies to all AI7 windows and changes presentation only. Light mode uses warm-paper shell chrome and a slightly warmer manuscript surface; dark mode uses low-glare night-ink chrome and a warm neutral reading surface (ADR 0092), avoiding pure black/white glare and saturated decoration during long professional sessions.
 
 Native accessibility appearance takes unconditional priority over either AI7 theme. This includes Windows high contrast/forced-colors and applicable macOS contrast, transparency, and color-accessibility settings; each is a system-owned rendering layer rather than a fourth appearance preset. Components use semantic roles—surface, manuscript surface, raised surface, primary/subdued text, focus, selection, boundary, informational, caution, danger, disabled and action—whose meaning stays stable across mappings. Exact words, icon/shape and structure remain authoritative; color is only reinforcement. V1 does not offer custom accent or palette controls.
 
@@ -70,7 +70,7 @@ The Codex-referential shell is reinterpreted around four explicit presentation s
 
 Book-bound Agent Workspace is an additional explicit central presentation, not a fifth business mode or generic root. The eligible DSH composition may visually own the inner surface, while an AI7 boundary frame keeps exact Book identity, safety state and a direct return to the preserved Active Work Object continuously recoverable. A DSH UI Plugin may not visually erase that frame or make native controls resemble AI7 Apply/authority controls.
 
-Mode transitions should feel spatially continuous and preserve object identity, location, and focus. They must not use celebratory motion or attention-stealing transitions when a background Run changes state.
+Mode transitions use short, restrained interpolation of changing layout properties and preserve object identity, location, and focus. Reduced-motion preferences disable transitions and animations. Motion never delays safety or authority state, simulates model output, or draws attention to background Run changes (ADR 0092).
 
 The right column keeps one `导航` entry (outline plus search and jump), an `审阅` entry and a `任务` entry as restrained icon-and-label entries above an always-visible Whole-manuscript Position Rail; the rail is visually quieter than the local editing surface, carries chapter ticks on one side and marks on the other, and reveals marker detail on focus, hover, or selection rather than becoming a colorful permanent minimap. The local scrollbar appears only while scrolling (ADR 0076).
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PREFERENCE_KEYS, SHELL_BOOK_SECTIONS } from '../../src/shared/preferences.js';
 import {
   bookIcon,
+  bookPickerRows,
   contextHeading,
   rememberRecentBook,
   screenActive,
@@ -162,5 +163,22 @@ describe('the 设置 hub', () => {
       ['编辑工作', [['evaluation-calibration', '评估校准与预测']]],
       ['本机', [['data-storage', '数据与存储'], ['appearance', '外观'], ['keyboard', '键盘与无障碍'], ['notifications', '通知'], ['diagnostics', '诊断']]],
     ]);
+  });
+});
+
+describe('catalog grouping and full-title search (#1002)', () => {
+  it('deduplicates catalog and preference entries, drops removed Books and keeps current catalog titles', () => {
+    const rows = bookPickerRows([{ bookId: 'a', title: '新标题' }, { bookId: 'b', title: '乙' }, { bookId: 'c', title: '丙' }, { bookId: 'a', title: '新标题' }],
+      [{ bookId: 'a', title: '旧标题' }, { bookId: 'a', title: '重复' }, { bookId: 'gone', title: '删除' }],
+      [{ bookId: 'a', title: '旧', section: 'history' }, { bookId: 'b', title: '乙旧', section: 'overview' }], 'b');
+    expect(rows.map((row) => [row.bookId, row.title, row.group, row.current])).toEqual([
+      ['a', '新标题', 'pinned', false], ['b', '乙', 'recent', true], ['c', '丙', 'remaining', false],
+    ]);
+  });
+  it('searches beyond the preference title limit, trims query, treats markup and identifiers as text', () => {
+    const catalog = [{ bookId: 'BOOK-A', title: '甲'.repeat(500) + '<末尾>' }];
+    expect(bookPickerRows(catalog, [], [], null, ' <末尾> ')).toHaveLength(1);
+    expect(bookPickerRows(catalog, [], [], null, 'book-a')).toHaveLength(1);
+    expect(bookPickerRows(catalog, [], [], null, '.*')).toHaveLength(0);
   });
 });

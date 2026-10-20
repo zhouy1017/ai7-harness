@@ -1,8 +1,9 @@
 import type { ShellBookSection } from '../shared/preferences.js';
 
-// The shell's words (Issue #934, wave 11 slice 11a; editor-surfaces §0.3, §8; IA-006 to IA-013): the two-level sidebar, the
-// context header and the 设置 hub. Each row's icon is one character of its own name, drawn by the stylesheet from a data
-// attribute, so a row's text is exactly its label and a collapsed row keeps that label as its accessible name.
+// The shell's words (Issue #934, wave 11 slice 11a; Issue #1002, wave 16 slice 16a; editor-surfaces §0.3, §8; IA-006 to IA-013, ADR 0092):
+// the two-level sidebar, the searchable multi-book switcher, the context header and the 设置 hub. Each row's icon is one
+// character of its own name, drawn by the stylesheet from a data attribute, so a row's text is exactly its label and a
+// collapsed row keeps that label as its accessible name.
 
 export type ShellDestination = 'attention' | 'library' | 'series' | 'knowledge' | 'quality';
 
@@ -73,6 +74,20 @@ export const SHELL_LABELS = Object.freeze({
   library: '书库',
   libraryTitle: '图书与稿件',
   allBooks: '全部图书',
+  remainingHeading: '其余图书',
+  retryCatalog: '重试读取图书',
+  loadingCatalog: '正在读取图书目录…',
+  catalogFailed: '无法读取图书目录，请重试或打开完整书库。',
+  emptyCatalog: '书库里还没有图书。',
+  catalogCount: (count: number) => `共 ${count} 本图书`,
+  switchBook: '切换书稿',
+  switchBookTrigger: '切换书稿 ▾',
+  bookSearchPlaceholder: '搜索书名或编号…',
+  bookSearchLabel: '筛选图书列表',
+  allBooksHeading: '全部在编图书',
+  catalogBookState: '在编图书',
+  noMatchingBooks: '未找到匹配的图书。',
+  openLibraryDirectory: '打开完整书库目录',
 });
 
 export const SETTINGS_PAGE_TITLES: Readonly<Record<string, string>> = Object.freeze({

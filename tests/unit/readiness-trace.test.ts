@@ -1,9 +1,11 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { journeyClose, type JourneyCloseStep } from '../../src/main/service-client.js';
 
 // Issue #518: the readiness trace a Journey prints when it waits past its budget, read from Playwright's `browser` debug
 // log — each line with the time it was written, as a Journey sets that log up — and relayed by the controller only in its
@@ -11,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 const trace = (await import(new URL('../../e2e/readiness-trace.mjs', import.meta.url).href)) as {
   STARTUP_LOCATIONS: ReadonlyArray<string>;
   SERVICE_STARTUP_STEPS: ReadonlyArray<string>;
+  CLOSE_STEPS: ReadonlyArray<string>;
   createLaunchTrace(scenario: string, startedAt?: number): Record<string, unknown>;
   readBrowserLog(trace: Record<string, unknown>, text: string): Record<string, unknown>;
   formatReadinessTrace(journey: string, trace: Record<string, unknown>, now?: number): string;
@@ -59,6 +62,113 @@ function launched(lines: ReadonlyArray<readonly [number, string]>): Record<strin
 }
 
 describe('the readiness trace (Issue #518)', () => {
+  it('keeps J-01 close timeout a failure at 25 seconds while observing request and disconnect (#1004)', async () => {
+    // J-01 executes on import. Exercise its actual bounded closer with an inert browser, without launching Electron.
+    const source = readFileSync(join(ROOT, 'e2e', 'run-j01.mjs'), 'utf8');
+    const start = source.indexOf('  const closeBrowserBounded = async (ownedBrowser) => {');
+    const end = source.indexOf('  const closeOwnedBrowser = async () => {', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const timeoutMs = Number(/const BROWSER_CLOSE_TIMEOUT_MS = ([\d_]+);/u.exec(source)![1]!.replaceAll('_', ''));
+    expect(timeoutMs).toBe(25_000);
+    const launch: { startedAt: number; close?: { request?: number; disconnect?: number } } = { startedAt: 1_000 };
+    const failure = new Error('close timeout');
+    const makeClose = new Function('launchInFlight', 'BROWSER_CLOSE_TIMEOUT_MS', 'BROWSER_CLOSE_TIMEOUT', 'BROWSER_DISCONNECTED',
+      `let activeBrowserClose; let browserLifecycleIncomplete = false; ${source.slice(start, end)} return closeBrowserBounded;`);
+    const close = makeClose(launch, timeoutMs, failure, new Error('disconnected')) as (browser: EventEmitter & {
+      isConnected(): boolean; close(): Promise<void>;
+    }) => Promise<void>;
+    const browser = Object.assign(new EventEmitter(), {
+      isConnected: () => true,
+      close: () => new Promise<void>(() => undefined),
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(2_000);
+    try {
+      let observed: unknown;
+      const pending = close(browser).catch((error: unknown) => { observed = error; });
+      expect(launch.close).toEqual({ request: 1_000 });
+      await vi.advanceTimersByTimeAsync(24_999);
+      expect(observed).toBeUndefined();
+      // Disconnect alone never changes the existing close promise's outcome.
+      browser.emit('disconnected');
+      expect(launch.close?.disconnect).toBe(25_999);
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(observed).toBe(failure);
+      expect(browser.listenerCount('disconnected')).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('carries actual Journey-only close markers through the PID-filtered parser and strict controller relay (#1004)', () => {
+    const steps: JourneyCloseStep[] = [
+      'before-quit', 'quit-ready', 'close-risk-blocked', 'close-risk-allowed', 'quit-pending',
+      'stop-entry', 'stop-complete', 'app-quit', 'will-quit', 'app-exit',
+      'service-stop-entry', 'service-already-stopped', 'service-shutdown-request', 'service-shutdown-answer',
+      'service-shutdown-failed', 'service-faulted', 'service-input-ended', 'service-exited',
+      'service-force', 'service-stop-timeout', 'service-stop-complete',
+    ];
+    const lines: Array<readonly [number, string]> = [[1, '<launched> pid=5']];
+    for (const [index, step] of steps.entries()) {
+      const write = (line: string) => lines.push([index + 10, `[pid=5][err] ${line.trimEnd()}`]);
+      journeyClose(step, {}, write);
+      expect(lines).toHaveLength(index + 1);
+      journeyClose(step, { AI7_E2E_JOURNEY: 'J-01' }, write);
+    }
+    expect(trace.CLOSE_STEPS).toEqual(['request', ...steps, 'disconnect']);
+    const launch = launched(lines);
+    const line = trace.formatReadinessTrace('J-01', launch, 2_000);
+    for (const [index, step] of steps.entries()) expect(line).toContain(`${step}:${index + 10}`);
+    expect(line).toContain(';close=request:none,');
+    expect(line).toMatch(/,disconnect:none$/u);
+    expect(controller.collectReadinessTrace({ stderr: `${line}\n` }, 'J-01')).toBe(line.slice('READINESS/J-01/'.length));
+    expect(line.length).toBeLessThan(1_200);
+  });
+
+  it('retains first phase times and missing phases without inferring completion or order (#1004)', () => {
+    const launch = launched([
+      [1, '<launched> pid=5'],
+      [20, '[pid=5][err] AI7_CLOSE/service-shutdown-answer'],
+      [30, '[pid=5][err] AI7_CLOSE/before-quit'],
+      [40, '[pid=5][err] AI7_CLOSE/before-quit'],
+      [50, '[pid=6][err] AI7_CLOSE/stop-complete'],
+      [60, '[pid=5][err] AI7_CLOSE/service-shutdown-request;path=private'],
+      [70, '[pid=5][err] AI7_CLOSE/request'],
+      [80, '[pid=5][err] AI7_CLOSE/disconnect'],
+      [90, '[pid=5][err] AI7_CLOSE/unknown'],
+    ]);
+    const line = trace.formatReadinessTrace('J-01', launch, 2_000);
+    expect(line).toContain('before-quit:30,');
+    expect(line).toContain('stop-complete:none,');
+    expect(line).toContain('service-shutdown-request:none,service-shutdown-answer:20,');
+    expect(line).toContain(';close=request:none,');
+    expect(line).toMatch(/,disconnect:none$/u);
+    expect(line).not.toContain('private');
+    expect(trace.readReadinessTrace(line, 'J-01')).not.toBeNull();
+  });
+
+  it('bounds close timing output and refuses injected, missing, duplicate or reordered close fields (#1004)', () => {
+    const launch = launched([[1, '<launched> pid=5']]);
+    launch.close = { request: 1e12, disconnect: -1, 'stop-entry': 'private\ntext', unknown: 'secret' };
+    const line = trace.formatReadinessTrace('J-01', launch, 2_000);
+    expect(line).toContain(';close=request:999999999,');
+    expect(line).toContain('stop-entry:none,');
+    expect(line).toMatch(/,disconnect:0$/u);
+    expect(line).not.toMatch(/private|secret|unknown|\n/u);
+    expect(trace.readReadinessTrace(line, 'J-01')).not.toBeNull();
+    for (const forged of [
+      line.replace('request:999999999', 'request:1000000000'),
+      line.replace('request:999999999', 'request:NaN'),
+      line.replace('request:999999999', 'request:private'),
+      line.replace('request:999999999,', ''),
+      line.replace('request:999999999,', 'request:1,request:2,'),
+      line.replace('request:999999999,before-quit:none', 'before-quit:none,request:1'),
+      `${line},payload:private`, `${line};close=request:1`,
+    ]) expect(trace.readReadinessTrace(forged, 'J-01')).toBeNull();
+  });
+
   it('reads a launch that became ready: when it launched, the last startup step, AI7_READY and the exit', () => {
     const launch = launched([
       [2, '<launching> C:\\product\\ai7.exe --remote-debugging-pipe'],
