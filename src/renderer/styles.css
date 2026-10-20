@@ -1489,7 +1489,8 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .milestone-purpose-note, .milestone-save-reason { margin-top: 0; }
 .milestone-save-reason[hidden] { display: none; }
 .manuscript-surface { min-width: 0; background: var(--manuscript); }
-.editor-window { position: relative; max-height: min(82vh, 960px); overflow: auto; padding: 2.2rem clamp(1.5rem, 5vw, 5rem) 3rem; background: var(--manuscript); }
+/* ADR 0092: more reading room where the viewport has it beyond the header; never less than before, and never a second page scroll. */
+.editor-window { position: relative; max-height: min(960px, max(min(70vh, 760px), calc(100dvh - 15rem))); overflow: auto; padding: 2.2rem clamp(1.5rem, 5vw, 5rem) 3rem; background: var(--manuscript); }
 /* Manuscript reading typography (Issue #951; VIEW-004/005): the face, size, leading, column and alignment come from the local
    reading preferences as custom properties, with the former values as the fallback. The column counts fullwidth characters. */
 .ProseMirror {
