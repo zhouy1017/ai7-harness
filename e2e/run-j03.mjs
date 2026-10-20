@@ -833,9 +833,11 @@ async function main() {
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
     at('editorial-disclosure-motion');
-    await assertRenderer(renderer, `(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); if(!details||!journal||details.open||journal.getClientRects().length!==0)return false; const summary=details.querySelector('summary'); summary.focus(); return document.activeElement===summary && summary.textContent==='查看技术详情' && document.querySelector('#persistence-status')?.getClientRects().length>0; })()`, 'journal-disclosure-closed');
+    // A closed native disclosure may hide its content by content-visibility rather than display, so ask checkVisibility().
+    const closedDisclosure = await renderer.evaluate(`(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); const summary=details?.querySelector('summary'); summary?.focus(); return { details: details instanceof HTMLDetailsElement, closed: details?.open===false, journal: (journal?.textContent ?? '').startsWith('修订日志序号 ') && Number.isSafeInteger(Number(journal.textContent.slice(7))), journalHidden: journal?.checkVisibility()===false, summary: summary?.textContent==='查看技术详情', summaryFocused: summary!==undefined && document.activeElement===summary, persistenceShown: document.querySelector('#persistence-status')?.checkVisibility()===true }; })()`);
+    requireJourney(Object.values(closedDisclosure ?? { missing: false }).every(Boolean), 'journal-disclosure-closed', closedDisclosure);
     await pressKey(renderer, ENTER_KEY);
-    await assertRenderer(renderer, `(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); return details.open && details.querySelector('[data-editor-technical]').getClientRects().length>0; })()`, 'journal-disclosure-keyboard-open');
+    await assertRenderer(renderer, `(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); return details.open && details.querySelector('[data-editor-technical]').checkVisibility(); })()`, 'journal-disclosure-keyboard-open');
     await pressKey(renderer, ENTER_KEY);
     await assertRenderer(renderer, `!document.querySelector('[data-editor-technical-disclosure="journal"]').open`, 'journal-disclosure-keyboard-close');
     // A real width changes between endpoints; do not confuse a transition declaration with visible motion.
