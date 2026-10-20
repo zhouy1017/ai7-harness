@@ -442,6 +442,7 @@ export class ServiceClient {
     if (this.#stopped || this.#child.exitCode !== null || this.#child.signalCode !== null) {
       this.#stopped = true;
       journeyClose('service-exited');
+      journeyClose('service-stop-complete');
       return;
     }
     const exited = once(this.#child, 'exit').then(() => {

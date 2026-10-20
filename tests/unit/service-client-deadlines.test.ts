@@ -89,6 +89,20 @@ describe('serial service request execution deadlines', () => {
     expect(lines.slice(-2)).toEqual(['AI7_CLOSE/service-stop-entry', 'AI7_CLOSE/service-already-stopped']);
   });
 
+  it('traces a service that exited during its shutdown request as a completed stop without forcing it (#1004)', async () => {
+    const lines = closeMarkers();
+    const stopped = client.stop();
+    expect(lines).toEqual(['AI7_CLOSE/service-stop-entry', 'AI7_CLOSE/service-shutdown-request']);
+    peer.exitCode = 0;
+    peer.emit('exit', 0, null);
+    await stopped;
+    expect(lines.slice(-3)).toEqual([
+      'AI7_CLOSE/service-input-ended', 'AI7_CLOSE/service-exited', 'AI7_CLOSE/service-stop-complete',
+    ]);
+    expect(lines).not.toContain('AI7_CLOSE/service-force');
+    expect(peer.kill).not.toHaveBeenCalled();
+  });
+
   it('traces a shutdown refusal and the unchanged five-second force fallback (#1004)', async () => {
     const lines = closeMarkers();
     const stopped = client.stop();
@@ -115,8 +129,9 @@ describe('serial service request execution deadlines', () => {
     await vi.advanceTimersByTimeAsync(1);
     await stopped;
     expect(peer.kill).toHaveBeenCalledTimes(1);
-    expect(lines.slice(-3)).toEqual([
+    expect(lines.slice(-4)).toEqual([
       'AI7_CLOSE/service-shutdown-failed', 'AI7_CLOSE/service-input-ended', 'AI7_CLOSE/service-exited',
+      'AI7_CLOSE/service-stop-complete',
     ]);
   });
 
