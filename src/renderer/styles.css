@@ -237,6 +237,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .lede { margin: 0 0 1.5rem; color: var(--text-subdued); line-height: 1.65; }
 .source-card, .review-section { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
 .source-card dl, .identity-grid { display: grid; grid-template-columns: max-content 1fr; gap: .55rem 1rem; margin: .8rem 0 0; }
+.help-build-identity, .data-version-build { min-width: 0; overflow-wrap: anywhere; }
 .native-artifact-card { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
 .native-artifact-heading { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
 .native-artifact-heading h3, .native-artifact-card h4 { margin: 0; }

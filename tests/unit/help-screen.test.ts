@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountHelp, type ThirdPartyLicense } from '../../src/renderer/help.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { SERVICE_PROTOCOL_VERSION } from '../../src/shared/protocol.js';
+import { HELP_ABOUT_FAILED } from '../../src/renderer/help-labels.js';
 
 // #939 slice 11f: drive the mounted 帮助 screen through its own data attributes — tab switching by click and by arrow
 // key, the 关于 line, and the license filter — with the same minimal DOM the other renderer surfaces use.
@@ -9,6 +10,8 @@ let restore: () => void;
 beforeEach(() => {
   restore = installMiniDom();
   vi.stubGlobal('document', { createElement: miniDocument.createElement });
+  vi.stubGlobal('__AI7_BUILD_IDENTITY__', { schema: 1, softwareVersion: '0.9.9', dataVersion: 1,
+    buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: true });
 });
 afterEach(() => { vi.unstubAllGlobals(); restore(); });
 
@@ -41,6 +44,15 @@ describe('the mounted 帮助 screen', () => {
     await vi.waitFor(() => expect(find('.help-about-line').textContent).toBe(`软件版本 0.9.9 · 数据版本 1 · 服务协议 ${SERVICE_PROTOCOL_VERSION}`));
     // The frozen Data Version in 设置 › 数据与存储's own words (Issue #967).
     expect(find('.help-data-version-state').textContent).toBe('数据版本 1 已冻结。');
+    expect(find('.help-build-identity').textContent).toBe(`构建 1234 · 源码 ${'a'.repeat(40)} · 本地修改（未提交）`);
+  });
+
+  it('refuses to combine identity with mismatched service software or data versions', async () => {
+    vi.stubGlobal('__AI7_BUILD_IDENTITY__', { schema: 1, softwareVersion: '0.9.8', dataVersion: 1,
+      buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: false });
+    const { find } = mounted();
+    await vi.waitFor(() => expect(find('.help-about-line').textContent).toBe(HELP_ABOUT_FAILED));
+    expect(find('.help-build-identity').textContent).toBe('');
   });
 
   it('starts on 使用帮助 and switches tabs by click and by the arrow keys', () => {

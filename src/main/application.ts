@@ -101,6 +101,7 @@ import { DIAGNOSTICS_CHANNELS, writeDiagnosticsBundle } from './diagnostics.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 import { journeyClose, journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { DATA_VERSION_STARTUP_CLOSE, DATA_VERSION_STARTUP_TITLE, dataVersionStartupRefusal } from '../shared/data-version-labels.js';
+import { readBuiltIdentity } from '../shared/read-build-identity.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
 import { chooseStartupDataRoot, type StartupLocationChoice } from './startup-data-root.js';
@@ -6390,6 +6391,8 @@ export async function runApplication(): Promise<void> {
     app.enableSandbox();
     startupLocation = reachStartup('data-root');
     const codeRoot = resolve(__dirname, '..', '..');
+    const buildIdentity = await readBuiltIdentity(resolve(__dirname, '..'));
+    const softwareVersion = buildIdentity.softwareVersion;
     const resourcesPath = process.platform === 'win32' ? resolve(dirname(process.execPath), 'resources')
       : resolve(dirname(process.execPath), '..', 'Resources');
     const channel = await readDistributionChannel(app.isPackaged, resourcesPath);
@@ -6463,11 +6466,9 @@ export async function runApplication(): Promise<void> {
     }
     app.setPath('userData', shellRoot);
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
-    // Like the service's version owner, read this application's package rather than Electron's fallback app version.
-    const softwareVersion = (JSON.parse(await readFile(resolve(codeRoot, 'package.json'), 'utf8')) as { version: string }).version;
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, dataVersion: 1, schemaRevision: 83, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 83, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -6529,7 +6530,7 @@ export async function runApplication(): Promise<void> {
       await openProtectedSecretStore(); // Loads the carrier; never reads or writes a credential.
       const versions = await service.call('inspectDataVersion', {});
       requireDesktop(typeof versions.dataVersion === 'number' && versions.history.length > 0);
-      const report = { softwareVersion, channel, electron: process.versions.electron, node: process.versions.node,
+      const report = { softwareVersion, buildIdentity, channel, electron: process.versions.electron, node: process.versions.node,
         modules: process.versions.modules, keyringCarrier: 'loaded', dataRoot, writable: true, store_versions: 'readable' };
       await stop();
       process.stdout.write(`${JSON.stringify(report)}\n`, () => app.exit(0));

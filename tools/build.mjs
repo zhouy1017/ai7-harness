@@ -1,12 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, lstat, mkdir, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { inspectDevelopmentInputs } from './doctor.mjs';
 import { electronLicenseCarriers } from './electron-runtime.mjs';
+import { readBuildIdentity } from './build-identity.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = resolve(ROOT, 'dist');
@@ -96,6 +97,7 @@ const nodeBuild = {
 
 async function ensureClosedOutputs() {
   const expected = new Set([
+    'build-identity.json',
     'main/index.cjs',
     'main/preload.cjs',
     'config/dsh-profiles/manuscript-editorial/package.json',
@@ -292,6 +294,8 @@ async function ensureClosedOutputs() {
 
 async function main() {
   const diagnosis = inspectDevelopmentInputs();
+  const identity = await readBuildIdentity(ROOT);
+  const define = { __AI7_BUILD_IDENTITY__: JSON.stringify(identity) };
   ({ build: runEsbuild } = await import('esbuild'));
   requireBuild(dirname(DIST) === ROOT && DIST !== ROOT, 'Unsafe dist target.');
   typecheck();
@@ -314,6 +318,7 @@ async function main() {
   await mkdir(outputPath('config', 'dsh-profiles', 'manuscript-editorial'), { recursive: true });
   await mkdir(outputPath('config', 'native-artifact-sources', 'editorial-workspace-profile'), { recursive: true });
   await mkdir(outputPath('docs', 'policies'), { recursive: true });
+  await writeFile(outputPath('build-identity.json'), `${JSON.stringify(identity, null, 2)}\n`);
 
   const editorialWorkspaceSourceDirectory = resolve(
     ROOT,
@@ -358,6 +363,7 @@ async function main() {
 
   await runEsbuild({
     ...nodeBuild,
+    define,
     entryPoints: [resolve(ROOT, 'src', 'main', 'index.ts')],
     external: ['electron'],
     format: 'cjs',
@@ -372,6 +378,7 @@ async function main() {
   });
   await runEsbuild({
     ...nodeBuild,
+    define,
     entryPoints: [resolve(ROOT, 'src', 'service', 'index.ts')],
     format: 'esm',
     outfile: outputPath('service', 'index.mjs'),
@@ -390,6 +397,7 @@ async function main() {
   });
   await runEsbuild({
     absWorkingDir: ROOT,
+    define,
     bundle: true,
     entryPoints: [resolve(ROOT, 'src', 'renderer', 'index.ts')],
     format: 'iife',
@@ -452,13 +460,15 @@ async function main() {
   await copyFile(electronLicense.path, outputPath('notices', 'ELECTRON_LICENSE'));
   await copyFile(electronChromium.path, outputPath('notices', 'ELECTRON_LICENSES.chromium.html'));
   await ensureClosedOutputs();
+  requireBuild(JSON.stringify(await readBuildIdentity(ROOT)) === JSON.stringify(identity), 'Build source identity changed.');
 }
 
 export async function runBuild() {
   try {
     await main();
-  } catch {
-    if (!typeScriptDiagnosticsReported) console.error('BUILD/unclassified');
+  } catch (error) {
+    if (error instanceof Error && /^AI7_BUILD_IDENTITY_[A-Z_]+$/u.test(error.message)) console.error(`BUILD/${error.message}`);
+    else if (!typeScriptDiagnosticsReported) console.error('BUILD/unclassified');
     process.exitCode = 1;
   }
 }

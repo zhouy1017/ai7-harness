@@ -9,6 +9,7 @@ import {
 } from './help-labels.js';
 import { HELP_PRIVACY_SECTIONS, HELP_USAGE_SECTIONS, type HelpSection } from './help-text.js';
 import { dataVersionStateLine } from './data-version-labels.js';
+import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 
 // 帮助 (Issue #939, wave 11 slice 11f; Owner decision 27; editor-surfaces §0.3): the screen the sidebar's 帮助 entry opens —
 // three tabs (使用帮助 · 隐私说明 · 第三方许可) with keyboard-complete tab switching and a filter on the generated license
@@ -69,15 +70,18 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   const aboutLine = el('p', 'help-about-line', HELP_ABOUT_LOADING);
   // Whether the Data Version is frozen, in 设置 › 数据与存储's own words (Issue #967).
   const stateLine = el('p', 'field-note help-data-version-state');
-  about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutLine, stateLine);
+  const buildLine = el('p', 'field-note help-build-identity');
+  about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutLine, stateLine, buildLine);
   root.append(about);
   void options.loadVersions().then(
     (versions) => {
+      const identity = currentBuildIdentity();
+      requireMatchingVersions(identity, versions);
       aboutLine.textContent = helpAboutLine(versions.softwareVersion, versions.dataVersion, protocolVersion);
       stateLine.textContent = dataVersionStateLine(versions);
+      buildLine.textContent = buildIdentityLine(identity);
     },
-    () => { aboutLine.textContent = HELP_ABOUT_FAILED; },
-  );
+  ).catch(() => { aboutLine.textContent = HELP_ABOUT_FAILED; stateLine.textContent = ''; buildLine.textContent = ''; });
 
   const tabs = el('div', 'knowledge-tabs help-tabs');
   tabs.setAttribute('role', 'tablist');
