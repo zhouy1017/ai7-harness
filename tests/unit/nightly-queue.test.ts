@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // `tools/*.mjs` is CI infrastructure outside the typed program (`allowJs: false`), so it is loaded
 // through a runtime specifier the compiler does not resolve and typed at this boundary.
@@ -78,6 +82,46 @@ const record = (overrides: Partial<QueueRecord> = {}): QueueRecord => ({
 });
 
 describe('the merge helper cannot silently bypass its release inputs', () => {
+  it('keeps the stable CLI exit status and error handling when invoked outside the checkout', () => {
+    const entry = fileURLToPath(new URL('../../tools/nightly-queue.mjs', import.meta.url));
+    const accepted = spawnSync(process.execPath, [entry, 'cleanup', '--ref', 'refs/heads/nightly/candidate-1011-local-1', '--dry-run'],
+      { cwd: tmpdir(), encoding: 'utf8', windowsHide: true });
+    expect(accepted.status).toBe(0);
+    expect(accepted.stdout).toContain('[dry-run] git push --delete origin refs/heads/nightly/candidate-1011-local-1');
+    const refused = spawnSync(process.execPath, [entry, 'cleanup', '--ref', 'refs/heads/main', '--dry-run'],
+      { cwd: tmpdir(), encoding: 'utf8', windowsHide: true });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain('NIGHTLY_QUEUE/cleanup-ref-outside-candidate-scope');
+  });
+
+  it('resolves subprocesses from the checkout root after moving the implementation', () => {
+    const entry = new URL('../../tools/nightly-queue.mjs', import.meta.url).href;
+    const root = resolve(fileURLToPath(new URL('../../', import.meta.url)));
+    // Intercept the subprocess in an isolated Node process: this exercises ROOT and imports without GitHub access.
+    const script = `
+      import assert from 'node:assert/strict';
+      import childProcess from 'node:child_process';
+      import { syncBuiltinESMExports } from 'node:module';
+      let calls = 0;
+      childProcess.spawnSync = (command, args, options) => {
+        assert.equal(command, 'gh');
+        assert.deepEqual(args.slice(0, 2), ['pr', 'list']);
+        assert.equal(options.cwd, ${JSON.stringify(root)});
+        calls += 1;
+        return { status: 0, stdout: '[]', stderr: '' };
+      };
+      syncBuiltinESMExports();
+      const queue = await import(${JSON.stringify(entry)});
+      assert.equal(calls, 0);
+      assert.equal(queue.main(['list']), 0);
+      assert.equal(calls, 1);
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script],
+      { cwd: tmpdir(), encoding: 'utf8', windowsHide: true });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
   it('requires exact tested candidate and actual Gate occurrence before remote work', () => {
     expect(() => queue.main(['merge', '--pr', '806', '--head', 'a'.repeat(40), '--expected-dev-tip', 'b'.repeat(40), '--dry-run'])).toThrow('merge needs --candidate');
   });
@@ -579,12 +623,12 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
     }
   });
 
-  it('holds only a direct manual dispatch, not a queue-called final dev Gate, to an immutable commit', async () => {
+  it('requires an immutable commit for both direct dispatch and queue-called final dev', async () => {
     const { readFile } = await import('node:fs/promises');
     const nightly = await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8');
-    const guard = nightly.split('- name: Require an immutable manually selected candidate')[1]!.split('\n      - name:')[0]!;
-    expect(guard).toContain("contains(github.workflow_ref, '/.github/workflows/e2e-nightly.yml@')");
+    const guard = nightly.split('- name: Require the selected immutable checkout')[1]!.split('\n      - name:')[0]!;
+    expect(guard).not.toContain('if: ${{');
     const queueWorkflow = await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8');
-    expect(queueWorkflow).toContain('ref: ${{ github.ref }}');
+    expect(queueWorkflow).toContain('ref: ${{ needs.resolve.outputs.sha }}');
   });
 });

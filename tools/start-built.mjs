@@ -236,10 +236,18 @@ async function main(argumentsOverride) {
   process.exitCode = exitCode;
 }
 
+// Composition callers retain this launcher's process identity, readiness and
+// bounded diagnostics rather than adding an unmonitored parent process.
+export async function startBuilt(args) {
+  try {
+    await main(args);
+  } catch {
+    console.error(`AI7_START_FAILED/${childFailureLocation ?? 'launcher'}`);
+    throw new Error('AI7_BUILT_LAUNCH_FAILED');
+  }
+}
+
 const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
-  main().catch(() => {
-    console.error(`AI7_START_FAILED/${childFailureLocation ?? 'launcher'}`);
-    process.exitCode = 1;
-  });
+  startBuilt().catch(() => { process.exitCode = 1; });
 }

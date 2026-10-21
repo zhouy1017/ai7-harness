@@ -132,6 +132,10 @@ describe('single-writer exact-candidate merge release', () => {
     const infrastructure = { ...checks, checks: ['pnpm run check', 'pnpm test', 'git diff --check'] };
     expect(release.mergeAuthorization({ ...candidate, files: [{ path: 'tools/nightly-queue.mjs' }] },
       [assignment, handoff, { ...complete, tests: infrastructure }, released]).allowed).toBe(true);
+    expect(release.mergeAuthorization({ ...candidate, files: [{ path: 'tools/ci/queue.mjs' }, { path: 'tools/ci/release-authority.mjs' }] },
+      [assignment, handoff, { ...complete, tests: infrastructure }, released]).allowed).toBe(true);
+    expect(release.mergeAuthorization({ ...candidate, files: [{ path: 'tools/ci/unrecognized.mjs' }] },
+      [assignment, handoff, { ...complete, tests: infrastructure }, released]).allowed).toBe(false);
     expect(release.mergeAuthorization({ ...candidate, files: [{ path: 'tools/nightly-queue.mjs' }, { path: 'src/main/index.ts' }] },
       [assignment, handoff, { ...complete, tests: infrastructure }, released]).allowed).toBe(false);
   });

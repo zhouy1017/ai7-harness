@@ -38,11 +38,13 @@ The Owner defines 1.0.0 as **every designed capability** in the PRD, `docs/ui-ux
 - Code signing, notarization, release, `main` promotion, auto-update.
 - Providers other than OpenCode Go and DeepSeek official remain declared documents marked 尚未支持; Doubao waits for official documentation (#719).
 
-## TODO after 1.0.0 (Issues to open in wave 14)
+## Deferred outcomes after 1.0.0
 
-OCR for the Material Index; auto-update via GitHub Releases; plugin analysis kinds; 结构调整模式; Detached Manuscript Window; workflow-definition branch; Skill catalog/trust/sandbox; S66d when a house profile exists; Rewind/Replay reconsideration.
+The [Post-1.0.0 Issues](#post-100-issues) below already track OCR, updates, plugin analysis kinds, 结构调整模式, Detached Manuscript Window, workflow definitions, Skill catalog/trust/sandbox, S66d and Rewind/Replay. Their current order and blockers live in the [development plan](development-plan.md); do not reopen or duplicate them.
 
 ## Completion record (ADR 0054)
+
+Record integration: [PR #986](https://github.com/zhouy1017/ai7-harness/pull/986) merged at `dev@ae5d2c1e29eebbeca7823e301d427ad2737ac5c1` on 2026-10-18; #972 is closed. The record below describes the named boundary commit, including its then-current evidence limits. Later implementation and evidence are routed through [PROGRESS](../../PROGRESS.md); this refresh does not revise the Owner's scope or backfill that record.
 
 This is the stable record required by [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md) under the separately authorized completion Issue [#972](https://github.com/zhouy1017/ai7-harness/issues/972). The boundary is crossed only when this record integrates into `dev`; a Draft PR or a slice merge into a wave does not cross it. It names one exact `dev` commit:
 

@@ -1,0 +1,76 @@
+name: Publish Windows release
+
+# Tag creation consumes completed nightly packages; completion reconciles early tags.
+# Neither trigger builds, runs another Gate, creates a tag, signs or promotes main.
+on:
+  push:
+    tags: ['v*']
+  workflow_run:
+    workflows: [E2E Nightly Merge Queue]
+    types: [completed]
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    name: Select admitted version tags
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      count: ${{ steps.select.outputs.count }}
+      controller: ${{ steps.select.outputs.controller }}
+    steps:
+      # Publication code is pinned to this trusted dev checkout, never tag/artifact code.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: refs/heads/dev
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          check-latest: false
+      - name: Validate event, source ancestry and exact tag version
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release.mjs select
+
+  publish:
+    name: Publish existing nightly assets (${{ matrix.tag }})
+    needs: select
+    if: ${{ needs.select.outputs.count != '0' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Serialize both trigger paths per tag. A newer pending tag must not cancel a different version.
+    concurrency:
+      group: ai7-windows-publication-${{ matrix.tag }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: read
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.select.outputs.controller }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          check-latest: false
+      - name: Verify immutable provenance and publish without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SELECTION: ${{ toJSON(matrix) }}
+        run: node tools/release.mjs publish

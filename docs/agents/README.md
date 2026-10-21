@@ -23,7 +23,7 @@ Resolve records at the intended integration target. `dev` is the canonical imple
 | Bug diagnosis | Nearest Journey and Issue; code path; [CI and test boundaries](ci-test-boundaries.md) |
 | Domain or authority change | [CONTEXT-MAP](../../CONTEXT-MAP.md); context owner; root ADRs; [domain rules](domain.md); scoped Owner decision |
 | Harness, dependency, pin, bootstrap, build or launch | ADRs 0020 and 0041; Runtime section of [project constraints](project-constraints.md); [source-checkout buildability](source-checkout-buildability.md) |
-| Git, pull request, tag or release | [Git conventions](git-conventions.md); [issue tracker](issue-tracker.md); [CI and test boundaries](ci-test-boundaries.md) |
+| Git, pull request, tag or release | [Git conventions](git-conventions.md); [issue tracker](issue-tracker.md); [CI and test boundaries](ci-test-boundaries.md); [nightly packages and Windows releases](../adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md); [version identity](../development/versioning.md) |
 | Documentation cleanup or handoff | [Document lifecycle](document-lifecycle.md) |
 | Architecture or design fork | [Design authority](design-authority.md); [multi-session design workflow](multi-session-design-workflow.md) |
 

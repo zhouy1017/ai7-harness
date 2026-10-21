@@ -6,6 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, relative, resolve, sep } from
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { electronRuntimeRoot } from './electron-runtime.mjs';
+import { isSoftwareVersion, nativeBuildVersions, parseBuildIdentity, readBuildIdentity } from './build-identity.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RELEASE = resolve(ROOT, 'release');
@@ -17,7 +18,7 @@ let phase = 'inputs';
 function reachPhase(value) { phase = value; console.log(`PACKAGE/${value}`); }
 
 export function plannedOutputs(version, platform = process.platform) {
-  requirePackage(/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(version));
+  requirePackage(isSoftwareVersion(version));
   if (platform === 'win32') return [`AI7-${version}-win-x64-setup.exe`, `AI7-${version}-win-x64-portable.zip`, 'self-check.txt'];
   if (platform === 'darwin') return [`AI7-${version}-mac-arm64.dmg`];
   throw new Error('AI7_PACKAGE_HOST_UNSUPPORTED');
@@ -98,9 +99,17 @@ export async function copyRuntimeClosure(source, target, platform = process.plat
   return [...selected.keys()].sort();
 }
 
-export function builderConfiguration(manifest, stage) {
+export function builderConfiguration(manifest, stage, value) {
+  const identity = parseBuildIdentity(value);
+  requirePackage(identity.softwareVersion === manifest.version && identity.dataVersion === manifest.ai7?.dataVersion && !identity.dirty);
+  const native = nativeBuildVersions(identity);
   return {
     ...manifest.build,
+    buildNumber: String(identity.buildNumber), buildVersion: native.windowsVersion,
+    win: { ...manifest.build.win, signAndEditExecutable: true, signExecutable: false },
+    mac: { ...manifest.build.mac, bundleVersion: native.macBundleVersion, bundleShortVersion: native.macShortVersion,
+      extendInfo: { AI7SoftwareVersion: identity.softwareVersion, AI7DataVersion: identity.dataVersion,
+        AI7BuildNumber: identity.buildNumber, AI7SourceCommit: identity.sourceCommit, AI7Dirty: identity.dirty } },
     electronVersion: '43.4.1', electronDist: electronRuntimeRoot(),
     directories: { app: stage, output: resolve(RELEASE, '.builder'), buildResources: resolve(RELEASE, '.resources') },
   };
@@ -136,21 +145,31 @@ function run(executable, args, options = {}) {
   return child.stdout;
 }
 
+export function parsePackageArguments(args) {
+  const values = [...args];
+  if (values[0] === '--') values.shift();
+  requirePackage(values.length === 0 || (values.length === 1 && ['--list', '--build-only'].includes(values[0])));
+  return { list: values[0] === '--list', buildOnly: values[0] === '--build-only' };
+}
+
 async function main(args) {
   // `pnpm run package -- --list` hands the separator through, as it does to the Journeys.
-  if (args[0] === '--') args.shift();
-  requirePackage(args.length === 0 || (args.length === 1 && args[0] === '--list'));
+  const options = parsePackageArguments(args);
   const manifest = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8'));
   const outputs = plannedOutputs(manifest.version);
-  console.log(outputs.map((name) => `release/${name}`).join('\n'));
+  console.log(outputs.filter((name) => !options.buildOnly || name !== 'self-check.txt').map((name) => `release/${name}`).join('\n'));
   if (process.platform !== 'darwin') console.log('DMG：仅在 macOS 主机构建');
-  if (args[0] === '--list') return;
+  if (options.list) return;
+  const identity = await readBuildIdentity(ROOT, { requireClean: true });
+  nativeBuildVersions(identity);
   requirePackage((process.platform === 'win32' && process.arch === 'x64') || (process.platform === 'darwin' && process.arch === 'arm64'));
   const artifacts = JSON.parse(await readFile(resolve(ROOT, 'config', 'dependency-artifacts.json'), 'utf8'));
   await verifyPackagerArchives(artifacts);
   // Build remains the existing clean, provider-free source-checkout command.
   reachPhase('build');
   run(process.execPath, [resolve(ROOT, 'tools', 'build-controller.mjs')]);
+  const builtIdentity = parseBuildIdentity(JSON.parse(await readFile(resolve(ROOT, 'dist', 'build-identity.json'), 'utf8')));
+  requirePackage(JSON.stringify(builtIdentity) === JSON.stringify(identity));
   const { installNodeNetworkDenial } = await import(pathToFileURL(resolve(ROOT, 'dist', 'shared', 'network-denial.mjs')).href);
   installNodeNetworkDenial();
   // Ignore ambient packager tool selectors, signing identities and credentials. No author home/config input is adopted.
@@ -176,11 +195,12 @@ async function main(args) {
   await copyRuntimeClosure(ROOT, stage);
   // productName makes the packaged runtime name itself AI7, so Chromium's own pre-data-root state lands under the OS's AI7 folder.
   await writeFile(resolve(stage, 'package.json'), `${JSON.stringify({ name: manifest.name, productName: manifest.build.productName,
-    version: manifest.version, description: manifest.description, type: 'module', main: manifest.main, author: 'AI7 contributors',
+    version: identity.softwareVersion, ai7: { dataVersion: identity.dataVersion, buildIdentity: identity },
+    description: manifest.description, type: 'module', main: manifest.main, author: 'AI7 contributors',
     license: 'UNLICENSED' }, null, 2)}\n`);
   const { build, Platform, Arch } = await import('electron-builder');
   const channel = process.platform === 'win32' ? 'windows-installer' : 'macos-dmg';
-  const config = builderConfiguration(manifest, stage);
+  const config = builderConfiguration(manifest, stage, identity);
   config.afterPack = async ({ appOutDir }) => {
     const resources = process.platform === 'win32' ? resolve(appOutDir, 'resources') : resolve(appOutDir, 'AI7.app', 'Contents', 'Resources');
     await writeFile(resolve(resources, 'channel.json'), `${JSON.stringify({ channel, softwareVersion: manifest.version })}\n`);
@@ -189,6 +209,7 @@ async function main(args) {
   const platform = process.platform === 'win32' ? Platform.WINDOWS : Platform.MAC;
   reachPhase('builder');
   await build({ projectDir: ROOT, targets: platform.createTarget(process.platform === 'win32' ? 'nsis' : 'dmg', process.platform === 'win32' ? Arch.x64 : Arch.arm64), config, publish: 'never' });
+  requirePackage(JSON.stringify(await readBuildIdentity(ROOT, { requireClean: true })) === JSON.stringify(identity));
   const output = resolve(RELEASE, '.builder', outputs[0]);
   await rename(output, resolve(RELEASE, outputs[0]));
   if (process.platform === 'win32') {
@@ -209,13 +230,16 @@ async function main(args) {
     const archive = resolve(RELEASE, outputs[1]);
     if (existsSync(archive)) await rm(archive);
     run(await getPath7za(), ['a', '-tzip', '-mx=5', archive, 'AI7'], { cwd: RELEASE });
-    reachPhase('self-check');
-    const executable = resolve(portable, 'app', 'AI7.exe');
-    const report = run(executable, ['--self-check'], { env: selfCheckEnvironment(executable) });
-    const check = JSON.parse(report.trim());
-    requirePackage(check.channel === 'windows-portable' && check.writable === true && check.store_versions === 'readable' && check.keyringCarrier === 'loaded');
-    await writeFile(resolve(RELEASE, 'self-check.txt'), report);
-    console.log('Packaged portable self-check: pass');
+    if (!options.buildOnly) {
+      reachPhase('self-check');
+      const executable = resolve(portable, 'app', 'AI7.exe');
+      const report = run(executable, ['--self-check'], { env: selfCheckEnvironment(executable) });
+      const check = JSON.parse(report.trim());
+      requirePackage(check.channel === 'windows-portable' && check.writable === true && check.store_versions === 'readable' && check.keyringCarrier === 'loaded');
+      requirePackage(JSON.stringify(parseBuildIdentity(check.buildIdentity)) === JSON.stringify(identity));
+      await writeFile(resolve(RELEASE, 'self-check.txt'), report);
+      console.log('Packaged portable self-check: pass');
+    }
   }
   // Scratch payloads never become a second distributable.
   await resetOwnedDirectory(stage);
@@ -223,5 +247,8 @@ async function main(args) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2)).catch(() => { console.error(`AI7_PACKAGE_FAILED/${phase}`); process.exitCode = 1; });
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(/^AI7_BUILD_IDENTITY_[A-Z_]+$/u.test(error.message) ? `AI7_PACKAGE_FAILED/${error.message}` : `AI7_PACKAGE_FAILED/${phase}`);
+    process.exitCode = 1;
+  });
 }

@@ -1,13 +1,26 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { DIAGNOSTICS_CHANNELS, buildDiagnosticsBundle, type DiagnosticsInputs } from '../../src/main/diagnostics.js';
+import { DIAGNOSTICS_CHANNELS, buildDiagnosticsBundle, sanitizeCrashRecord, type DiagnosticsInputs } from '../../src/main/diagnostics.js';
 import { DATA_VERSION } from '../../src/service/data-version.js';
 
 const facts: DiagnosticsInputs['facts'] = {
+  buildIdentity: { schema: 1, softwareVersion: '0.1.0', dataVersion: 1, buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: true },
   appVersion: '0.1.0', dataVersion: 1, schemaRevision: 83, protocol: 161, policySetVersion: 'v15', platform: 'win32',
   arch: 'x64', electron: '42.0.0', node: '24.18.1', locale: 'zh-CN', uptimeSeconds: 42, windowCount: 2,
 };
 describe('pure diagnostics bundle', () => {
+  it('preserves prerelease plus build metadata without inventing historical provenance', () => {
+    const softwareVersion = '0.1.0-rc.1+source.7';
+    const current = { ...facts, appVersion: softwareVersion, buildIdentity: { ...facts.buildIdentity!, softwareVersion } };
+    const historical = { appVersion: '0.0.9', schemaRevision: 82 };
+    const files = buildDiagnosticsBundle({ facts: current, crashes: [historical], preferences: {} });
+    expect(JSON.parse(files['summary.json']!)).toMatchObject({ appVersion: softwareVersion, buildIdentity: current.buildIdentity });
+    expect(JSON.parse(files['crashes/01-uncaughtException.json']!)).toMatchObject({ appVersion: '0.0.9', buildIdentity: null, schemaRevision: 82 });
+    expect(sanitizeCrashRecord(current)).toMatchObject({ appVersion: softwareVersion, buildIdentity: current.buildIdentity });
+    expect(sanitizeCrashRecord({ ...historical, buildIdentity: current.buildIdentity }).buildIdentity).toBeNull();
+    const olderIdentity = { ...current.buildIdentity, softwareVersion: historical.appVersion, buildNumber: 1000, sourceCommit: 'b'.repeat(40) };
+    expect(sanitizeCrashRecord({ ...historical, buildIdentity: olderIdentity }).buildIdentity).toEqual(olderIdentity);
+  });
   it('excludes protected inputs and projects exactly the allowed files', () => {
     const manuscript = 'SYNTHETIC_MANUSCRIPT_BLOCK_DO_NOT_EXPORT';
     const files = buildDiagnosticsBundle({ facts, preferences: { version: 1, values: { collapsed: true } },
@@ -45,7 +58,8 @@ describe('pure diagnostics bundle', () => {
       .filter((name) => name.endsWith('.ts'))
       .flatMap((name) => [...source(`src/service/${name.replaceAll('\\', '/')}`).matchAll(/_SCHEMA_VERSION = (\d+);/gu)].map((match) => Number(match[1])));
     expect(application.match(/schemaRevision: (\d+), protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(Math.max(...schemaVersions)));
-    expect(application.match(/dataVersion: (\d+), schemaRevision: \d+, protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(DATA_VERSION));
+    expect(application).toContain('dataVersion: buildIdentity.dataVersion, schemaRevision: 83, protocol: SERVICE_PROTOCOL_VERSION');
+    expect(facts.buildIdentity!.dataVersion).toBe(DATA_VERSION);
     // The summary reads the same built active policy set the service's launch policy verifies.
     const activeSet = source('src/service/launch-policy.ts').match(/const ACTIVE_SET_PATH = 'docs\/policies\/([^']+)';/u)?.[1];
     expect(activeSet).toBeDefined();

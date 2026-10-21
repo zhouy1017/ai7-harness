@@ -13,13 +13,13 @@ The initial design is based on these immutable snapshots:
 
 The Harness fork was identical to `deepseek-ai/deepseek-harness` at the audited revision. The two projects have unrelated Git histories.
 
-## Current recommendation
+## Historical recommendation and current routing
 
 Use a fresh AI7-owned repository and consume an exactly pinned Harness release/commit behind a narrow compatibility boundary. Build AI7 as a profile, bundle, domain plugins, and surface adapters; do not fork the Harness agent loop or carry the current AI7 monolith forward as the new foundation.
 
 The fresh-repository half is settled by Owner instruction. During development, `dev` is the long-lived integration line and `main` is the protected stable/release-promotion line. Frozen `design-doc@6895f02d2983865516d267809d8cdda77026f62c` supplies only the exact accepted allowlist; it is not a development line or merge source.
 
-The rest is now accepted too. The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. After the interview, ADR 0028 unified product scope as one Windows-and-macOS Standalone product; concrete macOS mechanics remain explicitly deferred. The missing-design audit is complete through root ADR 0040, including the destination-independent package, native local-export collision, and versioned maintenance refinements. The V2 UI/UX baseline adds wait-by-default D-084, Interactive Editorial Dialogue J-16, and UI ADR 0014 without changing authority or exposing raw chain of thought. **The design interview is complete**: all 36 questions are resolved or explicitly deferred, and the Owner has separately authorized exact baseline normalization, minimum policy baselines, implementation planning, and one bounded provider-free J-01 happy-path tracer in that sequence.
+The license and reuse authorization were settled at Question 27, full Harness capability at Question 29, and dependency strategy at Question 30. ADR 0028 unified the Windows-and-macOS Standalone scope; [ADR 0052](../docs/adr/0052-select-the-macos-v1-distribution-and-data-location-profile.md) later selected the macOS distribution/data profile. The interview and first-tracer sequence are completed history. Accepted design clauses below retain their status; current implementation, platform evidence and remaining work are in [PROGRESS](../PROGRESS.md) and the [development plan](../docs/development/development-plan.md), not this design-room summary.
 
 Agents arriving without prior context start at repository-root `AGENTS.md`. A Commander then reads `PROGRESS.md`, the [development plan](../docs/development/development-plan.md), and the [Dispatch Register](../docs/agents/dispatch-register.md); a Worker or Reviewer reads its Issue and the recorded assignment/current writer under [Orca dispatch](../docs/agents/orca-dispatch.md). Use `docs/agents/README.md` to load task-specific material. Do not read this entire design room, another Task transcript, or `docs/archive/` by default.
 
@@ -29,7 +29,7 @@ Agents arriving without prior context start at repository-root `AGENTS.md`. A Co
 2. [Source provenance](./01-source-provenance.md) — exact inputs, licensing, history, and source-copy rules.
 3. [Target architecture](./02-target-architecture.md) — proposed component boundaries, semantic mappings, and alternatives.
 4. [Keep / adapt / drop matrix](./03-keep-adapt-drop.md) — the initial evidence-backed legacy disposition.
-5. [Migration workflow](./04-migration-workflow.md) — compact current routing from accepted design into later authorized incremental vertical slices; the superseded full sequence is archived.
+5. [Migration workflow](./04-migration-workflow.md) — retained migration reasoning and a route to current incremental development; consult historical sequences only by exact reference.
 6. [Decision map](./05-decision-map.md) — the one-question-at-a-time interview and dependencies.
 7. [Risk register](./06-risk-register.md) — major technical, product, security, and provenance risks.
 8. [Canonical setup record](./07-project-setup-draft.md) — the approved agent, tracker, context-map, and glossary configuration now applied to the repository.
@@ -57,11 +57,11 @@ Agents arriving without prior context start at repository-root `AGENTS.md`. A Co
 30. [Editorial quality metrics](./29-editorial-quality-metrics.md) — accepted Question 36 Quality Signal families, derived metrics, cold-start tolerance, and low-burden feedback interaction; any separate Behavior Evaluation Gate is superseded by ADR 0027.
 31. [Upstream consumption and upgrade contract](./30-upstream-consumption-and-upgrade-contract.md) — accepted Question 30 exact-pin discipline and package-subset selection; its separate upgrade-proof programme is superseded by ADR 0027.
 32. [Single execution authority](./31-single-execution-authority.md) — accepted Question 31 agent-loop definition, instances-versus-authorities rule, required parallelism, scheduling split, and the learn-the-framework-not-its-defaults boundary.
-33. [Runtime language and release channel](./32-runtime-language-and-release-channel.md) — accepted TypeScript-only runtime and Windows zip/NSIS mechanics; macOS release/data mechanics remain separate implementation decisions under ADR 0028.
+33. [Runtime language and release channel](./32-runtime-language-and-release-channel.md) — accepted TypeScript-only runtime and original Windows release reasoning; current platform selection is routed through ADR 0052 and the operational guides.
 34. [Standalone shell and editor topology](./33-standalone-shell-and-editor-topology.md) — accepted Question 34 manuscript scale tiers, Electron three-process topology, and the ProseMirror windowed-editing foundation.
-35. [First tracer slice](./34-first-tracer-slice.md) — current bounded provider-free J-01 new-Book happy path plus retained manuscript-retrieval design; the earlier grounded-Q&A tracer, prerequisite spike, and thirteen-point exit gate are superseded historical material.
+35. [First tracer slice](./34-first-tracer-slice.md) — completed first-tracer design plus retained manuscript-retrieval reasoning; current supported paths are in E2E journeys.
 36. [Minimal E2E validation](./35-minimal-e2e-validation.md) — accepted project-wide rule that one provider-free E2E Functional Gate runs the same complete journey IDs and observed-bug regressions on Windows and macOS; implementation details live in [CI and test boundaries](../docs/agents/ci-test-boundaries.md).
-37. [Windows and macOS product platform](./35-windows-macos-product-platform.md) — accepted one-product scope and native-adapter boundary; concrete macOS mechanics remain deferred.
+37. [Windows and macOS product platform](./35-windows-macos-product-platform.md) — accepted one-product scope and native-adapter boundary; later macOS selection is in ADR 0052.
 38. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
 
 ## Decision discipline

@@ -4,6 +4,8 @@ status: accepted
 
 # Select the macOS V1 distribution and data-location profile
 
+> [ADR 0093](0093-automate-nightly-packages-and-windows-version-tag-releases.md) defers macOS releases indefinitely until the Owner explicitly requests resumption; unsigned macOS builds remain nightly inspection artifacts only. The signing, hardened-runtime and notarization requirements below still apply after resumption, and their readiness does not lift the hold.
+
 On 2026-08-28 the Owner selected the macOS V1 profile that ADRs 0023 and 0028 had left open. AI7 supports macOS 15 or later on Apple Silicon arm64 under the stable bundle identifier `io.github.zhouy1017.ai7`. This is the macOS adapter for the same AI7 product, data meaning, authority model, and supported journeys as Windows; it is not a Mac edition.
 
 ## Distribution and update posture
