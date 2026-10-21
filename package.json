@@ -1,6 +1,9 @@
 {
   "name": "ai7-harness",
   "version": "0.1.0",
+  "ai7": {
+    "dataVersion": 1
+  },
   "private": true,
   "description": "AI7 Chinese-first editorial desktop application",
   "type": "module",
@@ -18,6 +21,7 @@
     "test": "vitest run tests/unit",
     "test:service": "vitest run tests/service",
     "build": "node tools/build-controller.mjs",
+    "version:identity": "node tools/build-identity.mjs",
     "inspect": "node tools/inspect.mjs",
     "inspect:build": "node tools/inspect.mjs --build-only",
     "release:prepare": "node tools/release.mjs prepare",
@@ -99,7 +103,7 @@
           ]
         }
       ],
-      "signAndEditExecutable": false,
+      "signExecutable": false,
       "artifactName": "AI7-${version}-win-x64-setup.exe"
     },
     "nsis": {

@@ -4,6 +4,7 @@ import { DIAGNOSTICS_CHANNELS, buildDiagnosticsBundle, type DiagnosticsInputs } 
 import { DATA_VERSION } from '../../src/service/data-version.js';
 
 const facts: DiagnosticsInputs['facts'] = {
+  buildIdentity: { schema: 1, softwareVersion: '0.1.0', dataVersion: 1, buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: true },
   appVersion: '0.1.0', dataVersion: 1, schemaRevision: 83, protocol: 161, policySetVersion: 'v15', platform: 'win32',
   arch: 'x64', electron: '42.0.0', node: '24.18.1', locale: 'zh-CN', uptimeSeconds: 42, windowCount: 2,
 };
@@ -45,7 +46,8 @@ describe('pure diagnostics bundle', () => {
       .filter((name) => name.endsWith('.ts'))
       .flatMap((name) => [...source(`src/service/${name.replaceAll('\\', '/')}`).matchAll(/_SCHEMA_VERSION = (\d+);/gu)].map((match) => Number(match[1])));
     expect(application.match(/schemaRevision: (\d+), protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(Math.max(...schemaVersions)));
-    expect(application.match(/dataVersion: (\d+), schemaRevision: \d+, protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(DATA_VERSION));
+    expect(application).toContain('dataVersion: buildIdentity.dataVersion, schemaRevision: 83, protocol: SERVICE_PROTOCOL_VERSION');
+    expect(facts.buildIdentity!.dataVersion).toBe(DATA_VERSION);
     // The summary reads the same built active policy set the service's launch policy verifies.
     const activeSet = source('src/service/launch-policy.ts').match(/const ACTIVE_SET_PATH = 'docs\/policies\/([^']+)';/u)?.[1];
     expect(activeSet).toBeDefined();

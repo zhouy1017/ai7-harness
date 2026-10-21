@@ -6,6 +6,7 @@ import { createCanonicalProductionDataRoot, defaultProductionDataRoot, ensureCan
   inspectCanonicalDataFile, readStartupDataChoice } from '../shared/data-root.js';
 import { parseTrustedLaunchForm, type DistributionChannel, type TrustedLaunchForm } from '../shared/protocol.js';
 import { CHANNEL_DESCRIPTIONS, PORTABLE_UNWRITABLE_NOTICE, SYNC_LOCATION_WARNING } from '../renderer/distribution-channel-labels.js';
+import { isSoftwareVersion } from '../shared/build-identity.js';
 
 export { CHANNEL_LABELS } from '../renderer/distribution-channel-labels.js';
 
@@ -14,8 +15,7 @@ export function resolveChannel(packaged: boolean, marker: unknown, platform = pr
   if (!packaged) return 'source-checkout';
   if (typeof marker !== 'object' || marker === null || Array.isArray(marker)) return 'packaged';
   const value = marker as Record<string, unknown>;
-  if (Object.keys(value).length !== 2 || typeof value['softwareVersion'] !== 'string' ||
-      !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(value['softwareVersion'])) return 'packaged';
+  if (Object.keys(value).length !== 2 || !isSoftwareVersion(value['softwareVersion'])) return 'packaged';
   const channel = value['channel'];
   if (platform === 'win32' && (channel === 'windows-installer' || channel === 'windows-portable')) return channel;
   if (platform === 'darwin' && channel === 'macos-dmg') return channel;

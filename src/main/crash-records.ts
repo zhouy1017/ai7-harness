@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { sanitizeCrashRecord, type CrashKind, type CrashRecord } from './diagnostics.js';
 
 const RECORD_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z-[a-zA-Z-]+(?:-\d+)?\.json$/u;
-export type CrashFacts = Pick<CrashRecord, 'appVersion' | 'schemaRevision' | 'protocol' | 'platform' | 'arch' | 'electron' | 'uptimeSeconds'>;
+export type CrashFacts = Pick<CrashRecord, 'appVersion' | 'buildIdentity' | 'schemaRevision' | 'protocol' | 'platform' | 'arch' | 'electron' | 'uptimeSeconds'>;
 
 /** Synchronous by design: fatal hooks must finish the bounded record before invoking termination. */
 export class CrashRecords {

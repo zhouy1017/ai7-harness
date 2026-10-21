@@ -42,7 +42,8 @@ import {
   type DeveloperLiveRuntime,
   type OrdinaryProductionRuntime,
 } from './launch-policy.js';
-import { readSoftwareVersion } from './data-version.js';
+import { DATA_VERSION } from './data-version.js';
+import { readBuiltIdentity } from '../shared/read-build-identity.js';
 import { BACKUP_CHECK_INTERVAL_MS } from './scheduled-backups.js';
 import { decodeRequest, encodeServiceResponse, isSafeInteger, ProtocolError } from './request-frames.js';
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
@@ -1982,6 +1983,8 @@ async function run(): Promise<void> {
   let transportFailure: 'proxy-unreachable' | 'model-service-unreachable' | null = null;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
+    const buildIdentity = await readBuiltIdentity(codeRoot);
+    if (buildIdentity.dataVersion !== DATA_VERSION) throw new Error('AI7_BUILD_IDENTITY_MISMATCH');
     // Under ordinary-production the policy is resolved again with the editor's configured binding once the store is open, and
     // again after every model-service settings change (Issue #811); under every other scope it is the launch's, once.
     let launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
@@ -2012,9 +2015,8 @@ async function run(): Promise<void> {
     const baselinePromptContract = baselinePromptContractForLaunch({
       operationalScope: launchForm.trustedOperationalScope, journey: process.env.AI7_E2E_JOURNEY, fixture,
     });
-    // The software version the store records beside its Data Version (Issue #433, S85a) is the package the product ships
-    // in: the carrier holds no package manifest, so it is read from the source checkout that contains `dist/`.
-    const softwareVersion = await readSoftwareVersion(resolve(codeRoot, '..'));
+    // Build provenance is not written into compatibility records or backup formats.
+    const softwareVersion = buildIdentity.softwareVersion;
     reachServiceStartup('store');
     store = await EditorialStore.open(dataRoot, codeRoot, {
       softwareVersion,

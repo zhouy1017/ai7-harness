@@ -6,6 +6,7 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { readSmallFile, writeAtomic } from './database-replacement.js';
 import { DATA_VERSION_MARKER_UNREADABLE, newerDataVersionMessage } from '../shared/data-version-labels.js';
+import packageMetadata from '../../package.json' with { type: 'json' };
 
 /**
  * 数据版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1). The Data Version is a compatibility contract, an
@@ -28,7 +29,7 @@ import { DATA_VERSION_MARKER_UNREADABLE, newerDataVersionMessage } from '../shar
  */
 
 /** The Data Version this software reads and writes. A breaking migration — one older software could not read — raises it. */
-export const DATA_VERSION = 1 as const;
+export const DATA_VERSION = packageMetadata.ai7.dataVersion;
 /** Whether the Data Version is frozen: since the 1.0.0 development milestone boundary (Issue #967; ADR 0079 §1.2). */
 export const DATA_VERSION_FROZEN = true as const;
 

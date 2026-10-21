@@ -20,6 +20,7 @@ describe('distribution marker and packaged authority', () => {
     const marker = { channel: 'windows-portable', softwareVersion: '0.1.0' };
     expect(resolveChannel(false, marker, 'win32')).toBe('source-checkout');
     expect(resolveChannel(true, marker, 'win32')).toBe('windows-portable');
+    expect(resolveChannel(true, { ...marker, softwareVersion: '0.1.0-rc.1+source.7' }, 'win32')).toBe('windows-portable');
     expect(resolveChannel(true, { ...marker, channel: 'windows-installer' }, 'win32')).toBe('windows-installer');
     expect(resolveChannel(true, { ...marker, channel: 'macos-dmg' }, 'darwin')).toBe('macos-dmg');
     for (const invalid of [null, [], {}, { channel: 'windows-portable' }, { ...marker, channel: 'other' }, { ...marker, extra: true }]) {

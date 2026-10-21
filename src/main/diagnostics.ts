@@ -1,5 +1,6 @@
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { parseBuildIdentity, type BuildIdentity } from '../shared/build-identity.js';
 
 /** Pure, allowlisted diagnostics projection. Never accepts a filesystem root to crawl. */
 export const DIAGNOSTICS_CHANNELS = {
@@ -16,6 +17,8 @@ export interface CrashRecord {
   reason: string;
   exitCode: number | null;
   appVersion: string;
+  /** Missing on older crash records; never reconstruct historical provenance from the current build. */
+  buildIdentity?: BuildIdentity | null;
   /** The store's schema revision (数据库修订) this build writes — not the Data Version, which is far smaller (Issue #967). */
   schemaRevision: number;
   protocol: number;
@@ -56,12 +59,14 @@ const REASONS = new Set(['clean-exit', 'abnormal-exit', 'killed', 'crashed', 'oo
 export function sanitizeCrashRecord(input: Partial<CrashRecord>): CrashRecord {
   const instant = typeof input.instant === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(input.instant)
     ? input.instant : '1970-01-01T00:00:00.000Z';
+  let buildIdentity: BuildIdentity | null = null;
+  try { buildIdentity = parseBuildIdentity(input.buildIdentity); } catch { /* Older or malformed record: provenance unknown. */ }
   return {
     instant,
     kind: CRASH_KINDS.includes(input.kind!) ? input.kind! : 'uncaughtException',
     reason: REASONS.has(input.reason ?? '') ? input.reason! : '<redacted>',
     exitCode: typeof input.exitCode === 'number' && Number.isInteger(input.exitCode) ? input.exitCode : null,
-    appVersion: version(input.appVersion), schemaRevision: count(input.schemaRevision), protocol: count(input.protocol),
+    appVersion: version(input.appVersion), buildIdentity, schemaRevision: count(input.schemaRevision), protocol: count(input.protocol),
     platform: ['win32', 'darwin', 'linux'].includes(input.platform ?? '') ? input.platform! : 'unknown',
     arch: ['x64', 'arm64'].includes(input.arch ?? '') ? input.arch! : 'unknown',
     electron: version(input.electron), uptimeSeconds: count(input.uptimeSeconds),
@@ -94,7 +99,7 @@ export function buildDiagnosticsBundle(inputs: DiagnosticsInputs): Readonly<Reco
   const facts = sanitizeCrashRecord(inputs.facts);
   const files: Record<string, string> = {
     'summary.json': JSON.stringify({
-      appVersion: facts.appVersion, dataVersion: count(inputs.facts.dataVersion), schemaRevision: facts.schemaRevision, protocol: facts.protocol,
+      appVersion: facts.appVersion, buildIdentity: facts.buildIdentity, dataVersion: count(inputs.facts.dataVersion), schemaRevision: facts.schemaRevision, protocol: facts.protocol,
       policySetVersion: /^v\d+$/u.test(inputs.facts.policySetVersion) ? inputs.facts.policySetVersion : 'unknown',
       platform: facts.platform, arch: facts.arch, electron: facts.electron, node: version(inputs.facts.node),
       locale: /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(inputs.facts.locale) ? inputs.facts.locale : 'unknown',

@@ -1,3 +1,4 @@
+import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
 import { ANALYSIS_MORE_RANGES, ANALYSIS_READ_FAILED, ANALYSIS_READING, ANALYSIS_MORE_REPORT_ROWS, ANALYSIS_MORE_CHOICES, ANALYSIS_EARLIER_HISTORY, ANALYSIS_PAGED_LIST_LABELS } from './analysis-paging-labels.js';
 import { createAppearance } from './appearance.js';
@@ -5669,12 +5670,15 @@ async function renderDataAndStorage(): Promise<void> {
     mountScheduledBackup({ root: scheduledBackup, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
     void window.ai7.inspectDataVersion().then((version) => {
       if (!versions.isConnected) return;
+      const identity = currentBuildIdentity();
+      requireMatchingVersions(identity, version);
       versions.dataset['dataVersion'] = String(version.dataVersion);
       versions.dataset['softwareVersion'] = version.softwareVersion;
       versions.dataset['frozen'] = String(version.frozen);
       const rows = element('dl');
       rows.append(
         element('dt', undefined, DATA_VERSION_SOFTWARE), element('dd', 'data-version-software', version.softwareVersion),
+        element('dt', undefined, '构建来源'), element('dd', 'data-version-build', buildIdentityLine(identity)),
         element('dt', undefined, DATA_VERSION_DATA), element('dd', 'data-version-data', String(version.dataVersion)),
         element('dt', undefined, DATA_VERSION_MEANING), element('dd', 'data-version-state', dataVersionStateLine(version)),
         element('dt', undefined, DATA_VERSION_UPDATE), element('dd', 'data-version-update', dataVersionUpdateLine(version.update)),
