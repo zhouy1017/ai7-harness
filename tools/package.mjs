@@ -136,15 +136,21 @@ function run(executable, args, options = {}) {
   return child.stdout;
 }
 
+export function parsePackageArguments(args) {
+  const values = [...args];
+  if (values[0] === '--') values.shift();
+  requirePackage(values.length === 0 || (values.length === 1 && ['--list', '--build-only'].includes(values[0])));
+  return { list: values[0] === '--list', buildOnly: values[0] === '--build-only' };
+}
+
 async function main(args) {
   // `pnpm run package -- --list` hands the separator through, as it does to the Journeys.
-  if (args[0] === '--') args.shift();
-  requirePackage(args.length === 0 || (args.length === 1 && args[0] === '--list'));
+  const options = parsePackageArguments(args);
   const manifest = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8'));
   const outputs = plannedOutputs(manifest.version);
-  console.log(outputs.map((name) => `release/${name}`).join('\n'));
+  console.log(outputs.filter((name) => !options.buildOnly || name !== 'self-check.txt').map((name) => `release/${name}`).join('\n'));
   if (process.platform !== 'darwin') console.log('DMG：仅在 macOS 主机构建');
-  if (args[0] === '--list') return;
+  if (options.list) return;
   requirePackage((process.platform === 'win32' && process.arch === 'x64') || (process.platform === 'darwin' && process.arch === 'arm64'));
   const artifacts = JSON.parse(await readFile(resolve(ROOT, 'config', 'dependency-artifacts.json'), 'utf8'));
   await verifyPackagerArchives(artifacts);
@@ -209,13 +215,15 @@ async function main(args) {
     const archive = resolve(RELEASE, outputs[1]);
     if (existsSync(archive)) await rm(archive);
     run(await getPath7za(), ['a', '-tzip', '-mx=5', archive, 'AI7'], { cwd: RELEASE });
-    reachPhase('self-check');
-    const executable = resolve(portable, 'app', 'AI7.exe');
-    const report = run(executable, ['--self-check'], { env: selfCheckEnvironment(executable) });
-    const check = JSON.parse(report.trim());
-    requirePackage(check.channel === 'windows-portable' && check.writable === true && check.store_versions === 'readable' && check.keyringCarrier === 'loaded');
-    await writeFile(resolve(RELEASE, 'self-check.txt'), report);
-    console.log('Packaged portable self-check: pass');
+    if (!options.buildOnly) {
+      reachPhase('self-check');
+      const executable = resolve(portable, 'app', 'AI7.exe');
+      const report = run(executable, ['--self-check'], { env: selfCheckEnvironment(executable) });
+      const check = JSON.parse(report.trim());
+      requirePackage(check.channel === 'windows-portable' && check.writable === true && check.store_versions === 'readable' && check.keyringCarrier === 'loaded');
+      await writeFile(resolve(RELEASE, 'self-check.txt'), report);
+      console.log('Packaged portable self-check: pass');
+    }
   }
   // Scratch payloads never become a second distributable.
   await resetOwnedDirectory(stage);
