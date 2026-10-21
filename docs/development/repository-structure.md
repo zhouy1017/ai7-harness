@@ -26,7 +26,7 @@ Generated `node_modules/`, `.pnpm-store/`, `.cache/`, `.runtime/`, `dist/`, `rel
 
 The existing commands `node tools/nightly-queue.mjs …` and imports from `tools/orca-release.mjs` remain compatible. Their implementations live in [queue.mjs](../../tools/ci/queue.mjs) and [release-authority.mjs](../../tools/ci/release-authority.mjs). The latter authorizes repository merges; it is distinct from creating a product release. Keeping the entry paths stable also preserves trusted control checkouts used by existing workflow runs.
 
-[check.mjs](../../tools/check.mjs) owns local static verification. [check-docs.mjs](../../tools/check-docs.mjs) checks local file/directory destinations in tracked active Markdown and the root `CLAUDE.md` wrapper. It reads no archive contents and makes no network requests. Stage new documents before running it:
+[check.mjs](../../tools/check.mjs) owns local static verification. [check-docs.mjs](../../tools/check-docs.mjs) checks local file/directory destinations in tracked active Markdown and the root `CLAUDE.md` wrapper. It reads no archive contents or SampleBook payloads (only `SampleBooks/README.md` is documentation), refuses symlinks and redirected parent directories, and makes no network requests. Stage new documents before running it:
 
 ```text
 node tools/check-docs.mjs
