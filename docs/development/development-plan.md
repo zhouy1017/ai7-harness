@@ -2,7 +2,7 @@
 
 This is the sole delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The 2026-10-21 refresh starts from `dev@f3199a2d823821476e7fcdcfb077e0a3d7b28b3c`: waves 1–16 are integrated, including the [Initial v1.0.0 Development Milestone record](milestone-1.0.0-scope.md). [PROGRESS](../../PROGRESS.md) owns implementation status; Issues own bounded acceptance. An open Issue can contain delivered work, and a milestone name is not a release claim.
 
-The tracker snapshot contains **43 open Issues**, all accounted for below without reopening closed foundations. This is the remaining feature/fix roadmap, not a new design decision or blanket dispatch authorization. The Commander turns a selected outcome into a current [Change Brief](../agents/change-brief.md), resolves blockers and assigns its exact baseline and writer through [Orca dispatch](../agents/orca-dispatch.md).
+The initial tracker snapshot contained **43 open Issues**, all accounted for below without reopening closed foundations; the Owner's same-day automatic-release follow-up adds #1015 and revises #1009. This is the remaining feature/fix roadmap, not a blanket dispatch authorization. The Commander turns a selected outcome into a current [Change Brief](../agents/change-brief.md), resolves blockers and assigns its exact baseline and writer through [Orca dispatch](../agents/orca-dispatch.md).
 
 ## Delivery order
 
@@ -18,10 +18,11 @@ This preserves the accepted value-first approach: demonstrate a usable result, k
 | Issue | Outcome | Completion and boundary |
 | --- | --- | --- |
 | [#1008](https://github.com/zhouy1017/ai7-harness/issues/1008) | Product README, current-doc navigation, accurate checkpoint and actionable roadmap | Family review/dispositions recorded; links, root wrapper, directives, scenarios and diff checks pass. Frozen design and immutable policy assets preserved. |
-| [#1009](https://github.com/zhouy1017/ai7-harness/issues/1009) | Quick local inspection and GitHub draft-release preparation | Build/launch workflow and release preparation are reviewable and validated within that brief. No public release, tag or main promotion is implied; this slice owns local-inspection/releasing guides. |
+| [#1009](https://github.com/zhouy1017/ai7-harness/issues/1009) | Quick local inspection, automatic nightly packages and version-tag inspection releases | Both platforms pass the existing nightly Gate at one pinned final-dev SHA before packaging. Matching version tags publish those exact verified artifacts under [ADR 0093](../adr/0093-automate-nightly-packages-and-version-tag-inspection-releases.md); no main promotion. Depends on #1015's identity contract. |
 | [#1010](https://github.com/zhouy1017/ai7-harness/issues/1010) | Repository navigation/checks and behavior-preserving consolidation | Existing CLI consumers remain compatible, active local links/root wrappers checked and repository-structure guide supplied. No broad runtime redesign. |
+| [#1015](https://github.com/zhouy1017/ai7-harness/issues/1015) | Unified source, package and runtime version identity | Software version, compatible Data Version, deterministic Git build number and exact source SHA agree in runtime displays, native metadata and release provenance; shallow/dirty release source is refused. |
 
-These three are candidate work until final integration. The Owner's ChatGPT-only instruction applies to this session's model work, with actual bindings recorded in Orca/PRs; it does not fabricate cross-subscription review or authorize product model calls.
+These four are candidate work until final integration. The Owner's ChatGPT-only instruction applies to this session's model work, with actual bindings recorded in Orca/PRs; it does not fabricate cross-subscription review or authorize product model calls.
 
 ## Fixes and reliability
 

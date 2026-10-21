@@ -19,6 +19,8 @@ pnpm run bootstrap
 
 Bootstrap restores declared, integrity-checked dependencies and the Electron carrier. Inspection does not run bootstrap every time: it performs one clean build using those prepared inputs. It does not package, sign or call a model. This is the source-checkout development product; actual editorial model use follows its separate production launch and policy route.
 
+Use a checkout with complete Git history so the [build number](versioning.md) matches GitHub's packages. For an existing shallow clone, fetch its missing history before building. Local changes are allowed for inspection and are identified as modified source in the app; release packaging requires clean source. The software version and frozen Data Version keep their separate meanings.
+
 ## Data location
 
 The default persistent inspection root is separate from production and stable for each checkout:

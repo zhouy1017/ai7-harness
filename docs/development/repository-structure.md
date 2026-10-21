@@ -13,7 +13,7 @@ Start with the [product README](../../README.md) for what AI7 does, [source chec
 | `config/` | Pinned dependency inputs, provider declarations, native assets and generated metadata |
 | `tools/*.mjs` | Stable developer command entry points and generation/build owners |
 | `tools/ci/` | Internal GitHub queue orchestration and Orca merge-authority checks |
-| `.github/workflows/` | Existing hosted Gate/queue and manually invoked delivery workflows |
+| `.github/workflows/` | Existing hosted Gate/queue, automatic post-nightly packaging and version-tag delivery |
 | `e2e/` | Supported Journey runners over the real application topology |
 | `tests/unit/`, `tests/service/` | Provider-free checks at pure and persistence boundaries |
 | `tests/fixtures/`, `tests/editorial-cases/` | Admitted deterministic inputs and bounded editorial evidence; their READMEs own provenance |

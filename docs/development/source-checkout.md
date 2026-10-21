@@ -114,9 +114,9 @@ The portable zip has a pristine `AI7/` folder with `app/` and sibling `data/`: r
 
 The packaged `--self-check` verifies runtime, keyring carrier loading without reading a credential, data-root writability and store-version projection, then exits without opening a window or calling a Provider. Windows packaging records the portable self-check in `release/self-check.txt`. This does not prove installer execution, packaged Journeys or macOS packaging. [PROGRESS](../../PROGRESS.md) and the [milestone record](milestone-1.0.0-scope.md) retain those evidence limits.
 
-Data Version 1 is frozen. Later data changes need their recorded additive/breaking classification, pre-upgrade backup where required and named rollback steps. Packaging, draft-release preparation, signing, notarization, tagging, publication and main promotion are distinct actions; use only the exact assigned scope.
+Data Version 1 is frozen. Later data changes need their recorded additive/breaking classification, pre-upgrade backup where required and named rollback steps. [Versioning](versioning.md) explains how this compatibility value, the software version and the deterministic Git build number reach the running app and native package metadata. Full Git history is required; local inspection marks modified source and release packaging requires a clean checkout.
 
-The [release guide](releasing.md) describes unsigned inspection-draft preparation and the side-effect-free `pnpm run release:prepare -- --help` entry. Implementing that workflow does not authorize executing it, publish a release or implement #974's installed-product updater.
+The [release guide](releasing.md) describes automatic packaging after the paired nightly Gate and publication of matching version tags as unsigned inspection prereleases under [ADR 0093](../adr/0093-automate-nightly-packages-and-version-tag-inspection-releases.md). Implementing that workflow is not evidence that a release has run and does not implement #974's installed-product updater. Production signing/notarization and main promotion remain separately scoped.
 
 ## Operational owners
 

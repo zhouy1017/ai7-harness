@@ -44,9 +44,9 @@ Run the scoped [document lifecycle](document-lifecycle.md) sweep at completion. 
 
 ## Tags and releases
 
-Reserved syntax is `vX.Y.Z` and `vX.Y.Z-rc.N`. It does not assert that release automation exists. Release, tagging, packaging, signing, notarization, publication and promotion to `main` each require their separate exact Owner scope. This development procedure adds no release authorization or hosted gate.
+Reserved syntax is `vX.Y.Z` and `vX.Y.Z-rc.N`. [ADR 0093](../adr/0093-automate-nightly-packages-and-version-tag-inspection-releases.md) supplies the Owner's standing scope for automatic packaging after the paired nightly Gate and publication of those exact artifacts as unsigned inspection prereleases when a matching version tag exists. [Versioning](../development/versioning.md) owns identity; [releasing](../development/releasing.md) owns the workflow. Creating/moving tags, production signing/notarization and promotion to `main` remain separately scoped actions. No additional hosted Gate is created.
 
-The Initial v1.0.0 Development Milestone Boundary remains the exact record defined by [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md); its separately authorized consolidated platform re-entry precedes release-path work. Earlier PRs receive no retrospective evidence.
+The Initial v1.0.0 Development Milestone Boundary remains the exact record defined by [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md); its separately authorized consolidated platform re-entry precedes production release, with only ADR 0093's inspection lane excepted. Earlier PRs receive no retrospective evidence.
 
 ## Protected material and fixtures
 

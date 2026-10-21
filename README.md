@@ -43,12 +43,13 @@ AI output needs editorial judgement. Deterministic tests prove application behav
 
 Edited DOCX export discloses remaining formatting, hyperlink, field and revision limitations ([#874](https://github.com/zhouy1017/ai7-harness/issues/874)). Word integration, OCR, detached manuscript windows, structure-adjustment mode, executable foreign Skills and automatic updates are deferred. The [feature and fix roadmap](docs/development/development-plan.md) distinguishes implemented foundations from these remaining outcomes.
 
-Unsigned packaging exists. Windows installer/portable builds and a portable self-check have recorded evidence; that is not installer execution or macOS DMG validation. Signing, notarization, public release and promotion to `main` require their own authorization. Packaged builds currently include no sample Book.
+Unsigned packaging exists. Windows installer/portable builds and a portable self-check have recorded evidence; that is not installer execution or macOS DMG validation. The delivery workflow builds packages after the paired nightly Gate and publishes matching version tags as explicitly labeled unsigned inspection prereleases. Signing, notarization and promotion to `main` remain separate steps. Packaged builds currently include no sample Book.
 
 ## Documentation and contributions
 
 - [Documentation index](docs/README.md) — current guides, design owners and evidence.
-- [Inspection and draft-release preparation](docs/development/releasing.md) — workflow and its separate execution authorization.
+- [Nightly builds and version-tag releases](docs/development/releasing.md) — automatic delivery of unsigned inspection packages.
+- [Version identity](docs/development/versioning.md) — matching software version, Data Version, build number and source commit across the app and its packages.
 - [PROGRESS](PROGRESS.md) — exact integrated checkpoint and remaining risks.
 - [Development plan](docs/development/development-plan.md) — next fixes, features and decision blockers.
 - [AGENTS.md](AGENTS.md) — mandatory entry for repository work; [Orca dispatch](docs/agents/orca-dispatch.md) owns assignment, review and integration.

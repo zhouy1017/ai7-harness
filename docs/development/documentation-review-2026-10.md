@@ -2,6 +2,8 @@
 
 Scope: [#1008](https://github.com/zhouy1017/ai7-harness/issues/1008), brief revision 1; reviewed on 2026-10-21 against `dev@f3199a2d823821476e7fcdcfb077e0a3d7b28b3c`. This is a bounded review/disposition record, not a second progress ledger or design authority. [PROGRESS](../../PROGRESS.md) owns integration status and [development-plan.md](development-plan.md) owns remaining work.
 
+The Owner's same-day follow-up revises #1009 from manual draft preparation to automatic post-nightly packages and version-tag inspection releases, and adds #1015 for shared version identity. [ADR 0093](../adr/0093-automate-nightly-packages-and-version-tag-inspection-releases.md) names the exact distribution/re-entry amendments. The README, document router, roadmap and release/version guides reflect that successor; the 43-Issue count below remains the initial review snapshot.
+
 ## Review coverage and dispositions
 
 | Family / owners examined | Finding | Disposition |

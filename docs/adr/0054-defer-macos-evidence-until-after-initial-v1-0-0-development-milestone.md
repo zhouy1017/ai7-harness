@@ -4,6 +4,8 @@ status: accepted
 
 # Defer macOS evidence until after the initial v1.0.0 development milestone
 
+> [ADR 0093](0093-automate-nightly-packages-and-version-tag-inspection-releases.md) narrowly amends the release re-entry restriction for automatic unsigned inspection packages and prereleases after a paired nightly Gate. Production re-entry and historical evidence limits below remain current.
+
 On 2026-08-31 the Owner decided that product integration will require fresh Windows evidence only until AI7 crosses the **Initial v1.0.0 Development Milestone Boundary**. macOS evidence is deferred during that interval, not passed or removed from the product contract. This decision temporarily amends only the evidence-platform and integration-timing clauses of [ADR 0027](./0027-concentrate-ci-on-e2e-functionality.md), [ADR 0049](./0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md), [ADR 0051](./0051-admit-j-12-as-the-fourth-supported-e2e-journey.md), and [ADR 0053](./0053-preserve-local-first-development-through-a-bounded-ci-degraded-mode.md). It preserves [ADR 0028](./0028-support-windows-and-macos-as-one-product.md), [ADR 0052](./0052-select-the-macos-v1-distribution-and-data-location-profile.md), one logical provider-free E2E Functional Gate, and the then-current executable admitted Journey set. [ADR 0055](./0055-stage-the-bounded-provider-free-j-03-authorization-journey.md) and [ADR 0056](./0056-stage-the-bounded-provider-free-j-15-artifact-lifecycle-journey.md) govern that set's staged J-15-then-J-03 cutovers without changing this ADR's evidence timing. This decision does not revive ADR 0014's superseded Windows-only Gate.
 
 ## Initial v1.0.0 Development Milestone Boundary
