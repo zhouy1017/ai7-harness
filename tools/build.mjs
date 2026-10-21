@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { inspectDevelopmentInputs } from './doctor.mjs';
 import { electronLicenseCarriers } from './electron-runtime.mjs';
 import { readBuildIdentity } from './build-identity.mjs';
+import { IDENTITY_BOUND_OUTPUTS } from '../src/shared/build-identity.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = resolve(ROOT, 'dist');
@@ -363,14 +364,6 @@ async function main() {
 
   await runEsbuild({
     ...nodeBuild,
-    define,
-    entryPoints: [resolve(ROOT, 'src', 'main', 'index.ts')],
-    external: ['electron'],
-    format: 'cjs',
-    outfile: outputPath('main', 'index.cjs'),
-  });
-  await runEsbuild({
-    ...nodeBuild,
     entryPoints: [resolve(ROOT, 'src', 'main', 'preload.ts')],
     external: ['electron'],
     format: 'cjs',
@@ -411,6 +404,17 @@ async function main() {
   });
   await copyFile(resolve(ROOT, 'src', 'renderer', 'index.html'), outputPath('renderer', 'index.html'));
   await copyFile(resolve(ROOT, 'src', 'renderer', 'styles.css'), outputPath('renderer', 'styles.css'));
+  // Main checks this exact service/renderer closure before choosing or opening a data root.
+  const outputDigests = Object.fromEntries(await Promise.all(IDENTITY_BOUND_OUTPUTS.map(async (path) =>
+    [path, createHash('sha256').update(await readFile(outputPath(...path.split('/')))).digest('hex')])));
+  await runEsbuild({
+    ...nodeBuild,
+    define: { ...define, __AI7_BUILD_OUTPUT_DIGESTS__: JSON.stringify(outputDigests) },
+    entryPoints: [resolve(ROOT, 'src', 'main', 'index.ts')],
+    external: ['electron'],
+    format: 'cjs',
+    outfile: outputPath('main', 'index.cjs'),
+  });
   await copyFile(
     resolve(ROOT, 'config', 'dsh-profiles', 'manuscript-editorial', 'package.json'),
     outputPath('config', 'dsh-profiles', 'manuscript-editorial', 'package.json'),

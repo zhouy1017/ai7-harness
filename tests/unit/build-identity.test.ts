@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildIdentityLine, currentBuildIdentity, parseBuildIdentity, requireMatchingVersions } from '../../src/shared/build-identity.js';
-import { readBuiltIdentity } from '../../src/shared/read-build-identity.js';
+import { buildIdentityLine, currentBuildIdentity, IDENTITY_BOUND_OUTPUTS, parseBuildIdentity, requireMatchingVersions } from '../../src/shared/build-identity.js';
+import { readApplicationBuildIdentity, readBuiltIdentity } from '../../src/shared/read-build-identity.js';
 // @ts-expect-error Plain build tooling intentionally has no TypeScript declarations.
 import { nativeBuildVersions, readBuildIdentity } from '../../tools/build-identity.mjs';
 
@@ -79,6 +80,23 @@ describe('one source/build/runtime identity', () => {
     await expect(readBuildIdentity(root)).rejects.toThrow('PACKAGE_INVALID');
   });
 
+  it('ignores replacement ancestry and refuses grafted or incomplete history', async () => {
+    const root = await repository();
+    const first = git(root, 'rev-parse', 'HEAD');
+    git(root, 'commit', '--allow-empty', '-m', 'second');
+    const second = git(root, 'rev-parse', 'HEAD');
+    git(root, 'replace', second, first);
+    expect(await readBuildIdentity(root)).toMatchObject({ sourceCommit: second, buildNumber: 2 });
+    git(root, 'replace', '-d', second);
+    const graft = join(root, '.git', 'info', 'grafts');
+    await writeFile(graft, `${second}\n`);
+    await expect(readBuildIdentity(root)).rejects.toThrow('GRAFTED_HISTORY');
+    await rm(graft);
+    // A non-shallow repository with a missing ancestor must not silently count only its tip.
+    await rm(join(root, '.git', 'objects', first.slice(0, 2), first.slice(2)));
+    await expect(readBuildIdentity(root)).rejects.toThrow('GIT_UNAVAILABLE');
+  });
+
   it('loads persisted identity only if every field agrees with the built code', async () => {
     const root = await temporary();
     await expect(readBuiltIdentity(root, identity)).rejects.toThrow('UNAVAILABLE');
@@ -90,6 +108,36 @@ describe('one source/build/runtime identity', () => {
     }
     await writeFile(join(root, 'build-identity.json'), '{');
     await expect(readBuiltIdentity(root, identity)).rejects.toThrow('UNAVAILABLE');
+  });
+
+  it('refuses mixed service/renderer output even when software and Data Version still match', async () => {
+    const root = await temporary();
+    vi.stubGlobal('__AI7_BUILD_IDENTITY__', identity);
+    await writeFile(join(root, 'build-identity.json'), JSON.stringify(identity));
+    const bytes = JSON.stringify(identity);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    const digests = Object.fromEntries(IDENTITY_BOUND_OUTPUTS.map((path) => [path, digest]));
+    for (const path of IDENTITY_BOUND_OUTPUTS) {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(join(root, path), bytes);
+    }
+    await expect(readApplicationBuildIdentity(root)).rejects.toThrow('UNAVAILABLE');
+    vi.stubGlobal('__AI7_BUILD_OUTPUT_DIGESTS__', digests);
+    expect(await readApplicationBuildIdentity(root)).toEqual(identity);
+    const stale = JSON.stringify({ ...identity, buildNumber: identity.buildNumber - 1, sourceCommit: 'b'.repeat(40) });
+    for (const path of IDENTITY_BOUND_OUTPUTS) {
+      await writeFile(join(root, path), stale);
+      // The unchanged manifest alone still agrees, which is why main must validate the component bytes too.
+      expect(await readBuiltIdentity(root, identity)).toEqual(identity);
+      await expect(readApplicationBuildIdentity(root)).rejects.toThrow('MISMATCH');
+      await rm(join(root, path));
+      await expect(readApplicationBuildIdentity(root)).rejects.toThrow('UNAVAILABLE');
+      await writeFile(join(root, path), bytes);
+    }
+    for (const invalid of [null, {}, { ...digests, unexpected: digest }, { ...digests, 'renderer/renderer.js': 'invalid' }]) {
+      vi.stubGlobal('__AI7_BUILD_OUTPUT_DIGESTS__', invalid);
+      await expect(readApplicationBuildIdentity(root)).rejects.toThrow('INVALID');
+    }
   });
 
   it('keeps prerelease SemVer separate from numeric native fields and fails rather than wrapping', () => {

@@ -1,6 +1,6 @@
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { parseBuildIdentity, type BuildIdentity } from '../shared/build-identity.js';
+import { isSoftwareVersion, parseBuildIdentity, type BuildIdentity } from '../shared/build-identity.js';
 
 /** Pure, allowlisted diagnostics projection. Never accepts a filesystem root to crawl. */
 export const DIAGNOSTICS_CHANNELS = {
@@ -39,7 +39,7 @@ declare module '../shared/protocol.js' {
 
 const VERSION = /^[0-9]+(?:\.[0-9]+)*(?:[-+][a-zA-Z0-9.-]+)?$/u;
 function version(value: unknown): string {
-  return typeof value === 'string' && VERSION.test(value) ? value : 'unknown';
+  return typeof value === 'string' && (isSoftwareVersion(value) || VERSION.test(value)) ? value : 'unknown';
 }
 function count(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
@@ -60,7 +60,10 @@ export function sanitizeCrashRecord(input: Partial<CrashRecord>): CrashRecord {
   const instant = typeof input.instant === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(input.instant)
     ? input.instant : '1970-01-01T00:00:00.000Z';
   let buildIdentity: BuildIdentity | null = null;
-  try { buildIdentity = parseBuildIdentity(input.buildIdentity); } catch { /* Older or malformed record: provenance unknown. */ }
+  try {
+    const parsed = parseBuildIdentity(input.buildIdentity);
+    if (parsed.softwareVersion === input.appVersion) buildIdentity = parsed;
+  } catch { /* Older, malformed or contradictory record: provenance unknown. */ }
   return {
     instant,
     kind: CRASH_KINDS.includes(input.kind!) ? input.kind! : 'uncaughtException',
