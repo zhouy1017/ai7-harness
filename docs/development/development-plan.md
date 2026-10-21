@@ -2,7 +2,7 @@
 
 This is the sole delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The 2026-10-21 refresh starts from `dev@f3199a2d823821476e7fcdcfb077e0a3d7b28b3c`: waves 1–16 are integrated, including the [Initial v1.0.0 Development Milestone record](milestone-1.0.0-scope.md). [PROGRESS](../../PROGRESS.md) owns implementation status; Issues own bounded acceptance. An open Issue can contain delivered work, and a milestone name is not a release claim.
 
-The tracker snapshot contains **43 open Issues: 40 previously open plus #1008/#1009/#1010**. The assignment called the prior list 39, but its enumerated IDs expand to 40; all are accounted for below without reopening closed foundations. This is the remaining feature/fix roadmap, not a new design decision or blanket dispatch authorization. The Commander turns a selected outcome into a current [Change Brief](../agents/change-brief.md), resolves blockers and assigns its exact baseline and writer through [Orca dispatch](../agents/orca-dispatch.md).
+The tracker snapshot contains **43 open Issues**, all accounted for below without reopening closed foundations. This is the remaining feature/fix roadmap, not a new design decision or blanket dispatch authorization. The Commander turns a selected outcome into a current [Change Brief](../agents/change-brief.md), resolves blockers and assigns its exact baseline and writer through [Orca dispatch](../agents/orca-dispatch.md).
 
 ## Delivery order
 
