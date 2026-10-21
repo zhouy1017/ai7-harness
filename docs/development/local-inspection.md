@@ -6,7 +6,7 @@ For a person inspecting current source, after the one-time prerequisites below:
 pnpm run inspect
 ```
 
-This rebuilds current code and opens the normal provider-free development product. It awaits the existing build controller, then runs the existing foreground `start-built` launcher with explicit `development-ci` scope. Only the launcher's `AI7_READY` handshake means the main process, service and renderer are ready. The terminal stays attached until AI7 closes; build, launch and readiness failures return a nonzero exit code. Close AI7 before rebuilding, and do not run builds concurrently in the same checkout.
+This rebuilds current code and opens the normal provider-free development product. It awaits the existing build controller, then calls the existing foreground `start-built` launcher in the same process with explicit `development-ci` scope, preserving Electron's launcher-parent lease if inspection exits unexpectedly. Only the launcher's `AI7_READY` handshake means the main process, service and renderer are ready. The terminal stays attached until AI7 closes; build, launch and readiness failures return a nonzero exit code. Close AI7 before rebuilding, and do not run builds concurrently in the same checkout.
 
 ## Prerequisites
 

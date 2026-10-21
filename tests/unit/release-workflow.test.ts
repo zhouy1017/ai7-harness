@@ -1,9 +1,9 @@
-import { copyFile, link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { copyFile, link, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Plain build tooling intentionally has no TypeScript declarations.
-import { assetNames, draftArguments, parsePrepareArguments, releaseCandidate, requireEmptyRelease, stageAssets, verifyCheckout, verifyDownloads, verifyGate, verifyRemote, workflowCandidate } from '../../tools/release.mjs';
+import { assetNames, draftArguments, findRelease, parsePrepareArguments, releaseCandidate, requireEmptyRelease, stageAssets, verifyCheckout, verifyDownloads, verifyGate, verifyRemote, workflowCandidate } from '../../tools/release.mjs';
 // @ts-expect-error Plain build tooling intentionally has no TypeScript declarations.
 import { parsePackageArguments } from '../../tools/package.mjs';
 
@@ -73,19 +73,39 @@ describe('manual unsigned inspection draft boundaries', () => {
     const request = async (path: string) => {
       if (path.startsWith('git/ref/')) return { object: { type: 'tag', sha: 'd'.repeat(40) } };
       if (path.startsWith('git/tags/')) return { object: { type: 'commit', sha: candidate.sha } };
-      if (path.startsWith('releases/')) return null;
+      if (path.startsWith('releases?')) return [];
       if (path.includes('/jobs?')) return { total_count: 2, jobs };
       return run;
     };
     await expect(verifyRemote(candidate, request)).resolves.toBeUndefined();
     await expect(verifyRemote(candidate, async (path: string) => path.startsWith('git/tags/')
       ? { object: { type: 'commit', sha: 'e'.repeat(40) } } : request(path))).rejects.toThrow(/tag/);
-    await expect(verifyRemote(candidate, async (path: string) => path.startsWith('releases/')
-      ? { draft: true } : request(path))).rejects.toThrow(/existing-release/);
+    for (const draft of [true, false]) {
+      await expect(verifyRemote(candidate, async (path: string) => path.startsWith('releases?')
+        ? [{ tag_name: candidate.tag, draft }] : request(path))).rejects.toThrow(/existing-release/);
+    }
+  });
+
+  it('finds a pending draft beyond the first release page without the published-only tag endpoint', async () => {
+    const draft = { id: 1234, tag_name: candidate.tag, draft: true, prerelease: true, assets: [] };
+    const paths: string[] = [];
+    const request = async (path: string) => {
+      paths.push(path);
+      if (path === 'releases?per_page=100&page=1') {
+        return Array.from({ length: 100 }, (_, index) => ({ tag_name: `v2.0.${index}`, draft: false }));
+      }
+      if (path === 'releases?per_page=100&page=2') return [draft];
+      throw new Error('Unexpected release endpoint');
+    };
+    await expect(findRelease(candidate, request)).resolves.toEqual(draft);
+    expect(paths).toEqual(['releases?per_page=100&page=1', 'releases?per_page=100&page=2']);
+    await expect(findRelease(candidate, async () => [draft, draft])).rejects.toThrow(/duplicate-release/);
+    await expect(findRelease(candidate, async () => ({}))).rejects.toThrow(/releases/);
+    await expect(findRelease(candidate, async () => [])).resolves.toBeNull();
   });
 
   it('refuses dirty/wrong-head checkouts and version drift before packaging', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'ai7-release-test-'));
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'ai7-release-test-')));
     try {
       await fixture(root, 'win32');
       const cleanGit = (args: string[]) => args[0] === 'rev-parse' ? candidate.sha : '';
@@ -97,7 +117,7 @@ describe('manual unsigned inspection draft boundaries', () => {
   });
 
   it('stages only expected assets, binds provenance and detects missing/tampered/extra downloads', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'ai7-release-test-'));
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'ai7-release-test-')));
     try {
       const download = join(root, 'download');
       await mkdir(download);
@@ -124,7 +144,7 @@ describe('manual unsigned inspection draft boundaries', () => {
   });
 
   it.each(['self-check.txt', 'stale-package.zip', 'AI7/data/synthetic.txt'])('refuses residual output %s', async (name) => {
-    const root = await mkdtemp(join(tmpdir(), 'ai7-release-test-'));
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'ai7-release-test-')));
     try {
       await fixture(root, 'win32');
       await expect(requireEmptyRelease(root)).rejects.toThrow(/stale-output/);
@@ -134,7 +154,7 @@ describe('manual unsigned inspection draft boundaries', () => {
   });
 
   it('refuses redirected release directories and hard-linked output files', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'ai7-release-test-'));
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'ai7-release-test-')));
     try {
       await mkdir(join(root, 'redirect'));
       await symlink(join(root, 'redirect'), join(root, 'release'), 'junction');

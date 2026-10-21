@@ -14,7 +14,7 @@ Once authorized, select **Prepare unsigned inspection draft** on branch **dev** 
 | `version` | Exact `package.json` version, `X.Y.Z` or `X.Y.Z-rc.N` |
 | `gate_run` | Existing successful directly dispatched **E2E Nightly Full Gate** run ID for that exact SHA, with both platform jobs successful |
 
-The separately authorized tag `v<version>` must already exist and resolve to the same SHA, whether lightweight or annotated. A missing/moved tag, existing release (including a partial draft), version mismatch, dirty checkout, non-`dev` workflow ref, different workflow/source SHA, incomplete Gate run, or absent platform result stops preparation. The default-branch workflow discovery requirement must be satisfied through normal authorized integration/promotion; this feature does not justify changing `main` just to expose the Run workflow button.
+The separately authorized tag `v<version>` must already exist and resolve to the same SHA, whether lightweight or annotated. A missing/moved tag, existing visible release, version mismatch, dirty checkout, non-`dev` workflow ref, different workflow/source SHA, incomplete Gate run, or absent platform result stops preparation. Drafts require push access to see: the read-only validation job can reject published releases, and the final write job checks the paginated release listing for every matching release, including partial drafts, before creating anything. The default-branch workflow discovery requirement must be satisfied through normal authorized integration/promotion; this feature does not justify changing `main` just to expose the Run workflow button.
 
 An equivalent CLI invocation, **only after that separate execution authorization**, is:
 

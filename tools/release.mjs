@@ -147,14 +147,29 @@ export function verifyGate(candidate, run, jobs) {
       jobs.filter((job) => job.name.endsWith(suffix)).length === 1), 'gate');
 }
 
-function github(path, optional = false) {
+function github(path) {
   return fetch(`https://api.github.com/repos/${REPO}/${path}`, { redirect: 'error',
     headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${process.env.GH_TOKEN}`,
       'X-GitHub-Api-Version': '2022-11-28' }, signal: AbortSignal.timeout(30_000) }).then(async (response) => {
-    if (optional && response.status === 404) return null;
     requireRelease(response.ok, 'github');
     return response.json();
   });
+}
+
+// The tag endpoint returns published releases only. Listing also exposes drafts
+// to the final job's contents-write token, including partial earlier attempts.
+export async function findRelease(candidate, request = github) {
+  let found = null;
+  for (let page = 1; ; page++) {
+    const releases = await request(`releases?per_page=100&page=${page}`);
+    requireRelease(Array.isArray(releases), 'releases');
+    for (const release of releases) {
+      if (release.tag_name !== candidate.tag) continue;
+      requireRelease(found === null, 'duplicate-release');
+      found = release;
+    }
+    if (releases.length < 100) return found;
+  }
 }
 
 export async function verifyRemote(candidate, request = github) {
@@ -164,7 +179,7 @@ export async function verifyRemote(candidate, request = github) {
     object = (await request(`git/tags/${object.sha}`)).object;
   }
   requireRelease(object.type === 'commit' && object.sha === candidate.sha, 'tag');
-  requireRelease(await request(`releases/tags/${candidate.tag}`, true) === null, 'existing-release');
+  requireRelease(await findRelease(candidate, request) === null, 'existing-release');
   const run = await request(`actions/runs/${candidate.gateRun}`);
   requireRelease(Number.isSafeInteger(run.run_attempt) && run.run_attempt > 0, 'gate');
   const page = await request(`actions/runs/${candidate.gateRun}/attempts/${run.run_attempt}/jobs?per_page=100`);
@@ -247,8 +262,8 @@ async function main(args) {
   await writeFile(notes, `UNSIGNED INSPECTION ONLY — NOT AN END-USER macOS RELEASE.\n\nCommit: ${candidate.sha}\nExisting tag: ${candidate.tag}\nFull Gate: https://github.com/${REPO}/actions/runs/${candidate.gateRun}\nBuild: https://github.com/${REPO}/actions/runs/${process.env.GITHUB_RUN_ID}\n\nNo signing, hardened runtime, notarization or packaged launch verification was performed.\nmacOS end-user distribution requires Developer ID signing, hardened runtime, notarization and separate Owner publication authority under ADR 0052.\nChecksums and unsigned build provenance accompany these assets; they are not signed attestations.\n`, { flag: 'wx' });
   // gh checks that the tag exists itself; no --clobber, release edit or publish path.
   command('gh', draftArguments(candidate, files, notes));
-  const release = await github(`releases/tags/${candidate.tag}`);
-  requireRelease(release.draft === true && release.prerelease === true && release.tag_name === candidate.tag &&
+  const release = await findRelease(candidate);
+  requireRelease(release?.draft === true && release.prerelease === true && release.tag_name === candidate.tag &&
     release.assets?.length === files.length && files.every((file) => release.assets.some((asset) => asset.name === basename(file) && asset.state === 'uploaded')), 'draft');
   console.log('RELEASE/draft-created');
 }
