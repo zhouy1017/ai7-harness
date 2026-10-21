@@ -4,6 +4,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { startBuilt } from './start-built.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const HELP = `pnpm run inspect [-- --data-root <absolute external directory>]
@@ -81,7 +82,7 @@ function runNode(args) {
   });
 }
 
-export async function inspect(args, { run = runNode, codeRoot = ROOT, defaultRoot = defaultInspectionRoot,
+export async function inspect(args, { run = runNode, launch = startBuilt, codeRoot = ROOT, defaultRoot = defaultInspectionRoot,
   externalRoot = requireExternalInspectionRoot, log = console.log } = {}) {
   const options = parseInspectionArguments(args);
   if (options.help) { log(HELP); return; }
@@ -89,8 +90,9 @@ export async function inspect(args, { run = runNode, codeRoot = ROOT, defaultRoo
   await run([resolve(codeRoot, 'tools/build-controller.mjs')]);
   if (options.buildOnly) { log('INSPECTION/build-complete (Electron not launched)'); return; }
   log(`Provider-free inspection data: ${dataRoot}`);
-  // Await the existing foreground launcher: only its AI7_READY handshake means ready.
-  await run([resolve(codeRoot, 'tools/start-built.mjs'), '--data-root', dataRoot, '--trusted-operational-scope', 'development-ci']);
+  // This process is the existing launcher, so Electron's launcher-pid lease also
+  // covers an unexpected inspection-process exit. Only AI7_READY means ready.
+  await launch(['--data-root', dataRoot, '--trusted-operational-scope', 'development-ci']);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
