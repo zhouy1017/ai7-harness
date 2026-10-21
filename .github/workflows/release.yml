@@ -1,0 +1,139 @@
+name: Prepare unsigned inspection draft
+run-name: Unsigned inspection draft · ${{ inputs.sha }}
+
+# Implementation is not dispatch authority. See docs/development/releasing.md.
+# No push/tag trigger, signing secrets, new Gate, tag creation or publication.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact current dev commit (40 lowercase hex characters)
+        type: string
+        required: true
+      version:
+        description: Exact package version; a separately authorized vVERSION tag must already exist
+        type: string
+        required: true
+      gate_run:
+        description: Existing successful exact-commit E2E Nightly Full Gate run ID
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai7-inspection-draft
+  cancel-in-progress: false
+
+env:
+  RELEASE_SHA: ${{ inputs.sha }}
+  RELEASE_VERSION: ${{ inputs.version }}
+  RELEASE_GATE_RUN: ${{ inputs.gate_run }}
+  NPM_CONFIG_PREFIX: ''
+
+jobs:
+  validate:
+    name: Validate existing candidate and Gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          check-latest: false
+      - name: Refuse untrusted refs, mismatched versions, tags and stale verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release.mjs validate
+
+  package:
+    name: Build unsigned inspection (${{ matrix.platform }})
+    needs: validate
+    timeout-minutes: 45
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win-x64
+            runner: windows-2025
+            architecture: x64
+            windows_marker: '1'
+          - platform: mac-arm64
+            runner: macos-15
+            architecture: arm64
+            windows_marker: '0'
+    env:
+      AI7_CI_WINDOWS_SERVER_2025: ${{ matrix.windows_marker }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          architecture: ${{ matrix.architecture }}
+          check-latest: false
+      - name: Activate repository-pinned pnpm
+        shell: bash
+        run: |
+          corepack enable
+          pnpm --version
+      - name: Check supported host and closed inputs
+        run: pnpm run doctor
+      - name: Restore exact declared dependencies
+        run: pnpm run bootstrap
+      - name: Package without launching and stage only named outputs
+        id: stage
+        shell: bash
+        run: pnpm run release:prepare -- --sha "$RELEASE_SHA" --version "$RELEASE_VERSION" --gate-run "$RELEASE_GATE_RUN"
+      - name: Upload explicit inspection files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: inspection-${{ matrix.platform }}
+          path: ${{ steps.stage.outputs.files }}
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7
+          compression-level: 0
+
+  draft:
+    name: Create draft only
+    needs: [validate, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          check-latest: false
+      - name: Download this run's Windows inspection files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: inspection-win-x64
+          path: release/download
+      - name: Download this run's macOS inspection files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: inspection-mac-arm64
+          path: release/download
+      - name: Recheck tag and Gate, verify all bytes, create unsigned inspection draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release.mjs draft
