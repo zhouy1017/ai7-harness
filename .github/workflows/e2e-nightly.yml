@@ -10,16 +10,15 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Exact ref to run the full admitted Journey set against
-        required: false
+        description: Full 40-character commit SHA to run the admitted Journey set against
+        required: true
         type: string
   workflow_call:
     inputs:
       ref:
-        description: Exact ref to run the full admitted Journey set against
-        required: false
+        description: Full 40-character commit SHA to run the admitted Journey set against
+        required: true
         type: string
-        default: ''
 
 permissions:
   contents: read
@@ -52,8 +51,8 @@ jobs:
       - name: Check out exact source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ inputs.ref || github.ref }}
-          fetch-depth: 1
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Select exact Node
@@ -63,11 +62,8 @@ jobs:
           architecture: ${{ matrix.architecture }}
           check-latest: false
 
-      - name: Require an immutable manually selected candidate
-        # Inside a called workflow the `github` context is the caller's, so a manually dispatched
-        # queue calling this file for the moving final `dev` also reads `workflow_dispatch`. Only a
-        # direct dispatch of this file records a candidate in its run name.
-        if: ${{ github.event_name == 'workflow_dispatch' && contains(github.workflow_ref, '/.github/workflows/e2e-nightly.yml@') }}
+      - name: Require the selected immutable checkout
+        # The queue resolves final dev once; direct dispatch also requires an exact commit.
         shell: bash
         env:
           SELECTED_REF: ${{ inputs.ref }}

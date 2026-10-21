@@ -623,12 +623,12 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
     }
   });
 
-  it('holds only a direct manual dispatch, not a queue-called final dev Gate, to an immutable commit', async () => {
+  it('requires an immutable commit for both direct dispatch and queue-called final dev', async () => {
     const { readFile } = await import('node:fs/promises');
     const nightly = await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8');
-    const guard = nightly.split('- name: Require an immutable manually selected candidate')[1]!.split('\n      - name:')[0]!;
-    expect(guard).toContain("contains(github.workflow_ref, '/.github/workflows/e2e-nightly.yml@')");
+    const guard = nightly.split('- name: Require the selected immutable checkout')[1]!.split('\n      - name:')[0]!;
+    expect(guard).not.toContain('if: ${{');
     const queueWorkflow = await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8');
-    expect(queueWorkflow).toContain('ref: ${{ github.ref }}');
+    expect(queueWorkflow).toContain('ref: ${{ needs.resolve.outputs.sha }}');
   });
 });
