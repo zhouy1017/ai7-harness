@@ -2,7 +2,7 @@
 
 Scope: [#1008](https://github.com/zhouy1017/ai7-harness/issues/1008), brief revision 1; reviewed on 2026-10-21 against `dev@f3199a2d823821476e7fcdcfb077e0a3d7b28b3c`. This is a bounded review/disposition record, not a second progress ledger or design authority. [PROGRESS](../../PROGRESS.md) owns integration status and [development-plan.md](development-plan.md) owns remaining work.
 
-The Owner's same-day follow-up revises #1009 from manual draft preparation to automatic post-nightly packages and version-tag inspection releases, and adds #1015 for shared version identity. [ADR 0093](../adr/0093-automate-nightly-packages-and-version-tag-inspection-releases.md) names the exact distribution/re-entry amendments. The README, document router, roadmap and release/version guides reflect that successor; the 43-Issue count below remains the initial review snapshot.
+The Owner's same-day follow-up revises #1009 from manual draft preparation to automatic post-nightly packages and version-tag inspection releases, and adds #1015 for shared version identity. [ADR 0093](../adr/0093-automate-nightly-packages-and-version-tag-inspection-releases.md) names the exact distribution/re-entry amendments. The README, document router and roadmap route that accepted successor to #1009's release guide and #1015's version guide. The coverage, 43-Issue count and validation results below remain the initial #1008 review snapshot, not evidence that these follow-ups are implemented or checked.
 
 ## Review coverage and dispositions
 
@@ -46,6 +46,6 @@ No product build, Electron Journey, product inference, release workflow, tag, pu
 
 ## Remaining integration work
 
-Companion #1009 supplies the linked inspection/releasing guides; #1010 supplies the structure/checking guide and repairs generated provider-support prose. Their actual delivery and cumulative validation must precede any claim that wave 17 is integrated. The standing CI pairing guard and the session's ChatGPT-only review route require the Commander's disposition; this slice changes neither.
+Companion #1009 owns the linked inspection/releasing guides, #1010 owns the structure/checking guide and generated provider-support repair, and the follow-up #1015 owns the version guide and shared identity implementation. The revised automatic-delivery and identity slices need their own review and cumulative validation before any claim that wave 17 is integrated into dev. The standing CI pairing guard and the session's ChatGPT-only review route require the Commander's disposition; this slice changes neither.
 
 Product defects, material/decision blockers, tracker residue and unsliced outcomes are routed to the existing [development plan](development-plan.md). Frozen references and historical measurements are not silently updated to make those gaps disappear. The removed active prose is recoverable at the recorded baseline in Git.

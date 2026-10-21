@@ -10,7 +10,7 @@ On 2026-08-28 the Owner selected the macOS V1 profile that ADRs 0023 and 0028 ha
 
 ## Distribution and update posture
 
-The end-user macOS distribution is one direct-download DMG containing the AI7 `.app`. A distributable build must be Developer ID signed, use the hardened runtime, and be notarized. Updating is a manual replacement of the application while preserving product data. V1 has no Mac App Store channel, PKG channel, portable-data mode, or automatic updater.
+The end-user production macOS distribution is one direct-download DMG containing the AI7 `.app`. That production build must be Developer ID signed, use the hardened runtime, and be notarized. ADR 0093 separately permits explicitly labeled unsigned inspection prereleases; they do not satisfy this production requirement. Updating is a manual replacement of the application while preserving product data. V1 has no Mac App Store channel, PKG channel, portable-data mode, or automatic updater.
 
 This selection records product and release requirements; it does not itself authorize access to a signing secret, packaging, signing, hardening, notarization submission, upload, publication, release, or promotion to `main`. A source-checkout runtime identifies itself truthfully and never claims to be the packaged/notarized DMG.
 

@@ -21,7 +21,7 @@ Start with the [product README](../README.md) for audience, capabilities, limita
 | Development capture conversion | [Fixture conversion](development/manual-model-fixture-recording.md) |
 | Repository assignment, review and integration | [Orca dispatch](agents/orca-dispatch.md) and [task-specific router](agents/README.md) |
 
-These guides describe the checked-out candidate. [PROGRESS](../PROGRESS.md) distinguishes its integration state from the recorded dev baseline; workflow implementation is not evidence of an executed release.
+These guides route the wave 17 candidate and its accepted [automatic-delivery contract](adr/0093-automate-nightly-packages-and-version-tag-inspection-releases.md) to their implementation owners, #1009 and #1015. [PROGRESS](../PROGRESS.md) distinguishes integration state from the recorded dev baseline; workflow implementation is not evidence of an executed release.
 
 ## Design authority
 

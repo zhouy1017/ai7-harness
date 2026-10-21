@@ -43,7 +43,7 @@ AI output needs editorial judgement. Deterministic tests prove application behav
 
 Edited DOCX export discloses remaining formatting, hyperlink, field and revision limitations ([#874](https://github.com/zhouy1017/ai7-harness/issues/874)). Word integration, OCR, detached manuscript windows, structure-adjustment mode, executable foreign Skills and automatic updates are deferred. The [feature and fix roadmap](docs/development/development-plan.md) distinguishes implemented foundations from these remaining outcomes.
 
-Unsigned packaging exists. Windows installer/portable builds and a portable self-check have recorded evidence; that is not installer execution or macOS DMG validation. The delivery workflow builds packages after the paired nightly Gate and publishes matching version tags as explicitly labeled unsigned inspection prereleases. Signing, notarization and promotion to `main` remain separate steps. Packaged builds currently include no sample Book.
+Unsigned packaging exists. Windows installer/portable builds and a portable self-check have recorded evidence; that is not installer execution or macOS DMG validation. The [automatic-delivery contract](docs/adr/0093-automate-nightly-packages-and-version-tag-inspection-releases.md) requires packaging after the paired nightly Gate and publication of matching version tags as explicitly labeled unsigned inspection prereleases; [PROGRESS](PROGRESS.md) records implementation status. Signing, notarization and promotion to `main` remain separate steps. Packaged builds currently include no sample Book.
 
 ## Documentation and contributions
 
