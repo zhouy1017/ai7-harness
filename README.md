@@ -43,12 +43,12 @@ AI output needs editorial judgement. Deterministic tests prove application behav
 
 Edited DOCX export discloses remaining formatting, hyperlink, field and revision limitations ([#874](https://github.com/zhouy1017/ai7-harness/issues/874)). Word integration, OCR, detached manuscript windows, structure-adjustment mode, executable foreign Skills and automatic updates are deferred. The [feature and fix roadmap](docs/development/development-plan.md) distinguishes implemented foundations from these remaining outcomes.
 
-Unsigned packaging exists. Windows installer/portable builds and a portable self-check have recorded evidence; that is not installer execution or macOS DMG validation. The [automatic-delivery contract](docs/adr/0093-automate-nightly-packages-and-version-tag-inspection-releases.md) requires packaging after the paired nightly Gate and publication of matching version tags as explicitly labeled unsigned inspection prereleases; [PROGRESS](PROGRESS.md) records implementation status. Signing, notarization and promotion to `main` remain separate steps. Packaged builds currently include no sample Book.
+Unsigned packaging exists. Windows installer/portable builds and a portable self-check have recorded evidence; that is not installer execution or macOS DMG validation. The [automatic-delivery contract](docs/adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) requires native packaging after the paired nightly Gate and Windows-only publication from matching version tags: stable tags produce normal releases and RC tags prereleases, both disclosing unsigned Windows packages. Unsigned macOS builds remain nightly inspection artifacts; macOS publication is held until signing, hardened runtime and notarization are configured. [PROGRESS](PROGRESS.md) records implementation status; promotion to `main` remains separate. Packaged builds currently include no sample Book.
 
 ## Documentation and contributions
 
 - [Documentation index](docs/README.md) — current guides, design owners and evidence.
-- [Nightly builds and version-tag releases](docs/development/releasing.md) — automatic delivery of unsigned inspection packages.
+- [Nightly builds and Windows version-tag releases](docs/development/releasing.md) — native package builds, unsigned Windows releases and macOS inspection artifacts.
 - [Version identity](docs/development/versioning.md) — matching software version, Data Version, build number and source commit across the app and its packages.
 - [PROGRESS](PROGRESS.md) — exact integrated checkpoint and remaining risks.
 - [Development plan](docs/development/development-plan.md) — next fixes, features and decision blockers.

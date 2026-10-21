@@ -10,7 +10,7 @@ Start with the [product README](../README.md) for audience, capabilities, limita
 | Next feature, fix or decision | [Development plan](development/development-plan.md), then its linked Issue |
 | Build and open the current source for human inspection | [Quick local inspection](development/local-inspection.md) |
 | Build, launch scopes, data roots and diagnosis | [Source checkout](development/source-checkout.md) |
-| Nightly packages and automatic version-tag inspection releases | [Releasing](development/releasing.md) |
+| Native nightly packages and automatic Windows version-tag releases | [Releasing](development/releasing.md) |
 | Software version, Data Version, build number and source identity | [Versioning](development/versioning.md) |
 | Find code/tool owners and check documentation links | [Repository structure](development/repository-structure.md) |
 | Supported product paths and what their tests prove | [E2E journeys](development/e2e-journeys.md) |
@@ -21,7 +21,7 @@ Start with the [product README](../README.md) for audience, capabilities, limita
 | Development capture conversion | [Fixture conversion](development/manual-model-fixture-recording.md) |
 | Repository assignment, review and integration | [Orca dispatch](agents/orca-dispatch.md) and [task-specific router](agents/README.md) |
 
-These guides route the wave 17 candidate and its accepted [automatic-delivery contract](adr/0093-automate-nightly-packages-and-version-tag-inspection-releases.md) to their implementation owners, #1009 and #1015. [PROGRESS](../PROGRESS.md) distinguishes integration state from the recorded dev baseline; workflow implementation is not evidence of an executed release.
+These guides route the wave 17 candidate and its accepted [automatic-delivery contract](adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) to their implementation owners, #1009 and #1015. [PROGRESS](../PROGRESS.md) distinguishes integration state from the recorded dev baseline; workflow implementation is not evidence of an executed release.
 
 ## Design authority
 

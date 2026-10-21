@@ -4,13 +4,13 @@ status: accepted
 
 # Select the macOS V1 distribution and data-location profile
 
-> [ADR 0093](0093-automate-nightly-packages-and-version-tag-inspection-releases.md) adds a separately labeled unsigned inspection-prerelease channel. The signed/notarized end-user production DMG requirement below remains current.
+> [ADR 0093](0093-automate-nightly-packages-and-windows-version-tag-releases.md) retains unsigned macOS builds as nightly inspection artifacts only. macOS publication remains held until the signing, hardened-runtime and notarization requirements below are configured.
 
 On 2026-08-28 the Owner selected the macOS V1 profile that ADRs 0023 and 0028 had left open. AI7 supports macOS 15 or later on Apple Silicon arm64 under the stable bundle identifier `io.github.zhouy1017.ai7`. This is the macOS adapter for the same AI7 product, data meaning, authority model, and supported journeys as Windows; it is not a Mac edition.
 
 ## Distribution and update posture
 
-The end-user production macOS distribution is one direct-download DMG containing the AI7 `.app`. That production build must be Developer ID signed, use the hardened runtime, and be notarized. ADR 0093 separately permits explicitly labeled unsigned inspection prereleases; they do not satisfy this production requirement. Updating is a manual replacement of the application while preserving product data. V1 has no Mac App Store channel, PKG channel, portable-data mode, or automatic updater.
+The end-user macOS distribution is one direct-download DMG containing the AI7 `.app`. A distributable build must be Developer ID signed, use the hardened runtime, and be notarized. Updating is a manual replacement of the application while preserving product data. V1 has no Mac App Store channel, PKG channel, portable-data mode, or automatic updater.
 
 This selection records product and release requirements; it does not itself authorize access to a signing secret, packaging, signing, hardening, notarization submission, upload, publication, release, or promotion to `main`. A source-checkout runtime identifies itself truthfully and never claims to be the packaged/notarized DMG.
 
