@@ -383,6 +383,8 @@ export async function selectTags(event, eventName, request = github, versionAt =
     const tag = await resolveTag(name, request);
     if (source !== null && tag.sha !== source) continue;
     requireRelease(versionAt(tag.sha) === tag.version, 'version');
+    // Push `after` identifies the ref object; for an annotated tag, `head_commit` is
+    // the peeled commit instead. Comparing only that commit would admit reannotation.
     if (eventName === 'push') requireRelease(event.after === tag.tagObject, 'tag-moved');
     selections.push({ ...tag, runId });
   }
