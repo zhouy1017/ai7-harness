@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import { posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,22 +7,49 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /** Inspect versioned documentation only. Archives and local files are never read. */
 export function activeMarkdown(paths) {
-  return paths.filter((path) => path.endsWith('.md') && !path.startsWith('docs/archive/'));
+  return paths.filter((path) => path.endsWith('.md') && !path.startsWith('docs/archive/') &&
+    (!path.startsWith('SampleBooks/') || path === 'SampleBooks/README.md'));
+}
+
+function escaped(text, index) {
+  let slashes = 0;
+  while (index > 0 && text[--index] === '\\') slashes += 1;
+  return slashes % 2 === 1;
 }
 
 // Preserve newlines so a finding points at the source line, without interpreting examples as links.
 function proseOnly(markdown) {
-  let fence = null;
-  return markdown.replace(/<!--[\s\S]*?-->/gu, (text) => text.replace(/[^\n]/gu, ' '))
-    .split('\n').map((line) => {
-      const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
-      if (fence !== null) {
-        if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && marker[2].trim() === '') fence = null;
-        return '';
-      }
-      if (marker) { fence = marker[1]; return ''; }
-      return line.replace(/(`+)([\s\S]*?)\1/gu, (text) => ' '.repeat(text.length));
-    }).join('\n');
+  const tokens = /^ {0,3}(`{3,}|~{3,})([^\n]*)|<!--|`+/gmu;
+  let cursor = 0;
+  let prose = '';
+  for (let token; (token = tokens.exec(markdown)) !== null;) {
+    let end;
+    if (token[1] && (token[1][0] === '~' || !token[2].includes('`'))) {
+      const close = new RegExp(`^ {0,3}${token[1][0]}{${token[1].length},}[ \\t\\r]*$`, 'gmu');
+      close.lastIndex = tokens.lastIndex;
+      const closing = close.exec(markdown);
+      end = closing ? closing.index + closing[0].length : markdown.length;
+    } else if (token[0] === '<!--') {
+      const closing = markdown.indexOf('-->', tokens.lastIndex);
+      end = closing < 0 ? markdown.length : closing + 3;
+    } else {
+      // Code spans may cross lines; only a run of exactly the same length closes them.
+      const delimiter = token[1] ?? token[0];
+      const start = token.index + (token[1] ? token[0].indexOf(delimiter) : 0);
+      tokens.lastIndex = start + delimiter.length;
+      if (escaped(markdown, start)) continue;
+      const close = /`+/gu;
+      close.lastIndex = tokens.lastIndex;
+      let closing;
+      while ((closing = close.exec(markdown)) !== null && closing[0].length !== delimiter.length) { /* Next run. */ }
+      if (!closing) continue;
+      end = closing.index + closing[0].length;
+    }
+    prose += markdown.slice(cursor, token.index) + markdown.slice(token.index, end).replace(/[^\n]/gu, ' ');
+    cursor = end;
+    tokens.lastIndex = end;
+  }
+  return prose + markdown.slice(cursor);
 }
 
 /** Markdown inline/image destinations and reference definitions; no remote requests. */
@@ -32,10 +59,12 @@ export function linkDestinations(markdown) {
   const patterns = [
     /!?\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|((?:[^\s()\\]|\\.|\([^()\n]*\))+))(?:\s+["'][^\n]*?["'])?\s*\)/gu,
     /^ {0,3}\[[^\]\n]+\]:\s*(?:<([^>\n]+)>|(\S+))/gmu,
-    /\b(?:href|src)=["']([^"'\n]+)["']/gu,
+    /\b(?:href|src)\s*=\s*["']([^"'\n]+)["']/giu,
   ];
   for (const pattern of patterns) {
     for (const match of prose.matchAll(pattern)) {
+      const bracket = match.index + (match[0].startsWith('!') ? 1 : 0);
+      if (prose[bracket] === '[' && escaped(prose, bracket)) continue;
       destinations.push({ target: match[1] ?? match[2], line: prose.slice(0, match.index).split('\n').length });
     }
   }
@@ -64,7 +93,9 @@ export async function checkDocuments(paths, readDocument) {
   }
   const findings = [];
   for (const source of activeMarkdown(paths)) {
-    const markdown = await readDocument(source);
+    let markdown;
+    try { markdown = await readDocument(source); }
+    catch { findings.push({ source, line: 1, reason: 'unreadable-document' }); continue; }
     if (source === 'CLAUDE.md' && !/^@AGENTS\.md\r?\n?$/u.test(markdown)) {
       findings.push({ source, line: 1, reason: 'wrapper-must-be-@AGENTS.md' });
     }
@@ -83,6 +114,21 @@ export async function checkDocuments(paths, readDocument) {
   return findings;
 }
 
+/** Never follow a tracked document or replaced parent directory into excluded/local content. */
+export async function readTrackedDocument(root, path) {
+  const parts = path.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..' || part.includes('\\'))) throw new Error('invalid-document-path');
+  let current = root;
+  for (const [index, part] of parts.entries()) {
+    current = resolve(current, part);
+    const stat = await lstat(current);
+    if (stat.isSymbolicLink() || (index === parts.length - 1 ? !stat.isFile() : !stat.isDirectory())) {
+      throw new Error('non-regular-document');
+    }
+  }
+  return readFile(current, 'utf8');
+}
+
 export async function main(args = process.argv.slice(2)) {
   if (args.length === 1 && args[0] === '--help') {
     console.log('Usage: node tools/check-docs.mjs\nCheck tracked active Markdown local file/directory links and root routers.\nArchives, external URLs and heading fragments are not inspected. Stage new files before checking.');
@@ -92,7 +138,7 @@ export async function main(args = process.argv.slice(2)) {
   const listed = spawnSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024 });
   if (listed.error || listed.status !== 0) throw new Error('tracked-file-enumeration-failed');
   const paths = listed.stdout.split('\0').filter(Boolean);
-  const findings = await checkDocuments(paths, (path) => readFile(resolve(ROOT, path), 'utf8'));
+  const findings = await checkDocuments(paths, (path) => readTrackedDocument(ROOT, path));
   for (const finding of findings) {
     console.error(`DOCS/${finding.reason}: ${finding.source}:${finding.line}${finding.target ? ` -> ${finding.target}` : ''}`);
   }

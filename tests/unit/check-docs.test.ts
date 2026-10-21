@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 // @ts-expect-error Repository tooling is plain JavaScript.
-import { activeMarkdown, checkDocuments, linkDestinations, localTarget } from '../../tools/check-docs.mjs';
+import { activeMarkdown, checkDocuments, linkDestinations, localTarget, readTrackedDocument } from '../../tools/check-docs.mjs';
 
 describe('active documentation integrity', () => {
   it('reads only tracked active Markdown, never archive or non-document payloads', async () => {
-    const paths = ['AGENTS.md', 'CLAUDE.md', 'docs/guide.md', 'docs/archive/old.md', 'SampleBooks/sample1.docx', 'local.key.txt'];
+    const paths = ['AGENTS.md', 'CLAUDE.md', 'docs/guide.md', 'docs/archive/old.md', 'SampleBooks/sample1.docx', 'SampleBooks/book.md', 'local.key.txt'];
     const reads: string[] = [];
     const findings = await checkDocuments(paths, async (path: string) => {
       reads.push(path);
@@ -44,5 +47,42 @@ describe('active documentation integrity', () => {
       { source: 'CLAUDE.md', line: 1, reason: 'wrapper-must-be-@AGENTS.md' },
       { source: 'AGENTS.md', line: 1, reason: 'missing-root-router' },
     ]);
+  });
+
+  it('keeps code delimiters and comment markers from hiding active links or checking literal examples', () => {
+    expect(linkDestinations([
+      '`example', '[literal](absent.md)', '`',
+      '`<!--`', '[active](missing.md)', '<!-- end -->',
+      '``literal ` [example](absent.md)``',
+      '```md', '<!--', '```', '[after fence](also-missing.md)',
+      '\\[escaped](absent.md)',
+      '<a HREF = "manual.md">manual</a>',
+      '<img src = \'image.png\'>',
+    ].join('\n'))).toEqual([
+      { target: 'missing.md', line: 5 },
+      { target: 'also-missing.md', line: 11 },
+      { target: 'manual.md', line: 13 },
+      { target: 'image.png', line: 14 },
+    ]);
+  });
+
+  it('reports unreadable tracked documents without exposing read errors', async () => {
+    expect(await checkDocuments(['AGENTS.md', 'CLAUDE.md'], async (path: string) => {
+      if (path === 'AGENTS.md') throw new Error('external path must not be logged');
+      return '@AGENTS.md\n';
+    })).toEqual([{ source: 'AGENTS.md', line: 1, reason: 'unreadable-document' }]);
+  });
+
+  it('refuses a directory link before reading document contents through it', async () => {
+    const scratch = await mkdtemp(join(tmpdir(), 'ai7-docs-check-'));
+    try {
+      await mkdir(join(scratch, 'real'));
+      await writeFile(join(scratch, 'real', 'guide.md'), 'public synthetic document');
+      await symlink(join(scratch, 'real'), join(scratch, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+      await expect(readTrackedDocument(scratch, 'real/guide.md')).resolves.toBe('public synthetic document');
+      await expect(readTrackedDocument(scratch, 'linked/guide.md')).rejects.toThrow('non-regular-document');
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
   });
 });
