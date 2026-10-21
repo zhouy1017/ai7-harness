@@ -45,6 +45,17 @@ if (providerConfiguration.error || providerConfiguration.status !== 0) {
   process.exit(1);
 }
 
+const documentation = spawnSync(process.execPath, [resolve(ROOT, 'tools', 'check-docs.mjs')], {
+  cwd: ROOT,
+  env: ENV,
+  stdio: 'inherit',
+  windowsHide: true,
+});
+if (documentation.error || documentation.status !== 0) {
+  console.error('CHECK/documentation-invalid');
+  process.exit(1);
+}
+
 const enumerated = spawnSync('git', ['ls-files', '-z', '--', 'e2e/*.mjs', 'tools/*.mjs'], {
   cwd: ROOT,
   env: ENV,
