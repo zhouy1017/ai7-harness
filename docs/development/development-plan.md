@@ -71,6 +71,8 @@ These records are not proof of a current reproducible defect or permission to re
 
 These are unscheduled, not promises for a next release. The [milestone scope](milestone-1.0.0-scope.md), named ADRs and frozen UI clauses retain design authority.
 
+**macOS releases are deferred indefinitely until the Owner explicitly requests resumption**, under [ADR 0093](../adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md). Signing readiness, a version tag or a successful nightly does not lift this hold. Existing macOS source development, paired Gate checks and nightly inspection packages continue; macOS release work has no scheduled date.
+
 | Issue / lineage | Outcome | Unlocking decision and eventual proof |
 | --- | --- | --- |
 | [#973](https://github.com/zhouy1017/ai7-harness/issues/973) / [#899](https://github.com/zhouy1017/ai7-harness/issues/899) | Local OCR for 需要识别 PDFs | Owner selects the recognition dependency under ADR 0070; a recognized-text layer retains page anchors and never replaces the original. One outcome, two lineage records. |

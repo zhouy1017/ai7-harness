@@ -1,6 +1,6 @@
 # Nightly packages and Windows version-tag releases
 
-The nightly queue automatically packages its final tested `dev` commit on Windows x64 and macOS arm64. A matching version tag publishes **only the existing Windows installer and portable ZIP**. Stable `vX.Y.Z` tags create normal releases; `vX.Y.Z-rc.N` tags create prereleases that are never marked latest. Windows remains unsigned. macOS packages remain unsigned inspection artifacts in the nightly run; macOS release publication is held until its signing, hardened-runtime and notarization path is configured and authorized.
+The nightly queue automatically packages its final tested `dev` commit on Windows x64 and macOS arm64. A matching version tag publishes **only the existing Windows installer and portable ZIP**. Stable `vX.Y.Z` tags create normal releases; `vX.Y.Z-rc.N` tags create prereleases that are never marked latest. Windows remains unsigned. macOS packages remain unsigned inspection artifacts in the nightly run; macOS releases are deferred indefinitely until the Owner explicitly requests resumption. Signing, hardened-runtime and notarization readiness do not automatically lift this hold.
 
 [ADR 0093](../adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) owns this prospective automatic lane and its scoped authorization. It does not promote `main`, create tags, bump versions or authorize signed macOS distribution. Implementing or reviewing these workflows does not itself execute packaging or publish a release.
 

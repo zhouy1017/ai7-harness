@@ -522,7 +522,7 @@ async function publish(selection) {
       `Nightly Gate and packages: https://github.com/${REPO}/actions/runs/${run.id}/attempts/${run.run_attempt}\n` +
       `Workflow head (before queue merges): ${run.head_sha}\n\n` +
       `Windows code signing is deferred; Windows may show SmartScreen warnings. ` +
-      `macOS publication is held until its signing and notarization path is configured and authorized. ` +
+      `macOS releases are deferred indefinitely until the project Owner explicitly requests resumption. ` +
       `No packaged launch verification was performed. Provenance and checksums are descriptive, not signed attestations.\n\n` +
       `${RECORD_PREFIX}${JSON.stringify(record)} -->\n`, { flag: 'wx' });
     command('gh', draftArguments(candidate, [], notes));

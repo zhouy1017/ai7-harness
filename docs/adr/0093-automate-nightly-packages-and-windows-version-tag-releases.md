@@ -4,7 +4,7 @@ status: accepted
 
 # Automate nightly packages and Windows version-tag releases
 
-On 2026-10-21 the Owner requested automatic builds after the nightly Gate passes, releases triggered by version tags, and consistent software version, Data Version and build number in GitHub and the running executable. The Owner then selected **Windows releases only**, holding macOS publication until signing is configured. [#1009](https://github.com/zhouy1017/ai7-harness/issues/1009) implements delivery and [#1015](https://github.com/zhouy1017/ai7-harness/issues/1015) implements identity. This replaces the manual draft-only workflow and the initial unsigned-inspection-prerelease assumption in the same unmerged documentation/build wave.
+On 2026-10-21 the Owner requested automatic builds after the nightly Gate passes, releases triggered by version tags, and consistent software version, Data Version and build number in GitHub and the running executable. The Owner selected **Windows releases only** and then deferred macOS releases **indefinitely, until the Owner explicitly requests resumption**. This replaces the earlier signing-readiness condition; configuring signing does not lift the hold. [#1009](https://github.com/zhouy1017/ai7-harness/issues/1009) implements delivery and [#1015](https://github.com/zhouy1017/ai7-harness/issues/1015) implements identity. This replaces the manual draft-only workflow and the initial unsigned-inspection-prerelease assumption in the same unmerged documentation/build wave.
 
 ## One identity, three meanings
 
@@ -22,7 +22,7 @@ An eligible version tag selects the already built nightly artifacts at its exact
 
 The automatic release assets are the **Windows installer and portable package**, with their named checksums and build provenance. A stable `vX.Y.Z` tag produces a normal GitHub release; `vX.Y.Z-rc.N` produces a prerelease. The workflow and release notes disclose that Windows packages are unsigned. A normal release designation does not imply signing or promotion to `main`.
 
-Unsigned macOS DMGs remain **nightly inspection artifacts only**. No macOS package, macOS checksum file or macOS provenance file goes to GitHub Releases. macOS publication remains held until Developer ID signing, hardened runtime and notarization are configured under ADR 0052; this Windows-only workflow neither supplies that configuration nor grants access to signing secrets. Both native nightly builds remain required, without claiming unsigned macOS launch or distribution evidence.
+Unsigned macOS DMGs remain **nightly inspection artifacts only**. No macOS package, macOS checksum file or macOS provenance file goes to GitHub Releases. macOS release work and publication are deferred indefinitely, with no scheduled date or automatic resumption. Only a new explicit Owner request may resume that work. Developer ID signing, hardened runtime and notarization under ADR 0052 remain prerequisites after resumption; their readiness alone grants no release authority. This Windows-only workflow neither supplies that configuration nor grants access to signing secrets. Both native nightly builds remain required, without claiming unsigned macOS launch or distribution evidence.
 
 Only named package outputs, checksums and build provenance are admitted to their respective artifact/release channels; product data, private manuscripts, credentials and test-result payloads are excluded. [Releasing](../development/releasing.md) owns the operator procedure and recovery behavior.
 
