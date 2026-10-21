@@ -1,68 +1,71 @@
-# Preparing an unsigned inspection draft
+# Nightly packages and Windows version-tag releases
 
-`.github/workflows/release.yml` prepares Windows x64 and macOS arm64 inspection assets as a **draft GitHub release**. It has only a manual trigger. It does not publish, create or move a tag, promote `main`, sign, notarize or run another Gate. Its packaged macOS output is **unsigned inspection-only**, not the end-user distribution required by [ADR 0052](../adr/0052-select-the-macos-v1-distribution-and-data-location-profile.md).
+The nightly queue automatically packages its final tested `dev` commit on Windows x64 and macOS arm64. A matching version tag publishes **only the existing Windows installer and portable ZIP**. Stable `vX.Y.Z` tags create normal releases; `vX.Y.Z-rc.N` tags create prereleases that are never marked latest. Windows remains unsigned. macOS packages remain unsigned inspection artifacts in the nightly run; macOS release publication is held until its signing, hardened-runtime and notarization path is configured and authorized.
 
-Implementing this workflow does not authorize executing it. The [milestone/re-entry status](../../PROGRESS.md) and [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md) remain controlling: consolidated re-entry and separate exact Owner authorization for packaging/upload/draft creation must precede a run. Actual publication and signed macOS distribution remain separate work. No execution of this workflow is part of Issue #1009.
+[ADR 0093](../adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) owns this prospective automatic lane and its scoped authorization. It does not promote `main`, create tags, bump versions or authorize signed macOS distribution. Implementing or reviewing these workflows does not itself execute packaging or publish a release.
 
-## Manual workflow
+## Operator sequence
 
-Once authorized, select **Prepare unsigned inspection draft** on branch **dev** and supply:
+1. Change the software version in `package.json` through normal review and integration into `dev`; follow [versioning](versioning.md) for software, Data Version and build identity.
+2. Let the existing nightly merge queue finish its candidate work. It resolves the final `dev` once, runs the existing full Gate at that immutable SHA on **both** platforms, then packages that same SHA. The queue run's initial `head_sha` can precede its merges and is **not** the tested/package source SHA.
+3. Create the separately authorized `v<softwareVersion>` tag at that exact integrated, nightly-packaged commit. Lightweight and annotated tags are supported. Do not tag a pre-squash slice or version-bump commit and expect a newer green `dev` to satisfy it.
+4. Tag creation triggers publication from the verified nightly artifacts without rebuilding. An early tag waits for packages; completion of the matching nightly queue automatically reconciles it. If `dev` advances before that tagged commit receives its own nightly build, the tag remains without admissible packages. A newer nightly commit cannot fill that gap. Follow the ordinary development/tag authorization route for a version at an actually packaged commit; do not move a published tag or substitute another build.
 
-| Input | Required value |
-| --- | --- |
-| `sha` | Full lowercase 40-character SHA of the selected current `dev` commit |
-| `version` | Exact `package.json` version, `X.Y.Z` or `X.Y.Z-rc.N` |
-| `gate_run` | Existing successful directly dispatched **E2E Nightly Full Gate** run ID for that exact SHA, with both platform jobs successful |
+`release.yml` has no manual build/draft input path. An authorized retry reruns the publication workflow occurrence; it does not rebuild packages. A queue run with failed PR candidates can still supply packages if its final-dev resolution, both final-dev Gate jobs and both package jobs succeeded in the same attempt. PR, fork, candidate-ref and direct full-Gate runs cannot supply release packages.
 
-The separately authorized tag `v<version>` must already exist and resolve to the same SHA, whether lightweight or annotated. A missing/moved tag, existing visible release, version mismatch, dirty checkout, non-`dev` workflow ref, different workflow/source SHA, incomplete Gate run, or absent platform result stops preparation. Drafts require push access to see: the read-only validation job can reject published releases, and the final write job checks the paginated release listing for every matching release, including partial drafts, before creating anything. The default-branch workflow discovery requirement must be satisfied through normal authorized integration/promotion; this feature does not justify changing `main` just to expose the Run workflow button.
+The scheduled queue and `workflow_run` completion trigger use GitHub's default-branch discovery. The repository default is `dev`; the workflows become available through normal integration there. This feature does not justify changing or promoting `main`. Branch protections, Orca receipts and queue merge authority remain unchanged.
 
-An equivalent CLI invocation, **only after that separate execution authorization**, is:
+## Source, identity and artifact verification
 
-```text
-gh workflow run release.yml --ref dev -f sha=<exact-commit> -f version=<exact-version> -f gate_run=<existing-run-id>
-```
+`e2e-nightly-queue.yml` resolves final `dev` after the candidates, once, to a full 40-character SHA and software version. Both Gate runners and both native packagers consume those outputs. Full Git history is fetched by every build consumer. `tools/build-identity.mjs` supplies the canonical identity: schema, software version, Data Version, full Git ancestor-count build number, source commit and dirty status. The source must be clean, and `dist/build-identity.json` must equal that identity before assets are staged. Workflow run ID, run attempt and pre-merge workflow SHA are separate provenance fields, never substitutes for build number or source commit.
 
-The helper reuses `hostedGatePassed` from the existing Gate owner. It accepts the existing direct full-Gate occurrence whose run title binds the selected commit, and checks both Windows and macOS jobs. A PR head status or a queue run's outer `head_sha` is not sufficient proof of the final integrated tree. It neither dispatches tests nor queries Actions usage. Obtain any missing verification under the existing separately authorized verification process.
+The canonical identity may admit other valid SemVer forms. Source resolution and the full Gate still run for them; this packaging/publication lane is deliberately limited to the reserved `X.Y.Z` and `X.Y.Z-rc.N` version forms. Other forms skip native packaging and cannot become releases through this lane.
 
-The workflow checks out only its own exact `dev` workflow SHA, passes inputs through environment variables rather than executable shell text, and uses full-SHA-pinned actions. Validation has read-only contents/Actions access. Native package jobs have read-only contents access and no signing/product/provider secrets. Only the final isolated job receives contents-write for draft creation, after both package jobs succeed. Checkout never persists credentials. One concurrency group serializes draft attempts.
+The package phase uses `doctor`, `bootstrap` and the existing native packager through `release:prepare` / `tools/package.mjs --build-only`. It does not launch the packaged application or add a Gate. The existing provider-free Journeys run earlier in the full Gate. No signing or product/provider secret is supplied to packaging.
 
-## Outputs and publication boundary
+Each native upload is named `inspection-<source-sha>-<queue-run-id>-<attempt>-<platform>`, with platform `win-x64` or `mac-arm64`. These names identify immutable nightly artifacts; they do not make stable Windows releases prereleases. Upload overwriting is disabled. The artifact retention is seven days.
 
-The native jobs run `doctor`, `bootstrap` and `release:prepare`. Preparation delegates clean build and packaging to `tools/package.mjs --build-only`, which skips the packaged executable self-check; the existing package command without that option retains its self-check behavior. The packager stages the explicit production runtime closure and uses its existing offline builder configuration with publication disabled. Bootstrap's non-GUI runtime probe still occurs. No product Journey or live model call is added.
+| Platform | Exact nightly files | GitHub Release |
+| --- | --- | --- |
+| Windows x64 | `AI7-<version>-win-x64-setup.exe`, `AI7-<version>-win-x64-portable.zip`, `SHA256SUMS-win-x64.txt`, `provenance-win-x64.json` | All four files, unchanged |
+| macOS arm64 | `AI7-<version>-mac-arm64-unsigned-inspection.dmg`, `SHA256SUMS-mac-arm64.txt`, `provenance-mac-arm64.json` | None |
 
-Only these newly staged, explicitly named files are uploaded:
+Preparation requires an empty/absent `release/`. It refuses unexpected top-level files, redirected directories, linked/empty assets and populated Windows portable `data/`. Only the named files are staged; the checkout, build scratch trees, unpacked apps, self-check output, logs, credentials and product data are not uploaded. The portable archive is made before product launch.
 
-| Platform | Files |
-| --- | --- |
-| Windows x64 | `AI7-<version>-win-x64-setup-unsigned-inspection.exe`, `AI7-<version>-win-x64-portable-unsigned-inspection.zip`, `SHA256SUMS-win-x64.txt`, `provenance-win-x64.json` |
-| macOS arm64 | `AI7-<version>-mac-arm64-unsigned-inspection.dmg`, `SHA256SUMS-mac-arm64.txt`, `provenance-mac-arm64.json` |
+Each provenance file records the canonical identity, repository, platform/architecture, package/lock/dependency-manifest hashes, exact queue run/attempt, workflow SHA, asset sizes and SHA-256 digests, plus explicit signing/notarization flags. Only macOS has `inspectionOnly: true`. These records are descriptive provenance, not signed attestations or reproducible-build claims.
 
-Preparation requires an empty/absent `release/` before packaging. It rejects unexpected top-level outputs, redirected directories, linked/empty assets and populated portable `data/`; it never recursively uploads the checkout, `release/`, `.builder/`, `.stage/`, unpacked application, self-check report, product data, logs or credentials. The Windows portable archive is created from the pristine folder before any product launch. These artifact uploads expire after seven days; draft release assets are separate and remain until explicitly managed.
+Publication checks GitHub's repository/workflow/event/branch metadata, the exact attempt's final-dev jobs and their successful steps, and ordering from resolution through both Gate jobs to packaging. It separately verifies the artifact run/repository/workflow-head binding, exact source in names and canonical identity, both platforms' complete file sets, input hashes and every file's size/digest. Downloads use immutable artifact IDs. GitHub's archive SHA-256 is verified **before** parsing ZIP entries; digest mismatch is fatal, not a warning. Unexpected ZIP paths, extra/missing/expired/duplicate artifacts and changed bytes fail closed. Both platforms are verified even though only Windows files are published.
 
-Each SHA-256 file covers its platform's packages and provenance JSON. Provenance records the source commit/version/tag, platform/architecture, package/lock/artifact-manifest hashes, the existing Gate run, workflow run/attempt, asset sizes/digests and explicit unsigned/not-notarized/inspection-only flags. This is descriptive build provenance, **not a signed attestation or proof of reproducible binary output**. The final job verifies all downloaded bytes, identities and the exact file set, then rechecks the existing tag and Gate before creating a new draft with `--verify-tag --draft --prerelease --latest=false`. It never overwrites an existing release.
+The selection job runs with contents/Actions read. Packaging has contents read only. Only the isolated publication job has contents write and Actions read; it executes trusted `dev` helper code pinned by the selection job, reads the candidate checkout as data, installs nothing and never executes downloaded artifacts. All third-party Actions use full commit pins; checkout does not persist credentials.
 
-A network/upload failure may leave a partial draft. Stop and inspect it; do not treat it as complete, publish it, automatically delete it or rerun with overwrite. Recovery of that existing draft needs a separate explicit action. Tags remain mutable until protected; repository tag protection is an operational prerequisite for keeping the independently authorized tag fixed through preparation.
+## Tags, retries and recovery
 
-Windows signing remains deferred under the existing distribution profile. macOS end-user delivery requires Developer ID signing, hardened runtime and notarization; none is implemented by this workflow. Unsigned macOS artifacts may be blocked by Gatekeeper and are not claimed launchable on an end-user machine. The workflow has no signed mode and refuses a changed signing configuration until that future release path is deliberately implemented and reviewed.
+Direct forced, updated or deleted tag push payloads are refused. Before each release mutation, the helper resolves the current tag (peeling annotated tags) and rechecks both the source commit and tag-object SHA. The automation never creates or moves a tag. For an unpublished tag, a later completion may reconcile its **current** matching, successfully packaged source even if an earlier push was refused. This is current-tag reconciliation, not a guarantee that GitHub tag references themselves cannot be changed by administrators.
+
+The first publication assembly creates a draft bound to the exact source/tag object, canonical identity, queue run/attempt, artifact IDs/archive digests and four Windows asset digests. A serialized retry may upload only missing assets of that same assembly. Existing assets must have the expected name, uploaded state, size and GitHub-recorded digest. An unexpected, failed or changed asset stops recovery; there is no automatic delete, replacement, clobber or switch to a newer nightly build. Once the exact complete set is verified and the tag rechecked, the draft becomes a published release. Stable releases use GitHub's version/date-based latest selection; RC releases explicitly disable latest.
+
+An already published release is a no-op only when its stored binding, current tag, canonical source identity and exact durable Release asset metadata/digests still agree. This verification does not require expired nightly ZIPs or choose a newer build. A moved tag, mismatched record or missing/changed published asset fails instead of repairing or replacing the publication.
+
+An incomplete draft still requires its **original** unexpired nightly archives and successful attempt. Missing or expired originals stop the retry; inspect that draft and obtain an explicit recovery decision. A failed/partial native package attempt is not completed evidence; use the existing authorized queue retry process rather than joining outputs from different attempts. Nothing in this helper relaxes that process or authorizes another hosted verification occurrence.
 
 ## Local preparation and inspection
 
-For fast source inspection use [local inspection](local-inspection.md). It requires no tag, packaging or GitHub upload.
+For source inspection use [local inspection](local-inspection.md); it requires no tag, GitHub release or package. Its commands remain unchanged.
 
-The release helper's side-effect-free help is:
+Side-effect-free release-helper help:
 
 ```text
 pnpm run release:prepare -- --help
 ```
 
-After separate packaging authorization, on a supported clean checkout at the exact commit, run `doctor` and `bootstrap`, then:
+On an authorized, supported clean checkout with full Git history, run `doctor` and `bootstrap`, then:
 
 ```text
 pnpm run release:prepare -- --sha <exact-commit> --version <exact-version> --gate-run <existing-run-id>
 ```
 
-This builds only the current native platform and writes named files under ignored `release/upload/`. Local preparation records the supplied Gate ID but makes no GitHub request to verify it; only the manual workflow validates remote tag/Gate evidence and creates the draft. It does not remove a stale `release/` directory: use a fresh checkout or consciously move/delete only known generated outputs after inspecting their contents. No local preparation output is release authority.
+This builds only the current native platform and stages named files under ignored `release/upload/`. It records the supplied Gate ID without contacting GitHub or asserting remote verification. It does not remove stale `release/` content. Use a fresh checkout or inspect known generated output before moving/removing it. Local output is never accepted in place of the nightly artifact provenance.
 
 ## Technical references
 
-The implementation follows GitHub's [manual trigger, permissions and concurrency syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax), [release-create draft and existing-tag flags](https://cli.github.com/manual/gh_release_create), [artifact upload file selection](https://github.com/actions/upload-artifact/tree/v4.6.2), and [workflow run/job API](https://docs.github.com/en/rest/actions/workflow-runs). Signing configuration is checked against the pinned major version's [electron-builder v26 macOS options](https://www.electron.build/v26/docs/mac/) and [notarization requirements](https://www.electron.build/v26/docs/features/code-signing/notarization/); newer-major signing schemas are not substituted into this repository.
+GitHub documents [workflow-run/default-branch events](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run), [reusable workflow caller context and token restrictions](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations), [attempt-specific workflow jobs](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt), [artifact metadata, expiry and archive download](https://docs.github.com/en/rest/actions/artifacts), [Release asset digests](https://docs.github.com/en/rest/releases/assets), [release flags and latest selection](https://docs.github.com/en/rest/releases/releases#update-a-release), and [existing-tag verification](https://cli.github.com/manual/gh_release_create). GitHub's ordinary artifact download action only warns on digest mismatch; the publication helper enforces its own fatal verification as required here.
