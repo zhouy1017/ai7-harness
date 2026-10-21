@@ -2,7 +2,7 @@
 
 Issue [#1015](https://github.com/zhouy1017/ai7-harness/issues/1015) unifies source, build, package and running-app identity. Release orchestration remains in [releasing](releasing.md); compatibility remains in the [Data Version decision](../adr/0079-record-the-owner-s-decisions-of-2026-09-10-on-storage-policies-export-egress-providers-and-samplebooks.md).
 
-The wave's [ADR 0093](https://github.com/zhouy1017/ai7-harness/blob/codex/integration-17/docs/adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) authorizes paired nightly native packages and Windows-only version-tag releases. Stable tags publish normal Windows releases and RC tags publish prereleases; unsigned macOS packages remain nightly artifacts until signing, hardened runtime and notarization are configured.
+[ADR 0093](../adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) authorizes paired nightly native packages and Windows-only version-tag releases. Stable tags publish normal Windows releases and RC tags publish prereleases; unsigned macOS packages remain nightly artifacts until signing, hardened runtime and notarization are configured.
 
 ## Canonical inputs
 
