@@ -136,6 +136,25 @@ describe('tag timing and immutable published releases', () => {
     throw new Error(`unexpected ${path}`);
   };
 
+  it.each(['lightweight', 'annotated'])('binds a %s push to its ref object rather than head_commit', async (kind) => {
+    // GitHub's push schema distinguishes after (the ref object) from head_commit
+    // (the expanded, peeled commit) when an annotated tag is pushed.
+    const after = kind === 'annotated' ? tagObject : candidate.sha;
+    const event = { ...push, after, head_commit: { id: candidate.sha } };
+    const request = kind === 'annotated' ? tagRequest : async (path: string) => {
+      expect(path).toBe(`git/ref/tags/${candidate.tag}`);
+      return { object: { type: 'commit', sha: candidate.sha } };
+    };
+    await expect(selectTags(event, 'push', request, () => candidate.version)).resolves.toEqual([
+      { tag: candidate.tag, tagObject: after, sha: candidate.sha, version: candidate.version, runId: null },
+    ]);
+    // Even replacing the annotation while retaining the same commit moves the ref.
+    const replaced = async (path: string) => path.startsWith('git/ref/')
+      ? { object: { type: 'tag', sha: 'f'.repeat(40) } }
+      : { object: { type: 'commit', sha: candidate.sha } };
+    await expect(selectTags(event, 'push', replaced, () => candidate.version)).rejects.toThrow(/tag-moved/);
+  });
+
   it('peels annotated tags, checks the exact pushed object and rejects moves, deletions and version drift', async () => {
     const tag = await resolveTag(candidate.tag, tagRequest);
     expect(tag).toEqual({ tag: candidate.tag, tagObject, sha: candidate.sha, version: candidate.version });
