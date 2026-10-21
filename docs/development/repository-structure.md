@@ -29,7 +29,7 @@ The existing commands `node tools/nightly-queue.mjs …` and imports from `tools
 [check.mjs](../../tools/check.mjs) owns local static verification. [check-docs.mjs](../../tools/check-docs.mjs) checks local file/directory destinations in tracked active Markdown and the root `CLAUDE.md` wrapper. It reads no archive contents or SampleBook payloads (only `SampleBooks/README.md` is documentation), refuses symlinks and redirected parent directories, and makes no network requests. Stage new documents before running it:
 
 ```text
-node tools/check-docs.mjs
+pnpm run docs:check
 pnpm run check
 ```
 
