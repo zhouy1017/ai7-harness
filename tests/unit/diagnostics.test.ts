@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { DIAGNOSTICS_CHANNELS, buildDiagnosticsBundle, type DiagnosticsInputs } from '../../src/main/diagnostics.js';
+import { DIAGNOSTICS_CHANNELS, buildDiagnosticsBundle, sanitizeCrashRecord, type DiagnosticsInputs } from '../../src/main/diagnostics.js';
 import { DATA_VERSION } from '../../src/service/data-version.js';
 
 const facts: DiagnosticsInputs['facts'] = {
@@ -9,6 +9,18 @@ const facts: DiagnosticsInputs['facts'] = {
   arch: 'x64', electron: '42.0.0', node: '24.18.1', locale: 'zh-CN', uptimeSeconds: 42, windowCount: 2,
 };
 describe('pure diagnostics bundle', () => {
+  it('preserves prerelease plus build metadata without inventing historical provenance', () => {
+    const softwareVersion = '0.1.0-rc.1+source.7';
+    const current = { ...facts, appVersion: softwareVersion, buildIdentity: { ...facts.buildIdentity!, softwareVersion } };
+    const historical = { appVersion: '0.0.9', schemaRevision: 82 };
+    const files = buildDiagnosticsBundle({ facts: current, crashes: [historical], preferences: {} });
+    expect(JSON.parse(files['summary.json']!)).toMatchObject({ appVersion: softwareVersion, buildIdentity: current.buildIdentity });
+    expect(JSON.parse(files['crashes/01-uncaughtException.json']!)).toMatchObject({ appVersion: '0.0.9', buildIdentity: null, schemaRevision: 82 });
+    expect(sanitizeCrashRecord(current)).toMatchObject({ appVersion: softwareVersion, buildIdentity: current.buildIdentity });
+    expect(sanitizeCrashRecord({ ...historical, buildIdentity: current.buildIdentity }).buildIdentity).toBeNull();
+    const olderIdentity = { ...current.buildIdentity, softwareVersion: historical.appVersion, buildNumber: 1000, sourceCommit: 'b'.repeat(40) };
+    expect(sanitizeCrashRecord({ ...historical, buildIdentity: olderIdentity }).buildIdentity).toEqual(olderIdentity);
+  });
   it('excludes protected inputs and projects exactly the allowed files', () => {
     const manuscript = 'SYNTHETIC_MANUSCRIPT_BLOCK_DO_NOT_EXPORT';
     const files = buildDiagnosticsBundle({ facts, preferences: { version: 1, values: { collapsed: true } },

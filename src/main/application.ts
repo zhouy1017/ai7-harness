@@ -101,7 +101,7 @@ import { DIAGNOSTICS_CHANNELS, writeDiagnosticsBundle } from './diagnostics.js';
 import { CONFIGURED_PROVIDER_LABELS, CONFIGURED_ROUTE_IDS } from '../shared/provider-configuration.generated.js';
 import { journeyClose, journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { DATA_VERSION_STARTUP_CLOSE, DATA_VERSION_STARTUP_TITLE, dataVersionStartupRefusal } from '../shared/data-version-labels.js';
-import { readBuiltIdentity } from '../shared/read-build-identity.js';
+import { readApplicationBuildIdentity } from '../shared/read-build-identity.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import { createPreferenceStore, PreferenceError, type PreferenceStore } from './preferences.js';
 import { chooseStartupDataRoot, type StartupLocationChoice } from './startup-data-root.js';
@@ -6391,7 +6391,7 @@ export async function runApplication(): Promise<void> {
     app.enableSandbox();
     startupLocation = reachStartup('data-root');
     const codeRoot = resolve(__dirname, '..', '..');
-    const buildIdentity = await readBuiltIdentity(resolve(__dirname, '..'));
+    const buildIdentity = await readApplicationBuildIdentity(resolve(__dirname, '..'));
     const softwareVersion = buildIdentity.softwareVersion;
     const resourcesPath = process.platform === 'win32' ? resolve(dirname(process.execPath), 'resources')
       : resolve(dirname(process.execPath), '..', 'Resources');
