@@ -6,7 +6,7 @@ The Owner's 2026-10-22 v3.2 direction is recorded in [ADR 0094](../adr/0094-unif
 
 ## Order and integration contracts
 
-1. **Wave 18:** finish [#1019](https://github.com/zhouy1017/ai7-harness/issues/1019), authority/specification alignment and tracker migration before dependent implementation. No product or policy activation is included.
+1. **Wave 18:** [#1019](https://github.com/zhouy1017/ai7-harness/issues/1019), authority/specification alignment and tracker migration, reviewed in [#1035](https://github.com/zhouy1017/ai7-harness/pull/1035) and integrated through [#1037](https://github.com/zhouy1017/ai7-harness/pull/1037) before dependent implementation. No product or policy activation is included.
 2. **Wave 19:** unified model/search foundations and review reliability (F-01–F-04). Land shared configuration/policy/protocol contracts serially before independently owned adapters or UI work. Prefer a bounded existing-adapter tool roundtrip first, then production admission and selector composition.
 3. **Wave 20:** tracked-change intake, local learning, Global Agent and local semantic retrieval (F-07 → F-05 → F-06, with F-08's shared retrieval contracts coordinated). Independent implementation follows accepted persisted/wire/composition contracts, not merely separate proposed filenames.
 4. **Wave 21:** exact selection, copilot/direct execution and DOCX/report fidelity (F-09–F-11). Establish selection/proposal/task-target contracts before concurrent renderer/export work.
