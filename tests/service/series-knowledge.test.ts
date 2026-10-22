@@ -118,6 +118,60 @@ const wire = (value: unknown): number => Buffer.byteLength(JSON.stringify(value)
 const later = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 3));
 
 describe('书系知识 over the real store', () => {
+  it('orders equal-time candidates by ID after chronology, with identical pages across reopen', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let seriesId = '';
+    try {
+      seriesId = store.createSeries({ title: '候选项顺序', note: '' }).seriesId;
+      store.markCleanShutdown();
+    } finally { store.close(); }
+
+    const early = '2026-01-01T00:00:00.000Z';
+    const tied = '2026-01-01T00:00:01.000Z';
+    const late = '2026-01-01T00:00:02.000Z';
+    const id = (ordinal: number) => `00000000-0000-4000-8000-${String(ordinal).padStart(12, '0')}`;
+    const expected = [id(9), id(2), id(3), id(4), id(1)];
+    const assertOrder = (database: DatabaseSync) => {
+      const ledger = new SeriesKnowledgeLedger(database);
+      expect([...ledger.open(seriesId)].map((candidate) => candidate.candidateId)).toEqual(expected);
+      const first = ledger.openPage(seriesId, null, 2);
+      expect(first.map(({ candidate, firstAt }) => [candidate.candidateId, firstAt])).toEqual([[id(9), early], [id(2), tied]]);
+      const second = ledger.openPage(seriesId, { firstAt: first[1]!.firstAt, candidateId: first[1]!.candidate.candidateId }, 2);
+      expect(second.map(({ candidate, firstAt }) => [candidate.candidateId, firstAt])).toEqual([[id(3), tied], [id(4), tied]]);
+      const third = ledger.openPage(seriesId, { firstAt: second[1]!.firstAt, candidateId: second[1]!.candidate.candidateId }, 2);
+      expect(third.map(({ candidate, firstAt }) => [candidate.candidateId, firstAt])).toEqual([[id(1), late]]);
+      expect(ledger.openPage(seriesId, { firstAt: third[0]!.firstAt, candidateId: third[0]!.candidate.candidateId }, 2)).toEqual([]);
+      const paged = [...first, ...second, ...third].map(({ candidate }) => candidate.candidateId);
+      expect(paged).toEqual(expected);
+      expect(new Set(paged).size).toBe(expected.length);
+    };
+
+    const database = new DatabaseSync(databasePath());
+    try {
+      // Author canonical first-version fixtures: neither insertion order nor global ID order is the contract.
+      for (const [ordinal, recordedAt] of [[1, late], [4, tied], [9, early], [3, tied], [2, tied]] as const) {
+        const candidateId = id(ordinal);
+        const versionId = randomUUID();
+        const target = { kind: 'new', subject: `顺序${ordinal}`, knowledgeClass: 'canon' };
+        const content = `候选内容${ordinal}`;
+        const record = canonicalRecord({ schema: 'ai7.series-knowledge-candidate/1', versionId, candidateId, version: 1,
+          seriesId, target, content, authoring: 'editor', provenance: null, supersedes: null, actor: '本机编辑', recordedAt });
+        database.prepare(`INSERT INTO series_knowledge_candidates(version_id, candidate_id, version, series_id, subject, knowledge_class,
+          content, authoring, recorded_at, canonical_json, sha256) VALUES (?, ?, 1, ?, ?, ?, ?, 'editor', ?, ?, ?)`)
+          .run(versionId, candidateId, seriesId, target.subject, target.knowledgeClass, content, recordedAt, record.json, record.digest);
+      }
+      assertOrder(database);
+    } finally { database.close(); }
+
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(reopened.inspectSeries(seriesId).knowledge.candidates.map((candidate) => candidate.candidateId)).toEqual(expected);
+      const database = new DatabaseSync(databasePath(), { readOnly: true });
+      try { assertOrder(database); } finally { database.close(); }
+      reopened.markCleanShutdown();
+    } finally { reopened.close(); }
+  });
+
   it('refuses membership and review pages after a governing candidate changes without changing the displayed counts', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -308,6 +362,9 @@ describe('书系知识 over the real store', () => {
   }, 180_000);
 
   it('takes in candidates from the editor\'s words and a member\'s manuscript through review, conflicts disclosed and kept or resolved', async () => {
+    const candidatesById = (store: EditorialStore, seriesId: string) => new Map(store.inspectSeries(seriesId).knowledge.candidates
+      .map((candidate) => [candidate.candidateId, [candidate.target.kind, candidate.target.subject, candidate.content, candidate.authoring, candidate.conflicts]]));
+    let remainingCandidates = new Map<string, unknown[]>();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const member = await importBook(store, MEMBER);
@@ -337,8 +394,13 @@ describe('书系知识 over the real store', () => {
       const fromEditor = store.proposeSeriesKnowledge({ seriesId, target: { ...newItem, subject: ' 林 默 ' }, content: EDITOR_WORDS, span: null });
       // The answer is the candidate alone (Issue #63 review).
       expect([fromEditor.candidate.candidateId, fromEditor.candidate.target.subject, fromEditor.candidate.conflicts]).toEqual([fromEditor.candidateId, '林 默', 1]);
-      expect(knowledgeOf(store, seriesId)).toEqual({ items: [], candidates: [['new', '林默', 'manuscript-revision', 1], ['new', '林 默', 'editor', 1]] });
-      const provenance = store.inspectSeries(seriesId).knowledge.candidates[0]!.provenance!;
+      expect(knowledgeOf(store, seriesId).items).toEqual([]);
+      expect(store.inspectSeries(seriesId).knowledge.candidates).toHaveLength(2);
+      expect(candidatesById(store, seriesId)).toEqual(new Map([
+        [fromManuscript.candidateId, ['new', '林默', cited.selectedText, 'manuscript-revision', 1]],
+        [fromEditor.candidateId, ['new', '林 默', EDITOR_WORDS, 'editor', 1]],
+      ]));
+      const provenance = store.inspectSeries(seriesId).knowledge.candidates.find((candidate) => candidate.candidateId === fromManuscript.candidateId)!.provenance!;
       expect([provenance.bookTitle, provenance.revisionLabel, provenance.blockId, provenance.fromGrapheme, provenance.toGrapheme, provenance.quote === cited.selectedText, provenance.uncheckpointed])
         .toEqual(['书系成员', 'r1', cited.blockId, 0, 6, true, false]);
 
@@ -404,6 +466,10 @@ describe('书系知识 over the real store', () => {
       // 移出书系 names the knowledge taken from the Book and leaves it in place; a manuscript candidate from a Book that left
       // is held back.
       const pending = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '海边小城', knowledgeClass: 'places' }, content: cited.selectedText, span: span(store, member) });
+      remainingCandidates = new Map([
+        [late.candidateId, ['existing', '林默', CHANGED_WORDS, 'editor', 1]],
+        [pending.candidateId, ['new', '海边小城', cited.selectedText, 'manuscript-revision', 0]],
+      ]);
       const leave = store.previewSeriesMembershipChange({ seriesId, bookId: member.bookId, kind: 'remove' });
       expect(leave.groups[2]!.unchanged[0]).toBe('书系「星河三部曲」的书系知识里有 1 个条目取自《书系成员》的稿件；它们留在书系知识中不变。');
       // What the removal holds back is said too (Issue #63 review): the Book's candidate waits until it rejoins.
@@ -429,10 +495,11 @@ describe('书系知识 over the real store', () => {
     let seriesId: string;
     try {
       seriesId = reopened.inspectSeriesList().series[0]!.seriesId;
-      expect(knowledgeOf(reopened, seriesId)).toEqual({
-        items: [['林默', '人物', [[3, 'updated', 1, 'series-tasks'], [2, 'updated', 0, 'series-tasks'], [1, 'created', 1, 'consistency-review']]]],
-        candidates: [['existing', '林默', 'editor', 1], ['new', '海边小城', 'manuscript-revision', 0]],
-      });
+      expect(knowledgeOf(reopened, seriesId).items).toEqual([
+        ['林默', '人物', [[3, 'updated', 1, 'series-tasks'], [2, 'updated', 0, 'series-tasks'], [1, 'created', 1, 'consistency-review']]],
+      ]);
+      expect(candidatesById(reopened, seriesId)).toEqual(remainingCandidates);
+      expect(reopened.inspectSeries(seriesId).knowledge.candidates).toHaveLength(2);
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
