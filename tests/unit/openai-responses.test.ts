@@ -53,6 +53,7 @@ function responsesModel(capabilities: Partial<ProviderModelProfile['capabilities
       requestShape: 'openai-responses',
       reasoningControl: 'none',
       structuredOutput: 'none',
+      toolCalling: 'none',
       answerChannel: 'output-message-text',
       reasoningChannel: 'none',
       ...capabilities,
@@ -391,7 +392,7 @@ describe('DeepSeekOpenAiCompatibleAdapter · openai-responses', () => {
     });
   }
 
-  it('round-trips canonical blocks and correlated outputs through two stub turns', async () => {
+  it.each([true, false])('round-trips canonical blocks and correlated outputs with tools retained: %s', async (retainTools) => {
     const bodies: Array<Record<string, unknown>> = [];
     const calls = [functionCall('raw_first'), functionCall('raw_second', '{ invalid JSON')];
     const instance = instanceFor(functionModel(), async (_url, init) => {
@@ -423,10 +424,10 @@ describe('DeepSeekOpenAiCompatibleAdapter · openai-responses', () => {
         content: [{ type: 'tool-result' as const, toolCallId: call.call_id as never, content: [{ type: 'text' as const, text: `result_${index}` }], isError: index === 1 }],
       })),
     ];
-    const second = await collect(instance.stream({ ...toolPayload(), messages: history }));
+    const second = await collect(instance.stream({ ...toolPayload(), messages: history, tools: retainTools ? [TOOL] : [] }));
     expect(bodies[1]).toEqual({
       model: functionModel().model, instructions: SYSTEM, max_output_tokens: MAX_OUTPUT_TOKENS,
-      tools: [{ type: 'function', ...TOOL, strict: false }],
+      ...(retainTools ? { tools: [{ type: 'function', ...TOOL, strict: false }] } : {}),
       input: [
         { role: 'user', content: UNIT }, { role: 'assistant', content: 'looking' },
         ...calls.map((call) => ({ type: 'function_call', call_id: call.call_id, name: call.name, arguments: call.arguments })),
@@ -441,6 +442,26 @@ describe('DeepSeekOpenAiCompatibleAdapter · openai-responses', () => {
       { type: 'finish', reason: { kind: 'stop' } },
     ]);
     expect(instance.transmissions).toBe(2);
+  });
+
+  it('never emits unsolicited calls when tools are absent or empty, for either profile', async () => {
+    for (const model of [responsesModel(), functionModel()]) {
+      for (const tools of [undefined, []]) {
+        for (const text of ['', 'still an answer']) {
+          const instance = instanceFor(model, async () => ({ status: 200, json: async () => ({
+            status: 'incomplete', output: [functionCall(), message(outputText(text))],
+          }) }));
+          const chunks = await collect(instance.stream({ ...payload(), model: model.model, ...(tools === undefined ? {} : { tools }) }));
+          expect(chunks).toEqual([
+            { type: 'block-start', index: 0, blockType: 'text' },
+            { type: 'text-delta', index: 0, text },
+            { type: 'block-end', index: 0, block: { type: 'text', text } },
+            { type: 'finish', reason: { kind: 'stop' } },
+          ]);
+          expect(instance.lastCanonicalResult?.kind).toBe(text.length > 0 ? 'answer' : 'empty-answer');
+        }
+      }
+    }
   });
 
   it('refuses capability-none requests before ticket, credential or transport access', async () => {
