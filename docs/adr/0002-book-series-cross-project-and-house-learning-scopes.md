@@ -4,7 +4,7 @@ status: accepted
 
 # Separate Book, Series, Cross-project, and House-learning scopes
 
-AI7 uses four explicit scopes because direct manuscript authority and adaptive learning have different safety and editorial meanings. A Book owns its text and mutations; an explicit Series shares versioned knowledge and provenance-bearing read-only retrieval across member Books; a Cross-project task directly selects otherwise unrelated Books for one task; House Editorial Memory shares only derived patterns and feedback across the eligible Working Corpus. Every manuscript mutation remains targeted to one Book and exact revision.
+AI7 uses four explicit scopes because direct manuscript authority and adaptive learning have different safety and editorial meanings. A Book owns its text and mutations; an explicit Series shares versioned knowledge and provenance-bearing read-only retrieval across member Books; a Cross-project task directly selects otherwise unrelated Books for one task; House Editorial Memory shares derived patterns and feedback across the eligible Working Corpus, including the disclosed opt-out local collection, intelligent curation and effective exclusions of [ADR 0094](0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md). Every manuscript mutation remains targeted to one Book and exact revision.
 
 ## Consequences
 

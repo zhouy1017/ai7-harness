@@ -2,9 +2,15 @@
 
 Status: Owner-confirmed on 2026-10-13 (decision record kept by the Commander outside the repository); landed by wave 1's documentation slice (#832). Under [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md) the boundary is crossed only when a separately authorized completion Issue and pull request integrate a stable record naming the exact `dev` commit containing this scope. The consolidated Windows/macOS re-entry validation follows as a separate authorized step. Promotion to `main`, tags, packaging signatures, notarization and release stay separate.
 
-The Owner defines 1.0.0 as **every designed capability** in the PRD, `docs/ui-ux-v2/editor-surfaces.md` and `docs/ui-ux-v2/requirements.md`, except the items listed under "Outside 1.0.0". Delivery order lives in the [development plan](development-plan.md); this file only fixes what is in and what is out.
+For the historical 2026-10-13 scope and completion record below, the Owner defined 1.0.0 as **every designed capability** in the PRD, `docs/ui-ux-v2/editor-surfaces.md` and `docs/ui-ux-v2/requirements.md`, except the items listed under the historical exclusions below. Delivery order lives in the [development plan](development-plan.md); this file only fixes what is in and what is out.
 
-## In scope (beyond what dev@97149432 already integrates)
+## Windows v3.2 successor scope (accepted direction; not milestone backfill)
+
+[ADR 0094](../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md) adds unified multi-provider selection (F-01), DeepSeek/Bocha research (F-02), opt-out local intelligent learning (F-05), the project-independent Global Agent (F-06) and explicit dual-mode Word tracked-change intake/learning (F-07) to the Windows-first delivery scope. F-03/F-04 repair anchoring/reliability; F-08 supplies real local embeddings; F-09/F-10 improve selection/copilot/direct execution; F-11 improves DOCX/report fidelity; F-12/F-13 cover Windows packaging and admitted workflow acceptance. The [development plan](development-plan.md) owns all F-01–F-15 Issues, dependencies and proof. These capabilities remain planned until implemented and verified.
+
+The successor scope replaces the historical provider deferral for the named F-01 services, without changing current selected policies. It changes neither the exact milestone boundary commit nor that commit’s evidence. Standalone DOCX tracked-change intake is not Word integration. House gates (#415/#980), inert Doubao declaration (#719) and other F-15 outcomes remain deferred; #766’s real EPUB/ODT/RTF evidence still requires specific admission. F-12 may prepare signing, but actual certificate use/signing/release and `main` promotion retain their authorization boundaries. ADR 0093’s Windows delivery and indefinite macOS release hold remain in force. Data Version 1 remains frozen.
+
+## Historical in scope (beyond what dev@97149432 integrated)
 
 | Area | Outcome | Decision |
 | --- | --- | --- |
@@ -25,7 +31,7 @@ The Owner defines 1.0.0 as **every designed capability** in the PRD, `docs/ui-ux
 | Agent Workspace | Book-bound DSH Agent Workspace, one bounded journey; first-run onboarding with a bundled public-domain sample Book | #90; D27 |
 | Distribution | Buildable unsigned Windows installer + portable and macOS DMG; Data Version frozen at release; pre-upgrade backup and rollback; manual update | D25, D26 |
 
-## Outside 1.0.0 (confirmed exclusions and deferrals)
+## Historical outside 1.0.0 (2026-10-13 exclusions and deferrals)
 
 - Microsoft Word integration (ADR 0013). Legacy production-data migration (ADR 0012).
 - S66d house workflow gates, WGATE-001~011 (#415 stays deferred).
@@ -44,11 +50,11 @@ The [Post-1.0.0 Issues](#post-100-issues) below already track OCR, updates, plug
 
 ## Completion record (ADR 0054)
 
-Record integration: [PR #986](https://github.com/zhouy1017/ai7-harness/pull/986) merged at `dev@ae5d2c1e29eebbeca7823e301d427ad2737ac5c1` on 2026-10-18; #972 is closed. The record below describes the named boundary commit, including its then-current evidence limits. Later implementation and evidence are routed through [PROGRESS](../../PROGRESS.md); this refresh does not revise the Owner's scope or backfill that record.
+Record integration: [PR #986](https://github.com/zhouy1017/ai7-harness/pull/986) merged at `dev@ae5d2c1e29eebbeca7823e301d427ad2737ac5c1` on 2026-10-18; #972 is closed. The record below describes the named boundary commit, including its then-current evidence limits. Later implementation and evidence are routed through [PROGRESS](../../PROGRESS.md); the v3.2 successor scope above does not backfill or relabel this record.
 
 This is the stable record required by [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md) under the separately authorized completion Issue [#972](https://github.com/zhouy1017/ai7-harness/issues/972). The boundary is crossed only when this record integrates into `dev`; a Draft PR or a slice merge into a wave does not cross it. It names one exact `dev` commit:
 
-**`c2f4fff3faf8b7e3033545a0e1e23c1ca29c752b`** — the squash merge of wave 14's final integration, [PR #971](https://github.com/zhouy1017/ai7-harness/pull/971). That commit contains the Owner-confirmed complete initial-v1.0.0 development scope above: every row of the "In scope" table was integrated into `dev` by waves 1–14, through reviewed final wave PRs. The Owner's confirmation of the scope is the decision record kept outside the repository named in the status line; what follows is only what `git` proves about the integration.
+**`c2f4fff3faf8b7e3033545a0e1e23c1ca29c752b`** — the squash merge of wave 14's final integration, [PR #971](https://github.com/zhouy1017/ai7-harness/pull/971). That commit contains the Owner-confirmed complete initial-v1.0.0 development scope above: every row of the historical in-scope table was integrated into `dev` by waves 1–14, through reviewed final wave PRs. The Owner's confirmation of the scope is the decision record kept outside the repository named in the status line; what follows is only what `git` proves about the integration.
 
 ### Wave integrations
 
@@ -103,13 +109,13 @@ The development plan and the pull requests above record these, and this record d
 - The Agent 工作区 proposal round has fixture evidence only; its one live round was refused for an expired development credential.
 - On the Windows host that produced the evidence, only the unsigned installer and the portable zip were built, and only the portable executable was self-checked. The DMG, the macOS launch form and the macOS self-check are unbuilt and unrun.
 
-### Outside 1.0.0 and still outside
+### Outside the recorded milestone boundary
 
-This record adds nothing to the "Outside 1.0.0" list above, and every item on it stays outside: Microsoft Word integration and legacy production-data migration; S66d house workflow gates; Rewind and Replay; 结构调整模式 and the Detached Manuscript Window; accessibility-specific settings beyond keyboard remapping; the workflow-definition branch, Skill catalog sources, trust tiers and sandboxing; plugin-provided analysis kinds; escalation and frontier Model Roles bound by default; code signing, notarization, release, `main` promotion and auto-update; and providers other than OpenCode Go and DeepSeek official.
+This historical record adds nothing to the 2026-10-13 exclusion list. Its boundary commit excluded: Microsoft Word integration and legacy production-data migration; S66d house workflow gates; Rewind and Replay; 结构调整模式 and the Detached Manuscript Window; accessibility-specific settings beyond keyboard remapping; the workflow-definition branch, Skill catalog sources, trust tiers and sandboxing; plugin-provided analysis kinds; escalation and frontier Model Roles bound by default; code signing, notarization, release, `main` promotion and auto-update; and providers other than OpenCode Go and DeepSeek official.
 
 ### Post-1.0.0 Issues
 
-The deferred items are open, unscheduled and labeled `post-1.0.0`:
+The original deferred Issue lineage is listed below; current scheduling and successor Issue disposition are owned by the development plan:
 
 - [#973](https://github.com/zhouy1017/ai7-harness/issues/973) OCR for scanned PDFs in the Material Index (#899 lineage)
 - [#974](https://github.com/zhouy1017/ai7-harness/issues/974) Update through GitHub Releases (manual update posture today)

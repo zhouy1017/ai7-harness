@@ -283,7 +283,7 @@ The Model Role for challenge or explicitly authorized high-consequence work. An 
 _中文_: 前沿模型角色
 _Avoid_: Second harness, silent fallback, escape hatch, truth oracle
 
-Concrete provider/model defaults are configuration decisions owned by [ADR 0080](../../adr/0080-assign-a-provider-route-and-model-to-every-task-that-transmits.md) and [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md), not part of these role definitions.
+Concrete provider/model defaults are configuration decisions owned by [ADR 0080](../../adr/0080-assign-a-provider-route-and-model-to-every-task-that-transmits.md), [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) and [ADR 0094](../../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md)'s unified selector, not part of these role definitions.
 
 These four named roles remain Model Roles: Task Intents, native DSH artifacts, and DSH Analysis Contracts may declare hard requirements and soft preferences, never a provider, model, endpoint, or credential. A default binding is a configuration fact, never factual authority; output remains a proposal or research lead.
 
@@ -383,11 +383,16 @@ _中文_: 内置技能晋级关口
 _Avoid_: scoped artifact enablement, in-product trust escalation, self-promotion
 
 **Run Authorization**:
-The exact authority record permitting one Run for one Task Intent and Plan Envelope digest, including its provider, data, source scope, exact Run Budget Ceiling state, adaptation, and other reviewed bindings. A newly user-initiated Task may receive it through the user's direct decision or a matching active Default Execution Rule. A new autonomous background manuscript-analysis dispatch instead requires a matching active Background Analysis Enrollment and creates its own exact Run. Moving the same authorized Run into the background changes presentation only and does not create a new origin.
+The exact authority record permitting one Run for one Task Intent and Plan Envelope digest, including its provider, data, source scope, exact Run Budget Ceiling state, adaptation, and other reviewed bindings. A newly user-initiated Task may receive it through the user's direct decision or a matching active Default Execution Rule. A new autonomous background manuscript-analysis dispatch instead requires a matching active Background Analysis Enrollment and creates its own exact Run. ADR 0094 separately permits automatic Curation Passes under the active disclosed learning authorization envelope, with exact source/outbound/provider/policy pins and preflight. Moving the same authorized Run into the background changes presentation only and does not create a new origin.
 _中文_: 任务运行授权
 _Avoid_: Execution Grant, Effect Approval, standing permission
 
-Provider setup, credential configuration, manuscript import, artifact acquisition or enablement, DSH Session/Plugin membership, a Default Execution Rule without a newly user-initiated matching Task, and a Background Analysis Enrollment without a matching exact dispatch each remain non-authorizing. Every new idle, scheduled, post-checkpoint, import-triggered, or cross-Run Provider dispatch without a newly user-initiated Task requires a still-active matching Enrollment.
+Provider setup, credential configuration, manuscript import, artifact acquisition or enablement, DSH Session/Plugin membership, a Default Execution Rule without a newly user-initiated matching Task, and a Background Analysis Enrollment without a matching exact dispatch each remain non-authorizing. New autonomous manuscript-analysis dispatch requires a still-active matching Enrollment; automatic curation instead requires ADR 0094's active learning envelope and exact dispatch. Neither grants authority for the other or for unrelated background work.
+
+**Global Agent Session**:
+A project-independent dialogue identity for learning supervision, memory governance and explicitly scoped cross-workspace retrieval. It does not imply a current Book, manuscript mutation authority or an unrestricted source scope.
+_中文_: 全域智能体会话
+_Avoid_: Book-bound Agent Workspace, global Run Authorization, second agent loop
 
 **Default Execution Rule**:
 An explicit revocable rule that may issue the exact Run Authorization for a newly user-initiated matching Task without a second start decision, inside the rule's frozen task, artifact, scope, provider/data, budget, and capability constraints. It never originates, schedules, or expands work by itself.

@@ -37,7 +37,7 @@ The presentation of Task Intent, Plan, Run activity, clarification, and outcome 
 _Avoid_: chat workspace, task ledger UI, Harness Session view
 
 **Interactive Editorial Dialogue** (`交互式编辑问答`):
-A user-facing sequence of contextual questions and streamed answers bound to one exact Book and active manuscript, deliverable, source, or other work object, without becoming a generic chat product root or a software-quality-assurance workflow.
+A user-facing sequence of contextual questions and streamed answers bound to one exact Book/work object or ADR 0094’s exact Global Agent Session/turn and source scope. It creates no generic chat authority or software-quality-assurance workflow.
 _Avoid_: QA test, generic chatbot, Harness Session transcript, unowned conversation
 
 **Global Attention View** (`全局待处理视图`):
@@ -441,7 +441,7 @@ The readable and copyable complete semantic fragments preserved after an Interac
 _Avoid_: completed answer, failed empty turn, authoritative result, silently resumed stream
 
 **Dialogue Answer History** (`问答记录`):
-The recoverable, non-authoritative joined presentation of questions, completed formal answers, and Incomplete Dialogue Answers under one exact Book, work object, and Task context. Exact Execution Bindings and Harness Execution Spans resolve the presentation to model messages and attempt history owned only by the Harness Session Ledger; it copies no transcript into the AI7 Task Ledger and creates no third ledger. It excludes Live Reasoning Summary and grants no factual, manuscript, Proposal, learning, or execution authority.
+The recoverable, non-authoritative joined presentation of questions, completed formal answers, and Incomplete Dialogue Answers under one exact Book/work-object/Task context or Global Agent Session/turn and source scope. Exact Execution Bindings and Harness Execution Spans resolve the presentation to model messages and attempt history owned only by the Harness Session Ledger; it copies no transcript into the AI7 Task Ledger and creates no third ledger. It excludes Live Reasoning Summary and grants no factual, manuscript, Proposal, learning, or execution authority.
 _Avoid_: raw transcript, hidden reasoning archive, generic chat history, authoritative editorial record, third ledger, copied transcript
 
 **Usable Candidate Stream** (`可用候选结果流`):
