@@ -84,9 +84,12 @@ function reduce(outcomes: ReadonlyArray<FactualUnitOutcome>) {
 }
 
 describe('the factual review reduction', () => {
-  it('pins corrected UTF-16 anchoring separately from historical reductions (#1022)', () => {
+  it('pins UTF-16 anchoring and exact grapheme slices separately from historical reductions (#1022)', () => {
     const { sourceRangeMapping, ...historical } = FACTUAL_REVIEW_REDUCER_DESCRIPTOR;
     expect(sourceRangeMapping).toBe('folded-utf16-code-units-to-source-graphemes');
+    const { sourceRangeIntegrity, ...beforeSliceCheck } = FACTUAL_REVIEW_REDUCER_DESCRIPTOR;
+    expect(sourceRangeIntegrity).toBe('sole-candidate-normalized-grapheme-slice-equals-quotation');
+    expect(FACTUAL_REVIEW_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(beforeSliceCheck)));
     expect(FACTUAL_REVIEW_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(historical)));
     expect(factualReviewKindDefinition().reducerDigest).toBe(FACTUAL_REVIEW_REDUCER_DIGEST);
   });

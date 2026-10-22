@@ -56,6 +56,7 @@ export const REVIEW_CATEGORY_REDUCER_DESCRIPTOR = {
   stages: ['unit-validation', 'reference-integrity', 'finding-reduction', 'assurance-sampling'],
   referenceIntegrity: 'declared-block-first-then-unique-normalized-exact-match-in-complete-distinct-message-envelope',
   sourceRangeMapping: 'folded-utf16-code-units-to-source-graphemes',
+  sourceRangeIntegrity: 'sole-candidate-normalized-grapheme-slice-equals-quotation',
   normalization: ['whitespace-collapse', 'fullwidth-halfwidth-ascii'],
   mergeRule: 'same-block-same-normalized-quotation-same-replacement',
   exclusionReasons: ['quote-not-found', 'quote-ambiguous', 'replacement-identical'],

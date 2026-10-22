@@ -408,7 +408,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       const category = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       expect(category.resultSetRevision!.units).toHaveLength(2);
       expect(category.resultSetRevision!.gaps).toEqual([]);
-      expect(category.resultSetRevision!.excluded).toEqual([]);
+      expect(category.resultSetRevision!.findingCounts).toMatchObject({ listed: 2, located: 1, excluded: 1 });
+      expect(category.resultSetRevision!.excluded.map((entry) => entry.reason)).toEqual(['quote-not-found']);
+      expect(category.resultSetRevision!.excluded[0]).not.toHaveProperty('sourceRange');
       expect(category.resultSetRevision!.assuranceSample.state).toBe('closed');
       expect(category.taskOutcome!.report!.ifRedone.state).toBe('closed');
       expect(settled.findings).toHaveLength(1);
@@ -417,6 +419,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(finding).toMatchObject({ blockId: blocks[1]!.blockId, fromGrapheme: 3, toGrapheme: 6, anchorState: 'exact', status: 'pending' });
       const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
       expect(card.pinnedText === 'Ａ　Ｂ').toBe(true);
+      const markedWindow = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: finding.blockId });
+      expect(markedWindow.marksTruncated).toBe(false);
+      expect(markedWindow.marks.map((mark) => mark.markId)).toEqual([finding.markId]);
       const applied = session.store.applyChangeSuggestion({ ...binding(session, book), markId: finding.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
       expect(workingText(session, book).get(finding.blockId) === '开头👩‍💻丙结尾').toBe(true);
       expect(workingText(session, book).get(blocks[0]!.blockId) === paragraphs[0]).toBe(true);

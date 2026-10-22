@@ -88,6 +88,17 @@ describe('a review category reduction', () => {
     expect(merged.findings[0]!.findingId).toBe(results[0]!.findings[0]!.findingId);
     expect(merged.findings[0]!.mergedFrom).toEqual([{ unitOrdinal: 2, blockOrdinal: 2, findingOrdinal: 2 }]);
   });
+  it.each([1, 2])('excludes a partial grapheme through declared and fallback locations: ordinal %i (#1022)', (blockOrdinal) => {
+    const paragraphs = [block(1, 'paragraph', '甲'.repeat(UNIT_BUDGET_GRAPHEMES)), block(2, 'paragraph', '开头👩‍💻Ａ　Ｂ结尾')];
+    const split = deriveCoverageManifest({ bookId: randomUUID(), manuscriptId: randomUUID(), branchId: randomUUID(), revisionId: randomUUID(), revisionLabel: 'r1', revisionDigest: 'e'.repeat(64), blocks: paragraphs });
+    const reduction = reduceReviewCategory({
+      categoryId: 'typos-and-usage', manifest: split, blocks: new Map(paragraphs.map((entry) => [entry.blockId, entry])),
+      outcomes: [{ unitOrdinal: 2, state: 'closed', result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 2, findings: [{ quote: '💻', blockOrdinal, severity: 'should', note: '合成部分字素回归', replacement: '丙' }] } }],
+    });
+    expect(reduction.findings).toEqual([]);
+    expect(reduction.excluded.map((entry) => entry.reason)).toEqual(['quote-not-found']);
+    expect(reduction.excluded[0]).not.toHaveProperty('sourceRange');
+  });
   it.each([
     { name: 'preserves a declared success even with another match', texts: ['目标', '目标'], ordinal: 1, state: 'verified' },
     { name: 'preserves declared ambiguity', texts: ['目标目标', '目标'], ordinal: 1, state: 'quote-ambiguous' },

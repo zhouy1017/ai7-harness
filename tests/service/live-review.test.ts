@@ -250,13 +250,13 @@ describe('reference-free review on the Go execution path', () => {
     const findings = settled.findings;
     expect(findings.length).toBeGreaterThanOrEqual(source === 'recorded' ? 1 : 3);
     if (source === 'recorded') {
-      // The evidence item's persisted outcome replays exactly: 11 typos and 8 style findings grounded. The others
-      // name a block that does not hold their quotation and stay excluded, never relocated to a neighbouring block.
+      // Re-reduce the unchanged recorded answers under the current locator: unique quotations recover
+      // inside their authorized units. This checks exact grounding, not current live-model quality.
       const counts = (id: string) => (store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry(id)!)))
         .resultSetRevision as ReviewCategoryResultSetRevisionProjection).findingCounts;
-      expect(counts('typos-and-usage')).toMatchObject({ listed: 27, located: 11, excluded: 16 });
-      expect(counts('style-and-format')).toMatchObject({ listed: 9, located: 8, excluded: 1 });
-      expect(['typos-and-usage', 'style-and-format'].map((id) => findings.filter((candidate) => candidate.categoryId === id).length)).toEqual([11, 8]);
+      expect(counts('typos-and-usage')).toMatchObject({ listed: 27, located: 27, excluded: 0 });
+      expect(counts('style-and-format')).toMatchObject({ listed: 9, located: 9, excluded: 0 });
+      expect(['typos-and-usage', 'style-and-format'].map((id) => findings.filter((candidate) => candidate.categoryId === id).length)).toEqual([27, 9]);
     }
     for (const finding of findings) {
       const block = original.find((candidate) => candidate.blockId === finding.blockId)!;

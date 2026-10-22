@@ -2,7 +2,7 @@
   "schema": "ai7.model-fixture/1",
   "identity": "review-overlap-authored",
   "basedOn": null,
-  "description": "Issue #1022: two authored public synthetic paragraphs split at the unit budget; unit 2 deliberately numbers its own block without counting leading overlap.",
+  "description": "Issue #1022: two authored public synthetic paragraphs split at the unit budget; unit 2 deliberately numbers its own block without counting leading overlap. A partial ZWJ component is excluded without a mark beside the valid normalized quotation.",
   "provenance": "authored",
   "provider": "ai7-local-deterministic",
   "model": "ai7-deterministic-fixture",
@@ -24,7 +24,7 @@
       "requestDigest": "07ab89d3ccce59777d2cef9924ab93d633f4d8c080832b5bd431bc0f428ecef0",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"A B\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"合成重叠编号回归。\",\"replacement\":\"丙\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"A B\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"合成重叠编号回归。\",\"replacement\":\"丙\"},{\"quote\":\"💻\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"合成部分字素引文不得扩展。\",\"replacement\":\"丙\"}]}",
         "usage": {
           "inputTokens": 100,
           "outputTokens": 40
@@ -45,10 +45,10 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "e818c9cbe4ed56cd7759bb6d58a7f577c7d94bbd35ad2e184650effe86a17db0",
+      "requestDigest": "2ed874862ad1fd3a2427374c9ebb8a05826617f566a9486208024b721f0d77fb",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"维持当前精确引文定位边界。\",\"basis\":\"合成回归的两个单元均已闭合，唯一发现已定位。\"}]}",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"维持当前精确引文定位边界。\",\"basis\":\"合成回归的两个单元均已闭合，有效发现已定位，部分字素引文已排除。\"}]}",
         "usage": {
           "inputTokens": 100,
           "outputTokens": 40

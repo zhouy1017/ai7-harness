@@ -3242,11 +3242,12 @@ async function main() {
     const overlapReviewed = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     const overlapFinding = overlapReviewed.run.findings[0];
     requireJourney(overlapReviewed.run.findings.length === 1 && overlapFinding.anchorState === 'exact' && overlapFinding.markId !== null &&
-      overlapFinding.fromGrapheme === 3 && overlapFinding.toGrapheme === 6 && overlapReviewed.run.categories[0].excludedCount === 0,
+      overlapFinding.fromGrapheme === 3 && overlapFinding.toGrapheme === 6 && overlapReviewed.run.categories[0].excludedCount === 1,
     'overlap-resolved-finding');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${overlapFinding.findingId}"] [data-review-action="go-to-text"]`, 'overlap-go-to-text');
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${overlapFinding.markId}"]')?.dataset.markSource==='ai7'`, 'overlap-mark-visible');
     await assertRenderer(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const card=await window.ai7.getEditorialMarkCard({manuscriptId:work.manuscriptId,branchId:work.branchId,markId:${JSON.stringify(overlapFinding.markId)}});return card.pinnedText==='Ａ　Ｂ';})()`, 'overlap-mark-exact-text');
+    await assertRenderer(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(overlapFinding.blockId)}}});return !page.marksTruncated && page.marks.length===1 && page.marks[0].markId===${JSON.stringify(overlapFinding.markId)};})()`, 'overlap-partial-grapheme-has-no-mark');
     await openReviewDestination(renderer, 'overlap-back-to-review');
     await reviewAction(renderer, 'section.review-group[data-review-category="typos-and-usage"] [data-review-action="batch-prepare"]', 'overlap-apply-prepare');
     await waitFor(renderer, `document.querySelector('section.review-batch-strip')?.dataset.reviewBatchState==='ready'`, 'overlap-apply-ready');

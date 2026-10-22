@@ -82,9 +82,12 @@ describe('the dimension document (ai7.custom-analysis-dimension/1)', () => {
 });
 
 describe('the custom analysis kind family (custom-analysis/<dimension-id>)', () => {
-  it('pins corrected UTF-16 anchoring separately from historical reductions (#1022)', () => {
+  it('pins UTF-16 anchoring and exact grapheme slices separately from historical reductions (#1022)', () => {
     const { sourceRangeMapping, ...historical } = CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR;
     expect(sourceRangeMapping).toBe('folded-utf16-code-units-to-source-graphemes');
+    const { sourceRangeIntegrity, ...beforeSliceCheck } = CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR;
+    expect(sourceRangeIntegrity).toBe('sole-candidate-normalized-grapheme-slice-equals-quotation');
+    expect(CUSTOM_ANALYSIS_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(beforeSliceCheck)));
     expect(CUSTOM_ANALYSIS_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(historical)));
     expect(customAnalysisKindDefinition(version).reducerDigest).toBe(CUSTOM_ANALYSIS_REDUCER_DIGEST);
   });

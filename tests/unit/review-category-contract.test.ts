@@ -40,9 +40,12 @@ const TYPOS = reviewCategoryContractInput(entry('typos-and-usage'));
 const STYLE = reviewCategoryContractInput(entry('style-and-format'));
 
 describe('the built-in review categories', () => {
-  it('pins corrected UTF-16 anchoring separately from historical reductions (#1022)', () => {
+  it('pins UTF-16 anchoring and exact grapheme slices separately from historical reductions (#1022)', () => {
     const { sourceRangeMapping, ...historical } = REVIEW_CATEGORY_REDUCER_DESCRIPTOR;
     expect(sourceRangeMapping).toBe('folded-utf16-code-units-to-source-graphemes');
+    const { sourceRangeIntegrity, ...beforeSliceCheck } = REVIEW_CATEGORY_REDUCER_DESCRIPTOR;
+    expect(sourceRangeIntegrity).toBe('sole-candidate-normalized-grapheme-slice-equals-quotation');
+    expect(REVIEW_CATEGORY_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(beforeSliceCheck)));
     expect(REVIEW_CATEGORY_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(historical)));
     expect(reviewCategoryKindDefinition(TYPOS).reducerDigest).toBe(REVIEW_CATEGORY_REDUCER_DIGEST);
   });

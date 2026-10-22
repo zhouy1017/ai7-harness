@@ -373,11 +373,12 @@ export function locateQuotation(blockText: string, quote: string): QuotationLoca
   if (starts.length === 0) return { state: 'not-found' };
   if (starts.length > 1) return { state: 'ambiguous', occurrences: starts.length };
   const start = starts[0]!;
-  return {
-    state: 'verified',
-    fromGrapheme: haystack.fromGrapheme[start]!,
-    toGrapheme: haystack.toGrapheme[start + needle.length - 1]! + 1,
-  };
+  const fromGrapheme = haystack.fromGrapheme[start]!;
+  const toGrapheme = haystack.toGrapheme[start + needle.length - 1]! + 1;
+  // A folded substring can start or end inside a grapheme. Never expand that quotation into an
+  // anchor over additional characters, even when the substring itself occurs exactly once.
+  if (normalizedQuotation(sliceGraphemes(blockText, fromGrapheme, toGrapheme)) !== needle) return { state: 'not-found' };
+  return { state: 'verified', fromGrapheme, toGrapheme };
 }
 
 /** The comparison key duplicates are merged by: the folded form of the quotation (decision 5). */

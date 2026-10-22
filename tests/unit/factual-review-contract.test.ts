@@ -168,12 +168,24 @@ describe('reference integrity: locating a quotation in the block it names', () =
     { name: 'ZWJ prefix with width and whitespace folding', text: '开头👩‍💻Ａ　\tＢ结尾', quote: 'A B', from: 3, to: 7, exact: 'Ａ　\tＢ' },
     { name: 'target at the end after an astral prefix', text: '😀目标', quote: '目标', from: 1, to: 3, exact: '目标' },
     { name: 'whole ZWJ quotation', text: '甲👩‍💻乙', quote: '👩‍💻', from: 1, to: 2, exact: '👩‍💻' },
+    { name: 'whole combining grapheme', text: '甲e\u0301乙', quote: 'e\u0301', from: 1, to: 2, exact: 'e\u0301' },
   ])('maps UTF-16 match offsets to exact graphemes: $name (#1022)', ({ text, quote, from, to, exact }) => {
     const located = locateQuotation(text, quote);
     expect(located).toEqual({ state: 'verified', fromGrapheme: from, toGrapheme: to });
     if (located.state !== 'verified') return;
     expect(sliceGraphemes(text, located.fromGrapheme, located.toGrapheme)).toBe(exact);
     expect(normalizedQuotation(exact)).toBe(normalizedQuotation(quote));
+  });
+
+  it.each([
+    { name: 'woman component', text: '甲👩‍💻乙', quote: '👩' },
+    { name: 'laptop component', text: '甲👩‍💻乙', quote: '💻' },
+    { name: 'base of combining grapheme', text: '甲e\u0301乙', quote: 'e' },
+    { name: 'accent of combining grapheme', text: '甲e\u0301乙', quote: '\u0301' },
+  ])('refuses partial-grapheme expansion: $name (#1022)', ({ text, quote }) => {
+    expect(locateQuotation(text, quote)).toEqual({ state: 'not-found' });
+    // Count all folded occurrences before checking a sole candidate's exact slice.
+    expect(locateQuotation(text + quote, quote)).toEqual({ state: 'ambiguous', occurrences: 2 });
   });
 
   it('verifies a quotation that occurs exactly once and returns its exact grapheme range', () => {
