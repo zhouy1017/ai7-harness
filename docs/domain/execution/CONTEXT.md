@@ -387,7 +387,7 @@ The exact authority record permitting one Run for one Task Intent and Plan Envel
 _中文_: 任务运行授权
 _Avoid_: Execution Grant, Effect Approval, standing permission
 
-Provider setup, credential configuration, manuscript import, artifact acquisition or enablement, DSH Session/Plugin membership, a Default Execution Rule without a newly user-initiated matching Task, and a Background Analysis Enrollment without a matching exact dispatch each remain non-authorizing. Every new idle, scheduled, post-checkpoint, import-triggered, or cross-Run Provider dispatch without a newly user-initiated Task requires a still-active matching Enrollment.
+Provider setup, credential configuration, manuscript import, artifact acquisition or enablement, DSH Session/Plugin membership, a Default Execution Rule without a newly user-initiated matching Task, and a Background Analysis Enrollment without a matching exact dispatch each remain non-authorizing. New autonomous manuscript-analysis dispatch requires a still-active matching Enrollment; automatic curation instead requires ADR 0094's active learning envelope and exact dispatch. Neither grants authority for the other or for unrelated background work.
 
 **Global Agent Session**:
 A project-independent dialogue identity for learning supervision, memory governance and explicitly scoped cross-workspace retrieval. It does not imply a current Book, manuscript mutation authority or an unrestricted source scope.

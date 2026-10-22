@@ -98,7 +98,7 @@ Recorded by [ADR 0078](../adr/0078-align-the-remaining-references-the-plan-and-t
 | HTML/CSS/JavaScript prototype and its component behavior | Throwaway reference implementation; it supplies no implementation or prototype authority |
 | Figma raw frames, old component tree and handoff geometry | Reference artifacts only; any Figma or native-library work requires separate explicit authority |
 | Exact V1 palette, typography sizes, radii, shadows, spacing and token values | V2 has independent theme, density, reading and semantic-state direction |
-| Codex brand, assets, copied microcopy, code/repository/terminal or unbound generic-chat hierarchy | Codex supplies interaction principles only; AI7 owns publishing objects and authority. New contextual Interactive Editorial Dialogue remains subordinate to an exact Book/work object rather than reviving chat as the product root |
+| Codex brand, assets, copied microcopy, code/repository/terminal or unbound generic-chat hierarchy | Codex supplies interaction principles only; AI7 owns publishing objects and authority. Interactive Editorial Dialogue binds an exact Book/work object or ADR 0094 Global Agent Session/turn and scoped sources, without creating generic chat authority |
 | Editor-facing Policy/Composition activation or capability-expansion controls | Hidden governed assets remain developer-controlled and cannot become editorial self-service elevation |
 | Formal `签发` wording, signature ceremony and generic approval styling | Target-house workflow uses Milestone Version language and keeps exact internal records separate |
 | Direct send/handoff/recipient/delivery-confirmation UI | V1 ends at a local Export Effect Receipt |

@@ -1,5 +1,5 @@
 ---
-status: accepted — amended by root ADR 0094
+status: accepted
 ---
 
 # Show automatic local learning and preserve explicit scope overrides

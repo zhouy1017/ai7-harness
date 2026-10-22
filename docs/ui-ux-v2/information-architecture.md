@@ -823,7 +823,7 @@ editor considering a Background Analysis Enrollment
          └─ compatible kinds may share an authorized batch Run without merging per-kind results
 ```
 
-Baseline is preselected only within the separately disclosed Enrollment decision; the eight Editorial Dimensions and Plugin/user-defined kinds remain independent. Enrollment is revocable, but Issue #86 does not settle pause/disable mechanics. Model Service setup, import, artifact lifecycle, Workflow Profile activation, Default Execution Rule and DSH Session membership never create this authority. Moving the same already-authorized Run out of the foreground changes presentation only; a new idle, scheduled, import-triggered, post-checkpoint or cross-Run Provider dispatch requires a matching active Enrollment.
+Baseline is preselected only within the separately disclosed Enrollment decision; the eight Editorial Dimensions and Plugin/user-defined kinds remain independent. Enrollment is revocable, but Issue #86 does not settle pause/disable mechanics. Model Service setup, import, artifact lifecycle, Workflow Profile activation, Default Execution Rule and DSH Session membership never create this authority. Moving the same already-authorized Run out of the foreground changes presentation only; a new autonomous manuscript-analysis dispatch requires a matching active Enrollment. ADR 0094's automatic curation instead uses its disclosed enabled-learning envelope and exact dispatch, without a per-pass click.
 
 ## Editorial marks
 
