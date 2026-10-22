@@ -1,0 +1,59 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "review-overlap-authored",
+  "basedOn": null,
+  "description": "Issue #1022: two authored public synthetic paragraphs split at the unit budget; unit 2 deliberately numbers its own block without counting leading overlap.",
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "d9c715385e85040c20a8ae9fab3290630b7b8e881cdd0eddf35ca87b7f5706ae",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":1,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 100,
+          "outputTokens": 40
+        }
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "9b39b3ef0a70452b357b2bb16b245f7d035715bdfe7b5c98c4d8cffa3d850f0e",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"错词\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"合成重叠编号回归。\",\"replacement\":\"正词\"}]}",
+        "usage": {
+          "inputTokens": 100,
+          "outputTokens": 40
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "af6f05311d2d86a297eda1eeee1d5804b820f9246bc020287768d4c2bf39b26b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"合成引文在授权单元内唯一定位。\"}]}",
+        "usage": {
+          "inputTokens": 100,
+          "outputTokens": 40
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "e818c9cbe4ed56cd7759bb6d58a7f577c7d94bbd35ad2e184650effe86a17db0",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"维持当前精确引文定位边界。\",\"basis\":\"合成回归的两个单元均已闭合，唯一发现已定位。\"}]}",
+        "usage": {
+          "inputTokens": 100,
+          "outputTokens": 40
+        }
+      }
+    }
+  ]
+}

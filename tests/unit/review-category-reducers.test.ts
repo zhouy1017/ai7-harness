@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { deriveCoverageManifest, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
+import { deriveCoverageManifest, UNIT_BUDGET_GRAPHEMES, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
 import { OUT_OF_SCOPE_GAP_REASON } from '../../src/service/analysis/reuse-plan.js';
 import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
+import { locateQuotation, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { reduceReviewCategory, type ReviewUnitOutcome } from '../../src/service/review/review-category-reducers.js';
 import { markRetrievalResult } from '../../src/service/retrieval/result-validator.js';
 
@@ -61,6 +62,60 @@ function reduce(categoryId = 'typos-and-usage', second: ReviewUnitOutcome = { un
 }
 
 describe('a review category reduction', () => {
+  it('resolves own-only and overlap-inclusive ordinals to the same exact range (#1022)', () => {
+    const paragraphs = [block(1, 'paragraph', '甲'.repeat(UNIT_BUDGET_GRAPHEMES)), block(2, 'paragraph', '开头éＡ　Ｂ结尾')];
+    const split = deriveCoverageManifest({ bookId: randomUUID(), manuscriptId: randomUUID(), branchId: randomUUID(), revisionId: randomUUID(), revisionLabel: 'r1', revisionDigest: 'e'.repeat(64), blocks: paragraphs });
+    expect(split.units).toHaveLength(2);
+    expect(split.units[1]!.overlapBlockIds).toEqual([paragraphs[0]!.blockId]);
+    expect(locateQuotation(paragraphs[1]!.text, 'A B')).toEqual({ state: 'verified', fromGrapheme: 3, toGrapheme: 6 });
+    const results = [1, 2].map((blockOrdinal) => reduceReviewCategory({
+      categoryId: 'typos-and-usage', manifest: split, blocks: new Map(paragraphs.map((entry) => [entry.blockId, entry])),
+      outcomes: [{ unitOrdinal: 2, state: 'closed', result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 2, findings: [{ quote: 'A B', blockOrdinal, severity: 'should', note: '合成重叠回归', replacement: '丙' }] } }],
+    }));
+    for (const result of results) {
+      expect(result.excluded).toEqual([]);
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]!.sourceRange).toEqual({ blockId: paragraphs[1]!.blockId, fromGrapheme: 3, toGrapheme: 6 });
+      expect(sliceGraphemes(paragraphs[1]!.text, 3, 6)).toBe('Ａ　Ｂ');
+    }
+    expect(results[0]!.findings[0]!.findingId).toBe(results[1]!.findings[0]!.findingId);
+    const duplicate = { quote: 'A B', severity: 'should' as const, note: '合成重叠回归', replacement: '丙' };
+    const merged = reduceReviewCategory({
+      categoryId: 'typos-and-usage', manifest: split, blocks: new Map(paragraphs.map((entry) => [entry.blockId, entry])),
+      outcomes: [{ unitOrdinal: 2, state: 'closed', result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 2, findings: [1, 2].map((blockOrdinal) => ({ ...duplicate, blockOrdinal })) } }],
+    });
+    expect(merged.findings).toHaveLength(1);
+    expect(merged.findings[0]!.findingId).toBe(results[0]!.findings[0]!.findingId);
+    expect(merged.findings[0]!.mergedFrom).toEqual([{ unitOrdinal: 2, blockOrdinal: 2, findingOrdinal: 2 }]);
+  });
+  it.each([
+    { name: 'preserves a declared success even with another match', texts: ['目标', '目标'], ordinal: 1, state: 'verified' },
+    { name: 'preserves declared ambiguity', texts: ['目标目标', '目标'], ordinal: 1, state: 'quote-ambiguous' },
+    { name: 'refuses matches across blocks', texts: ['没有', '目标', '目标'], ordinal: 1, state: 'quote-ambiguous' },
+    { name: 'refuses repeated matches within another block', texts: ['没有', '目标目标'], ordinal: 1, state: 'quote-ambiguous' },
+    { name: 'refuses an absent quote', texts: ['没有', '仍然没有'], ordinal: 1, state: 'quote-not-found' },
+    { name: 'fails closed with a missing declared record', texts: ['没有', '目标'], ordinal: 1, missing: 0, state: 'quote-not-found' },
+    { name: 'fails closed with another missing envelope record', texts: ['没有', '目标', '目标'], ordinal: 1, missing: 2, state: 'quote-not-found' },
+    { name: 'deduplicates envelope IDs', texts: ['没有', '目标'], ordinal: 1, repeatedId: true, state: 'verified' },
+    { name: 'never searches outside the unit', texts: ['没有', '仍然没有'], ordinal: 1, outside: true, state: 'quote-not-found' },
+    { name: 'rejects an identical resolved replacement', texts: ['没有', '目标'], ordinal: 1, replacement: '目标', state: 'replacement-identical' },
+    { name: 'preserves Exact Fetch exclusion after recovery', texts: ['没有', '目标'], ordinal: 1, notFetched: true, state: 'not-exact-fetched' },
+  ])('$name (#1022)', ({ texts, ordinal, missing, repeatedId, outside, replacement, notFetched, state }) => {
+    const inputs = texts.map((text, index) => block(index + 1, 'paragraph', text));
+    const unit = { ...manifest.units[0]!, blockIds: inputs.map((entry) => entry.blockId), overlapBlockIds: repeatedId ? [inputs[1]!.blockId] : [] };
+    const records = new Map(inputs.filter((_, index) => index !== missing).map((entry) => [entry.blockId, entry]));
+    if (outside) { const extra = block(99, 'paragraph', '目标'); records.set(extra.blockId, extra); }
+    const result = { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1, findings: [{ quote: '目标', blockOrdinal: ordinal, severity: 'should' as const, note: '合成边界回归', replacement: replacement ?? '替换' }] };
+    if (notFetched) markRetrievalResult(result, [{ collection: 'findings', ordinal: 0 }]);
+    const reduction = reduceReviewCategory({ categoryId: 'typos-and-usage', manifest: { ...manifest, units: [unit] }, blocks: records, outcomes: [{ unitOrdinal: 1, state: 'closed', result }] });
+    if (state === 'verified') {
+      expect(reduction.excluded).toEqual([]);
+      expect(reduction.findings).toHaveLength(1);
+    } else {
+      expect(reduction.findings).toEqual([]);
+      expect(reduction.excluded.map((entry) => entry.reason)).toEqual([state]);
+    }
+  });
   it('keeps a retrieval quotation without Exact Fetch in the existing excluded appendix (#893)', () => {
     const result = { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1, findings: [{ ...located }] };
     markRetrievalResult(result, [{ collection: 'findings', ordinal: 0 }]);

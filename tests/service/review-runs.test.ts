@@ -386,6 +386,46 @@ function eventTrail(reviewRunId: string): Array<[string, string]> {
   }
 }
 describe('a Review Run over the real store on exact sample1', () => {
+  it('materializes an overlap-misnumbered synthetic finding at its resolved block, applies and reverses it (#1022)', async () => {
+    const session = await open('review-overlap-authored');
+    try {
+      const book = await importBook(session);
+      // Existing admitted synthetic-evidence pattern: tester edits of a fresh sample1 lineage,
+      // with only these two authored paragraphs left in its pinned working representation.
+      const paragraphs = ['甲'.repeat(1200), '清晨的合成码头出现错词，船员随后离开。'];
+      for (const [index, block] of session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).entries()) {
+        const replace = (fromGrapheme: number, toGrapheme: number, insertText: string): void => {
+          const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: block.blockId });
+          const current = window.blocks.find((entry) => entry.blockId === block.blockId)!;
+          session.store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId, blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: current.digest, expectedJournalSequence: window.journalSequence, fromGrapheme, toGrapheme, insertText });
+        };
+        let remaining = graphemeCount(block.text);
+        while (remaining > 0) { const from = Math.max(0, remaining - 256); replace(from, remaining, ''); remaining = from; }
+        const words = paragraphs[index] ?? '';
+        for (let offset = 0; offset < words.length; offset += 256) replace(offset, offset, words.slice(offset, offset + 256));
+      }
+      const settled = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      const category = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(category.resultSetRevision!.units).toHaveLength(2);
+      expect(category.resultSetRevision!.gaps).toEqual([]);
+      expect(category.resultSetRevision!.excluded).toEqual([]);
+      expect(category.resultSetRevision!.assuranceSample.state).toBe('closed');
+      expect(category.taskOutcome!.report!.ifRedone.state).toBe('closed');
+      expect(settled.findings).toHaveLength(1);
+      const finding = settled.findings[0]!;
+      const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+      expect(finding).toMatchObject({ blockId: blocks[1]!.blockId, fromGrapheme: 9, toGrapheme: 11, anchorState: 'exact', status: 'pending' });
+      const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
+      expect(card.pinnedText).toBe('错词');
+      const applied = session.store.applyChangeSuggestion({ ...binding(session, book), markId: finding.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      expect(workingText(session, book).get(finding.blockId)).toBe(blocks[1]!.text.replace('错词', '正词'));
+      const reversed = session.store.reverseAppliedChangeSuggestion({ ...binding(session, book), markId: finding.markId!, clientEffectId: randomUUID() });
+      expect(reversed.application.reversesEffectId).toBe(applied.application.effectId);
+      expect(workingText(session, book).get(finding.blockId)).toBe(blocks[1]!.text);
+    } finally {
+      await close(session);
+    }
+  });
   it('quick-starts only a matching review category-set rule and records that origin on its category Runs', async () => {
     await withBook('sample1-review-authored', async (session, book) => {
       const run = prepare(session, book, [TYPOS], WHOLE);
