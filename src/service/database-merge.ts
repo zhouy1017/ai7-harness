@@ -367,6 +367,8 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   // item's are made again here on request, from the build made here.
   material_index_vectors: 'derived',
   material_index_translations: 'derived',
+  // Attempts name the source machine's exact build and batch; Book merge keeps destination attempts and takes none from source.
+  material_translation_attempts: 'derived',
   // Factual verification (Issue #901): a Book's results, decisions and Correction Proposal lineage travel with it.
   factual_run_assurance: 'owned',
   house_review_preference_versions: 'house',
