@@ -217,29 +217,9 @@ An ordinary optional reason never enters `待我处理`, adds an unread badge, o
 
 ## Learning Material eligibility
 
-Eligibility begins from one identified item and keeps reuse scope explicit:
+ADR 0094 admits eligible decision/rewrite/imported-revision signals to disclosed opt-out local collection and intelligent curation. `质量与学习` shows current collection/scope, global disable, per-Book/material exclusion, narrower reuse, provenance and recent memory. Automatic admission names its governing basis. Only unresolved manual decisions open the existing exact-material review card; choices remain unselected and explicit exclusions win immediately. Inspectable derived preferences/exemplars may activate within that envelope; Series Knowledge promotion remains separate.
 
-```text
-candidate Learning Material · created quietly
-├─ no editor decision currently required
-│  └─ 质量与学习 / candidate history
-└─ explicit editor decision required
-   ├─ 待我处理 / Learning Eligibility Attention Item · grouped by Book
-   └─ Learning Material Review Card
-      ├─ bounded item/excerpt + exact provenance/version
-      ├─ originating Book / Task / decision or outcome
-      ├─ why candidate + possible future influence
-      └─ unselected decision
-         ├─ 仅纳入当前图书 · recommended
-         ├─ 纳入当前书系 · exact named Series + wider consequence
-         ├─ 纳入出版社经验 · House-wide consequence
-         ├─ 明确排除
-         ├─ 稍后决定
-         ├─ 补充说明 / 自行输入
-         └─ 记录学习准入决定
-```
-
-The review stays a product-record surface rather than a Policy editor. Scope means where this material may contribute learning; it is not Run Source Scope, provider outbound permission, memory activation, or permission to browse other Books. A decision deep-links into later Learning Lineage without rewriting the originating feedback, edit, or business record.
+The top-level Global Agent opens without a Book and provides learning supervision, memory governance, habits summaries and scoped cross-workspace retrieval. Sources and effective exclusions remain explicit, with manuscript proposals returning to their exact Book/Apply chain. Neither global entry nor local collection grants remote processing or unrestricted manuscript browsing. See [ADR 0094 §§3–4](../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md).
 
 ## Learning Audit and remediation
 
@@ -294,11 +274,10 @@ Task requiring model processing
          ├─ Model Setup Return Point
          └─ 设置模型服务
             └─ 设置 > 模型服务
-               ├─ 快速交互角色 · state
-               ├─ 主编辑角色 · state
-               ├─ 疑难升级角色 · state
-               ├─ 前沿模型角色 · state
-               ├─ secondary Provider/model/fallback connections
+               ├─ unified channel selection
+               ├─ protected credential / connection test
+               ├─ eligible model selection
+               ├─ advanced per-role / fallback connections
                ├─ secondary credential replace/remove
                └─ secondary optional Run Budget Ceiling preference
                   └─ return to exact Task draft → re-run preflight
@@ -1240,12 +1219,12 @@ Offline Task Preparation changes availability, not authority. If exact provider/
 
 ## Model selection and service detail
 
-The primary Task surface gives Model Role/capability selection little vertical weight:
+The primary workbench offers compact channel/model selection, with optional role/capability detail (ADR 0094):
 
 ```text
 Model Selection Strip
-├─ 模型角色
-└─ 模型能力要求
+├─ 渠道 / 可用模型
+└─ 模型角色 / 能力要求（高级）
 
 compact Provider and Budget Disclosure
 └─ exact binding · ready/blocking · outbound · fallback · estimate · Run Budget Ceiling state
@@ -1255,7 +1234,7 @@ compact Provider and Budget Disclosure
       └─ tertiary 设置 / 用量
 ```
 
-Editors choose the role and capability needed for the work, not a raw model catalog or provider endpoint. Provider Preflight resolves the exact binding. The compact disclosure satisfies non-silent processing and budget visibility without becoming a large Task card; a blocker expands inline automatically.
+Editors choose an eligible channel/model, optionally refining role/capability requirements; arbitrary endpoints remain outside the normal Task surface. Provider Preflight resolves the exact binding. The compact disclosure satisfies non-silent processing and budget visibility without becoming a large Task card; a blocker expands inline automatically.
 
 Settings owns persistent provider connections, credentials, alternative-frontier eligibility, default bindings, and optional Run Budget Ceiling preferences. Provider account quotas/spending controls remain provider-owned. Usage owns historical/aggregate consumption. Per-Run detail owns the exact binding, fallback, ceiling state and actual cost for that Run.
 
@@ -1308,7 +1287,7 @@ Book
                └─ 等待回答
 ```
 
-There is no instance-wide generic chat root. Opening a dialogue restores the exact Book, work object, Task context, answer attempt, and scroll position through exact Execution Binding and Harness Execution Span joins. Dialogue Answer History survives navigation and restart as a non-authoritative projection over Harness Session Ledger-owned messages and attempt history; it excludes Live Reasoning Summary, copies no transcript into the AI7 Task Ledger, and creates no third ledger. Moving the dialogue between foreground and background changes presentation only and does not change Provider execution, priority, scope, or authority.
+There is no instance-wide generic chat root. Opening a dialogue restores the exact Book/work-object/Task context or ADR 0094 Global Agent Session/turn and scoped sources, answer attempt, and scroll position through exact Execution Binding and Harness Execution Span joins. Dialogue Answer History survives navigation and restart as a non-authoritative projection over Harness Session Ledger-owned messages and attempt history; it excludes Live Reasoning Summary, copies no transcript into the AI7 Task Ledger, and creates no third ledger. Moving the dialogue between foreground and background changes presentation only and does not change Provider execution, priority, scope, or authority.
 
 Completed and incomplete answers are generated-content projections, not Manuscript, Editorial Artifact, factual-verification, Proposal, Learning Material, or Effect authority. Named actions such as `转为提案` or `用于新任务草稿` begin a separate governed object with provenance; they do not silently promote the answer, widen source/egress scope, or bypass Proposal Decision and Apply. A new Task Intent Draft is not the `Task Input / 任务输入` Manuscript Checkpoint purpose; that checkpoint appears only later if the new task meets D-075's journal-newer manuscript condition.
 

@@ -676,8 +676,8 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 
 | Layer | Visible by default | Interaction |
 | --- | --- | --- |
-| Primary Task surface | Compact Model Role selector and Model Capability Requirement chips | Editor changes desired work capability; Provider Preflight recomputes |
-| Compact disclosure | Exact provider/model label, ready/blocking state, outbound category, fallback presence, reliable estimate/range, Run Budget Ceiling state | Expand secondary detail; no raw provider control here |
+| Primary Task surface | Compact channel/model selector with optional Model Role/capability detail | Editor changes desired work capability; Provider Preflight recomputes |
+| Compact disclosure | Exact provider/model label, ready/blocking state, outbound category, fallback presence, reliable estimate/range, Run Budget Ceiling state | Expand secondary detail; compact eligible binding selection remains available |
 | Secondary Task detail | Binding rationale, fallback conditions, provider policy, outbound classes, connection name, explicit/unset ceiling, reported Provider Account Limit, and estimate assumptions | Review; material Plan-boundary changes return through Plan Revision |
 | Settings | Connections, credentials, eligible alternative frontier, default bindings, billing currency, and optional Run Budget Ceiling preference | Configure persistent service state; provider-side limits stay provider-owned and secrets never display after entry |
 | Usage | Historical/aggregate usage and cost plus per-Run links | Inspect; no Task or Run authority |
@@ -689,7 +689,7 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 - AI7 defaults the ceiling to `未设置` and explains that provider-side quotas, spending controls and billing still apply. A Provider Account Limit may be `未知 / 提供方未返回`; no unavailable value becomes `0`, `免费`, or `无限`.
 - A missing connection, changed outbound category, unavailable model, ambiguous fallback, unreliable estimate, invalid explicit ceiling, reached Run Budget Ceiling, or Provider Account Limit expands inline automatically with its own exact safe action.
 - Model Role and Model Capability Requirements are not quality/factual sliders and never use labels such as `更正确` or `事实可靠`.
-- DeepSeek default bindings and any explicitly configured alternative frontier binding remain exact detail, not user-facing product authority.
+- Eligible selected bindings remain exact configuration, not user-facing factual or product authority (ADR 0094).
 - After execution, actual use/cost moves to Run detail and Usage rather than permanently occupying the manuscript/task surface.
 
 ## Running Run activity
@@ -728,7 +728,7 @@ Response Presentation Mode is assigned explicitly by task type:
 | Task category | Mode | Provider-content behavior |
 | --- | --- | --- |
 | Writing, rewriting, research, factual verification, Proposal generation, automation, export, and other ordinary Runs | `Waiting Only` | Show exact phase/wait state; reveal no progressive Provider answer |
-| Interactive Editorial Dialogue bound to the exact active Book/work object | `Interactive Stream` | Stream only while that dialogue is foregrounded, under the boundaries below |
+| Interactive Editorial Dialogue bound to the exact active Book/work object or ADR 0094 Global Agent Session/turn and scoped sources | `Interactive Stream` | Stream only while that dialogue is foregrounded, under the boundaries below |
 
 The product never infers this mode from response length, latency, provider protocol, model, user impatience, or current window location. The user does not toggle an individual Run into streaming.
 
@@ -768,7 +768,7 @@ AI7 never silently retries, continues, changes Provider, or falls back after the
 
 ### History and promotion boundary
 
-- Dialogue Answer History is a recoverable, non-authoritative joined projection under the exact Book, active work object, and Task context. Exact Execution Bindings and Harness Execution Spans resolve it to model messages and attempt history owned only by the Harness Session Ledger; no transcript is copied into the AI7 Task Ledger and no third ledger is created.
+- Dialogue Answer History is a recoverable, non-authoritative joined projection under the exact Book/work-object/Task context or ADR 0094 Global Agent Session/turn and scoped sources. Exact Execution Bindings and Harness Execution Spans resolve it to model messages and attempt history owned only by the Harness Session Ledger; no transcript is copied into the AI7 Task Ledger and no third ledger is created.
 - Live Reasoning Summary is generation-only presentation and does not appear in visible history.
 - A subsequent turn may reference prior questions and answers in the same dialogue but gains no broader manuscript/source scope, Provider outbound category, or authorization from that history.
 - A completed answer remains generated content. `转为提案`, `用于新任务草稿`, or another exact named action may copy selected answer content into a new governed draft while preserving provenance back to the joined history; no conversion is implicit, and manuscript mutation still requires Proposal Decision plus the normal Apply path. `用于新任务草稿` creates a Task Intent Draft, not a `Task Input / 任务输入` Manuscript Checkpoint; D-075 applies later only if that task actually targets journal-newer manuscript state.
@@ -1357,28 +1357,9 @@ Under [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-th
 
 ## Learning Material eligibility
 
-| Candidate state | Presentation | Available consequence |
-| --- | --- | --- |
-| Identified; no explicit decision currently required | Quiet candidate/history row in `质量与学习` | Inspect only; no badge or eligibility inference |
-| Explicit decision required | Book-grouped `学习准入待处理` item | Open exact Learning Material Review Card |
-| Review opened | Bounded material, provenance, origin, candidate rationale, governing basis, possible future influence | Inspect/deep-link without creating a decision |
-| No scope selected | All include/exclude/defer choices unselected; `仅纳入当前图书` marked recommended | Select/edit only; no authority yet |
-| Named Series selected | Exact Series and cross-Book influence expand inline | Record eligibility for that displayed Series scope only |
-| House selected | House-wide future-influence consequence expands inline | Record eligibility for House scope only |
-| Exclude selected | Exact material and optional reason remain visible | Explicit exclusion supersedes inferred recommendation for this material |
-| Defer selected | `稍后决定` with preserved candidate identity | Keep one unresolved item; no eligibility state inferred |
-| Origin/material changed before record | Exact drift/version difference | Refresh review; stale selection cannot bind new material |
+ADR 0094 replaces the Book-first admission-only flow with visible opt-out local collection, curation and supported-pattern activation. Show collection/scope, global disable, exact exclusions/narrower reuse and source lineage. Automatic records name their governing basis; explicit exclusion overrides inferred eligibility immediately. After roughly 5–10 effective signals or one imported batch, a pass may filter noise and merge patterns without forcing a useful-rule result. Show the preferences actually used on later suggestion cards.
 
-### Eligibility rules
-
-- Candidate identification never chains a second prompt after contextual feedback. Only a genuine unresolved editor decision enters `待我处理`.
-- The Book-first recommendation is visibly advisory and unselected. Keyboard focus, hover, or ordering cannot be mistaken for selection.
-- Wider Series/House scope reveals its named reuse boundary and likely future influence beside the choice before `记录学习准入决定`; no generic second confirmation repeats the card.
-- Selection remains draft state until the exact record action. Recording binds material/version, scope, actor/time, optional reason, and governing basis; later correction appends a superseding decision.
-- `明确排除` does not delete the originating feedback/edit or Learning Material evidence. `稍后决定` does not count as inclusion, exclusion, or a negative Quality Signal.
-- Hidden Learning Eligibility Policy or behavior-composition assets may explain why a decision is required through plain-language basis text, but editors receive no policy editing or authority-expansion control.
-- Inclusion permits downstream signals or Memory Candidates only. `纳入当前书系` never means `纳入书系知识` and cannot create or bypass a Series Knowledge Candidate/Promotion Review. Memory approval/activation, task retrieval, provider egress, factual status, and every named product authority remain separate.
-- Series/House eligibility does not make raw material a global browsing result. Every later use remains attributable through Learning Lineage and bound by the future Run's exact source scope.
+Real unresolved manual choices retain the bounded material/provenance review and initially unselected inclusion/exclusion/deferral controls. A Series learning choice does not promote Series Knowledge. Local admission/activation grants no ambient manuscript retrieval, remote curation permission, factual proof or Apply. Supervision constrains subsequent curation/use and remediates affected memory with immutable history. See [root ADR 0094 §§3–4](../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md).
 
 ## Learning Audit and remediation
 
@@ -1409,7 +1390,7 @@ Under [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-th
 | --- | --- | --- |
 | First launch/no connection | Normal Book create/import and local work | No forced setup or reduced local capability |
 | Task needs an unconfigured Model Role | Inline Model Connection Blocker Card | Save exact Model Setup Return Point; no Run/authorization |
-| Open `设置模型服务` | Role-first connection states, with blocked role focused | Task draft remains intact in background/local state |
+| Open `设置模型服务` | Unified channel/connection/model flow, with blocked binding focused | Task draft remains intact in background/local state |
 | Enter credential | Protected input with purpose/Provider/connection name | Store through broker; secret never becomes redisplayable text |
 | Connection becomes ready | `已连接` plus exact role/binding summary | Return to originating Task and re-run preflight only |
 | Credential invalid/expired | `需处理` plus `重新输入`/`移除` | Preserve Task/Run boundary; no silent fallback |
@@ -1424,7 +1405,7 @@ Under [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-th
 - Operational scope selection for development/CI, exact fixture recording or ordinary production is trusted build/launch authority, not a product setting, environment value, artifact/Plugin choice or fallback. Missing/unknown selection blocks Provider work and no cross-scope fallback appears.
 - A secret entry may support paste and password-manager behavior but offers no reveal-after-save, copy, export or diagnostic action. Replacement does not expose the old value.
 - Removing a connection names affected defaults and waiting/blocked Runs without deleting their history or silently choosing another Provider.
-- Role cards remain primary. Raw model/endpoint/fallback detail expands only when needed for configuration or support, and no label implies one role is more factually correct.
+- Channel, protected connection test and eligible model selection are primary; optional per-role/fallback controls expand one level deeper. The workbench has a compact selector; no label implies factual authority (ADR 0094).
 - Optional Run Budget Ceiling preferences never hide per-Run estimate uncertainty, the exact default `未设置`, or Provider Account Limit uncertainty. `用量` presents aggregate and exact history without becoming a source of authorization or a substitute for provider account controls.
 
 ## Distribution channel and Product Data Location

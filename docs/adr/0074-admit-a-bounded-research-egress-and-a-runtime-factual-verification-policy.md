@@ -25,7 +25,7 @@ Plan slice S18 (#53) brings the first factual review of a manuscript: a `factual
 
 4. **What the model may and may not do stays as the policy says.** Foundation Model knowledge forms the verification question and chooses among listed hosts; it is never displayed, counted, or recorded as evidence, and it cannot close a finding (policy §Authority boundary 5). Reference Integrity is deterministic and never model-judged. Claim Support and Factual Verification are model-judged only over captured excerpts and are shown as separate states, never as one badge, score, or percentage (V2-UX-FACT-007).
 
-5. **Not decided here.** An open search provider and the credential slot it would need; research on a manuscript that is not an admitted Public SampleBook; research under `ordinary-production`, including the search-engine egress V2-UX-REV-010 admits for 事实核查 and 学术道德与引用 and the host policy it needs, which is the Owner's decision before S70 (#425) can dispatch; Series and cross-project evidence scope; the evidence surfaces, which [`docs/ui-ux-v2/editor-surfaces.md`](../ui-ux-v2/editor-surfaces.md) §4 (②B) and SRC-013's Evidence Sentence Links and 来源译文 specify (ADR 0077) and whose slices are S69 (#417) and S70 (#425).
+5. **Successor research admission.** [ADR 0094 §2](0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md#2-research-engines-remain-evidence-producers) admits the intended DeepSeek Search/Fetch and Bocha peer backends with user-selected default and an explicitly admitted fallback chain. Product implementation must reconcile exact protocols, protected credential mappings, scope, policy selection and per-result provenance. Ordinary-production research may process the editor’s own manuscript under its selected policy; developer tests remain limited to admitted Public SampleBooks. Series and cross-project reads still need exact source scope, and factual evidence surfaces retain their existing owners.
 
 ## Consequences
 
@@ -33,7 +33,7 @@ Plan slice S18 (#53) brings the first factual review of a manuscript: a `factual
 - On acceptance, one slice — S70 — writes Factual Verification Policy v1 (JSON, schema, projection), active-policy-set v5, the `fetch-public-source` decision with its ticket and refusal reasons, the Research Snapshot Cache, the search-budget field of the Plan Envelope, the ledger item kind, the research capability's live path, and the retention, alignment and translation steps of the External Evidence Retention Procedure. The Owner reviews the policy bytes and the curated list before that pull request is Ready.
 - The E2E Gate stays network-denied and provider-free: the capability replays fixtures, and a missing fixture is a disclosed gap in the Run, never a fetch.
 - Fixtures that quote an admitted Public SampleBook are permitted by ADR 0043; the fixture-generation tool's manuscript-echo refusal gains a kind-aware rule that admits a quotation only when it is a verbatim substring of the admitted unit it is anchored to, which is Reference Integrity applied at generation time.
-- A private manuscript gains nothing from this record: its factual review can produce assertions and `未外部复核` verdicts, and no query derived from it leaves the host under any scope.
+- This ADR supplies no development admission for a private manuscript. Ordinary-production processing follows its selected policy and the editor’s exact task authority, including ADR 0094’s research admission; repository, hosted CI, fixtures and logs remain closed to protected material.
 
 ## Rejected alternatives
 

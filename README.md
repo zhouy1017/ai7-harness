@@ -1,19 +1,39 @@
 # AI7 Harness
 
-AI7 is a Chinese-first desktop workbench for professional literary editors. It brings long manuscripts, editorial review, reference materials and publishing deliverables into one local workspace, with a revision history and explicit decisions for consequential changes.
+AI7 是面向中文文学编辑的本地桌面工作台：把长篇稿件、审校建议、参考资料、事实考据和出版交付放在同一条可追溯的工作流里。你决定哪些修改进入稿件；模型输出先成为建议或证据线索。
 
-AI7 is under active development for **Windows and macOS**. The Initial v1.0.0 Development Milestone is recorded; it is not a public-release or platform-certification claim. [Current implementation and evidence](PROGRESS.md) describe the integrated product and its limits.
+当前可从源码构建 Windows 与 macOS 工作台。Windows 是本轮 v3.2 产品方向的首发重点；v3.2 是规划名称，不是已发布的软件版本。[PROGRESS](PROGRESS.md) 记录实际集成能力与证据，已完成的 Initial v1.0.0 Development Milestone 不代表公开发行或平台认证。
 
-## What you can do
+## 现在可以怎样工作
 
-- **Read and edit long manuscripts.** Import a Book, work in bounded manuscript views, compare revisions and recover interrupted work. Marks, suggestions and conflict handling keep proposed changes separate from the manuscript until you decide to apply them.
-- **Analyze and review.** Prepare baseline analysis, editorial review, AI7 初评 and 审稿意见; inspect results, cited passages, coverage and missing work. 就这段提问 provides a streamed discussion of a selected passage, and 润色这段 prepares suggestions for review.
-- **Use your sources.** Keep a local 资料库, extract supported document text, retrieve passages and use pinned references in supported tasks. Text PDFs retain page anchors; scanned PDFs are identified as 需要识别 and are not OCR-processed.
-- **Research and check claims.** Supported review, writing and market-evaluation tasks can search and fetch public sources through a configured backend. Factual review keeps evidence, unresolved claims and the editor's verification decisions distinct.
-- **Prepare publishing work.** Draft Production Documents, retain their versions and delivery records, export DOCX and 图书交付包, and record 发稿 separately from file export.
-- **Keep editorial practice reusable.** Work with 书系 knowledge, house review preferences, captured procedures and editor-defined analysis dimensions. Imported Skills remain inert; the bounded Agent 工作区 proposes changes through the existing review and Apply chain.
+1. **导入并编辑。** 创建图书、导入稿件，在长文视图中编辑、标注、比较版本和恢复中断工作。当前 DOCX 修订导入为建议标记，完整原件保留。
+2. **审校并核红。** 运行基线分析、审阅、AI7 初评和审稿意见；查看覆盖、引文与缺口。对选中段落「就这段提问」或「润色这段」，再决定是否接受并应用建议。
+3. **查资料与核事实。** 本地资料库支持已接入格式的全文提取、检索与精确取证；已接入任务可通过配置的搜索服务获取公开资料，事实判断与编辑采纳分开记录。扫描 PDF 目前只提示需要识别。
+4. **准备出版交付。** 起草生产文档，保留版本与交付记录，导出 DOCX 或图书交付包；发稿与文件导出分别决定。
+5. **复用编辑经验。** 使用书系知识、社级审阅偏好、范例、工序和自定义分析维度；图书绑定的 Agent 工作区通过既有建议与 Apply 链提出修改。
 
-The warm-paper/night-ink workbench includes searchable Book switching, focus mode, reading and density settings, keyboard remapping and on-demand journal details. Product labels are primarily Simplified Chinese.
+工作台提供暖纸/夜墨外观、图书搜索切换、专注模式、阅读密度、快捷键与按需技术详情。当前正式模型连接为用户自己的 OpenCode Go 或 DeepSeek 官方凭据；运行数据与开发测试证据分开。
+
+## 已接受、尚待实现的 v3.2 方向
+
+[ADR 0094](docs/adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md) 与[开发计划](docs/development/development-plan.md)规定后续交付顺序；本次文档变更没有实现下列能力：
+
+- **统一渠道与选模。** Zen、Go 与 Claude / Gemini / OpenAI / DeepSeek 官方服务共用配置、连接测试与模型选择；各绑定仍需协议、能力与策略准入。
+- **DeepSeek 与博查双擎考据。** 默认来源可选，回退限于已授权链路，保留实际取证来源。
+- **默认本地学习与全域智能体。** 有效核红决定与 Word 修订样本进入可关闭、可排除的智能归纳流程；检索可用审美记忆并标出参考规则。无需打开图书即可监督学习方向、整理记忆和按明确范围跨书检索。
+- **Word 修订双路径。** 导入时明确选择「直接并入正文」或「转为 AI7 修订建议」，两者保留原件与符合准入的修前/修后学习样本。
+- **案头提效与保真。** 跨段精确选区、右侧常驻副驾、高频工序一次点击执行、千条建议流畅核红及更好的 Word 格式保留。一次点击仍授权本次精确处理；写入稿件仍需随后明确采纳与 Apply。
+
+## 当前限制与发布状态
+
+AI 输出需要编辑判断。确定性测试证明程序行为，一次模型记录只证明那次结果。[编辑质量实测](docs/development/editorial-evidence-2026-10.md)仍有漏报、锚点失配和不完整响应；标准/严格事实核查及多轮证据复用仍待完善。已编辑 DOCX 的行内格式、超链接、域与修订往返仍有[具体限制](https://github.com/zhouy1017/ai7-harness/issues/874)。真实 EPUB/ODT/RTF 格式验证仍须专门材料准入，已有 DOCX 样本不能替代。
+
+Word 插件集成、OCR、独立稿件窗口、结构调整模式、可执行外来 Skill 与自动更新仍在演进池。DOCX 修订导入是桌面文件工作流，不等于 Word 插件集成；默认学习、全域智能体和真实本地语义模型尚未交付。
+
+已有未签名 Windows 安装包/便携包构建与便携程序自检记录；这不等于安装卸载或完整打包环境验收。依据[自动交付约定](docs/adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md)，配对 nightly Gate 与原生构建通过后，匹配版本标签发布对应 Windows 产物并披露未签名状态。macOS 公开发布无限期后置，直到 Owner 明确恢复；nightly macOS 包仅供检查。签名准备与 `main` 晋升仍需各自授权。打包版目前不附赠示例书。
+
+<details>
+<summary>开发者：从源码构建、打开与配置生产连接</summary>
 
 ## Getting started from source
 
@@ -37,13 +57,7 @@ pnpm run start:production
 
 Choose the product data location when prompted. In 设置 › 模型服务, configure your own OpenCode Go or DeepSeek 官方 connection for model-assisted tasks; the key is stored through the operating system's protected credential store. Supported web tasks also need a configured search backend and its key. Production uses your own data and credentials, separately from development evidence and caches. See the [source-checkout guide](docs/development/source-checkout.md) for launch scopes, data locations and troubleshooting.
 
-## Current limits
-
-AI output needs editorial judgement. Deterministic tests prove application behavior; a recorded model run establishes only that run's result. The [measured editorial evidence](docs/development/editorial-evidence-2026-10.md) includes missed findings, grounding failures and incomplete responses. Standard/strict factual-review live evidence remains incomplete, and a Book currently supports one factual-review Run; [#908](https://github.com/zhouy1017/ai7-harness/issues/908) and [#905](https://github.com/zhouy1017/ai7-harness/issues/905) track those gaps.
-
-Edited DOCX export discloses remaining formatting, hyperlink, field and revision limitations ([#874](https://github.com/zhouy1017/ai7-harness/issues/874)). Word integration, OCR, detached manuscript windows, structure-adjustment mode, executable foreign Skills and automatic updates are deferred. The [feature and fix roadmap](docs/development/development-plan.md) distinguishes implemented foundations from these remaining outcomes.
-
-Unsigned packaging exists. Windows installer/portable builds and a portable self-check have recorded evidence; that is not installer execution or macOS DMG validation. The [automatic-delivery contract](docs/adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) requires native packaging after the paired nightly Gate and Windows-only publication from matching version tags: stable tags produce normal releases and RC tags prereleases, both disclosing unsigned Windows packages. macOS releases are deferred indefinitely until the project Owner explicitly requests resumption; unsigned macOS builds remain nightly inspection artifacts. [PROGRESS](PROGRESS.md) records implementation status; promotion to `main` remains separate. Packaged builds currently include no sample Book.
+</details>
 
 ## Documentation and contributions
 

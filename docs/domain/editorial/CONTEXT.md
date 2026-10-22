@@ -191,7 +191,7 @@ Recorded evidence that indicates a user's delivery-quality preference, such as e
 _Avoid_: Untracked inference, raw manuscript content
 
 **Editorial Learning**:
-The governed process that turns eligible Editorial Learning Signals into inspectable candidates for later explicit activation or promotion as Series Knowledge or House Editorial Memory without changing Foundation Model weights.
+The governed process that turns eligible Editorial Learning Signals into inspectable derived editorial memory and exemplars, with supported-pattern automatic activation inside ADR 0094's disclosed opt-out local envelope or explicit activation elsewhere. It changes no Foundation Model weights and does not replace explicit Series Knowledge promotion.
 _Avoid_: Model Training, Agent Behavior Improvement
 
 **Series**:
@@ -239,16 +239,36 @@ An identifiable piece of editorial work or evidence considered for learning, suc
 _Avoid_: Whole Working Corpus, untracked content
 
 **Learning Eligibility Decision**:
-An explicit include or exclude judgment about whether identified Learning Material may contribute Editorial Learning Signals within a stated scope.
+An attributable include or exclude judgment about whether identified Learning Material may contribute Editorial Learning Signals within a stated scope, made explicitly or under ADR 0094's disclosed automatic local basis. An explicit exclusion or narrower scope overrides that automatic basis.
 _Avoid_: Memory approval, source-access permission
 
 **Learning Eligibility Policy**:
-A user-governed Policy Document that uses prior Learning Eligibility Decisions to recommend or determine the eligibility of similar future material within explicit material-type and scope boundaries.
+A user-governed Policy Document determining Learning Material eligibility within disclosed material-type and scope boundaries, including ADR 0094's opt-out local admission and explicit overrides.
 _Avoid_: Editorial preference, hidden classifier
 
 **Learning Lineage**:
-The traceable relationship from Learning Material and its eligibility through signals, candidates, approved memory, and later tasks that used it.
+The traceable relationship from Learning Material and its explicit or automatic eligibility through signals, curation, candidates, activated memory, supervision/remediation and later tasks that used it.
 _Avoid_: Generic activity log, model transcript
+
+**Global Editorial Memory Item**:
+An inspectable, versioned editorial preference derived from eligible local decisions across the Working Corpus, with applicability, examples, confidence, source lineage and activation state. Global influence grants no whole-library manuscript access or factual authority.
+_中文_: 全域审美记忆条目
+_Avoid_: Raw decision copy, model weights, factual evidence
+
+**Editorial Exemplar**:
+A governed before/after editorial example linked to eligible decisions or imported revisions and retained to guide later review or polish. It remains distinct from a whole-document Exemplar and carries its own scope and lineage.
+_中文_: 精修范例
+_Avoid_: Training dataset, automatic manuscript replacement
+
+**Word Tracked Edit Sample**:
+An exact source-attributed before/after editorial pair extracted from a preserved DOCX revision, independent of whether import chose the final baseline or suggestion marks.
+_中文_: Word 修订对照样本
+_Avoid_: Applied AI7 proposal, factual verification, loss of original Source Version
+
+**Learning Supervision Directive**:
+A versioned user instruction governing what local learning should generalize, constrain or stop, attributable to its originating decision. It governs subsequent curation and use without rewriting completed history.
+_中文_: 学习监督指令
+_Avoid_: Hidden prompt, manuscript mutation authority
 
 **Learning Audit Log**:
 The user-readable history and current projection of Learning Lineage, eligibility decisions, memory lifecycle changes, and downstream use.
