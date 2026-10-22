@@ -139,12 +139,12 @@ const REDO_SUMMARY = Object.freeze([
 /** The redo Task's own sentence: what it carries from the Run it redoes, and what it reads. */
 const REDO_GOAL_FIRST = '改计划重做：沿用已读完的 6 个阅读范围，接着读其余 2 个';
 const REDO_GOAL_THIRD = '改计划重做：沿用已读完的 2 个阅读范围，接着读其余 6 个';
-const IMPACT = Object.freeze([
+const IMPACT = Object.freeze([[
   `正在读的第 6 个阅读范围读完后停止；其余 ${SAMPLE1_UNITS - 6} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
   '已读完的 5 个阅读范围和正在读的这一个的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
   '这项分析不改稿，没有需要撤回的受控动作。',
   '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。',
-]);
+].join('')]);
 const REFLECTION_CANCELLED = '运行已按你的要求取消，运行反思未发起。';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);

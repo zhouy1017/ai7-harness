@@ -20,7 +20,7 @@ export const TASK_PAGE_NAMES: Readonly<Record<string, string>> = {
   'drift.entries': '计划变化', 'edit.lastEdit.entries': '修改记录', 'resend.units': '再次发送的范围',
   'resend.statement': '再次发送说明', 'unconfirmed.ranges': '结果待确认的阅读范围',
   'runControl.outcomeUnknown.units': '结果待确认的阅读范围', 'runControl.continuation.pendingAnswerUnits': '待续行的范围',
-  'runControl.cancel.impact': '取消影响说明', 'redo.summary': '重做影响说明',
+  'runControl.cancel.impact': '取消影响说明',
   clarifications: '问题与回答', 'scopeOptions.chapters.chapters': '章节',
 };
 export const taskPageMore = (name: string, shown: number, total: number): string => `继续读取${name}（已显示 ${shown} / ${total}）`;

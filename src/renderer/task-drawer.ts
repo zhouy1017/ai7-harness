@@ -757,7 +757,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
       ...(next.edit.lastEdit === null ? [] : [el('p', 'field-note task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit))]),
       mode === 'compact' ? compactBlock(next) : fullBlock(next),
-      ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.') && path !== 'runControl.cancel.impact' && path !== 'redo.summary').flatMap((path) => {
+      ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.') && path !== 'runControl.cancel.impact').flatMap((path) => {
         const button = pageControl(next, path, TASK_PAGE_NAMES[path] ?? path);
         return button === null ? [] : [button];
       }),
@@ -1207,22 +1207,25 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     button.disabled = working || interrupted;
     button.addEventListener('click', () => {
       if (plan !== next) return;
+      const focused = document.activeElement === button;
       button.disabled = true;
       clearPoll();
       ticket += 1;
       void api.getTaskPlanPage({ kind: next.kind, ref: next.ref, path, afterOrdinal: meta.nextOrdinal!, digest: meta.digest }).then((page) => {
         if (plan !== next || root.hidden) return;
         if (page.path !== path) throw new Error(TASK_PAGE_FAILED);
-        const focused = document.activeElement === button;
+        // Disabling a focused button blurs it. Restore only if the editor has not moved focus elsewhere.
+        const restoreFocus = focused && (document.activeElement === document.body || document.activeElement === button);
         const appended = appendTaskPlanPage(next, page);
         paint(appended, true);
-        if (focused && appended.listPages?.[path]?.nextOrdinal === null) {
-          const heading = path === 'runControl.cancel.impact' ? 'cancel-impact' : path === 'redo.summary' ? 'redo-summary' : null;
-          if (heading !== null) bar.querySelector<HTMLElement>(`[data-task-drawer-control="${heading}"]`)?.focus();
+        if (restoreFocus && path === 'runControl.cancel.impact') {
+          const target = appended.listPages?.[path]?.nextOrdinal === null ? 'cancel-impact' : 'page-runControl-cancel-impact';
+          bar.querySelector<HTMLElement>(`[data-task-drawer-control="${target}"]`)?.focus();
         }
       }).catch((error: unknown) => {
         if (plan !== next || root.hidden) return;
         button.disabled = false;
+        if (focused && path === 'runControl.cancel.impact' && document.activeElement === document.body) button.focus();
         options.setStatus(options.errorMessage(error, TASK_PAGE_FAILED), 'error');
         schedulePoll(next);
       });
@@ -1946,10 +1949,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const actions = el('div', 'button-row');
     actions.append(confirm, keep);
     section.append(heading, lines, actions);
-    if (plan !== null) {
-      const more = pageControl(plan, 'redo.summary', TASK_PAGE_NAMES['redo.summary']!);
-      if (more !== null) section.insertBefore(more, actions);
-    }
     if (working) for (const button of [confirm, keep]) button.disabled = true;
     return section;
   }

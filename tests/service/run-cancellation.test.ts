@@ -284,12 +284,12 @@ describe('取消任务 over the real store', () => {
         redo: { reason: RUN_CONTROL_REDO_REASON },
         activity: { unitsSettled: 2, unitsTotal: SAMPLE1_UNITS, currentUnitOrdinal: 3 },
       });
-      expect(running.runControl!.cancel.impact).toEqual([
+      expect(running.runControl!.cancel.impact).toEqual([[
         `正在读的第 3 个阅读范围读完后停止；其余 ${SAMPLE1_UNITS - 3} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
         '已读完的 2 个阅读范围和正在读的这一个的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
         '这项分析不改稿，没有需要撤回的受控动作。',
         '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。',
-      ]);
+      ].join('')]);
       expect(running.runControl!.executingSince).toBe(store.inspectBaselineAnalysis(bookId, progress).run!.transitions.find((transition) => transition.state === 'executing')!.recordedAt);
 
       // Reading impact pages, including rereading from the start, grants nothing and leaves the exact Run unchanged.
@@ -397,7 +397,7 @@ describe('取消任务 over the real store', () => {
       await until(() => heldAt === 'cross-unit-reduction', 'the reduction turn out');
       expect(execution.progressFor(runRecordId)).toMatchObject({ stage: 'cross-unit-reduction', unitsSettled: SAMPLE1_UNITS });
       expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, progress).runControl!.cancel.impact[0])
-        .toBe('正在进行的跨单元归纳完成后停止，之后的步骤都不再进行，不再发送任何内容。');
+        .toContain('正在进行的跨单元归纳完成后停止，之后的步骤都不再进行，不再发送任何内容。');
 
       expect(store.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
       expect(execution.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('stopping');
@@ -437,7 +437,7 @@ describe('取消任务 over the real store', () => {
       // Admitted and parked at its first await: nothing has been read or sent yet (CTRL-008).
       const queued = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, (id) => execution.progressFor(id));
       expect(queued.state).toEqual({ key: 'running', label: '正在排队' });
-      expect(queued.runControl?.cancel.impact).toEqual(['这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。', '这项分析不改稿，没有需要撤回的受控动作。']);
+      expect(queued.runControl?.cancel.impact).toEqual(['这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。这项分析不改稿，没有需要撤回的受控动作。']);
       expect(store.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
       expect(execution.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('stopping');
       await execution.whenIdle();
@@ -473,7 +473,8 @@ describe('取消任务 over the real store', () => {
       store.baselineAnalysisLedger.recordRunState(runRecordId, 'executing', { detail: '执行绑定已持久化并核对；开始逐单元执行。' });
       const orphaned = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, (id) => execution.progressFor(id));
       expect(orphaned.runControl).toMatchObject({ activity: null, cancel: { reason: null } });
-      expect(orphaned.runControl!.cancel.impact[0]).toBe('AI7 上次关闭时这项任务没有结束，现在也没有在运行；取消只结束这条运行记录，不会再发送任何内容。');
+      expect(orphaned.runControl!.cancel.impact[0]).toContain('这项任务已经停下');
+      expect(orphaned.runControl!.cancel.impact[0]).toContain('这项任务还没有读完任何阅读范围，不会形成结果集修订版。');
       expect(store.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
       expect(execution.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('settled');
       const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
@@ -508,7 +509,8 @@ describe('取消任务 over the real store', () => {
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, (id) => execution.progressFor(id));
       expect(plan.state).toEqual({ key: 'cancelling', label: '正在取消' });
       expect(plan.runControl).toMatchObject({ cancelling: false, activity: null, cancel: { reason: null } });
-      expect(plan.runControl!.cancel.impact[0]).toBe('AI7 上次关闭时这项任务没有结束，现在也没有在运行；取消只结束这条运行记录，不会再发送任何内容。');
+      expect(plan.runControl!.cancel.impact[0]).toContain('这项任务已经停下');
+      expect(plan.runControl!.cancel.impact[0]).toContain('这项任务还没有读完任何阅读范围，不会形成结果集修订版。');
       expect(store.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
       expect(execution.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('settled');
       const cancelled = store.inspectBaselineAnalysis(bookId, () => null);

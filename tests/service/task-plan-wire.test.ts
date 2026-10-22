@@ -35,6 +35,20 @@ function expectNonEmptyPages(listPages: TaskPlanProjection['listPages']): void {
   for (const [path, meta] of Object.entries(listPages ?? {})) expect(meta.total === 0 || meta.shown >= 1, path).toBe(true);
 }
 
+/** Find the smallest usable reply, including its real projection overhead. */
+function minimumTaskPlanWire(plan: TaskPlanProjection): TaskPlanProjection {
+  let low = 1;
+  let high = serializedBytes(taskPlanWire(plan));
+  while (low < high) {
+    const budget = Math.floor((low + high) / 2);
+    try { taskPlanWire(plan, budget); high = budget; }
+    catch (error) { expect(String(error)).toMatch(/任务计划摘要超出可读取范围/u); low = budget + 1; }
+  }
+  const minimum = taskPlanWire(plan, high);
+  expect(serializedBytes(minimum)).toBeLessThanOrEqual(high);
+  return minimum;
+}
+
 const PAGEABLE_PATHS = ['drift.entries', 'edit.lastEdit.entries', 'resend.units', 'resend.statement', 'unconfirmed.ranges', 'runControl.cancel.impact',
   'runControl.outcomeUnknown.units', 'runControl.continuation.pendingAnswerUnits', 'clarifications'];
 function largestPageable(plan: TaskPlanProjection): number {
@@ -153,18 +167,14 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
           expect(first.listPages?.['runControl.cancel.impact']?.shown).toBe(51); // Summary plus fifty details.
           expect(first.runControl!.cancel.impact[0]).toBe(extreme.runControl!.cancel.impact[0]);
           expect(first.runControl!.cancel.impact[0]).toContain('这项分析不改稿，没有需要撤回的受控动作。');
-          // Find the guard's minimum usable share, rather than assuming a particular projection overhead.
-          let low = 1;
-          let high = serializedBytes(first);
-          while (low < high) {
-            const budget = Math.floor((low + high) / 2);
-            try { taskPlanWire(extreme, budget); high = budget; }
-            catch (error) { expect(String(error)).toMatch(/任务计划摘要超出可读取范围/u); low = budget + 1; }
-          }
-          const minimum = taskPlanWire(extreme, high);
+          const minimum = minimumTaskPlanWire(extreme);
           expect(minimum.listPages?.['runControl.cancel.impact']?.shown).toBe(1);
           expect(minimum.runControl!.cancel.impact).toEqual([extreme.runControl!.cancel.impact[0]]);
           const meta = first.listPages!['runControl.cancel.impact']!;
+          expect(minimum.listPages!['runControl.cancel.impact']!.digest).toBe(meta.digest);
+          const fromMinimum = store.getTaskPlanPage({ bookId: extreme.bookId, kind: extreme.kind, ref: extreme.ref,
+            path: 'runControl.cancel.impact', afterOrdinal: 1, digest: meta.digest }, extreme);
+          expect(fromMinimum.items).toEqual(extreme.runControl!.cancel.impact.slice(1, 51));
           expect(() => store.getTaskPlanPage({ bookId: extreme.bookId, kind: extreme.kind, ref: extreme.ref,
             path: 'runControl.cancel.impact', afterOrdinal: meta.nextOrdinal!, digest: '0'.repeat(64) }, extreme)).toThrow(/变化/u);
           const moved = { ...extreme, runControl: { ...extreme.runControl!, cancel: { ...extreme.runControl!.cancel,
@@ -185,6 +195,25 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
         expect(summary).toContain(kind === 'review-run' ? '取消不会撤回已完成的受控动作' : '不会自动采用、改稿或发稿');
         expect(summary).not.toContain('这项分析不改稿');
         expect(summary).toContain('这项任务最新的结果');
+        // Other large lists already have the full sweep above; isolate this kind's minimum cancellation share.
+        expect(minimumTaskPlanWire({ ...shared, technical: [], clarifications: [] }).runControl!.cancel.impact).toEqual([summary]);
+        expect(taskPlanWire(shared).listPages).not.toHaveProperty('redo.summary');
+        if (shared.redo !== null) {
+          expect(shared.redo.summary.join('')).toContain('已读完的 5 个阅读范围');
+          expect(shared.redo.summary.join('')).not.toMatch(/等你回答|你已回答|结果待确认/u);
+        }
+      }
+      for (const state of ['paused', 'resumable'] as const) {
+        for (const unitsSettled of [0, 3, null]) for (const bindingHolds of [true, false]) {
+          const ordinary = baselineAnalysisPlan({ projection: { ...settled, run: { ...settled.run!, state, progress: null } },
+            bookTitle: '生成测试', blocks, stopped: { unitsSettled, unitsClosed: unitsSettled, unitsTotal: 10,
+              waiting: [], blockers: [], bindingHolds } });
+          const minimum = minimumTaskPlanWire({ ...ordinary, technical: [] });
+          expect(minimum.runControl!.cancel.impact).toEqual(ordinary.runControl!.cancel.impact);
+          expect(minimum.runControl!.cancel.impact).toHaveLength(1);
+          expect(minimum.runControl!.cancel.impact[0]).toContain('这项分析不改稿，没有需要撤回的受控动作。');
+          expect(minimum.runControl!.cancel.impact[0]).toContain(unitsSettled === null ? '数量无法核对' : `已读完 ${unitsSettled} 个阅读范围`);
+        }
       }
     }
     // The prepared plan is the store's own; the later states are #988's generated settled analysis through the real plan
