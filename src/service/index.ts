@@ -114,7 +114,7 @@ function failureResponse(
   error: unknown,
   StoreErrorClass?: typeof import('./store.js').StoreError,
 ): ServiceFailureResponse {
-  if ((StoreErrorClass && error instanceof StoreErrorClass) || error instanceof ProtocolError || error instanceof ImportedExemplarError) {
+  if ((StoreErrorClass && error instanceof StoreErrorClass) || error instanceof ProtocolError || error instanceof ImportedExemplarError || error instanceof FastRoleError) {
     return { id: requestId, ok: false, error: { code: error.code, message: error.message } };
   }
   return { id: requestId, ok: false, error: { code: 'SERVICE_REQUEST_FAILED', message: '服务请求失败。' } };
