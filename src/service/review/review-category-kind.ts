@@ -55,6 +55,7 @@ export const REVIEW_CATEGORY_REDUCER_DESCRIPTOR = {
   schema: 'ai7.editorial-review.reducers/1',
   stages: ['unit-validation', 'reference-integrity', 'finding-reduction', 'assurance-sampling'],
   referenceIntegrity: 'declared-block-first-then-unique-normalized-exact-match-in-complete-distinct-message-envelope',
+  sourceRangeMapping: 'folded-utf16-code-units-to-source-graphemes',
   normalization: ['whitespace-collapse', 'fullwidth-halfwidth-ascii'],
   mergeRule: 'same-block-same-normalized-quotation-same-replacement',
   exclusionReasons: ['quote-not-found', 'quote-ambiguous', 'replacement-identical'],

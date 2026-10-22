@@ -17,7 +17,8 @@ import {
   parseCustomAnalysisDimensionDocument,
   parseCustomAnalysisUnitResult,
 } from '../../src/service/analysis/custom-analysis-contract.js';
-import { customAnalysisKindDefinition, customAnalysisPlan, reduceCustomAnalysis } from '../../src/service/analysis/custom-analysis-kind.js';
+import { CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR, CUSTOM_ANALYSIS_REDUCER_DIGEST, customAnalysisKindDefinition, customAnalysisPlan, reduceCustomAnalysis } from '../../src/service/analysis/custom-analysis-kind.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
 import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
@@ -81,6 +82,13 @@ describe('the dimension document (ai7.custom-analysis-dimension/1)', () => {
 });
 
 describe('the custom analysis kind family (custom-analysis/<dimension-id>)', () => {
+  it('pins corrected UTF-16 anchoring separately from historical reductions (#1022)', () => {
+    const { sourceRangeMapping, ...historical } = CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR;
+    expect(sourceRangeMapping).toBe('folded-utf16-code-units-to-source-graphemes');
+    expect(CUSTOM_ANALYSIS_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(historical)));
+    expect(customAnalysisKindDefinition(version).reducerDigest).toBe(CUSTOM_ANALYSIS_REDUCER_DIGEST);
+  });
+
   it('names one kind per dimension and reads it back, never another kind', () => {
     expect(customAnalysisKindId(DIMENSION_ID)).toBe(`custom-analysis/${DIMENSION_ID}`);
     expect(customAnalysisDimensionIdOfKind(`custom-analysis/${DIMENSION_ID}`)).toBe(DIMENSION_ID);

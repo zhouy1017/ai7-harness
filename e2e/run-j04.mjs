@@ -3215,7 +3215,7 @@ async function main() {
       do { const page=await window.ai7.getManuscriptWindow({manuscriptId,branchId,cursor}); for(const block of page.blocks)byId.set(block.blockId,block); cursor=page.nextCursor; } while(cursor!==null);
       const blocks=[...byId.values()];
       if(blocks.length!==97)return false;
-      const paragraphs=['甲'.repeat(1200),'清晨的合成码头出现错词，船员随后离开。'];
+      const paragraphs=['甲'.repeat(1200),'开头👩‍💻Ａ　Ｂ结尾'];
       const segmenter=new Intl.Segmenter('zh',{granularity:'grapheme'});
       for(const [index,block] of blocks.entries()) {
         const replace=async(fromGrapheme,toGrapheme,insertText)=>{
@@ -3242,17 +3242,24 @@ async function main() {
     const overlapReviewed = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     const overlapFinding = overlapReviewed.run.findings[0];
     requireJourney(overlapReviewed.run.findings.length === 1 && overlapFinding.anchorState === 'exact' && overlapFinding.markId !== null &&
-      overlapFinding.fromGrapheme === 9 && overlapFinding.toGrapheme === 11 && overlapReviewed.run.categories[0].excludedCount === 0,
+      overlapFinding.fromGrapheme === 3 && overlapFinding.toGrapheme === 6 && overlapReviewed.run.categories[0].excludedCount === 0,
     'overlap-resolved-finding');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${overlapFinding.findingId}"] [data-review-action="go-to-text"]`, 'overlap-go-to-text');
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${overlapFinding.markId}"]')?.dataset.markSource==='ai7'`, 'overlap-mark-visible');
-    await assertRenderer(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const card=await window.ai7.getEditorialMarkCard({manuscriptId:work.manuscriptId,branchId:work.branchId,markId:${JSON.stringify(overlapFinding.markId)}});return card.pinnedText==='错词';})()`, 'overlap-mark-exact-text');
+    await assertRenderer(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const card=await window.ai7.getEditorialMarkCard({manuscriptId:work.manuscriptId,branchId:work.branchId,markId:${JSON.stringify(overlapFinding.markId)}});return card.pinnedText==='Ａ　Ｂ';})()`, 'overlap-mark-exact-text');
     await openReviewDestination(renderer, 'overlap-back-to-review');
     await reviewAction(renderer, 'section.review-group[data-review-category="typos-and-usage"] [data-review-action="batch-prepare"]', 'overlap-apply-prepare');
     await waitFor(renderer, `document.querySelector('section.review-batch-strip')?.dataset.reviewBatchState==='ready'`, 'overlap-apply-ready');
     await reviewAction(renderer, 'section.review-batch-strip [data-review-action="batch-confirm"]', 'overlap-apply-confirm');
     await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${overlapFinding.findingId}"]')?.dataset.status==='handled'`, 'overlap-applied');
-    await assertRenderer(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(overlapFinding.blockId)}}});return page.blocks[1].blockId===${JSON.stringify(overlapFinding.blockId)} && page.blocks[1].text==='清晨的合成码头出现正词，船员随后离开。' && page.blocks[0].text==='甲'.repeat(1200);})()`, 'overlap-apply-resolved-block-only');
+    await assertRenderer(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(overlapFinding.blockId)}}});return page.blocks[1].blockId===${JSON.stringify(overlapFinding.blockId)} && page.blocks[1].text==='开头👩‍💻丙结尾' && page.blocks[0].text==='甲'.repeat(1200);})()`, 'overlap-apply-resolved-block-only');
+    await reviewAction(renderer, `article.review-finding[data-finding-id="${overlapFinding.findingId}"] [data-review-action="go-to-text"]`, 'overlap-applied-go-to-text');
+    const overlapCard = `.editorial-mark-card[data-mark-card="${overlapFinding.markId}"]`;
+    await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-action="prepare-reverse"]')?.disabled===false`, 'overlap-reversal-available');
+    await reviewAction(renderer, `${overlapCard} [data-mark-action="prepare-reverse"]`, 'overlap-reversal-prepare');
+    await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-form="reverse-apply"]')`, 'overlap-reversal-ready');
+    await reviewAction(renderer, `${overlapCard} [data-mark-form="reverse-apply"] [data-mark-action="submit"]`, 'overlap-reversal-confirm');
+    await waitFor(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(overlapFinding.blockId)}}});return page.blocks[1].blockId===${JSON.stringify(overlapFinding.blockId)} && page.blocks[1].text==='开头👩‍💻Ａ　Ｂ结尾' && page.blocks[0].text==='甲'.repeat(1200);})()`, 'overlap-reversal-restored-exactly');
 
     // ---- 事实核查 at its Evidence Assurance Levels (Issue #901; FACT, EVID, EASSURE, FREV, CORR) ----
     // Synchronized delta with Issue #901: a fresh, unedited sample1 Book on the provider-free `sample1-factual-verified` fixture,

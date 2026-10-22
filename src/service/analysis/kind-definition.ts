@@ -604,6 +604,7 @@ export const FACTUAL_REVIEW_REDUCER_DESCRIPTOR = {
   schema: 'ai7.factual-review.reducers/1',
   stages: ['unit-validation', 'reference-integrity', 'finding-reduction', 'assurance-sampling'],
   referenceIntegrity: 'deterministic-normalized-exact-match-in-committed-block',
+  sourceRangeMapping: 'folded-utf16-code-units-to-source-graphemes',
   normalization: ['whitespace-collapse', 'fullwidth-halfwidth-ascii'],
   findingClasses: ['real-world-fact', 'quotation'],
   mergeRule: 'same-block-same-normalized-quotation',

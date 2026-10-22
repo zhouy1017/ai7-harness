@@ -63,7 +63,7 @@ function reduce(categoryId = 'typos-and-usage', second: ReviewUnitOutcome = { un
 
 describe('a review category reduction', () => {
   it('resolves own-only and overlap-inclusive ordinals to the same exact range (#1022)', () => {
-    const paragraphs = [block(1, 'paragraph', '甲'.repeat(UNIT_BUDGET_GRAPHEMES)), block(2, 'paragraph', '开头éＡ　Ｂ结尾')];
+    const paragraphs = [block(1, 'paragraph', '甲'.repeat(UNIT_BUDGET_GRAPHEMES)), block(2, 'paragraph', '开头👩‍💻Ａ　Ｂ结尾')];
     const split = deriveCoverageManifest({ bookId: randomUUID(), manuscriptId: randomUUID(), branchId: randomUUID(), revisionId: randomUUID(), revisionLabel: 'r1', revisionDigest: 'e'.repeat(64), blocks: paragraphs });
     expect(split.units).toHaveLength(2);
     expect(split.units[1]!.overlapBlockIds).toEqual([paragraphs[0]!.blockId]);

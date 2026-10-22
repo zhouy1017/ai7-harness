@@ -21,10 +21,10 @@
     },
     {
       "unitOrdinal": 2,
-      "requestDigest": "9b39b3ef0a70452b357b2bb16b245f7d035715bdfe7b5c98c4d8cffa3d850f0e",
+      "requestDigest": "07ab89d3ccce59777d2cef9924ab93d633f4d8c080832b5bd431bc0f428ecef0",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"错词\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"合成重叠编号回归。\",\"replacement\":\"正词\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"A B\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"合成重叠编号回归。\",\"replacement\":\"丙\"}]}",
         "usage": {
           "inputTokens": 100,
           "outputTokens": 40
@@ -33,7 +33,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "af6f05311d2d86a297eda1eeee1d5804b820f9246bc020287768d4c2bf39b26b",
+      "requestDigest": "2a09bf3c361a6d36d17c8161958a655f78b78c42267c7223b8670eee0adca18f",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"合成引文在授权单元内唯一定位。\"}]}",

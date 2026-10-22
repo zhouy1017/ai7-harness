@@ -392,7 +392,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const book = await importBook(session);
       // Existing admitted synthetic-evidence pattern: tester edits of a fresh sample1 lineage,
       // with only these two authored paragraphs left in its pinned working representation.
-      const paragraphs = ['甲'.repeat(1200), '清晨的合成码头出现错词，船员随后离开。'];
+      const paragraphs = ['甲'.repeat(1200), '开头👩‍💻Ａ　Ｂ结尾'];
       for (const [index, block] of session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).entries()) {
         const replace = (fromGrapheme: number, toGrapheme: number, insertText: string): void => {
           const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: block.blockId });
@@ -414,14 +414,16 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(settled.findings).toHaveLength(1);
       const finding = settled.findings[0]!;
       const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
-      expect(finding).toMatchObject({ blockId: blocks[1]!.blockId, fromGrapheme: 9, toGrapheme: 11, anchorState: 'exact', status: 'pending' });
+      expect(finding).toMatchObject({ blockId: blocks[1]!.blockId, fromGrapheme: 3, toGrapheme: 6, anchorState: 'exact', status: 'pending' });
       const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
-      expect(card.pinnedText).toBe('错词');
+      expect(card.pinnedText === 'Ａ　Ｂ').toBe(true);
       const applied = session.store.applyChangeSuggestion({ ...binding(session, book), markId: finding.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
-      expect(workingText(session, book).get(finding.blockId)).toBe(blocks[1]!.text.replace('错词', '正词'));
+      expect(workingText(session, book).get(finding.blockId) === '开头👩‍💻丙结尾').toBe(true);
+      expect(workingText(session, book).get(blocks[0]!.blockId) === paragraphs[0]).toBe(true);
       const reversed = session.store.reverseAppliedChangeSuggestion({ ...binding(session, book), markId: finding.markId!, clientEffectId: randomUUID() });
       expect(reversed.application.reversesEffectId).toBe(applied.application.effectId);
-      expect(workingText(session, book).get(finding.blockId)).toBe(blocks[1]!.text);
+      expect(workingText(session, book).get(finding.blockId) === paragraphs[1]).toBe(true);
+      expect(workingText(session, book).get(blocks[0]!.blockId) === paragraphs[0]).toBe(true);
     } finally {
       await close(session);
     }

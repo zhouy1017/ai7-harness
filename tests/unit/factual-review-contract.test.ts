@@ -163,6 +163,19 @@ describe('the factual review unit result parser', () => {
 });
 
 describe('reference integrity: locating a quotation in the block it names', () => {
+  it.each([
+    { name: 'astral prefix', text: '甲😀乙目标结尾', quote: '目标', from: 3, to: 5, exact: '目标' },
+    { name: 'ZWJ prefix with width and whitespace folding', text: '开头👩‍💻Ａ　\tＢ结尾', quote: 'A B', from: 3, to: 7, exact: 'Ａ　\tＢ' },
+    { name: 'target at the end after an astral prefix', text: '😀目标', quote: '目标', from: 1, to: 3, exact: '目标' },
+    { name: 'whole ZWJ quotation', text: '甲👩‍💻乙', quote: '👩‍💻', from: 1, to: 2, exact: '👩‍💻' },
+  ])('maps UTF-16 match offsets to exact graphemes: $name (#1022)', ({ text, quote, from, to, exact }) => {
+    const located = locateQuotation(text, quote);
+    expect(located).toEqual({ state: 'verified', fromGrapheme: from, toGrapheme: to });
+    if (located.state !== 'verified') return;
+    expect(sliceGraphemes(text, located.fromGrapheme, located.toGrapheme)).toBe(exact);
+    expect(normalizedQuotation(exact)).toBe(normalizedQuotation(quote));
+  });
+
   it('verifies a quotation that occurs exactly once and returns its exact grapheme range', () => {
     const text = '甲乙丙丁戊己庚辛';
     const located = locateQuotation(text, '丙丁戊');
@@ -196,6 +209,7 @@ describe('reference integrity: locating a quotation in the block it names', () =
     // Overlapping occurrences are two places the quotation could have come from, and so ambiguous.
     expect(locateQuotation('甲甲甲', '甲甲')).toMatchObject({ state: 'ambiguous', occurrences: 2 });
     expect(locateQuotation('甲乙丙', '   ')).toEqual({ state: 'not-found' });
+    expect(locateQuotation('👩‍💻👩‍💻👩‍💻', '👩‍💻👩‍💻')).toEqual({ state: 'ambiguous', occurrences: 2 });
   });
 
   it('merges duplicates by the folded quotation and counts graphemes, not code units', () => {
