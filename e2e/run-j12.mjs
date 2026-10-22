@@ -1443,7 +1443,6 @@ async function main() {
     })`), 'openai-saved-is-untested-models-independent-fast');
     requireJourney(await primary.evaluate(`window.ai7.testModelServiceConnection({route:'openai-platform',modelId:'gpt-5.6-sol'}).then(()=>false,(error)=>error.code==='MODEL_CONNECTION_TEST_UNAVAILABLE')`), 'connection-test-ci-scope-denied');
     requireJourney(await primary.evaluate(`window.ai7.selectFastRoleModel({route:'openai-platform',modelId:'gpt-5.6-sol'}).then(()=>false,(error)=>error.code==='MODEL_CONNECTION_TEST_REQUIRED')`), 'untested-model-selection-refused');
-    await assertSecretsAbsentFromDataRoot('J-12', dataRoot, [openAiSecret], 'openai-secret-absent-from-data-root');
     at('model-service-first-save');
 
     await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
@@ -1455,6 +1454,8 @@ async function main() {
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await primary.send('Emulation.clearDeviceMetricsOverride');
     await close();
+    // Audit only after Electron releases its data-root file locks, as for the existing credential checks below.
+    await assertSecretsAbsentFromDataRoot('J-12', dataRoot, [openAiSecret], 'openai-secret-absent-from-data-root');
     await assertSecretsAbsentFromDataRoot('J-12', dataRoot, [secretOne], 'model-first-secret-absent-from-data-root');
 
     at('model-service-restart-and-replace');
