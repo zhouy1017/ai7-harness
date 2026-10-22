@@ -25,8 +25,9 @@ import { reviewCategoryMessageBlockIds, type ReviewCategoryUnitResult, type Revi
  *
  * The order is the factual kind's and for the same reason. The model lists findings and quotes the
  * manuscript for each; nothing it says about *where* a quotation sits is trusted. This reducer locates
- * every quotation itself in the committed block the finding named, and only a quotation found there
- * exactly once becomes a finding with a source range — the range an Editorial Mark is later made
+ * every quotation itself in the committed block the finding named; only on not-found does it search
+ * the complete authorized unit envelope for exactly one occurrence. A verified quotation gains a
+ * source range — the range an Editorial Mark is later made
  * from, so it must be one the service proved rather than one the model offered. A quotation found
  * nowhere, or found twice, is kept with its reason in the excluded appendix, never as a mark, because
  * deleting it would hide what the model claimed.
@@ -48,8 +49,8 @@ export interface ReviewCategoryReduction {
 
 export const REVIEW_EXCLUSION_REASON_LABELS = {
   'not-exact-fetched': '未经精确取文',
-  'quote-not-found': '引文未在其所声明的内容块中找到；该发现不获得来源范围，也不形成标记。',
-  'quote-ambiguous': '引文在其所声明的内容块中出现多于一次，锚点不唯一；该发现不获得来源范围，也不形成标记。',
+  'quote-not-found': '引文未能在本单元完整的授权内容块中定位；该发现不获得来源范围，也不形成标记。',
+  'quote-ambiguous': '引文存在多个精确匹配，锚点不唯一；该发现不获得来源范围，也不形成标记。',
   'replacement-identical': '替换文字与其定位到的原文完全相同，没有提出任何修改；该发现不形成修改建议。',
 } as const satisfies Record<ReviewFindingExclusionReason, string>;
 
@@ -99,16 +100,41 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
   const bySeverity = Object.fromEntries(REVIEW_FINDING_SEVERITIES.map((severity) => [severity, 0])) as Record<ReviewFindingSeverity, number>;
   let listed = 0;
 
-  // Reference Integrity: every listed finding is located in the block it named.
+  // Reference Integrity: preserve declared-block matches, then resolve a missed ordinal only within
+  // the exact message envelope. Missing pinned records cannot establish envelope-wide uniqueness.
   const located: LocatedFinding[] = [];
   for (const outcome of closed) {
     const unit = manifest.units[outcome.unitOrdinal - 1]!;
     const messageBlockIds = reviewCategoryMessageBlockIds(unit);
+    const distinctBlockIds = [...new Set(messageBlockIds)];
+    const completeEnvelope = distinctBlockIds.every((id) => blocks.has(id));
     outcome.result.findings.forEach((finding, index) => {
       listed += 1;
       bySeverity[finding.severity] += 1;
-      const blockId = messageBlockIds[finding.blockOrdinal - 1];
-      const block = blockId === undefined ? undefined : blocks.get(blockId);
+      let blockId = messageBlockIds[finding.blockOrdinal - 1];
+      let block = blockId === undefined ? undefined : blocks.get(blockId);
+      let location: ReturnType<typeof locateQuotation> = block === undefined ? { state: 'not-found' } : locateQuotation(block.text, finding.quote);
+      if (location.state === 'not-found' && block !== undefined && completeEnvelope) {
+        let occurrences = 0;
+        let unique: { block: ManifestBlockInput; location: Extract<ReturnType<typeof locateQuotation>, { state: 'verified' }> } | undefined;
+        for (const id of distinctBlockIds) {
+          const candidate = blocks.get(id)!;
+          const match = locateQuotation(candidate.text, finding.quote);
+          if (match.state === 'verified') {
+            occurrences += 1;
+            unique = { block: candidate, location: match };
+          } else if (match.state === 'ambiguous') {
+            occurrences += match.occurrences;
+          }
+        }
+        if (occurrences === 1 && unique !== undefined) {
+          block = unique.block;
+          blockId = block.blockId;
+          location = unique.location;
+        } else if (occurrences > 1) {
+          location = { state: 'ambiguous', occurrences };
+        }
+      }
       // The contract parser already refused an out-of-range block ordinal, so a missing block here is
       // one the manifest named and the revision does not hold: not found, and never a silent drop.
       located.push({
@@ -117,7 +143,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
         finding,
         blockId: blockId ?? '',
         blockText: block?.text ?? null,
-        location: block === undefined ? { state: 'not-found' } : locateQuotation(block.text, finding.quote),
+        location,
       });
     });
   }

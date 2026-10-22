@@ -386,6 +386,53 @@ function eventTrail(reviewRunId: string): Array<[string, string]> {
   }
 }
 describe('a Review Run over the real store on exact sample1', () => {
+  it('materializes an overlap-misnumbered synthetic finding at its resolved block, applies and reverses it (#1022)', async () => {
+    const session = await open('review-overlap-authored');
+    try {
+      const book = await importBook(session);
+      // Existing admitted synthetic-evidence pattern: tester edits of a fresh sample1 lineage,
+      // with only these two authored paragraphs left in its pinned working representation.
+      const paragraphs = ['甲'.repeat(1200), '开头👩‍💻Ａ　Ｂ结尾'];
+      for (const [index, block] of session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).entries()) {
+        const replace = (fromGrapheme: number, toGrapheme: number, insertText: string): void => {
+          const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: block.blockId });
+          const current = window.blocks.find((entry) => entry.blockId === block.blockId)!;
+          session.store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId, blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: current.digest, expectedJournalSequence: window.journalSequence, fromGrapheme, toGrapheme, insertText });
+        };
+        let remaining = graphemeCount(block.text);
+        while (remaining > 0) { const from = Math.max(0, remaining - 256); replace(from, remaining, ''); remaining = from; }
+        const words = paragraphs[index] ?? '';
+        for (let offset = 0; offset < words.length; offset += 256) replace(offset, offset, words.slice(offset, offset + 256));
+      }
+      const settled = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      const category = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(category.resultSetRevision!.units).toHaveLength(2);
+      expect(category.resultSetRevision!.gaps).toEqual([]);
+      expect(category.resultSetRevision!.findingCounts).toMatchObject({ listed: 2, located: 1, excluded: 1 });
+      expect(category.resultSetRevision!.excluded.map((entry) => entry.reason)).toEqual(['quote-not-found']);
+      expect(category.resultSetRevision!.excluded[0]).not.toHaveProperty('sourceRange');
+      expect(category.resultSetRevision!.assuranceSample.state).toBe('closed');
+      expect(category.taskOutcome!.report!.ifRedone.state).toBe('closed');
+      expect(settled.findings).toHaveLength(1);
+      const finding = settled.findings[0]!;
+      const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+      expect(finding).toMatchObject({ blockId: blocks[1]!.blockId, fromGrapheme: 3, toGrapheme: 6, anchorState: 'exact', status: 'pending' });
+      const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
+      expect(card.pinnedText === 'Ａ　Ｂ').toBe(true);
+      const markedWindow = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: finding.blockId });
+      expect(markedWindow.marksTruncated).toBe(false);
+      expect(markedWindow.marks.map((mark) => mark.markId)).toEqual([finding.markId]);
+      const applied = session.store.applyChangeSuggestion({ ...binding(session, book), markId: finding.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      expect(workingText(session, book).get(finding.blockId) === '开头👩‍💻丙结尾').toBe(true);
+      expect(workingText(session, book).get(blocks[0]!.blockId) === paragraphs[0]).toBe(true);
+      const reversed = session.store.reverseAppliedChangeSuggestion({ ...binding(session, book), markId: finding.markId!, clientEffectId: randomUUID() });
+      expect(reversed.application.reversesEffectId).toBe(applied.application.effectId);
+      expect(workingText(session, book).get(finding.blockId) === paragraphs[1]).toBe(true);
+      expect(workingText(session, book).get(blocks[0]!.blockId) === paragraphs[0]).toBe(true);
+    } finally {
+      await close(session);
+    }
+  });
   it('quick-starts only a matching review category-set rule and records that origin on its category Runs', async () => {
     await withBook('sample1-review-authored', async (session, book) => {
       const run = prepare(session, book, [TYPOS], WHOLE);

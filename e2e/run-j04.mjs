@@ -3190,6 +3190,81 @@ async function main() {
     await assertRenderer(renderer, `window.ai7.inspectBackgroundAnalysisEnrollment().then((enrollment) => enrollment.state === 'none' && enrollment.enrollment === null && enrollment.startedRunCount === 0 && enrollment.historyCount === 0)`, 'no-background-enrollment');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
 
+    // #1022 observed-bug variation: authored synthetic tester edits on a fresh admitted sample1
+    // lineage. Two nonempty paragraphs split at the budget; unit 2 reports its own ordinal 1,
+    // omitting the leading overlap. The resolved finding must become a mark and survive real Apply.
+    at('review-overlap-relaunch');
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    modelAdapterIdentity = 'review-overlap-authored';
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'overlap-launch-ready');
+    const overlapBook = await importSample1(renderer, cancellation, true);
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'overlap-artifact-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'overlap-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'overlap-artifact-enabled');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'overlap-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'overlap-library');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(overlapBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'overlap-open-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(overlapBook.bookId)}]')`, 'overlap-manuscript-ready');
+    at('review-overlap-synthetic-edits');
+    await assertRenderer(renderer, `(async () => {
+      const workspace=await window.ai7.inspectReviewWorkspace();
+      const {manuscriptId,branchId}=workspace.manuscript;
+      const byId=new Map(); let cursor=null;
+      do { const page=await window.ai7.getManuscriptWindow({manuscriptId,branchId,cursor}); for(const block of page.blocks)byId.set(block.blockId,block); cursor=page.nextCursor; } while(cursor!==null);
+      const blocks=[...byId.values()];
+      if(blocks.length!==97)return false;
+      const paragraphs=['甲'.repeat(1200),'开头👩‍💻Ａ　Ｂ结尾'];
+      const segmenter=new Intl.Segmenter('zh',{granularity:'grapheme'});
+      for(const [index,block] of blocks.entries()) {
+        const replace=async(fromGrapheme,toGrapheme,insertText)=>{
+          const page=await window.ai7.getManuscriptWindowAt({manuscriptId,branchId,target:{kind:'block',blockId:block.blockId}});
+          const current=page.blocks.find(item=>item.blockId===block.blockId);
+          await window.ai7.flushJournalEdit({clientEditId:crypto.randomUUID(),manuscriptId,branchId,baseRevisionId:page.revisionId,windowStartBlockId:page.blocks[0].blockId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:current.digest,fromGrapheme,toGrapheme,insertText});
+        };
+        let remaining=Array.from(segmenter.segment(block.text)).length;
+        while(remaining>0){const from=Math.max(0,remaining-256);await replace(from,remaining,'');remaining=from;}
+        const words=paragraphs[index]??'';
+        for(let offset=0;offset<words.length;offset+=256)await replace(offset,offset,words.slice(offset,offset+256));
+      }
+      return true;
+    })()`, 'overlap-synthetic-edits');
+    await openReviewDestination(renderer, 'overlap-review-destination');
+    await reviewAction(renderer, '[data-review-action="new-review"]', 'overlap-new-review');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'overlap-sheet');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); sheet.querySelector('[data-review-action="prepare"]').click(); return true; })()`, 'overlap-prepare');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'overlap-prepared', 120_000);
+    const overlapPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
+    await drawerShowing(renderer, overlapPrepared.reviewRunId, 'ready', 'overlap-drawer');
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'overlap-start');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'overlap-settled', 180_000);
+    const overlapReviewed = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
+    const overlapFinding = overlapReviewed.run.findings[0];
+    requireJourney(overlapReviewed.run.findings.length === 1 && overlapFinding.anchorState === 'exact' && overlapFinding.markId !== null &&
+      overlapFinding.fromGrapheme === 3 && overlapFinding.toGrapheme === 6 && overlapReviewed.run.categories[0].excludedCount === 1,
+    'overlap-resolved-finding');
+    await reviewAction(renderer, `article.review-finding[data-finding-id="${overlapFinding.findingId}"] [data-review-action="go-to-text"]`, 'overlap-go-to-text');
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${overlapFinding.markId}"]')?.dataset.markSource==='ai7'`, 'overlap-mark-visible');
+    await assertRenderer(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const card=await window.ai7.getEditorialMarkCard({manuscriptId:work.manuscriptId,branchId:work.branchId,markId:${JSON.stringify(overlapFinding.markId)}});return card.pinnedText==='Ａ　Ｂ';})()`, 'overlap-mark-exact-text');
+    await assertRenderer(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(overlapFinding.blockId)}}});return !page.marksTruncated && page.marks.length===1 && page.marks[0].markId===${JSON.stringify(overlapFinding.markId)};})()`, 'overlap-partial-grapheme-has-no-mark');
+    await openReviewDestination(renderer, 'overlap-back-to-review');
+    await reviewAction(renderer, 'section.review-group[data-review-category="typos-and-usage"] [data-review-action="batch-prepare"]', 'overlap-apply-prepare');
+    await waitFor(renderer, `document.querySelector('section.review-batch-strip')?.dataset.reviewBatchState==='ready'`, 'overlap-apply-ready');
+    await reviewAction(renderer, 'section.review-batch-strip [data-review-action="batch-confirm"]', 'overlap-apply-confirm');
+    await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${overlapFinding.findingId}"]')?.dataset.status==='handled'`, 'overlap-applied');
+    await assertRenderer(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(overlapFinding.blockId)}}});return page.blocks[1].blockId===${JSON.stringify(overlapFinding.blockId)} && page.blocks[1].text==='开头👩‍💻丙结尾' && page.blocks[0].text==='甲'.repeat(1200);})()`, 'overlap-apply-resolved-block-only');
+    await reviewAction(renderer, `article.review-finding[data-finding-id="${overlapFinding.findingId}"] [data-review-action="go-to-text"]`, 'overlap-applied-go-to-text');
+    const overlapCard = `.editorial-mark-card[data-mark-card="${overlapFinding.markId}"]`;
+    await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-action="prepare-reverse"]')?.disabled===false`, 'overlap-reversal-available');
+    await reviewAction(renderer, `${overlapCard} [data-mark-action="prepare-reverse"]`, 'overlap-reversal-prepare');
+    await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-form="reverse-apply"]')`, 'overlap-reversal-ready');
+    await reviewAction(renderer, `${overlapCard} [data-mark-form="reverse-apply"] [data-mark-action="submit"]`, 'overlap-reversal-confirm');
+    await waitFor(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(overlapFinding.blockId)}}});return page.blocks[1].blockId===${JSON.stringify(overlapFinding.blockId)} && page.blocks[1].text==='开头👩‍💻Ａ　Ｂ结尾' && page.blocks[0].text==='甲'.repeat(1200);})()`, 'overlap-reversal-restored-exactly');
+    // The store commits before the renderer finishes its Apply refresh. As in J-05, wait for the
+    // reopened suggestion before closing this browser, so the transition cannot race an active write.
+    await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-state]')?.textContent==='待你处理' && document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${overlapFinding.markId}"]')?.dataset.markStatus==='open'`, 'overlap-reversal-renderer-settled');
+
     // ---- 事实核查 at its Evidence Assurance Levels (Issue #901; FACT, EVID, EASSURE, FREV, CORR) ----
     // Synchronized delta with Issue #901: a fresh, unedited sample1 Book on the provider-free `sample1-factual-verified` fixture,
     // which answers contract /2 at 标准核查 and layers v1's own answers beneath it. The deterministic route fetches nothing, so

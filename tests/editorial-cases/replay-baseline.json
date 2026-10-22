@@ -81,30 +81,28 @@
       },
       "findings": {
         "listed": 2,
-        "located": 1,
-        "excluded": 1,
-        "useful": 0,
-        "precise": 0,
+        "located": 2,
+        "excluded": 0,
+        "useful": 1,
+        "precise": 1,
         "unclassified": 0,
         "falsePositives": 0
       },
       "concerns": {
         "total": 1,
-        "met": [],
-        "missed": [
+        "met": [
           "x-age-mismatch"
         ],
+        "missed": [],
         "unmeasured": [],
-        "excludedOnly": [
-          "x-age-mismatch"
-        ]
+        "excludedOnly": []
       },
       "checks": {
         "total": 1,
         "triggered": []
       },
       "effort": {
-        "adopted": 0,
+        "adopted": 1,
         "edited": 0,
         "rejected": 0,
         "left": 0,
@@ -116,13 +114,13 @@
       "delivery": null,
       "result": {
         "issue": 879,
-        "quoteNotFound": 1,
-        "verbatimInBook": 1,
+        "quoteNotFound": 0,
+        "verbatimInBook": 0,
         "ownBlockOrdinalMatches": 0
       },
       "replay": {
         "answered": 2,
-        "unmatched": 2
+        "unmatched": 3
       },
       "recordedUsage": {
         "requests": 4,
@@ -202,56 +200,53 @@
       },
       "findings": {
         "listed": 21,
-        "located": 11,
-        "excluded": 10,
-        "useful": 2,
-        "precise": 2,
-        "unclassified": 9,
+        "located": 21,
+        "excluded": 0,
+        "useful": 4,
+        "precise": 4,
+        "unclassified": 17,
         "falsePositives": 0
       },
       "concerns": {
         "total": 7,
         "met": [
           "m-missing-de",
+          "m-stray-shang",
+          "m-missing-object",
           "m-missing-lai"
         ],
         "missed": [
           "m-circle-1990",
           "m-circle-1980",
-          "m-stray-shang",
-          "m-missing-object",
           "m-missing-ta"
         ],
         "unmeasured": [],
-        "excludedOnly": [
-          "m-stray-shang",
-          "m-missing-object"
-        ]
+        "excludedOnly": []
       },
       "checks": {
         "total": 4,
         "triggered": []
       },
       "effort": {
-        "adopted": 2,
+        "adopted": 4,
         "edited": 0,
         "rejected": 0,
-        "left": 9,
-        "applied": 2,
-        "appliedCorrect": 2,
-        "reversed": 2,
+        "left": 17,
+        "applied": 4,
+        "appliedCorrect": 4,
+        "reversed": 4,
         "restoredExactly": true
       },
       "delivery": null,
       "result": {
         "issue": 879,
-        "quoteNotFound": 10,
-        "verbatimInBook": 10,
-        "ownBlockOrdinalMatches": 10
+        "quoteNotFound": 0,
+        "verbatimInBook": 0,
+        "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 13,
-        "unmatched": 0
+        "answered": 12,
+        "unmatched": 5
       },
       "recordedUsage": {
         "requests": 13,
@@ -438,24 +433,23 @@
       },
       "findings": {
         "listed": 77,
-        "located": 38,
-        "excluded": 39,
-        "useful": 0,
-        "precise": 0,
-        "unclassified": 38,
+        "located": 77,
+        "excluded": 0,
+        "useful": 1,
+        "precise": 1,
+        "unclassified": 76,
         "falsePositives": 0
       },
       "concerns": {
         "total": 2,
-        "met": [],
+        "met": [
+          "s1-stacked-adverbials"
+        ],
         "missed": [
-          "s1-stacked-adverbials",
           "s1-long-attributive"
         ],
         "unmeasured": [],
-        "excludedOnly": [
-          "s1-stacked-adverbials"
-        ]
+        "excludedOnly": []
       },
       "checks": {
         "total": 4,
@@ -463,24 +457,24 @@
       },
       "effort": {
         "adopted": 0,
-        "edited": 0,
+        "edited": 1,
         "rejected": 0,
-        "left": 38,
-        "applied": 0,
-        "appliedCorrect": 0,
-        "reversed": 0,
+        "left": 76,
+        "applied": 1,
+        "appliedCorrect": 1,
+        "reversed": 1,
         "restoredExactly": true
       },
       "delivery": null,
       "result": {
         "issue": 879,
-        "quoteNotFound": 39,
-        "verbatimInBook": 39,
-        "ownBlockOrdinalMatches": 39
+        "quoteNotFound": 0,
+        "verbatimInBook": 0,
+        "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 11,
-        "unmatched": 2
+        "answered": 8,
+        "unmatched": 9
       },
       "recordedUsage": {
         "requests": 12,
@@ -507,11 +501,11 @@
       },
       "findings": {
         "listed": 10,
-        "located": 8,
-        "excluded": 2,
+        "located": 10,
+        "excluded": 0,
         "useful": 1,
         "precise": 1,
-        "unclassified": 6,
+        "unclassified": 8,
         "falsePositives": 1
       },
       "concerns": {
@@ -535,7 +529,7 @@
         "adopted": 1,
         "edited": 0,
         "rejected": 1,
-        "left": 6,
+        "left": 8,
         "applied": 0,
         "appliedCorrect": 0,
         "reversed": 0,
@@ -544,13 +538,13 @@
       "delivery": null,
       "result": {
         "issue": 879,
-        "quoteNotFound": 2,
-        "verbatimInBook": 2,
-        "ownBlockOrdinalMatches": 2
+        "quoteNotFound": 0,
+        "verbatimInBook": 0,
+        "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 13,
-        "unmatched": 0
+        "answered": 12,
+        "unmatched": 3
       },
       "recordedUsage": {
         "requests": 13,
@@ -653,57 +647,54 @@
       },
       "findings": {
         "listed": 29,
-        "located": 19,
-        "excluded": 10,
-        "useful": 2,
-        "precise": 2,
-        "unclassified": 17,
+        "located": 29,
+        "excluded": 0,
+        "useful": 4,
+        "precise": 4,
+        "unclassified": 25,
         "falsePositives": 0
       },
       "concerns": {
         "total": 7,
         "met": [
           "s1-missing-de",
-          "s1-stray-shang"
+          "s1-stray-shang",
+          "s1-missing-object",
+          "s1-missing-lai"
         ],
         "missed": [
           "s1-circle-1990",
-          "s1-circle-1980",
-          "s1-missing-object",
-          "s1-missing-lai"
+          "s1-circle-1980"
         ],
         "unmeasured": [
           "s1-missing-ta"
         ],
-        "excludedOnly": [
-          "s1-missing-object",
-          "s1-missing-lai"
-        ]
+        "excludedOnly": []
       },
       "checks": {
         "total": 4,
         "triggered": []
       },
       "effort": {
-        "adopted": 2,
+        "adopted": 4,
         "edited": 0,
         "rejected": 0,
-        "left": 17,
-        "applied": 2,
-        "appliedCorrect": 2,
-        "reversed": 2,
+        "left": 25,
+        "applied": 4,
+        "appliedCorrect": 4,
+        "reversed": 4,
         "restoredExactly": true
       },
       "delivery": null,
       "result": {
         "issue": 879,
-        "quoteNotFound": 10,
-        "verbatimInBook": 10,
-        "ownBlockOrdinalMatches": 9
+        "quoteNotFound": 0,
+        "verbatimInBook": 0,
+        "ownBlockOrdinalMatches": 0
       },
       "replay": {
-        "answered": 12,
-        "unmatched": 1
+        "answered": 11,
+        "unmatched": 5
       },
       "recordedUsage": {
         "requests": 12,
