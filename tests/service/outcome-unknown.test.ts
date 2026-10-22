@@ -186,7 +186,9 @@ describe('结果待确认 over the real store', () => {
       expect(before.state.key).toBe('outcome-unknown');
       // 取消任务's summary counts seven ranges read and names unit 4 apart, its own gap rather than a range not attempted.
       expect(before.runControl?.cancel.impact).toContain(CANCEL_LINE);
-      expect(before.runControl?.cancel.impact).toContain('已读完的 7 个阅读范围的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。');
+      expect(before.runControl?.cancel.impact[0]).toContain('已读完 7 个阅读范围，等你回答 0 个，你已回答但尚未续行 0 个，结果待确认 1 个，未尝试 0 个');
+      expect(before.runControl?.cancel.impact[0]).toContain('已读结果与这些缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。');
+      expect(before.runControl?.cancel.impact.slice(1)).toEqual([CANCEL_LINE]);
       store.requestBaselineAnalysisCancel(bookId, taskIntentId);
       execution.cancelRun(runRecordId, store.baselineAnalysisLedger);
       await execution.whenIdle();

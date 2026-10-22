@@ -292,6 +292,17 @@ describe('取消任务 over the real store', () => {
       ]);
       expect(running.runControl!.executingSince).toBe(store.inspectBaselineAnalysis(bookId, progress).run!.transitions.find((transition) => transition.state === 'executing')!.recordedAt);
 
+      // Reading impact pages, including rereading from the start, grants nothing and leaves the exact Run unchanged.
+      const beforeReads = store.inspectBaselineAnalysis(bookId, progress);
+      const digest = createHash('sha256').update(JSON.stringify(running.runControl!.cancel.impact)).digest('hex');
+      for (const afterOrdinal of [0, 1, 0]) {
+        const page = store.getTaskPlanPage({ bookId, kind: 'baseline-analysis', ref: taskIntentId,
+          path: 'runControl.cancel.impact', afterOrdinal, digest }, running);
+        expect(page.items).toEqual(running.runControl!.cancel.impact.slice(afterOrdinal));
+        expect(page.digest).toBe(digest);
+      }
+      expect(store.inspectBaselineAnalysis(bookId, progress)).toEqual(beforeReads);
+
       // 确认取消任务: `cancelling` is recorded at once and the Run the owner holds is asked to stop.
       expect(store.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
       expect(execution.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('stopping');
