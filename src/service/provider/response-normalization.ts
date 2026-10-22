@@ -223,12 +223,12 @@ function normalizeContentBlocks(profile: ProviderModelProfile, body: unknown): C
  * the empty answer this module exists to distinguish, not a string for the contract layer to fail to
  * parse. A response with no `output` array matched no channel at all and is `output-absent`.
  *
- * `status`, `incomplete_details`, and `error` are deliberately not carried, for the reason
- * `stop_reason` is not carried above: an incomplete or failed body reads as the empty or unparsable
- * answer the layers above already handle, and the canonical result gains no field one vendor needs.
+ * Text-only reading keeps its existing status semantics. Offered/admitted function calls require a
+ * completed response and complete call items; a malformed batch or opaque reasoning refuses the whole
+ * batch because this payload cannot preserve the reasoning needed for continuation (Issue #1038).
  * `output_text` is not read either — the SDK synthesizes it client-side and the wire body has none.
  */
-function normalizeOutputItems(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
+function normalizeOutputItems(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions): CanonicalModelResult {
   if (!isRecord(body)) return { kind: 'malformed', reason: 'response-not-a-record' };
   if (!Array.isArray(body.output)) return { kind: 'malformed', reason: 'output-absent' };
   const text = body.output
@@ -238,6 +238,25 @@ function normalizeOutputItems(profile: ProviderModelProfile, body: unknown): Can
     .map((part) => part.text as string)
     .join('');
   const usage = outputItemUsageOf(body);
+  if (options.toolCallsOffered === true && profile.capabilities.toolCalling === 'function' &&
+      body.output.some((item) => isBlockOfType(item, 'function_call'))) {
+    // A partial batch cannot execute. Reasoning requires opaque replay that the current payload cannot preserve.
+    if (body.status !== 'completed' || body.output.some((item) => isBlockOfType(item, 'reasoning'))) {
+      return { kind: 'malformed', reason: 'tool-calls-malformed' };
+    }
+    const calls: CanonicalToolCall[] = [];
+    for (const item of body.output) {
+      if (!isBlockOfType(item, 'function_call')) continue;
+      if (typeof item.call_id !== 'string' || item.call_id.length === 0 || typeof item.name !== 'string' || item.name.length === 0 ||
+          typeof item.arguments !== 'string' || (item.status !== undefined && item.status !== 'completed') ||
+          calls.some((call) => call.id === item.call_id)) {
+        return { kind: 'malformed', reason: 'tool-calls-malformed' };
+      }
+      // The separate item id is never a correlation id; argument JSON/schema validation belongs to the tool boundary.
+      calls.push({ id: item.call_id, name: item.name, arguments: item.arguments });
+    }
+    return { kind: 'tool-calls', text, calls, reasoningText: null, usage };
+  }
   const reasoningPresent = profile.capabilities.reasoningChannel === 'output-reasoning-items' &&
     body.output.some((item) => isBlockOfType(item, 'reasoning'));
   if (text.length === 0) return { kind: 'empty-answer', reasoningPresent, usage };
@@ -292,7 +311,7 @@ function normalizeCandidateParts(profile: ProviderModelProfile, body: unknown): 
 export function normalizeModelResponse(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions = {}): CanonicalModelResult {
   if (profile.capabilities.answerChannel === 'none') return { kind: 'malformed', reason: 'answer-channel-not-declared' };
   if (profile.capabilities.answerChannel === 'content-text-blocks') return normalizeContentBlocks(profile, body);
-  if (profile.capabilities.answerChannel === 'output-message-text') return normalizeOutputItems(profile, body);
+  if (profile.capabilities.answerChannel === 'output-message-text') return normalizeOutputItems(profile, body, options);
   if (profile.capabilities.answerChannel === 'candidate-parts-text') return normalizeCandidateParts(profile, body);
   return normalizeMessageContentString(profile, body, options);
 }
