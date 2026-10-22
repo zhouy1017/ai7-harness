@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { deriveCoverageManifest, UNIT_BUDGET_GRAPHEMES, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
 import { OUT_OF_SCOPE_GAP_REASON } from '../../src/service/analysis/reuse-plan.js';
 import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
-import { locateQuotation, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
+import { graphemeCount, locateQuotation, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { reduceReviewCategory, type ReviewUnitOutcome } from '../../src/service/review/review-category-reducers.js';
 import { markRetrievalResult } from '../../src/service/retrieval/result-validator.js';
 
@@ -19,7 +19,7 @@ function block(position: number, kind: ManifestBlockInput['kind'], text: string)
     level: kind === 'heading' ? 1 : null,
     text,
     digest: createHash('sha256').update(text).digest('hex'),
-    graphemes: Array.from(text).length,
+    graphemes: graphemeCount(text),
   };
 }
 
