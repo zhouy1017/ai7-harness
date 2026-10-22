@@ -1330,6 +1330,19 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   taskSurfaceRefresh = {};
   screen.dataset['screen'] = state;
   screen.replaceChildren(content);
+  if (place !== null) {
+    const selected = button(lastModelSelection === null ? '快速交互模型 · 查看设置' : `快速交互 · ${lastModelSelection.providerLabel} / ${lastModelSelection.modelLabel}`,
+      'quiet', () => void renderModelServiceSettings());
+    selected.dataset['compactModelSelection'] = 'fast-interaction';
+    content.prepend(selected);
+    void window.ai7.getModelServiceSettings().then((settings) => {
+      if (!selected.isConnected) return;
+      const role = settings.roles.find((candidate) => candidate.roleId === 'fast-interaction');
+      lastModelSelection = role?.binding ?? null;
+      selected.textContent = lastModelSelection === null ? '快速交互模型 · 需设置'
+        : `快速交互 · ${lastModelSelection.providerLabel} / ${lastModelSelection.modelLabel} · ${role?.statusLabel ?? '需设置'}`;
+    }).catch(() => { selected.textContent = '快速交互模型 · 需处理'; });
+  }
   if (authorityInterrupted) {
     for (const control of screen.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
       control.disabled = true;
@@ -6283,6 +6296,8 @@ function renderModelServiceProxyBlock(projection: ModelServiceSettingsProjection
  * One route of 设置 › 模型服务 (Issue #811): its binding, whether new Tasks use it, and its own connection name and credential.
  * The DeepSeek 开放平台（官方） form keeps the field identities and action words S55a gave it; the Go form names its route.
  */
+let lastModelSelection: ModelServiceRouteOptionProjection['binding'] | null = null;
+
 function renderModelRouteOption(option: ModelServiceRouteOptionProjection): HTMLElement {
   const official = option.route === 'deepseek-open-platform';
   const section = element('article', 'model-route-option');
@@ -6347,7 +6362,7 @@ function renderModelRouteOption(option: ModelServiceRouteOptionProjection): HTML
     const stored = element('p', 'success-note', `连接名称：${option.connection.connectionName} · 凭据值不再显示`);
     stored.dataset['credentialState'] = option.connection.credentialOperationState;
     const actions = element('div', 'button-row');
-    if (!option.inUse && option.connection.credentialOperationState === 'ready') {
+    if (option.route !== 'openai-platform' && !option.inUse && option.connection.credentialOperationState === 'ready') {
       const use = button(`改用${option.binding.providerLabel}`, 'secondary', async () => {
         use.disabled = true;
         setStatus('正在切换新任务使用的模型服务路线…', 'busy');
@@ -6362,6 +6377,39 @@ function renderModelRouteOption(option: ModelServiceRouteOptionProjection): HTML
       use.dataset['action'] = 'select-model-service-route';
       actions.append(use);
     }
+    const modelLabel = element('label', undefined, '快速交互模型');
+    const models = element('select');
+    models.dataset['fastModelChoice'] = option.route;
+    for (const model of option.models ?? [option.binding]) {
+      const item = element('option', undefined, model.modelLabel);
+      item.value = model.modelId; item.selected = model.modelId === (option.connection?.connectionTest?.modelId ?? option.binding.modelId);
+      models.append(item);
+    }
+    const testState = option.connection.connectionTest;
+    const testLabel = testState == null ? '尚未测试；保存凭据不等于连接成功'
+      : testState.outcome === 'passed' ? `文本连接测试通过 · ${testState.modelId}`
+        : `文本连接测试${testState.outcome === 'outcome-unknown' ? '结果待确认；不会自动重试' : testState.outcome === 'cancelled' ? '已取消' : '未通过'} · ${testState.code ?? ''}`;
+    section.append(element('p', 'field-note', testLabel), element('p', 'field-note', '测试只发送固定公开合成消息，不含图书文字；仅核验缓冲文本，不核验工具或流式。'));
+    const test = button('测试文本连接', 'secondary', async () => {
+      test.disabled = true;
+      try { renderModelServiceSettingsProjection(await window.ai7.testModelServiceConnection({ route: option.route, modelId: models.value })); }
+      catch (error) { test.disabled = false; setStatus(rendererErrorMessage(error, '连接测试没有完成；不会自动重试。'), 'error'); }
+    });
+    test.dataset['action'] = 'test-model-connection';
+    const useFast = button('用于快速交互角色', 'secondary', async () => {
+      useFast.disabled = true;
+      try { renderModelServiceSettingsProjection(await window.ai7.selectFastRoleModel({ route: option.route, modelId: models.value })); }
+      catch (error) { useFast.disabled = false; setStatus(rendererErrorMessage(error, '无法保存快速交互模型。'), 'error'); }
+    });
+    useFast.dataset['action'] = 'select-fast-role-model';
+    const ready = option.connection.credentialOperationState === 'ready';
+    test.disabled = !ready;
+    const updateSelection = (): void => {
+      useFast.disabled = !ready || (option.route === 'openai-platform' &&
+        (testState?.outcome !== 'passed' || testState.modelId !== models.value || testState.credentialUpdatedAt !== option.connection?.credentialUpdatedAt));
+    };
+    models.addEventListener('change', updateSelection); updateSelection();
+    modelLabel.append(models); actions.append(modelLabel, test, useFast);
     const remove = button(`移除${suffix}`, 'secondary', async () => {
       remove.disabled = true;
       setStatus('正在从操作系统安全凭据库移除凭据…', 'busy');
@@ -6442,6 +6490,7 @@ function renderSearchBackendSettings(projection: ModelServiceSettingsProjection)
 }
 
 function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
+  lastModelSelection = projection.roles.find((role) => role.roleId === 'fast-interaction')?.binding ?? null;
   const content = panel();
   content.classList.add('model-service-settings');
   content.dataset['policyIntegrity'] = projection.launchPolicy.integrityState;

@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -386,6 +388,9 @@ async function main() {
   let browserAcquisition;
   let tempParent;
   let journeyCompleted = false;
+  let fastCredentialSaved = false;
+  let fastDataRoot;
+  let fastExecutable;
   const closeOwnedBrowser = async () => {
     const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
     await ownedBrowser?.close().catch(() => undefined);
@@ -393,6 +398,10 @@ async function main() {
   };
   const cancellation = installJourneyCancellationCleanup(async () => {
     await closeOwnedBrowser();
+    if (fastCredentialSaved && fastDataRoot !== undefined && runRoot !== undefined) {
+      const recovered = await recoverSyntheticCredentialCleanupState('J-05', fastDataRoot, runRoot);
+      if (recovered.kind === 'reference') await removeSyntheticCredentialWithElectron('J-05', fastExecutable, productEnvironment(fastExecutable), recovered.credentialReference);
+    }
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
     await ownedLoopback?.close().catch(() => undefined);
     loopback = undefined;
@@ -433,6 +442,7 @@ async function main() {
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
+    fastDataRoot = dataRoot; fastExecutable = executable;
     const launch = async ({ picker, loseFirstApplyAcknowledgement = false } = {}) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
@@ -462,8 +472,29 @@ async function main() {
       await renderer.send('Page.setBypassCSP', { enabled: false });
     }
     await loopback.close();
+    at('selected-fast-text-scope-refusal');
+    const fastSecret = randomBytes(48).toString('base64url');
+    fastCredentialSaved = true;
+    await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}})`);
+    await renderer.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
     await importAndOpen(renderer, EXCERPT.title);
     await assertRenderer(renderer, PAGE_HELPERS, 'page-helpers');
+    at('selected-fast-text-scope-refusal');
+    // Refresh this same Book surface so its compact selector reads the persisted independent Fast choice.
+    await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{
+      const role=settings.roles.find((item)=>item.roleId==='fast-interaction');
+      window.__j05FastSelected=role.binding.providerId==='deepseek-open-platform' && role.connection.fastSelected===true;
+    })`);
+    requireJourney(await renderer.evaluate(`Boolean(window.__j05FastSelected)`), 'selected-fast-exact-recorded-choice');
+    await waitFor(renderer, `document.querySelector('[data-compact-model-selection="fast-interaction"]')?.textContent.includes('DeepSeek')`, 'selected-fast-compact-display');
+    requireJourney(await renderer.evaluate(`window.ai7.listPriorWork().then(async (work)=>{
+      const book=work.find((item)=>item.bookTitle===${JSON.stringify(EXCERPT.title)});
+      const routes=await window.ai7.inspectFastInteractionRoutes({bookId:book.bookId});
+      return JSON.stringify(routes).includes('当前运行范围未允许');
+    })`), 'selected-fast-ci-text-task-refused');
+    await renderer.evaluate(`window.ai7.removeModelServiceCredential()`);
+    at('selection-menu-empty');
+
     // Two paragraphs long enough to mark, whose first 80 code units are 80 graphemes.
     const blocks = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); return Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node) => { const head = (node.textContent ?? '').slice(0, 80); return head.length === 80 && Array.from(segmenter.segment(head)).length === 80; }).slice(0, 2).map((node) => node.dataset.blockId); })()`);
     requireJourney(Array.isArray(blocks) && blocks.length === 2 && blocks.every((id) => /^blk_[0-9a-f]{24}$/.test(id)), 'markable-paragraphs');

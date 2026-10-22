@@ -41,7 +41,7 @@ export type AdmittedDialogueRoute = AdmittedFastRoleRoute;
  */
 const LIVE_ROUTES: Readonly<Record<'developer-live' | 'ordinary-production', ReadonlyArray<RemoteExecutionRoute>>> = {
   'developer-live': [OPENCODE_GO_ROUTE],
-  'ordinary-production': [OPENCODE_GO_ROUTE, DEEPSEEK_ROUTE],
+  'ordinary-production': [OPENCODE_GO_ROUTE, DEEPSEEK_ROUTE, 'openai-platform'],
 };
 
 /** The categories the Egress Gate reads; a rule naming any other carries it to no binding. */
@@ -91,7 +91,8 @@ export function admittedFastRoleRoute(policy: LaunchPolicyProjection, kindId: st
   const profile = (PROVIDER_ROUTE_PROFILES as Readonly<Record<string, ProviderRouteProfile>>)[route];
   if (profile === undefined || profile.endpoint !== endpoint || profile.credentialSlot !== credentialSlot) return null;
   const modelProfile = modelProfileFor(route as RemoteExecutionRoute, model);
-  if (modelProfile === null) return null;
+  if (modelProfile === null || modelProfile.capabilities.answerChannel === 'none') return null;
+  if (route === 'openai-platform' && kindId !== 'material-translation' && kindId !== 'model-connection-test') return null;
   return {
     ruleId,
     operationalScope: scope,

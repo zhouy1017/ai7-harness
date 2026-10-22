@@ -1,3 +1,6 @@
+import { MODEL_SERVICE_CONNECTION_REVISION_72_SQL } from '../../src/service/bounded-manuscript.js';
+import { FastRoleExecutionOwner, productionFastRoleRoutes, testModelServiceConnection } from '../../src/service/fast-role/fast-role-execution.js';
+import { materialTranslator, MATERIAL_TRANSLATION_RESULT_SCHEMA } from '../../src/service/fast-role/material-translation-contract.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import fs from 'node:fs/promises';
@@ -264,7 +267,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     const bookId = await sample1Book(store, 'L2 正式后台分析');
     const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
     const selected = production.policy;
-    expect(selected.providerProcessing.version).toBe('v23');
+    expect(selected.providerProcessing.version).toBe('v25');
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'])?.backgroundOrigin).toBe(false);
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'], 'background')?.ruleId)
       .toBe('enrolled-background-manuscript-analysis-processing');
@@ -346,7 +349,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     const reference = await configure(store, production, 'deepseek-open-platform');
     expect(production.live).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', credentialReference: reference });
     // v13 names the editor's unpublished words in every admitted rule (#853 revision 5), which is what the gate admits them by.
-    for (const rule of production.policy.providerProcessing.admittedRules) {
+    for (const rule of production.policy.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test')) {
       expect(rule.outboundDataCategories).toEqual(expect.arrayContaining(['unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content']));
     }
     const bookId = await sample1Book(store, 'L2 官方路线');
@@ -354,7 +357,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(prepared.planEnvelope).toMatchObject({ providerStatus: 'remote-eligible-ordinary-production', dispatchAllowed: true });
     expect(prepared.providerResolutionPlan).toMatchObject({
       remoteBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-flash', credentialSlot: 'deepseek-api-key', credentialReference: reference,
-        providerProcessing: { operationalScope: 'ordinary-production', version: 'v23' } },
+        providerProcessing: { operationalScope: 'ordinary-production', version: 'v25' } },
       executionRoute: { kind: 'deepseek-open-platform', model: 'deepseek-flash', endpoint: OFFICIAL.endpoint },
       outboundDataCategory: 'unpublished-excerpts',
       runBudgetCeiling: 'unset',
@@ -371,8 +374,8 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)).not.toContain(reference);
     const binding = store.baselineAnalysisLedger.executionBindingOf(settled.run!.runRecordId)!;
     expect(binding.binding).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', outboundDataCategory: 'unpublished-excerpts',
-      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v23' } });
-    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v23' });
+      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v25' } });
+    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v25' });
   });
 
   it('restarts beside an exact seeded development response, reads no cache file, and sends identical Tasks twice', async () => {
@@ -603,4 +606,170 @@ describe('schema 72 (Issue #811)', () => {
       await rm(dataRoot, { recursive: true, force: true });
     }
   });
+});
+
+
+describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
+  function responsesTransport(calls: Array<{ url: string; model: string; cap: number }>, answer: string): typeof fetch {
+    return (async (url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      calls.push({ url, model: body.model, cap: body.max_output_tokens });
+      expect(body.tools).toBeUndefined(); expect(body.stream).toBeUndefined();
+      return { status: 200, json: async () => ({ status: 'completed', output: [{ type: 'reasoning', id: 'rs_public_synthetic', summary: [], encrypted_content: 'public-synthetic-opaque-reasoning' }, { type: 'message', role: 'assistant',
+        content: [{ type: 'output_text', text: answer }] }], usage: { input_tokens: 12, output_tokens: 7, output_tokens_details: { reasoning_tokens: 2 } } }) };
+    }) as unknown as typeof fetch;
+  }
+
+  it('tests, independently selects both reviewed models, restarts and translates through the exact persisted composition', async () => {
+    let { store } = await openProductionStore();
+    const official = store.saveModelServiceConnection('Main official', null, 'ready', 'deepseek-open-platform');
+    store.selectModelServiceRoute('deepseek-open-platform');
+    const openai = store.saveModelServiceConnection('Fast OpenAI', null, 'ready', 'openai-platform');
+    expect(openai.connectionTest).toBeNull();
+    expect(() => store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna')).toThrowError();
+    const calls: Array<{ url: string; model: string; cap: number }> = [];
+    const reads: string[] = [];
+    const resolver = { resolve: async (reference: string) => { reads.push(reference); return 'public-synthetic-placeholder'; } };
+    for (const modelId of ['gpt-5.6-sol', 'gpt-5.6-luna']) {
+      const tested = await testModelServiceConnection(store, roots.codeRoot,
+        { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, 'AI7_OK') }, { route: 'openai-platform', modelId }, resolver);
+      expect(tested).toMatchObject({ modelId, outcome: 'passed', verified: 'buffered-text-only' });
+      store.selectFastRoleModel('openai-platform', modelId);
+      expect(store.getConfiguredModelRoleBinding('main-editorial')?.credentialReference).toBe(official.credentialReference);
+      expect(store.getConfiguredModelRoleBinding('fast-interaction')?.model).toBe(modelId);
+    }
+    store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(store);
+    const fast = store.getConfiguredModelRoleBinding('fast-interaction')!;
+    expect(fast).toEqual({ route: 'openai-platform', endpoint: 'https://api.openai.com/v1/responses', model: 'gpt-5.6-luna',
+      credentialSlot: 'openai-platform', credentialReference: openai.credentialReference });
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', store.getConfiguredModelRoleBinding('main-editorial'), fast);
+    expect(policy.integrityState).toBe('verified');
+    const owner = new FastRoleExecutionOwner({ fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, JSON.stringify({ schema: MATERIAL_TRANSLATION_RESULT_SCHEMA,
+        translations: [{ n: 1, text: '公开连接测试的合成译文。' }] })) }, () => policy, () => fast.credentialReference, resolver) });
+    try {
+      const translator = materialTranslator(owner, 'ordinary-production', () => 1);
+      const result = await translator.translate('a'.repeat(64), ['Public synthetic reference text for a connection contract.'], 'selection-proof');
+      expect(result.kind).toBe('translated');
+      if (result.kind !== 'translated') throw new Error('production translation failed');
+      expect(result.made).toMatchObject({ model: fast.model, route: fast.route, policyRuleId: 'ordinary-production-material-translation',
+        provenance: { role: 'Fast Interaction Role', endpoint: fast.endpoint, credentialReference: fast.credentialReference, policyVersion: 'v25',
+          usage: { inputTokens: 12, outputTokens: 7 }, failureCode: null } });
+      expect(calls).toEqual([{ url: fast.endpoint, model: 'gpt-5.6-sol', cap: 512 },
+        { url: fast.endpoint, model: fast.model, cap: 512 }, { url: fast.endpoint, model: fast.model, cap: 8192 }]);
+      expect(reads.every((reference) => reference === openai.credentialReference)).toBe(true);
+      // Finish the existing user-facing task through its store/index owner, not only the text contract.
+      store.useMaterialTranslator(translator);
+      const referencePath = join(roots.inputRoot, 'public-synthetic-reference.txt');
+      await fs.writeFile(referencePath, 'Public synthetic reference paragraph for the persisted translation test.');
+      const preview = await store.previewLibraryMaterial(referencePath);
+      const material = await store.addLibraryMaterial({ previewId: preview.previewId, title: 'Public synthetic reference', kind: 'document' });
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      store.requestMaterialTranslation(material.materialId);
+      await store.settleMaterialLayers();
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const translations = database.prepare('SELECT canonical_json FROM material_index_translations').all();
+        expect(translations).toHaveLength(1);
+        const record = JSON.parse(String(translations[0]!.canonical_json));
+        expect(record.provenance).toMatchObject({ role: 'Fast Interaction Role', route: fast.route, model: fast.model,
+          endpoint: fast.endpoint, credentialSlot: fast.credentialSlot, credentialReference: fast.credentialReference,
+          policyVersion: 'v25', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 }, failureCode: null });
+        expect(record.label).toBe('来源译文');
+        expect(JSON.stringify(record)).not.toContain('public-synthetic-opaque-reasoning');
+      } finally { database.close(); }
+      expect(calls).toHaveLength(4);
+
+      expect(store.getModelServiceRouteConnection('deepseek-open-platform')?.selected).toBe(true);
+    } finally { owner.dispose(); }
+  });
+
+  it('refuses missing credentials, unsupported models and wrong scopes before resolving a secret', async () => {
+    const { store } = await openProductionStore();
+    const resolver = { resolve: vi.fn(async () => 'public-placeholder') };
+    for (const [runtime, modelId] of [[null, 'gpt-5.6-luna'], [{ scope: 'ordinary-production', nativeFetch: vi.fn() }, 'gpt-6-astra'],
+      [{ scope: 'ordinary-production', nativeFetch: vi.fn() }, 'gpt-5.6-luna']] as const) {
+      await expect(testModelServiceConnection(store, roots.codeRoot, runtime, { route: 'openai-platform', modelId }, resolver)).rejects.toThrow();
+    }
+    expect(resolver.resolve).not.toHaveBeenCalled();
+  });
+
+  it.each(['invalid-key', 'account-limit', 'malformed', 'refusal', 'unknown'] as const)('keeps %s attributed and sends only once', async (failure) => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Failure probe', null, 'ready', 'openai-platform');
+    const transport = vi.fn(async () => {
+      if (failure === 'unknown') throw new Error('synthetic transport failure after submission');
+      return { status: failure === 'invalid-key' ? 401 : failure === 'account-limit' ? 429 : 200,
+        json: async () => failure === 'refusal' ? { output: [{ type: 'message', role: 'assistant', content: [{ type: 'refusal', refusal: 'synthetic refusal' }] }], usage: { input_tokens: 12, output_tokens: 1 } }
+          : failure === 'malformed' ? { invalid: true, usage: { input_tokens: 12, output_tokens: 0 } } : { error: { message: 'never retain synthetic provider body' } } };
+    });
+    const status = await testModelServiceConnection(store, roots.codeRoot,
+      { scope: 'ordinary-production', nativeFetch: transport as unknown as typeof fetch },
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' });
+    expect(status.outcome).toBe(failure === 'unknown' ? 'outcome-unknown' : 'failed');
+    expect(transport).toHaveBeenCalledTimes(1);
+    if (failure === 'malformed' || failure === 'refusal') expect(status.provenance?.usage).toMatchObject({ inputTokens: 12, outputTokens: failure === 'malformed' ? 0 : 1 });
+    expect(store.getModelServiceRouteConnection('openai-platform')?.connectionTest).toEqual(status);
+    expect(JSON.stringify(status)).not.toContain('synthetic provider body');
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toBeNull();
+    expect(connection.credentialReference).toHaveLength(36);
+  });
+  it('cancels an explicit probe before dispatch without resolving a key', async () => {
+    const { store } = await openProductionStore();
+    store.saveModelServiceConnection('Cancelled probe', null, 'ready', 'openai-platform');
+    const resolver = { resolve: vi.fn(async () => 'public-placeholder') };
+    const transport = vi.fn(); const controller = new AbortController(); controller.abort();
+    const result = await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: transport },
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver, controller.signal);
+    expect(result.outcome).toBe('cancelled'); expect(resolver.resolve).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('invalidates tested state on key replacement and refuses a stale selection before secret release', async () => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Exact probe', null, 'ready', 'openai-platform');
+    const calls: Array<{ url: string; model: string; cap: number }> = [];
+    const resolver = { resolve: async () => 'public-placeholder' };
+    await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, 'AI7_OK') },
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver);
+    store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna');
+    const fast = store.getConfiguredModelRoleBinding('fast-interaction')!;
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, fast);
+    const forbiddenReads: string[] = []; const transport = vi.fn();
+    const owner = new FastRoleExecutionOwner({ fixture: null, live: productionFastRoleRoutes({ scope: 'ordinary-production', nativeFetch: transport },
+      () => policy, () => fast.credentialReference, { resolve: async (reference) => { forbiddenReads.push(reference); return 'public-placeholder'; } }, () => false) });
+    try {
+      const result = await owner.ask('material-translation', 'Public synthetic stale request.', 'stale');
+      expect(result.kind).toBe('failed'); expect(transport).not.toHaveBeenCalled(); expect(forbiddenReads).toHaveLength(0);
+      // Readiness may inspect presence; no ticket releases the value to a transport.
+      expect(owner.busy).toBe(false);
+    } finally { owner.dispose(); }
+    store.saveModelServiceConnection('Exact probe', connection.credentialReference, 'ready', 'openai-platform');
+    expect(store.getModelServiceRouteConnection('openai-platform')?.connectionTest).toBeNull();
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toBeNull();
+    expect(() => store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna')).toThrow();
+  });
+
+  it('migrates revision83 without changing Main/reference/history and freezes the prior Fast choice independently', async () => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Legacy Main', null, 'ready', 'deepseek-open-platform');
+    store.selectModelServiceRoute('deepseek-open-platform'); store.close();
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    const columns = 'connection_id, role_id, connection_name, provider_id, model_id, adapter_revision, configuration_revision, approved_fallback_chain, credential_slot, credential_reference, credential_operation_state, created_at, updated_at, credential_updated_at, selected';
+    const before = database.prepare(`SELECT ${columns} FROM model_service_connections`).all();
+    database.exec(`CREATE TEMP TABLE legacy_model_selection AS SELECT ${columns} FROM model_service_connections; DROP TABLE model_service_connections;`);
+    database.exec(MODEL_SERVICE_CONNECTION_REVISION_72_SQL);
+    database.exec(`INSERT INTO model_service_connections SELECT * FROM legacy_model_selection; DROP TABLE legacy_model_selection; PRAGMA user_version = 83;`);
+    database.close();
+    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(migrated);
+    const after = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try { expect(after.prepare(`SELECT ${columns} FROM model_service_connections`).all()).toEqual(before); }
+    finally { after.close(); }
+    const saved = migrated.getModelServiceRouteConnection('deepseek-open-platform')!;
+    expect(saved).toMatchObject({ credentialReference: connection.credentialReference, selected: true, fastSelected: true, connectionTest: null });
+    migrated.saveModelServiceConnection('New Main', null, 'ready', 'opencode-go'); migrated.selectModelServiceRoute('opencode-go');
+    expect(migrated.getConfiguredModelRoleBinding('main-editorial')?.route).toBe('opencode-go');
+    expect(migrated.getConfiguredModelRoleBinding('fast-interaction')?.route).toBe('deepseek-open-platform');
+  });
+
 });

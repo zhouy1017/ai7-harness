@@ -1,3 +1,4 @@
+import type { FastRoleProvenance } from './fast-role/fast-role-execution.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { opendir } from 'node:fs/promises';
@@ -1437,7 +1438,7 @@ export class MaterialIndexLedger {
    */
   recordTranslations(
     target: { readonly indexId: string; readonly indexSha256: string },
-    made: { readonly model: string; readonly route: string; readonly policyRuleId: string | null; readonly promptContractDigest: string },
+    made: { readonly model: string; readonly route: string; readonly policyRuleId: string | null; readonly promptContractDigest: string; readonly provenance?: FastRoleProvenance },
     rows: ReadonlyArray<{ readonly ordinal: number; readonly sha256: string; readonly text: string }>,
     recordedAt = new Date().toISOString(),
   ): void {
@@ -1456,6 +1457,7 @@ export class MaterialIndexLedger {
         schema: TRANSLATION_SCHEMA, indexId: target.indexId, indexSha256: target.indexSha256, ordinal: row.ordinal, segmentSha256: row.sha256,
         label: MATERIAL_TRANSLATION_LABEL, text: row.text, model: made.model, route: made.route, policyRuleId: made.policyRuleId,
         promptContractDigest: made.promptContractDigest, recordedAt,
+        ...(made.provenance === undefined ? {} : { provenance: made.provenance }),
       });
       insert.run(target.indexId, row.ordinal, row.sha256, made.model, recordedAt, record.json, record.digest);
     }

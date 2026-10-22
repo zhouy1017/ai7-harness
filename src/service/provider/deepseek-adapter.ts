@@ -18,7 +18,7 @@ import {
 import { assistantToolCalls, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
 import { GENERATED_ROUTE_PROFILES } from './provider-profiles.generated.js';
 import { LOCAL_TOOL_NAMES, LOCAL_TOOL_SCHEMAS, toolSetEqualsPlatformSchemas } from './platform-tools.js';
-import { normalizeModelResponse, type CanonicalModelResult, type NormalizeOptions } from './response-normalization.js';
+import { normalizeModelResponse, type CanonicalModelResult, type ModelUsage, type NormalizeOptions } from './response-normalization.js';
 
 /**
  * The AI7-owned Provider adapter, revision 1. One adapter serves every remote route and all four
@@ -296,6 +296,7 @@ function openaiResponsesBody(
   const instructions = systemPromptOf(payload);
   return canonicalJson({
     model: model.model,
+    ...(profile.route === 'openai-platform' ? { store: false } : {}),
     ...(instructions === null ? {} : { instructions }),
     input: toolCalling ? openaiResponsesConversation(payload) : conversationMessages(payload),
     ...(profile.maxOutputTokens === null ? {} : { max_output_tokens: profile.maxOutputTokens }),
@@ -531,7 +532,8 @@ export function credentialHeaders(profile: ProviderRouteProfile, secret: string)
  */
 export type ProviderResponseOutcome =
   | CanonicalModelResult
-  | { readonly kind: 'failure'; readonly code: string; readonly message: string; readonly status: number };
+  | (Extract<CanonicalModelResult, { kind: 'malformed' }> & { readonly usage: ModelUsage | null })
+  | { readonly kind: 'failure'; readonly code: string; readonly message: string; readonly status: number; readonly usage?: ModelUsage | null };
 
 /** The error text of one response, lowercased, for the limit and context-window shapes to be read from. */
 function errorTextOf(body: unknown): string {
@@ -578,7 +580,17 @@ export function parseProviderResponse(
   }
   if (status >= 500) return { kind: 'failure', code: AI7_FAILURE_CODES.PROVIDER_ERROR, message: '模型服务返回服务端错误。', status };
   if (status !== 200) return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务返回了无法分类的状态。', status };
-  return normalizeModelResponse(model, body, options);
+  const normalized = normalizeModelResponse(model, body, options);
+  if (model.route === 'openai-platform' && model.capabilities.requestShape === 'openai-responses' && isRecord(body)) {
+    // A malformed output may still report billed usage. Reuse the existing usage reader without retaining its body.
+    const usageOnly = normalized.kind === 'malformed' ? normalizeModelResponse(model, { ...body, output: [] }, options) : normalized;
+    const usage = 'usage' in usageOnly ? usageOnly.usage : null;
+    const refusal = Array.isArray(body.output) && body.output.some((item) => isRecord(item) && Array.isArray(item.content) && item.content.some((part) => isRecord(part) && part.type === 'refusal'));
+    if (refusal) return { kind: 'failure', code: 'PROVIDER_REFUSAL', message: '模型拒绝了本次文本请求。', status, usage };
+    if (body.status !== undefined && body.status !== 'completed') return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务没有返回完整的文本结果。', status, usage };
+    if (normalized.kind === 'malformed') return { ...normalized, usage };
+  }
+  return normalized;
 }
 
 /** Classify a transport-level rejection (network denial, abort, other) into failure facts. */
@@ -754,6 +766,9 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
   readonly #requestDigests: string[] = [];
   #transmissions = 0;
   #lastResult: CanonicalModelResult | null = null;
+  #lastUsage: ModelUsage | null = null;
+
+  get lastUsage(): ModelUsage | null { return this.#lastUsage; }
 
   constructor(deps: DeepSeekAdapterDependencies) {
     this.#deps = deps;
@@ -822,6 +837,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     // Cleared here so a reader after this turn never sees the previous turn's result: a turn that
     // fails before any response arrives has no canonical result, and must not appear to have one.
     this.#lastResult = null;
+    this.#lastUsage = null;
     if (options.provider !== this.#profile.route || options.model !== this.#modelProfile.model) {
       yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, '适配器只服务其绑定路由与模型。');
       return;
@@ -897,6 +913,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       yield fail(classified.code, classified.message, classified.code === AI7_FAILURE_CODES.OUTCOME_UNKNOWN ? 200 : undefined);
       return;
     }
+    this.#lastUsage = 'usage' in outcome ? outcome.usage ?? null : null;
     if (outcome.kind === 'failure') {
       yield fail(outcome.code, outcome.message, outcome.status);
       return;

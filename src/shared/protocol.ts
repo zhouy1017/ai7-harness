@@ -428,6 +428,8 @@ export const IPC_CHANNELS = {
   getProductDataLocation: 'ai7:j12:get-product-data-location',
   revealProductDataLocation: 'ai7:j12:reveal-product-data-location',
   getModelServiceSettings: 'ai7:j12:get-model-service-settings',
+  selectFastRoleModel: 'ai7:model-service:select-fast-model',
+  testModelServiceConnection: 'ai7:model-service:test-connection',
   selectSearchBackend: 'ai7:j12:select-search-backend',
   probeSearchBackend: 'ai7:j12:probe-search-backend',
   saveSearchBackendCredential: 'ai7:j12:save-search-backend-credential',
@@ -2184,22 +2186,22 @@ export type ModelRoleStatusLabel = '可用' | '需设置' | '需处理' | '不�
 export type ModelCredentialOperationState = 'ready' | 'missing' | 'needs-attention';
 
 /**
- * The two routes an ordinary-production Model Role may be configured to (Issue #811): OpenCode Go DeepSeek V4.1 Flash, the
- * default, and DeepSeek 开放平台（官方） V4.1 Flash, an independent choice. Every other configured provider is 尚未支持.
+ * Production channels: existing Go/DeepSeek choices and the reviewed OpenAI buffered-text choices (Issue #1044).
+ * Each role still requires its own capability-matched policy admission.
  */
-export type ModelServiceRouteId = 'opencode-go' | 'deepseek-open-platform';
+export type ModelServiceRouteId = 'opencode-go' | 'deepseek-open-platform' | 'openai-platform';
 /** One connection row per route; the official row keeps the identity Issue #712 gave it. */
-export type ModelServiceConnectionId = 'main-editorial-deepseek-v4-pro' | 'main-editorial-opencode-go';
+export type ModelServiceConnectionId = 'main-editorial-deepseek-v4-pro' | 'main-editorial-opencode-go' | 'openai-platform';
 
 export interface ModelServiceBindingProjection {
   providerId: ModelServiceRouteId;
-  providerLabel: 'OpenCode Go' | 'DeepSeek 开放平台（官方）';
-  modelId: 'deepseek-v4.1-flash' | 'deepseek-flash';
-  modelLabel: 'DeepSeek V4.1 Flash';
+  providerLabel: 'OpenCode Go' | 'DeepSeek 开放平台（官方）' | 'OpenAI 官方';
+  modelId: 'deepseek-v4.1-flash' | 'deepseek-flash' | 'gpt-5.6-sol' | 'gpt-5.6-luna';
+  modelLabel: string;
   adapterRevision: 1;
   configurationRevision: 1;
   approvedFallbackChain: readonly [];
-  credentialSlot: 'opencode-go' | 'deepseek-api-key';
+  credentialSlot: 'opencode-go' | 'deepseek-api-key' | 'openai-platform';
 }
 
 export interface ModelServiceConnectionProjection {
@@ -2214,6 +2216,38 @@ export interface ModelServiceConnectionProjection {
   credentialUpdatedAt: string;
   /** Whether the editor chose this route for the Tasks they start from now on (Issue #811). */
   selected: boolean;
+  /** Independent Fast choice; Main's legacy selected column keeps its meaning. */
+  fastSelected?: boolean;
+  connectionTest?: ModelConnectionTestStatus | null;
+}
+
+/** Sanitized exact-binding text-probe result. No response, error body or credential value. */
+export interface ModelConnectionTestStatus {
+  modelId: string;
+  credentialUpdatedAt: string;
+  testedAt: string;
+  outcome: 'passed' | 'failed' | 'outcome-unknown' | 'cancelled';
+  code: string | null;
+  verified: 'buffered-text-only';
+  provenance?: ModelTextAttemptProvenance;
+}
+
+export interface ModelTextAttemptProvenance {
+  readonly role: 'Fast Interaction Role';
+  readonly route: string;
+  readonly model: string;
+  readonly endpoint: string;
+  readonly credentialSlot: string;
+  readonly credentialReference: string;
+  readonly policyVersion: string;
+  readonly bindingDigest: string;
+  readonly usage: { readonly inputTokens: number; readonly outputTokens: number; readonly cacheReadTokens?: number; readonly reasoningTokens?: number } | null;
+  readonly failureCode: string | null;
+}
+
+export interface FastModelSelectionInput {
+  route: ModelServiceRouteId;
+  modelId: string;
 }
 
 /**
@@ -2234,9 +2268,9 @@ export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ord
  */
 export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22' | 'v24';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25';
 /** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16';
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
@@ -2672,6 +2706,7 @@ export interface ModelServiceRouteOptionProjection {
   status: ModelRoleStatus;
   statusLabel: ModelRoleStatusLabel;
   connection: ModelServiceConnectionProjection | null;
+  models?: readonly ModelServiceBindingProjection[];
 }
 
 /** A configured provider no Model Role can bind yet: named, never selectable. */
@@ -2682,9 +2717,9 @@ export interface ModelServiceUnsupportedProviderProjection {
 }
 
 /** The routes in the order 设置 › 模型服务 lists them: the default first (Issue #811). */
-export const MODEL_SERVICE_ROUTES: ReadonlyArray<ModelServiceRouteId> = ['opencode-go', 'deepseek-open-platform'];
+export const MODEL_SERVICE_ROUTES: ReadonlyArray<ModelServiceRouteId> = ['opencode-go', 'deepseek-open-platform', 'openai-platform'];
 
-/** Each route's exact binding (Issue #811): one model each, no fallback chain. */
+/** Each channel's default model. `modelServiceModels` lists its reviewed choices; no fallback chain. */
 export const MODEL_SERVICE_ROUTE_BINDINGS: Readonly<Record<ModelServiceRouteId, ModelServiceBindingProjection>> = {
   'opencode-go': {
     providerId: 'opencode-go', providerLabel: 'OpenCode Go', modelId: 'deepseek-v4.1-flash', modelLabel: 'DeepSeek V4.1 Flash',
@@ -2694,7 +2729,19 @@ export const MODEL_SERVICE_ROUTE_BINDINGS: Readonly<Record<ModelServiceRouteId, 
     providerId: 'deepseek-open-platform', providerLabel: 'DeepSeek 开放平台（官方）', modelId: 'deepseek-flash', modelLabel: 'DeepSeek V4.1 Flash',
     adapterRevision: 1, configurationRevision: 1, approvedFallbackChain: [], credentialSlot: 'deepseek-api-key',
   },
+  'openai-platform': {
+    providerId: 'openai-platform', providerLabel: 'OpenAI 官方', modelId: 'gpt-5.6-luna', modelLabel: 'GPT-5.6 Luna',
+    adapterRevision: 1, configurationRevision: 1, approvedFallbackChain: [], credentialSlot: 'openai-platform',
+  },
 };
+
+/** Reviewed text choices only. Native tools/streams are not admitted by this catalogue. */
+export function modelServiceModels(route: ModelServiceRouteId): readonly ModelServiceBindingProjection[] {
+  const binding = MODEL_SERVICE_ROUTE_BINDINGS[route];
+  return route === 'openai-platform'
+    ? [binding, { ...binding, modelId: 'gpt-5.6-sol', modelLabel: 'GPT-5.6 Sol' }]
+    : [binding];
+}
 
 /**
  * Why a model-calling action refuses under ordinary-production while no route is configured (Issue #811): it names both routes
@@ -14414,6 +14461,8 @@ export interface ServiceOperationMap {
     input: { revisionId: string; cursor: string | null };
     output: HistoricalRevisionProjection;
   };
+  selectFastRoleModel: { input: FastModelSelectionInput; output: void };
+  testModelServiceConnection: { input: FastModelSelectionInput; output: ModelConnectionTestStatus };
   getModelServiceStoredState: {
     input: Record<string, never>;
     output: ModelServiceStoredStateProjection;
@@ -14937,6 +14986,8 @@ export interface RendererApi {
   ): Promise<HistoricalRevisionProjection>;
   getProductDataLocation(): Promise<ProductDataLocationProjection>;
   revealProductDataLocation(): Promise<ProductDataLocationRevealProjection>;
+  selectFastRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
+  testModelServiceConnection(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;
   saveModelServiceProxy(input: ModelServiceProxySetting): Promise<ModelServiceSettingsProjection>;
   /**

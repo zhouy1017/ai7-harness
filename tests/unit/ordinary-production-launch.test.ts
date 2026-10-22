@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
+  ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS,
   allowedProductionBindingOf,
   resolveSourceCheckoutLaunchPolicy,
   type ConfiguredProviderBinding,
@@ -131,11 +131,11 @@ const OFFICIAL = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[1];
 describe('the configured binding the resolver reads (#853 v13, carried by #863 v15, #473 v17, #891 v19, #910 v21 and #920 v23)', () => {
   const CARRIED = [
     'config/source-checkout-launch-authority.json',
-    'docs/policies/active-policy-set.v16.json',
+    'docs/policies/active-policy-set.v17.json',
     'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v2.json',
     'docs/policies/provider-processing-policy.v24.json',
-    'docs/policies/provider-processing-policy.v23.json',
+    'docs/policies/provider-processing-policy.v25.json',
     'docs/policies/external-export-policy.v2.json',
   ];
 
@@ -150,14 +150,14 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
   }
 
   it('mirrors exactly the bindings v23 allows both bound roles, Go first, as 设置 › 模型服务 offers them', async () => {
-    const policy = JSON.parse(await readFile(join(REPO_ROOT, 'docs', 'policies', 'provider-processing-policy.v23.json'), 'utf8')) as {
+    const policy = JSON.parse(await readFile(join(REPO_ROOT, 'docs', 'policies', 'provider-processing-policy.v25.json'), 'utf8')) as {
       roleBindings: Record<string, { defaultBinding?: string; allowedBindings: unknown[] }>;
     };
     for (const role of ['Main Editorial Role', 'Fast Interaction Role']) {
-      expect(policy.roleBindings[role]!.allowedBindings).toEqual(ORDINARY_PRODUCTION_ALLOWED_BINDINGS);
+      expect(policy.roleBindings[role]!.allowedBindings).toEqual(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS);
       expect(policy.roleBindings[role]!.defaultBinding).toBe('opencode-go');
     }
-    expect(MODEL_SERVICE_ROUTES).toEqual(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.map((binding) => binding.route));
+    expect(MODEL_SERVICE_ROUTES).toEqual([...new Set(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.map((binding) => binding.route))]);
     for (const binding of ORDINARY_PRODUCTION_ALLOWED_BINDINGS) {
       expect(MODEL_SERVICE_ROUTE_BINDINGS[binding.route]).toMatchObject({ providerId: binding.route, modelId: binding.model, credentialSlot: binding.credentialSlot, approvedFallbackChain: [] });
     }
@@ -165,9 +165,9 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
 
   it('reports 需设置 with no admitted rule until a route is configured, and transmits nothing', async () => {
     const projection = await resolveSourceCheckoutLaunchPolicy(await checkout(), 'ordinary-production', null);
-    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v16' });
+    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v17' });
     expect(projection.providerProcessing).toMatchObject({
-      version: 'v23', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
+      version: 'v25', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
     });
   });
 

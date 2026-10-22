@@ -10,24 +10,26 @@ import {
 import {
   LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_CALLS_PER_UNIT, LOCAL_TOOL_CANDIDATES_PER_CALL, LOCAL_TOOL_ROUND_TRIP_BREAKER, readLocalToolsRule,
 } from './provider/local-tools.js';
+import { modelProfileFor } from './provider/model-profile.js';
+import type { RemoteExecutionRoute } from './provider/egress-gate.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v16, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v17, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
  * Provider Processing v24; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v23, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * and binds v25, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v16' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v16.json';
-const ACTIVE_SET_SHA256 = '7fd78fa81eb2f4bb1b6c723558b178c02b0a904872e28d1a58a360dd6708d5e3';
+export const ACTIVE_SET_VERSION = 'v17' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v17.json';
+const ACTIVE_SET_SHA256 = '226a2ed353ca829e462a18315c0193fba881885fc3c06847fc9880b6a68bebd2';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -40,9 +42,9 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v23',
-    canonicalPath: 'docs/policies/provider-processing-policy.v23.json',
-    sha256: '311f60232c6e3424e64e0a0f760402c2fe07f4bca71a0299b37d295a7baa6dcb',
+    version: 'v25',
+    canonicalPath: 'docs/policies/provider-processing-policy.v25.json',
+    sha256: 'b3fdb7550da57d4127c1c507fea9deec04d829185dd854b3e8e5dc58e92da282',
   },
   'developer-live': {
     version: 'v24',
@@ -83,7 +85,7 @@ export const DEVELOPER_LIVE_POLICY_BINDING = {
 export const DEFAULT_PROVIDER_CACHE_DIRECTORY = 'ai7-harness-provider-cache';
 
 /**
- * The two bindings an ordinary-production Model Role may be configured to (Issue #811, Owner decision 23 of 2026-10-13): OpenCode
+ * Main Editorial retains the two existing production bindings (Issue #811): OpenCode
  * Go DeepSeek V4.1 Flash, the default, and DeepSeek 开放平台（官方） V4.1 Flash, an independent choice — exactly v13's
  * `allowedBindings`, which `tests/unit/ordinary-production-launch.test.ts` pins against the bytes. The store lists these routes,
  * the service arms their hosts, and the resolver checks a configured binding against the policy itself. Never a fallback chain.
@@ -93,15 +95,36 @@ export const ORDINARY_PRODUCTION_ALLOWED_BINDINGS = [
   { route: 'deepseek-open-platform', endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash', credentialSlot: 'deepseek-api-key' },
 ] as const;
 export type OrdinaryProductionAllowedBinding = (typeof ORDINARY_PRODUCTION_ALLOWED_BINDINGS)[number];
+export const ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS = [
+  ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
+  { route: 'openai-platform', endpoint: 'https://api.openai.com/v1/responses', model: 'gpt-5.6-luna', credentialSlot: 'openai-platform' },
+  { route: 'openai-platform', endpoint: 'https://api.openai.com/v1/responses', model: 'gpt-5.6-sol', credentialSlot: 'openai-platform' },
+] as const;
+export type OrdinaryProductionFastAllowedBinding = (typeof ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS)[number];
+
+export const CONNECTION_TEST_KIND = 'model-connection-test' as const;
+export const CONNECTION_TEST_POLICY = {
+  purpose: 'explicit-synthetic-model-connection-test', taskKind: CONNECTION_TEST_KIND,
+  ruleId: 'ordinary-production-model-connection-test', modelRole: 'Fast Interaction Role',
+  explicitEditorActionRequired: true, source: 'fixed-public-synthetic-only', bookMaterialAllowed: false,
+  message: 'AI7 public connection test. Reply with AI7_OK only.',
+  systemPrompt: 'This is a public synthetic AI7 text connection test. Do not call tools.',
+  maxInputCharacters: 256, maxOutputTokens: 512, requestsPerAction: 1,
+  responseBodiesRetained: false, automaticRetryAllowed: false, toolsVerified: false, streamingVerified: false,
+  allowedBindings: ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS,
+} as const;
 
 /**
  * The allowed binding a configured one names exactly, on a well-formed production Credential Reference (Issue #811); `null` for any
  * other binding and for a reference a provider document fixes for development, which a production connection never holds.
  */
-export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | null): OrdinaryProductionAllowedBinding | null {
+export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | null): OrdinaryProductionAllowedBinding | null;
+export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | null, role: 'fast-interaction'): OrdinaryProductionFastAllowedBinding | null;
+export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | null, role?: 'fast-interaction'): OrdinaryProductionFastAllowedBinding | null {
   if (binding === null || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference) ||
       DEVELOPMENT_CREDENTIAL_REFERENCES.has(binding.credentialReference.toLowerCase())) return null;
-  return ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((allowed) => allowed.route === binding.route && allowed.endpoint === binding.endpoint &&
+  const allowedBindings = role === 'fast-interaction' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS;
+  return allowedBindings.find((allowed) => allowed.route === binding.route && allowed.endpoint === binding.endpoint &&
     allowed.model === binding.model && allowed.credentialSlot === binding.credentialSlot) ?? null;
 }
 
@@ -1488,6 +1511,7 @@ export interface OrdinaryProductionPolicyReading {
   readonly runReportReflectionAllowed: boolean;
   /** The bindings the user-configurable Main Editorial and Fast Interaction Roles may be configured with, as the bytes state them. */
   readonly allowedBindings: readonly AllowedRoleBinding[];
+  readonly connectionTestAllowed?: boolean;
   /** The rules in policy order, each with the routes the policy lets its role bind and its verified platform tools (`null` without web). */
   readonly rules: ReadonlyArray<{
     readonly ruleId: string;
@@ -1505,7 +1529,7 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
   for (const entry of role['allowedBindings'] as unknown[]) {
     requirePolicy(isRecord(entry) && exactKeys(entry, ['route', 'endpoint', 'model', 'credentialSlot']));
     for (const key of ['route', 'endpoint', 'model', 'credentialSlot']) requirePolicy(typeof entry[key] === 'string' && (entry[key] as string).length > 0);
-    requirePolicy(!bindings.some((known) => known.route === entry['route']));
+    requirePolicy(!bindings.some((known) => known.route === entry['route'] && known.model === entry['model']));
     bindings.push({ route: entry['route'] as string, endpoint: entry['endpoint'] as string, model: entry['model'] as string, credentialSlot: entry['credentialSlot'] as string });
   }
   return bindings;
@@ -1519,7 +1543,8 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
  */
 export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
-  requirePolicy(exactKeys(policy, PRODUCTION_POLICY_TERMS) && policy['operationalScope'] === 'ordinary-production' && policy['lifecycleStatus'] === 'active');
+  const selectedBindingPolicy = policy['version'] === 'v25';
+  requirePolicy(exactKeys(policy, [...PRODUCTION_POLICY_TERMS, ...(selectedBindingPolicy ? ['connectionTest'] : [])]) && policy['operationalScope'] === 'ordinary-production' && policy['lifecycleStatus'] === 'active');
   requirePolicy(sameBlock(policy['trustedSelection'], {
     selectionAuthorityClass: 'trusted-build-or-launch-authority',
     launchArgument: '--trusted-operational-scope ordinary-production',
@@ -1556,8 +1581,9 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
   // are unbound by default and named by no rule; all four choose among the same bindings, none of which authorizes transmission.
   const roles = policy['roleBindings'];
   requirePolicy(isRecord(roles) && exactKeys(roles, ['Main Editorial Role', 'Fast Interaction Role', 'Difficult Escalation Role', 'Frontier Model Role']));
+  if (selectedBindingPolicy) requirePolicy(sameValue(policy['connectionTest'], CONNECTION_TEST_POLICY));
   const mainBindings = allowedBindingsOf(roles['Main Editorial Role']);
-  const routes = mainBindings.map((binding) => binding.route);
+  const routes = [...new Set(mainBindings.map((binding) => binding.route))];
   for (const roleName of ['Main Editorial Role', 'Fast Interaction Role']) {
     const role = roles[roleName];
     requirePolicy(isRecord(role) && exactKeys(role, ['bindingState', 'userConfigurable', 'defaultBinding', 'allowedBindings', 'userConfiguredBindingAuthorizesTransmission', 'fallbackAllowed']) &&
@@ -1626,7 +1652,7 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
     rules.push({ ruleId, reading, allowedRoutes: routes, platformTools, localTools });
   }
   requirePolicy(seen.has(ORDINARY_PRODUCTION_BASELINE_RULE_ID));
-  return { crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true, allowedBindings: mainBindings, rules };
+  return { crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true, allowedBindings: mainBindings, rules, ...(selectedBindingPolicy ? { connectionTestAllowed: true } : {}) };
 }
 
 /**
@@ -1634,17 +1660,24 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
  * credential slot are filled from the one binding, which must be exactly one of the bindings the policy allows (and a route the
  * rule names). `null` when it is not, or when the binding is malformed — the caller denies with `binding-not-allowed`.
  */
-export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyReading, binding: ConfiguredProviderBinding): AdmittedProviderRule[] | null {
-  if (!isRecord(binding) || !exactKeys(binding, ['route', 'endpoint', 'model', 'credentialSlot', 'credentialReference'])) return null;
-  for (const key of ['route', 'endpoint', 'model', 'credentialSlot', 'credentialReference'] as const) {
-    if (typeof binding[key] !== 'string' || binding[key].length === 0) return null;
+export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyReading, binding: ConfiguredProviderBinding | null, fastBinding: ConfiguredProviderBinding | null = binding): AdmittedProviderRule[] | null {
+  for (const selected of [binding, fastBinding]) {
+    if (selected === null) continue;
+    if (!isRecord(selected) || !exactKeys(selected, ['route', 'endpoint', 'model', 'credentialSlot', 'credentialReference']) ||
+        allowedProductionBindingOf(selected, 'fast-interaction') === null || !reading.allowedBindings.some((candidate) =>
+          candidate.route === selected.route && candidate.model === selected.model && candidate.endpoint === selected.endpoint && candidate.credentialSlot === selected.credentialSlot)) return null;
   }
-  const allowed = reading.allowedBindings.find((candidate) =>
-    candidate.route === binding.route && candidate.endpoint === binding.endpoint && candidate.model === binding.model && candidate.credentialSlot === binding.credentialSlot);
-  if (allowed === undefined) return null;
   const admitted: AdmittedProviderRule[] = [];
   for (const { ruleId, reading: kind, allowedRoutes, platformTools, localTools } of reading.rules) {
+    const selected = kind.modelRole === 'Fast Interaction Role' ? fastBinding : binding;
+    if (selected === null) continue;
+    const allowed = kind.modelRole === 'Fast Interaction Role' ? allowedProductionBindingOf(selected, 'fast-interaction') : allowedProductionBindingOf(selected);
+    if (allowed === null) return null;
     if (!allowedRoutes.includes(allowed.route)) return null;
+    const profile = modelProfileFor(allowed.route as RemoteExecutionRoute, allowed.model);
+    if (profile === null || profile.capabilities.answerChannel === 'none') continue;
+    // This admission proves buffered, tool-free 来源译文 only. Other contracts keep their existing capability requirements.
+    if (allowed.route === 'openai-platform' && (kind.modelRole !== 'Fast Interaction Role' || !kind.taskKinds.includes(MATERIAL_TRANSLATION_KIND))) continue;
     admitted.push({
       ruleId,
       taskKinds: [...kind.taskKinds],
@@ -1669,6 +1702,17 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
       sourceTranslationAllowed: kind.sourceTranslation,
     });
   }
+  if (fastBinding !== null && reading.connectionTestAllowed === true) {
+    const profile = modelProfileFor(fastBinding.route as RemoteExecutionRoute, fastBinding.model);
+    if (profile !== null && profile.capabilities.answerChannel !== 'none') admitted.push({
+      ruleId: CONNECTION_TEST_POLICY.ruleId, taskKinds: [CONNECTION_TEST_KIND], modelRole: 'Fast Interaction Role',
+      route: fastBinding.route, endpoint: fastBinding.endpoint, model: fastBinding.model, credentialSlot: fastBinding.credentialSlot,
+      outboundDataCategories: ['public-or-synthetic'], crossUnitSynthesisAllowed: false, materialReferencesAllowed: false,
+      editorialDeliverablesAllowed: false, clarificationQuestionAllowed: false, clarificationTimeoutHours: null,
+      backgroundOrigin: false, matchingActiveDefaultExecutionRuleAllowed: false, webSearchToolAllowed: false,
+      platformTools: null, localTools: { targetedRetrieval: { allowed: false, source: 'authorized-pinned-sources-only', callsPerUnit: LOCAL_TOOL_CALLS_PER_UNIT, candidatesPerCall: LOCAL_TOOL_CANDIDATES_PER_CALL, exactFetchRequiredBeforeCitation: true, scope: 'no-egress' }, breaker: { roundTrips: LOCAL_TOOL_ROUND_TRIP_BREAKER, end: LOCAL_TOOL_BREAKER_END } }, sourceTranslationAllowed: false,
+    });
+  }
   return admitted;
 }
 
@@ -1685,6 +1729,7 @@ export async function resolveSourceCheckoutLaunchPolicy(
   codeRoot: string,
   requestedScope: TrustedOperationalScope = 'development-ci',
   configuredBinding: ConfiguredProviderBinding | null = null,
+  configuredFastBinding: ConfiguredProviderBinding | null = configuredBinding,
 ): Promise<LaunchPolicyProjection> {
   try {
     const carrier = parseJson(await readBuiltFile(codeRoot, CARRIER_PATH));
@@ -1820,9 +1865,9 @@ export async function resolveSourceCheckoutLaunchPolicy(
     }
     if (requestedScope === 'ordinary-production') {
       const reading = verifyOrdinaryProductionPolicy(selectedPolicy);
-      const admittedRules = configuredBinding === null ? [] : bindOrdinaryProductionRules(reading, configuredBinding);
+      const admittedRules = bindOrdinaryProductionRules(reading, configuredBinding, configuredFastBinding);
       if (admittedRules === null) return deny('binding-not-allowed');
-      const configured = configuredBinding !== null;
+      const configured = admittedRules.length > 0;
       return {
         integrityState: 'verified',
         denialReason: null,
