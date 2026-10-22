@@ -3211,8 +3211,9 @@ async function main() {
     await assertRenderer(renderer, `(async () => {
       const workspace=await window.ai7.inspectReviewWorkspace();
       const {manuscriptId,branchId}=workspace.manuscript;
-      const blocks=[]; let cursor=null;
-      do { const page=await window.ai7.getManuscriptWindow({manuscriptId,branchId,cursor}); blocks.push(...page.blocks); cursor=page.nextCursor; } while(cursor!==null);
+      const byId=new Map(); let cursor=null;
+      do { const page=await window.ai7.getManuscriptWindow({manuscriptId,branchId,cursor}); for(const block of page.blocks)byId.set(block.blockId,block); cursor=page.nextCursor; } while(cursor!==null);
+      const blocks=[...byId.values()];
       if(blocks.length!==97)return false;
       const paragraphs=['甲'.repeat(1200),'清晨的合成码头出现错词，船员随后离开。'];
       const segmenter=new Intl.Segmenter('zh',{granularity:'grapheme'});
