@@ -3260,6 +3260,9 @@ async function main() {
     await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-form="reverse-apply"]')`, 'overlap-reversal-ready');
     await reviewAction(renderer, `${overlapCard} [data-mark-form="reverse-apply"] [data-mark-action="submit"]`, 'overlap-reversal-confirm');
     await waitFor(renderer, `(async()=>{const work=${JSON.stringify(overlapReviewed.manuscript)};const page=await window.ai7.getManuscriptWindowAt({manuscriptId:work.manuscriptId,branchId:work.branchId,target:{kind:'block',blockId:${JSON.stringify(overlapFinding.blockId)}}});return page.blocks[1].blockId===${JSON.stringify(overlapFinding.blockId)} && page.blocks[1].text==='开头👩‍💻Ａ　Ｂ结尾' && page.blocks[0].text==='甲'.repeat(1200);})()`, 'overlap-reversal-restored-exactly');
+    // The store commits before the renderer finishes its Apply refresh. As in J-05, wait for the
+    // reopened suggestion before closing this browser, so the transition cannot race an active write.
+    await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-state]')?.textContent==='待你处理' && document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${overlapFinding.markId}"]')?.dataset.markStatus==='open'`, 'overlap-reversal-renderer-settled');
 
     // ---- 事实核查 at its Evidence Assurance Levels (Issue #901; FACT, EVID, EASSURE, FREV, CORR) ----
     // Synchronized delta with Issue #901: a fresh, unedited sample1 Book on the provider-free `sample1-factual-verified` fixture,
