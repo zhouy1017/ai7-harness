@@ -362,8 +362,10 @@ describe('书系知识 over the real store', () => {
   }, 180_000);
 
   it('takes in candidates from the editor\'s words and a member\'s manuscript through review, conflicts disclosed and kept or resolved', async () => {
+    // Compare content digests so assertion failures cannot print manuscript text.
+    const contentDigest = (content: string) => createHash('sha256').update(content).digest('hex');
     const candidatesById = (store: EditorialStore, seriesId: string) => new Map(store.inspectSeries(seriesId).knowledge.candidates
-      .map((candidate) => [candidate.candidateId, [candidate.target.kind, candidate.target.subject, candidate.content, candidate.authoring, candidate.conflicts]]));
+      .map((candidate) => [candidate.candidateId, [candidate.target.kind, candidate.target.subject, contentDigest(candidate.content), candidate.authoring, candidate.conflicts]]));
     let remainingCandidates = new Map<string, unknown[]>();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -395,10 +397,10 @@ describe('书系知识 over the real store', () => {
       // The answer is the candidate alone (Issue #63 review).
       expect([fromEditor.candidate.candidateId, fromEditor.candidate.target.subject, fromEditor.candidate.conflicts]).toEqual([fromEditor.candidateId, '林 默', 1]);
       expect(knowledgeOf(store, seriesId).items).toEqual([]);
-      expect(store.inspectSeries(seriesId).knowledge.candidates).toHaveLength(2);
+      expect(store.inspectSeries(seriesId).knowledge.candidates.length).toBe(2);
       expect(candidatesById(store, seriesId)).toEqual(new Map([
-        [fromManuscript.candidateId, ['new', '林默', cited.selectedText, 'manuscript-revision', 1]],
-        [fromEditor.candidateId, ['new', '林 默', EDITOR_WORDS, 'editor', 1]],
+        [fromManuscript.candidateId, ['new', '林默', contentDigest(cited.selectedText), 'manuscript-revision', 1]],
+        [fromEditor.candidateId, ['new', '林 默', contentDigest(EDITOR_WORDS), 'editor', 1]],
       ]));
       const provenance = store.inspectSeries(seriesId).knowledge.candidates.find((candidate) => candidate.candidateId === fromManuscript.candidateId)!.provenance!;
       expect([provenance.bookTitle, provenance.revisionLabel, provenance.blockId, provenance.fromGrapheme, provenance.toGrapheme, provenance.quote === cited.selectedText, provenance.uncheckpointed])
@@ -467,8 +469,8 @@ describe('书系知识 over the real store', () => {
       // is held back.
       const pending = store.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '海边小城', knowledgeClass: 'places' }, content: cited.selectedText, span: span(store, member) });
       remainingCandidates = new Map([
-        [late.candidateId, ['existing', '林默', CHANGED_WORDS, 'editor', 1]],
-        [pending.candidateId, ['new', '海边小城', cited.selectedText, 'manuscript-revision', 0]],
+        [late.candidateId, ['existing', '林默', contentDigest(CHANGED_WORDS), 'editor', 1]],
+        [pending.candidateId, ['new', '海边小城', contentDigest(cited.selectedText), 'manuscript-revision', 0]],
       ]);
       const leave = store.previewSeriesMembershipChange({ seriesId, bookId: member.bookId, kind: 'remove' });
       expect(leave.groups[2]!.unchanged[0]).toBe('书系「星河三部曲」的书系知识里有 1 个条目取自《书系成员》的稿件；它们留在书系知识中不变。');
@@ -499,7 +501,7 @@ describe('书系知识 over the real store', () => {
         ['林默', '人物', [[3, 'updated', 1, 'series-tasks'], [2, 'updated', 0, 'series-tasks'], [1, 'created', 1, 'consistency-review']]],
       ]);
       expect(candidatesById(reopened, seriesId)).toEqual(remainingCandidates);
-      expect(reopened.inspectSeries(seriesId).knowledge.candidates).toHaveLength(2);
+      expect(reopened.inspectSeries(seriesId).knowledge.candidates.length).toBe(2);
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
