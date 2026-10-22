@@ -10,6 +10,8 @@ import {
   type FactualUnitAssertion,
 } from '../../src/service/analysis/factual-review-contract.js';
 import { reduceFactualReview, type FactualUnitOutcome } from '../../src/service/analysis/factual-review-reducers.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { FACTUAL_REVIEW_REDUCER_DESCRIPTOR, FACTUAL_REVIEW_REDUCER_DIGEST, factualReviewKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import { researchCapabilityFor } from '../../src/service/capabilities/research.js';
 import {
   FACTUAL_RESEARCH_NOT_AUTHORIZED,
@@ -82,6 +84,16 @@ function reduce(outcomes: ReadonlyArray<FactualUnitOutcome>) {
 }
 
 describe('the factual review reduction', () => {
+  it('pins UTF-16 anchoring and exact grapheme slices separately from historical reductions (#1022)', () => {
+    const { sourceRangeMapping, ...historical } = FACTUAL_REVIEW_REDUCER_DESCRIPTOR;
+    expect(sourceRangeMapping).toBe('folded-utf16-code-units-to-source-graphemes');
+    const { sourceRangeIntegrity, ...beforeSliceCheck } = FACTUAL_REVIEW_REDUCER_DESCRIPTOR;
+    expect(sourceRangeIntegrity).toBe('sole-candidate-normalized-grapheme-slice-equals-quotation');
+    expect(FACTUAL_REVIEW_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(beforeSliceCheck)));
+    expect(FACTUAL_REVIEW_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(historical)));
+    expect(factualReviewKindDefinition().reducerDigest).toBe(FACTUAL_REVIEW_REDUCER_DIGEST);
+  });
+
   it('excludes an anchored assertion without Exact Fetch with its explicit reason (#893)', () => {
     const outcome = closed([assertion()]);
     if (outcome.state !== 'closed') throw new Error('synthetic outcome');

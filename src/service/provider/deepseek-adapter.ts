@@ -264,10 +264,11 @@ function anthropicMessagesBody(
 }
 
 /**
- * The OpenAI Responses body, from the vendor's published SDK contract read on 2026-09-08: the
- * platform reference page refuses an unauthenticated fetch, so the source of record is the OpenAI
- * Node SDK's `src/resources/responses/responses.ts` at commit
- * `eecbebe294be7e657c99a34eb104a6a4b507335c` (2026-09-05). The body is `{ model, instructions?, input }`.
+ * The OpenAI Responses text/function body, rechecked against the official function-calling guide and
+ * Create Response reference on 2026-10-22 (Issue #1038):
+ * https://developers.openai.com/api/docs/guides/function-calling
+ * https://developers.openai.com/api/reference/resources/responses/methods/create
+ * Flat functions explicitly retain non-strict schemas; call_id correlates calls and outputs.
  *
  * Two facts of this shape are worth stating where they are implemented. The system prompt is the
  * top-level `instructions` and never an input item — the third spelling of the one thing the
@@ -289,13 +290,44 @@ function openaiResponsesBody(
 ): string {
   if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
   if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
+  const tools = payload.tools ?? [];
+  const toolCalling = model.capabilities.toolCalling === 'function';
+  if (tools.length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
   const instructions = systemPromptOf(payload);
   return canonicalJson({
     model: model.model,
     ...(instructions === null ? {} : { instructions }),
-    input: conversationMessages(payload),
+    input: toolCalling ? openaiResponsesConversation(payload) : conversationMessages(payload),
     ...(profile.maxOutputTokens === null ? {} : { max_output_tokens: profile.maxOutputTokens }),
+    // Responses defaults can tighten the existing schemas; retain their non-strict semantics explicitly.
+    ...(tools.length > 0 ? { tools: tools.map((tool) => ({ type: 'function', ...chatCompletionsTool(tool).function, strict: false })) } : {}),
   });
+}
+
+/** Text and function items only; opaque Responses reasoning cannot round-trip through this payload. */
+function openaiResponsesConversation(payload: AssembledModelPayload): Array<Record<string, unknown>> {
+  const items: Array<Record<string, unknown>> = [];
+  for (const message of payload.messages) {
+    const calls = assistantToolCalls(message);
+    if (calls !== null) {
+      if (message.content.some((block) => block.type === 'reasoning')) throw new Error('PROVIDER_REASONING_CONTINUATION_UNSUPPORTED');
+      if (calls.text.length > 0) items.push({ role: 'assistant', content: calls.text });
+      for (const call of calls.calls) {
+        items.push({ type: 'function_call', call_id: call.id, name: call.name, arguments: call.arguments });
+      }
+      continue;
+    }
+    const result = toolResultOf(message);
+    if (result !== null) {
+      items.push({ type: 'function_call_output', call_id: result.callId, output: result.text });
+      continue;
+    }
+    const text = messageText(message);
+    if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
+    if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
+    items.push({ role: message.role, content: text });
+  }
+  return items;
 }
 
 /**
@@ -358,9 +390,10 @@ function providerRequestBody(
   model: ProviderModelProfile,
   payload: AssembledModelPayload,
 ): string {
-  // Function tools are spelled only for chat completions (Issue #473); every other shape refuses a payload carrying them
+  // Function tools are spelled only for chat completions and the text/function Responses subset; other shapes refuse them
   // rather than dropping them silently.
-  if ((payload.tools ?? []).length > 0 && model.capabilities.requestShape !== 'openai-chat-completions') {
+  if ((payload.tools ?? []).length > 0 && model.capabilities.requestShape !== 'openai-chat-completions' &&
+      model.capabilities.requestShape !== 'openai-responses') {
     throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
   }
   switch (model.capabilities.requestShape) {

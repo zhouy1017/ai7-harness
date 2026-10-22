@@ -150,18 +150,20 @@ describe('the harness', () => {
         expect(entry.source, entry.id).toBe('fixture');
         if (entry.effort !== null) expect(entry.effort.restoredExactly, entry.id).toBe(true);
       }
-      // OPEN DEFECT #879 measurement, deliberately separate from the baseline. These are losses, not success criteria for
-      // localization. A future #879 fix must replace this measurement with its positive regression in that Issue's scope.
+      // #1022 recovers the retained #879 quotations within their existing unit envelopes. This is
+      // grounding regression evidence; unmatched sampling/reflection and editorial-quality limits remain in the baseline.
       const reviews = report.cases.filter((entry) => ['review-typos-sample1', 'review-style-sample1', 'review-literary-sample1'].includes(entry.id));
-      expect(reviews.reduce((sum, entry) => sum + entry.findings.listed, 0), 'open #879: listed findings').toBe(116);
-      expect(reviews.map((entry) => [entry.id, entry.result.quoteNotFound]), 'open #879: excluded verbatim quotations').toEqual([
-        ['review-literary-sample1', 39], ['review-style-sample1', 2], ['review-typos-sample1', 10],
+      expect(reviews.reduce((sum, entry) => sum + entry.findings.listed, 0), '#1022: listed findings').toBe(116);
+      expect(reviews.reduce((sum, entry) => sum + entry.findings.located, 0), '#1022: located findings').toBe(116);
+      expect(reviews.reduce((sum, entry) => sum + entry.findings.excluded, 0), '#1022: excluded findings').toBe(0);
+      expect(reviews.map((entry) => [entry.id, entry.result.quoteNotFound]), '#1022: no lost verbatim quotations').toEqual([
+        ['review-literary-sample1', 0], ['review-style-sample1', 0], ['review-typos-sample1', 0],
       ]);
-      expect(reviews.reduce((sum, entry) => sum + entry.result.verbatimInBook, 0), 'open #879: all quotations occur verbatim').toBe(51);
-      expect(reviews.reduce((sum, entry) => sum + entry.result.ownBlockOrdinalMatches, 0), 'open #879: ordinal excluding overlap').toBe(50);
+      expect(reviews.find((entry) => entry.id === 'review-typos-sample1')!.concerns.met).toEqual(expect.arrayContaining(['s1-missing-object', 's1-missing-lai']));
+      expect(reviews.find((entry) => entry.id === 'review-literary-sample1')!.concerns.met).toContain('s1-stacked-adverbials');
       expect(report.cases.find((entry) => entry.id === 'review-typos-sample1')!.concerns.unmeasured).toEqual(['s1-missing-ta']);
       expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'measured-pass')).toMatchObject({
-        cases: 3, concerns: 11, matched: 3, missed: 7, unmeasured: 1, raisedButExcluded: 3, falsePositiveChecks: 1,
+        cases: 3, concerns: 11, matched: 6, missed: 4, unmeasured: 1, raisedButExcluded: 0, falsePositiveChecks: 1,
       });
       expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'authored')).toMatchObject({
         cases: 2, concerns: 13, matched: 11, missed: 2, falsePositiveChecks: 2,

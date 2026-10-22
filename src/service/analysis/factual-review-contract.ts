@@ -299,14 +299,14 @@ const WHITESPACE = /^\s+$/u;
 interface FoldedText {
   /** The folded characters, whitespace runs collapsed to one space and the ends trimmed. */
   readonly text: string;
-  /** For each folded character, the first grapheme of the source that produced it. */
+  /** For each folded UTF-16 code unit, the first grapheme of the source that produced it. */
   readonly fromGrapheme: ReadonlyArray<number>;
-  /** For each folded character, the last grapheme of the source that produced it. */
+  /** For each folded UTF-16 code unit, the last grapheme of the source that produced it. */
   readonly toGrapheme: ReadonlyArray<number>;
 }
 
 /**
- * Fold one text into the form quotations are compared in, keeping for every folded character the
+ * Fold one text into the form quotations are compared in, keeping for every folded UTF-16 code unit the
  * exact graphemes of the source it came from. The map is what lets a match in the folded form be
  * reported as an exact grapheme range of the committed block, which is the only anchor a finding gets.
  */
@@ -337,8 +337,12 @@ function fold(text: string): FoldedText {
     }
     for (const character of foldWidth(segment)) {
       characters.push(character);
-      fromGrapheme.push(index);
-      toGrapheme.push(index);
+      // indexOf and needle.length address UTF-16 code units, including both halves of an astral
+      // character. Each of those units maps to the same original grapheme.
+      for (let codeUnit = 0; codeUnit < character.length; codeUnit += 1) {
+        fromGrapheme.push(index);
+        toGrapheme.push(index);
+      }
     }
   }
   return { text: characters.join(''), fromGrapheme, toGrapheme };
@@ -369,11 +373,12 @@ export function locateQuotation(blockText: string, quote: string): QuotationLoca
   if (starts.length === 0) return { state: 'not-found' };
   if (starts.length > 1) return { state: 'ambiguous', occurrences: starts.length };
   const start = starts[0]!;
-  return {
-    state: 'verified',
-    fromGrapheme: haystack.fromGrapheme[start]!,
-    toGrapheme: haystack.toGrapheme[start + needle.length - 1]! + 1,
-  };
+  const fromGrapheme = haystack.fromGrapheme[start]!;
+  const toGrapheme = haystack.toGrapheme[start + needle.length - 1]! + 1;
+  // A folded substring can start or end inside a grapheme. Never expand that quotation into an
+  // anchor over additional characters, even when the substring itself occurs exactly once.
+  if (normalizedQuotation(sliceGraphemes(blockText, fromGrapheme, toGrapheme)) !== needle) return { state: 'not-found' };
+  return { state: 'verified', fromGrapheme, toGrapheme };
 }
 
 /** The comparison key duplicates are merged by: the folded form of the quotation (decision 5). */

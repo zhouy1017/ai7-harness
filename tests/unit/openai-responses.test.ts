@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_CODE, attributionHeaders } from '@deepseek-ai/dsh-llm';
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
@@ -53,6 +53,7 @@ function responsesModel(capabilities: Partial<ProviderModelProfile['capabilities
       requestShape: 'openai-responses',
       reasoningControl: 'none',
       structuredOutput: 'none',
+      toolCalling: 'none',
       answerChannel: 'output-message-text',
       reasoningChannel: 'none',
       ...capabilities,
@@ -67,6 +68,11 @@ function message(...parts: ReadonlyArray<unknown>): Record<string, unknown> {
 
 const outputText = (text: string) => ({ type: 'output_text', text, annotations: [] });
 const REASONING_ITEM = { type: 'reasoning', summary: [{ type: 'summary_text', text: '合成推理' }] };
+const TOOL = { name: 'synthetic_lookup', description: 'Synthetic lookup', parameters: { type: 'object', properties: { query: { type: 'string' } } } };
+const functionCall = (callId = 'call_raw_1', args = '{ "query": "synthetic" }') =>
+  ({ type: 'function_call', id: `item_${callId}`, call_id: callId, name: TOOL.name, arguments: args });
+const functionModel = () => responsesModel({ toolCalling: 'function' });
+const toolPayload = (): GenerateOptions => ({ ...payload(), model: functionModel().model, tools: [TOOL] });
 
 function payload(messages?: GenerateOptions['messages']): GenerateOptions {
   return {
@@ -86,6 +92,34 @@ async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[
 }
 
 describe('assembleProviderRequest · openai-responses', () => {
+  it('sends flat non-strict functions and preserves tool-free bytes for absent and empty tools', () => {
+    const plain = assembleProviderRequest(CAPPED_ROUTE_PROFILE, responsesModel(), payload(), context);
+    for (const model of [responsesModel(), functionModel()]) {
+      for (const input of [payload(), { ...payload(), tools: [] }]) {
+        const assembled = assembleProviderRequest(CAPPED_ROUTE_PROFILE, model, input, context);
+        expect(assembled.body).toBe(plain.body);
+        expect(assembled.requestDigest).toBe(plain.requestDigest);
+      }
+    }
+    const assembled = assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), toolPayload(), context);
+    expect(JSON.parse(assembled.body)).toEqual({ ...JSON.parse(plain.body), tools: [{ type: 'function', ...TOOL, strict: false }] });
+    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, responsesModel({ toolCalling: 'none' }), toolPayload(), context))
+      .toThrowError('PROVIDER_TOOL_CALLING_UNSUPPORTED');
+    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), { ...toolPayload(), tools: [{ ...TOOL, parameters: null } as never] }, context))
+      .toThrowError('PROVIDER_TOOL_SCHEMA_INVALID');
+  });
+
+  it('refuses reasoning-bearing call history, even an empty reasoning block', () => {
+    for (const text of ['', 'synthetic reasoning']) {
+      const history: GenerateOptions['messages'] = [{
+        id: 'history' as never, role: 'assistant', source: { kind: 'model', provider: OPENCODE_GO_ROUTE, model: functionModel().model },
+        content: [{ type: 'reasoning', text }, { type: 'tool-call', id: 'call_raw_1' as never, name: TOOL.name, arguments: '{}' }],
+      }];
+      expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), { ...toolPayload(), messages: history }, context))
+        .toThrowError('PROVIDER_REASONING_CONTINUATION_UNSUPPORTED');
+    }
+  });
+
   it('assembles the three documented fields and nothing else', () => {
     const assembly = assembleProviderRequest(UNCAPPED_ROUTE_PROFILE, responsesModel(), payload(), context);
     const body = JSON.parse(assembly.body) as Record<string, unknown>;
@@ -206,6 +240,60 @@ describe('normalizeModelResponse · output-message-text', () => {
   const model = responsesModel();
   const reasoningModel = responsesModel({ reasoningChannel: 'output-reasoning-items' });
 
+  it('reads multiple calls in order using call_id, retaining text, usage and raw argument strings', () => {
+    const calls = [functionCall('raw_2', '{ invalid JSON'), functionCall('raw_1', '  {"query":"one"}  ')];
+    expect(normalizeModelResponse(functionModel(), {
+      status: 'completed', output: [message(outputText('before')), calls[0], message(outputText('after')), { ...calls[1], status: 'completed' }],
+      usage: { input_tokens: 9, output_tokens: 4 },
+    }, { toolCallsOffered: true })).toEqual({
+      kind: 'tool-calls', text: 'beforeafter', reasoningText: null,
+      calls: calls.map((call) => ({ id: call.call_id, name: call.name, arguments: call.arguments })), usage: { inputTokens: 9, outputTokens: 4 },
+    });
+  });
+
+  it.each([
+    { call_id: undefined }, { call_id: '' }, { call_id: 1 }, { name: undefined }, { name: '' }, { name: 1 },
+    { arguments: undefined }, { arguments: {} }, { arguments: null },
+    { status: 'in_progress' }, { status: 'incomplete' }, { status: 'failed' }, { status: null },
+  ])('rejects the whole batch for malformed call fields %j', (fields) => {
+    expect(normalizeModelResponse(functionModel(), { status: 'completed', output: [functionCall('valid'), { ...functionCall(), ...fields }] }, { toolCallsOffered: true }))
+      .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+  });
+
+  it('rejects duplicate call IDs regardless of distinct item IDs, and never falls back to item id', () => {
+    for (const output of [
+      [functionCall(), { ...functionCall(), id: 'different_item' }],
+      [{ ...functionCall(), call_id: undefined, id: 'usable_item_id' }],
+    ]) {
+      expect(normalizeModelResponse(functionModel(), { status: 'completed', output }, { toolCallsOffered: true }))
+        .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+    }
+  });
+
+  it.each([undefined, null, 'incomplete', 'failed', 'cancelled', 'queued', 'in_progress'])('refuses calls from response status %s', (status) => {
+    expect(normalizeModelResponse(functionModel(), { status, output: [functionCall(), message(outputText('partial'))] }, { toolCallsOffered: true }))
+      .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+  });
+
+  it('rejects reasoning beside calls whether or not the reasoning channel was declared', () => {
+    for (const model of [functionModel(), responsesModel({ toolCalling: 'function', reasoningChannel: 'output-reasoning-items' })]) {
+      expect(normalizeModelResponse(model, { status: 'completed', output: [functionCall(), REASONING_ITEM] }, { toolCallsOffered: true }))
+        .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+    }
+  });
+
+  it('ignores calls without both offered and admitted tools, preserving text and empty-answer semantics', () => {
+    for (const [profile, options] of [
+      [functionModel(), {}], [functionModel(), { toolCallsOffered: false }],
+      [responsesModel({ toolCalling: 'none' }), { toolCallsOffered: true }],
+    ] as const) {
+      expect(normalizeModelResponse(profile, { status: 'incomplete', output: [functionCall(), message(outputText('text'))] }, options))
+        .toEqual({ kind: 'answer', text: 'text', reasoningText: null, usage: null });
+      expect(normalizeModelResponse(profile, { output: [functionCall()] }, options))
+        .toEqual({ kind: 'empty-answer', reasoningPresent: false, usage: null });
+    }
+  });
+
   it('reads the answer across every message item of the output, in order, with usage', () => {
     expect(normalizeModelResponse(model, {
       output: [message(outputText('{"ok":')), message(outputText('true}'))],
@@ -284,21 +372,161 @@ describe('normalizeModelResponse · output-message-text', () => {
 });
 
 describe('DeepSeekOpenAiCompatibleAdapter · openai-responses', () => {
-  function instanceFor(model: ProviderModelProfile, transport: DeepSeekTransport): DeepSeekOpenAiCompatibleAdapter {
+  function instanceFor(model: ProviderModelProfile, transport: DeepSeekTransport, overrides: {
+    tickets?: { take: () => TransmitTicket | null };
+    resolve?: () => Promise<string>;
+    profile?: ProviderRouteProfile;
+  } = {}): DeepSeekOpenAiCompatibleAdapter {
     let ticket: TransmitTicket | null = { decision: 'transmit-remote', bindingDigest: 'a'.repeat(64), payloadDigest: 'b'.repeat(64) };
     return new DeepSeekOpenAiCompatibleAdapter({
-      broker: new CredentialBroker({ resolve: async () => 'placeholder-secret' }),
+      broker: new CredentialBroker({ resolve: overrides.resolve ?? (async () => 'placeholder-secret') }),
       slotBinding: { bindingDigest: 'a'.repeat(64), modelRole: 'Main Editorial Role', slot: 'opencode-go', credentialReference: randomUUID() },
-      tickets: { take: () => { const current = ticket; ticket = null; return current; } },
+      tickets: overrides.tickets ?? { take: () => { const current = ticket; ticket = null; return current; } },
       attribution: () => attributionHeaders(),
       promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
       codes,
-      profile: CAPPED_ROUTE_PROFILE,
+      profile: overrides.profile ?? CAPPED_ROUTE_PROFILE,
       modelProfile: model,
       sessionId: () => SESSION,
       transport,
     });
   }
+
+  it.each([true, false])('round-trips canonical blocks and correlated outputs with tools retained: %s', async (retainTools) => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const calls = [functionCall('raw_first'), functionCall('raw_second', '{ invalid JSON')];
+    const instance = instanceFor(functionModel(), async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return { status: 200, json: async () => bodies.length === 1
+        ? { status: 'completed', output: [message(outputText('looking')), ...calls], usage: { input_tokens: 9, output_tokens: 4 } }
+        : { status: 'completed', output: [message(outputText('final answer'))], usage: { input_tokens: 20, output_tokens: 3 } } };
+    }, { tickets: { take: () => ({ decision: 'transmit-remote', bindingDigest: 'a'.repeat(64), payloadDigest: 'b'.repeat(64) }) } });
+    const first = await collect(instance.stream(toolPayload()));
+    expect(first).toEqual([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'looking' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'looking' } },
+      ...calls.flatMap((call, i) => [
+        { type: 'block-start', index: i + 1, blockType: 'tool-call' },
+        { type: 'tool-call-delta', index: i + 1, id: call.call_id, name: call.name, argumentsDelta: call.arguments },
+        { type: 'block-end', index: i + 1, block: { type: 'tool-call', id: call.call_id, name: call.name, arguments: call.arguments } },
+      ]),
+      { type: 'usage', usage: { inputTokens: 9, outputTokens: 4 } },
+      { type: 'finish', reason: { kind: 'tool-calls' } },
+    ]);
+    const blocks = first.flatMap((chunk) => chunk.type === 'block-end' ? [chunk.block] : []);
+    const history: GenerateOptions['messages'] = [
+      ...toolPayload().messages,
+      { id: 'assistant' as never, role: 'assistant', content: blocks, source: { kind: 'model', provider: OPENCODE_GO_ROUTE, model: functionModel().model } },
+      ...calls.map((call, index) => ({
+        id: `result_${index}` as never, role: 'user' as const,
+        source: { kind: 'tool' as const, callId: call.call_id as never },
+        content: [{ type: 'tool-result' as const, toolCallId: call.call_id as never, content: [{ type: 'text' as const, text: `result_${index}` }], isError: index === 1 }],
+      })),
+    ];
+    const second = await collect(instance.stream({ ...toolPayload(), messages: history, tools: retainTools ? [TOOL] : [] }));
+    expect(bodies[1]).toEqual({
+      model: functionModel().model, instructions: SYSTEM, max_output_tokens: MAX_OUTPUT_TOKENS,
+      ...(retainTools ? { tools: [{ type: 'function', ...TOOL, strict: false }] } : {}),
+      input: [
+        { role: 'user', content: UNIT }, { role: 'assistant', content: 'looking' },
+        ...calls.map((call) => ({ type: 'function_call', call_id: call.call_id, name: call.name, arguments: call.arguments })),
+        ...calls.map((call, index) => ({ type: 'function_call_output', call_id: call.call_id, output: `result_${index}` })),
+      ],
+    });
+    expect(second).toEqual([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'final answer' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'final answer' } },
+      { type: 'usage', usage: { inputTokens: 20, outputTokens: 3 } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ]);
+    expect(instance.transmissions).toBe(2);
+  });
+
+  it('never emits unsolicited calls when tools are absent or empty, for either profile', async () => {
+    for (const model of [responsesModel(), functionModel()]) {
+      for (const tools of [undefined, []]) {
+        for (const text of ['', 'still an answer']) {
+          const instance = instanceFor(model, async () => ({ status: 200, json: async () => ({
+            status: 'incomplete', output: [functionCall(), message(outputText(text))],
+          }) }));
+          const chunks = await collect(instance.stream({ ...payload(), model: model.model, ...(tools === undefined ? {} : { tools }) }));
+          expect(chunks).toEqual([
+            { type: 'block-start', index: 0, blockType: 'text' },
+            { type: 'text-delta', index: 0, text },
+            { type: 'block-end', index: 0, block: { type: 'text', text } },
+            { type: 'finish', reason: { kind: 'stop' } },
+          ]);
+          expect(instance.lastCanonicalResult?.kind).toBe(text.length > 0 ? 'answer' : 'empty-answer');
+        }
+      }
+    }
+  });
+
+  it('refuses capability-none requests before ticket, credential or transport access', async () => {
+    const take = vi.fn(() => null);
+    const resolve = vi.fn(async () => 'placeholder-secret');
+    const transport = vi.fn<DeepSeekTransport>();
+    const instance = instanceFor(responsesModel({ toolCalling: 'none' }), transport, { tickets: { take }, resolve });
+    expect(await collect(instance.stream(toolPayload()))).toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.INVALID_RESPONSE } } }]);
+    expect(take).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it.each([null, { decision: 'transmit-remote' as const, bindingDigest: 'c'.repeat(64), payloadDigest: 'b'.repeat(64) }])('requires a matching ticket %j', async (ticket) => {
+    const resolve = vi.fn(async () => 'placeholder-secret');
+    const transport = vi.fn<DeepSeekTransport>();
+    const instance = instanceFor(functionModel(), transport, { tickets: { take: () => ticket }, resolve });
+    expect(await collect(instance.stream(toolPayload()))).toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.TRANSMIT_TICKET_ABSENT } } }]);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { status: 'incomplete', output: [functionCall()] },
+    { status: 'completed', output: [functionCall(), { ...functionCall('second'), arguments: {} }] },
+    { status: 'completed', output: [functionCall(), REASONING_ITEM] },
+  ])('emits no partial tool chunks for rejected batches %j', async (body) => {
+    const instance = instanceFor(functionModel(), async () => ({ status: 200, json: async () => body }));
+    expect(await collect(instance.stream(toolPayload()))).toEqual([{
+      type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务响应不含可用内容。', status: 200 } },
+    }]);
+  });
+
+  it.each([
+    [401, INVALID_CREDENTIAL_CODE, 'account-limit-terminal'],
+    [403, INVALID_CREDENTIAL_CODE, 'account-limit-terminal'],
+    [402, QUOTA_EXCEEDED_CODE, 'account-limit-terminal'],
+    [429, QUOTA_EXCEEDED_CODE, 'account-limit-terminal'],
+    [429, AI7_FAILURE_CODES.RATE_LIMIT, 'rate-limit-retryable'],
+    [500, AI7_FAILURE_CODES.PROVIDER_ERROR, 'account-limit-terminal'],
+  ] as const)('preserves HTTP %s classification with offered functions', async (status, code, limitPolicy) => {
+    const transport = vi.fn<DeepSeekTransport>(async () => ({ status, json: async () => ({ status: 'completed', output: [functionCall()] }) }));
+    const instance = instanceFor(functionModel(), transport, { profile: { ...CAPPED_ROUTE_PROFILE, limitPolicy } });
+    expect(await collect(instance.stream(toolPayload()))).toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code, status } } }]);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(instance.lastCanonicalResult).toBeNull();
+  });
+
+  it('preserves abort and unreadable-response boundaries without retry', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const aborted = vi.fn<DeepSeekTransport>(async (_url, init) => {
+      expect(init.signal).toBe(controller.signal);
+      throw Object.assign(new Error('synthetic abort'), { name: 'AbortError' });
+    });
+    const abortInstance = instanceFor(functionModel(), aborted);
+    expect(await collect(abortInstance.stream({ ...toolPayload(), signal: controller.signal })))
+      .toMatchObject([{ type: 'finish', reason: { kind: 'aborted', failure: { code: AI7_FAILURE_CODES.INTERRUPTED } } }]);
+    expect(aborted).toHaveBeenCalledTimes(1);
+    const unreadable = vi.fn<DeepSeekTransport>(async () => ({ status: 200, json: async () => { throw new Error('synthetic unreadable'); } }));
+    const unreadableInstance = instanceFor(functionModel(), unreadable);
+    expect(await collect(unreadableInstance.stream(toolPayload())))
+      .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, status: 200 } } }]);
+    expect(unreadable).toHaveBeenCalledTimes(1);
+  });
 
   it('streams the shape through the unchanged event contract with a stub transport', async () => {
     const calls: Array<{ url: string; body: string }> = [];

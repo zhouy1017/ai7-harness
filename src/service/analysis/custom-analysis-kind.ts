@@ -52,6 +52,8 @@ export const CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR = {
   schema: 'ai7.custom-analysis.reducers/1',
   stages: ['unit-validation', 'reference-integrity'],
   referenceIntegrity: 'deterministic-normalized-exact-match-in-committed-block',
+  sourceRangeMapping: 'folded-utf16-code-units-to-source-graphemes',
+  sourceRangeIntegrity: 'sole-candidate-normalized-grapheme-slice-equals-quotation',
   normalization: ['whitespace-collapse', 'fullwidth-halfwidth-ascii'],
   anchorStates: ['located', 'not-found', 'ambiguous'],
   crossUnitSynthesis: 'none',

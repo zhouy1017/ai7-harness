@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   FACTUAL_REVIEW_PROMPT_CONTRACT,
   FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST,
@@ -258,53 +258,58 @@ describe('the factual verification ledger', () => {
   });
 
   it('versions one assertion across Runs, supersedes the earlier decision, reuses a current capture, and refuses drift', () => {
-    const { db, ledger } = bareLedger();
-    const text = { value: '它现藏湖北省博物馆，是重器。' };
-    const manuscript = reader(text);
-    const runA = randomUUID();
-    retain(db, { runRecordId: runA, url: MUSEUM, content: PAGE, capturedAt: '2026-10-16T01:00:00.000Z' });
-    const base = { bookId: BOOK, reviewRunId: REVIEW, taskIntentId: randomUUID(), revisionId: randomUUID(), manuscriptRevisionId: 'rev-1', contractLevel: 'standard' as const };
-    expect(ledger.materialize({ ...base, runRecordId: runA, plannedLevel: 'standard', findings: [finding([{ sourceRef: MUSEUM, relation: '支持', excerptRef: '它现藏湖北省博物馆', lineage: 'original' }])] })).toBe(1);
-    // Recording the same Run again records nothing more.
-    expect(ledger.materialize({ ...base, runRecordId: runA, plannedLevel: 'standard', findings: [finding([])] })).toBe(0);
-    const first = ledger.lens({ bookId: BOOK, reviewRunId: null, after: null, chapterOf: () => null, filters: { chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null } }, manuscript).results[0]!;
-    expect(first).toMatchObject({ version: 1, states: { factualVerification: '证据支持' }, pendingReview: true, actionNeed: 'review' });
-    const decided = ledger.recordDecision({ bookId: BOOK, resultId: first.resultId, resultVersion: 1, disposition: 'accept', ownWords: null, reason: null }, manuscript);
-    expect(decided.result.pendingReview).toBe(false);
-    // A later strict Run of the same assertion: its own fetch of the museum page failed, so the earlier exact capture is reused.
-    const runB = randomUUID();
-    retain(db, { runRecordId: runB, url: MUSEUM, content: null, capturedAt: '2026-10-16T02:00:00.000Z' });
-    retain(db, { runRecordId: runB, url: ARCHIVE, content: '档案记载：它现藏湖北省博物馆。', capturedAt: '2026-10-16T02:00:00.000Z' });
-    ledger.materialize({ ...base, runRecordId: runB, plannedLevel: 'strict', contractLevel: 'strict', findings: [finding([
-      { sourceRef: MUSEUM, relation: '支持', excerptRef: '它现藏湖北省博物馆', lineage: 'original' },
-      { sourceRef: ARCHIVE, relation: '支持', excerptRef: '它现藏湖北省博物馆', lineage: 'original' },
-    ])] });
-    const lens = ledger.lens({ bookId: BOOK, reviewRunId: null, after: null, chapterOf: () => null, filters: { chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null } }, manuscript);
-    expect(lens.results).toHaveLength(1);
-    const second = lens.results[0]!;
-    expect(second).toMatchObject({ version: 2, level: 'strict', states: { factualVerification: '证据支持' }, sourceCounts: { checked: 2, independent: 2, reused: 1 },
-      pendingReview: true, decision: { boundVersion: 1, superseded: true } });
-    const workspace = ledger.workspace(BOOK, second.resultId, null, manuscript, new Date('2026-10-16T03:00:00.000Z'));
-    expect(workspace.history.map((entry) => [entry.version, entry.level])).toEqual([[1, 'standard'], [2, 'strict']]);
-    expect(workspace.sources.find((card) => card.sourceRef === MUSEUM)).toMatchObject({ reused: true, checkState: 'exact' });
-    expect(workspace.decisions).toEqual([expect.objectContaining({ boundVersion: 1, superseded: true })]);
-    // The earlier version refuses a decision now, naming the later one.
-    expect(() => ledger.recordDecision({ bookId: BOOK, resultId: first.resultId, resultVersion: 1, disposition: 'decline', ownWords: null, reason: null }, manuscript))
-      .toThrow(/第 2 版/u);
-    // A later capture of the museum page under another hash marks only that source's dependency changed.
-    retain(db, { runRecordId: randomUUID(), url: MUSEUM, content: '这件尊盘出土于1978年。它现已移交他馆。', capturedAt: '2026-10-16T04:00:00.000Z' });
-    expect(ledger.workspace(BOOK, second.resultId, null, manuscript).decisionCard.drift).toContain('来源版本已变化');
-    expect(() => ledger.recordDecision({ bookId: BOOK, resultId: second.resultId, resultVersion: 2, disposition: 'accept', ownWords: null, reason: null }, manuscript))
-      .toThrow(/来源版本已变化/u);
-    // An edit inside the range: 锚点已失效, the result kept as history and never moved.
-    text.value = '它现藏湖北某博物馆，是重器。';
-    const stale = ledger.workspace(BOOK, second.resultId, null, manuscript);
-    expect(stale.result.anchor).toEqual({ state: 'stale', label: STALE_VERIFICATION_ANCHOR_LABEL });
-    expect(stale.decisionCard.drift).toContain(STALE_VERIFICATION_ANCHOR_LABEL);
-    expect(stale.result).toMatchObject({ blockId: BLOCK, fromGrapheme: 2, toGrapheme: 9, version: 2 });
-    // Every row is append-only.
-    expect(() => db.prepare('DELETE FROM factual_review_decisions').run()).toThrow(/IMMUTABLE/u);
-    expect(() => db.prepare("UPDATE factual_verification_results SET level = 'quick'").run()).toThrow(/IMMUTABLE/u);
+    // Keep the retained October captures current regardless of the host's wall clock.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-16T05:00:00.000Z'));
+      const { db, ledger } = bareLedger();
+      const text = { value: '它现藏湖北省博物馆，是重器。' };
+      const manuscript = reader(text);
+      const runA = randomUUID();
+      retain(db, { runRecordId: runA, url: MUSEUM, content: PAGE, capturedAt: '2026-10-16T01:00:00.000Z' });
+      const base = { bookId: BOOK, reviewRunId: REVIEW, taskIntentId: randomUUID(), revisionId: randomUUID(), manuscriptRevisionId: 'rev-1', contractLevel: 'standard' as const };
+      expect(ledger.materialize({ ...base, runRecordId: runA, plannedLevel: 'standard', findings: [finding([{ sourceRef: MUSEUM, relation: '支持', excerptRef: '它现藏湖北省博物馆', lineage: 'original' }])] })).toBe(1);
+      // Recording the same Run again records nothing more.
+      expect(ledger.materialize({ ...base, runRecordId: runA, plannedLevel: 'standard', findings: [finding([])] })).toBe(0);
+      const first = ledger.lens({ bookId: BOOK, reviewRunId: null, after: null, chapterOf: () => null, filters: { chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null } }, manuscript).results[0]!;
+      expect(first).toMatchObject({ version: 1, states: { factualVerification: '证据支持' }, pendingReview: true, actionNeed: 'review' });
+      const decided = ledger.recordDecision({ bookId: BOOK, resultId: first.resultId, resultVersion: 1, disposition: 'accept', ownWords: null, reason: null }, manuscript);
+      expect(decided.result.pendingReview).toBe(false);
+      // A later strict Run of the same assertion: its own fetch of the museum page failed, so the earlier exact capture is reused.
+      const runB = randomUUID();
+      retain(db, { runRecordId: runB, url: MUSEUM, content: null, capturedAt: '2026-10-16T02:00:00.000Z' });
+      retain(db, { runRecordId: runB, url: ARCHIVE, content: '档案记载：它现藏湖北省博物馆。', capturedAt: '2026-10-16T02:00:00.000Z' });
+      ledger.materialize({ ...base, runRecordId: runB, plannedLevel: 'strict', contractLevel: 'strict', findings: [finding([
+        { sourceRef: MUSEUM, relation: '支持', excerptRef: '它现藏湖北省博物馆', lineage: 'original' },
+        { sourceRef: ARCHIVE, relation: '支持', excerptRef: '它现藏湖北省博物馆', lineage: 'original' },
+      ])] });
+      const lens = ledger.lens({ bookId: BOOK, reviewRunId: null, after: null, chapterOf: () => null, filters: { chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null } }, manuscript);
+      expect(lens.results).toHaveLength(1);
+      const second = lens.results[0]!;
+      expect(second).toMatchObject({ version: 2, level: 'strict', states: { factualVerification: '证据支持' }, sourceCounts: { checked: 2, independent: 2, reused: 1 },
+        pendingReview: true, decision: { boundVersion: 1, superseded: true } });
+      const workspace = ledger.workspace(BOOK, second.resultId, null, manuscript, new Date('2026-10-16T03:00:00.000Z'));
+      expect(workspace.history.map((entry) => [entry.version, entry.level])).toEqual([[1, 'standard'], [2, 'strict']]);
+      expect(workspace.sources.find((card) => card.sourceRef === MUSEUM)).toMatchObject({ reused: true, checkState: 'exact' });
+      expect(workspace.decisions).toEqual([expect.objectContaining({ boundVersion: 1, superseded: true })]);
+      // The earlier version refuses a decision now, naming the later one.
+      expect(() => ledger.recordDecision({ bookId: BOOK, resultId: first.resultId, resultVersion: 1, disposition: 'decline', ownWords: null, reason: null }, manuscript))
+        .toThrow(/第 2 版/u);
+      // A later capture of the museum page under another hash marks only that source's dependency changed.
+      retain(db, { runRecordId: randomUUID(), url: MUSEUM, content: '这件尊盘出土于1978年。它现已移交他馆。', capturedAt: '2026-10-16T04:00:00.000Z' });
+      expect(ledger.workspace(BOOK, second.resultId, null, manuscript).decisionCard.drift).toContain('来源版本已变化');
+      expect(() => ledger.recordDecision({ bookId: BOOK, resultId: second.resultId, resultVersion: 2, disposition: 'accept', ownWords: null, reason: null }, manuscript))
+        .toThrow(/来源版本已变化/u);
+      // An edit inside the range: 锚点已失效, the result kept as history and never moved.
+      text.value = '它现藏湖北某博物馆，是重器。';
+      const stale = ledger.workspace(BOOK, second.resultId, null, manuscript);
+      expect(stale.result.anchor).toEqual({ state: 'stale', label: STALE_VERIFICATION_ANCHOR_LABEL });
+      expect(stale.decisionCard.drift).toContain(STALE_VERIFICATION_ANCHOR_LABEL);
+      expect(stale.result).toMatchObject({ blockId: BLOCK, fromGrapheme: 2, toGrapheme: 9, version: 2 });
+      // Every row is append-only.
+      expect(() => db.prepare('DELETE FROM factual_review_decisions').run()).toThrow(/IMMUTABLE/u);
+      expect(() => db.prepare("UPDATE factual_verification_results SET level = 'quick'").run()).toThrow(/IMMUTABLE/u);
+    } finally { vi.useRealTimers(); }
   });
 
   it('refuses expired evidence and checks source drift again before saving a previously accepted correction', () => {

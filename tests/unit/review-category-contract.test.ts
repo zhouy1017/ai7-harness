@@ -17,7 +17,8 @@ import {
   reviewCategoryRequestDigest,
   type ReviewCategoryContractInput,
 } from '../../src/service/review/review-category-contract.js';
-import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
+import { REVIEW_CATEGORY_REDUCER_DESCRIPTOR, REVIEW_CATEGORY_REDUCER_DIGEST, reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import {
   MAX_REVIEW_CATEGORY_GOAL_LENGTH,
   REVIEW_CATEGORY_TASK_MODES,
@@ -39,6 +40,16 @@ const TYPOS = reviewCategoryContractInput(entry('typos-and-usage'));
 const STYLE = reviewCategoryContractInput(entry('style-and-format'));
 
 describe('the built-in review categories', () => {
+  it('pins UTF-16 anchoring and exact grapheme slices separately from historical reductions (#1022)', () => {
+    const { sourceRangeMapping, ...historical } = REVIEW_CATEGORY_REDUCER_DESCRIPTOR;
+    expect(sourceRangeMapping).toBe('folded-utf16-code-units-to-source-graphemes');
+    const { sourceRangeIntegrity, ...beforeSliceCheck } = REVIEW_CATEGORY_REDUCER_DESCRIPTOR;
+    expect(sourceRangeIntegrity).toBe('sole-candidate-normalized-grapheme-slice-equals-quotation');
+    expect(REVIEW_CATEGORY_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(beforeSliceCheck)));
+    expect(REVIEW_CATEGORY_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(historical)));
+    expect(reviewCategoryKindDefinition(TYPOS).reducerDigest).toBe(REVIEW_CATEGORY_REDUCER_DIGEST);
+  });
+
   it('are the nine of the specification, in its order', () => {
     expect(BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((category) => category.label)).toEqual([
       '错别字与规范用语', '体例与格式', '情节逻辑与前后一致', '事实核查', '学术道德与引用', '出版政策与风险', '文学性与表达改进', '书系一致性', '跨交付物一致性',

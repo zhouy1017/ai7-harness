@@ -912,6 +912,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'research-evidence-source-view',
     'review-return-to-analysis',
     'zero-activity',
+    // Issue #1022: the authorized overlap/Unicode mark, Apply and reversal variation.
+    'review-overlap-relaunch',
+    'review-overlap-synthetic-edits',
     // Issue #901: 事实核查 at its levels on a fresh sample1 Book — the selector, the Evidence Workspace, a review decision, a
     // Correction Proposal that keeps 证据核查未完成.
     'factual-level-plan',
