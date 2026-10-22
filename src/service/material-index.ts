@@ -16,11 +16,13 @@ import {
   type MaterialIndexReason,
   type MaterialSegmentsPageProjection,
   type MaterialTranslationProjection,
+  type MaterialTranslationAttemptProjection,
+  type ModelTextAttemptProvenance,
   type MaterialVectorSearchProjection,
   type MaterialVectorsProjection,
 } from '../shared/protocol.js';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
-import { UUID_PATTERN, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import { UUID_PATTERN, canonicalRecord, hasExactKeys, isRecord, sha256Hex } from './analysis/canonical.js';
 import { DOC_CONVERTER_IDENTITY, convertDocManuscript } from './doc-manuscript.js';
 import { DOCX_PARSER_IDENTITY, MAX_ARCHIVE_BYTES, parseDocx, type ParsedDocxBlock } from './docx.js';
 import { cosineSimilarity, vectorBytes, vectorFromBytes, vectorNorm, type EmbeddingReadiness } from './knowledge/embedding.js';
@@ -168,6 +170,100 @@ export const MATERIAL_INDEX_LAYER_FOREIGN_KEYS: Readonly<Record<string, Readonly
 
 /** The revision that adds them; a store stamped at or above it must already hold them exactly. */
 const MATERIAL_INDEX_LAYER_REVISION = 76;
+
+/** Revision 84: one bounded, payload-free record per actual translation batch attempt; no invented historical attempts. */
+export const MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL = {
+  material_translation_attempts: `CREATE TABLE material_translation_attempts (
+  attempt_id TEXT PRIMARY KEY CHECK(length(attempt_id) = 36),
+  index_id TEXT NOT NULL REFERENCES material_index_builds(index_id),
+  outcome TEXT NOT NULL CHECK(outcome IN ('translated', 'failed', 'outcome-unknown')),
+  recorded_at TEXT NOT NULL,
+  canonical_json TEXT NOT NULL CHECK(length(canonical_json) BETWEEN 1 AND 16384 AND json_valid(canonical_json)),
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64)
+) STRICT`,
+} as const;
+export const MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL = {
+  material_translation_attempts_no_update: `CREATE TRIGGER material_translation_attempts_no_update
+    BEFORE UPDATE ON material_translation_attempts
+    BEGIN
+      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
+    END`,
+  material_translation_attempts_no_delete: `CREATE TRIGGER material_translation_attempts_no_delete
+    BEFORE DELETE ON material_translation_attempts
+    BEGIN
+      SELECT RAISE(ABORT, 'MATERIAL_INDEX_LEDGER_IMMUTABLE');
+    END`,
+} as const;
+export const MATERIAL_TRANSLATION_ATTEMPT_FOREIGN_KEYS = {
+  material_translation_attempts: ['index_id>material_index_builds.index_id:NO ACTION/NO ACTION/NONE'],
+} as const;
+
+export function initializeMaterialTranslationAttemptSchema(db: DatabaseSync, version: number): void {
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'material_translation_attempts'").get() !== undefined) {
+    validateMaterialTranslationAttemptSchema(db);
+    return;
+  }
+  requireIndex(version < 84, 'SCHEMA_INVALID', '来源译文尝试记录表缺失。');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const sql of [...Object.values(MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL), ...Object.values(MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL)]) db.exec(sql);
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+}
+
+/** Closed metadata only; shared by persisted connection tests and translation attempt readers. */
+export function isModelTextAttemptProvenance(value: unknown): value is ModelTextAttemptProvenance {
+  if (!isRecord(value) || !hasExactKeys(value, ['role', 'route', 'model', 'endpoint', 'credentialSlot', 'credentialReference',
+    'policyVersion', 'bindingDigest', 'usage', 'failureCode', ...(value.credentialUpdatedAt === undefined ? [] : ['credentialUpdatedAt'])])) return false;
+  if (value.role !== 'Fast Interaction Role' || typeof value.credentialReference !== 'string' || !UUID_PATTERN.test(value.credentialReference) ||
+      typeof value.bindingDigest !== 'string' || !DIGEST_PATTERN.test(value.bindingDigest) ||
+      typeof value.policyVersion !== 'string' || !/^v[1-9][0-9]*$/u.test(value.policyVersion) ||
+      (value.credentialUpdatedAt !== undefined && (typeof value.credentialUpdatedAt !== 'string' || !Number.isFinite(Date.parse(value.credentialUpdatedAt)))) ||
+      (value.failureCode !== null && (typeof value.failureCode !== 'string' || !/^[A-Z0-9_]{1,100}$/u.test(value.failureCode)))) return false;
+  for (const field of ['route', 'model', 'endpoint', 'credentialSlot'] as const) {
+    if (typeof value[field] !== 'string' || value[field].length < 1 || value[field].length > 256 || !value[field].isWellFormed()) return false;
+  }
+  const usage = value.usage;
+  return usage === null || (isRecord(usage) && hasExactKeys(usage, ['inputTokens', 'outputTokens',
+    ...(usage.reasoningTokens === undefined ? [] : ['reasoningTokens']), ...(usage.cacheReadTokens === undefined ? [] : ['cacheReadTokens'])]) &&
+    Object.values(usage).every((count) => Number.isSafeInteger(count) && (count as number) >= 0));
+}
+
+function readTranslationAttempt(db: DatabaseSync, row: SqlRow): MaterialTranslationAttemptProjection {
+  const json = String(row.canonical_json);
+  requireIndex(json.length <= 16384 && sha256Hex(json) === row.sha256, 'MATERIAL_INDEX_RECORD_INVALID', '来源译文尝试记录已损坏。');
+  const record: unknown = JSON.parse(json);
+  requireIndex(isRecord(record) && hasExactKeys(record, ['schema', 'attemptId', 'indexId', 'indexSha256', 'sourceSha256', 'batch', 'recordedAt', 'outcome', 'provenance']) &&
+    record.schema === 'ai7.material-translation-attempt/1' && record.attemptId === row.attempt_id && typeof record.attemptId === 'string' && UUID_PATTERN.test(record.attemptId) &&
+    record.indexId === row.index_id && typeof record.indexId === 'string' && UUID_PATTERN.test(record.indexId) &&
+    typeof record.indexSha256 === 'string' && DIGEST_PATTERN.test(record.indexSha256) && typeof record.sourceSha256 === 'string' && DIGEST_PATTERN.test(record.sourceSha256) &&
+    record.recordedAt === row.recorded_at && typeof record.recordedAt === 'string' && Number.isFinite(Date.parse(record.recordedAt)) &&
+    record.outcome === row.outcome && ['translated', 'failed', 'outcome-unknown'].includes(record.outcome as string) &&
+    Array.isArray(record.batch) && record.batch.length > 0 && record.batch.length <= 20 && isModelTextAttemptProvenance(record.provenance) &&
+    ((record.outcome === 'translated') === (record.provenance.failureCode === null)),
+    'MATERIAL_INDEX_RECORD_INVALID', '来源译文尝试记录已损坏。');
+  requireIndex(canonicalRecord(record).json === json, 'MATERIAL_INDEX_RECORD_INVALID', '来源译文尝试记录不是规范记录。');
+  const build = db.prepare('SELECT b.sha256, m.object_sha256 AS source_sha256 FROM material_index_builds b JOIN library_materials m ON m.material_id = b.material_id WHERE b.index_id = ?').get(record.indexId);
+  requireIndex(build?.sha256 === record.indexSha256 && build.source_sha256 === record.sourceSha256, 'MATERIAL_INDEX_RECORD_INVALID', '来源译文尝试来源不匹配。');
+  const segment = db.prepare('SELECT sha256 FROM material_index_segments WHERE index_id = ? AND ordinal = ?');
+  let previous = 0;
+  for (const item of record.batch) {
+    requireIndex(isRecord(item) && hasExactKeys(item, ['ordinal', 'sha256']) && Number.isSafeInteger(item.ordinal) && (item.ordinal as number) > previous &&
+      typeof item.sha256 === 'string' && DIGEST_PATTERN.test(item.sha256) && segment.get(record.indexId, item.ordinal as number)?.sha256 === item.sha256,
+      'MATERIAL_INDEX_RECORD_INVALID', '来源译文尝试分段不匹配。');
+    previous = item.ordinal as number;
+  }
+  const { schema: _schema, ...projection } = record;
+  return projection as unknown as MaterialTranslationAttemptProjection;
+}
+
+export function validateMaterialTranslationAttemptSchema(db: DatabaseSync): void {
+  for (const [name, sql] of [...Object.entries(MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL), ...Object.entries(MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL)]) {
+    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name = ?').get(name);
+    requireIndex(typeof row?.sql === 'string' && foldSql(row.sql) === foldSql(sql), 'SCHEMA_INVALID', '来源译文尝试记录表结构不兼容。');
+  }
+  for (const row of db.prepare('SELECT * FROM material_translation_attempts').iterate()) readTranslationAttempt(db, row);
+}
 
 /**
  * The indexer's identity: what a build was made by. A build is made once per item per identity, so a later indexer that
@@ -990,6 +1086,7 @@ export class MaterialIndexLedger {
       };
       if (build.metadata.language === 'other') {
         const translated = this.#translationFacts(build.indexId);
+        const lastAttempt = this.lastTranslationAttempt(build.indexId);
         translation = {
           state: activity.translating ? 'building' : translated.translated === build.segmentCount ? 'complete' : translated.translated > 0 ? 'partial' : 'not-built',
           translated: translated.translated,
@@ -998,7 +1095,10 @@ export class MaterialIndexLedger {
           request: translated.translated === build.segmentCount
             ? { available: false, reason: '每段都已有来源译文。' }
             : activity.translating ? { available: false, reason: '正在生成来源译文。' } : activity.translationRequest,
-          lastFailure: activity.translationFailure,
+          lastFailure: activity.translationFailure ?? (lastAttempt === null || lastAttempt.outcome === 'translated' ? null : lastAttempt.outcome === 'outcome-unknown'
+            ? '结果待确认：本次来源译文可能已计费，没有完整结果；不会自动重发。'
+            : `来源译文没有完成（${lastAttempt.provenance.failureCode}）；不会自动重发。`),
+          ...(lastAttempt === null ? {} : { lastAttempt }),
         };
       }
     }
@@ -1192,7 +1292,7 @@ export class MaterialIndexLedger {
 
   // ---- the two on-request layers (Issue #892) ------------------------------------------------------------------------
 
-  #layerPresent(table: keyof typeof MATERIAL_INDEX_LAYER_SCHEMA_SQL): boolean {
+  #layerPresent(table: keyof typeof MATERIAL_INDEX_LAYER_SCHEMA_SQL | keyof typeof MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL): boolean {
     return this.#db.prepare(LAYER_TABLE_PRESENT).get(table) !== undefined;
   }
 
@@ -1461,5 +1561,26 @@ export class MaterialIndexLedger {
       });
       insert.run(target.indexId, row.ordinal, row.sha256, made.model, recordedAt, record.json, record.digest);
     }
+  }
+
+  lastTranslationAttempt(indexId: string): MaterialTranslationAttemptProjection | null {
+    if (!this.#layerPresent('material_translation_attempts')) return null;
+    const row = this.#db.prepare('SELECT * FROM material_translation_attempts WHERE index_id = ? ORDER BY rowid DESC LIMIT 1').get(indexId);
+    return row === undefined ? null : readTranslationAttempt(this.#db, row);
+  }
+
+  /** Caller owns the transaction, together with successful translations when any exist. */
+  recordTranslationAttempt(target: { readonly indexId: string; readonly indexSha256: string }, sourceSha256: string,
+    batch: ReadonlyArray<{ readonly ordinal: number; readonly sha256: string }>, outcome: MaterialTranslationAttemptProjection['outcome'],
+    provenance: ModelTextAttemptProvenance): void {
+    requireIndex(isModelTextAttemptProvenance(provenance), 'MATERIAL_INDEX_INVALID', '来源译文尝试来历无效。');
+    const attemptId = randomUUID();
+    const recordedAt = new Date().toISOString();
+    const record = canonicalRecord({ schema: 'ai7.material-translation-attempt/1', attemptId, indexId: target.indexId, indexSha256: target.indexSha256,
+      sourceSha256, batch: batch.map(({ ordinal, sha256 }) => ({ ordinal, sha256 })), recordedAt, outcome, provenance });
+    const row = { attempt_id: attemptId, index_id: target.indexId, outcome, recorded_at: recordedAt, canonical_json: record.json, sha256: record.digest };
+    readTranslationAttempt(this.#db, row);
+    this.#db.prepare('INSERT INTO material_translation_attempts(attempt_id, index_id, outcome, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(attemptId, target.indexId, outcome, recordedAt, record.json, record.digest);
   }
 }

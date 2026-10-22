@@ -158,7 +158,8 @@ export function materialTranslator(
       }
       if (answer.kind === 'failed') return { kind: 'failed', message: answer.message, ...(answer.provenance === undefined ? {} : { provenance: answer.provenance }) };
       const texts = readMaterialTranslationAnswer(answer.text, paragraphs.length);
-      if (texts === null) return { kind: 'failed', message: `模型给出的${MATERIAL_TRANSLATION_LABEL}没有与原文逐段对齐；这一批没有记录任何译文。` };
+      if (texts === null) return { kind: 'failed', message: `模型给出的${MATERIAL_TRANSLATION_LABEL}没有与原文逐段对齐；这一批没有记录任何译文。`,
+        ...(answer.binding.provenance === undefined ? {} : { provenance: { ...answer.binding.provenance, failureCode: 'MATERIAL_TRANSLATION_CONTRACT_INVALID' } }) };
       return {
         kind: 'translated',
         texts,

@@ -97,8 +97,7 @@
           "bindingSource": "user-configured-role-binding",
           "allowedRoutes": [
             "opencode-go",
-            "deepseek-open-platform",
-            "openai-platform"
+            "deepseek-open-platform"
           ],
           "exactProviderBindingRequired": true,
           "fallbackAllowed": false,
@@ -231,8 +230,7 @@
           "bindingSource": "user-configured-role-binding",
           "allowedRoutes": [
             "opencode-go",
-            "deepseek-open-platform",
-            "openai-platform"
+            "deepseek-open-platform"
           ],
           "exactProviderBindingRequired": true,
           "fallbackAllowed": false,
@@ -347,8 +345,7 @@
           "bindingSource": "user-configured-role-binding",
           "allowedRoutes": [
             "opencode-go",
-            "deepseek-open-platform",
-            "openai-platform"
+            "deepseek-open-platform"
           ],
           "exactProviderBindingRequired": true,
           "fallbackAllowed": false,
@@ -565,8 +562,7 @@
           "bindingSource": "user-configured-role-binding",
           "allowedRoutes": [
             "opencode-go",
-            "deepseek-open-platform",
-            "openai-platform"
+            "deepseek-open-platform"
           ],
           "exactProviderBindingRequired": true,
           "fallbackAllowed": false,
@@ -754,8 +750,7 @@
           "bindingSource": "user-configured-role-binding",
           "allowedRoutes": [
             "opencode-go",
-            "deepseek-open-platform",
-            "openai-platform"
+            "deepseek-open-platform"
           ],
           "exactProviderBindingRequired": true,
           "fallbackAllowed": false,
@@ -940,8 +935,7 @@
           "bindingSource": "user-configured-role-binding",
           "allowedRoutes": [
             "opencode-go",
-            "deepseek-open-platform",
-            "openai-platform"
+            "deepseek-open-platform"
           ],
           "exactProviderBindingRequired": true,
           "fallbackAllowed": false,
@@ -1057,8 +1051,7 @@
           "bindingSource": "user-configured-role-binding",
           "allowedRoutes": [
             "opencode-go",
-            "deepseek-open-platform",
-            "openai-platform"
+            "deepseek-open-platform"
           ],
           "exactProviderBindingRequired": true,
           "fallbackAllowed": false,
@@ -1184,8 +1177,7 @@
           "bindingSource": "user-configured-role-binding",
           "allowedRoutes": [
             "opencode-go",
-            "deepseek-open-platform",
-            "openai-platform"
+            "deepseek-open-platform"
           ],
           "exactProviderBindingRequired": true,
           "fallbackAllowed": false,
@@ -1427,8 +1419,7 @@
           "bindingSource": "user-configured-role-binding",
           "allowedRoutes": [
             "opencode-go",
-            "deepseek-open-platform",
-            "openai-platform"
+            "deepseek-open-platform"
           ],
           "exactProviderBindingRequired": true,
           "fallbackAllowed": false,
@@ -1541,18 +1532,6 @@
           "endpoint": "https://api.deepseek.com/chat/completions",
           "model": "deepseek-flash",
           "credentialSlot": "deepseek-api-key"
-        },
-        {
-          "route": "openai-platform",
-          "endpoint": "https://api.openai.com/v1/responses",
-          "model": "gpt-5.6-luna",
-          "credentialSlot": "openai-platform"
-        },
-        {
-          "route": "openai-platform",
-          "endpoint": "https://api.openai.com/v1/responses",
-          "model": "gpt-5.6-sol",
-          "credentialSlot": "openai-platform"
         }
       ],
       "userConfiguredBindingAuthorizesTransmission": false,
@@ -1607,18 +1586,6 @@
           "endpoint": "https://api.deepseek.com/chat/completions",
           "model": "deepseek-flash",
           "credentialSlot": "deepseek-api-key"
-        },
-        {
-          "route": "openai-platform",
-          "endpoint": "https://api.openai.com/v1/responses",
-          "model": "gpt-5.6-luna",
-          "credentialSlot": "openai-platform"
-        },
-        {
-          "route": "openai-platform",
-          "endpoint": "https://api.openai.com/v1/responses",
-          "model": "gpt-5.6-sol",
-          "credentialSlot": "openai-platform"
         }
       ],
       "userConfiguredBindingAuthorizesTransmission": false,
@@ -1640,18 +1607,6 @@
           "endpoint": "https://api.deepseek.com/chat/completions",
           "model": "deepseek-flash",
           "credentialSlot": "deepseek-api-key"
-        },
-        {
-          "route": "openai-platform",
-          "endpoint": "https://api.openai.com/v1/responses",
-          "model": "gpt-5.6-luna",
-          "credentialSlot": "openai-platform"
-        },
-        {
-          "route": "openai-platform",
-          "endpoint": "https://api.openai.com/v1/responses",
-          "model": "gpt-5.6-sol",
-          "credentialSlot": "openai-platform"
         }
       ],
       "userConfiguredBindingAuthorizesTransmission": false,

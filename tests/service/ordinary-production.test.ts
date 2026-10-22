@@ -668,6 +668,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       await store.settleMaterialIndexing();
       store.requestMaterialTranslation(material.materialId);
       await store.settleMaterialLayers();
+      expect(store.inspectLibraryMaterial(material.materialId).index?.translation?.lastFailure).toBeNull();
       const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
       try {
         const translations = database.prepare('SELECT canonical_json FROM material_index_translations').all();
@@ -695,13 +696,14 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     expect(resolver.resolve).not.toHaveBeenCalled();
   });
 
-  it.each(['invalid-key', 'account-limit', 'malformed', 'refusal', 'unknown'] as const)('keeps %s attributed and sends only once', async (failure) => {
+  it.each(['invalid-key', 'account-limit', 'malformed', 'refusal', 'unexpected-text', 'unknown'] as const)('keeps %s attributed and sends only once', async (failure) => {
     const { store } = await openProductionStore();
     const connection = store.saveModelServiceConnection('Failure probe', null, 'ready', 'openai-platform');
     const transport = vi.fn(async () => {
       if (failure === 'unknown') throw new Error('synthetic transport failure after submission');
       return { status: failure === 'invalid-key' ? 401 : failure === 'account-limit' ? 429 : 200,
-        json: async () => failure === 'refusal' ? { output: [{ type: 'message', role: 'assistant', content: [{ type: 'refusal', refusal: 'synthetic refusal' }] }], usage: { input_tokens: 12, output_tokens: 1 } }
+        json: async () => failure === 'unexpected-text' ? { status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'unexpected public synthetic answer' }] }], usage: { input_tokens: 12, output_tokens: 1 } }
+          : failure === 'refusal' ? { output: [{ type: 'message', role: 'assistant', content: [{ type: 'refusal', refusal: 'synthetic refusal' }] }], usage: { input_tokens: 12, output_tokens: 1 } }
           : failure === 'malformed' ? { invalid: true, usage: { input_tokens: 12, output_tokens: 0 } } : { error: { message: 'never retain synthetic provider body' } } };
     });
     const status = await testModelServiceConnection(store, roots.codeRoot,
@@ -709,7 +711,8 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' });
     expect(status.outcome).toBe(failure === 'unknown' ? 'outcome-unknown' : 'failed');
     expect(transport).toHaveBeenCalledTimes(1);
-    if (failure === 'malformed' || failure === 'refusal') expect(status.provenance?.usage).toMatchObject({ inputTokens: 12, outputTokens: failure === 'malformed' ? 0 : 1 });
+    if (failure === 'malformed' || failure === 'refusal' || failure === 'unexpected-text') expect(status.provenance?.usage).toMatchObject({ inputTokens: 12, outputTokens: failure === 'malformed' ? 0 : 1 });
+    expect(status.provenance?.failureCode).toBe(status.code);
     expect(store.getModelServiceRouteConnection('openai-platform')?.connectionTest).toEqual(status);
     expect(JSON.stringify(status)).not.toContain('synthetic provider body');
     expect(store.getConfiguredModelRoleBinding('fast-interaction')).toBeNull();
@@ -759,17 +762,127 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const before = database.prepare(`SELECT ${columns} FROM model_service_connections`).all();
     database.exec(`CREATE TEMP TABLE legacy_model_selection AS SELECT ${columns} FROM model_service_connections; DROP TABLE model_service_connections;`);
     database.exec(MODEL_SERVICE_CONNECTION_REVISION_72_SQL);
-    database.exec(`INSERT INTO model_service_connections SELECT * FROM legacy_model_selection; DROP TABLE legacy_model_selection; PRAGMA user_version = 83;`);
+    database.exec(`INSERT INTO model_service_connections SELECT * FROM legacy_model_selection; DROP TABLE legacy_model_selection;
+      DROP TABLE material_translation_attempts; PRAGMA user_version = 83;`);
     database.close();
     const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(migrated);
     const after = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-    try { expect(after.prepare(`SELECT ${columns} FROM model_service_connections`).all()).toEqual(before); }
+    try {
+      expect(after.prepare(`SELECT ${columns} FROM model_service_connections`).all()).toEqual(before);
+      expect(after.prepare('SELECT count(*) AS count FROM material_translation_attempts').get()!.count).toBe(0);
+    }
     finally { after.close(); }
     const saved = migrated.getModelServiceRouteConnection('deepseek-open-platform')!;
     expect(saved).toMatchObject({ credentialReference: connection.credentialReference, selected: true, fastSelected: true, connectionTest: null });
     migrated.saveModelServiceConnection('New Main', null, 'ready', 'opencode-go'); migrated.selectModelServiceRoute('opencode-go');
     expect(migrated.getConfiguredModelRoleBinding('main-editorial')?.route).toBe('opencode-go');
     expect(migrated.getConfiguredModelRoleBinding('fast-interaction')?.route).toBe('deepseek-open-platform');
+  });
+
+  it.each([1, 2])('refuses a replaced and retested credential during secret read %s without retargeting the attempt', async (replaceAt) => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Generation race', null, 'ready', 'openai-platform');
+    const probes: Array<{ url: string; model: string; cap: number }> = [];
+    const runtime = { scope: 'ordinary-production' as const, nativeFetch: responsesTransport(probes, 'AI7_OK') };
+    const selection = { route: 'openai-platform' as const, modelId: 'gpt-5.6-luna' };
+    const retest = () => testModelServiceConnection(store, roots.codeRoot, runtime, selection, { resolve: async () => 'public-synthetic-probe' });
+    await retest();
+    store.selectFastRoleModel(selection.route, selection.modelId);
+    const fast = store.getConfiguredModelRoleBinding('fast-interaction')!;
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, fast);
+    let reads = 0;
+    const transport = vi.fn();
+    const routes = productionFastRoleRoutes({ scope: 'ordinary-production', nativeFetch: transport }, () => policy, () => fast.credentialReference,
+      { resolve: async () => {
+        reads += 1;
+        if (reads === replaceAt) {
+          store.saveModelServiceConnection('Generation race', connection.credentialReference, 'ready', selection.route);
+          await retest();
+          store.selectFastRoleModel(selection.route, selection.modelId);
+        }
+        return 'public-synthetic-replacement';
+      } },
+      (reference, route) => { const current = store.getConfiguredModelRoleBinding('fast-interaction');
+        return current?.credentialReference === reference && current.route === route.profile.route && current.model === route.modelProfile.model; },
+      () => store.getModelServiceRouteConnection(selection.route)!.credentialUpdatedAt);
+    const owner = new FastRoleExecutionOwner({ fixture: null, live: routes });
+    try {
+      const result = await owner.ask('material-translation', 'Public synthetic replacement-race input.', 'generation-race');
+      expect(result.kind).toBe('failed');
+      expect(transport).not.toHaveBeenCalled();
+      expect(routes.broker.releaseCount).toBe(0);
+      expect(probes).toHaveLength(2);
+      expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(fast);
+    } finally { owner.dispose(); }
+  });
+
+  it.each(['contract-invalid', 'malformed', 'refusal', 'incomplete', 'unknown'] as const)('retains %s translation attribution across restart without a translation or automatic resend', async (failure) => {
+    const { store } = await openProductionStore();
+    store.saveModelServiceConnection('Attempt provenance', null, 'ready', 'openai-platform');
+    const probes: Array<{ url: string; model: string; cap: number }> = [];
+    const resolver = { resolve: async () => 'public-synthetic-placeholder' };
+    await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: responsesTransport(probes, 'AI7_OK') },
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver);
+    store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna');
+    const fast = store.getConfiguredModelRoleBinding('fast-interaction')!;
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, fast);
+    const transport = vi.fn(async () => {
+      if (failure === 'unknown') throw new Error('public synthetic lost response');
+      const usage = { input_tokens: 12, output_tokens: 7, output_tokens_details: { reasoning_tokens: 2 } };
+      return { status: 200, json: async () => failure === 'malformed' ? { status: 'completed', usage, invalid: true } : {
+        status: failure === 'incomplete' ? 'incomplete' : 'completed', usage,
+        output: [{ type: 'message', role: 'assistant', content: [failure === 'refusal' ? { type: 'refusal', refusal: 'public synthetic refusal' }
+          : { type: 'output_text', text: 'public synthetic invalid translation contract' }] }],
+      } };
+    });
+    const owner = new FastRoleExecutionOwner({ fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: transport as unknown as typeof fetch }, () => policy, () => fast.credentialReference, resolver) });
+    try {
+      store.useMaterialTranslator(materialTranslator(owner, 'ordinary-production', () => 1));
+      const path = join(roots.inputRoot, 'public-synthetic-failed-reference.txt');
+      await fs.writeFile(path, 'Public synthetic reference paragraph for failure attribution.');
+      const preview = await store.previewLibraryMaterial(path);
+      const material = await store.addLibraryMaterial({ previewId: preview.previewId, title: 'Public synthetic failed attempt', kind: 'document' });
+      store.startMaterialIndexing(); await store.settleMaterialIndexing();
+      store.requestMaterialTranslation(material.materialId); await store.settleMaterialLayers();
+      expect(transport).toHaveBeenCalledTimes(1);
+      store.close();
+      const restarted = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(restarted);
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        expect(database.prepare('SELECT count(*) AS count FROM material_index_translations').get()!.count).toBe(0);
+        const rows = database.prepare('SELECT canonical_json FROM material_translation_attempts').all();
+        expect(rows).toHaveLength(1);
+        expect(() => database.exec('UPDATE material_translation_attempts SET outcome = outcome')).toThrow('MATERIAL_INDEX_LEDGER_IMMUTABLE');
+        expect(() => database.exec('DELETE FROM material_translation_attempts')).toThrow('MATERIAL_INDEX_LEDGER_IMMUTABLE');
+        const attempt = JSON.parse(String(rows[0]!.canonical_json));
+        expect(attempt).toMatchObject({ outcome: failure === 'unknown' ? 'outcome-unknown' : 'failed',
+          provenance: { role: 'Fast Interaction Role', route: fast.route, model: fast.model, endpoint: fast.endpoint,
+            credentialSlot: fast.credentialSlot, credentialReference: fast.credentialReference,
+            usage: failure === 'unknown' ? null : { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 } } });
+        expect(attempt.provenance.failureCode).toMatch(/^[A-Z0-9_]+$/u);
+        expect(attempt.batch).toHaveLength(1);
+        expect(JSON.stringify(attempt)).not.toContain('public synthetic');
+        const translation = restarted.inspectLibraryMaterial(material.materialId).index?.translation;
+        expect(translation?.lastAttempt?.attemptId).toBe(attempt.attemptId);
+        expect(translation?.lastFailure).not.toBeNull();
+      } finally { database.close(); }
+      if (failure === 'contract-invalid' || failure === 'unknown') {
+        const before = restarted.inspectLibraryMaterial(material.materialId).index?.translation?.lastAttempt;
+        const destination = join(roots.inputRoot, `${failure}-attempt.ai7db`);
+        const prepared = await restarted.prepareDatabaseExport(destination, true);
+        expect((await restarted.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
+        const preview = await restarted.inspectDatabaseImport(destination);
+        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 84, dataVersion: 1 });
+        await restarted.prepareDatabaseReplacement(preview.previewId);
+        restarted.close();
+        const replaced = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(replaced);
+        expect((await replaced.inspectDatabaseReplacements()).replacements[0]?.outcome).toBe('applied');
+        expect(replaced.inspectLibraryMaterial(material.materialId).index?.translation?.lastAttempt).toEqual(before);
+        expect(replaced.inspectLibraryMaterial(material.materialId).index?.translation?.translated).toBe(0);
+      }
+      expect(transport).toHaveBeenCalledTimes(1);
+    } finally { owner.dispose(); }
   });
 
 });

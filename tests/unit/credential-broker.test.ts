@@ -56,6 +56,25 @@ describe('CredentialBroker', () => {
     await expect(broker.checkReadiness({ ...binding, modelRole: 'Frontier Model Role' as 'Main Editorial Role' })).rejects.toMatchObject({ code: 'CREDENTIAL_BINDING_INVALID' });
   });
 
+  it('refuses a stale attempt before reading or releasing a replaced credential (#1044)', async () => {
+    let current = true;
+    let reads = 0;
+    let consumed = false;
+    const broker = new CredentialBroker({ resolve: async () => {
+      reads += 1;
+      current = false;
+      return 'public-synthetic-replacement';
+    } });
+    const frozen = { ...binding, isCurrent: () => current };
+    await expect(broker.releaseTo(frozen, ticket, async () => { consumed = true; })).rejects.toMatchObject({ code: 'CREDENTIAL_BINDING_STALE' });
+    expect(reads).toBe(1);
+    expect(consumed).toBe(false);
+    expect(broker.releaseCount).toBe(0);
+    await expect(broker.checkReadiness(frozen)).rejects.toMatchObject({ code: 'CREDENTIAL_BINDING_STALE' });
+    await expect(broker.releaseTo(frozen, ticket, async () => { consumed = true; })).rejects.toMatchObject({ code: 'CREDENTIAL_BINDING_STALE' });
+    expect(reads).toBe(1);
+  });
+
   it('binds a slot for the Fast Interaction Role the dialogue runs on, releasing only against its own ticket (Issue #52, S17c)', async () => {
     const broker = new CredentialBroker(fakeResolver({ [binding.credentialReference]: 'placeholder-secret' }));
     const fast: CredentialSlotBinding = { ...binding, modelRole: 'Fast Interaction Role' };

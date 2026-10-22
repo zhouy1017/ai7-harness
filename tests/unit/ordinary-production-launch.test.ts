@@ -154,7 +154,7 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
       roleBindings: Record<string, { defaultBinding?: string; allowedBindings: unknown[] }>;
     };
     for (const role of ['Main Editorial Role', 'Fast Interaction Role']) {
-      expect(policy.roleBindings[role]!.allowedBindings).toEqual(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS);
+      expect(policy.roleBindings[role]!.allowedBindings).toEqual(role === 'Fast Interaction Role' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS);
       expect(policy.roleBindings[role]!.defaultBinding).toBe('opencode-go');
     }
     expect(MODEL_SERVICE_ROUTES).toEqual([...new Set(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.map((binding) => binding.route))]);

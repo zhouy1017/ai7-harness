@@ -119,6 +119,7 @@ export interface FastRoleLiveRoutes {
   /** The Credential Reference of the development slot, as the provider configuration names it. */
   readonly credentialReference: string;
   readonly current?: (reference: string, route: AdmittedFastRoleRoute) => boolean;
+  readonly credentialGeneration?: () => string | null;
 }
 
 /** The fast-role routes of a developer-live launch: each kind's route as the verified projection's policy admits it, or none. */
@@ -147,6 +148,7 @@ export function productionFastRoleRoutes(
   credentialReference: () => string | null,
   secretResolver: SecretResolver,
   current?: (reference: string, route: AdmittedFastRoleRoute) => boolean,
+  credentialGeneration?: () => string | null,
 ): FastRoleLiveRoutes {
   const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => {
     const admitted = admittedFastRoleRoute(policy(), kind.kindId, categoryIn(kind, 'ordinary-production'));
@@ -156,6 +158,7 @@ export function productionFastRoleRoutes(
     runtime,
     broker: new CredentialBroker(secretResolver, { developmentReferences: 'refused' }),
     ...(current === undefined ? {} : { current }),
+    ...(credentialGeneration === undefined ? {} : { credentialGeneration }),
     get routes() {
       return {
         [CONNECTION_TEST_KIND]: route(FAST_ROLE_KINDS[CONNECTION_TEST_KIND]),
@@ -281,6 +284,10 @@ export class FastRoleExecutionOwner {
     const route = live === null ? null : live.routes[kind.kindId] ?? null;
     // Read once: under ordinary-production the configured reference may change while this request is in flight (Issue #811).
     const credentialReference = live === null ? '' : live.credentialReference;
+    const credentialGeneration = live?.credentialGeneration?.();
+    const isCurrent = (): boolean => route === null || live === null ||
+      ((live.current?.(credentialReference, route) ?? true) &&
+       (live.credentialGeneration === undefined || (credentialGeneration !== null && live.credentialGeneration() === credentialGeneration)));
     const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
     const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
     const { promptContractDigest, systemPrompt } = kind;
@@ -288,7 +295,7 @@ export class FastRoleExecutionOwner {
     const composition = describeComposition(executionRoute, model, promptContractDigest);
     const bindingDigest = sha256Hex(`${kind.kindId}\u0000${sessionId}\u0000${composition.digest}`);
     const slotBinding: CredentialSlotBinding | null = live === null || route === null ? null : {
-      bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference,
+      bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference, isCurrent,
     };
     const bindingFacts: EgressBindingFacts = {
       bindingDigest,
@@ -318,6 +325,7 @@ export class FastRoleExecutionOwner {
     const provenance = (failureCode: string | null): FastRoleProvenance | undefined => route === null ? undefined : ({
       role: 'Fast Interaction Role', route: executionRoute, model, credentialSlot: route.profile.credentialSlot, endpoint: route.profile.endpoint, credentialReference,
       policyVersion: route.providerProcessingVersion, bindingDigest,
+      ...(credentialGeneration == null ? {} : { credentialUpdatedAt: credentialGeneration }),
       usage: adapter?.lastUsage ?? null, failureCode,
     });
     let current: string | null = null;
@@ -326,7 +334,7 @@ export class FastRoleExecutionOwner {
     // The Provider Test Ledger's own refusal, when it held the request back: the adapter reports any transport refusal alike.
     let ledgerRefusal: { code: string; message: string } | null = null;
     try {
-      if (route !== null && live?.current !== undefined && !live.current(credentialReference, route)) throw new FastRoleError('FAST_ROLE_BINDING_STALE', '快速交互选择已变化；请重新确认，未发送任何内容。');
+      if (!isCurrent()) throw new FastRoleError('FAST_ROLE_BINDING_STALE', '快速交互选择已变化；请重新确认，未发送任何内容。');
       let cache: ProviderResultCache | null = null;
       if (live !== null && validation !== null && !isOrdinaryProductionRuntime(live.runtime)) {
         cache = new ProviderResultCache(live.runtime.launch.providerCacheRoot);
@@ -379,7 +387,7 @@ export class FastRoleExecutionOwner {
           return adapter;
         },
         gate: (payload) => evaluateEgress(payload, bindingFacts, {
-          currentBindingDigest: () => route !== null && live?.current !== undefined && !live.current(credentialReference, route) ? null : current,
+          currentBindingDigest: () => isCurrent() ? current : null,
           acceptedOutputDigests: new Set(),
           // No Run, so no per-Run ceiling applies; the single bounded payload is the bound, as the dialogue's is. 生成来源译文's
           // words are no manuscript excerpt, so that waiver is not theirs (Issue #892, brief revision 5): under developer-live each
@@ -484,7 +492,8 @@ export async function testModelServiceConnection(
     return now?.credentialOperationState === 'ready' && now.credentialReference === connection.credentialReference && now.credentialUpdatedAt === connection.credentialUpdatedAt;
   };
   const owner = new FastRoleExecutionOwner({ fixture: null, live: productionFastRoleRoutes(runtime, () => policy,
-    () => unchanged() ? connection.credentialReference : null, secretResolver, () => unchanged()) });
+    () => unchanged() ? connection.credentialReference : null, secretResolver, () => unchanged(),
+    () => store.getModelServiceRouteConnection(input.route)?.credentialUpdatedAt ?? null) });
   const stop = (): void => owner.dispose();
   signal?.addEventListener('abort', stop, { once: true });
   if (cancelled()) stop();
@@ -493,13 +502,15 @@ export async function testModelServiceConnection(
   catch { answer = { kind: 'failed', code: cancelled() ? AI7_FAILURE_CODES.INTERRUPTED : 'MODEL_CONNECTION_TEST_UNAVAILABLE', message: '文本连接测试没有发送。', outcomeUnknown: false }; }
   finally { signal?.removeEventListener('abort', stop); owner.dispose(); }
   const passed = answer.kind === 'answered' && answer.text.trim() === 'AI7_OK';
+  const code = passed ? null : answer.kind === 'failed' ? answer.code : 'MODEL_CONNECTION_TEST_RESPONSE_INVALID';
+  const facts = answer.kind === 'answered' ? answer.binding.provenance : answer.provenance;
   const status: ModelConnectionTestStatus = {
     modelId: input.modelId, credentialUpdatedAt: connection.credentialUpdatedAt, testedAt: new Date().toISOString(),
     outcome: passed ? 'passed' : answer.kind === 'failed' && answer.outcomeUnknown ? 'outcome-unknown'
       : cancelled() ? 'cancelled' : 'failed',
-    code: passed ? null : answer.kind === 'failed' ? answer.code : 'MODEL_CONNECTION_TEST_RESPONSE_INVALID',
+    code,
     verified: 'buffered-text-only',
-    ...((answer.kind === 'answered' ? answer.binding.provenance : answer.provenance) === undefined ? {} : { provenance: (answer.kind === 'answered' ? answer.binding.provenance : answer.provenance)! }),
+    ...(facts === undefined ? {} : { provenance: { ...facts, failureCode: code } }),
   };
   store.recordModelConnectionTest(connection, status);
   return status;

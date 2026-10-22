@@ -43,7 +43,7 @@
             "policyType": "provider-processing",
             "version": "v25",
             "canonicalPath": "docs/policies/provider-processing-policy.v25.json",
-            "sha256": "b3fdb7550da57d4127c1c507fea9deec04d829185dd854b3e8e5dc58e92da282"
+            "sha256": "d46a98dc4f99170b7e0706102af388a8b33e5dabbc351e76a5f47db374a2104c"
           },
           "developer-live": {
             "policyId": "provider-processing-policy",

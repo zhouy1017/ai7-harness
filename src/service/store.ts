@@ -726,6 +726,8 @@ import {
   MaterialIndexLedger,
   extractMaterialText,
   initializeMaterialIndexLayerSchema,
+  initializeMaterialTranslationAttemptSchema,
+  isModelTextAttemptProvenance,
   initializeMaterialIndexSchema,
   prepareMaterialIndexInSlices,
   sweepMaterialIndexWork,
@@ -903,7 +905,7 @@ import {
 } from '../shared/protocol.js';
 /** How many items or Runs one line of an exclusion's impact preview names before it gives the count. */
 const NAMED_EXCLUSION_ENTRIES = 5;
-import { canonicalRecord, isRecord } from './analysis/canonical.js';
+import { canonicalRecord, hasExactKeys, isRecord } from './analysis/canonical.js';
 import {
   DIALOGUE_BASIS_QUOTE_CHARACTERS,
   DIALOGUE_MARK_SOURCE_LABEL,
@@ -3479,6 +3481,7 @@ function validateModelServiceSchema(
      LIMIT 1`,
   ).get();
   requireStore(invalid === undefined, 'SCHEMA_INVALID', '模型服务连接记录超出当前固定绑定。');
+  for (const row of db.prepare('SELECT * FROM model_service_connections').iterate()) readModelConnectionTest(row);
 }
 
 /** The connection row of each production route (Issue #811); the official row keeps the identity Issue #712 gave it. */
@@ -3511,6 +3514,29 @@ function initializeSearchBackendSchema(db: DatabaseSync): void {
     for (const entry of SEARCH_BACKENDS.filter((backend) => backend.shipped)) insert.run(entry.id, entry.id === defaultSearchBackend()!.id ? 1 : null, instant);
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }
+}
+
+/** Read only the closed, generation-bound metadata retained by the protected synthetic test. */
+function readModelConnectionTest(row: SqlRow): ModelConnectionTestStatus | null {
+  if (row.connection_test == null) return null;
+  const json = asString(row.connection_test);
+  requireStore(json.length <= 8192, 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
+  const value: unknown = JSON.parse(json);
+  requireStore(isRecord(value) && hasExactKeys(value, ['modelId', 'credentialUpdatedAt', 'testedAt', 'outcome', 'code', 'verified',
+    ...(value.provenance === undefined ? [] : ['provenance'])]) &&
+    value.credentialUpdatedAt === row.credential_updated_at && typeof value.testedAt === 'string' && value.testedAt.length <= 30 && Number.isFinite(Date.parse(value.testedAt)) &&
+    ['passed', 'failed', 'outcome-unknown', 'cancelled'].includes(value.outcome as string) && value.verified === 'buffered-text-only' &&
+    (value.code === null || (typeof value.code === 'string' && /^[A-Z0-9_]{1,100}$/u.test(value.code))) &&
+    MODEL_SERVICE_ROUTES.includes(row.provider_id as ModelServiceRouteId) && modelServiceModels(row.provider_id as ModelServiceRouteId).some((model) => model.modelId === value.modelId),
+    'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
+  const facts = value.provenance;
+  requireStore(value.outcome !== 'passed' || (value.code === null && facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
+  if (facts !== undefined) requireStore(isModelTextAttemptProvenance(facts) && facts.model === value.modelId && facts.route === row.provider_id &&
+    facts.credentialReference === row.credential_reference && facts.credentialSlot === row.credential_slot && facts.policyVersion === 'v25' && facts.failureCode === value.code &&
+    (facts.credentialUpdatedAt === undefined || facts.credentialUpdatedAt === value.credentialUpdatedAt) &&
+    allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null,
+    'MODEL_CONNECTION_TEST_INVALID', '连接测试来历无效。');
+  return value as unknown as ModelConnectionTestStatus;
 }
 
 /**
@@ -5198,6 +5224,7 @@ export class EditorialStore {
       // Revision 83 (Issue #89; ADR 0090 §3): the foreign Skill update candidates, rules and current selections beside them.
       initializeImportedSkillUpdateSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeModelSelectionSchema(authority);
+      initializeMaterialTranslationAttemptSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -10760,6 +10787,8 @@ export class EditorialStore {
         }
         const answer = await translator.translate(originalSha256, batch.map((target) => target.text), `${next.indexSha256.slice(0, 16)}/${batch[0]!.ordinal}`);
         if (answer.kind === 'failed') {
+          if (answer.provenance !== undefined) this.#transaction(this.#authority, () => this.#materialIndexCall(() => this.#materialIndex.recordTranslationAttempt(
+            next, originalSha256, batch, ['AI7_OUTCOME_UNKNOWN', 'PROVIDER_VALIDATION_OUTCOME_UNKNOWN'].includes(answer.provenance!.failureCode ?? '') ? 'outcome-unknown' : 'failed', answer.provenance!)));
           this.#translationFailures.set(materialId, answer.message);
           return;
         }
@@ -10768,8 +10797,11 @@ export class EditorialStore {
           this.#translationFailures.set(materialId, MATERIAL_LAYERS_READ_ONLY);
           return;
         }
-        this.#transaction(this.#authority, () => this.#materialIndexCall(() => this.#materialIndex.recordTranslations(next, answer.made,
-          batch.map((target, index) => ({ ordinal: target.ordinal, sha256: target.sha256, text: answer.texts[index]! })))));
+        this.#transaction(this.#authority, () => this.#materialIndexCall(() => {
+          if (answer.made.provenance !== undefined) this.#materialIndex.recordTranslationAttempt(next, originalSha256, batch, 'translated', answer.made.provenance);
+          this.#materialIndex.recordTranslations(next, answer.made,
+            batch.map((target, index) => ({ ordinal: target.ordinal, sha256: target.sha256, text: answer.texts[index]! })));
+        }));
       }
     } catch (error) {
       this.#translationFailures.set(materialId, error instanceof StoreError ? error.message : '来源译文没有完成；已记录的译文保留。');
@@ -17978,9 +18010,7 @@ export class EditorialStore {
     return (this.#authority.prepare('SELECT * FROM search_backend_connections').all() as SqlRow[]).map((row) => ({
       backendId: asString(row.backend_id), credentialReference: row.credential_reference === null ? null : asString(row.credential_reference),
       credentialOperationState: asString(row.credential_operation_state) as import('../shared/protocol.js').ModelCredentialOperationState,
-      selected: row.selected === 1,
-      fastSelected: row.fast_selected === 1,
-      connectionTest: row.connection_test === null ? null : JSON.parse(asString(row.connection_test)) as ModelConnectionTestStatus, selectedAt: asString(row.selected_at),
+      selected: row.selected === 1, selectedAt: asString(row.selected_at),
     }));
   }
 
@@ -18055,7 +18085,7 @@ export class EditorialStore {
       credentialUpdatedAt: asString(row.credential_updated_at),
       selected: row.selected === 1,
       fastSelected: row.fast_selected === 1,
-      connectionTest: row.connection_test === null ? null : JSON.parse(asString(row.connection_test)) as ModelConnectionTestStatus,
+      connectionTest: readModelConnectionTest(row),
     };
   }
 
@@ -18221,11 +18251,14 @@ export class EditorialStore {
       ...(facts === undefined ? {} : { provenance: {
         role: facts.role, route: facts.route, model: facts.model, endpoint: facts.endpoint, credentialSlot: facts.credentialSlot,
         credentialReference: facts.credentialReference, policyVersion: facts.policyVersion, bindingDigest: facts.bindingDigest,
+        ...(facts.credentialUpdatedAt === undefined ? {} : { credentialUpdatedAt: facts.credentialUpdatedAt }),
         failureCode: facts.failureCode, usage: counts == null ? null : { inputTokens: counts.inputTokens, outputTokens: counts.outputTokens,
           ...(counts.reasoningTokens === undefined ? {} : { reasoningTokens: counts.reasoningTokens }),
           ...(counts.cacheReadTokens === undefined ? {} : { cacheReadTokens: counts.cacheReadTokens }) },
       } }),
     };
+    readModelConnectionTest({ connection_test: JSON.stringify(sanitized), credential_updated_at: connection.credentialUpdatedAt,
+      provider_id: connection.binding.providerId, credential_slot: connection.binding.credentialSlot, credential_reference: connection.credentialReference });
     requireStore(this.#authority.prepare(`UPDATE model_service_connections SET connection_test = ?
       WHERE connection_id = ? AND credential_reference = ? AND credential_updated_at = ? AND credential_operation_state = 'ready'`)
       .run(JSON.stringify(sanitized), connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt).changes === 1,

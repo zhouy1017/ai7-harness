@@ -2241,6 +2241,7 @@ export interface ModelTextAttemptProvenance {
   readonly credentialReference: string;
   readonly policyVersion: string;
   readonly bindingDigest: string;
+  readonly credentialUpdatedAt?: string;
   readonly usage: { readonly inputTokens: number; readonly outputTokens: number; readonly cacheReadTokens?: number; readonly reasoningTokens?: number } | null;
   readonly failureCode: string | null;
 }
@@ -8795,6 +8796,19 @@ export interface MaterialTranslationProjection {
   readonly request: { readonly available: boolean; readonly reason: string | null };
   /** Why the last request stopped part way, in the editor's words; `null` when it did not. */
   readonly lastFailure: string | null;
+  /** Last actual model attempt, retained independently of whether it produced any translation. */
+  readonly lastAttempt?: MaterialTranslationAttemptProjection | null;
+}
+
+export interface MaterialTranslationAttemptProjection {
+  readonly attemptId: string;
+  readonly indexId: string;
+  readonly indexSha256: string;
+  readonly sourceSha256: string;
+  readonly batch: ReadonlyArray<{ readonly ordinal: number; readonly sha256: string }>;
+  readonly recordedAt: string;
+  readonly outcome: 'translated' | 'failed' | 'outcome-unknown';
+  readonly provenance: ModelTextAttemptProvenance;
 }
 
 /** What a 来源译文 is labelled wherever it is shown or read: it is the machine's, never the original. */

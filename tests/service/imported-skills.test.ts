@@ -34,8 +34,8 @@ describe('imported Skill store boundary', () => {
     try {
       const after = new DatabaseSync(path, { readOnly: true });
       try {
-        expect(Number(after.prepare('PRAGMA user_version').get()?.user_version)).toBe(IMPORTED_SKILL_UPDATE_SCHEMA_VERSION);
-        expect(IMPORTED_SKILL_UPDATE_SCHEMA_VERSION).toBe(LATEST_SCHEMA_VERSION);
+        expect(Number(after.prepare('PRAGMA user_version').get()?.user_version)).toBe(LATEST_SCHEMA_VERSION);
+        expect(IMPORTED_SKILL_UPDATE_SCHEMA_VERSION).toBe(83);
         const added = new Set([...Object.keys(IMPORTED_SKILL_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_TRIGGER_SQL), ...Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL)]);
         expect(pre82SchemaRows(after.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all() as Array<{ type: string; name: string; sql: string }>).filter((row) => !added.has(String(row.name)))).toEqual(before!);
         for (const table of [...Object.keys(IMPORTED_SKILL_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL)]) expect(MERGE_TABLE_POLICY[table as keyof typeof MERGE_TABLE_POLICY]).toBe('house');
@@ -75,7 +75,7 @@ describe('imported Skill store boundary', () => {
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const planted = new DatabaseSync(path);
     try {
-      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(83);
+      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(84);
       for (const trigger of [...Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL), ...Object.keys(IMPORTED_SKILL_TRIGGER_SQL)]) planted.exec(`DROP TRIGGER ${trigger}`);
       for (const table of [...Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_SCHEMA_SQL)].reverse()) planted.exec(`DROP TABLE ${table}`);
     } finally { planted.close(); }

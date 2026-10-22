@@ -239,6 +239,10 @@ import {
   MATERIAL_INDEX_LAYER_FOREIGN_KEYS,
   MATERIAL_INDEX_LAYER_SCHEMA_SQL,
   MATERIAL_INDEX_LAYER_TRIGGER_SQL,
+  MATERIAL_TRANSLATION_ATTEMPT_FOREIGN_KEYS,
+  MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL,
+  MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL,
+  validateMaterialTranslationAttemptSchema,
   MATERIAL_INDEX_SCHEMA_SQL,
   MATERIAL_INDEX_TRIGGER_SQL,
 } from './material-index.js';
@@ -2065,6 +2069,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...IMPORTED_EXEMPLAR_FOREIGN_KEYS,
   ...RESEARCH_EVIDENCE_FOREIGN_KEYS,
   ...MATERIAL_INDEX_LAYER_FOREIGN_KEYS,
+  ...MATERIAL_TRANSLATION_ATTEMPT_FOREIGN_KEYS,
   ...FACTUAL_VERIFICATION_FOREIGN_KEYS,
   ...HOUSE_REVIEW_PREFERENCE_FOREIGN_KEYS,
   ...TASK_INTENT_DRAFT_FOREIGN_KEYS,
@@ -2808,6 +2813,7 @@ function requireManuscriptReimportTargetSchema(
   const includeResearchEvidenceTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= RESEARCH_EVIDENCE_SCHEMA_VERSION || committed(RESEARCH_EVIDENCE_SCHEMA_SQL);
   // Revision 76 (Issue #892): the Material Index's similarity vectors and 来源译文.
   const includeMaterialIndexLayerTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MATERIAL_INDEX_LAYER_SCHEMA_VERSION || committed(MATERIAL_INDEX_LAYER_SCHEMA_SQL);
+  const includeMaterialTranslationAttempts = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_SELECTION_SCHEMA_VERSION || committed(MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL);
   // Revision 77 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
   const includeFactualVerificationTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= FACTUAL_VERIFICATION_SCHEMA_VERSION || committed(FACTUAL_VERIFICATION_SCHEMA_SQL);
   // Revision 79 (Issue #911): 本社审阅偏好 versions and each review category Task's pin of the version it read.
@@ -2980,6 +2986,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEvaluationProfileTables ? EVALUATION_PROFILE_SCHEMA_SQL : {}),
       ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_SCHEMA_SQL : {}),
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_SCHEMA_SQL : {}),
+      ...(includeMaterialTranslationAttempts ? MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL : {}),
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_SCHEMA_SQL : {}),
       ...(includeHousePreferenceTables ? HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL : {}),
       ...(includeTaskIntentDraftTables ? TASK_INTENT_DRAFT_SCHEMA_SQL : {}),
@@ -3047,6 +3054,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEvaluationProfileTables ? EVALUATION_PROFILE_TRIGGER_SQL : {}),
       ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_TRIGGER_SQL : {}),
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_TRIGGER_SQL : {}),
+      ...(includeMaterialTranslationAttempts ? MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL : {}),
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_TRIGGER_SQL : {}),
       ...(includeHousePreferenceTables ? HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL : {}),
       ...(includeTaskIntentDraftTables ? TASK_INTENT_DRAFT_TRIGGER_SQL : {}),
@@ -3055,6 +3063,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeImportedSkillUpdateTables ? IMPORTED_SKILL_UPDATE_TRIGGER_SQL : {}),
     },
   );
+  if (includeMaterialTranslationAttempts) validateMaterialTranslationAttemptSchema(db);
 }
 
 function requireV7TargetSchema(db: DatabaseSync): void {
