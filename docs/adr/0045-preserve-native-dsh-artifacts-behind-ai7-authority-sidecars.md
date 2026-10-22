@@ -63,7 +63,7 @@ Catalog discovery, acquisition/pinning, compatibility or conversion validation, 
 - Native lifecycle hooks, dependency scripts or code requiring execution produce at least a `restricted` compatibility disposition until separately authorized executable admission and sandboxing exist.
 - Installation and scoped enablement grant no manuscript access, Provider processing, credential resolution, network access, external Effect, background analysis or formal mutation authority.
 - A foreground artifact may execute only inside an exact Run created for a newly user-initiated Task, directly authorized or matched by an active Default Execution Rule.
-- A new autonomous background Provider dispatch requires a matching active Background Analysis Enrollment and still creates an exact frozen Run.
+- A new autonomous Provider-backed manuscript-analysis dispatch requires a matching active Background Analysis Enrollment and still creates an exact frozen Run. [ADR 0094 §3](0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md#3-opt-out-local-learning-with-intelligent-curation) separately authorizes automatic curation inside its active learning envelope; artifact enablement grants neither.
 - DSH Session, Plugin membership, catalog visibility or recommendation grants nothing.
 
 AI7 may expose pluggable catalog sources and native browse, search, install, update, disable, remove and rollback operations. No community directory is made authoritative by this decision, and the supported source set and adapter contract remain unresolved.

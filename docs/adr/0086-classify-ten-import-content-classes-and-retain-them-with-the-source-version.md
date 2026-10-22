@@ -48,7 +48,7 @@ The review shows the first nine as rows under the columns 内容类 · 数量 ·
 | Class | At import |
 | --- | --- |
 | 行内样式 | `完整保留（随文件保留）`, with 「改过的段落，导出时逐段说明格式能否原样恢复」 |
-| 批注与修订 | Unchanged by this record. S62 (#411) imports them as marks |
+| 批注与修订 | Comments retain author-attributed marks. [ADR 0094 §5](0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md#5-two-tracked-change-import-choices) requires an explicit choice of final imported baseline or AI7 suggestion marks for tracked insertions/deletions/moves; both preserve the original and eligible local learning pairs. |
 | 脚注与尾注 | `降级导入` until the manuscript has a note block. The manuscript shows neither the reference nor the note; the notes stay with the Source Version; the row says both (IMP-004) |
 | 表格 | `完整保留（随文件保留）`, with the same line as 行内样式. The cells' text enters the manuscript as paragraphs in reading order; the table's structure stays with the file |
 | 图片与图注 | `完整保留（随文件保留）`. The image stays with the Source Version and is restored on export. The manuscript keeps the caption as text and draws no placeholder yet: a placeholder needs a non-text block, which the manuscript does not have |
