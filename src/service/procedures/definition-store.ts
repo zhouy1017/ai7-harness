@@ -1,7 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { ProcedureDefinitionDocument, ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { canonicalJson, canonicalRecord, parseCanonicalJson, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
-import { preinstalledProcedureDefinitions } from './preinstalled.js';
+import { preinstalledProcedureDefinitions, allPreinstalledProcedureDefinitions } from './preinstalled.js';
+import { REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 
 export const PROCEDURE_DEFINITION_SCHEMA_SQL = {
   procedure_definitions: `CREATE TABLE procedure_definitions (
@@ -50,26 +51,39 @@ export const PROCEDURE_DEFINITION_FOREIGN_KEYS = {
 } as const;
 
 /** The three tables and the initial ten versions commit together, before the terminal schema stamp. */
+function insertProcedureVersions(db: DatabaseSync, documents: readonly ProcedureDefinitionDocument[]): void {
+  const createdAt = new Date().toISOString();
+  for (const document of documents) {
+    if (document.version === 1) {
+      const identity = canonicalRecord({ procedureId: document.id, preInstalled: true, createdAt });
+      db.prepare('INSERT INTO procedure_definitions VALUES (?, 1, ?, ?, ?)').run(document.id, createdAt, identity.json, identity.digest);
+    }
+    const record = canonicalRecord(document);
+    const versionId = `${document.id}@${document.version}`;
+    const previous = document.version === 1 ? null : db.prepare('SELECT document_sha256 FROM procedure_definition_versions WHERE procedure_id = ? AND version = ?').get(document.id, document.version - 1)?.document_sha256;
+    requireAnalysis(previous === null || typeof previous === 'string', 'PROCEDURE_RECORD_INVALID', '工序前一版本缺失。');
+    const version = canonicalRecord({ versionId, procedureId: document.id, version: document.version,
+      documentDigest: record.digest, previousDocumentDigest: previous, createdAt });
+    db.prepare('INSERT INTO procedure_definition_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(versionId, document.id, document.version, record.json, record.digest, previous, createdAt, version.json, version.digest);
+  }
+}
+
 export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'procedure_definitions'").get() !== undefined) {
-    validateProcedureDefinitions(db);
-    return;
+  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'procedure_definitions'").get() !== undefined;
+  if (existing) {
+    const legacy = Number(db.prepare('PRAGMA user_version').get()?.user_version) < REVIEW_CONTRACT_SCHEMA_VERSION;
+    validateProcedureDefinitions(db, legacy);
+    const count = Number(db.prepare('SELECT count(*) total FROM procedure_definition_versions').get()!.total);
+    if (count === allPreinstalledProcedureDefinitions().length) return;
   }
   db.exec('BEGIN IMMEDIATE');
   try {
-    for (const sql of Object.values(PROCEDURE_DEFINITION_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(PROCEDURE_DEFINITION_TRIGGER_SQL)) db.exec(sql);
-    const createdAt = new Date().toISOString();
-    for (const document of preinstalledProcedureDefinitions()) {
-      const identity = canonicalRecord({ procedureId: document.id, preInstalled: true, createdAt });
-      db.prepare('INSERT INTO procedure_definitions VALUES (?, 1, ?, ?, ?)').run(document.id, createdAt, identity.json, identity.digest);
-      const record = canonicalRecord(document);
-      const versionId = `${document.id}@${document.version}`;
-      const version = canonicalRecord({ versionId, procedureId: document.id, version: document.version,
-        documentDigest: record.digest, previousDocumentDigest: null, createdAt });
-      db.prepare('INSERT INTO procedure_definition_versions VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)')
-        .run(versionId, document.id, document.version, record.json, record.digest, createdAt, version.json, version.digest);
+    if (!existing) {
+      for (const sql of Object.values(PROCEDURE_DEFINITION_SCHEMA_SQL)) db.exec(sql);
+      for (const sql of Object.values(PROCEDURE_DEFINITION_TRIGGER_SQL)) db.exec(sql);
     }
+    insertProcedureVersions(db, existing ? preinstalledProcedureDefinitions().filter((document) => document.version === 2) : allPreinstalledProcedureDefinitions());
     validateProcedureDefinitions(db);
     db.exec('COMMIT');
   } catch (error) {
@@ -80,43 +94,45 @@ export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
   }
 }
 
-/** F-26a admits only the exact pre-installed versions; no writer or editor API exists yet. */
-export function validateProcedureDefinitions(db: DatabaseSync): void {
-  const expected = preinstalledProcedureDefinitions();
+/** Both generations have fixed bytes; a current store may lose neither predecessors nor successors. */
+export function validateProcedureDefinitions(db: DatabaseSync, allowLegacy = false): void {
   const identities = db.prepare('SELECT * FROM procedure_definitions').all();
   const versions = db.prepare('SELECT * FROM procedure_definition_versions').all();
-  requireAnalysis(identities.length === expected.length && versions.length === expected.length,
+  const expected = allowLegacy && versions.length === 10 ? preinstalledProcedureDefinitions(1) : allPreinstalledProcedureDefinitions();
+  requireAnalysis(identities.length === 10 && versions.length === expected.length,
     'PROCEDURE_RECORD_INVALID', '预装工序版本不完整。');
   for (const document of expected) {
     const identity = identities.find((row) => row.procedure_id === document.id);
     const row = versions.find((version) => version.procedure_id === document.id && version.version === document.version);
     requireAnalysis(identity !== undefined && row !== undefined, 'PROCEDURE_RECORD_INVALID', '预装工序版本缺失。');
+    const previous = document.version === 1 ? null : sha256Hex(canonicalJson(expected.find((entry) => entry.id === document.id && entry.version === document.version - 1)!));
     const identityRecord = canonicalRecord({ procedureId: document.id, preInstalled: true, createdAt: identity.created_at });
     const versionRecord = canonicalRecord({ versionId: `${document.id}@${document.version}`, procedureId: document.id,
-      version: document.version, documentDigest: sha256Hex(canonicalJson(document)), previousDocumentDigest: null, createdAt: row.created_at });
+      version: document.version, documentDigest: sha256Hex(canonicalJson(document)), previousDocumentDigest: previous, createdAt: row.created_at });
     requireAnalysis(identity.pre_installed === 1 && identity.canonical_json === identityRecord.json && identity.sha256 === identityRecord.digest &&
-      row.version_id === `${document.id}@${document.version}` && row.previous_document_sha256 === null &&
+      row.version_id === `${document.id}@${document.version}` && row.previous_document_sha256 === previous &&
       row.document_json === canonicalJson(document) && row.document_sha256 === sha256Hex(canonicalJson(document)) &&
       row.canonical_json === versionRecord.json && row.sha256 === versionRecord.digest,
     'PROCEDURE_RECORD_INVALID', '预装工序版本或摘要无效。');
   }
 }
 
-export function resolveProcedureDefinition(db: DatabaseSync, procedureId: string, version = 1): {
+export function resolveProcedureDefinition(db: DatabaseSync, procedureId: string, version?: number): {
   document: ProcedureDefinitionDocument; pin: ProcedureDefinitionPin;
 } {
-  const row = db.prepare('SELECT document_json, document_sha256 FROM procedure_definition_versions WHERE procedure_id = ? AND version = ?')
-    .get(procedureId, version);
+  const row = version === undefined
+    ? db.prepare('SELECT document_json, document_sha256, version FROM procedure_definition_versions WHERE procedure_id = ? ORDER BY version DESC LIMIT 1').get(procedureId)
+    : db.prepare('SELECT document_json, document_sha256, version FROM procedure_definition_versions WHERE procedure_id = ? AND version = ?').get(procedureId, version);
   requireAnalysis(row !== undefined && typeof row.document_json === 'string' && typeof row.document_sha256 === 'string' &&
     sha256Hex(row.document_json) === row.document_sha256, 'PROCEDURE_RECORD_INVALID', '工序版本不可用。');
   const document = parseCanonicalJson(row.document_json) as ProcedureDefinitionDocument;
-  requireAnalysis(document.id === procedureId && document.version === version, 'PROCEDURE_RECORD_INVALID', '工序版本标识无效。');
-  return { document, pin: { procedureId, version, digest: row.document_sha256 } };
+  requireAnalysis(document.id === procedureId && document.version === row.version, 'PROCEDURE_RECORD_INVALID', '工序版本标识无效。');
+  return { document, pin: { procedureId, version: document.version, digest: row.document_sha256 } };
 }
 
-/** The sibling binds the exact procedure/stages without changing the legacy canonical envelope or its digest. */
-export function recordProcedurePlanPin(db: DatabaseSync, taskIntentId: string, envelopeDigest: string, procedureId: string): void {
-  const { pin } = resolveProcedureDefinition(db, procedureId);
+/** New plans pin the latest matching contract; existing pins are immutable. */
+export function recordProcedurePlanPin(db: DatabaseSync, taskIntentId: string, envelopeDigest: string, procedureId: string, version?: number): void {
+  const { pin } = resolveProcedureDefinition(db, procedureId, version);
   const record = canonicalRecord({ taskIntentId, planEnvelopeDigest: envelopeDigest, procedure: pin });
   db.prepare('INSERT INTO procedure_plan_pins VALUES (?, ?, ?, ?, ?)')
     .run(envelopeDigest, taskIntentId, `${pin.procedureId}@${pin.version}`, record.json, record.digest);

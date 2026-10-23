@@ -5,7 +5,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
-import { PROCEDURE_DEFINITION_SCHEMA_SQL } from '../../src/service/procedures/definition-store.js';
+import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL, resolveProcedureDefinition } from '../../src/service/procedures/definition-store.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 
@@ -76,8 +76,21 @@ describe('Procedure Definition persistence and exact plan pins', () => {
     expect(store.getBookOverview(book.bookId).book.bookId).toBe(book.bookId);
     store.markCleanShutdown(); store.close();
     db = new DatabaseSync(path);
-    // Synchronized with #1082 and #1083: revisions 86 and 87 follow without moving these relations.
-    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(87);
+    // Synchronized with #1082, #1083 and #1084: revisions 86 to 88 follow; 88 adds the version-2 review procedures beside version 1.
+    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(88);
+    const originalVersions = db.prepare('SELECT * FROM procedure_definition_versions WHERE version = 1 ORDER BY version_id').all();
+    db.exec('DROP TRIGGER procedure_definition_versions_no_delete; DELETE FROM procedure_definition_versions WHERE version = 2; PRAGMA user_version = 85;');
+    db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definition_versions_no_delete']!);
+    db.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const library = (await store.inspectKnowledgeProcedures()).preinstalled!;
+    expect(library.filter((entry) => entry.version === 2)).toHaveLength(7);
+    expect(library.filter((entry) => entry.version === 2).every((entry) => entry.previousVersions?.[0]?.version === 1)).toBe(true);
+    store.markCleanShutdown(); store.close();
+    db = new DatabaseSync(path);
+    expect(db.prepare('SELECT * FROM procedure_definition_versions WHERE version = 1 ORDER BY version_id').all()).toEqual(originalVersions);
+    expect(resolveProcedureDefinition(db, 'ai7-procedure/review-typos-and-usage', 1).document.stages[0]!.outputTemplateId).toBe('ai7.editorial-review.unit-result/1');
+    expect(resolveProcedureDefinition(db, 'ai7-procedure/review-typos-and-usage').document.stages[0]!.outputTemplateId).toBe('ai7.editorial-review.unit-result/2');
     db.exec('DROP TABLE procedure_plan_pins'); db.close();
     await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
     db = new DatabaseSync(path, { readOnly: true });

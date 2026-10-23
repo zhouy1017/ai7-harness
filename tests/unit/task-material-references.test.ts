@@ -36,7 +36,10 @@ describe('exact Material Index reference contracts', () => {
     expect(definition.promptContractDigest).not.toBe(base.promptContractDigest);
     expect(definition.requestDigest(1, 'c'.repeat(64))).not.toBe(base.requestDigest(1, 'c'.repeat(64)));
     const changed = { ...source, indexDigest: 'b'.repeat(64) };
-    expect(taskMaterialKindDefinition(base, { ...boundary, references: [changed] }, [taskMaterialWords(changed, paragraphs)]).promptContractDigest).not.toBe(definition.promptContractDigest);
+    const successor = taskMaterialKindDefinition(base, { ...boundary, references: [changed] }, [taskMaterialWords(changed, paragraphs)]);
+    expect(successor.promptContractDigest).not.toBe(definition.promptContractDigest);
+    expect(successor.contractIdentity!.categoryConfiguration).not.toEqual(definition.contractIdentity!.categoryConfiguration);
+    expect(definition.contractIdentity!.categoryConfiguration).not.toEqual(base.contractIdentity!.categoryConfiguration);
   });
   it('refuses altered material words, duplicate records and a different frozen contract', () => {
     expect(() => taskMaterialWords(source, ['不同的合成文字'])).toThrow();

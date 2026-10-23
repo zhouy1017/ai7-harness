@@ -1,3 +1,4 @@
+import { reviewFixtureContractVersion } from '../../src/service/provider/model-fixture.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,6 +34,7 @@ const fixtureTool = await import('../../tools/generate-model-fixture.mjs') as {
 };
 let roots: ServiceTestRoots;
 let store: EditorialStore;
+let control: NonNullable<Parameters<typeof EditorialStore.open>[2]>;
 let owner: BaselineAnalysisExecutionOwner;
 let driver: ReviewRunDriver;
 let policy: LaunchPolicyProjection;
@@ -64,9 +66,10 @@ beforeEach(async () => {
     policy = withRuleFor(policy, id, { materialReferencesAllowed: true,
       outboundDataCategories: [...new Set([...rule.outboundDataCategories, 'frozen-material-reference-excerpt' as const])] });
   }
-  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+  control = { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
-    induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false };
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
   bind();
   const book = await importSample1Book(store, roots.codeRoot, 'sample1 · 资料参考验证');
   bookId = book.bookId;
@@ -120,7 +123,7 @@ beforeEach(async () => {
       if (entry?.response.kind !== 'unit-result') throw new Error('SYNTHETIC_REPORT_ENTRY_MISSING');
       text = entry.response.text;
     } else {
-      const result = review !== null ? { schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: Number(review[1]), findings: [] }
+      const result = review !== null ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: Number(review[1]), findings: [] }
         : writing !== null ? { schema: 'ai7.writing.unit-result/1', unitOrdinal: Number(writing[1]), passages: [{ kind: 'highlight', note: '合成看点。', blockOrdinals: [1] }] }
         : message.startsWith('写作综合 ') ? { schema: 'ai7.writing.synthesis-result/1', title: '合成草稿', sections: [{ heading: '合成部分', paragraphs: ['合成草稿待编辑修改。'] }] }
         : message.startsWith('保证抽样 ') ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message).map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
@@ -242,6 +245,7 @@ describe('live material references (#809)', () => {
     policy = withRuleFor(policy, kindId(kind), { clarificationQuestionAllowed: false, clarificationTimeoutHours: null });
     bind();
     recorded = await loadModelFixture(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), `sample1-recorded-v41-material-${kind}`);
+    if (kind === 'review') control.baselineAnalysisRoute = { fixtureIdentity: recorded.identity, fixtureSha256: recorded.sha256, fixtureLineage: recorded.lineage, reviewContractVersion: reviewFixtureContractVersion(recorded) };
     await prepare(kind)();
     expect(recordedUnits.size).toBe(8);
     expect(sent.some((body) => materialParagraphs.every((paragraph) => body.includes(paragraph)))).toBe(true);

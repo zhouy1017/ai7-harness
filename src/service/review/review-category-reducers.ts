@@ -48,6 +48,11 @@ export interface ReviewCategoryReduction {
 }
 
 export const REVIEW_EXCLUSION_REASON_LABELS = {
+  'contract-schema-invalid': '发现的字段或文字不符合审阅契约。',
+  'contract-quote-not-in-block': '发现引用的内容块序号不在本单元中。',
+  'contract-replacement-required': '修改建议缺少替换文字。',
+  'contract-replacement-refused': '批注不能包含替换文字。',
+  'contract-clause-unknown': '发现引用了本次审阅未列出的依据。',
   'not-exact-fetched': '未经精确取文',
   'quote-not-found': '引文未能在本单元完整的授权内容块中定位；该发现不获得来源范围，也不形成标记。',
   'quote-ambiguous': '引文存在多个精确匹配，锚点不唯一；该发现不获得来源范围，也不形成标记。',
@@ -103,11 +108,20 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
   // Reference Integrity: preserve declared-block matches, then resolve a missed ordinal only within
   // the exact message envelope. Missing pinned records cannot establish envelope-wide uniqueness.
   const located: LocatedFinding[] = [];
+  const rejected: ReviewCategoryExcludedProjection[] = [];
   for (const outcome of closed) {
     const unit = manifest.units[outcome.unitOrdinal - 1]!;
     const messageBlockIds = reviewCategoryMessageBlockIds(unit);
     const distinctBlockIds = [...new Set(messageBlockIds)];
     const completeEnvelope = distinctBlockIds.every((id) => blocks.has(id));
+    for (const entry of outcome.result.rejected ?? []) {
+      listed += 1;
+      const reason = `contract-${entry.reasonCode}` as ReviewFindingExclusionReason;
+      rejected.push({ findingId: findingId({ kind: 'rejected', categoryId, unitOrdinal: outcome.unitOrdinal, index: entry.index }),
+        unitOrdinal: outcome.unitOrdinal, findingIndex: entry.index, blockId: '', blockOrdinal: 0,
+        quote: '', severity: 'note', note: '', replacement: null, clauseId: null, rawText: entry.text,
+        reason, reasonLabel: REVIEW_EXCLUSION_REASON_LABELS[reason] });
+    }
     outcome.result.findings.forEach((finding, index) => {
       listed += 1;
       bySeverity[finding.severity] += 1;
@@ -139,7 +153,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       // one the manifest named and the revision does not hold: not found, and never a silent drop.
       located.push({
         unitOrdinal: outcome.unitOrdinal,
-        findingOrdinal: index + 1,
+        findingOrdinal: (outcome.result.acceptedIndexes?.[index] ?? index) + 1,
         finding,
         blockId: blockId ?? '',
         blockText: block?.text ?? null,
@@ -153,7 +167,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
   // findings on the same words that propose different replacements are two findings.
   const findings: ReviewCategoryFindingProjection[] = [];
   const findingsByKey = new Map<string, number>();
-  const excluded: ReviewCategoryExcludedProjection[] = [];
+  const excluded: ReviewCategoryExcludedProjection[] = [...rejected];
   let merged = 0;
   let verified = 0;
   for (const entry of located) {

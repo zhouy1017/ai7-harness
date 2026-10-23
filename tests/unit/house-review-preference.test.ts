@@ -35,6 +35,9 @@ describe('review preference opt-in', () => {
     expect(wrapped.requestDigest(1, 'b'.repeat(64))).not.toBe(base.requestDigest(1, 'b'.repeat(64)));
     expect(wrapped.parseUnitResult).toBe(base.parseUnitResult);
     expect(wrapped.reduce).toBe(base.reduce);
+    expect(wrapped.contractIdentity!.categoryConfiguration).not.toEqual(base.contractIdentity!.categoryConfiguration);
+    const changed = houseReviewPreferenceKindDefinition(base, { ...preference, ordinal: 2, lines: ['另一条合成审阅偏好。'] }, true);
+    expect(changed.contractIdentity!.categoryConfiguration).not.toEqual(wrapped.contractIdentity!.categoryConfiguration);
   });
 
   it('counts grapheme edits and stable category effort weights without time tracking', () => {

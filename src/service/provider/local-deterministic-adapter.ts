@@ -149,7 +149,7 @@ const BLOCK_PLACEHOLDER = /\{\{block:(\d+)\}\}/gu;
 const CROSS_UNIT_BLOCK_PLACEHOLDER = /\{\{unit:(\d+):block:(\d+)\}\}/gu;
 const SAMPLING_REF_PLACEHOLDER = /\{\{ref:(\d+)\}\}/gu;
 const SAMPLING_BLOCK_PLACEHOLDER = /\{\{sample-block:(\d+)\}\}/gu;
-const BLOCK_LINE = /^\[(blk_[0-9a-f]{24})\] /u;
+const BLOCK_LINE = /^(?:\[[1-9][0-9]*\] )?\[(blk_[0-9a-f]{24})\] /u;
 /** The `({kind}{level})` marker the prompt contract writes between a block's identity and its text. */
 const BLOCK_KIND_MARKER = /^\((?:title|heading|paragraph)(?: h[1-6])?\) /u;
 

@@ -89,7 +89,7 @@ export async function runReviewCase(
     let revision: ReviewCategoryResultSetRevisionProjection | null = null;
     let manifest: { units: ReadonlyArray<{ ordinal: number; blockIds: ReadonlyArray<string> }> } | null = null;
     try {
-      const category = store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(entry)));
+      const category = store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(entry), testCase.fixture.startsWith('sample1-recorded-') ? 1 : 2));
       revision = category.resultSetRevision as ReviewCategoryResultSetRevisionProjection | null;
       manifest = category.coverageManifest;
     } catch { revision = null; }

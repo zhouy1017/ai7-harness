@@ -163,7 +163,7 @@ export async function runEditorialCase(request: RunCaseRequest): Promise<CaseMet
   const fixtures = basis === null ? [fixture] : [basis, fixture];
   const deterministic = testCase.replay.route === 'deterministic';
   const roots = await createCaseRoots();
-  const store = await openStore(roots, codeRoot, deterministic ? fixture : null);
+  const store = await openStore(roots, codeRoot, fixture);
   let owner: ReturnType<typeof deterministicOwner> | null = null;
   const reportOwners: Array<ReturnType<typeof deterministicOwner>> = [];
   try {

@@ -266,3 +266,18 @@ describe('resendUnits', () => {
   });
 });
 
+
+
+it('review v2 reuse compares the framework version and semantic category inputs, independently of prompt bytes (#1084)', () => {
+  const manifest = manifestOf(baseBlocks);
+  const predecessor: ScopePlanPredecessor = { revisionId: randomUUID(), ordinal: 1, digest: 'a'.repeat(64),
+    contractVersion: 'ai7.editorial-review/2', schemaDigest: 'a'.repeat(64), categoryConfigurationIdentity: 'configuration-1',
+    coverageManifestDigest: manifest.digest, manifest, unitStates: manifest.units.map((unit) => ({ unitOrdinal: unit.ordinal, state: 'closed' })),
+    unreviewedUnitOrdinals: [] };
+  const derive = (configuration: string, contractVersion = 'ai7.editorial-review/2') => deriveScopePlan({
+    kind: 'editorial-review/typos-and-usage', contractVersion, schemaDigest: 'b'.repeat(64), categoryConfigurationIdentity: configuration,
+    mode: 'review-sync', recompute: 'changed', selectedRange: null, manifest, predecessor });
+  expect(derive('configuration-1').counts.reused).toBe(manifest.units.length);
+  expect(derive('configuration-2').counts.reused).toBe(0);
+  expect(derive('configuration-1', 'ai7.editorial-review/3').counts.reused).toBe(0);
+});

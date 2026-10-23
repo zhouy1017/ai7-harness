@@ -186,11 +186,9 @@ export function reusePlanRecord(plan: AnalysisReusePlanProjection | ReviewScopeP
  * unread there — is read again, never carried as unchanged because the range Run saw it last
  * (`changedUnreadUnitOrdinals`).
  *
- * Compatibility binds the frozen category contract, not only the contract version. Every category is
- * read under the one version `ai7.editorial-review/1`, and what a category's units were actually read
- * under — its guideline clauses, its procedure, its output kind — is frozen into its prompt contract,
- * whose digest the revision's schema digest pins. A predecessor produced under another schema digest
- * answers a different question, so none of its units is reused (`contract-version-mismatch`).
+ * Review v2 compares the framework version and the semantic category configuration identity, independent
+ * of the prompt-byte digest that keys fixtures and caches. A changed clause or guideline version still
+ * invalidates reuse. Historical v1 plans keep their schema-digest compatibility rule.
  */
 export const SCOPE_PLAN_SCHEMA = 'ai7.analysis.reuse-plan/2' as const;
 
@@ -211,6 +209,7 @@ export const CARRIED_GAP_REASON = '上一次读这个单元没有成功；它不
 export interface ScopePlanPredecessor extends ReusePlanPredecessor {
   /** The schema digest the predecessor revision pinned: the frozen category contract its units were read under. */
   readonly schemaDigest: string;
+  readonly categoryConfigurationIdentity?: string;
   /** The predecessor units that were left unreviewed rather than lost: `out-of-scope` gaps. */
   readonly unreviewedUnitOrdinals: ReadonlyArray<number>;
   /**
@@ -228,6 +227,7 @@ export interface ScopePlanInput {
   readonly kind: AnalysisKindId;
   readonly contractVersion: string;
   readonly schemaDigest: string;
+  readonly categoryConfigurationIdentity?: string;
   readonly mode: AnalysisTaskMode;
   /** What the mode means to read, from the kind's own mode table. */
   readonly recompute: 'everything' | 'changed' | 'selected-range';
@@ -251,7 +251,10 @@ export function deriveScopePlan(input: ScopePlanInput): ReviewScopePlanProjectio
     (predecessor.manifest.units.every((unit) => states.has(unit.ordinal)) && states.size === predecessor.manifest.units.length),
   'ANALYSIS_RECORD_INVALID', '前一修订版的单元结果与其覆盖清单不一致。');
   const contractCompatible = predecessor !== null &&
-    predecessor.contractVersion === input.contractVersion && predecessor.schemaDigest === input.schemaDigest;
+    predecessor.contractVersion === input.contractVersion &&
+    (input.kind.startsWith('editorial-review/')
+      ? (predecessor.categoryConfigurationIdentity ?? predecessor.schemaDigest) === (input.categoryConfigurationIdentity ?? input.schemaDigest)
+      : predecessor.schemaDigest === input.schemaDigest);
   const newKeys = unitContentKeys(manifest);
   const closedByKey = new Map<string, number[]>();
   const failedKeys = new Set<string>();

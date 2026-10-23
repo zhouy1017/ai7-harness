@@ -26,8 +26,9 @@ export const NO_PLAN_EDITS: PlanEdits = Object.freeze({ removedSteps: [], disall
 
 /** The words the plan and its revisions use for each editable item. */
 export const PLAN_EDIT_STEP_LABELS: Readonly<Record<PlanEditableStep, string>> = { 'assurance-sampling': '核对与抽检' };
-export const PLAN_EDIT_ADAPTATION_LABELS: Readonly<Record<PlanEditableAdaptation, string>> = {
+export const PLAN_EDIT_ADAPTATION_LABELS: Readonly<Record<PlanEditableAdaptation | 'contract-retry', string>> = {
   'safe-retry': '模型服务暂时出错时，同一个阅读范围安全地再试一次',
+  'contract-retry': '契约重试（同一消息再发一次）',
 };
 
 /**

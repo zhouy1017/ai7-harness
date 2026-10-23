@@ -55,12 +55,14 @@ export const DATA_VERSION_BASELINE_REVISION: number = 83;
  * unit suite holds; a `breaking` class is the Owner's decision alone. Revision 84 adds independent model selections and
  * append-only translation-attempt metadata without rewriting existing records, so it remains inside Data Version 1. Revision 86
  * (Issue #1082) only adds the append-only learning signal, control and explicit memory relations, so it stays inside it too.
+ * Revision 88 (Issue #1084) widens the review contract CHECKs over unchanged rows and adds append-only excluded findings.
  */
 export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = [
   { revision: 84, class: 'additive' },
   { revision: 85, class: 'additive' },
   { revision: 86, class: 'additive' },
   { revision: 87, class: 'additive' },
+  { revision: 88, class: 'additive' },
 ];
 
 /**

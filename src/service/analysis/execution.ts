@@ -1651,6 +1651,11 @@ export class BaselineAnalysisExecutionOwner {
       const priorAdaptations = continuation === null ? [] : ledger.adaptationsOf(facts.runRecordId);
       let spanOrdinal = stored?.spanCount ?? 0;
       let adaptationOrdinal = priorAdaptations.length;
+      const contractRule = liveKindRule(policy, definition.kind, [], facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
+      const contractDeclared = definition.contractIdentity?.version === 2 &&
+        (ledger.frozenPlan(facts.taskIntentId, facts.planEnvelopeDigest).components['plan-envelope'] as { boundary?: { adaptable?: ReadonlyArray<{ adaptationClass: string }> } })
+          .boundary?.adaptable?.some((entry) => entry.adaptationClass === 'contract-retry') === true;
+      const contractAllowed = live === null || contractRule?.plusDeclaredContractRetryAdaptations === true;
       const adaptedUnitOrdinals: number[] = priorAdaptations.map((entry) => entry.unitOrdinal);
       // The units the Run kept before it stopped count as settled here exactly as they did then: their results, their
       // observations, their usage — toward the revision, the report and the ceiling alike — and their accepted answers.
@@ -2301,6 +2306,36 @@ export class BaselineAnalysisExecutionOwner {
               withheld = SAFE_RETRY_WITHHELD;
             }
           }
+        }
+        // A contract retry is a separate declared adaptation, never an inference from a possibly billed failure.
+        // Only a completed, nonempty answer with an invalid envelope can reach it; finding rejections close normally.
+        const contractCandidate = attempt.turn.signals.find((signal) => signal.kind === 'contentCandidate');
+
+        const contractParsed = contractDeclared && contractAllowed && attempt.turn.terminal === 'completed' && contractCandidate?.kind === 'contentCandidate'
+          ? definition.parseUnitResult(contractCandidate.text, unit) : null;
+        if (contractDeclared && contractAllowed && attempts <= 2 &&
+            !priorAdaptations.some((entry) => entry.unitOrdinal === unit.ordinal && entry.adaptationClass === 'contract-retry') &&
+            attempt.turn.terminal === 'completed' && contractCandidate?.kind === 'contentCandidate' &&
+            contractCandidate.text.trim().length > 0 && attempt.canonical?.kind !== 'empty-answer' &&
+            parseModelClarification(contractCandidate.text) === null && contractParsed?.ok === false &&
+            (contractParsed.code === 'not-json' || contractParsed.code === 'schema-invalid') &&
+            !active.cancelRequested && !active.pauseRequested && !active.interrupted && liveInterruption === null && !scopeChanged() && ceilingState() !== 'reached') {
+          const message = unitMessages.get(unit.ordinal)!;
+          if (attempt.unitMessageDigest !== sha256Hex(message)) throw new ExecutionAdmissionError('CONTRACT_RETRY_MESSAGE_DRIFT', '契约重试的单元消息与首次请求不同。');
+          adaptationOrdinal += 1;
+          const contractAttemptIndex = attempts === 1 ? 2 : 3;
+          const adaptation = ledger.recordAdaptation({ adaptationClass: 'contract-retry', attemptIndex: contractAttemptIndex, attemptId, runRecordId: facts.runRecordId,
+            taskIntentId: facts.taskIntentId, ordinal: adaptationOrdinal, unitOrdinal: unit.ordinal,
+            classifiedReason: '单元结果信封无法解析，以相同消息重试一次。', failureCode: 'CONTRACT_INVALID', failureClass: 'contract-invalid',
+            failureStatus: null, requestDigest, firstPayloadDigest: attempt.payloadDigest, firstUnitMessageDigest: attempt.unitMessageDigest,
+            planEnvelopeDigest: facts.planEnvelopeDigest, bindingDigest });
+          adaptedUnitOrdinals.push(unit.ordinal);
+          if (currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '契约重试期间执行绑定发生变化。');
+          acceptedOutputDigests.add(contractCandidate.digest);
+          attempt = await submitAttempt(unit, contractAttemptIndex, 'retrying', adaptation.adaptationId);
+          if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
+          attempts = contractAttemptIndex;
+          unitUsageTotal = addUsage(unitUsageTotal, attempt.unitUsage);
         }
         // A range the account limit refused before 续行 carries that attempt in its row as well.
         const prior = refused !== null && refused.unitOrdinal === unit.ordinal ? refused : null;

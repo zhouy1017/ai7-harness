@@ -73,10 +73,10 @@ export const PLAN_REVISION_REQUIRED_REASON = 'plan-revision-required' as const;
  * into 先问你 (Issue #422, S76d) leaves the adaptable list for its own, and the plan then says where the editor may be
  * asked; both are named only when something is there, so every split made before S76d reads back byte for byte.
  */
-export function planBoundarySplit(withdrawn: ReadonlyArray<string> = [], askFirst: ReadonlyArray<string> = []): PlanBoundarySplitProjection {
+export function planBoundarySplit(withdrawn: ReadonlyArray<string> = [], askFirst: ReadonlyArray<string> = [], contractRetry = false): PlanBoundarySplitProjection {
   const entry = (adaptationClass: PlanAdaptationClass) => ({ adaptationClass, label: '安全重试', statement: SAFE_RETRY_STATEMENT });
   const asked = PLAN_ADAPTATION_CLASSES.filter((adaptationClass) => askFirst.includes(adaptationClass) && !withdrawn.includes(adaptationClass));
-  return {
+  const split: PlanBoundarySplitProjection = {
     adaptable: PLAN_ADAPTATION_CLASSES
       .filter((adaptationClass) => !withdrawn.includes(adaptationClass) && !asked.includes(adaptationClass))
       .map(entry),
@@ -86,6 +86,9 @@ export function planBoundarySplit(withdrawn: ReadonlyArray<string> = [], askFirs
       ? { expected: false, statement: NO_PARTICIPATION_STATEMENT }
       : { expected: true, statement: ASK_FIRST_SAFE_RETRY_STATEMENT },
   };
+  if (contractRetry) split.adaptable = [...split.adaptable, { adaptationClass: 'contract-retry', label: '契约重试',
+    statement: '单元结果信封无法解析时，以完全相同的单元消息重试一次，计入传输边界；仅在所选处理政策准许时发送。' }];
+  return split;
 }
 
 function materialValueAt(inputs: MaterialPlanInputsProjection, field: MaterialPlanField): PlanRevisionDiffValue {
@@ -207,6 +210,7 @@ function runBudgetCeilingOf(value: unknown): MaterialPlanInputsProjection['runBu
 }
 
 export interface PlanAdaptationRecordInput {
+  readonly adaptationClass?: 'safe-retry' | 'contract-retry';
   readonly adaptationId: string;
   readonly attemptId: string;
   readonly runRecordId: string;
@@ -243,7 +247,7 @@ export function buildPlanAdaptationRecord(input: PlanAdaptationRecordInput): { r
   requireAnalysis(UUID_PATTERN.test(input.adaptationId) && UUID_PATTERN.test(input.attemptId) && UUID_PATTERN.test(input.runRecordId) && UUID_PATTERN.test(input.taskIntentId),
     'ANALYSIS_RECORD_INVALID', '计划内调整记录身份无效。');
   requireAnalysis(Number.isSafeInteger(input.ordinal) && input.ordinal >= 1 && Number.isSafeInteger(input.unitOrdinal) && input.unitOrdinal >= 1 &&
-    input.attemptIndex === 2 && DIGEST_PATTERN.test(input.requestDigest) && DIGEST_PATTERN.test(input.planEnvelopeDigest) && DIGEST_PATTERN.test(input.bindingDigest) &&
+    (input.attemptIndex === 2 || (input.adaptationClass === 'contract-retry' && input.attemptIndex === 3)) && DIGEST_PATTERN.test(input.requestDigest) && DIGEST_PATTERN.test(input.planEnvelopeDigest) && DIGEST_PATTERN.test(input.bindingDigest) &&
     (input.firstPayloadDigest === null || DIGEST_PATTERN.test(input.firstPayloadDigest)) &&
     (input.firstUnitMessageDigest === null || DIGEST_PATTERN.test(input.firstUnitMessageDigest)), 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
   const record = {
@@ -253,7 +257,7 @@ export function buildPlanAdaptationRecord(input: PlanAdaptationRecordInput): { r
     taskIntentId: input.taskIntentId,
     ordinal: input.ordinal,
     unitOrdinal: input.unitOrdinal,
-    adaptationClass: 'safe-retry' as const,
+    adaptationClass: input.adaptationClass ?? 'safe-retry',
     attemptIndex: input.attemptIndex,
     classifiedReason: input.classifiedReason,
     failureCode: input.failureCode,

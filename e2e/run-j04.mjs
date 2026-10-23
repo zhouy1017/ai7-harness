@@ -162,7 +162,7 @@ const RETRY_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 // The authored review fixture (Issue #417) layers over the transient-retry fixture: one launch answers
 // every request the earlier stages froze and the review categories' requests over the manuscript as this
 // Journey leaves it — both of its edits in the first block.
-const REVIEW_FIXTURE_IDENTITY = 'sample1-review-authored';
+const REVIEW_FIXTURE_IDENTITY = 'sample1-review-contract-v2-controls';
 // Issue #901: contract /2 at 标准核查, layered on sample1-factual-authored; provider-free, nothing fetched.
 const FACTUAL_FIXTURE_IDENTITY = 'sample1-factual-verified';
 // Issue #922 (slice 7f): one synthetic 自定义分析维度 on a fresh sample1 Book, layered on sample1-baseline-happy; provider-free.
@@ -3022,10 +3022,15 @@ async function main() {
     // every other finding of a model-read category became a mark on the manuscript (V2-UX-REV-008, MARK-010).
     requireJourney(reviewed?.run?.state === 'settled' &&
       reviewedCategories.map((category) => `${category.categoryId}:${category.state}`).join('|') === 'typos-and-usage:settled|style-and-format:settled|plot-consistency:settled' &&
-      reviewedCategories[0].findingsCount > 0 && reviewedCategories[0].excludedCount === 2 && reviewedCategories[1].findingsCount > 0 && reviewedCategories[1].excludedCount === 1 &&
+      reviewedCategories[0].findingsCount > 0 && reviewedCategories[0].excludedCount === 3 && reviewedCategories[1].findingsCount > 0 && reviewedCategories[1].excludedCount === 1 &&
       reviewed.run.findings.filter((finding) => finding.categoryId !== 'plot-consistency').every((finding) => finding.markId !== null && finding.status === 'pending') &&
       reviewed.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage').every((finding) => finding.output === 'change-suggestion' && finding.replacement !== null),
     'review-run-settled', { state: reviewed?.run?.state, categories: reviewedCategories.map((category) => [category.categoryId, category.state, category.findingsCount, category.excludedCount]) });
+    // #1084: this v2 fixture first returns an invalid envelope, then valid siblings and one invalid finding.
+    // The declared retry closes the unit; its rejected finding is readable and never becomes a mark.
+    requireJourney(reviewed.run.excluded.some((entry) => entry.reasonCode === 'contract-schema-invalid') &&
+      reviewed.run.findings.every((entry) => entry.quote !== '合成的无效发现'), 'review-v2-rejected-sibling');
+    await assertRenderer(renderer, `(() => { const details=document.querySelector('details.review-excluded'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return details.querySelector('summary')?.textContent==='未列为发现的 4 条' && details.textContent.includes('contract-schema-invalid') && details.textContent.includes('合成的无效发现'); })()`, 'review-v2-visible-excluded');
     await assertRenderer(renderer, `document.querySelectorAll('ol.review-progress > li[data-category-state="settled"]').length===3 && document.querySelectorAll('section.review-group[data-review-category]').length>=2`, 'review-groups');
     // The drawer beside ②B read the plan again as the Run moved; it now states the Run's end.
     const settledReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'settled', 'review-drawer-settled');

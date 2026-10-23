@@ -1,3 +1,4 @@
+import { reviewFixtureContractVersion } from '../../src/service/provider/model-fixture.js';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -28,6 +29,7 @@ const CATEGORY = 'cross-deliverable-consistency';
 const WHOLE = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null } as const;
 let roots: ServiceTestRoots;
 let store: EditorialStore;
+let control: NonNullable<Parameters<typeof EditorialStore.open>[2]>;
 let db: DatabaseSync;
 let policy: LaunchPolicyProjection;
 let owner: BaselineAnalysisExecutionOwner | undefined;
@@ -36,7 +38,9 @@ let book: Awaited<ReturnType<typeof importSample1Book>>;
 
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-cross-deliverable-');
-  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  control = { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false,
+    induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false };
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
   db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
   book = await importSample1Book(store, roots.codeRoot, 'Cross deliverable sample1');
@@ -123,11 +127,11 @@ async function execution(afterFirst?: () => Promise<void>, recorded?: ResolvedMo
     if (header !== null) {
       sent.push(header.ordinal);
       const blocks = message.split('\n').flatMap((line) => {
-        const match = /^\[blk_[0-9a-f]{24}\] \((?:title|heading|paragraph)(?: h[1-6])?\) (.*)$/u.exec(line);
+        const match = /^(?:\[[1-9][0-9]*\] )?\[blk_[0-9a-f]{24}\] \((?:title|heading|paragraph)(?: h[1-6])?\) (.*)$/u.exec(line);
         return match === null ? [] : [match[1]!];
       });
       const quote = sliceGraphemes(blocks[0]!, 0, 20);
-      result = { schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: header.ordinal,
+      result = { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal,
         findings: header.ordinal === 1 ? [{ quote, blockOrdinal: 1, severity: 'should', note: '合成回归：两处说法需要核对。', clauseId: reading().participants[0]!.paragraphs[0]!.ref }] : [] };
       if (header.ordinal === 1) await afterFirst?.();
     } else if (message.startsWith('保证抽样 ')) {
@@ -364,6 +368,7 @@ describe('cross-deliverable participants and revision lineage', () => {
     expect(fixture.provenance).toBe('recorded');
     expect([...fixture.entries.values()].every((entry) => entry.contentDigest === null)).toBe(true);
     const doc = await create();
+    control.baselineAnalysisRoute = { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) };
     const selected = await recordedDocument(doc.documentId);
     const frozen = entry();
     const digest = sha256Hex(canonicalJson(frozen.deliverables!.participants.map(({ typeId, title, paragraphs }) => ({
@@ -375,7 +380,7 @@ describe('cross-deliverable participants and revision lineage', () => {
     store.authorizeReviewRun(book.bookId, run.reviewRunId, approvals(run));
     await driver!.drive(run.reviewRunId);
     expect(sent).toEqual([1, 2]);
-    const revision = store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(frozen))).resultSetRevision as ReviewCategoryResultSetRevisionProjection;
+    const revision = store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(frozen), 1)).resultSetRevision as ReviewCategoryResultSetRevisionProjection;
     expect(revision.findingCounts).toMatchObject({ listed: 2, located: 2, excluded: 0 });
     expect(revision.coverage.unitsClosed).toBe(2);
     const result = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;

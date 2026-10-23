@@ -501,7 +501,8 @@ export const MODEL_SELECTION_SCHEMA_VERSION = 84;
 export const PROCEDURE_DEFINITION_SCHEMA_VERSION = 85;
 export const EDITORIAL_LEARNING_SCHEMA_VERSION = 86;
 export const GLOBAL_AGENT_SCHEMA_VERSION = 87;
-export const LATEST_SCHEMA_VERSION = GLOBAL_AGENT_SCHEMA_VERSION;
+export const REVIEW_CONTRACT_SCHEMA_VERSION = 88;
+export const LATEST_SCHEMA_VERSION = REVIEW_CONTRACT_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -781,7 +782,7 @@ export const ANALYSIS_LEDGER_REVISION_79_SQL = {
     task_intent_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),
     kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}', '${INITIAL_EVALUATION_KIND}', '${READERS_REPORT_KIND}', '${EVALUATION_REWRITE_KIND}', '${WRITING_KIND}') OR kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}'),
-    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', '${EDITORIAL_REVIEW_CONTRACT_VERSION}', '${INITIAL_EVALUATION_CONTRACT_VERSION}', '${READERS_REPORT_CONTRACT_VERSION}', '${EVALUATION_REWRITE_CONTRACT_VERSION}',
+    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', 'ai7.editorial-review/1', '${INITIAL_EVALUATION_CONTRACT_VERSION}', '${READERS_REPORT_CONTRACT_VERSION}', '${EVALUATION_REWRITE_CONTRACT_VERSION}',
       '${WRITING_CONTRACT_VERSION}')),
     goal TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -797,7 +798,7 @@ export const ANALYSIS_LEDGER_REVISION_79_SQL = {
         AND mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book'))
       OR (kind = '${FACTUAL_REVIEW_KIND}' AND contract_version = '${FACTUAL_REVIEW_CONTRACT_VERSION}'
         AND mode IN ('whole-manuscript', 'range'))
-      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = '${EDITORIAL_REVIEW_CONTRACT_VERSION}'
+      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = 'ai7.editorial-review/1'
         AND mode IN ('review-first', 'review-first-range', 'review-again', 'review-sync', 'review-range'))
       OR (kind = '${INITIAL_EVALUATION_KIND}' AND contract_version = '${INITIAL_EVALUATION_CONTRACT_VERSION}'
         AND mode IN ('evaluation-first', 'evaluation-again'))
@@ -843,7 +844,7 @@ export const ANALYSIS_LEDGER_REVISION_64_SQL = {
     task_intent_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),
     kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}', '${INITIAL_EVALUATION_KIND}', '${READERS_REPORT_KIND}', '${EVALUATION_REWRITE_KIND}') OR kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}'),
-    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', '${EDITORIAL_REVIEW_CONTRACT_VERSION}', '${INITIAL_EVALUATION_CONTRACT_VERSION}', '${READERS_REPORT_CONTRACT_VERSION}', '${EVALUATION_REWRITE_CONTRACT_VERSION}')),
+    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', 'ai7.editorial-review/1', '${INITIAL_EVALUATION_CONTRACT_VERSION}', '${READERS_REPORT_CONTRACT_VERSION}', '${EVALUATION_REWRITE_CONTRACT_VERSION}')),
     goal TEXT NOT NULL,
     created_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
@@ -858,7 +859,7 @@ export const ANALYSIS_LEDGER_REVISION_64_SQL = {
         AND mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book'))
       OR (kind = '${FACTUAL_REVIEW_KIND}' AND contract_version = '${FACTUAL_REVIEW_CONTRACT_VERSION}'
         AND mode IN ('whole-manuscript', 'range'))
-      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = '${EDITORIAL_REVIEW_CONTRACT_VERSION}'
+      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = 'ai7.editorial-review/1'
         AND mode IN ('review-first', 'review-first-range', 'review-again', 'review-sync', 'review-range'))
       OR (kind = '${INITIAL_EVALUATION_KIND}' AND contract_version = '${INITIAL_EVALUATION_CONTRACT_VERSION}'
         AND mode IN ('evaluation-first', 'evaluation-again'))
@@ -898,7 +899,7 @@ export const ANALYSIS_LEDGER_REVISION_62_SQL = {
     task_intent_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),
     kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}', '${INITIAL_EVALUATION_KIND}', '${READERS_REPORT_KIND}') OR kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}'),
-    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', '${EDITORIAL_REVIEW_CONTRACT_VERSION}', '${INITIAL_EVALUATION_CONTRACT_VERSION}', '${READERS_REPORT_CONTRACT_VERSION}')),
+    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', 'ai7.editorial-review/1', '${INITIAL_EVALUATION_CONTRACT_VERSION}', '${READERS_REPORT_CONTRACT_VERSION}')),
     goal TEXT NOT NULL,
     created_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
@@ -913,7 +914,7 @@ export const ANALYSIS_LEDGER_REVISION_62_SQL = {
         AND mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book'))
       OR (kind = '${FACTUAL_REVIEW_KIND}' AND contract_version = '${FACTUAL_REVIEW_CONTRACT_VERSION}'
         AND mode IN ('whole-manuscript', 'range'))
-      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = '${EDITORIAL_REVIEW_CONTRACT_VERSION}'
+      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = 'ai7.editorial-review/1'
         AND mode IN ('review-first', 'review-first-range', 'review-again', 'review-sync', 'review-range'))
       OR (kind = '${INITIAL_EVALUATION_KIND}' AND contract_version = '${INITIAL_EVALUATION_CONTRACT_VERSION}'
         AND mode IN ('evaluation-first', 'evaluation-again'))
@@ -949,7 +950,7 @@ export const ANALYSIS_LEDGER_REVISION_59_SQL = {
     task_intent_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),
     kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}', '${INITIAL_EVALUATION_KIND}') OR kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}'),
-    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', '${EDITORIAL_REVIEW_CONTRACT_VERSION}', '${INITIAL_EVALUATION_CONTRACT_VERSION}')),
+    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', 'ai7.editorial-review/1', '${INITIAL_EVALUATION_CONTRACT_VERSION}')),
     goal TEXT NOT NULL,
     created_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
@@ -963,7 +964,7 @@ export const ANALYSIS_LEDGER_REVISION_59_SQL = {
         AND mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book'))
       OR (kind = '${FACTUAL_REVIEW_KIND}' AND contract_version = '${FACTUAL_REVIEW_CONTRACT_VERSION}'
         AND mode IN ('whole-manuscript', 'range'))
-      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = '${EDITORIAL_REVIEW_CONTRACT_VERSION}'
+      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = 'ai7.editorial-review/1'
         AND mode IN ('review-first', 'review-first-range', 'review-again', 'review-sync', 'review-range'))
       OR (kind = '${INITIAL_EVALUATION_KIND}' AND contract_version = '${INITIAL_EVALUATION_CONTRACT_VERSION}'
         AND mode IN ('evaluation-first', 'evaluation-again'))),
@@ -994,7 +995,7 @@ export const ANALYSIS_LEDGER_REVISION_58_SQL = {
     task_intent_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),
     kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}') OR kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}'),
-    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', '${EDITORIAL_REVIEW_CONTRACT_VERSION}')),
+    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', 'ai7.editorial-review/1')),
     goal TEXT NOT NULL,
     created_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
@@ -1008,7 +1009,7 @@ export const ANALYSIS_LEDGER_REVISION_58_SQL = {
         AND mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book'))
       OR (kind = '${FACTUAL_REVIEW_KIND}' AND contract_version = '${FACTUAL_REVIEW_CONTRACT_VERSION}'
         AND mode IN ('whole-manuscript', 'range'))
-      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = '${EDITORIAL_REVIEW_CONTRACT_VERSION}'
+      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = 'ai7.editorial-review/1'
         AND mode IN ('review-first', 'review-first-range', 'review-again', 'review-sync', 'review-range'))),
     CHECK((mode = 'first-baseline' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['first-baseline']}')
       OR (mode = 'sync-current' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['sync-current']}')
@@ -1231,7 +1232,7 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
     book_id TEXT NOT NULL REFERENCES books(book_id),
     kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}', '${INITIAL_EVALUATION_KIND}', '${READERS_REPORT_KIND}', '${EVALUATION_REWRITE_KIND}', '${WRITING_KIND}') OR kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}'
       OR kind GLOB '${CUSTOM_ANALYSIS_KIND_GLOB}'),
-    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', '${EDITORIAL_REVIEW_CONTRACT_VERSION}', '${INITIAL_EVALUATION_CONTRACT_VERSION}', '${READERS_REPORT_CONTRACT_VERSION}', '${EVALUATION_REWRITE_CONTRACT_VERSION}',
+    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', 'ai7.editorial-review/1', '${EDITORIAL_REVIEW_CONTRACT_VERSION}', '${INITIAL_EVALUATION_CONTRACT_VERSION}', '${READERS_REPORT_CONTRACT_VERSION}', '${EVALUATION_REWRITE_CONTRACT_VERSION}',
       '${WRITING_CONTRACT_VERSION}') OR contract_version GLOB '${CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB}'),
     goal TEXT NOT NULL CHECK(length(goal) BETWEEN 1 AND ${MAX_TASK_INTENT_GOAL_LENGTH}),
     created_at TEXT NOT NULL,
@@ -1247,7 +1248,7 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
         AND mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book'))
       OR (kind = '${FACTUAL_REVIEW_KIND}' AND contract_version = '${FACTUAL_REVIEW_CONTRACT_VERSION}'
         AND mode IN ('whole-manuscript', 'range'))
-      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version = '${EDITORIAL_REVIEW_CONTRACT_VERSION}'
+      OR (kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}' AND contract_version IN ('ai7.editorial-review/1', '${EDITORIAL_REVIEW_CONTRACT_VERSION}')
         AND mode IN ('review-first', 'review-first-range', 'review-again', 'review-sync', 'review-range'))
       OR (kind = '${INITIAL_EVALUATION_KIND}' AND contract_version = '${INITIAL_EVALUATION_CONTRACT_VERSION}'
         AND mode IN ('evaluation-first', 'evaluation-again'))
@@ -1378,7 +1379,7 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
     attempt_id TEXT NOT NULL REFERENCES analysis_execution_attempts(attempt_id),
     ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
     unit_ordinal INTEGER NOT NULL CHECK(unit_ordinal >= 1),
-    adaptation_class TEXT NOT NULL CHECK(adaptation_class = 'safe-retry'),
+    adaptation_class TEXT NOT NULL CHECK(adaptation_class IN ('safe-retry', 'contract-retry')),
     recorded_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
     sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
@@ -1431,6 +1432,14 @@ function asNumber(value: unknown): number {
   requireTask(typeof value === 'number' && Number.isSafeInteger(value), 'TASK_RECORD_INVALID', '任务授权记录数值无效。');
   return value;
 }
+
+/** The exact revision-84 CHECKs, retained for forward migration and startup validation. */
+export const ANALYSIS_LEDGER_REVISION_84_SQL = Object.fromEntries(
+  (['analysis_task_intents', 'analysis_result_set_revisions', 'analysis_plan_adaptations'] as const).map((table) => [table,
+    ANALYSIS_LEDGER_SCHEMA_SQL[table].replaceAll("'ai7.editorial-review/1', 'ai7.editorial-review/2'", "'ai7.editorial-review/1'")
+      .replaceAll("contract_version IN ('ai7.editorial-review/1')", "contract_version = 'ai7.editorial-review/1'")
+      .replace("adaptation_class IN ('safe-retry', 'contract-retry')", "adaptation_class = 'safe-retry'")]),
+) as Readonly<Record<'analysis_task_intents' | 'analysis_result_set_revisions' | 'analysis_plan_adaptations', string>>;
 
 function canonicalJson(value: unknown): string {
   if (typeof value === 'string') requireTask(value.isWellFormed(), 'TASK_CANONICAL_INVALID', '任务授权记录无法规范化。');
@@ -2388,6 +2397,34 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
  * family; a revision-24 to revision-58 store is validated whole as revision 24 left the three and has them rebuilt once
  * more, to the terminal shape. Every path lands on the terminal version.
  */
+function widenReviewContractLedger(db: DatabaseSync): void {
+  const tables = ['analysis_task_intents', 'analysis_result_set_revisions', 'analysis_plan_adaptations'] as const;
+  const changed: typeof tables[number][] = [];
+  for (const table of tables) {
+    const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as SqlRow | undefined;
+    if (row === undefined) continue;
+    const current = ANALYSIS_LEDGER_SCHEMA_SQL[table];
+    const prior = ANALYSIS_LEDGER_REVISION_84_SQL[table];
+    if (normalizeSql(asString(row.sql)) === normalizeSql(current)) continue;
+    // Older schemas are widened by their existing version-specific migration below.
+    if (normalizeSql(asString(row.sql)) === normalizeSql(prior)) changed.push(table);
+  }
+  if (changed.length === 0) return;
+  validateCanonicalRowDigests(db, changed);
+  const restoreForeignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    for (const table of changed) {
+      const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as SqlRow[]).map((row) => asString(row.name)).join(', ');
+      rebuildAnalysisRelation(db, table, `INSERT INTO ${table}(${columns}) SELECT ${columns} FROM temp.migrate_${table} ORDER BY migrate_rowid`);
+    }
+    requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '审阅契约迁移后引用校验失败。');
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  finally { if (restoreForeignKeys) db.exec('PRAGMA foreign_keys = ON'); }
+}
+
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
   requireTask(
@@ -2418,10 +2455,13 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === MATERIAL_INDEX_SCHEMA_VERSION || version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
       version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION ||
-      version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION,
+      version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === GLOBAL_AGENT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version < REVIEW_CONTRACT_SCHEMA_VERSION) widenReviewContractLedger(db);
+  if (version === REVIEW_CONTRACT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // Revision 87 → 88 (Issue #1084): the review contract CHECKs widen above; only the version advances here.
+  if (version === GLOBAL_AGENT_SCHEMA_VERSION) return advanceToTerminalRevision(db);
   // Revision 86 → 87 (Issue #1083) moves no analysis relation: the supervision ledger and the Book-less dialogue metadata are
   // their owners', made before this runs, so only the version advances — as it does from revisions 83 to 85.
   if (version === EDITORIAL_LEARNING_SCHEMA_VERSION) return advanceToTerminalRevision(db);

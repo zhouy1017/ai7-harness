@@ -23,6 +23,22 @@ export function renderProcedureLibrary(procedures: readonly PreinstalledProcedur
     stages.className = 'field-note procedure-stages';
     stages.textContent = ` · ${procedureStagesLine(procedure)}`;
     item.append(pill, words, stages);
+    if ((procedure.previousVersions?.length ?? 0) > 0) {
+      const history = document.createElement('details');
+      history.className = 'procedure-previous-versions';
+      const summary = document.createElement('summary');
+      summary.textContent = '历史版本';
+      history.append(summary);
+      for (const previous of procedure.previousVersions ?? []) {
+        const row = document.createElement('p');
+        row.className = 'field-note';
+        row.setAttribute('style', 'overflow-wrap: anywhere');
+        row.dataset['procedurePreviousVersion'] = String(previous.version);
+        row.textContent = `第 ${previous.version} 版 · ${previous.stages.map((stage) => stage.label).join(' → ')} · 摘要 ${previous.digest}`;
+        history.append(row);
+      }
+      item.append(history);
+    }
     list.append(item);
   }
   const predecessor = document.createElement('p');

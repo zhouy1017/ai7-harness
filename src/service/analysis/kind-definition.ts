@@ -246,6 +246,8 @@ export interface ResearchDeclaration {
 }
 
 export interface AnalysisKindDefinition {
+  readonly legacyReviewContract?: AnalysisKindDefinition;
+  readonly contractIdentity?: import('../../shared/protocol.js').ReviewContractIdentity;
   readonly seriesScopes?: ReadonlyArray<import('../../shared/protocol.js').FrozenSeriesScope>;
   readonly researchDeclaration?: ResearchDeclaration;
   /**

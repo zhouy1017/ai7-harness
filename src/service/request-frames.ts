@@ -1641,6 +1641,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = requireInputWithOptional(value.input, ['bookId', 'reviewRunId'], REVIEW_FINDING_PAGE_KEYS, tentativeId);
       if (!validUuid(input.bookId) || !(input.reviewRunId === null || validUuid(input.reviewRunId)) ||
           !optionalOrNull(input, 'findingsAfterOrdinal', (after) => isSafeInteger(after, 1)) ||
+          !optionalOrNull(input, 'excludedAfterOrdinal', (after) => isSafeInteger(after, 1)) ||
           !optionalOrNull(input, 'categoryId', isReviewCategoryId) ||
           !optionalOrNull(input, 'severity', (severity) => REVIEW_FINDING_SEVERITIES.includes(severity as ReviewFindingSeverity)) ||
           !optionalOrNull(input, 'status', (status) => REVIEW_FINDING_STATUSES.includes(status as ReviewFindingStatus)) ||

@@ -1108,6 +1108,7 @@ async function main() {
     })()`);
     const library = await renderer.evaluate(`({ stages: Array.from(document.querySelectorAll('.procedure-stages'), (node) => node.textContent), predecessor: document.querySelector('.procedure-predecessor')?.textContent, baseline: document.querySelector('[data-procedure-id="ai7-procedure/baseline-analysis"]')?.textContent })`);
     requireJourney(library.stages.length === 10 && library.stages.every((value) => value.length > 0) && library.predecessor?.includes('审阅专用前身') && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
+    await assertRenderer(renderer, `(() => { const entries=document.querySelectorAll('.preinstalled-procedure-library li[data-procedure-version="2"]'); if(entries.length!==7)return false; return Array.from(entries).every((entry) => { const history=entry.querySelector('details.procedure-previous-versions'); if(!(history instanceof HTMLDetailsElement))return false; history.open=true; return history.querySelector('[data-procedure-previous-version="1"]')?.textContent.includes('第 1 版'); }); })()`, 'preinstalled-review-v2-with-v1-history');
     const technical = new Map(procedures?.technical ?? []);
     requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(10).fill(['enabled', '已启用', '0', 'solid'])) &&
       procedures.first === '已启用 错别字与规范用语审阅工序 · 第 1 版 · 预装 · 已使用 0 次 · 分块审读 → 综合 → 派生报告' &&

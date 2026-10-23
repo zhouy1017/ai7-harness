@@ -159,6 +159,8 @@ describe('exact sample1 fixture exemption source proof', () => {
   });
 
   it('proves review captures against the frozen category and refuses a changed category or material references (#809)', async () => {
+    database.exec("CREATE TABLE analysis_task_intents (task_intent_id TEXT, kind TEXT, contract_version TEXT)");
+    database.prepare('INSERT INTO analysis_task_intents VALUES (?,?,?)').run(request.sample1Task, 'editorial-review/typos-and-usage', 'ai7.editorial-review/2');
     const row = database.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component='coverage-manifest'").get()!;
     const manifest = JSON.parse(String(row.canonical_json)) as CoverageManifestProjection;
     const blocks: ManifestBlockInput[] = [];

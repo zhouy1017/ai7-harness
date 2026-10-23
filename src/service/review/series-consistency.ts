@@ -385,7 +385,7 @@ export function seriesConsistencyKindDefinition(db: DatabaseSync, base: Analysis
     const resolved = seriesConsistencyFromSources(scopes.map((scope) => ({ seriesId: scope.seriesId, title: scope.title })), sources);
     requireAnalysis(resolved.kind === 'available', 'SERIES_SCOPE_INVALID', '书系一致性依据无法核对。');
     const entry = seriesConsistencyEntry(BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.categoryId === 'series-consistency')!, resolved);
-    const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(entry));
+    const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(entry), base.contractVersion === 'ai7.editorial-review/1' ? 1 : 2);
     return { digest: definition.promptContractDigest, system: definition.systemPrompt };
   };
   const proof = derive();

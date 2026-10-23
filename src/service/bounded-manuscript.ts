@@ -89,7 +89,7 @@ import {
   ANALYSIS_LEDGER_REVISION_30_SQL,
   ANALYSIS_LEDGER_REVISION_65_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
-  ANALYSIS_LEDGER_SCHEMA_SQL, WEB_TOOLS_PLAN_RECORDS_SQL, SEARCH_BACKEND_CONNECTIONS_SQL,
+  ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_REVISION_84_SQL, REVIEW_CONTRACT_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL, SEARCH_BACKEND_CONNECTIONS_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
@@ -309,6 +309,7 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
   ...ANALYSIS_LEDGER_SCHEMA_SQL,
   analysis_task_intents: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents,
+    ANALYSIS_LEDGER_REVISION_84_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_79_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_64_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_62_SQL.analysis_task_intents,
@@ -318,6 +319,7 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
     ANALYSIS_LEDGER_REVISION_19_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_15_SQL.analysis_task_intents,
   ],
+  analysis_plan_adaptations: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_adaptations, ANALYSIS_LEDGER_REVISION_84_SQL.analysis_plan_adaptations],
   analysis_plan_records: [WEB_TOOLS_PLAN_RECORDS_SQL, ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_16_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records],
   analysis_result_sets: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_sets,
@@ -331,6 +333,7 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
   ],
   analysis_result_set_revisions: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_set_revisions,
+    ANALYSIS_LEDGER_REVISION_84_SQL.analysis_result_set_revisions,
     ANALYSIS_LEDGER_REVISION_81_SQL.analysis_result_set_revisions,
     ANALYSIS_LEDGER_REVISION_64_SQL.analysis_result_set_revisions,
     ANALYSIS_LEDGER_REVISION_62_SQL.analysis_result_set_revisions,
@@ -2774,6 +2777,10 @@ function requireManuscriptReimportTargetSchema(
   includeEditorialMarkTables ||= committed(EDITORIAL_MARK_SCHEMA_SQL);
   includeManuscriptEffectTables ||= committed(MANUSCRIPT_EFFECT_SCHEMA_SQL);
   includeReviewRunTables ||= committed(REVIEW_RUN_SCHEMA_SQL);
+  const legacyReview = Number(db.prepare('PRAGMA user_version').get()?.user_version) < REVIEW_CONTRACT_SCHEMA_VERSION &&
+    schemaObjectSql(db, 'table', 'review_excluded_findings') === undefined;
+  const reviewTables = legacyReview ? Object.fromEntries(Object.entries(REVIEW_RUN_SCHEMA_SQL).filter(([name]) => name !== 'review_excluded_findings')) : REVIEW_RUN_SCHEMA_SQL;
+  const reviewTriggers = legacyReview ? Object.fromEntries(Object.entries(REVIEW_RUN_TRIGGER_SQL).filter(([name]) => !name.startsWith('review_excluded_findings_'))) : REVIEW_RUN_TRIGGER_SQL;
   includePublicationVersionTables ||= committed(PUBLICATION_VERSION_SCHEMA_SQL);
   includeProposalConflictTables ||= committed(PROPOSAL_CONFLICT_SCHEMA_SQL);
   includeImportRetentionTables ||= committed(IMPORT_RETENTION_SCHEMA_SQL);
@@ -2889,7 +2896,7 @@ function requireManuscriptReimportTargetSchema(
       // Revision 24 (Issue #417) adds the Review Run relations beside the three analysis relations it
       // rebuilds; they join this exact table set, the trigger set and `SCHEMA_FOREIGN_KEYS` behind a
       // flag of their own, as revisions 22 and 23 did.
-      ...(includeReviewRunTables ? REVIEW_RUN_SCHEMA_SQL : {}),
+      ...(includeReviewRunTables ? reviewTables : {}),
       // Revision 25 (Issue #414) adds the Publication Version relations the same way, behind a flag of
       // their own, and revision 26 (Issue #57) the proposal-conflict relations.
       ...(includePublicationVersionTables ? PUBLICATION_VERSION_SCHEMA_SQL : {}),
@@ -3030,7 +3037,7 @@ function requireManuscriptReimportTargetSchema(
       ...(committed(PROPOSAL_REVIEW_SCHEMA_SQL) ? PROPOSAL_REVIEW_TRIGGER_SQL : {}),
       ...(includeEditorialMarkTables ? EDITORIAL_MARK_TRIGGER_SQL : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_TRIGGER_SQL : {}),
-      ...(includeReviewRunTables ? REVIEW_RUN_TRIGGER_SQL : {}),
+      ...(includeReviewRunTables ? reviewTriggers : {}),
       ...(includePublicationVersionTables ? PUBLICATION_VERSION_TRIGGER_SQL : {}),
       ...(includeProposalConflictTables ? PROPOSAL_CONFLICT_TRIGGER_SQL : {}),
       ...(includeImportRetentionTables ? IMPORT_RETENTION_TRIGGER_SQL : {}),
@@ -3087,7 +3094,7 @@ function requireManuscriptReimportTargetSchema(
     },
   );
   if (includeMaterialTranslationAttempts) validateMaterialTranslationAttemptSchema(db);
-  if (includeProcedureDefinitions) { validateProcedureDefinitions(db); validateProcedurePlanPins(db); }
+  if (includeProcedureDefinitions) { validateProcedureDefinitions(db, Number(db.prepare('PRAGMA user_version').get()?.user_version) < REVIEW_CONTRACT_SCHEMA_VERSION); validateProcedurePlanPins(db); }
 }
 
 function requireV7TargetSchema(db: DatabaseSync): void {
@@ -6004,7 +6011,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -6055,7 +6062,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(

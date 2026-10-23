@@ -1,3 +1,4 @@
+import { reviewExcludedHeading } from './review-labels.js';
 import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSizeText, similarMaterialsField } from './task-material-selection.js';
 import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
 import { TASK_PAGE_FAILED, TASK_SELECTED_CHAPTER_NOT_LOADED, taskPageMore } from './analysis-paging-labels.js';
@@ -277,7 +278,7 @@ export interface MountReviewWorkspaceOptions {
   openLearningLineage?(bookId: string, materialKey: string, reviewRunId: string): void;
 }
 
-type Filters = Omit<ReviewFindingPageRequest, 'findingsAfterOrdinal'>;
+type Filters = Omit<ReviewFindingPageRequest, 'findingsAfterOrdinal' | 'excludedAfterOrdinal'>;
 type FilterName = 'category' | 'severity' | 'status' | 'chapter';
 
 interface IgnoreForm {
@@ -519,8 +520,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   };
 
   /** The workspace with as many pages of findings as the editor has asked to see, read one after another. */
+  let excludedPages = 1;
+  let excludedOpen = false;
   const load = async (): Promise<ReviewWorkspaceProjection> => {
-    const first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput() });
+    let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput() });
+    if (first.run != null && excludedPages > 1) {
+      const excluded = [...(first.run.excluded ?? [])];
+      let nextOrdinal = first.run.excludedNextOrdinal;
+      for (let page = 2; page <= excludedPages && nextOrdinal != null; page += 1) {
+        const next = await api.inspectReviewWorkspace({ reviewRunId: first.run.reviewRunId, excludedAfterOrdinal: nextOrdinal });
+        if (next.run?.reviewRunId !== first.run.reviewRunId) break;
+        excluded.push(...(next.run.excluded ?? []));
+        nextOrdinal = next.run.excludedNextOrdinal;
+      }
+      first = { ...first, run: { ...first.run, excluded, excludedNextOrdinal: nextOrdinal ?? null, excludedTruncated: nextOrdinal != null } };
+    }
     const run = first.run;
     if (run === null || query.pages <= 1 || !run.findingsTruncated) { await loadResearch(run); await loadFactual(run); return first; }
     const findings = [...run.findings];
@@ -1159,6 +1173,26 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       filters.append(more);
     }
     section.append(filters, el('p', 'field-note', REVIEW_FILTER_NOTE));
+    if ((run.excludedTotal ?? 0) > 0) {
+      const details = el('details', 'review-excluded');
+      details.open = excludedOpen;
+      details.addEventListener('toggle', () => { excludedOpen = details.open; });
+      details.append(el('summary', '', reviewExcludedHeading(run.excludedTotal ?? 0)));
+      for (const finding of run.excluded ?? []) {
+        const item = el('div', 'review-excluded-entry');
+        item.setAttribute('style', 'overflow-wrap: anywhere');
+        item.append(el('p', 'field-note', `${finding.categoryLabel} · 单元 ${finding.unitOrdinal}${finding.textPart === undefined ? '' : ` · 原文 ${finding.textPart.index}/${finding.textPart.total}`}`),
+          el('p', '', finding.text), el('p', 'field-note', `${finding.reasonLabel}（${finding.reasonCode}）`));
+        details.append(item);
+      }
+      if (run.excludedTruncated) {
+        const more = el('button', 'secondary', '显示更多未列为发现的条目');
+        more.type = 'button';
+        more.addEventListener('click', () => { excludedPages += 1; refresh(true); });
+        details.append(more);
+      }
+      section.append(details);
+    }
     const filtered = Object.values(query.filters).some((value) => value !== null);
     if (filtered) section.append(el('p', 'field-note review-filtered', reviewFilteredLine(run.findingsTotal)));
     if (run.findings.length === 0) {
