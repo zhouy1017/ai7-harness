@@ -718,6 +718,29 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     expect(store.getConfiguredModelRoleBinding('fast-interaction')).toBeNull();
     expect(connection.credentialReference).toHaveLength(36);
   });
+  // Issue #1079: v26 keeps v25's connection-test declaration, so a status retained under v25 stays readable beside v26's; no other version is.
+  it('reads a retained connection-test status from v25 or v26 and refuses any other Provider Processing version', async () => {
+    const { store } = await openProductionStore();
+    store.saveModelServiceConnection('Retained probe', null, 'ready', 'openai-platform');
+    const status = await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: responsesTransport([], 'AI7_OK') },
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' });
+    expect(status).toMatchObject({ outcome: 'passed', provenance: { policyVersion: 'v26' } });
+    store.close();
+    for (const policyVersion of ['v25', 'v24']) {
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        database.prepare("UPDATE model_service_connections SET connection_test = ? WHERE provider_id = 'openai-platform'")
+          .run(JSON.stringify({ ...status, provenance: { ...status.provenance, policyVersion } }));
+      } finally { database.close(); }
+      if (policyVersion !== 'v25') {
+        await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow('连接测试来历无效。');
+        continue;
+      }
+      const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(reopened);
+      expect(reopened.getModelServiceRouteConnection('openai-platform')?.connectionTest?.provenance?.policyVersion).toBe('v25');
+      reopened.close();
+    }
+  });
   it('cancels an explicit probe before dispatch without resolving a key', async () => {
     const { store } = await openProductionStore();
     store.saveModelServiceConnection('Cancelled probe', null, 'ready', 'openai-platform');
