@@ -511,6 +511,19 @@ describe('a Review Run over the real store on exact sample1', () => {
     } finally { roots = previous; await isolated.dispose(); }
   }, 300_000);
 
+  it('keeps the contract retry and the rejected sibling on J-04\'s review-time manuscript, after all three of its first-block edits (#1084)', async () => {
+    await withBook('sample1-review-contract-v2-controls', async (session, book) => {
+      // J-04's own suffixes, in its order (run-j04.mjs saveEditorSuffix): its Review Run reads unit 1 with all three in place.
+      for (const suffix of [J04_EDIT_SUFFIX, '，J-04 计划版本形成后的确认编辑', '，J-04 快速开始前的确认编辑']) appendToBlockAt(session, book, 1, suffix);
+      const settled = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      expect(settled.categories[0]).toMatchObject({ state: 'settled', excludedCount: 3 });
+      expect(settled.excluded!.some((entry) => entry.reasonCode === 'contract-schema-invalid' && entry.text.includes('合成的无效发现'))).toBe(true);
+      const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(projection.run!.adaptations!.map((entry) => [entry.adaptationClass, entry.unitOrdinal])).toEqual([['contract-retry', 1]]);
+      expect(projection.resultSetRevision!.gaps).toEqual([]);
+    });
+  }, 300_000);
+
   it('retries one invalid v2 envelope, keeps valid siblings, and persists the visible rejected finding without a mark (#1084)', async () => {
     const session = await open('sample1-review-contract-v2-controls');
     const book = await importBook(session);

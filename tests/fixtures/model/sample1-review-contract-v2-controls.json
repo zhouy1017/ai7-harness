@@ -720,6 +720,44 @@
         }
       },
       "attempt": 2
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "b722cdfe16e35c7c2cd0ff71945f9595d1681abddbb89c74b4b99698aebd78d6",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 200
+        }
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "b722cdfe16e35c7c2cd0ff71945f9595d1681abddbb89c74b4b99698aebd78d6",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 200
+        }
+      },
+      "attempt": 1
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "b722cdfe16e35c7c2cd0ff71945f9595d1681abddbb89c74b4b99698aebd78d6",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"合成的无效发现\",\"blockOrdinal\":1,\"severity\":\"invalid\",\"note\":\"合成契约拒绝示例。\",\"replacement\":\"合成改文\"}]}",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 200
+        }
+      },
+      "attempt": 2
     }
   ]
 }

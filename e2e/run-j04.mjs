@@ -161,7 +161,8 @@ const FIXTURE_BASE_IDENTITY = 'sample1-baseline-happy';
 const RETRY_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 // The authored review fixture (Issue #417) layers over the transient-retry fixture: one launch answers
 // every request the earlier stages froze and the review categories' requests over the manuscript as this
-// Journey leaves it — both of its edits in the first block.
+// Journey leaves it — all three of its edits in the first block (#1084: the v2 controls fixture keys that state, pinned by
+// tests/service/review-runs.test.ts).
 const REVIEW_FIXTURE_IDENTITY = 'sample1-review-contract-v2-controls';
 // Issue #901: contract /2 at 标准核查, layered on sample1-factual-authored; provider-free, nothing fetched.
 const FACTUAL_FIXTURE_IDENTITY = 'sample1-factual-verified';
