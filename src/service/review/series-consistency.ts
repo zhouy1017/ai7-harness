@@ -405,6 +405,10 @@ export function seriesScopeKindDefinition(db: DatabaseSync, base: AnalysisKindDe
   const system = `${base.systemPrompt}\n${instruction}\n${canonicalJson(words)}`;
   const definition: AnalysisKindDefinition = { ...base, seriesScopes: structuredClone(scopes), systemPrompt: system,
     promptContractDigest: digest, schemaDigest: sha256Hex(canonicalJson({ base: base.schemaDigest, digest })),
+    // Review contract v2 reuses by semantic identity (#1084): the Series words read are part of it, as materials and preference are.
+    ...(base.contractIdentity?.categoryConfiguration === undefined ? {} : { contractIdentity: { ...base.contractIdentity,
+      categoryConfiguration: { version: base.contractIdentity.categoryConfiguration.version,
+        digest: sha256Hex(canonicalJson({ base: base.contractIdentity.categoryConfiguration, words })) } } }),
     requestDigest: (ordinal, unitDigest) => base.kind === 'evaluation' ? initialEvaluationRequestDigest(digest, ordinal, unitDigest)
       : reviewCategoryRequestDigest(digest, base.kind.slice('editorial-review/'.length), ordinal, unitDigest),
     ...(base.crossUnit?.step === undefined ? {} : { crossUnit: { ...base.crossUnit, promptContractDigest: digest, step: { ...base.crossUnit.step,
