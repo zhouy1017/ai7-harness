@@ -1,6 +1,6 @@
 # Provider Processing Policy v26
 
-Canonical authority: [v26 JSON](provider-processing-policy.v26.json), validated against its [exact schema](provider-processing-policy.v26.schema.json). This immutable ordinary-production successor of [v25](provider-processing-policy.v25.json) is selected by [active set v18](active-policy-set.v18.json) only when the coherent successor integrates at the intended target. [ADR 0095 §§2–6](https://github.com/zhouy1017/ai7-harness/blob/4246234bec44f304d7b4837ceb2c089a5f5eaedb/docs/adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) supplies the authority; that Owner-accepted record integrates through #1077.
+Canonical authority: [v26 JSON](provider-processing-policy.v26.json), validated against its [exact schema](provider-processing-policy.v26.schema.json). This immutable ordinary-production successor of [v25](provider-processing-policy.v25.json) is selected by [active set v18](active-policy-set.v18.json) only when the coherent successor integrates at the intended target. [ADR 0095 §§2–6](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) supplies the authority.
 
 ## In plain words
 
