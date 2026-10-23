@@ -1376,13 +1376,13 @@ describe('a Review Run over the real store on exact sample1', () => {
     }
   }, 300_000);
 
-  it('names a category that waits for a place of the governor 等待运行名额, and drops it once the category has one (Issue #632)', async () => {
+  it('records an approval while full, names a category that waits for a place of the governor 等待运行名额, and drops it once the category has one (Issue #632)', async () => {
     let taken = null as PlacesTakenOwner | null;
     const session = await open('sample1-review-authored', (inner) => { taken = new PlacesTakenOwner(inner); return taken; });
     try {
       const book = await importBook(session);
       const prepared = prepare(session, book, [TYPOS, STYLE], WHOLE);
-      session.store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
+      session.store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared), true);
       const loop = session.driver.drive(prepared.reviewRunId);
       await taken!.reached;
       const waiting = workspace(session, book, prepared.reviewRunId).run!;

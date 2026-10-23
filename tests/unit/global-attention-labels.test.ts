@@ -161,7 +161,7 @@ describe('each item', () => {
       'analysis-interrupted': '已中断',
       'analysis-budget-reached': '已停止 · 预算已达上限',
       'analysis-account-limit': '模型服务账户限额',
-      'analysis-outcome-unknown': '结果待确认',
+      'analysis-outcome-unknown': '该单元结果未知',
       'analysis-outcome-unconfirmed': '结果待确认',
       'analysis-blocked': '派发前已阻止',
       'analysis-orphaned': '已中断',

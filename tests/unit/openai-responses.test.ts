@@ -514,13 +514,13 @@ describe('DeepSeekOpenAiCompatibleAdapter · openai-responses', () => {
     const controller = new AbortController();
     controller.abort();
     const aborted = vi.fn<DeepSeekTransport>(async (_url, init) => {
-      expect(init.signal).toBe(controller.signal);
+      expect(init.signal?.aborted).toBe(true);
       throw Object.assign(new Error('synthetic abort'), { name: 'AbortError' });
     });
     const abortInstance = instanceFor(functionModel(), aborted);
     expect(await collect(abortInstance.stream({ ...toolPayload(), signal: controller.signal })))
-      .toMatchObject([{ type: 'finish', reason: { kind: 'aborted', failure: { code: AI7_FAILURE_CODES.INTERRUPTED } } }]);
-    expect(aborted).toHaveBeenCalledTimes(1);
+      .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.TRANSPORT_FAILED } } }]);
+    expect(aborted).not.toHaveBeenCalled();
     const unreadable = vi.fn<DeepSeekTransport>(async () => ({ status: 200, json: async () => { throw new Error('synthetic unreadable'); } }));
     const unreadableInstance = instanceFor(functionModel(), unreadable);
     expect(await collect(unreadableInstance.stream(toolPayload())))

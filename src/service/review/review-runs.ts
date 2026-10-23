@@ -78,7 +78,6 @@ import {
   sha256Hex,
 } from '../analysis/canonical.js';
 import { deriveCoverageManifest } from '../analysis/coverage-manifest.js';
-import { EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON } from '../analysis/execution-error.js';
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import type { PackageReviewRunReading } from '../book-delivery-packages.js';
 import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editorial-marks.js';
@@ -1345,15 +1344,13 @@ export class ReviewRunStore {
    * stale. The ledgers' own authorizations are written later, one category at a time, when the drive
    * loop reaches each; a plan that moves in between is refused there, with the ledger's reason.
    *
-   * `slotBusy` is the execution owner's word that other Runs hold every place of its governor (Issue #420, S74a
-   * A2; Issue #49, S14): a new approval is then refused before anything is written, so the Run never waits in a
-   * queue; a repeat of an approval already recorded answers as it always has.
+   * A full governor never refuses the approval: the driver waits for a place before authorizing the next category.
    */
   recordAuthorization(
     bookId: string,
     reviewRunId: string,
     planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
-    slotBusy = false,
+    _slotBusy = false,
     start: 'now' | 'when-online' = 'now',
     ruleVersionId: string | null = null,
   ): void {
@@ -1403,8 +1400,7 @@ export class ReviewRunStore {
       requireReview(!this.#seriesKnowledgeMoved(bookId, category), 'REVIEW_PLAN_CHANGED', seriesKnowledgeMovedReason(category.entry.label));
     }
     // A Run approved to start once online waits in Connectivity Wait and takes no place until Reconnect Preflight starts it
-    // (Issue #760, S74c; Issue #49, S14): only an approval that would start now is refused for a busy governor.
-    requireReview(start === 'when-online' || !slotBusy, EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON);
+    // (Issue #760, S74c). An immediate approval is recorded even when full; the driver queues for a place (ADR 0095 §2).
     const authorizedAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: AUTHORIZATION_SCHEMA,

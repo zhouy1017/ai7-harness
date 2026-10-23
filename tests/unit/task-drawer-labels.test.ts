@@ -891,10 +891,10 @@ describe('结果待确认 in the drawer (S16c)', () => {
   };
 
   it('names the unconfirmed ranges and what the editor can do, with no repeat-shaped action', () => {
-    expect([TASK_BAR_VIEW_UNCONFIRMED, TASK_BAR_UNCONFIRMED_HEADING]).toEqual(['查看未确认的部分', '结果待确认的阅读范围']);
+    expect([TASK_BAR_VIEW_UNCONFIRMED, TASK_BAR_UNCONFIRMED_HEADING]).toEqual(['查看未确认的部分', '该单元结果未知']);
     expect(taskBarOutcomeUnknownNote(1, 8, 8)).toBe(
       '1 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。' +
-      '其余已读完的 7 / 8 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 1 个记为结果待确认的缺口');
+      '其余已读完的 7 / 8 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 1 个记为结果未知的单元缺口');
     expect(taskBarOutcomeUnknownNote(1, 8, 8)).not.toMatch(/续行|重做|再次计费/u);
     expect(taskBarUnconfirmedUnit(4, 1)).toBe('第 4 个阅读范围 · 请求已发出 1 次 · 回答没有完整传回');
     const unknown = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'outcome-unknown', label: '结果待确认' }, runControl: control }));

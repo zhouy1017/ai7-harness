@@ -80,7 +80,17 @@ export const createProxyDispatcher: ProxyDispatcherFactory = (uri, failed) => ne
 });
 
 function interruptedOrDenied(error: unknown): Error | null {
-  if (error instanceof Error && error.name === 'AbortError') return new DOMException('请求被中断。', 'AbortError');
+  if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+    return new DOMException('请求已中止或超过时限。', error.name);
+  }
+  const cause = error instanceof Error ? error.cause : null;
+  const timeoutCode = cause !== null && typeof cause === 'object' && 'code' in cause ? cause.code : null;
+  if (timeoutCode === 'UND_ERR_CONNECT_TIMEOUT') {
+    return Object.assign(new Error('连接在发送请求前超时。'), { code: 'TRANSPORT_FAILED', requestSent: false });
+  }
+  if (timeoutCode === 'UND_ERR_HEADERS_TIMEOUT' || timeoutCode === 'UND_ERR_BODY_TIMEOUT' || timeoutCode === 'ETIMEDOUT') {
+    return new DOMException('模型服务响应超过时限。', 'TimeoutError');
+  }
   if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'AI7_OUTBOUND_NETWORK_DENIED') {
     return Object.assign(new Error('出站网络在当前产品区间内被禁用。'), { code: 'AI7_OUTBOUND_NETWORK_DENIED' });
   }
@@ -92,8 +102,14 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
   factory: ProxyDispatcherFactory = createProxyDispatcher,
   report: (failure: 'proxy-unreachable' | 'model-service-unreachable' | null) => void = () => undefined): typeof fetch {
   return async (input, init) => {
+    const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    const beforeSend = (): void => {
+      if (signal?.aborted === true) throw Object.assign(new Error('请求在发送前已中止。'), { code: 'TRANSPORT_FAILED', requestSent: false });
+    };
+    beforeSend();
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const setting = await read();
+    beforeSend();
     if (setting.mode === 'direct') {
       try { const response = await nativeFetch(input, { ...init, redirect: 'manual' }); report(null); return response; }
       catch (error) {

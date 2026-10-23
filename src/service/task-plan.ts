@@ -245,7 +245,7 @@ export function accountLimitReached(condition: string): string {
  * 结果待确认 (Issue #51, S16c; CTRL-007, COPY-009, interaction-spec §807, §1036): the pill of a Run stopped on sent requests
  * whose results cannot be known — never 任务已中断 · 可续行 nor 已取消.
  */
-export const OUTCOME_UNKNOWN_STATE = { key: 'outcome-unknown', label: '结果待确认' } as const;
+export const OUTCOME_UNKNOWN_STATE = { key: 'outcome-unknown', label: '该单元结果未知' } as const;
 /**
  * Why 结果待确认 offers no 改计划重做 (Issue #51, S16c; CONT-011 lists Redo among the blocked repeats): the editor settles the
  * uncertainty first with 取消任务, which keeps each such range as its own gap; a redo after that discloses the resend.
@@ -1085,7 +1085,7 @@ export function baselineAnalysisPlan(input: {
       // 结果待确认 (Issue #51, S16c): each unconfirmed range's outcome as AI7 classified it, one step below the bar's words.
       ...(input.stopped?.outcomeUnknown == null ? [] : [{
         key: 'outcome-unknown',
-        label: '结果待确认',
+        label: '该单元结果未知',
         value: input.stopped.outcomeUnknown.units.map((unit) => `第 ${unit.unitOrdinal} 个阅读范围 · 已发送 ${unit.attempts} 次 · ${unit.reason}`).join('；'),
       }]),
     ],

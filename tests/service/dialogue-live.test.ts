@@ -640,7 +640,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
       const projection = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
       expect(calls).toHaveLength(0);
       expect(await ledgerLines()).toHaveLength(0);
-      expect(projection.attempts[0]!.state).toBe(action === 'stop' ? 'stopped' : 'interrupted');
+      expect(projection.attempts[0]!.state).toBe('failed');
       expect(projection.question).toBe(QUESTION);
       expect(projection.attempts[0]!.fragments).toHaveLength(0);
     } finally {

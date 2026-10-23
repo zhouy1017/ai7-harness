@@ -423,10 +423,10 @@ export function taskBarAccountLimitNote(unitOrdinal: number | null, unitsSettled
  * and what is missing, with 查看未确认的部分 to see which ranges — and no repeat-shaped action: this Run never sends them again.
  */
 export const TASK_BAR_VIEW_UNCONFIRMED = '查看未确认的部分';
-export const TASK_BAR_UNCONFIRMED_HEADING = '结果待确认的阅读范围';
+export const TASK_BAR_UNCONFIRMED_HEADING = '该单元结果未知';
 export function taskBarOutcomeUnknownNote(unconfirmed: number, unitsSettled: number, unitsTotal: number): string {
   return `${unconfirmed} 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。` +
-    `其余已读完的 ${unitsSettled - unconfirmed} / ${unitsTotal} 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 ${unconfirmed} 个记为结果待确认的缺口`;
+    `其余已读完的 ${unitsSettled - unconfirmed} / ${unitsTotal} 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 ${unconfirmed} 个记为结果未知的单元缺口`;
 }
 /** One unconfirmed range in 查看未确认的部分's list: which range, and how often its request was sent. */
 export function taskBarUnconfirmedUnit(unitOrdinal: number, attempts: number): string {
@@ -453,9 +453,13 @@ export const UNCONFIRMED_STAGE_LABELS: Readonly<Record<UnconfirmedStageId, strin
   'run-report-reflection': '运行反思',
 };
 export const UNCONFIRMED_HEADING = '结果待确认';
+/** Completed unit gaps have their own state; unknown non-unit stages keep their existing wording. */
+export function unconfirmedHeading(listed: TaskPlanUnconfirmedProjection): string {
+  return listed.ranges.length > 0 ? '该单元结果未知' : UNCONFIRMED_HEADING;
+}
 export const UNCONFIRMED_KEEP_AS_GAP = '保留为缺口';
 export const UNCONFIRMED_KEEP_FAILED = '未能记下保留为缺口。';
-export const UNCONFIRMED_KEPT_NOTE = '已记下：这些部分保留为结果待确认的缺口，不再列在待我处理里；没有发送任何内容。';
+export const UNCONFIRMED_KEPT_NOTE = '已记下：这些部分保留为缺口，不再列在待我处理里；没有发送任何内容。';
 /** `2 个阅读范围、跨单元归纳`: how many ranges, and which steps. */
 export function unconfirmedWhat(ranges: number, steps: ReadonlyArray<UnconfirmedStageId>): string {
   return [...(ranges === 0 ? [] : [`${ranges} 个阅读范围`]), ...steps.map((stage) => UNCONFIRMED_STAGE_LABELS[stage])].join('、');
@@ -464,7 +468,7 @@ export function unconfirmedWhat(ranges: number, steps: ReadonlyArray<Unconfirmed
 export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection, rangesTotal = listed.ranges.length): string {
   const what = unconfirmedWhat(rangesTotal, [...new Set(listed.steps.map((step) => step.stage))]);
   // A step is never sent again by a later Task as the same request, so only ranges carry the re-send sentence (#763 review).
-  return `${what}的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。` +
+  return `${what}的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为${rangesTotal > 0 ? '结果未知的单元缺口' : '结果待确认的缺口'}，AI7 没有自动再发。` +
     `保留为缺口只记下你的确认：不发送任何内容，不改变结果${rangesTotal === 0 ? '。' : '；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。'}`;
 }
 /**

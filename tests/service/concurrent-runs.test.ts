@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, EXECUTION_RUN_CAPACITY, type UnitHold } from '../../src/service/analysis/execution.js';
 import { RECONCILED_QUEUED_DETAIL, RUN_QUEUED_LABEL } from '../../src/service/analysis/baseline-analysis-store.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { RESUME_BLOCKED_SLOT } from '../../src/service/task-plan.js';
@@ -547,4 +548,67 @@ describe('the execution owner\'s concurrency governor over the real store on exa
       store.close();
     }
   });
+});
+
+describe('live foreground places and request aborts (#1080)', () => {
+  it.each(['ordinary-production', 'developer-live'] as const)('runs two Books under %s, queues the third and aborts on pause/cancel', async (scope) => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    const ceiling = { kind: 'tokens' as const, maxTotalTokens: 500_000 };
+    if (scope === 'ordinary-production') {
+      const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === 'deepseek-open-platform')!;
+      const pending = store.saveModelServiceConnection('L2 官方并行', null, 'needs-attention', route.route);
+      store.saveModelServiceConnection('L2 官方并行', pending.credentialReference, 'ready', route.route);
+      store.selectModelServiceRoute(route.route);
+      const configured = { ...route, credentialReference: pending.credentialReference };
+      launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, scope, configured);
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: scope, policy: launchPolicy,
+        live: { scope, ...configured, runBudgetCeiling: 'unset' } });
+    } else {
+      launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, scope);
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: scope, policy: launchPolicy,
+        live: { route: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: DEVELOPER_LIVE_POLICY_BINDING.endpoint,
+          credentialSlot: 'opencode-go', credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, runBudgetCeiling: ceiling } });
+      recordMissingCredentialConnection(store, 'L2 开发连接');
+    }
+    const calls: Array<{ signal: AbortSignal; body: string }> = [];
+    const nativeFetch: typeof fetch = async (_url, init) => {
+      calls.push({ signal: init!.signal!, body: String(init!.body) });
+      return new Promise((_resolve, reject) => init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason), { once: true }));
+    };
+    const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
+      secretResolver: { resolve: async () => 'placeholder-key' },
+      ...(scope === 'ordinary-production' ? { production: { scope, nativeFetch } }
+        : { developerLive: { launch: { runBudgetCeiling: ceiling, providerCacheRoot: roots.dataRoot, validation: null }, nativeFetch } }) });
+    try {
+      const a = await preparedBook(store, 'L2 实时甲', false);
+      const b = await preparedBook(store, 'L2 实时乙', false);
+      const c = await preparedBook(store, 'L2 实时丙', false);
+      const ar = start(store, execution, a);
+      const br = start(store, execution, b);
+      const cr = start(store, execution, c);
+      expect([ar.admission, br.admission, cr.admission]).toEqual(['admitted', 'admitted', 'queued']);
+      await until(() => calls.length === 2, 'both Books requests in flight');
+      expect(calls.every((call) => !call.signal.aborted)).toBe(true);
+      expect(execution.busy).toBe(true);
+      store.requestBaselineAnalysisPause(a.bookId, a.taskIntentId);
+      execution.pauseRun(ar.runRecordId);
+      await execution.whenDone(ar.runRecordId);
+      expect(calls[0]!.signal.aborted).toBe(true);
+      expect(store.inspectBaselineAnalysis(a.bookId, () => null).run?.state).toBe('paused');
+      expect(store.baselineAnalysisLedger.unconfirmedRangesOf(ar.runRecordId).map((unit) => unit.unitOrdinal)).toEqual([1]);
+      await until(() => calls.length === 3, 'queued Book request admitted');
+      store.requestBaselineAnalysisCancel(b.bookId, b.taskIntentId);
+      execution.cancelRun(br.runRecordId);
+      await execution.whenDone(br.runRecordId);
+      expect(calls[1]!.signal.aborted).toBe(true);
+      const cancelled = store.inspectBaselineAnalysis(b.bookId, () => null);
+      expect(cancelled.run?.state).toBe('cancelled');
+      expect(cancelled.resultSetRevision?.gaps.find((gap) => gap.unitOrdinal === 1)?.code).toBe('outcome-unknown');
+      expect(store.baselineAnalysisLedger.adaptationsOf(br.runRecordId)).toEqual([]);
+      expect(calls).toHaveLength(3); // No automatic resend of either aborted request.
+      store.requestBaselineAnalysisCancel(c.bookId, c.taskIntentId);
+      execution.cancelRun(cr.runRecordId);
+      await execution.whenDone(cr.runRecordId);
+    } finally { await execution.dispose(); store.close(); }
+  }, 60_000);
 });

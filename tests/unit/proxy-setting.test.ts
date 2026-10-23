@@ -117,11 +117,31 @@ describe('per-request native-fetch dispatcher', () => {
     expect(native).toHaveBeenCalledOnce();
     expect(destroy).toHaveBeenCalledOnce();
   });
+  it('keeps a cancellation before physical send transport-failed and preserves a sent timeout', async () => {
+    const { native, factory } = fixture();
+    const controller = new AbortController();
+    const fetch = proxyAwareFetch(native, async () => {
+      controller.abort();
+      return { mode: 'direct' };
+    }, factory);
+    let failure: unknown;
+    try { await fetch(modelUrl, { signal: controller.signal }); } catch (error) { failure = error; }
+    expect(classifyTransportError(failure, true).code).toBe('TRANSPORT_FAILED');
+    expect(native).not.toHaveBeenCalled();
+    const bodyTimeout = proxyAwareFetch(async () => { throw new TypeError('private', { cause: { code: 'UND_ERR_BODY_TIMEOUT' } }); }, async () => ({ mode: 'direct' }));
+    try { await bodyTimeout(modelUrl); } catch (error) {
+      expect(classifyTransportError(error, true).code).toBe('AI7_OUTCOME_UNKNOWN');
+    }
+    const timeout = proxyAwareFetch(async () => { throw new DOMException('private', 'TimeoutError'); }, async () => ({ mode: 'direct' }));
+    try { await timeout(modelUrl); } catch (error) {
+      expect(classifyTransportError(error, true).code).toBe('AI7_OUTCOME_UNKNOWN');
+    }
+  });
   it('recognizes proxy 407 separately and preserves cancellation', async () => {
     const { factory } = fixture();
     const fetch = proxyAwareFetch(async () => new Response('', { status: 407 }), async () => parseProxyUrl('https://proxy.invalid:8080'), factory);
     await expect(fetch(modelUrl)).rejects.toMatchObject({ code: 'AI7_PROXY_UNREACHABLE' });
     const aborted = proxyAwareFetch(async () => { throw new DOMException('secret', 'AbortError'); }, async () => ({ mode: 'direct' }), factory);
-    await expect(aborted(modelUrl)).rejects.toMatchObject({ name: 'AbortError', message: '请求被中断。' });
+    await expect(aborted(modelUrl)).rejects.toMatchObject({ name: 'AbortError', message: '请求已中止或超过时限。' });
   });
 });

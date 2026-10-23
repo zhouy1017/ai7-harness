@@ -299,7 +299,7 @@ export const ACCOUNT_LIMIT_RUN_LABEL = '模型服务账户限额' as const;
  * A Run stopped because a sent request's result cannot be known (Issue #51, S16c; CTRL-007, COPY-009): 结果待确认, never
  * 任务已中断 · 可续行 nor 已取消.
  */
-export const OUTCOME_UNKNOWN_RUN_LABEL = '结果待确认' as const;
+export const OUTCOME_UNKNOWN_RUN_LABEL = '该单元结果未知' as const;
 /** Why 结果待确认 has no 续行 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016). */
 export const OUTCOME_UNKNOWN_NO_RESUME = '结果待确认：有阅读范围的请求已发出而结果无法确认，这次运行不能续行；可以取消任务保留已读完的部分，或改计划重做。' as const;
 
