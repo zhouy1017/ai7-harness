@@ -8,13 +8,17 @@ This is the canonical design-phase Policy Document for deciding whether identifi
 
 ## Current authority boundary
 
+Rule numbers are stable identities: a replaced rule keeps its number.
+
 1. Local learning is enabled by default inside ADR 0094 §3's disclosed eligible material and local scope: editorial acceptance/rejection decisions and reasons, editor rewrites, and imported Word revision pairs enter the local Working Corpus learning pipeline. Show what is collected and its future cross-Book influence, a visible global off switch, and Book/material/scope exclusion controls.
-2. Record each automatic admission's governing basis, policy version and source provenance; never fabricate a human inclusion click. Preserve exact source/decision identities and revisions, author/editor attribution, reason, confidence and Learning Lineage.
-3. An explicit exclusion or narrower scope prevails immediately over the default and any inferred rule. An explicit user decision overrides an inferred rule. User decisions and Learning Supervision Directives constrain subsequent curation and use and become evidence for review; affected derived memory is frozen or corrected with lineage.
-4. Local capture creates learning signals only: it sends no model request and activates no memory. Governed intelligent curation and derived-memory activation follow the separate envelope below. Novel, conflicting, low-confidence and out-of-boundary cases remain inspectable and require review rather than forced activation.
-5. Eligibility grants no ambient manuscript retrieval, external egress, Series membership, Series Knowledge promotion, publication or Foundation Model training. Later task source access and processing require their respective exact authority; manuscript changes retain the ordinary explicit Apply boundary.
-6. The policy cannot expand its own material types, scopes, actions or authority. Proposed Policy Revisions retain the independent versioning, review and activation safeguards below.
-7. The user can disable a rule, roll back the active version, return to recommendation-only mode or disable automation. Disabling learning stops later capture, curation and use as applicable; exclusion/remediation invalidates later consumption without rewriting completed history.
+2. Admission inside that envelope needs no per-item approval or recommendation-only calibration period. Record each automatic admission's governing basis, policy version and source provenance; never fabricate a human inclusion click.
+3. An explicit exclusion or narrower scope prevails immediately over the default and any inferred rule.
+4. Novel, conflicting, low-confidence, and out-of-boundary cases remain inspectable and require review rather than forced activation.
+5. Every decision records its reason, confidence, policy version, exact source/decision identities and revisions, author/editor attribution, and Learning Lineage.
+6. An explicit user decision overrides an inferred rule. User decisions and Learning Supervision Directives constrain subsequent curation and use and become evidence for future policy review; affected derived memory is frozen or corrected with lineage.
+7. The policy cannot expand its own material types, scopes, actions, or authority. Proposed Policy Revisions retain the independent versioning, review and activation safeguards below.
+8. Local capture creates Editorial Learning Signals only: it sends no model request and activates no memory. Governed intelligent curation and derived-memory activation follow the separate envelope below. Eligibility grants no ambient manuscript retrieval, task source access, external egress, Series membership, Series Knowledge promotion, publication or Foundation Model training; later task processing requires its own exact authority, and manuscript changes retain the ordinary explicit Apply boundary.
+9. The user can disable a rule, roll back the active version, choose recommendation-only mode, or disable automation. Disabling learning stops later capture, curation and use as applicable; exclusion/remediation invalidates later consumption without rewriting completed history.
 
 ## Governed curation and memory use
 
@@ -28,7 +32,7 @@ Subsequent review, polish and dialogue retrieve relevant eligible memory/exempla
 
 ## Optional reason inputs
 
-Under [ADR 0095 §7](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#7-the-learning-agent-may-ask-why), the learning agent may ask why a decision was made when the reason would help learning. Its short options card has optional free text, nothing preselected and never blocks review. Answers are capture inputs with the same eligibility checks and lineage as other decision signals; answering, declining or ignoring an ask never changes eligibility standing. The editor's frequency setting (`经常 / 偶尔 / 关闭`) controls asks only and remains outside this policy; it neither disables learning nor grants admission, curation or egress authority.
+Under [ADR 0095 §7](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#7-the-learning-agent-may-ask-why), and only within the disclosed learning envelope, the learning agent may ask why a decision was made when the reason would help learning. Its short options card has optional free text, nothing preselected and never blocks review. Answers are capture inputs with the same eligibility checks and lineage as other decision signals; answering, declining or ignoring an ask never changes eligibility standing. The editor's frequency setting (`经常 / 偶尔 / 关闭`) controls asks only and remains outside this policy; it neither disables learning nor grants admission, curation or egress authority.
 
 ## Policy-document contract
 
