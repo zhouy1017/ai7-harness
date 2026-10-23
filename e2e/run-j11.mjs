@@ -284,7 +284,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000, detailExpre
   if (detailExpression !== undefined) {
     const detail = await renderer.evaluate(detailExpression);
     // Only boolean/null control state enters the content-free check marker; retain the object for local debug too.
-    requireJourney(false, `${name}-present-${detail.present}-checked-${detail.checked}-disabled-${detail.disabled}`, detail);
+    requireJourney(false, `${name}-present-${detail.present === true ? 'true' : 'false'}-checked-${detail.checked === null ? 'null' : detail.checked === true ? 'true' : 'false'}-disabled-${detail.disabled === null ? 'null' : detail.disabled === true ? 'true' : 'false'}`, detail);
   }
   throw journeyCheckFailure('J-11', name);
 }
