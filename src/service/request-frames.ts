@@ -1437,6 +1437,35 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     // 知识库 › 社级编辑记忆 (Issue #911): the house record takes no input; 质量与学习's edit signals, the house or one Book.
+    case 'inspectEditorialLearning': {
+      const input = requireInputWithOptional(value.input, ['signalOffset', 'itemOffset'], ['exclusionOffset'], tentativeId);
+      if (![input.signalOffset, input.itemOffset, input.exclusionOffset ?? 0].every((offset) => Number.isSafeInteger(offset) && Number(offset) >= 0 && Number(offset) <= 1_000_000)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'changeEditorialLearning': {
+      if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
+      const kind = value.input.kind;
+      if (kind === 'material') {
+        const input = requireInput(value.input, ['kind', 'signalId'], tentativeId);
+        if (!validUuid(input.signalId)) throw new ProtocolError(tentativeId);
+      } else {
+        const input = requireInput(value.input, kind === 'switch' ? ['kind', 'enabled', 'expectedEntries'] : ['kind', 'bookId', 'excluded', 'expectedEntries'], tentativeId);
+        if (!Number.isSafeInteger(input.expectedEntries) || Number(input.expectedEntries) < 0 ||
+            !(kind === 'switch' ? typeof input.enabled === 'boolean' : kind === 'book' && validUuid(input.bookId) && typeof input.excluded === 'boolean')) throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'createEditorialMemory': {
+      const input = requireInput(value.input, ['clientMemoryId', 'signalId', 'title', 'editorialDimension', 'confidence'], tentativeId);
+      if (!validUuid(input.clientMemoryId) || !validUuid(input.signalId) || !isBoundedString(input.title, 160) || !isBoundedString(input.editorialDimension, 80) ||
+          typeof input.confidence !== 'number' || !Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'deactivateEditorialMemory': {
+      const input = requireInput(value.input, ['itemId', 'expectedVersionId'], tentativeId);
+      if (!validUuid(input.itemId) || !validUuid(input.expectedVersionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'inspectHouseReviewPreference':
     case 'rebuildHouseReviewPreference': {
       requireInput(value.input, [], tentativeId);

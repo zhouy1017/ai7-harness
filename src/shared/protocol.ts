@@ -109,6 +109,13 @@ import type {
   DatabaseReplacementsProjection,
 } from './protocol/data-storage.js';
 import type { ProcedureDefinitionPin, PreinstalledProcedureProjection } from './protocol/procedures.js';
+import type {
+  ChangeEditorialLearningInput,
+  CreateEditorialMemoryInput,
+  DeactivateEditorialMemoryInput,
+  EditorialLearningProjection,
+  InspectEditorialLearningInput,
+} from './protocol/learning.js';
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
@@ -116,7 +123,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 162 as const;
+export const SERVICE_PROTOCOL_VERSION = 163 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -402,6 +409,10 @@ export const IPC_CHANNELS = {
   recordChangeSuggestionDecision: 'ai7:j05:record-change-suggestion-decision',
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
+  inspectEditorialLearning: 'ai7:learning:inspect-editorial-learning',
+  changeEditorialLearning: 'ai7:learning:change-editorial-learning',
+  createEditorialMemory: 'ai7:learning:create-editorial-memory',
+  deactivateEditorialMemory: 'ai7:learning:deactivate-editorial-memory',
   inspectHouseReviewPreference: 'ai7:j11:inspect-house-review-preference',
   rebuildHouseReviewPreference: 'ai7:j11:rebuild-house-review-preference',
   inspectEditQualitySignals: 'ai7:j11:inspect-edit-quality-signals',
@@ -9888,7 +9899,7 @@ export interface LearningLineageProjection {
   readonly decisions: ReadonlyArray<LearningLineageDecisionProjection>;
   /** How many earlier decisions the chain holds beyond those. */
   readonly earlierDecisions: number;
-  readonly downstream: { readonly signals: number; readonly memoryCandidates: 0; readonly activeMemories: 0; readonly tasks: number };
+  readonly downstream: { readonly signals: number; readonly memoryCandidates: 0; readonly activeMemories: number; readonly tasks: number };
   /** Its 学习信号, oldest first. */
   readonly signals: ReadonlyArray<LearningLineageSignalProjection>;
   /** The newest `MAX_LEARNING_LINEAGE_TASKS` Tasks that used it, oldest first. */
@@ -9937,8 +9948,8 @@ export interface LearningRemediationPreviewProjection {
     readonly running: number;
     /** Prepared, not approved Review Runs whose pinned version reads them: their approval is refused. */
     readonly prepared: number;
-    /** Candidates or enabled memory made of them: none, since none is made yet. */
-    readonly memory: 0;
+    /** Explicitly created active memory referencing these materials. */
+    readonly memory: number;
     /** Completed Review Runs whose result read them: each keeps its result and gains the marker. */
     readonly completed: number;
     /** The first few of each, by name. */
@@ -10064,6 +10075,8 @@ export * from './protocol/data-storage.js';
 export * from './protocol/deliverables.js';
 
 export * from './protocol/procedures.js';
+
+export * from './protocol/learning.js';
 
 // ---- 待我处理 · Global Attention (Issue #424, plan slice S78; editor-surfaces §8.1) ------------------------
 
@@ -12075,6 +12088,10 @@ export interface ServiceOperationMap {
   recordChangeSuggestionDecision: { input: RecordChangeSuggestionDecisionInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
+  inspectEditorialLearning: { input: InspectEditorialLearningInput; output: EditorialLearningProjection };
+  changeEditorialLearning: { input: ChangeEditorialLearningInput; output: EditorialLearningProjection };
+  createEditorialMemory: { input: CreateEditorialMemoryInput; output: EditorialLearningProjection };
+  deactivateEditorialMemory: { input: DeactivateEditorialMemoryInput; output: EditorialLearningProjection };
   inspectHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
   rebuildHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
   inspectEditQualitySignals: { input: { bookId: string | null }; output: EditQualitySignalsProjection };
@@ -12666,6 +12683,10 @@ export interface RendererApi {
   recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): Promise<EditorialMarkCommandProjection>;
+  inspectEditorialLearning(input: InspectEditorialLearningInput): Promise<EditorialLearningProjection>;
+  changeEditorialLearning(input: ChangeEditorialLearningInput): Promise<EditorialLearningProjection>;
+  createEditorialMemory(input: CreateEditorialMemoryInput): Promise<EditorialLearningProjection>;
+  deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): Promise<EditorialLearningProjection>;
   inspectHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
   rebuildHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
   inspectEditQualitySignals(input: { bookId: string | null }): Promise<EditQualitySignalsProjection>;

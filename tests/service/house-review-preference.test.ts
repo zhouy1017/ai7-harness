@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { HouseReviewPreferenceLedger, withdrawalOf, HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL, preferenceLines, type HousePreferenceSource } from '../../src/service/house-review-preference.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
-import { LEARNING_ELIGIBILITY_POLICY_BASIS, LEARNING_ELIGIBILITY_SCHEMA_SQL } from '../../src/service/learning-eligibility.js';
+import { LEARNING_ELIGIBILITY_POLICY_BASIS, LEARNING_ELIGIBILITY_SCHEMA_SQL, LOCAL_LEARNING_POLICY_BASIS } from '../../src/service/learning-eligibility.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { dropHouseReviewPreferenceRelations, restoreTaskIntentDraftPredecessor } from '../support/pre74-schema.js';
@@ -135,6 +135,7 @@ describe('house review preference ledger', () => {
     dropHouseReviewPreferenceRelations(db); db.exec('PRAGMA user_version = 78'); db.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(store.inspectHouseReviewPreference().current).toBeNull();
+    expect(store.inspectHouseReviewPreference().basis).toBe(LOCAL_LEARNING_POLICY_BASIS.text);
     store.markCleanShutdown(); store.close();
     db = new DatabaseSync(path);
     expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);

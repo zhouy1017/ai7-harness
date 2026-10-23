@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { sha256Hex } from '../../src/service/analysis/canonical.js';
-import { LEARNING_ELIGIBILITY_BASIS, LEARNING_ELIGIBILITY_POLICY_BASIS, LEARNING_ELIGIBILITY_TRIGGER_SQL } from '../../src/service/learning-eligibility.js';
+import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { LEARNING_ELIGIBILITY_POLICY_BASIS, LEARNING_ELIGIBILITY_SCHEMA_SQL, LOCAL_LEARNING_POLICY_BASIS, LEARNING_ELIGIBILITY_TRIGGER_SQL, LearningEligibilityLedger,
+  learningMaterialDigest, reviewDispositionCandidate } from '../../src/service/learning-eligibility.js';
 import { fileURLToPath } from 'node:url';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -108,7 +109,111 @@ function attention(store: EditorialStore): Array<[string, GlobalAttentionItemPro
     .map((item) => [group.key, item.state, item.book.title, item.object, item.nextStep, item.target] as [string, GlobalAttentionItemProjection['state'], string | null, unknown, string, unknown]));
 }
 
+describe('学习准入 policy bases', () => {
+  it('reads a decision made under basis version 1 and records the next one under version 2 (Issue #1082)', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT');
+      for (const sql of Object.values(LEARNING_ELIGIBILITY_SCHEMA_SQL)) db.exec(sql);
+      for (const sql of Object.values(LEARNING_ELIGIBILITY_TRIGGER_SQL)) db.exec(sql);
+      const bookId = randomUUID();
+      db.prepare('INSERT INTO books VALUES (?)').run(bookId);
+      const candidate = reviewDispositionCandidate({ signalId: randomUUID(), reviewRunId: randomUUID(), findingId: 'rvf_basis', categoryLabel: '文字',
+        reason: '准入版本理由', recordedAt: '2026-10-23T00:00:00.000Z' }, false);
+      const digest = learningMaterialDigest(candidate);
+      const decisionId = randomUUID(); const recordedAt = '2026-10-23T00:00:01.000Z';
+      const attribution = { peopleVersion: 0, authors: [], editors: [] };
+      const record = canonicalRecord({ schema: 'ai7.learning-eligibility-decision/1', decisionId, bookId, materialKey: candidate.materialKey, materialDigest: digest,
+        kind: candidate.kind, ordinal: 1, choice: 'book', note: null, basis: LEARNING_ELIGIBILITY_POLICY_BASIS, attribution, supersedes: null, actor: '本机编辑', recordedAt });
+      db.prepare('INSERT INTO learning_eligibility_decisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(decisionId, bookId, candidate.materialKey, digest, 1, 'book', null, recordedAt, record.json, record.digest);
+      const ledger = new LearningEligibilityLedger(db);
+      ledger.decide({ bookId, candidate, expectedDecisions: 1, choice: 'excluded', note: null, attribution });
+      expect(ledger.history(bookId, candidate.materialKey).map((entry) => [entry.choice, entry.basis])).toEqual([
+        ['book', LEARNING_ELIGIBILITY_POLICY_BASIS], ['excluded', LOCAL_LEARNING_POLICY_BASIS]]);
+    } finally { db.close(); }
+  });
+});
+
 describe('学习准入 over the real store', () => {
+  it('captures local decisions with reference-only memory, stops at scope overrides and preserves immutable history on restart', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      store.updateBookPeople({ bookId: book.bookId, expectedVersion: 0, authors: ['学习作者'], editors: ['学习责编'], related: [] });
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const binding = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId };
+      const make = (from: number) => store.createEditorialMark(suggestion(book, window, from, from + 2, '学习建议示例')).markId;
+      const inspect = () => store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
+      const reject = (markId: string, reason: string | null) => store.recordChangeSuggestionDecision({ ...binding, markId, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason });
+      const accepted = make(0);
+      const workspaceInput = { manuscriptId: book.manuscriptId, branchId: book.branchId, resultId: null };
+      const workspace = store.inspectProposalWorkspace(workspaceInput);
+      const draft = store.saveProposalDecisionDraft({ ...workspaceInput, expectedScopeDigest: workspace.scopeDigest, markIds: [accepted], atomicGroupId: null, disposition: 'accepted' });
+      store.recordProposalDecision({ ...workspaceInput, expectedScopeDigest: draft.scopeDigest, clientDecisionId: randomUUID() });
+      expect(inspect().signals.map((signal) => signal.kind)).toEqual(['accepted']);
+      const editedMark = make(5);
+      const editInput = { ...binding, markId: editedMark, clientDecisionId: randomUUID(), disposition: 'accepted-with-edit' as const, editedText: '学习改写示例', reason: null };
+      const editDecision = store.recordChangeSuggestionDecision(editInput).card!.suggestion!.decision!;
+      store.recordChangeSuggestionDecision(editInput);
+      const rewritten = inspect().signals[0]!;
+      expect(rewritten.kind).toBe('accepted-with-edit');
+      expect(rewritten.rewriteDistance).toBe(2);
+      expect(rewritten.source).toMatchObject({ bookId: book.bookId, markId: editedMark, decisionId: editDecision.decisionId, revisionId: window.revisionId, journalSequence: window.journalSequence });
+      expect(rewritten.attribution).toEqual({ peopleVersion: 1, authors: ['学习作者'], editors: ['学习责编'] });
+      expect(rewritten.eligibility).toEqual({ choice: 'house', decisionId: null, basisVersion: 2 });
+      expect(inspect().signals).toHaveLength(2);
+      expect(inspect().items).toHaveLength(0);
+      const rejectedMark = make(10);
+      const rejection = reject(rejectedMark, null).card!.suggestion!.decision!;
+      expect(inspect().signals).toHaveLength(2);
+      store.recordProposalDecisionReason({ ...binding, markId: rejectedMark, decisionId: rejection.decisionId, reason: '学习理由示例', reasonSource: 'free-text' });
+      const rejected = inspect().signals[0]!;
+      expect(rejected.kind).toBe('rejected');
+      store.recordProposalDecisionFeedback({ ...binding, markId: rejectedMark, decisionId: rejection.decisionId, expectedFeedback: 0,
+        action: 'revise', reason: '学习理由修订示例', reasonSource: 'free-text' });
+      expect(inspect().signals[0]!.source.reasonRevision).toBe(1);
+      // The revised reason supersedes the earlier signal: unusable, and never reported as the editor's 明确排除.
+      expect(inspect().signals.slice(0, 2).map((signal) => [signal.source.reasonRevision, signal.currentEligibility])).toEqual([[1, 'house'], [0, 'superseded']]);
+      const create = { clientMemoryId: randomUUID(), signalId: rewritten.signalId, title: '保持用语一致', editorialDimension: '语言', confidence: 0.5 };
+      store.createEditorialMemory(create); store.createEditorialMemory(create);
+      const memory = inspect().items[0]!;
+      expect(inspect().items).toHaveLength(1);
+      expect(memory.current.positiveExamples).toEqual([rewritten.source]);
+      expect(memory.current.supervisionDirectiveRefs).toEqual([]);
+      expect(JSON.stringify(memory).includes('学习改写示例')).toBe(false);
+      expect(memory.usable).toBe(true);
+      let material = store.inspectLearningMaterial(book.bookId, rewritten.source.materialKey);
+      material = store.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: material.decisions, choice: 'house', note: null });
+      expect(store.inspectLearningLineage(book.bookId, material.materialKey).downstream.activeMemories).toBe(1);
+      expect(store.previewLearningRemediation({ bookId: book.bookId, items: [{ materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: material.decisions }] }).groups.memory).toBe(1);
+      store.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: material.decisions, choice: 'book', note: null });
+      expect(inspect().items[0]!.usable).toBe(false);
+      expect(() => store.createEditorialMemory({ ...create, clientMemoryId: randomUUID() })).toThrow();
+      store.changeEditorialLearning({ kind: 'material', signalId: rewritten.signalId });
+      expect(inspect().excludedMaterials.some((entry) => entry.materialKey === rewritten.source.materialKey)).toBe(true);
+      expect(store.inspectLearningMaterial(book.bookId, rewritten.source.materialKey).decision!.choice).toBe('excluded');
+      const count = inspect().signals.length;
+      store.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true, expectedEntries: 0 });
+      reject(make(15), '本书排除后不收集'); expect(inspect().signals).toHaveLength(count);
+      store.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: false, expectedEntries: 1 });
+      store.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 2 });
+      reject(make(20), '全局关闭后不收集'); expect(inspect().signals).toHaveLength(count);
+      expect(() => store.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: 0 })).toThrow();
+      store.deactivateEditorialMemory({ itemId: memory.current.itemId, expectedVersionId: memory.current.versionId });
+      expect(inspect().items[0]!.history.map((version) => version.activation)).toEqual(['active', 'inactive']);
+      const saved = inspect(); store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(inspect()).toEqual(saved);
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        expect(() => db.exec('DELETE FROM learning_signals')).toThrow('IMMUTABLE');
+        expect(() => db.exec('UPDATE global_editorial_memory_item_versions SET ordinal = 9')).toThrow('IMMUTABLE');
+      } finally { db.close(); }
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it('refuses a Series membership preview after an eligibility change even when all displayed counts stay the same', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -158,7 +263,7 @@ describe('学习准入 over the real store', () => {
       store.updateBookPeople({ bookId: book.bookId, expectedVersion: 0, authors: ['周一'], editors: ['郑三'], related: [] });
 
       // Nothing yet: a Book with no feedback has no Learning Material, and 待我处理 lists nothing for it.
-      expect(store.inspectLearningMaterials(null)).toEqual({ basis: LEARNING_ELIGIBILITY_BASIS, books: [], nextCursor: null });
+      expect(store.inspectLearningMaterials(null)).toEqual({ basis: LOCAL_LEARNING_POLICY_BASIS.text, books: [], nextCursor: null });
       expect(attention(store)).toEqual([]);
 
       // A rejection with a reason and an acceptance in the editor's own wording are material; a rejection with no reason,
@@ -283,7 +388,7 @@ describe('学习准入 over the real store', () => {
       expect(records.slice(0, 4).map((record) => record.choice)).toEqual(['book', 'deferred', 'house', 'excluded']);
       // Each names the policy it was made under by identity, mode and version, with its words (Issue #61 review).
       for (const record of records) {
-        expect(record.basis).toEqual(LEARNING_ELIGIBILITY_POLICY_BASIS);
+        expect(record.basis).toEqual(LOCAL_LEARNING_POLICY_BASIS);
         expect(record.attribution).toEqual({ authors: ['周一'], editors: ['郑三'], peopleVersion: 1 });
       }
       expect(() => database.exec("UPDATE learning_eligibility_decisions SET choice = 'book'")).toThrowError(/LEARNING_ELIGIBILITY_LEDGER_IMMUTABLE/u);
@@ -314,7 +419,7 @@ describe('学习准入 over the real store', () => {
     let planted: { decision_id: string; canonical_json: string; sha256: string } | undefined;
     expect(await rewrite((database) => {
       planted = database.prepare('SELECT decision_id, canonical_json, sha256 FROM learning_eligibility_decisions ORDER BY recorded_at LIMIT 1').get() as typeof planted;
-      const unknownBasis = planted!.canonical_json.replace('"version":1}', '"version":2}');
+      const unknownBasis = planted!.canonical_json.replace('"version":2}', '"version":3}');
       expect(unknownBasis).not.toBe(planted!.canonical_json);
       database.prepare('UPDATE learning_eligibility_decisions SET canonical_json = ?, sha256 = ? WHERE decision_id = ?').run(unknownBasis, sha256Hex(unknownBasis), planted!.decision_id);
     })).toBe('LEARNING_ELIGIBILITY_RECORD_INVALID:学习准入记录已损坏。');
@@ -461,6 +566,10 @@ describe('学习准入 over the real store', () => {
       const finding = store.inspectReviewWorkspace(bookId, run.reviewRunId).run!.findings[0]!;
       expect(finding.findingId).toMatch(/^rvf_/u);
       store.recordReviewFindingDisposition(bookId, run.reviewRunId, finding.findingId, '本书体例允许这种写法');
+      const captured = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!;
+      expect(captured.kind).toBe('review-finding-ignored');
+      expect(captured.source).toMatchObject({ bookId, reviewRunId: run.reviewRunId, findingId: finding.findingId });
+      expect(captured.source.resultSetRevisionId).not.toBeNull();
       const material = store.inspectLearningMaterials(bookId).books[0]!.materials.find((entry) => entry.kind === 'review-disposition')!;
       expect(material.materialKey).toBe(`review-disposition:${run.reviewRunId}/${finding.findingId}`);
       expect(material.target).toEqual({ kind: 'review', bookId, reviewRunId: run.reviewRunId, findingId: finding.findingId });

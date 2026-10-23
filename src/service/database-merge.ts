@@ -374,6 +374,12 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   material_translation_attempts: 'derived',
   // Factual verification (Issue #901): a Book's results, decisions and Correction Proposal lineage travel with it.
   factual_run_assurance: 'owned',
+  // Local learning (Issue #1082): a Book's signals travel with the decisions they reference; the controls and explicit memory
+  // are the house's own, like 本社审阅偏好.
+  learning_signals: 'owned',
+  editorial_learning_controls: 'house',
+  global_editorial_memory_items: 'house',
+  global_editorial_memory_item_versions: 'house',
   house_review_preference_versions: 'house',
   review_run_preference_pins: 'owned',
   factual_verification_results: 'owned',

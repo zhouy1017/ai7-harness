@@ -36,9 +36,10 @@ import { weighedPage } from './series.js';
  * 质量与学习 › 学习准入 (Issue #61, plan slice S26b; V2-UX-LEARN-001 to LEARN-012, ATTN-009, FDBK-013). A Learning Material is
  * identified quietly from what the editor already recorded — a 修改建议 decided with their reason or their own wording, a
  * judgment of an analysis result that says why, a 审阅 finding ignored with its reason — and never by asking again after the
- * feedback that made it (LEARN-001). The Learning Eligibility Policy is still recommendation-only, with no material type or
- * scope approved for automatic inclusion, so every material waits for the editor's explicit decision: `仅纳入当前图书`,
- * recommended and unselected, `纳入出版社经验`, `明确排除` or `稍后决定`. `纳入当前书系` waits for Series (Issue #63, S28).
+ * feedback that made it (LEARN-001). Each material takes the editor's explicit decision here: `仅纳入当前图书`, recommended and
+ * unselected, `纳入出版社经验`, `明确排除` or `稍后决定`. `纳入当前书系` waits for Series (Issue #63, S28). A new decision records
+ * basis version 2, the disclosed opt-out envelope the card states and local capture runs under (Issue #1082; ADR 0094 §3);
+ * every decision made under version 1, recommendation-only, still reads.
  *
  * A decision binds the exact version of the material it was made on. A material that changes afterwards — a reason changed,
  * a judgment succeeded — is decided again, and the decision it had stays on record (LEARN-007). A decision permits only
@@ -124,8 +125,20 @@ export const LEARNING_ELIGIBILITY_POLICY_BASIS = {
   version: 1,
   text: LEARNING_ELIGIBILITY_BASIS,
 } as const;
+/**
+ * Version 2 (Issue #1082; ADR 0094 §3, the policy's rules 2 and 5 as #1059 revises them): the disclosed opt-out envelope that
+ * local capture records as its governing basis. Version 1 stays readable for every decision already made under it.
+ */
+export const LOCAL_LEARNING_POLICY_BASIS = {
+  policy: 'ai7.learning-eligibility-policy',
+  mode: 'opt-out-local',
+  version: 2,
+  authority: 'ADR 0094 §3',
+  rules: [2, 5],
+  text: '本机学习默认开启：记录符合准入的处理与改写，供以后跨书参考；可随时关闭全局开关，或排除某本书、某条材料。明确排除或更窄范围立即优先。仅本机收集，不发送内容，也不训练基础模型。',
+} as const;
 /** Every basis a stored decision may name. */
-const KNOWN_LEARNING_ELIGIBILITY_BASES: ReadonlyArray<unknown> = [LEARNING_ELIGIBILITY_POLICY_BASIS];
+const KNOWN_LEARNING_ELIGIBILITY_BASES: ReadonlyArray<unknown> = [LEARNING_ELIGIBILITY_POLICY_BASIS, LOCAL_LEARNING_POLICY_BASIS];
 
 function knownBasis(value: unknown): boolean {
   return KNOWN_LEARNING_ELIGIBILITY_BASES.some((basis) => canonicalJson(basis) === canonicalJson(value));
@@ -576,7 +589,7 @@ export class LearningEligibilityLedger {
       ordinal,
       choice: input.choice,
       note,
-      basis: LEARNING_ELIGIBILITY_POLICY_BASIS,
+      basis: LOCAL_LEARNING_POLICY_BASIS,
       attribution: { peopleVersion: input.attribution.peopleVersion, authors: [...input.attribution.authors], editors: [...input.attribution.editors] },
       supersedes: latest?.decisionId ?? null,
       actor: ACTOR,
@@ -641,7 +654,7 @@ export const LEARNING_REMEDIATION_NAMED = 5;
  * version's lines they support and the Review Run category Tasks whose pinned version reads them.
  */
 export type LearningRemediationReach = (materialKeys: ReadonlyArray<string>) => Pick<LearningRemediationPreviewProjection['groups'],
-  'currentVersion' | 'linesAffected' | 'running' | 'prepared' | 'completed' | 'runningNamed' | 'completedNamed'>;
+  'currentVersion' | 'linesAffected' | 'running' | 'prepared' | 'completed' | 'runningNamed' | 'completedNamed'> & { readonly memory?: number };
 
 const NO_REACH: LearningRemediationReach = () => ({ currentVersion: null, linesAffected: 0, running: 0, prepared: 0, completed: 0, runningNamed: [], completedNamed: [] });
 
@@ -696,8 +709,8 @@ export function learningRemediationPreview(
   }
   const groups = {
     future: included.length,
+    memory: 0,
     ...(included.length === 0 ? NO_REACH([]) : reach(included.map((entry) => entry.materialKey))),
-    memory: 0 as const,
     decisionsKept: included.reduce((sum, entry) => sum + entry.decisions, 0),
   };
   const previewDigest = sha256Hex(canonicalJson({
