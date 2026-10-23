@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { hydrateAnalysisRevision, appendTaskPlanPage, retainTaskPlanPages } from '../../src/renderer/analysis-paging.js';
 import { analysisOverviewPage, analysisOverviewText, baselineAnalysisWire } from '../../src/service/analysis/baseline-analysis-wire.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
-import { ANALYSIS_READ_FAILED } from '../../src/renderer/analysis-paging-labels.js';
+import { ANALYSIS_READ_FAILED, TASK_PAGE_NAMES, taskPageMore, taskPageShown } from '../../src/renderer/analysis-paging-labels.js';
 import { longPreparedAnalysis, longSettledAnalysis } from '../support/long-baseline-analysis.js';
 
 it('keeps all eight short-book units and the exact overview inline, making no overview call', async () => {
@@ -64,4 +64,18 @@ it('retains technical-row arrays and joins strings using code-point counts', () 
   expect(Array.isArray(next.technical)).toBe(true);
   expect(next.technical[0]!.value).toBe('甲😀"\\');
   expect(next.listPages['technical.0.value'].shown).toBe(4);
+});
+
+it('keeps cancellation counts, exact nested details and digest-pinned pages through polling', () => {
+  const path = 'runControl.cancel.impact';
+  const first = { runControl: { cancel: { reason: null, impact: ['完整数量与影响'] } },
+    listPages: { [path]: { shown: 1, total: 3, nextOrdinal: 1, digest: 'snapshot' } } };
+  const complete = appendTaskPlanPage(first, { path, items: ['第 2 个 · 等你回答', '第 3 个 · 结果待确认'], nextOrdinal: null, digest: 'snapshot' });
+  expect(complete.runControl.cancel.impact).toEqual(['完整数量与影响', '第 2 个 · 等你回答', '第 3 个 · 结果待确认']);
+  expect(first.runControl.cancel.impact).toEqual(['完整数量与影响']);
+  expect(retainTaskPlanPages(first, complete).runControl.cancel).toEqual(complete.runControl.cancel);
+  const changed = { ...first, listPages: { [path]: { ...first.listPages[path]!, digest: 'changed' } } };
+  expect(retainTaskPlanPages(changed, complete).runControl.cancel.impact).toEqual(first.runControl.cancel.impact);
+  expect(taskPageMore(TASK_PAGE_NAMES[path]!, 1, 3)).toBe('继续读取取消影响说明（已显示 1 / 3）');
+  expect(taskPageShown(TASK_PAGE_NAMES[path]!, 3, 3)).toBe('取消影响说明 · 已显示 3 / 3 条');
 });

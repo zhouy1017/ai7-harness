@@ -1275,6 +1275,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'seventh-book-import',
     'outcome-unknown-stop',
     'outcome-unknown-view',
+    'cancel-impact-paging',
     'outcome-unknown-cancelled',
     'outcome-unknown-redo-disclosed',
     'relaunch-for-reduction-unknown',
