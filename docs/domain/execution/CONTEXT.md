@@ -215,7 +215,7 @@ _中文_: 构件更新规则
 _Avoid_: automatic upstream update, Plugin update channel, standing expansion authority
 
 **Authority Ceiling**:
-The maximum capabilities, eligible scope kinds, Model Role needs, and Effect classes AI7 permits one exact native DSH artifact revision — or one Captured Procedure version: its steps, their executors, output kinds, model and search-engine use, and the current-Book Run Source Scope ([ADR 0087](../../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md) §4) — to request; it is AI7-owned metadata, not a native-artifact claim or current Run authority.
+The maximum capabilities, eligible scope kinds, Model Role needs, and Effect classes AI7 permits one exact native DSH artifact revision — or one Captured Procedure version: its steps, their executors, output kinds, model and search-engine use, and the current-Book Run Source Scope ([ADR 0087](../../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md) §4) — to request; the Procedure Definition successor pins its declared stages, tools, outputs and eligible scope under [ADR 0095 §1](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#1-every-task-is-one-run-of-a-procedure). It is AI7-owned metadata, not a native-artifact claim or current Run authority.
 _中文_: 权限上限
 _Avoid_: Capability Grant, Run Authorization, standing permission
 
@@ -405,7 +405,7 @@ _中文_: 后台分析登记
 _Avoid_: Provider setup, artifact enablement, Default Execution Rule, general scheduler permission
 
 **Background Processing Enrollment**:
-The per-kind generalization of Background Analysis Enrollment ([ADR 0095 §3](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#3-an-idle-time-background-lane)): an explicit, disclosed, revocable authority with a mandatory budget ceiling under which named kinds that need no immediate result — analysis sync, index and embedding builds, learning curation passes, factual re-checks, custom analysis, deferred procedure stages — may dispatch during the editor's idle time, each dispatch separately recorded and policy-gated.
+The per-kind generalization of Background Analysis Enrollment ([ADR 0095 §3](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#3-an-idle-time-background-lane)): an explicit, disclosed, revocable authority with a mandatory budget ceiling under which named kinds that need no immediate result — analysis sync, index and embedding builds, learning curation passes, factual re-checks, custom analysis, deferred procedure stages — may dispatch during the editor's idle time, each dispatch separately recorded and policy-gated; ADR 0094's disclosed enabled-learning envelope remains an independent authority for automatic curation.
 _中文_: 后台处理登记
 _Avoid_: Background Analysis Enrollment (the manuscript-analysis special case), scheduler, standing Provider permission
 
@@ -505,7 +505,7 @@ _中文_: 续行
 _Avoid_: Retry, Redo, automatic process restoration, continuation after a material source restriction
 
 **Retry**:
-A new explicitly linked execution attempt within the same unchanged Run when evidence proves repetition is safe.
+A new explicitly linked execution attempt within the same unchanged Run when evidence proves repetition is safe; a model-request unit gap instead needs the separately authorized new attempt with possible double billing disclosed under [ADR 0095 §2](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#2-an-execution-governor-and-real-throughput).
 _中文_: 重试
 _Avoid_: Resume, Redo, automatic ambiguous-Effect repetition
 

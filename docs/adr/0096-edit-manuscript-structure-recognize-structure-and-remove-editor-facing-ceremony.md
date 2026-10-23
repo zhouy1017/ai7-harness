@@ -36,16 +36,18 @@ A paragraph longer than the block bound no longer refuses the whole import: AI7 
 
 | Owner | Affected clause and replacement |
 | --- | --- |
-| Editorial CONTEXT **Manuscript Block**; [ADR 0006](0006-preserve-manuscript-native-history-and-recovery.md); [ADR 0025](0025-windowed-editing-over-a-paging-manuscript-store.md); kick-in 18 | Block kinds gain note and table; structural edits are journal edit kinds with lineage (§1). |
+| Editorial CONTEXT **Manuscript Block**; [ADR 0006](0006-preserve-manuscript-native-history-and-recovery.md); [ADR 0025](0025-windowed-editing-over-a-paging-manuscript-store.md); [kick-in 18](../../kick-in/18-manuscript-revision-and-recovery-boundary.md#accepted-semantic-model) | Block kinds gain note and table; structural edits are journal edit kinds with lineage (§1). |
 | V2-UX-ED-017, ED-018, ED-019, ED-044 | Split/merge/insert/delete and a single heading's level are ordinary edits; section moves and multi-heading hierarchy changes keep Structure Adjustment Mode (§1). |
 | [ADR 0086](0086-classify-ten-import-content-classes-and-retain-them-with-the-source-version.md) §2 rows 脚注与尾注 (`降级导入 until the manuscript has a note block`), 表格, 图片与图注; its rejected "prototype as drawn" | A note block exists; tables and images are shown read-only; the long-paragraph import refusal becomes a split or a disclosed choice (§1, §2). |
-| [ADR 0072](0072-admit-multi-format-manuscript-intake-with-docx-as-the-working-representation.md) heading classification; V2-UX-IMP-002, IMP-055; `src/service/docx.ts` style-name heading detection | Candidate structure recognition with editor confirmation for style-less manuscripts (§2). |
+| [ADR 0072](0072-admit-multi-format-manuscript-intake-with-docx-as-the-working-representation.md) §4 classified import; V2-UX-IMP-002, IMP-055 | Candidate structure recognition with editor confirmation for style-less manuscripts (§2). |
 | [ADR 0045](0045-preserve-native-dsh-artifacts-behind-ai7-authority-sidecars.md) staged admission, Issue #165 successor; [ADR 0055](0055-stage-the-bounded-provider-free-j-03-authorization-journey.md); V2-UX-OFF-007, REUSE-026 | The shipped default profile is pinned at Book creation; explicit enablement remains for any other artifact (§3). |
 | V2-UX-AUTH-001, AUTH-002, AUTH-004, PLAN-007, PLAN-008, TASK-017; [ADR 0094 §6](0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md#6-one-explicit-action-for-frequent-operations); editor surfaces §6 | A procedure sheet's start is the one explicit action when the plan is not editable (§3). |
 | V2-UX-PDEC-001, PDEC-002, PDEC-006, PDEC-012, EAPP-003, EAPP-004; [UI ADR 0011](../ui-ux-v2/adr/0011-use-proposal-change-items-and-explicit-atomic-groups.md); editor surfaces §1 mark table | One decision system on the card; drafts only in the proposal workspace (§3). |
 | Editor surfaces §0.3 context header 「一句状态」; V2-UX-LIVE-004 | The live processing indicator (§3). |
-| Editor surfaces §0.1 precedence sentence; UI README decision log | ADR 0096 is named. |
+| [PRD Further Notes](../prd/ai7-v2-prd.md#further-notes) successor routing; editor surfaces §0.1 precedence sentence; UI CONTEXT **Live Processing Indicator** and glossary; UI README decision log | ADR 0096 is named. |
 
 ## Delivery and proof
+
+Implementation owners (unchanged here): `src/service/docx.ts` style-name heading detection and paragraph bounds, manuscript store/editor structural edit and undo paths (F-22), and the default-profile, procedure-start and card projections (F-23).
 
 Structural edits, the note block and structure recognition are F-22 in the [development plan](../development/development-plan.md) (Wave 22, with tables and images in Wave 23); the ceremony and indicator changes are F-23 (Wave 22). J-02 proves split, merge, heading level and undo continuity on the synthetic long manuscript; J-01 proves candidate structure recognition and the long-paragraph choice on an admitted Public SampleBook variant without heading styles; J-05 proves the single decision system; J-12 proves the live indicator and the Main-role connection test. This record supplies no product or live-model pass.

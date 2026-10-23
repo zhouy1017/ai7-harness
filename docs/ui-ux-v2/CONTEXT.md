@@ -293,7 +293,7 @@ The compact pre-save explanation that recommends exactly one of Default Executio
 _Avoid_: saved asset, generic template type, authority decision
 
 **Captured Procedure** (`可复用工序`):
-An AI7-owned, versioned, digest-pinned procedure document (`ai7.captured-procedure/1`) captured from a completed Review Run: its title, its ordered review-category steps with each 工序 version, output kind and model and search-engine use, one scope parameter and its Authority Ceiling — nothing of the Book. It runs only as an ordinary Review Run after `验证并启用`, pinned to the exact version; it is not a DSH Skill or an instruction carrier ([ADR 0087](../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md)).
+An AI7-owned, versioned, digest-pinned procedure document (`ai7.captured-procedure/1`) captured from a completed Review Run: its title, its ordered review-category steps with each 工序 version, output kind and model and search-engine use, one scope parameter and its Authority Ceiling — nothing of the Book. This is the review-only predecessor form retained under [ADR 0087](../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md); [ADR 0095 §1](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#1-every-task-is-one-run-of-a-procedure) generalizes it into the execution context's Procedure Definition, with bounded instructions and capture from other completed runs.
 _Avoid_: Skill, macro, recipe, template, automatic procedure
 
 **Procedure Library** (`工序库`):
@@ -473,7 +473,7 @@ The disclosure-closed part of the same surface that carries the exact digests, r
 _Avoid_: deleted identity, truncated digest, primary status, console
 
 **Run Liveness Signal** (`任务存活信号`):
-The reading beside Measured Run Progress that lets an editor tell, within a bounded interval and from facts the system already holds — the current unit and its start instant, the last recorded transition, completed transmissions and usage, the Provider attempt's state — whether a Run is alive, what it is doing now, and how long that step has taken, with a measured stale case and no estimated percentage (ADR 0071).
+The reading beside Measured Run Progress that lets an editor tell, within a bounded interval and from facts the system already holds — every unit in flight and its start instant, the last recorded transition, completed transmissions and usage, each Provider attempt's state — whether a Run is alive, what it is doing now, and how long that step has taken, with a measured stale case for each unit and no estimated percentage (ADR 0071, amended by ADR 0095 §2).
 _Avoid_: estimated spinner percentage, remaining-time estimate, frozen status pill, Connectivity Wait State
 
 **Book-grouped Run Overview** (`按图书分组的任务概览`):

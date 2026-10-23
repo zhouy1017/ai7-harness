@@ -30,6 +30,8 @@ The reference-only older AI7 used a linear `manuscript_versions.parent_version_i
 
 ## Accepted semantic model
 
+> Amended by [ADR 0096 §1](../docs/adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#1-structural-edits-are-ordinary-edits): ordinary structural edits and editable note/read-only table blocks retain this model's stable lineage, and governed Apply reversal remains traversable by durable undo.
+
 These concepts remain distinct even if one storage engine implements several of them:
 
 1. **Source Version** — immutable imported evidence that may seed editable text; it remains part of textual-source lineage.

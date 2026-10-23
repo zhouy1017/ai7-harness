@@ -19,7 +19,7 @@ AI7 是面向中文文学编辑的本地桌面工作台：把长篇稿件、审�
 [ADR 0094](docs/adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md)、[ADR 0095](docs/adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md)、[ADR 0096](docs/adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) 与[开发计划](docs/development/development-plan.md)规定后续交付顺序；文档变更没有实现下列能力：
 
 - **工序为中心。** 每个任务都是一份工序的一次运行：预装工序（基线分析、九类审阅、评估与审稿意见、写作）与本社自己改写、新建、从运行中捕获的工序同在工序库；编辑的任务说明与豁免规则进入工序；每条产出仍过精确锚定，写稿仍过 Apply。
-- **更快、可并行的执行。** 一本书内多个单元并行、多本书同时审阅、空闲时自动处理非即时任务；请求有超时、速率限制退避、结果未知只影响该单元；全书审阅在一个工作时段内完成。
+- **更快、可并行的执行。** 一本书内多个单元并行、多本书同时审阅、空闲时自动处理非即时任务；请求有超时、速率限制退避、结果未知只影响该单元。
 - **工具型 harness。** 模型回合可按策略调用只读本地工具回看稿件、基线事实、规范条款与术语表，并行调用，子代理在父尝试内扇出；不开放 shell、文件系统或任意网络。
 - **审阅契约 v2 与证据上卡。** 块编号、逐条容错、被排除的发现可见；跨章一致性成为模型阶段；事实核查证据（来源、逐字片段、译文、说明）挂在卡片上并归档，报告导出逐条附带；出版政策与风险不联网即可运行；国标标点数字、规范汉字、本社词表与术语一致性由确定性检查阶段完成。
 - **统一渠道与选模。** 一份生产策略之后，模型在已声明协议内成为可配置记录；Zen、Go 与 Claude / Gemini / OpenAI / DeepSeek 官方服务共用配置、连接测试与模型选择；各协议仍需能力准入。

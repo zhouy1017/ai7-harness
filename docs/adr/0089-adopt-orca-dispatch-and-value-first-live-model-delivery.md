@@ -32,7 +32,7 @@ For identical or similar **development tests**, reuse recorded results or saniti
 
 For **actual business**, a new user task uses the real Provider for model-dependent steps, including a user deliberately asking or generating again with the same input. Development live-once restrictions, test-family matching and caches never block or answer those tasks. Existing business continuation, explicit incremental analysis and reuse of completed steps keep their own semantics.
 
-Repository coding agents use their subscriptions normally; their conversations are not AI7 test items. CI, Gate and ordinary automated product regression remain provider-free. No new client daily/batch/call-count ceiling is introduced. Existing product Run budget semantics and account-limit stopping remain; quota exhaustion does not silently switch Provider or payment source.
+Repository coding agents use their subscriptions normally; their conversations are not AI7 test items. CI, Gate and ordinary automated product regression remain provider-free. No new client daily/batch/call-count ceiling is introduced. Product Run budget semantics and account-limit stopping follow [ADR 0095 §2](./0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#2-an-execution-governor-and-real-throughput): reserve explicit ceiling capacity for in-flight requests, treat a bare 429 as backoff only on a declared retryable route, and keep account-limit responses terminal; quota exhaustion does not silently switch Provider or payment source.
 
 ## Provider target and credential boundary
 

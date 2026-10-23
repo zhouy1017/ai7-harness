@@ -16,7 +16,7 @@ Provider onboarding may offer a separate explicit Enrollment action, but Provide
 
 [ADR 0095 §3](0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#3-an-idle-time-background-lane) generalizes this Enrollment into a per-kind **Background Processing Enrollment** for work that needs no immediate result — analysis sync, index and embedding builds, learning curation passes, factual re-checks, custom analysis and the deferred stages of a procedure — and adds the explicit 「空闲时处理」 start for one task. Every clause above about disclosure, revocation, the mandatory ceiling, exact per-dispatch Plan/binding/authorization and the non-origins applies to the generalized enrollment unchanged. No matching newly user-initiated Task or active Enrollment means no manuscript-analysis Provider call or cost; automatic curation has only ADR 0094's separately bounded authority.
 
-Enrollment grants only the selected non-mutating analysis work. It grants no Effect, formal Manuscript Apply, factual decision, Series Knowledge promotion, learning, publication or Public Release Permission.
+Enrollment grants only the selected non-mutating processing work under ADR 0095 §3. It grants no Effect, formal Manuscript Apply, factual decision, Series Knowledge promotion, learning eligibility, memory activation, publication or Public Release Permission; curation still requires ADR 0094 §3's disclosed enabled-learning envelope.
 
 ## Baseline and optional analysis
 

@@ -312,7 +312,7 @@ A revision-bound, evidence-linked record of a suspected factual or semantic defe
 _Avoid_: Model verdict, applied correction
 
 **Correction Proposal**:
-A suggested change bound to one exact Editorial Deliverable Revision that addresses an Editorial Error Finding without altering active deliverable content until accepted through its applicable mutation workflow. For a Manuscript, it remains exact-Manuscript-Revision-bound and model-generated changes still begin on a Proposal Branch; the editor sees it as a 修改建议 mark and accepts it through one-click 接受并应用 ([ADR 0076](../../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)).
+A suggested change bound to one exact Editorial Deliverable Revision that addresses an Editorial Error Finding without altering active deliverable content until accepted through its applicable mutation workflow. For a Manuscript, it remains exact-Manuscript-Revision-bound and model-generated changes still begin on a Proposal Branch; the editor sees it as a 修改建议 mark and accepts it through one-click 接受并应用 ([ADR 0076](../../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)). For a factual finding, its card carries the source link, verbatim snippet, 来源译文 and note also archived in 来源与证据 and attached per finding on report export ([ADR 0095 §5](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#5-review-contract-v2-evidence-on-the-card-and-the-derived-report)).
 _Avoid_: Silent rewrite, completed fix
 
 **Source Version**:
@@ -489,7 +489,7 @@ _Avoid_: source search, initial web/research retrieval, fuzzy match, factual ver
 
 
 **Annotation**:
-An exportable comment bound to an exact Manuscript Revision range, authored by an editor, by AI7 from a named Task, review category or analysis, or carried in from an imported file with its original author. It may be converted to a Proposal Change Item by an editor and is exported unless the export excludes annotations ([ADR 0076](../../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)).
+An exportable comment bound to an exact Manuscript Revision range, authored by an editor, by AI7 from a named Task, review category or analysis, or carried in from an imported file with its original author. It may be converted to a Proposal Change Item by an editor and is exported unless the export excludes annotations ([ADR 0076](../../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)). For a factual finding, its card carries the source link, verbatim snippet, 来源译文 and note also archived in 来源与证据 and attached per finding on report export ([ADR 0095 §5](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#5-review-contract-v2-evidence-on-the-card-and-the-derived-report)).
 _中文_: 批注
 _Avoid_: Editor Note, Proposal Change Item, Editorial Error Finding without a location, model context
 

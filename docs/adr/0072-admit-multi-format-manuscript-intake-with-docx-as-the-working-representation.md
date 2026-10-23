@@ -34,6 +34,8 @@ The Import Fidelity Review keeps its eight content classes and its three labels 
 
 ### 4 · The bounded DOCX import becomes a classified one
 
+> Amended by [ADR 0096 §2](./0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#2-structure-recognition-on-import-and-long-paragraphs): the classified import also proposes an unselected, editor-confirmed structure for DOCX without heading styles and offers the disclosed long-paragraph split path; the block-size bound and hostile-input protections remain, and no import is committed through an inferred heading alone.
+
 The two `sample1`-shaped conditions stop refusing and start classifying:
 
 - The body-level terminal `sectPr` check (`docx.ts:316`, `:339`, `:341`) no longer requires a zero-attribute or `sample1`-exact shape. Section properties become a counted fidelity signal in the `sections` class, labelled `降级导入` with its count and examples, and the document imports under an explicit Import Degradation Decision.
