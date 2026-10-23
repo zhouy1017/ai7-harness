@@ -1344,7 +1344,8 @@ export class ReviewRunStore {
    * stale. The ledgers' own authorizations are written later, one category at a time, when the drive
    * loop reaches each; a plan that moves in between is refused there, with the ledger's reason.
    *
-   * A full governor never refuses the approval: the driver waits for a place before authorizing the next category.
+   * A full governor never refuses the approval: the driver waits for a place before authorizing the next category
+   * (#1080). `_slotBusy` is still passed by the store's callers and is no longer read.
    */
   recordAuthorization(
     bookId: string,

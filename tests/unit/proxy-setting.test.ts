@@ -129,13 +129,24 @@ describe('per-request native-fetch dispatcher', () => {
     expect(classifyTransportError(failure, true).code).toBe('TRANSPORT_FAILED');
     expect(native).not.toHaveBeenCalled();
     const bodyTimeout = proxyAwareFetch(async () => { throw new TypeError('private', { cause: { code: 'UND_ERR_BODY_TIMEOUT' } }); }, async () => ({ mode: 'direct' }));
-    try { await bodyTimeout(modelUrl); } catch (error) {
-      expect(classifyTransportError(error, true).code).toBe('AI7_OUTCOME_UNKNOWN');
-    }
+    expect(classifyTransportError(await bodyTimeout(modelUrl).catch((error: unknown) => error), true).code).toBe('AI7_OUTCOME_UNKNOWN');
     const timeout = proxyAwareFetch(async () => { throw new DOMException('private', 'TimeoutError'); }, async () => ({ mode: 'direct' }));
-    try { await timeout(modelUrl); } catch (error) {
-      expect(classifyTransportError(error, true).code).toBe('AI7_OUTCOME_UNKNOWN');
-    }
+    expect(classifyTransportError(await timeout(modelUrl).catch((error: unknown) => error), true).code).toBe('AI7_OUTCOME_UNKNOWN');
+  });
+  it('keeps a connect timeout unreachable: proxy-unreachable through a proxy, a reported transport failure direct (#1080 review)', async () => {
+    const { factory, destroy } = fixture();
+    factory.mockImplementation((_uri, failed) => { failed(); return { destroy } as unknown as ReturnType<ProxyDispatcherFactory>; });
+    const connectTimeout = async (): Promise<Response> => { throw new TypeError('private', { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }); };
+    const reports: Array<'proxy-unreachable' | 'model-service-unreachable' | null> = [];
+    const proxied = proxyAwareFetch(connectTimeout, async () => parseProxyUrl('http://proxy.invalid:8080'), factory, (value) => { reports.push(value); });
+    expect(classifyTransportError(await proxied(modelUrl).catch((error: unknown) => error), true).code).toBe('AI7_PROXY_UNREACHABLE');
+    const direct = proxyAwareFetch(connectTimeout, async () => ({ mode: 'direct' }), factory, (value) => { reports.push(value); });
+    expect(classifyTransportError(await direct(modelUrl).catch((error: unknown) => error), true).code).toBe('TRANSPORT_FAILED');
+    // A socket timeout through a proxy that never connected is the proxy's, never an unknown model-service result.
+    const proxiedSocket = proxyAwareFetch(async () => { throw new TypeError('private', { cause: { code: 'ETIMEDOUT' } }); },
+      async () => parseProxyUrl('http://proxy.invalid:8080'), factory, (value) => { reports.push(value); });
+    expect(classifyTransportError(await proxiedSocket(modelUrl).catch((error: unknown) => error), true).code).toBe('AI7_PROXY_UNREACHABLE');
+    expect(reports).toEqual(['proxy-unreachable', 'model-service-unreachable', 'proxy-unreachable']);
   });
   it('recognizes proxy 407 separately and preserves cancellation', async () => {
     const { factory } = fixture();

@@ -83,18 +83,23 @@ function interruptedOrDenied(error: unknown): Error | null {
   if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
     return new DOMException('请求已中止或超过时限。', error.name);
   }
-  const cause = error instanceof Error ? error.cause : null;
-  const timeoutCode = cause !== null && typeof cause === 'object' && 'code' in cause ? cause.code : null;
-  if (timeoutCode === 'UND_ERR_CONNECT_TIMEOUT') {
-    return Object.assign(new Error('连接在发送请求前超时。'), { code: 'TRANSPORT_FAILED', requestSent: false });
-  }
-  if (timeoutCode === 'UND_ERR_HEADERS_TIMEOUT' || timeoutCode === 'UND_ERR_BODY_TIMEOUT' || timeoutCode === 'ETIMEDOUT') {
-    return new DOMException('模型服务响应超过时限。', 'TimeoutError');
-  }
   if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'AI7_OUTBOUND_NETWORK_DENIED') {
     return Object.assign(new Error('出站网络在当前产品区间内被禁用。'), { code: 'AI7_OUTBOUND_NETWORK_DENIED' });
   }
   return null;
+}
+
+/**
+ * A timeout that may have come after the request left (ADR 0095 §2, #1080) is unknown, never a resendable transport failure.
+ * It is read only once a failed proxy connection is ruled out; undici's connect timeout is not one of these, so it keeps its
+ * unreachable report and class.
+ */
+function responseTimedOut(error: unknown): Error | null {
+  const cause = error instanceof Error ? error.cause : null;
+  const code = cause !== null && typeof cause === 'object' && 'code' in cause ? cause.code : null;
+  return code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT' || code === 'ETIMEDOUT'
+    ? new DOMException('模型服务响应超过时限。', 'TimeoutError')
+    : null;
 }
 
 /** Captured fetch only. Called by admitted transports; no global dispatcher or host allowance is changed. */
@@ -113,7 +118,7 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
     if (setting.mode === 'direct') {
       try { const response = await nativeFetch(input, { ...init, redirect: 'manual' }); report(null); return response; }
       catch (error) {
-        const preserved = interruptedOrDenied(error);
+        const preserved = interruptedOrDenied(error) ?? responseTimedOut(error);
         if (preserved !== null) throw preserved;
         report('model-service-unreachable'); throw Object.assign(new Error('模型服务不可达。'), { code: 'TRANSPORT_FAILED' });
       }
@@ -151,6 +156,8 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
         report('proxy-unreachable');
         throw Object.assign(new Error('代理不可达：请检查网络代理设置。'), { code: PROXY_UNREACHABLE });
       }
+      const timedOut = responseTimedOut(error);
+      if (timedOut !== null) throw timedOut;
       // Discard native error causes, which may contain proxy URLs or headers.
       report('model-service-unreachable');
       throw Object.assign(new Error('模型服务不可达。'), { code: 'TRANSPORT_FAILED' });

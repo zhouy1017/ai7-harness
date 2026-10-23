@@ -221,7 +221,7 @@ export class ReviewRunDriver {
     } catch (error) {
       const code = codeOf(error);
       // The last place was taken between the wait and the hand-off: the next step waits again and dispatches.
-      if (code === 'EXECUTION_BUSY' || code === 'EXECUTION_SLOT_BUSY') {
+      if (code === 'EXECUTION_BUSY') {
         await this.#place(reviewRunId, categoryId);
         return;
       }

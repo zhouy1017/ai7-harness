@@ -573,8 +573,9 @@ export class BaselineAnalysisExecutionOwner {
 
   /**
    * Whether the governor has no place for a Run the editor starts now (Issue #49, S14): as many Runs execute as it holds, or —
-   * under a live launch — the editor's one place is taken (Issue #864). A start then waits in its queue (`admitOrQueue`); a quick
-   * start, a Review Run's approval and a 续行 wait for a place with their reasons.
+   * under a live launch — the editor's Runs hold every foreground place (Issue #864; all of them since #1080). A start then
+   * waits in its queue (`admitOrQueue`); a Review Run's recorded approval, a quick start and a 续行 wait for a place with their
+   * reasons.
    */
   get busy(): boolean {
     const occupying = this.#occupiedPlaces();
@@ -829,6 +830,7 @@ export class BaselineAnalysisExecutionOwner {
     // the partial revision, never one that drops them (Issue #759).
     if (options.cancel !== true && !resuming) this.#requireMaterials(runRecordId, ledger);
     // 结果待确认 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016): a Run stopped there never goes on — only its cancellation runs.
+    // Only Runs recorded before #1080 carry that stop; a Run now completes with its unknown units as gaps.
     if (resuming && options.cancel !== true && ledger.outcomeUnknownOf(runRecordId) !== null) {
       throw new ExecutionAdmissionError('EXECUTION_OUTCOME_UNKNOWN', OUTCOME_UNKNOWN_NO_RESUME);
     }
@@ -2342,8 +2344,6 @@ export class BaselineAnalysisExecutionOwner {
         // ceiling reached if one is still to be sent, and a Run that needs none completes, since the ceiling counts only
         // where it stops a request.
         if (ceilingState() === 'reached') {
-          // A Run that would stop 结果待确认 with the ceiling spent ends as the ceiling reached, its unknown ranges kept as their
-          // own gaps in the partial revision (Issue #51, S16c).
           if (asking || accountLimit !== null || active.interrupted) {
             liveInterruption = 'run-budget-ceiling-reached';
             terminalClassification = 'interrupted';
