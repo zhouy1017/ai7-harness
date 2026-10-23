@@ -1,3 +1,4 @@
+import { renderProcedureLibrary } from './procedure-library.js';
 import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
 import { ANALYSIS_MORE_RANGES, ANALYSIS_READ_FAILED, ANALYSIS_READING, ANALYSIS_MORE_REPORT_ROWS, ANALYSIS_MORE_CHOICES, ANALYSIS_EARLIER_HISTORY, ANALYSIS_PAGED_LIST_LABELS } from './analysis-paging-labels.js';
@@ -190,10 +191,8 @@ import {
 } from './evaluation-labels.js';
 import {
   PROCEDURES_HEADING,
-  PROCEDURE_STATE_LABELS,
   RULES_HEADING,
   artifactLine,
-  procedureLine,
   EXEMPLARS_EMPTY,
   EXEMPLARS_LATER,
   EXEMPLARS_MORE,
@@ -6096,20 +6095,12 @@ function knowledgeBasePage(tab: KnowledgeBaseTab, tabFocused: boolean): { conten
 function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjection, tabFocused = false, procedures: KnowledgeProceduresProjection | null = null): void {
   const { content, panelNode } = knowledgeBasePage('rules', tabFocused);
   content.dataset['ruleCount'] = String(projection.rules.length);
-  // The expert 工序 (Issue #427, S79d; KB-010): what each does, its version, state and use, then the native artifact.
+  // The expert 工序 (Issue #427, S79d; KB-010), since Issue #1081 the pre-installed procedure library: what each does, its
+  // version, state, use and stages, then the native artifact.
   if (procedures !== null) {
     const section = element('section', 'knowledge-procedures');
-    section.dataset['procedureCount'] = String(procedures.procedures.length);
-    const list = element('ul', 'knowledge-procedure-list');
-    for (const procedure of procedures.procedures) {
-      const item = element('li', undefined);
-      item.dataset['procedureId'] = procedure.procedureId;
-      item.dataset['procedureState'] = procedure.state;
-      item.dataset['procedureRuns'] = String(procedure.reviewRuns);
-      item.append(element('span', `status-pill procedure-state-${procedure.state}`, PROCEDURE_STATE_LABELS[procedure.state]), element('span', undefined, ` ${procedureLine(procedure)}`));
-      if (procedure.unavailableReason !== null) item.append(element('span', 'field-note procedure-reason', ` · ${procedure.unavailableReason}`));
-      list.append(item);
-    }
+    section.dataset['procedureCount'] = String(procedures.preinstalled.length);
+    const list = renderProcedureLibrary(procedures.preinstalled);
     const artifacts = element('ul', 'knowledge-artifact-list');
     for (const artifact of procedures.artifacts) {
       const item = element('li', undefined, artifactLine(artifact));
@@ -6130,7 +6121,7 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
           ? []
           : [element('dt', undefined, '权限侧车 SHA-256'), element('dd', 'technical-identity', artifact.technical.sidecarSha256)]),
       ]),
-      ...procedures.procedures.flatMap((procedure) => [element('dt', undefined, procedure.title), element('dd', 'technical-identity', procedure.procedureId)]),
+      ...procedures.preinstalled.flatMap((procedure) => [element('dt', undefined, procedure.title), element('dd', 'technical-identity', procedure.procedureId)]),
     );
     section.append(element('h3', undefined, PROCEDURES_HEADING), list, artifacts, identities);
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): apart from the built-in 工序, read on their own.

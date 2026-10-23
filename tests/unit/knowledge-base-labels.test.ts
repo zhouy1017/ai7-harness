@@ -25,6 +25,9 @@ import {
   materialSegmentsHeading,
   artifactLine,
   procedureLine,
+  procedureStagesLine,
+  PROCEDURE_PREDECESSOR_NOTE,
+  PROCEDURE_STATE_LABELS,
   EXEMPLARS_LATER,
   EXEMPLAR_READERS_REPORT_ADMIT,
   EXEMPLAR_READERS_REPORT_PINS,
@@ -173,10 +176,14 @@ describe('范例 (Issue #427, S79b)', () => {
 });
 
 describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
-  it('names each 工序 by what it does, its version, the category it serves and its use, and the artifact in its own words', () => {
-    const procedure = { procedureId: 'p', title: '出版风险点标注', version: '1', categoryId: 'c', categoryLabel: '出版风险', state: 'enabled' as const, unavailableReason: null, reviewRuns: 0 };
-    expect(procedureLine(procedure)).toBe('出版风险点标注 · 第 1 版 · 内置 · 用于「出版风险」 · 还没有审阅用过');
-    expect(procedureLine({ ...procedure, reviewRuns: 3 })).toBe('出版风险点标注 · 第 1 版 · 内置 · 用于「出版风险」 · 已用于 3 次审阅');
+  it('names each pre-installed 工序 by what it does, its version, its use and its stages, and the artifact in its own words', () => {
+    // Issue #1081 (F-26a): the library re-expresses the nine categories and baseline analysis as pre-installed procedures.
+    const procedure = { procedureId: 'p', version: 1, digest: 'a'.repeat(64), title: '出版风险点标注', state: 'enabled' as const, uses: 0,
+      stages: [{ stageType: 'chunked-review' as const, label: '分块审读' }, { stageType: 'synthesis' as const, label: '综合' }] };
+    expect(procedureLine(procedure)).toBe('出版风险点标注 · 第 1 版 · 预装 · 已使用 0 次');
+    expect(procedureLine({ ...procedure, uses: 3 })).toBe('出版风险点标注 · 第 1 版 · 预装 · 已使用 3 次');
+    expect(procedureStagesLine(procedure)).toBe('分块审读 → 综合');
+    expect([PROCEDURE_STATE_LABELS, PROCEDURE_PREDECESSOR_NOTE]).toEqual([{ enabled: '已启用' }, '下方的可复用工序是审阅专用前身，仅用于审阅；已保存的版本仍可查看和运行。']);
     // The 方案 in the house's words, 本社方案 vN, in its lifecycle; no identifier of the carrier's.
     const artifact = { title: '本社方案', revision: 2, state: 'installed' as const, enabledBooks: 2 };
     expect(artifactLine(artifact)).toBe('本社方案 v2 · 已安装 · 已为 2 本书启用');

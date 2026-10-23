@@ -108,6 +108,7 @@ import type {
   DatabaseImportPreviewProjection,
   DatabaseReplacementsProjection,
 } from './protocol/data-storage.js';
+import type { ProcedureDefinitionPin, PreinstalledProcedureProjection } from './protocol/procedures.js';
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
@@ -115,7 +116,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 161 as const;
+export const SERVICE_PROTOCOL_VERSION = 162 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -4712,6 +4713,8 @@ export interface BaselineAnalysisProjection {
     dispatchAllowed: boolean;
     providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route' | 'remote-eligible-developer-live' | 'remote-eligible-ordinary-production';
     summary: string;
+    /** Append-only sibling pin; the canonical envelope and its legacy digest stay unchanged. */
+    procedure?: ProcedureDefinitionPin | null;
     promptContractDigest: string;
     behaviorCompositionDigest: string;
     /** The plan version this envelope freezes; `null` for an envelope recorded before plan versions existed. */
@@ -4746,6 +4749,7 @@ export interface BaselineAnalysisProjection {
   };
   run: null | {
     runRecordId: string;
+    procedure?: ProcedureDefinitionPin | null;
     state: BaselineAnalysisRunState;
     stateLabel: string;
     recordedAt: string;
@@ -6899,6 +6903,8 @@ export interface ReviewRunProjection {
   scopeStop: null | 'series-knowledge' | 'house-review-preference';
   /** The Captured Procedure version the Run was prepared from, pinned (Issue #65, S30; ADR 0087 §4); `null` for one chosen by hand. */
   procedure: ReviewRunProcedureProjection | null;
+  /** The pre-installed procedure version each category ran (Issue #1081, F-26a); empty for a Run recorded before revision 85. */
+  preinstalledProcedures?: ReadonlyArray<{ categoryId: string; procedure: ProcedureDefinitionPin }>;
   /** Whether `将以上工序保存为可复用工序` is offered on this Run, and why not (ADR 0087 §2). */
   capture: ReviewAvailabilityProjection;
 }
@@ -7987,21 +7993,6 @@ export interface ExemplarsProjection {
 
 // ---- 知识库 › 工序与规则's expert 工序 (Issue #427, plan slice S79d; V2-UX-KB-010, REUSE-029, REUSE-030) ---------------
 
-/** One 工序 a review category runs, named by what it does. */
-export interface KnowledgeProcedureProjection {
-  readonly procedureId: string;
-  readonly title: string;
-  readonly version: string;
-  readonly categoryId: string;
-  readonly categoryLabel: string;
-  /** `enabled` when its category can run; `unavailable` when the category's basis does not exist yet. */
-  readonly state: 'enabled' | 'unavailable';
-  /** Why it cannot run yet, said of the house rather than of one Book; `null` while it can. */
-  readonly unavailableReason: string | null;
-  /** How many approved Review Runs applied this version of it; a Run only prepared applied nothing. */
-  readonly reviewRuns: number;
-}
-
 /**
  * A native artifact AI7 carries, in the house's words (editor-surfaces §10; REUSE-030): the 编辑工作区方案 with its AI7 权限侧车
  * reads 本社方案 vN, in its lifecycle as the Book card reads it. Its identities are the Technical Identity Layer's (ADR 0071
@@ -8024,7 +8015,8 @@ export interface KnowledgeArtifactProjection {
 }
 
 export interface KnowledgeProceduresProjection {
-  readonly procedures: ReadonlyArray<KnowledgeProcedureProjection>;
+  /** The pre-installed procedure library (Issue #1081, F-26a; ADR 0095 §1), in the configuration's order, baseline last. */
+  readonly preinstalled: ReadonlyArray<PreinstalledProcedureProjection>;
   readonly artifacts: ReadonlyArray<KnowledgeArtifactProjection>;
 }
 
@@ -10070,6 +10062,8 @@ export * from './protocol/series.js';
 export * from './protocol/data-storage.js';
 
 export * from './protocol/deliverables.js';
+
+export * from './protocol/procedures.js';
 
 // ---- 待我处理 · Global Attention (Issue #424, plan slice S78; editor-surfaces §8.1) ------------------------
 

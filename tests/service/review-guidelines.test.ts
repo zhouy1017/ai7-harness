@@ -243,18 +243,15 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
         ['typos-and-usage/1', 0], ['typos-and-usage/2', 0], ['typos-and-usage/3', 0], ['typos-and-usage/4', 0],
       ]);
       expect(typosDocument(fresh).versions).toEqual([expect.objectContaining({ ordinal: 1, versionId: null, source: null, usedByCount: 0, usedBy: [] })]);
-      // 工序与规则's expert 工序 (S79d): the nine categories' 工序, none used yet, and 本社方案 not installed yet — its identities
-      // only for 查看技术详情.
+      // 工序与规则's expert 工序 (S79d), since Issue #1081 the pre-installed procedure library: the nine categories' 工序 and
+      // baseline analysis, none used yet, and 本社方案 not installed yet — its identities only for 查看技术详情. A category's
+      // Book-dependent availability stays on the ordinary task sheet (跨交付物一致性 runs for a Book with deliverables, #813).
       const freshProcedures = await store.inspectKnowledgeProcedures();
-      expect(freshProcedures.procedures.map((procedure) => [procedure.title, procedure.state, procedure.reviewRuns])).toEqual([
+      expect(freshProcedures.preinstalled.map((procedure) => [procedure.title, procedure.state, procedure.uses])).toEqual([
         ['错别字与规范用语审阅工序', 'enabled', 0], ['体例与格式审阅工序', 'enabled', 0], ['线索转批注', 'enabled', 0], ['断言列举与引文定位', 'enabled', 0],
         ['引用风险点标注', 'enabled', 0], ['出版风险点标注', 'enabled', 0], ['文学性与表达改进工序', 'enabled', 0],
-        ['书系一致性检查', 'enabled', 0], ['跨交付物一致性检查', 'unavailable', 0],
+        ['书系一致性检查', 'enabled', 0], ['跨交付物一致性检查', 'enabled', 0], ['基线分析', 'enabled', 0],
       ]);
-      // The one not connected yet says why of the house, never of one Book; 书系一致性检查 runs for each Book over its Series
-      // Knowledge (Issue #64, S29a).
-      expect(freshProcedures.procedures.filter((procedure) => procedure.state === 'unavailable').map((procedure) => procedure.unavailableReason))
-        .toEqual(['生产文档之间的一致性核对还没有接通。']);
       expect(freshProcedures.artifacts).toEqual([{
         title: '本社方案', revision: null, state: 'available-to-install', enabledBooks: 0,
         technical: {
@@ -286,8 +283,9 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(reviewed.versions[0]!.usedByCount).toBe(1);
       expect(reviewed.olderVersionBooks).toEqual([]);
       const afterReview = await store.inspectKnowledgeProcedures();
-      expect(afterReview.procedures.find((procedure) => procedure.categoryId === TYPOS)!.reviewRuns).toBe(1);
-      expect(afterReview.procedures.filter((procedure) => procedure.categoryId !== TYPOS).every((procedure) => procedure.reviewRuns === 0)).toBe(true);
+      const typosProcedure = `ai7-procedure/review-${TYPOS}`;
+      expect(afterReview.preinstalled.find((procedure) => procedure.procedureId === typosProcedure)!.uses).toBe(1);
+      expect(afterReview.preinstalled.filter((procedure) => procedure.procedureId !== typosProcedure).every((procedure) => procedure.uses === 0)).toBe(true);
       expect(afterReview.artifacts[0]).toMatchObject({
         title: '本社方案', revision: 2, state: 'installed', enabledBooks: 1, technical: { sidecarSha256: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_DIGEST },
       });
@@ -343,8 +341,8 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       const now = typosDocument(store.inspectReviewGuidelines());
       expect(now.olderVersionBooks).toEqual([{ bookId: imported.bookId, bookTitle: 'L2 审阅规范', ordinal: 1, merged: false }]);
       expect(now.versions.map((version) => version.usedBy.map((run) => run.reviewOrdinal))).toEqual([[], [2, 1]]);
-      // 已用于 counts the two approved reviews, never the two only prepared.
-      expect((await store.inspectKnowledgeProcedures()).procedures.find((procedure) => procedure.categoryId === TYPOS)!.reviewRuns).toBe(2);
+      // 已使用 counts the two approved reviews, never the two only prepared.
+      expect((await store.inspectKnowledgeProcedures()).preinstalled.find((procedure) => procedure.procedureId === `ai7-procedure/review-${TYPOS}`)!.uses).toBe(2);
       // A retained carrier altered on disk: 知识库 reads the 方案 as the Book card does, needing attention.
       appendFileSync(join(roots.dataRoot, 'native-artifacts', ...EDITORIAL_WORKSPACE_PROFILE_RETAINED_KEY.split('/')), ' ');
       expect((await store.inspectKnowledgeProcedures()).artifacts[0]!.state).toBe('unavailable-needs-attention');

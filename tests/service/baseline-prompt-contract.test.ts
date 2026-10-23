@@ -139,9 +139,11 @@ function withDatabase<T>(operation: (database: DatabaseSync) => T): T {
  */
 function rewriteToPrePinPlan(taskIntentId: string): void {
   withDatabase((database) => {
-    const names = ['analysis_plan_records_no_update', 'analysis_plan_versions_no_update'];
+    const names = ['analysis_plan_records_no_update', 'analysis_plan_versions_no_update', 'procedure_plan_pins_no_delete'];
     const triggers = names.map((name) => (database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) as { sql: string }).sql);
     for (const name of names) database.exec(`DROP TRIGGER ${name}`);
+    // A pre-826 plan also predates Procedure Definitions; its changed envelope has no revision-85 sibling pin.
+    database.prepare('DELETE FROM procedure_plan_pins WHERE task_intent_id = ?').run(taskIntentId);
     const component = (name: string) => JSON.parse((database.prepare(
       'SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 1 AND component = ?',
     ).get(taskIntentId, name) as { canonical_json: string }).canonical_json) as Record<string, unknown>;

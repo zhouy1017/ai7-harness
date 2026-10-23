@@ -506,6 +506,9 @@ async function constructPredecessorV12(dataRoot, bookId) {
       DROP TABLE evaluation_rewrite_tasks;
       DROP TABLE developer_capability_proposal_exports;
       DROP TABLE developer_capability_proposals;
+      DROP TABLE procedure_plan_pins;
+      DROP TABLE procedure_definition_versions;
+      DROP TABLE procedure_definitions;
       DROP TABLE review_run_procedure_pins;
       DROP TABLE captured_procedure_states;
       DROP TABLE captured_procedure_versions;
@@ -1078,13 +1081,13 @@ async function main() {
     await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-versions`)}); return area?.querySelector('[data-guideline-version-row="8"]') && area.querySelectorAll('.guideline-version-list li').length===5 && document.activeElement===area.querySelector('summary'); })()`, 'knowledge-versions-latest-focus');
 
     at('knowledge-procedures');
-    // 工序与规则 (Issue #427, S79d): the nine review 工序 by what each does — eight 已启用 drawn solid (书系一致性检查 since
-    // Issue #64, S29a), the one whose basis does not exist yet 尚未接通 drawn dashed, with why said of the house — none used by
-    // a review in this Journey, and the 方案
+    // 工序与规则 (Issue #427, S79d; since Issue #1081, F-26a, the pre-installed procedure library): the nine review categories'
+    // 工序 and baseline analysis by what each does, each 已启用 drawn solid with its version and its stages in order — none used
+    // in this Journey — the review-only predecessor named above 可复用工序, and the 方案
     // in the house's words, 本社方案 v2, installed and enabled for the one Book that enabled it. Both layers (LAYER-008): the
     // words carry no identifier, and 查看技术详情, closed, holds the carrier's and the 权限侧车's identities and each 工序's id.
     await click(renderer, '工序与规则', 'knowledge-procedures-tab');
-    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('.knowledge-procedures')?.dataset.procedureCount==='9'`, 'knowledge-procedures-painted');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('.knowledge-procedures')?.dataset.procedureCount==='10'`, 'knowledge-procedures-painted');
     const procedures = await renderer.evaluate(`(() => {
       const section = document.querySelector('.knowledge-procedures');
       const details = section?.querySelector(':scope > details.technical-details') ?? null;
@@ -1097,22 +1100,24 @@ async function main() {
         first: document.querySelector('.knowledge-procedure-list > li')?.textContent ?? null,
         reasons: Array.from(document.querySelectorAll('.knowledge-procedure-list .procedure-reason'), (reason) => reason.textContent),
         artifact: document.querySelector('.knowledge-artifact-list > li')?.textContent ?? null,
-        identifierInWords: /1\\.0\\.0|@ai7\\/|[0-9a-f]{64}|ai7-review-procedure/u.test(decision),
+        identifierInWords: /1\\.0\\.0|@ai7\\/|[0-9a-f]{64}|ai7-review-procedure|ai7-procedure\\//u.test(decision),
         detailsOpen: details === null ? null : details.open,
         summary: details?.querySelector('summary')?.textContent ?? null,
         technical: Array.from(details?.querySelectorAll(':scope > dl > dt') ?? [], (term) => [term.textContent, term.nextElementSibling?.textContent ?? null]),
       };
     })()`);
+    const library = await renderer.evaluate(`({ stages: Array.from(document.querySelectorAll('.procedure-stages'), (node) => node.textContent), predecessor: document.querySelector('.procedure-predecessor')?.textContent, baseline: document.querySelector('[data-procedure-id="ai7-procedure/baseline-analysis"]')?.textContent })`);
+    requireJourney(library.stages.length === 10 && library.stages.every((value) => value.length > 0) && library.predecessor?.includes('审阅专用前身') && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
     const technical = new Map(procedures?.technical ?? []);
-    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify([...Array(8).fill(['enabled', '已启用', '0', 'solid']), ['unavailable', '尚未接通', '0', 'dashed']]) &&
-      procedures.first === '已启用 错别字与规范用语审阅工序 · 第 1 版 · 内置 · 用于「错别字与规范用语」 · 还没有审阅用过' &&
-      JSON.stringify(procedures.reasons) === JSON.stringify([' · 生产文档之间的一致性核对还没有接通。']) &&
+    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(10).fill(['enabled', '已启用', '0', 'solid'])) &&
+      procedures.first === '已启用 错别字与规范用语审阅工序 · 第 1 版 · 预装 · 已使用 0 次 · 分块审读 → 综合 → 派生报告' &&
+      JSON.stringify(procedures.reasons) === '[]' &&
       procedures.artifact === '本社方案 v2 · 已安装 · 已为 1 本书启用' && procedures.identifierInWords === false &&
       procedures.detailsOpen === false && procedures.summary === '查看技术详情' &&
       technical.get('原生载体身份') === '@ai7/editorial-workspace-profile' && technical.get('原生载体版本') === '1.0.0' &&
       /^[0-9a-f]{64}$/u.test(technical.get('SHA-256') ?? '') && technical.get('权限侧车') === 'ai7.editorial-workspace-profile.authority' &&
-      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 9 &&
-      procedures.technical.slice(5).every(([, procedureId]) => /^ai7-review-procedure\//u.test(procedureId ?? '')),
+      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 10 &&
+      procedures.technical.slice(5).every(([, procedureId]) => /^ai7-procedure\//u.test(procedureId ?? '')),
     'knowledge-procedures-list', procedures);
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087) sit apart from the built-in 工序, empty here and saying how one is made;
     // capturing, validating, running and stopping one is J-13's, which runs Review Runs (Issue #65 review).
