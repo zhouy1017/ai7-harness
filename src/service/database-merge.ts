@@ -381,6 +381,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   global_editorial_memory_items: 'house',
   global_editorial_memory_item_versions: 'house',
   house_review_preference_versions: 'house',
+  learning_supervision_directives: 'house',
   review_run_preference_pins: 'owned',
   factual_verification_results: 'owned',
   factual_review_decisions: 'owned',

@@ -744,6 +744,13 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['saveProductionDocumentVersion']['output']>(IPC_CHANNELS.saveProductionDocumentVersion, input),
   recordProductionDocumentDelivery: (input: Omit<ServiceOperationMap['recordProductionDocumentDelivery']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['recordProductionDocumentDelivery']['output']>(IPC_CHANNELS.recordProductionDocumentDelivery, input),
+  inspectGlobalAgentDialogue: (input: ServiceOperationMap['inspectGlobalAgentDialogue']['input']) => invoke<ServiceOperationMap['inspectGlobalAgentDialogue']['output']>(IPC_CHANNELS.inspectGlobalAgentDialogue, input),
+  stopGlobalAgentAnswer: (input: ServiceOperationMap['stopGlobalAgentAnswer']['input']) => invoke<ServiceOperationMap['stopGlobalAgentAnswer']['output']>(IPC_CHANNELS.stopGlobalAgentAnswer, input),
+  continueGlobalAgentAnswer: (input: ServiceOperationMap['continueGlobalAgentAnswer']['input']) => invoke<ServiceOperationMap['continueGlobalAgentAnswer']['output']>(IPC_CHANNELS.continueGlobalAgentAnswer, input),
+  regenerateGlobalAgentAnswer: (input: ServiceOperationMap['regenerateGlobalAgentAnswer']['input']) => invoke<ServiceOperationMap['regenerateGlobalAgentAnswer']['output']>(IPC_CHANNELS.regenerateGlobalAgentAnswer, input),
+  inspectGlobalAgent: () => invoke<ServiceOperationMap['inspectGlobalAgent']['output']>(IPC_CHANNELS.inspectGlobalAgent, {}),
+  recordLearningSupervision: (input: ServiceOperationMap['recordLearningSupervision']['input']) => invoke<ServiceOperationMap['recordLearningSupervision']['output']>(IPC_CHANNELS.recordLearningSupervision, input),
+  askGlobalAgent: (input: ServiceOperationMap['askGlobalAgent']['input']) => invoke<ServiceOperationMap['askGlobalAgent']['output']>(IPC_CHANNELS.askGlobalAgent, input),
   inspectGlobalAttention: () =>
     invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
   reviewManuscriptExport: (input: Parameters<RendererApi['reviewManuscriptExport']>[0]) =>

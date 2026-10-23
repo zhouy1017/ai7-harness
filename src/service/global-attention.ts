@@ -1,3 +1,4 @@
+import type { GlobalAgentDialogueProjection } from '../shared/protocol.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   BOOK_TASK_GROUP_KEYS,
@@ -286,6 +287,7 @@ export interface MaterialIndexAttentionReading {
 }
 
 export interface GlobalAttentionReadings {
+  readonly globalDialogues?: ReadonlyArray<GlobalAgentDialogueProjection>;
   readonly applyOutcomes?: ReadonlyArray<GlobalAttentionItemProjection>;
   readonly imports: ReadonlyArray<ImportAttentionReading>;
   readonly recoveries: ReadonlyArray<RecoveryAttentionReading>;
@@ -925,6 +927,15 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
   const since = recentWindowStart(now);
   const all: GlobalAttentionItemProjection[] = [
     ...(readings.applyOutcomes ?? []),
+    ...(readings.globalDialogues ?? []).flatMap((dialogue) => {
+      const latest = dialogue.attempts.at(-1);
+      if (latest === undefined || latest.state !== 'answering' && (latest.settledAt ?? dialogue.askedAt) < since) return [];
+      return [item(latest.state === 'answering' ? 'active' : 'recent', DIALOGUE_STATES[latest.state], {
+        itemId: `global-dialogue:${dialogue.dialogueId}`, blocked: false, at: latest.settledAt ?? dialogue.askedAt,
+        book: { bookId: null, title: null }, object: { kind: 'dialogue', question: dialogue.question }, nextStep: 'open-dialogue',
+        target: { kind: 'global-agent-dialogue', dialogueId: dialogue.dialogueId }, technical: [],
+      })];
+    }),
     ...readings.imports.map(importItem),
     ...readings.recoveries.map(recoveryItem),
     ...readings.conflicts.map(conflictItem),
@@ -954,7 +965,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     actionableCount: groups.filter((group) => GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key)).reduce((sum, group) => sum + group.total, 0),
     // A Run holds a place of the governor's, or waits for one (Issue #49, S14), or a Review Run is being driven — between
     // two categories it holds none — or a Run waits to start once online, which a reader follows until it starts (Issue #502).
-    running: readings.busy || readings.reviewRuns.some((reading) => reading.state === 'running' || reading.state === 'waiting') ||
+    running: readings.busy || (readings.globalDialogues ?? []).some((dialogue) => dialogue.attempts.at(-1)?.state === 'answering') || readings.reviewRuns.some((reading) => reading.state === 'running' || reading.state === 'waiting') ||
       readings.analysisTasks.some((reading) => reading.run !== null && followedRun(reading.run)) ||
       (readings.waitingTasks ?? []).some((reading) => reading.state === 'awaiting-connectivity'),
   };
