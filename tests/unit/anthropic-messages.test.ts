@@ -13,7 +13,8 @@ import {
   assembleProviderRequest,
   type ProviderRouteProfile,
 } from '../../src/service/provider/deepseek-adapter.js';
-import { OPENCODE_GO_V4_FLASH_PROFILE, type ProviderModelProfile } from '../../src/service/provider/model-profile.js';
+import { OPENCODE_GO_V4_FLASH_PROFILE, PROVIDER_MODEL_PROFILES, type ProviderModelProfile } from '../../src/service/provider/model-profile.js';
+import type { AssembledMessage, AssembledModelPayload } from '../../src/service/provider/payload.js';
 import { normalizeModelResponse } from '../../src/service/provider/response-normalization.js';
 import { OPENCODE_GO_MODEL, OPENCODE_GO_ROUTE, type TransmitTicket } from '../../src/service/provider/egress-gate.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
@@ -70,6 +71,243 @@ async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[
   for await (const chunk of stream) chunks.push(chunk);
   return chunks;
 }
+
+const FUNCTION_TOOLS = [
+  { name: 'lookup', description: 'Look up synthetic data', parameters: { type: 'object', properties: { query: { type: 'string' } } } },
+  { name: 'summarize', description: 'Summarize synthetic data', parameters: { type: 'object', properties: {} } },
+];
+const functionModel = (): ProviderModelProfile => messagesModel({ toolCalling: 'function' });
+const offered = { toolCallsOffered: true, offeredToolNames: FUNCTION_TOOLS.map((tool) => tool.name) };
+const toolUse = (id = 'call_1', name = 'lookup', input: unknown = { query: 'synthetic' }) => ({ type: 'tool_use', id, name, input });
+const toolResponse = (content: unknown[] = [toolUse()]) => ({ content, stop_reason: 'tool_use', usage: { input_tokens: 9, output_tokens: 4 } });
+
+function toolPayload(messages: ReadonlyArray<AssembledMessage> = payload().messages): AssembledModelPayload {
+  return { ...payload(), model: functionModel().model, messages, tools: FUNCTION_TOOLS };
+}
+
+function callMessage(content: AssembledMessage['content'] = [{ type: 'tool-call', id: 'call_1', name: 'lookup', arguments: '{"query":"synthetic"}' }]): AssembledMessage {
+  return { role: 'assistant', source: { kind: 'model', provider: OPENCODE_GO_ROUTE, model: functionModel().model }, content };
+}
+
+function resultMessage(callId = 'call_1', isError = false): AssembledMessage {
+  return { role: 'user', source: { kind: 'tool', callId }, content: [{ type: 'tool-result', toolCallId: callId, isError, content: [{ type: 'text', text: 'synthetic result' }] }] };
+}
+
+function stubToolsAdapter(responses: unknown[], model = functionModel()) {
+  const bodies: string[] = [];
+  const adapter = new DeepSeekOpenAiCompatibleAdapter({
+    broker: new CredentialBroker({ resolve: async () => 'placeholder-secret' }),
+    slotBinding: { bindingDigest: 'a'.repeat(64), modelRole: 'Main Editorial Role', slot: 'opencode-go', credentialReference: randomUUID() },
+    tickets: { take: () => ({ decision: 'transmit-remote', bindingDigest: 'a'.repeat(64), payloadDigest: 'b'.repeat(64) }) },
+    attribution: () => attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+    codes, profile: CAPPED_ROUTE_PROFILE, modelProfile: model, sessionId: () => SESSION,
+    transport: async (_url, init) => {
+      bodies.push(init.body);
+      return { status: 200, json: async () => responses[bodies.length - 1] };
+    },
+  });
+  return { adapter, bodies };
+}
+
+describe('Messages buffered client functions · synthetic profiles only', () => {
+  it('maps canonical function declarations without changing text-only request bytes', () => {
+    const body = JSON.parse(assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), toolPayload(), context).body) as Record<string, unknown>;
+    expect(body.tools).toEqual(FUNCTION_TOOLS.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })));
+    for (const extra of [{}, { tools: [] }]) {
+      expect(assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), { ...payload(), ...extra }, context).body)
+        .toBe(assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel(), payload(), context).body);
+    }
+    const shipped = Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.capabilities.requestShape === 'anthropic-messages');
+    expect(shipped.length).toBeGreaterThan(0);
+    expect(shipped.every((profile) => profile.capabilities.toolCalling === 'none')).toBe(true);
+  });
+
+  it.each([
+    { name: '' }, { name: 'not.a.client.name' }, { description: undefined }, { parameters: null },
+    { type: 'web_search_20250305' }, { toolset_name: 'computer' },
+  ])('refuses invalid or native tool declarations %j', (fields) => {
+    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), {
+      ...toolPayload(), tools: [{ ...FUNCTION_TOOLS[0], ...fields }],
+    }, context)).toThrow('PROVIDER_TOOL_SCHEMA_INVALID');
+  });
+
+  it('refuses duplicate declarations and preserves nested object inputs and prefix text in history', () => {
+    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), {
+      ...toolPayload(), tools: [FUNCTION_TOOLS[0], FUNCTION_TOOLS[0]],
+    }, context)).toThrow('PROVIDER_TOOL_SCHEMA_INVALID');
+    const input = { nested: { values: [null, true, 0, 'synthetic'] } };
+    const response = normalizeModelResponse(functionModel(), toolResponse([toolUse('call_1', 'lookup', input)]), offered);
+    expect(response.kind).toBe('tool-calls');
+    if (response.kind !== 'tool-calls') throw new Error('Expected synthetic client calls');
+    expect(JSON.parse(response.calls[0]!.arguments)).toEqual(input);
+    const history = [callMessage([
+      { type: 'text', text: 'first' }, { type: 'text', text: 'second' },
+      { type: 'tool-call', id: 'call_1', name: 'lookup', arguments: response.calls[0]!.arguments },
+    ]), resultMessage()];
+    const body = JSON.parse(assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), toolPayload(history), context).body) as { messages: unknown[] };
+    expect(body.messages[0]).toEqual({ role: 'assistant', content: [
+      { type: 'text', text: 'first' }, { type: 'text', text: 'second' }, toolUse('call_1', 'lookup', input),
+    ] });
+  });
+
+  it('reads a complete batch in order with object arguments, leading text and usage', () => {
+    expect(normalizeModelResponse(functionModel(), toolResponse([
+      { type: 'text', text: 'first ' }, { type: 'text', text: 'second' }, toolUse(), toolUse('call_2', 'summarize', {}),
+    ]), offered)).toEqual({
+      kind: 'tool-calls', text: 'first second', reasoningText: null,
+      calls: [{ id: 'call_1', name: 'lookup', arguments: '{"query":"synthetic"}' }, { id: 'call_2', name: 'summarize', arguments: '{}' }],
+      usage: { inputTokens: 9, outputTokens: 4 },
+    });
+  });
+
+  it('serializes correlated results in the immediately following user message', () => {
+    const history = [payload().messages[0]!, callMessage(), resultMessage('call_1', true)];
+    const body = JSON.parse(assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), toolPayload(history), context).body) as { messages: unknown[] };
+    expect(body.messages.slice(1)).toEqual([
+      { role: 'assistant', content: [toolUse()] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'synthetic result', is_error: true }] },
+    ]);
+  });
+
+  it('groups a complete parallel batch and preserves canonical result order and error flags', async () => {
+    const { adapter, bodies } = stubToolsAdapter([toolResponse([toolUse(), toolUse('call_2', 'summarize', {})]), {
+      content: [{ type: 'text', text: 'finished' }], stop_reason: 'end_turn',
+    }]);
+    const first = await collect(adapter.stream(toolPayload() as unknown as GenerateOptions));
+    expect(first.filter((chunk) => chunk.type === 'tool-call-delta').map((chunk) => chunk.id)).toEqual(['call_1', 'call_2']);
+    const blocks = first.flatMap((chunk) => chunk.type === 'block-end' ? [chunk.block] : []);
+    const history = [payload().messages[0]!, callMessage(blocks), resultMessage('call_2', true), resultMessage(), payload().messages[0]!];
+    expect((await collect(adapter.stream(toolPayload(history) as unknown as GenerateOptions))).at(-1))
+      .toEqual({ type: 'finish', reason: { kind: 'stop' } });
+    expect((JSON.parse(bodies[1]!) as { messages: unknown[] }).messages.slice(1)).toEqual([
+      { role: 'assistant', content: [toolUse(), toolUse('call_2', 'summarize', {})] },
+      { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'call_2', content: 'synthetic result', is_error: true },
+        { type: 'tool_result', tool_use_id: 'call_1', content: 'synthetic result', is_error: false },
+      ] },
+      { role: 'user', content: UNIT },
+    ]);
+  });
+
+  it.each([
+    { id: '' }, { id: 1 }, { id: undefined }, { name: '' }, { name: 'unoffered' }, { name: undefined },
+    { input: null }, { input: [] }, { input: 'not an object' }, { input: '{bad JSON' }, { input: 3 }, { input: undefined },
+    { toolset_name: 'computer' }, { caller: { type: 'code_execution_20250825' } },
+  ])('refuses an entire batch for malformed or unsupported tool fields %j', async (fields) => {
+    const body = toolResponse([{ type: 'text', text: 'prefix' }, toolUse('valid'), { ...toolUse(), ...fields }]);
+    expect(normalizeModelResponse(functionModel(), body, offered)).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+    const { adapter } = stubToolsAdapter([body]);
+    const chunks = await collect(adapter.stream(toolPayload() as unknown as GenerateOptions));
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.INVALID_RESPONSE } } });
+  });
+
+  it.each(['max_tokens', 'end_turn', 'stop_sequence', 'pause_turn', 'refusal', null, undefined])
+    ('refuses tool blocks with inconsistent or incomplete stop_reason %j', (stop_reason) => {
+      expect(normalizeModelResponse(functionModel(), { ...toolResponse(), stop_reason }, offered))
+        .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+    });
+
+  it('refuses opaque content and unfinished final turns while client tools are offered', () => {
+    for (const body of [
+      { content: [{ type: 'text', text: 'prefix' }, { type: 'thinking', thinking: 'opaque' }], stop_reason: 'end_turn' },
+      { content: [{ type: 'text', text: 'prefix' }, { type: 'server_tool_use', id: 'server_1', name: 'web_search', input: {} }], stop_reason: 'pause_turn' },
+      { content: [{ type: 'text', text: 'partial' }], stop_reason: 'max_tokens' },
+      { content: [{ type: 'text', text: 'partial' }], stop_reason: null },
+    ]) {
+      expect(normalizeModelResponse(functionModel(), body, offered)).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+    }
+  });
+
+  it.each([
+    [], [{ type: 'text', text: 'no call' }], [toolUse(), toolUse()],
+    [toolUse(), { type: 'text', text: 'after' }], [toolUse(), { type: 'text', text: '' }, toolUse('call_2')],
+    [{ type: 'thinking', thinking: 'opaque', signature: 'synthetic' }, toolUse()],
+    [{ type: 'redacted_thinking', data: 'opaque' }, toolUse()],
+    [{ type: 'server_tool_use', id: 'server_1', name: 'web_search', input: {} }, toolUse()],
+    [{ type: 'web_search_tool_result', tool_use_id: 'server_1', content: [] }, toolUse()],
+    [{ type: 'text', text: 'prefix', citations: [{ type: 'opaque' }] }, toolUse()],
+    [{ type: 'text', text: 1 }, toolUse()], [null, toolUse()],
+  ])('refuses unrepresentable, empty or duplicate batches %j', (...content) => {
+    expect(normalizeModelResponse(functionModel(), toolResponse(content), offered)).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+  });
+
+  it('requires both offered tools and explicit function capability for reading and writing calls', async () => {
+    for (const [model, options] of [[messagesModel(), offered], [functionModel(), {}], [functionModel(), { toolCallsOffered: true }]] as const) {
+      expect(normalizeModelResponse(model, toolResponse([{ type: 'text', text: 'prefix' }, toolUse()]), options))
+        .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+    }
+    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel(), toolPayload(), context)).toThrow('PROVIDER_TOOL_CALLING_UNSUPPORTED');
+    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), { ...toolPayload([callMessage(), resultMessage()]), tools: [] }, context))
+      .toThrow('PROVIDER_TOOL_CALLING_UNSUPPORTED');
+    const { adapter, bodies } = stubToolsAdapter([toolResponse()], messagesModel());
+    const chunks = await collect(adapter.stream(toolPayload() as unknown as GenerateOptions));
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({ type: 'finish', reason: { kind: 'error' } });
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('refuses missing, duplicate, orphaned and interrupted result correlations before transport', async () => {
+    const twoCalls = callMessage([
+      ...callMessage().content, { type: 'tool-call', id: 'call_2', name: 'summarize', arguments: '{}' },
+    ]);
+    const invalid: AssembledMessage[][] = [
+      [resultMessage()], [callMessage()], [callMessage(), resultMessage('orphan')],
+      [callMessage(), resultMessage(), resultMessage()],
+      [twoCalls, resultMessage()], [twoCalls, resultMessage(), resultMessage()],
+      [twoCalls, resultMessage(), payload().messages[0]!, resultMessage('call_2')],
+      [callMessage(), payload().messages[0]!, resultMessage()],
+      [callMessage(), callMessage(), resultMessage()],
+      [callMessage(), resultMessage(), callMessage(), resultMessage()],
+      [callMessage(), { ...resultMessage(), source: { kind: 'tool', callId: 'wrong' } }],
+      [callMessage(), { ...resultMessage(), content: [...resultMessage().content, { type: 'text', text: 'extra' }] }],
+      [callMessage(), { ...resultMessage(), content: [{ type: 'tool-result', toolCallId: 'call_1', content: [{ type: 'image' }] }] }],
+    ];
+    for (const messages of invalid) {
+      const { adapter, bodies } = stubToolsAdapter([]);
+      const chunks = await collect(adapter.stream(toolPayload(messages) as unknown as GenerateOptions));
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.INVALID_RESPONSE } } });
+      expect(bodies).toHaveLength(0);
+    }
+  });
+
+  it.each([
+    [{ type: 'tool-call', id: 'call_1', name: 'lookup', arguments: 'not JSON' }],
+    [{ type: 'tool-call', id: 'call_1', name: 'lookup', arguments: '[]' }],
+    [{ type: 'tool-call', id: 'call_1', name: 'lookup', arguments: 'null' }],
+    [{ type: 'tool-call', id: 'call_1', name: 'unoffered', arguments: '{}' }],
+    [...callMessage().content, ...callMessage().content],
+    [...callMessage().content, { type: 'text', text: 'after' }],
+    [{ type: 'reasoning', text: '' }, ...callMessage().content],
+    [{ type: 'image' }, ...callMessage().content],
+  ] satisfies AssembledMessage['content'][])('refuses unrepresentable assistant history %j', (...content) => {
+    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), toolPayload([callMessage(content), resultMessage()]), context)).toThrow();
+  });
+
+  it('completes a buffered call/result/final-answer round trip through DSH events', async () => {
+    const { adapter, bodies } = stubToolsAdapter([toolResponse([{ type: 'text', text: 'checking' }, toolUse()]), {
+      content: [{ type: 'text', text: 'finished' }], stop_reason: 'end_turn', usage: { input_tokens: 15, output_tokens: 2 },
+    }]);
+    const first = await collect(adapter.stream(toolPayload() as unknown as GenerateOptions));
+    expect(first.filter((chunk) => chunk.type === 'block-end')).toEqual([
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'checking' } },
+      { type: 'block-end', index: 1, block: { type: 'tool-call', id: 'call_1', name: 'lookup', arguments: '{"query":"synthetic"}' } },
+    ]);
+    expect(first.at(-1)).toEqual({ type: 'finish', reason: { kind: 'tool-calls' } });
+    expect(first).toContainEqual({ type: 'usage', usage: { inputTokens: 9, outputTokens: 4 } });
+    const blocks = first.flatMap((chunk) => chunk.type === 'block-end' ? [chunk.block] : []);
+    const continued = toolPayload([payload().messages[0]!, callMessage(blocks), resultMessage()]);
+    const second = await collect(adapter.stream(continued as unknown as GenerateOptions));
+    expect(second).toContainEqual({ type: 'text-delta', index: 0, text: 'finished' });
+    expect(second.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } });
+    expect(adapter.lastUsage).toEqual({ inputTokens: 15, outputTokens: 2 });
+    expect(bodies).toHaveLength(2);
+    expect((JSON.parse(bodies[1]!) as { messages: unknown[] }).messages.at(-1)).toEqual({
+      role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'synthetic result', is_error: false }],
+    });
+  });
+});
 
 describe('assembleProviderRequest · anthropic-messages', () => {
   it('assembles the four documented fields and nothing else', () => {

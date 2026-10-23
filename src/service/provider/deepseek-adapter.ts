@@ -254,13 +254,84 @@ function anthropicMessagesBody(
   if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
   if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
   if (profile.maxOutputTokens === null) throw new Error('PROVIDER_MAX_OUTPUT_TOKENS_ABSENT');
+  const toolCalling = model.capabilities.toolCalling === 'function';
+  if ((payload.tools ?? []).length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
+  const tools = (payload.tools ?? []).map((tool) => {
+    const { name, description, parameters } = chatCompletionsTool(tool).function;
+    // Only canonical client functions: native/server declarations and toolsets cannot be silently converted.
+    if (!/^[a-zA-Z0-9_-]{1,128}$/u.test(name) || !isRecord(tool) ||
+        Object.keys(tool).some((key) => !['name', 'description', 'parameters'].includes(key))) {
+      throw new Error('PROVIDER_TOOL_SCHEMA_INVALID');
+    }
+    return { name, description, input_schema: parameters };
+  });
+  const names = tools.map((tool) => tool.name);
+  if (new Set(names).size !== names.length) throw new Error('PROVIDER_TOOL_SCHEMA_INVALID');
   const system = systemPromptOf(payload);
   return canonicalJson({
     model: model.model,
     max_tokens: profile.maxOutputTokens,
     ...(system === null ? {} : { system }),
-    messages: conversationMessages(payload),
+    messages: toolCalling ? anthropicMessagesConversation(payload, names) : conversationMessages(payload),
+    ...(tools.length > 0 ? { tools } : {}),
   });
+}
+
+/**
+ * Buffered client functions only (Issue #1056). Keep text before calls, then consume exactly one
+ * consecutive result per call into the next user message, retaining the canonical result order.
+ * No unresolved batch, opaque reasoning, or intervening message can be repaired by serialization.
+ */
+function anthropicMessagesConversation(payload: AssembledModelPayload, offeredNames: ReadonlyArray<string>): Array<Record<string, unknown>> {
+  const messages: Array<Record<string, unknown>> = [];
+  const seenIds = new Set<string>();
+  for (let index = 0; index < payload.messages.length; index += 1) {
+    const message = payload.messages[index]!;
+    const calls = assistantToolCalls(message);
+    if (calls !== null) {
+      if (offeredNames.length === 0) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
+      const content: Array<Record<string, unknown>> = [];
+      const pending = new Set<string>();
+      for (const block of message.content) {
+        if (block.type === 'text' && typeof block.text === 'string' && pending.size === 0) {
+          content.push({ type: 'text', text: block.text });
+          continue;
+        }
+        if (block.type !== 'tool-call' || typeof block.id !== 'string' || block.id.length === 0 ||
+            typeof block.name !== 'string' || !offeredNames.includes(block.name) || typeof block.arguments !== 'string' || seenIds.has(block.id)) {
+          throw new Error('PROVIDER_TOOL_CALLS_INVALID');
+        }
+        let input: unknown;
+        try { input = JSON.parse(block.arguments) as unknown; } catch { throw new Error('PROVIDER_TOOL_CALLS_INVALID'); }
+        if (!isRecord(input)) throw new Error('PROVIDER_TOOL_CALLS_INVALID');
+        seenIds.add(block.id);
+        pending.add(block.id);
+        content.push({ type: 'tool_use', id: block.id, name: block.name, input });
+      }
+      messages.push({ role: 'assistant', content });
+      const results: Array<Record<string, unknown>> = [];
+      while (pending.size > 0) {
+        index += 1;
+        const next = payload.messages[index];
+        const result = next === undefined ? null : toolResultOf(next);
+        if (result === null || !pending.delete(result.callId)) throw new Error('PROVIDER_TOOL_CORRELATION_INVALID');
+        const isError = next!.content[0]!.isError;
+        if (isError !== undefined && typeof isError !== 'boolean') throw new Error('PROVIDER_TOOL_CORRELATION_INVALID');
+        results.push({ type: 'tool_result', tool_use_id: result.callId, content: result.text, is_error: result.isError });
+      }
+      messages.push({ role: 'user', content: results });
+      continue;
+    }
+    // Results outside the immediately following batch are orphans, even if their id appeared before.
+    if (message.source.kind === 'tool' || message.content.some((block) => block.type === 'tool-result')) {
+      throw new Error('PROVIDER_TOOL_CORRELATION_INVALID');
+    }
+    const text = messageText(message);
+    if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
+    if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
+    messages.push({ role: message.role, content: text });
+  }
+  return messages;
 }
 
 /**
@@ -391,10 +462,10 @@ function providerRequestBody(
   model: ProviderModelProfile,
   payload: AssembledModelPayload,
 ): string {
-  // Function tools are spelled only for chat completions and the text/function Responses subset; other shapes refuse them
+  // Function tools are spelled only for chat completions and the bounded Responses/Messages subsets; other shapes refuse them
   // rather than dropping them silently.
   if ((payload.tools ?? []).length > 0 && model.capabilities.requestShape !== 'openai-chat-completions' &&
-      model.capabilities.requestShape !== 'openai-responses') {
+      model.capabilities.requestShape !== 'openai-responses' && model.capabilities.requestShape !== 'anthropic-messages') {
     throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
   }
   switch (model.capabilities.requestShape) {
@@ -904,7 +975,10 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       }
       // Tool calls are read only for a request that offered tools (Issue #473); to any other the response reads as before.
       const parsed = parseProviderResponse(response.status, body, this.#deps.codes, this.#profile, this.#modelProfile,
-        { toolCallsOffered: (options.tools ?? []).length > 0 });
+        { toolCallsOffered: (options.tools ?? []).length > 0,
+          ...(this.#modelProfile.capabilities.requestShape === 'anthropic-messages'
+            ? { offeredToolNames: (options.tools ?? []).map((tool) => tool.name) } : {}),
+        });
       outcome = response.replayed === true ? withoutIncurredUsage(parsed) : parsed;
     } catch (error) {
       const classified = error instanceof Error && error.message === 'AI7_OUTCOME_UNKNOWN'
