@@ -24,7 +24,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
 import { allowedProductionBindingOf, type ConfiguredProviderBinding } from './launch-policy.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
-import { MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES } from '../shared/protocol.js';
+import { MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES, modelServiceModels, type ModelConnectionTestStatus } from '../shared/protocol.js';
 import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
@@ -552,6 +552,7 @@ import {
   ANSWER_BLOCKED_OFFLINE,
   RESUME_BLOCKED_SLOT,
   type BaselineStoppedRunFacts,
+  type BaselineCancellationRanges,
 } from './task-plan.js';
 import { decisionResolvesConflict, initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention, type ProposalConflictRegenerationLineage } from './proposal-conflicts.js';
 import {
@@ -726,6 +727,8 @@ import {
   MaterialIndexLedger,
   extractMaterialText,
   initializeMaterialIndexLayerSchema,
+  initializeMaterialTranslationAttemptSchema,
+  isModelTextAttemptProvenance,
   initializeMaterialIndexSchema,
   prepareMaterialIndexInSlices,
   sweepMaterialIndexWork,
@@ -903,7 +906,7 @@ import {
 } from '../shared/protocol.js';
 /** How many items or Runs one line of an exclusion's impact preview names before it gives the count. */
 const NAMED_EXCLUSION_ENTRIES = 5;
-import { canonicalRecord, isRecord } from './analysis/canonical.js';
+import { canonicalRecord, hasExactKeys, isRecord } from './analysis/canonical.js';
 import {
   DIALOGUE_BASIS_QUOTE_CHARACTERS,
   DIALOGUE_MARK_SOURCE_LABEL,
@@ -1044,6 +1047,7 @@ import {
   initializeManuscriptEntryPositionSchema,
   MODEL_SERVICE_CONNECTION_REVISION_11_SQL,
   MODEL_SERVICE_CONNECTION_SCHEMA_SQL,
+  MODEL_SERVICE_CONNECTION_REVISION_72_SQL,
   validateManuscriptReimportSchemaTruth,
   validateSourceImportSchemaTruth,
   type RecoverySnapshotCursor,
@@ -1129,7 +1133,7 @@ import {
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   MODEL_CLARIFICATION_SCHEMA_VERSION,
-  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_UPDATE_SCHEMA_VERSION,
+  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_UPDATE_SCHEMA_VERSION, MODEL_SELECTION_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -2421,7 +2425,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2485,7 +2489,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2863,7 +2867,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2916,7 +2920,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -3061,7 +3065,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3113,7 +3117,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3469,13 +3473,16 @@ function validateModelServiceSchema(
      WHERE NOT ((connection_id = 'main-editorial-deepseek-v4-pro' AND provider_id = 'deepseek-open-platform'
               AND credential_slot = 'deepseek-api-key' AND model_id IN ('deepseek-v4-pro', 'deepseek-flash'))
              OR (connection_id = 'main-editorial-opencode-go' AND provider_id = 'opencode-go'
-              AND credential_slot = 'opencode-go' AND model_id = 'deepseek-v4.1-flash'))
+              AND credential_slot = 'opencode-go' AND model_id = 'deepseek-v4.1-flash')
+             OR (connection_id = 'openai-platform' AND provider_id = 'openai-platform' AND credential_slot = 'openai-platform'
+              AND model_id IN ('gpt-5.6-luna', 'gpt-5.6-sol')))
         OR role_id != 'main-editorial'
         OR adapter_revision != 1 OR configuration_revision != 1
         OR approved_fallback_chain != '[]'
      LIMIT 1`,
   ).get();
   requireStore(invalid === undefined, 'SCHEMA_INVALID', '模型服务连接记录超出当前固定绑定。');
+  for (const row of db.prepare('SELECT * FROM model_service_connections').iterate()) readModelConnectionTest(row);
 }
 
 /** The connection row of each production route (Issue #811); the official row keeps the identity Issue #712 gave it. */
@@ -3484,6 +3491,7 @@ const MODEL_SERVICE_ROUTE_ROWS: Readonly<Record<ModelServiceRouteId, {
   readonly binding: ModelServiceBindingProjection;
 }>> = {
   'opencode-go': { connectionId: 'main-editorial-opencode-go', binding: MODEL_SERVICE_ROUTE_BINDINGS['opencode-go'] },
+  'openai-platform': { connectionId: 'openai-platform', binding: MODEL_SERVICE_ROUTE_BINDINGS['openai-platform'] },
   'deepseek-open-platform': { connectionId: 'main-editorial-deepseek-v4-pro', binding: MODEL_SERVICE_ROUTE_BINDINGS['deepseek-open-platform'] },
 };
 const MODEL_SERVICE_ROW_COLUMNS = 'connection_id, role_id, connection_name, provider_id, model_id, adapter_revision, configuration_revision, ' +
@@ -3509,6 +3517,29 @@ function initializeSearchBackendSchema(db: DatabaseSync): void {
   } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
+/** Read only the closed, generation-bound metadata retained by the protected synthetic test. */
+function readModelConnectionTest(row: SqlRow): ModelConnectionTestStatus | null {
+  if (row.connection_test == null) return null;
+  const json = asString(row.connection_test);
+  requireStore(json.length <= 8192, 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
+  const value: unknown = JSON.parse(json);
+  requireStore(isRecord(value) && hasExactKeys(value, ['modelId', 'credentialUpdatedAt', 'testedAt', 'outcome', 'code', 'verified',
+    ...(value.provenance === undefined ? [] : ['provenance'])]) &&
+    value.credentialUpdatedAt === row.credential_updated_at && typeof value.testedAt === 'string' && value.testedAt.length <= 30 && Number.isFinite(Date.parse(value.testedAt)) &&
+    ['passed', 'failed', 'outcome-unknown', 'cancelled'].includes(value.outcome as string) && value.verified === 'buffered-text-only' &&
+    (value.code === null || (typeof value.code === 'string' && /^[A-Z0-9_]{1,100}$/u.test(value.code))) &&
+    MODEL_SERVICE_ROUTES.includes(row.provider_id as ModelServiceRouteId) && modelServiceModels(row.provider_id as ModelServiceRouteId).some((model) => model.modelId === value.modelId),
+    'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
+  const facts = value.provenance;
+  requireStore(value.outcome !== 'passed' || (value.code === null && facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
+  if (facts !== undefined) requireStore(isModelTextAttemptProvenance(facts) && facts.model === value.modelId && facts.route === row.provider_id &&
+    facts.credentialReference === row.credential_reference && facts.credentialSlot === row.credential_slot && facts.policyVersion === 'v25' && facts.failureCode === value.code &&
+    (facts.credentialUpdatedAt === undefined || facts.credentialUpdatedAt === value.credentialUpdatedAt) &&
+    allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null,
+    'MODEL_CONNECTION_TEST_INVALID', '连接测试来历无效。');
+  return value as unknown as ModelConnectionTestStatus;
+}
+
 /**
  * Revision 11 → 72 for `model_service_connections` (Issue #811): the relation is rebuilt from its current text and its one
  * official row copied byte for byte, rowid included — except that it now names the official route's current model id,
@@ -3520,7 +3551,7 @@ function initializeModelServiceRoutesSchema(db: DatabaseSync): void {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'model_service_connections'").get() as SqlRow | undefined;
   requireStore(row !== undefined, 'SCHEMA_MIGRATION_FAILED', '模型服务连接表缺失。');
   const sql = folded(asString(row.sql));
-  if (sql === folded(MODEL_SERVICE_CONNECTION_SCHEMA_SQL)) return;
+  if (sql === folded(MODEL_SERVICE_CONNECTION_SCHEMA_SQL) || sql === folded(MODEL_SERVICE_CONNECTION_REVISION_72_SQL)) return;
   requireStore(sql === folded(MODEL_SERVICE_CONNECTION_REVISION_11_SQL), 'SCHEMA_MIGRATION_FAILED', '模型服务连接表结构不兼容。');
   const total = (): number => asNumber((db.prepare('SELECT count(*) total FROM model_service_connections').get() as SqlRow).total);
   db.exec('BEGIN IMMEDIATE');
@@ -3528,7 +3559,7 @@ function initializeModelServiceRoutesSchema(db: DatabaseSync): void {
     const before = total();
     db.exec('CREATE TEMP TABLE migrate_model_service_connections AS SELECT rowid AS migrate_rowid, * FROM model_service_connections');
     db.exec('DROP TABLE model_service_connections');
-    db.exec(MODEL_SERVICE_CONNECTION_SCHEMA_SQL);
+    db.exec(MODEL_SERVICE_CONNECTION_REVISION_72_SQL);
     db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected)
       SELECT migrate_rowid, connection_id, role_id, connection_name, provider_id, 'deepseek-flash', adapter_revision, configuration_revision,
              approved_fallback_chain, credential_slot, credential_reference, credential_operation_state, created_at, updated_at,
@@ -3545,6 +3576,24 @@ function initializeModelServiceRoutesSchema(db: DatabaseSync): void {
     }
     throw error;
   }
+}
+
+/** Revision 84: preserve every legacy identity/reference and Main choice, and freeze its old Fast choice independently. */
+function initializeModelSelectionSchema(db: DatabaseSync): void {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'model_service_connections'").get() as SqlRow;
+  const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
+  if (fold(asString(row.sql)) === fold(MODEL_SERVICE_CONNECTION_SCHEMA_SQL)) return;
+  requireStore(fold(asString(row.sql)) === fold(MODEL_SERVICE_CONNECTION_REVISION_72_SQL), 'SCHEMA_INVALID', '模型服务连接结构不兼容。');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec('CREATE TEMP TABLE model_selection_migration AS SELECT rowid AS original_rowid, * FROM model_service_connections');
+    db.exec('DROP TABLE model_service_connections');
+    db.exec(MODEL_SERVICE_CONNECTION_SCHEMA_SQL);
+    db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test)
+      SELECT original_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, selected, NULL FROM temp.model_selection_migration ORDER BY original_rowid`);
+    db.exec('DROP TABLE temp.model_selection_migration');
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
 /**
@@ -3610,7 +3659,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3662,7 +3711,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -5175,6 +5224,8 @@ export class EditorialStore {
       initializeCustomAnalysisDimensionSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       // Revision 83 (Issue #89; ADR 0090 §3): the foreign Skill update candidates, rules and current selections beside them.
       initializeImportedSkillUpdateSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
+      initializeModelSelectionSchema(authority);
+      initializeMaterialTranslationAttemptSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -6205,7 +6256,8 @@ export class EditorialStore {
         if (projection.taskIntent?.taskIntentId === controlling.taskIntentId) {
           const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun, controlling.ledger);
           const originalState = plan.state;
-          plan = withLedgerRunControls(plan, projection, [], stopped ?? undefined, controlling.ledger.launch.operationalScope === 'developer-live');
+          plan = withLedgerRunControls(plan, projection, [], stopped ?? undefined, controlling.ledger.launch.operationalScope === 'developer-live',
+            this.#liveCancellationRanges(projection, controlling.ledger));
           if (active === undefined && projection.run?.state !== 'cancelled') plan = { ...plan, state: originalState, runControl: null };
           plan = { ...plan, edit: { ...plan.edit, planEnvelopeDigest: plan.edit.editable
             ? canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest : null } };
@@ -6230,7 +6282,8 @@ export class EditorialStore {
       if (checkpoint !== null) {
         const blocks = this.#analysisCall(() => ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
         const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun, ledger);
-        plan = withLedgerRunControls(plan, projection, blocks, stopped ?? undefined, ledger.launch.operationalScope === 'developer-live');
+        plan = withLedgerRunControls(plan, projection, blocks, stopped ?? undefined, ledger.launch.operationalScope === 'developer-live',
+          this.#liveCancellationRanges(projection, ledger));
       }
     }
     // A Task prepared from a Task Intent Draft shows the draft's sentence in its 目标块 (Issue #423, slice 7a).
@@ -6288,7 +6341,8 @@ export class EditorialStore {
       const clarifications = projection.run === null ? [] : this.#analysisCall(() => ledger.clarificationsOf(projection.run!.runRecordId));
       // 结果待确认 (Issue #51, S16c): the ranges this Task would send again whose earlier result could not be known.
       const resendUnits = this.#analysisCall(() => ledger.resendUnitsOf(projection));
-      const baseline = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, ...(defaultRule === undefined ? {} : { defaultRule }), clarifications, resendUnits, ...(stopped === null ? {} : { stopped }) }));
+      const baseline = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, ...(defaultRule === undefined ? {} : { defaultRule }), clarifications, resendUnits, ...(stopped === null ? {} : { stopped }),
+        liveCancellation: this.#liveCancellationRanges(projection, ledger) }));
       const routeKind = projection.providerResolutionPlan?.executionRoute.kind ?? null;
       const plan = custom === null ? baseline : customAnalysisPlan(baseline, { ...customAnalysisVersionInput(custom), version: custom.version },
         routeKind === 'opencode-go' || routeKind === 'deepseek-open-platform');
@@ -6812,6 +6866,25 @@ export class EditorialStore {
   reconcileStoppedReviewCategoryRuns(): { settled: number } {
     this.#assertAvailable();
     return { settled: this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns())) };
+  }
+
+  /** Exact recorded ranges for a live Run's cancellation disclosure; no stopped-Run authority is inferred. */
+  #liveCancellationRanges(projection: BaselineAnalysisProjection, ledger: BaselineAnalysisStore): BaselineCancellationRanges | null {
+    const run = projection.run;
+    if (run === null || run.progress === null) return null;
+    const inFlight = run.progress.stage === 'units' ? run.progress.currentUnitOrdinal : null;
+    return this.#analysisCall(() => {
+      const checkpoints = ledger.unitCheckpoints(run.runRecordId);
+      const settled = new Set(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal));
+      return {
+        // An answered range already in flight is being continued, not waiting to be continued.
+        waiting: ledger.clarificationsOf(run.runRecordId)
+          .filter((request) => !settled.has(request.unitOrdinal) && request.unitOrdinal !== inFlight)
+          .map((request) => ({ unitOrdinal: request.unitOrdinal, answered: request.answer !== null })),
+        unconfirmed: checkpoints.filter((checkpoint) => checkpoint.unit.closed.state === 'gap' && checkpoint.unit.closed.gap.code === 'outcome-unknown')
+          .map((checkpoint) => checkpoint.unit.unitOrdinal),
+      };
+    });
   }
 
   /**
@@ -10737,6 +10810,8 @@ export class EditorialStore {
         }
         const answer = await translator.translate(originalSha256, batch.map((target) => target.text), `${next.indexSha256.slice(0, 16)}/${batch[0]!.ordinal}`);
         if (answer.kind === 'failed') {
+          if (answer.provenance !== undefined) this.#transaction(this.#authority, () => this.#materialIndexCall(() => this.#materialIndex.recordTranslationAttempt(
+            next, originalSha256, batch, ['AI7_OUTCOME_UNKNOWN', 'PROVIDER_VALIDATION_OUTCOME_UNKNOWN'].includes(answer.provenance!.failureCode ?? '') ? 'outcome-unknown' : 'failed', answer.provenance!)));
           this.#translationFailures.set(materialId, answer.message);
           return;
         }
@@ -10745,8 +10820,11 @@ export class EditorialStore {
           this.#translationFailures.set(materialId, MATERIAL_LAYERS_READ_ONLY);
           return;
         }
-        this.#transaction(this.#authority, () => this.#materialIndexCall(() => this.#materialIndex.recordTranslations(next, answer.made,
-          batch.map((target, index) => ({ ordinal: target.ordinal, sha256: target.sha256, text: answer.texts[index]! })))));
+        this.#transaction(this.#authority, () => this.#materialIndexCall(() => {
+          if (answer.made.provenance !== undefined) this.#materialIndex.recordTranslationAttempt(next, originalSha256, batch, 'translated', answer.made.provenance);
+          this.#materialIndex.recordTranslations(next, answer.made,
+            batch.map((target, index) => ({ ordinal: target.ordinal, sha256: target.sha256, text: answer.texts[index]! })));
+        }));
       }
     } catch (error) {
       this.#translationFailures.set(materialId, error instanceof StoreError ? error.message : '来源译文没有完成；已记录的译文保留。');
@@ -18000,7 +18078,7 @@ export class EditorialStore {
     const target = MODEL_SERVICE_ROUTE_ROWS[route];
     requireStore(target !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
     const row = this.#authority.prepare(
-      `SELECT ${MODEL_SERVICE_ROW_COLUMNS}, selected
+      `SELECT ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test
        FROM model_service_connections
        WHERE connection_id = ?`,
     ).get(target.connectionId) as SqlRow | undefined;
@@ -18022,13 +18100,15 @@ export class EditorialStore {
       roleId: 'main-editorial',
       connectionName: asString(row.connection_name),
       // A connection saved before revision 72 named `deepseek-v4-pro`; the migration moved it to the route's current model.
-      binding: { ...target.binding, approvedFallbackChain: [] },
+      binding: { ...(modelServiceModels(route).find((model) => model.modelId === asString(row.model_id)) ?? target.binding), approvedFallbackChain: [] },
       credentialReference,
       credentialOperationState: state,
       createdAt: asString(row.created_at),
       updatedAt: asString(row.updated_at),
       credentialUpdatedAt: asString(row.credential_updated_at),
       selected: row.selected === 1,
+      fastSelected: row.fast_selected === 1,
+      connectionTest: readModelConnectionTest(row),
     };
   }
 
@@ -18068,7 +18148,7 @@ export class EditorialStore {
       'MODEL_SERVICE_CONNECTION_CONFLICT',
       '已存连接的凭据引用不可替换。',
     );
-    const now = new Date().toISOString();
+    const now = new Date(Math.max(Date.now(), current === null ? 0 : Date.parse(current.credentialUpdatedAt) + 1)).toISOString();
     this.#transaction(this.#authority, () => {
       if (current === null) {
         // Minted here when the caller names none — as main always does — so the reference belongs to this data root alone.
@@ -18079,12 +18159,15 @@ export class EditorialStore {
           `INSERT INTO model_service_connections(${MODEL_SERVICE_ROW_COLUMNS}, selected)
            VALUES (?, 'main-editorial', ?, ?, ?, 1, 1, '[]', ?, ?, ?, ?, ?, ?, ?)`,
         ).run(target.connectionId, connectionName, target.binding.providerId, target.binding.modelId, target.binding.credentialSlot,
-          credentialReference, credentialOperationState, now, now, now, anySelected ? null : 1);
+          credentialReference, credentialOperationState, now, now, now, anySelected || route === 'openai-platform' ? null : 1);
+        if (route !== 'openai-platform' && this.#authority.prepare('SELECT 1 FROM model_service_connections WHERE fast_selected = 1').get() === undefined) {
+          this.#authority.prepare('UPDATE model_service_connections SET fast_selected = 1 WHERE connection_id = ?').run(target.connectionId);
+        }
       } else {
         requireStore(
           this.#authority.prepare(
             `UPDATE model_service_connections
-             SET connection_name = ?, credential_operation_state = ?, updated_at = ?, credential_updated_at = ?
+             SET connection_name = ?, credential_operation_state = ?, updated_at = ?, credential_updated_at = ?, connection_test = NULL
              WHERE connection_id = ? AND credential_reference = ?`,
           ).run(connectionName, credentialOperationState, now, now, target.connectionId, current.credentialReference).changes === 1,
           'MODEL_SERVICE_CONNECTION_CONFLICT',
@@ -18105,21 +18188,21 @@ export class EditorialStore {
     const now = new Date().toISOString();
     let connectionId = '';
     this.#transaction(this.#authority, () => {
-      const row = this.#authority.prepare('SELECT connection_id FROM model_service_connections WHERE credential_reference = ?')
+      const row = this.#authority.prepare('SELECT connection_id, credential_updated_at FROM model_service_connections WHERE credential_reference = ?')
         .get(credentialReference) as SqlRow | undefined;
       requireStore(row !== undefined, 'MODEL_SERVICE_CONNECTION_CONFLICT', '模型服务连接状态已变化。');
       connectionId = asString(row.connection_id);
       requireStore(
         this.#authority.prepare(
           `UPDATE model_service_connections
-           SET credential_operation_state = ?, updated_at = ?, credential_updated_at = ?
+           SET credential_operation_state = ?, updated_at = ?, credential_updated_at = ?, connection_test = NULL
            WHERE connection_id = ? AND credential_reference = ?`,
-        ).run(credentialOperationState, now, now, connectionId, credentialReference).changes === 1,
+        ).run(credentialOperationState, now, new Date(Math.max(Date.parse(now), Date.parse(asString(row.credential_updated_at)) + 1)).toISOString(), connectionId, credentialReference).changes === 1,
         'MODEL_SERVICE_CONNECTION_CONFLICT',
         '模型服务连接状态已变化。',
       );
     });
-    return this.getModelServiceRouteConnection(connectionId === MODEL_SERVICE_ROUTE_ROWS['opencode-go'].connectionId ? 'opencode-go' : 'deepseek-open-platform')!;
+    return this.getModelServiceRouteConnection(MODEL_SERVICE_ROUTES.find((route) => MODEL_SERVICE_ROUTE_ROWS[route].connectionId === connectionId)!)!;
   }
 
   /**
@@ -18129,7 +18212,7 @@ export class EditorialStore {
   selectModelServiceRoute(route: ModelServiceRouteId): ModelServiceConnectionProjection {
     this.#assertAvailable();
     const target = MODEL_SERVICE_ROUTE_ROWS[route];
-    requireStore(target !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
+    requireStore(target !== undefined && route !== 'openai-platform', 'MODEL_SERVICE_CONNECTION_INVALID', '主编辑角色需要现有工具能力；此文本绑定不可用于主编辑。');
     requireStore(this.getModelServiceRouteConnection(route) !== null, 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '这条路线还没有连接；请先保存它的连接名称与凭据。');
     this.#transaction(this.#authority, () => {
       this.#authority.prepare('UPDATE model_service_connections SET selected = NULL WHERE selected = 1 AND connection_id != ?').run(target.connectionId);
@@ -18137,6 +18220,72 @@ export class EditorialStore {
         .run(new Date().toISOString(), target.connectionId);
     });
     return this.getModelServiceRouteConnection(route)!;
+  }
+
+  /** Exact persisted role selection. A missing chosen key never falls back to another channel. */
+  getConfiguredModelRoleBinding(role: 'main-editorial' | 'fast-interaction'): ConfiguredProviderBinding | null {
+    const connections = this.getModelServiceConnections();
+    const chosen = connections.find((connection) => role === 'main-editorial' ? connection.selected : connection.fastSelected);
+    const connection = chosen ?? connections.find((candidate) => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready');
+    if (connection === undefined || connection.credentialOperationState !== 'ready') return null;
+    if (role === 'fast-interaction' && connection.binding.providerId === 'openai-platform' &&
+        (connection.connectionTest?.outcome !== 'passed' || connection.connectionTest.modelId !== connection.binding.modelId ||
+         connection.connectionTest.credentialUpdatedAt !== connection.credentialUpdatedAt)) return null;
+    const { providerId, modelId, credentialSlot } = connection.binding;
+    const binding = { route: providerId, model: modelId, credentialSlot, credentialReference: connection.credentialReference,
+      endpoint: providerId === 'openai-platform' ? 'https://api.openai.com/v1/responses' : providerId === 'opencode-go'
+        ? 'https://opencode.ai/zen/go/v1/chat/completions' : 'https://api.deepseek.com/chat/completions' };
+    return (role === 'fast-interaction' ? allowedProductionBindingOf(binding, 'fast-interaction') : allowedProductionBindingOf(binding)) === null ? null : binding;
+  }
+
+  selectFastRoleModel(route: ModelServiceRouteId, modelId: string): void {
+    const connection = this.getModelServiceRouteConnection(route);
+    requireStore(modelServiceModels(route).some((model) => model.modelId === modelId), 'MODEL_CAPABILITY_UNSUPPORTED', '此模型没有准入的缓冲文本能力。');
+    requireStore(connection !== null && connection.credentialOperationState === 'ready', 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '请先保护并保存凭据。');
+    requireStore(route !== 'openai-platform' || (connection.connectionTest?.outcome === 'passed' && connection.connectionTest.modelId === modelId &&
+      connection.connectionTest.credentialUpdatedAt === connection.credentialUpdatedAt), 'MODEL_CONNECTION_TEST_REQUIRED', '请先明确测试此模型的文本连接。');
+    this.#transaction(this.#authority, () => {
+      this.#authority.prepare('UPDATE model_service_connections SET fast_selected = NULL WHERE fast_selected = 1').run();
+      this.#authority.prepare('UPDATE model_service_connections SET fast_selected = 1, model_id = ?, updated_at = ? WHERE connection_id = ?')
+        .run(modelId, new Date().toISOString(), connection.connectionId);
+    });
+  }
+
+  /** Retain only a closed, sanitized status for the exact credential generation tested. */
+  recordModelConnectionTest(connection: ModelServiceConnectionProjection, result: ModelConnectionTestStatus): void {
+    requireStore(result.credentialUpdatedAt === connection.credentialUpdatedAt && modelServiceModels(connection.binding.providerId).some((model) => model.modelId === result.modelId) &&
+      ['passed', 'failed', 'outcome-unknown', 'cancelled'].includes(result.outcome) && result.verified === 'buffered-text-only' &&
+      (result.code === null || /^[A-Z0-9_]{1,100}$/u.test(result.code)), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
+    const facts = result.provenance;
+    const counts = facts?.usage;
+    requireStore(Number.isFinite(Date.parse(result.testedAt)) && (result.outcome !== 'passed' || facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
+    if (facts !== undefined) requireStore(facts.role === 'Fast Interaction Role' && facts.model === result.modelId &&
+      facts.credentialReference === connection.credentialReference && facts.route === connection.binding.providerId &&
+      facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && facts.policyVersion === 'v25' &&
+      allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null &&
+      (facts.failureCode === null || /^[A-Z0-9_]{1,100}$/u.test(facts.failureCode)) &&
+      (counts == null || [counts.inputTokens, counts.outputTokens, ...(counts.reasoningTokens === undefined ? [] : [counts.reasoningTokens]),
+        ...(counts.cacheReadTokens === undefined ? [] : [counts.cacheReadTokens])].every((count) => Number.isSafeInteger(count) && count >= 0)),
+      'MODEL_CONNECTION_TEST_INVALID', '连接测试来历无效。');
+    // Project the closed status explicitly: no unknown property from an adapter/result can become retained material.
+    const sanitized: ModelConnectionTestStatus = {
+      modelId: result.modelId, credentialUpdatedAt: result.credentialUpdatedAt, testedAt: result.testedAt,
+      outcome: result.outcome, code: result.code, verified: 'buffered-text-only',
+      ...(facts === undefined ? {} : { provenance: {
+        role: facts.role, route: facts.route, model: facts.model, endpoint: facts.endpoint, credentialSlot: facts.credentialSlot,
+        credentialReference: facts.credentialReference, policyVersion: facts.policyVersion, bindingDigest: facts.bindingDigest,
+        ...(facts.credentialUpdatedAt === undefined ? {} : { credentialUpdatedAt: facts.credentialUpdatedAt }),
+        failureCode: facts.failureCode, usage: counts == null ? null : { inputTokens: counts.inputTokens, outputTokens: counts.outputTokens,
+          ...(counts.reasoningTokens === undefined ? {} : { reasoningTokens: counts.reasoningTokens }),
+          ...(counts.cacheReadTokens === undefined ? {} : { cacheReadTokens: counts.cacheReadTokens }) },
+      } }),
+    };
+    readModelConnectionTest({ connection_test: JSON.stringify(sanitized), credential_updated_at: connection.credentialUpdatedAt,
+      provider_id: connection.binding.providerId, credential_slot: connection.binding.credentialSlot, credential_reference: connection.credentialReference });
+    requireStore(this.#authority.prepare(`UPDATE model_service_connections SET connection_test = ?
+      WHERE connection_id = ? AND credential_reference = ? AND credential_updated_at = ? AND credential_operation_state = 'ready'`)
+      .run(JSON.stringify(sanitized), connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt).changes === 1,
+      'MODEL_SERVICE_CONNECTION_CONFLICT', '连接已变化；请重新测试。');
   }
 
   getManuscriptWindowAt(

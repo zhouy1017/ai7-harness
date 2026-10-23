@@ -90,6 +90,8 @@ export const tokenText = (value: number): string => value.toLocaleString('zh-CN'
 /** A route in words: a configured route reads as its service and model, the test route as itself. */
 export function usageRouteLabel(route: string | null): string {
   if (route === null) return UNBOUND_ROUTE_LABEL;
+  // A channel with multiple eligible models cannot truthfully name its default as historical usage.
+  if (route === 'openai-platform') return 'OpenAI 官方';
   if ((MODEL_SERVICE_ROUTES as readonly string[]).includes(route)) {
     const binding = MODEL_SERVICE_ROUTE_BINDINGS[route as ModelServiceRouteId];
     return `${binding.providerLabel} · ${binding.modelLabel}`;

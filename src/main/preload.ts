@@ -792,6 +792,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   probeSearchBackend: (input: Parameters<RendererApi['probeSearchBackend']>[0]) => invoke<Awaited<ReturnType<RendererApi['probeSearchBackend']>>>(IPC_CHANNELS.probeSearchBackend, input),
   saveSearchBackendCredential: (input: Parameters<RendererApi['saveSearchBackendCredential']>[0]) => invoke<Awaited<ReturnType<RendererApi['saveSearchBackendCredential']>>>(IPC_CHANNELS.saveSearchBackendCredential, input),
   removeSearchBackendCredential: (input: Parameters<RendererApi['removeSearchBackendCredential']>[0]) => invoke<Awaited<ReturnType<RendererApi['removeSearchBackendCredential']>>>(IPC_CHANNELS.removeSearchBackendCredential, input),
+  selectFastRoleModel: (input: Parameters<RendererApi['selectFastRoleModel']>[0]) => invoke<Awaited<ReturnType<RendererApi['selectFastRoleModel']>>>(IPC_CHANNELS.selectFastRoleModel, input),
+  testModelServiceConnection: (input: Parameters<RendererApi['testModelServiceConnection']>[0]) => invoke<Awaited<ReturnType<RendererApi['testModelServiceConnection']>>>(IPC_CHANNELS.testModelServiceConnection, input),
   getModelServiceSettings: () =>
     invoke<Awaited<ReturnType<RendererApi['getModelServiceSettings']>>>(IPC_CHANNELS.getModelServiceSettings),
   saveModelServiceProxy: (input: Parameters<RendererApi['saveModelServiceProxy']>[0]) =>

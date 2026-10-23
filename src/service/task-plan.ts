@@ -50,11 +50,13 @@ import { WRITING_COPY_SIZES, WRITING_COPY_SIZES_V1, WRITING_EXEMPLAR_MOVED, type
 import type { WritingMaterialSource } from './writing-tasks.js';
 
 const TASK_PLAN_LIST_PATHS = ['drift.entries', 'edit.lastEdit.entries', 'resend.units', 'unconfirmed.ranges',
-  'runControl.outcomeUnknown.units', 'runControl.continuation.pendingAnswerUnits', 'clarifications'] as const;
-// As #988's: a reply that fits is returned unchanged; only a reply past this budget is paged, each large value to a share.
+  'runControl.outcomeUnknown.units', 'runControl.continuation.pendingAnswerUnits', 'runControl.cancel.impact', 'clarifications'] as const;
+// As #988's, oversized replies share this budget. Cancellation details also keep their fifty-item default.
 const TASK_REPLY_BUDGET = MAX_FRAME_BYTES - 72 * 1024;
 const INLINE_SHARE = 32 * 1024;
 const PAGE_BYTES = 64 * 1024;
+const CANCELLATION_PATH = 'runControl.cancel.impact';
+const CANCELLATION_DETAIL_ITEMS = 50;
 
 function taskPlanValue(plan: unknown, path: string): unknown {
   let value = plan;
@@ -80,7 +82,7 @@ function taskPlanPaths(plan: TaskPlanProjection): string[] {
  * A page, inline or read, is never empty while its value holds more: a read always advances, and a consumer that asks whether
  * a list is empty, or reads its first entries — open questions come first — is never misled by the cut.
  */
-function planValuePage(value: ReadonlyArray<unknown> | string, afterOrdinal: number, budget: number) {
+function planValuePage(value: ReadonlyArray<unknown> | string, afterOrdinal: number, budget: number, limit = Infinity) {
   if (typeof value === 'string') {
     const points = [...value];
     const selected: string[] = [];
@@ -94,9 +96,10 @@ function planValuePage(value: ReadonlyArray<unknown> | string, afterOrdinal: num
     return { items: selected.join(''), shown: selected.length, total: points.length, nextOrdinal: end < points.length ? end : null };
   }
   const indexed = value.map((item, index) => ({ item, ordinal: index + 1 }));
-  const page = analysisBytePage(indexed, afterOrdinal, (row) => row.ordinal, budget);
+  const page = analysisBytePage(indexed.slice(afterOrdinal, afterOrdinal + limit), afterOrdinal, (row) => row.ordinal, budget);
+  const end = afterOrdinal + page.items.length;
   return { items: page.items.map((row) => row.item),
-    shown: page.items.length, total: indexed.length, nextOrdinal: page.next };
+    shown: page.items.length, total: indexed.length, nextOrdinal: end < indexed.length ? end : null };
 }
 
 /** Snapshot-pinned, read-only paging of the drawer's own complete derivation. */
@@ -105,7 +108,8 @@ export function taskPlanPage(plan: TaskPlanProjection, path: string, afterOrdina
   const value = taskPlanValue(plan, path);
   requireAnalysis(typeof value === 'string' || Array.isArray(value), 'TASK_PLAN_PAGE_INVALID', '任务计划读取范围无效。');
   requireAnalysis(sha256Hex(canonicalJson(value)) === digest, 'TASK_PLAN_PAGE_CHANGED', '任务计划已变化，请重新打开计划。');
-  const page = planValuePage(value, afterOrdinal, PAGE_BYTES);
+  const page = planValuePage(value, afterOrdinal, PAGE_BYTES,
+    path === CANCELLATION_PATH ? CANCELLATION_DETAIL_ITEMS + (afterOrdinal === 0 ? 1 : 0) : Infinity);
   requireAnalysis(afterOrdinal <= page.total, 'TASK_PLAN_PAGE_INVALID', '任务计划读取位置无效。');
   return { path, items: page.items, nextOrdinal: page.nextOrdinal, digest };
 }
@@ -150,17 +154,21 @@ function taskDraftsWire(projection: TaskIntentDraftsProjection): TaskIntentDraft
     listPages: { drafts: { shown: page.shown, total: page.total, nextOrdinal: page.nextOrdinal, digest: sha256Hex(canonicalJson(projection.drafts)) } } };
 }
 
-/** The transport edge alone bounds a reply that would not fit; every reply that fits is returned byte for byte. */
+/** Bound the reply at the transport edge, preserving short replies and cancellation's fifty-detail default. */
 export function taskPlanWire(plan: TaskPlanProjection, replyBudget = TASK_REPLY_BUDGET): TaskPlanProjection {
-  if (serializedBytes(plan) <= replyBudget) return plan;
+  const fits = serializedBytes(plan) <= replyBudget;
+  if (fits && (plan.runControl?.cancel.impact.length ?? 0) <= CANCELLATION_DETAIL_ITEMS + 1) return plan;
   let share = INLINE_SHARE;
   for (;;) {
     const wire = structuredClone(plan);
     const pages: Record<string, NonNullable<TaskPlanProjection['listPages']>[string]> = {};
     for (const path of taskPlanPaths(plan)) {
+      // Applying cancellation's item default alone does not page unrelated values in a reply that already fits.
+      if (fits && share === INLINE_SHARE && path !== CANCELLATION_PATH) continue;
       const value = taskPlanValue(plan, path);
-      if (!(typeof value === 'string' || Array.isArray(value)) || serializedBytes(value) <= share) continue;
-      const page = planValuePage(value, 0, share);
+      const limit = path === CANCELLATION_PATH ? CANCELLATION_DETAIL_ITEMS + 1 : Infinity;
+      if (!(typeof value === 'string' || Array.isArray(value)) || (serializedBytes(value) <= share && value.length <= limit)) continue;
+      const page = planValuePage(value, 0, share, limit);
       replaceTaskPlanValue(wire, path, page.items);
       pages[path] = { shown: page.shown, total: page.total, nextOrdinal: page.nextOrdinal, digest: sha256Hex(canonicalJson(value)) };
     }
@@ -805,15 +813,15 @@ export function withLedgerRunControls(
   blocks: ReadonlyArray<ManifestBlockInput>,
   stopped?: BaselineStoppedRunFacts,
   developerLive = false,
+  liveCancellation: BaselineCancellationRanges | null = null,
 ): TaskPlanProjection {
   const version = projection.planVersion;
   if (version === null || projection.providerResolutionPlan === null) return plan;
   const edits = version.edits;
   const run = projection.run;
-  const impactWords = (lines: ReadonlyArray<string>): string[] => lines.map((line) => line === CANCELLATION_NO_EFFECTS
-    ? plan.kind === 'review-run' ? '已经形成的审阅批注与修改建议会保留；取消不会撤回已完成的受控动作。'
-      : '这项任务只形成草稿或建议，不会自动采用、改稿或发稿。'
-    : line.replace('这本书最新的分析', '这项任务最新的结果'));
+  const impactWords = (lines: ReadonlyArray<string>): string[] => lines.map((line) => line.replace(CANCELLATION_NO_EFFECTS,
+    plan.kind === 'review-run' ? '已经形成的审阅批注与修改建议会保留；取消不会撤回已完成的受控动作。'
+      : '这项任务只形成草稿或建议，不会自动采用、改稿或发稿。').replace('这本书最新的分析', '这项任务最新的结果'));
   const budgetReached = run?.state === 'interrupted' && projection.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached';
   const canRedo = run !== null && runBegan(run) &&
     (run.state === 'paused' || run.state === 'resumable' || run.state === 'cancelled' || budgetReached);
@@ -840,7 +848,7 @@ export function withLedgerRunControls(
       })),
     },
     runControl: (() => {
-      const control = baselineRunControl(projection, stopped);
+      const control = baselineRunControl(projection, stopped, liveCancellation);
       return control === null ? null : { ...control, cancel: { ...control.cancel, impact: impactWords(control.cancel.impact) } };
     })(),
     redo,
@@ -898,6 +906,8 @@ export function baselineAnalysisPlan(input: {
   defaultRule?: TaskPlanDefaultRuleProjection;
   /** What the store read of the Task's stopped Run (Issue #422, S76b); absent while no Run of it is stopped. */
   stopped?: BaselineStoppedRunFacts;
+  /** Exact already-recorded ranges for cancellation while execution still holds this Run. */
+  liveCancellation?: BaselineCancellationRanges | null;
   /** What the Task's Run asked the editor, and the answers (Issue #422, S76d); absent reads as nothing asked. */
   clarifications?: ReadonlyArray<ClarificationFacts>;
   /** The ranges this Task sends again whose earlier result could not be known (Issue #51, S16c); absent reads as none. */
@@ -1081,7 +1091,7 @@ export function baselineAnalysisPlan(input: {
     ],
     start: baselineStart(projection, envelope.digest),
     defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
-    runControl: baselineRunControl(projection, input.stopped),
+    runControl: baselineRunControl(projection, input.stopped, input.liveCancellation),
     redo: baselineRedo(projection, input.stopped),
     resend: baselineResend(input.resendUnits),
     unconfirmed: null,
@@ -2075,95 +2085,73 @@ export function baselineCancellationImpact(
   const reusedKept = update === null || update.reusedUnits === 0 ? '' : `，连同沿用上一份分析的 ${update.reusedUnits} 个阅读范围，`;
   // The ranges not read yet stop with the steps after them — named only when there are any.
   const restOf = (count: number): string => count === 0 ? '' : update === null ? `其余 ${count} 个阅读范围和` : `其余 ${count} 个要重新分析的阅读范围和`;
-  // What a Run nothing executes kept becomes its partial revision — unless this launch can no longer carry it under the
-  // binding it persisted, when its cancellation forms none (Issue #422, S76c).
-  const partial = (unitsSettled: number): string => kept?.bindingHolds === false
-    ? `执行绑定已经变化，已读完的 ${unitsSettled} 个阅读范围不能整理成结果集修订版；这次取消不会形成修订版。`
-    : `已读完的 ${unitsSettled} 个阅读范围的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
-  // The ranges that asked the editor and have not settled (Issue #422, S76d; D7): each is named, answered or not, and
-  // ends as a gap, unretried — in the partial revision when there is one.
-  const waitingLines = (asked: ReadonlyArray<{ unitOrdinal: number; answered: boolean }>, shared: boolean): string[] => {
-    if (asked.length === 0) return [];
-    const carried = kept?.bindingHolds !== false;
-    const tail = !carried ? '取消后不再重试。' : shared ? '取消后不再重试，在这份修订版里记为缺口。' : '取消后不再重试，记为缺口。';
-    const lines: string[] = [];
-    for (const answered of [false, true]) {
-      const units = asked.filter((entry) => entry.answered === answered).map((entry) => `第 ${entry.unitOrdinal} 个`);
-      if (units.length > 0) lines.push(`${units.join('、')}阅读范围${answered ? '你已回答，但还没有按回答接着做' : '在等你的回答'}；${tail}`);
-    }
-    if (!shared) {
-      lines.push(carried
-        ? '这些缺口和没读到的阅读范围（记为未尝试）会保留在一份新的结果集修订版里；这份修订版会成为这本书最新的分析。'
-        : '执行绑定已经变化，这次取消不会形成结果集修订版。');
-    }
-    return lines;
-  };
   const progress = run.progress;
-  // A Run nothing executes — paused, left 可续行, or left under way when AI7 closed — has nothing in flight: what its
-  // checkpoints kept becomes its partial revision, and one that kept nothing, or whose kept progress no longer reads
-  // back, ends with its record alone (Issue #422, S76b).
-  if (progress === null && kept !== null) {
+  const asked = kept?.waiting ?? [];
+  const unconfirmed = kept?.unconfirmed ?? [];
+  const inFlight = progress?.stage === 'units' && progress.currentUnitOrdinal !== null;
+  const liveRemaining = progress === null ? 0 : Math.max(0, progress.unitsTotal - progress.unitsSettled - asked.length - (inFlight ? 1 : 0));
+  const stops = progress === null ? '这项任务已经停下；' : progress.stage !== 'units'
+    ? `正在进行的${STAGE_WORDS[progress.stage]}完成后停止，之后的步骤都不再进行，不再发送任何内容。`
+    : inFlight
+      ? `正在读的第 ${progress.currentUnitOrdinal} 个阅读范围读完后停止；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`
+      : `在这两个阅读范围之间停止；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`;
+  // The existing redo caller supplies only aggregate progress. Preserve that disclosure without inventing zero
+  // waiting/unknown counts; the cancellation owner supplies both arrays, even when they are empty.
+  if (progress === null && kept !== null && kept.waiting === undefined && kept.unconfirmed === undefined) {
     const { unitsSettled, unitsTotal } = kept;
-    if (run.state === 'paused' || run.state === 'resumable' || run.state === 'awaiting-clarification') {
-      if (unitsSettled === null) {
-        return ['这项任务已经停下，它已保存的阅读进度无法核对；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
-      }
-      const asked = kept.waiting ?? [];
-      const unconfirmed = kept.unconfirmed ?? [];
-      if (unitsSettled === 0 && asked.length === 0 && unconfirmed.length === 0) {
-        return ['这项任务还没有读完任何阅读范围；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
-      }
-      return [
-        `这项任务已经停下；${restOf(Math.max(0, unitsTotal - unitsSettled - asked.length))}之后的归纳、抽样都不再进行，不再发送任何内容。`,
-        // Ranges kept as 结果待确认 gaps (Issue #51, S16c) are named on their own line, never counted as read.
-        ...(unitsSettled - unconfirmed.length <= 0 ? [] : [partial(unitsSettled - unconfirmed.length)]),
-        ...waitingLines(asked, unitsSettled > 0),
-        // 结果待确认 (Issue #51, S16c): their requests were sent, so they are gaps of their own — never ranges not attempted.
-        ...(unconfirmed.length === 0 ? [] : [
-          `${unconfirmed.map((ordinal) => `第 ${ordinal} 个`).join('、')}阅读范围的请求已发出、结果待确认；不会再发，${kept.bindingHolds === false ? '' : '在这份修订版里'}记为结果待确认的缺口，不记为未尝试。`,
-        ]),
-        CANCELLATION_NO_EFFECTS,
-      ];
+    const stopped = run.state === 'paused' || run.state === 'resumable' || run.state === 'awaiting-clarification';
+    if (stopped && (unitsSettled === null || unitsSettled === 0)) {
+      return [(unitsSettled === null
+        ? '这项任务已经停下，它已保存的阅读进度无法核对；取消后不会发送任何内容，也不会形成结果集修订版。'
+        : '这项任务还没有读完任何阅读范围；取消后不会发送任何内容，也不会形成结果集修订版。') + CANCELLATION_NO_EFFECTS];
     }
-    if (unitsSettled === null || unitsSettled === 0) {
-      return [
-        'AI7 上次关闭时这项任务没有结束，现在也没有在运行；取消只结束这条运行记录，不会再发送任何内容。',
-        unitsSettled === null ? '它已保存的阅读进度无法核对，不会形成结果集修订版。' : '它还没有读完任何阅读范围，不会形成结果集修订版。',
-        CANCELLATION_NO_EFFECTS,
-      ];
-    }
+    const stops = unitsSettled === null || unitsSettled === 0
+      ? 'AI7 上次关闭时这项任务没有结束，现在也没有在运行；取消只结束这条运行记录，不会再发送任何内容。'
+      : `${stopped ? '这项任务已经停下' : 'AI7 上次关闭时这项任务没有结束，现在也没有在运行'}；${restOf(Math.max(0, unitsTotal - unitsSettled))}之后的归纳、抽样都不再进行，不再发送任何内容。`;
+    const consequence = unitsSettled === null ? '它已保存的阅读进度无法核对，不会形成结果集修订版。'
+      : unitsSettled === 0 ? '它还没有读完任何阅读范围，不会形成结果集修订版。'
+        : kept.bindingHolds === false
+          ? `执行绑定已经变化，已读完的 ${unitsSettled} 个阅读范围不能整理成结果集修订版；这次取消不会形成修订版。`
+          : `已读完的 ${unitsSettled} 个阅读范围的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
+    return [stops + consequence + CANCELLATION_NO_EFFECTS];
+  }
+  if (kept !== null && (progress === null || asked.length > 0 || unconfirmed.length > 0)) {
+    const answered = asked.filter((entry) => entry.answered).length;
+    // unitsSettled already includes unknown outcomes: subtract them once, never describe them as read or unattempted.
+    const read = kept.unitsSettled === null ? null : Math.max(0, kept.unitsSettled - unconfirmed.length);
+    const remaining = kept.unitsSettled === null ? null : Math.max(0, kept.unitsTotal - kept.unitsSettled - asked.length - (inFlight ? 1 : 0));
+    const carried = kept.bindingHolds !== false && read !== null;
+    const consequence = read === null ? '已保存的阅读进度无法核对，这次取消不会形成结果集修订版。'
+      : read === 0 && asked.length === 0 && unconfirmed.length === 0 ? '这项任务还没有读完任何阅读范围，不会形成结果集修订版。'
+        : !carried ? '执行绑定已经变化，这次取消不会形成结果集修订版。'
+        : `已读结果与这些缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
+    // The first, bounded entry is the complete decision summary even at the wire guard's minimum share.
+    // Each subsequent entry names one exact range, so the existing list pager can always advance.
     return [
-      `AI7 上次关闭时这项任务没有结束，现在也没有在运行；${restOf(Math.max(0, unitsTotal - unitsSettled))}之后的归纳、抽样都不再进行，不再发送任何内容。`,
-      partial(unitsSettled),
-      CANCELLATION_NO_EFFECTS,
+      `${stops}${read === null ? '已读完数量无法核对' : `已读完 ${read} 个阅读范围`}，等你回答 ${asked.length - answered} 个，你已回答但尚未续行 ${answered} 个，结果待确认 ${unconfirmed.length} 个，${remaining === null ? '未尝试数量无法核对' : `未尝试 ${remaining} 个`}。${progress === null ? '取消后，之后的归纳、抽样都不再进行，不再发送任何内容；' : ''}等待回答的范围不再重试，结果待确认的请求不会再发，仍记为结果待确认的缺口，不记为未尝试。${consequence}${CANCELLATION_NO_EFFECTS}${inFlight ? '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。' : ''}`,
+      ...asked.map((entry) => `第 ${entry.unitOrdinal} 个阅读范围${entry.answered ? '你已回答，但还没有按回答接着做' : '在等你的回答'}；取消后不再重试${carried ? '，在这份修订版里记为缺口。' : '。'}`),
+      ...unconfirmed.map((ordinal) => `第 ${ordinal} 个阅读范围的请求已发出、结果待确认；不会再发，${carried ? '在这份修订版里' : ''}记为结果待确认的缺口，不记为未尝试。`),
     ];
   }
   // Admitted and waiting its turn: nothing read yet — unless it is a Run going on from what it kept.
   if (run.state === 'admitted' && (progress === null || progress.unitsSettled === 0)) {
-    return ['这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
+    return [`这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。${CANCELLATION_NO_EFFECTS}`];
   }
   if (progress === null) {
     // No execution of this service holds the Run: AI7 closed while it ran, and its unit results were never kept.
-    return [
+    return [[
       'AI7 上次关闭时这项任务没有结束，现在也没有在运行；取消只结束这条运行记录，不会再发送任何内容。',
       '它已读完的阅读范围的结果没有保存下来，不会形成结果集修订版。',
       CANCELLATION_NO_EFFECTS,
-    ];
+    ].join('')];
   }
-  const inFlight = progress.stage === 'units' && progress.currentUnitOrdinal !== null;
-  const remaining = Math.max(0, progress.unitsTotal - progress.unitsSettled - (inFlight ? 1 : 0));
-  const stops = progress.stage !== 'units'
-    ? `正在进行的${STAGE_WORDS[progress.stage]}完成后停止，之后的步骤都不再进行，不再发送任何内容。`
-    : inFlight
-      ? `正在读的第 ${progress.currentUnitOrdinal} 个阅读范围读完后停止；${restOf(remaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`
-      : `在这两个阅读范围之间停止；${restOf(remaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`;
   const settled = `已读完的 ${progress.unitsSettled} 个阅读范围${inFlight ? '和正在读的这一个' : ''}的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
-  return [
+  return [[
     stops,
     settled,
     CANCELLATION_NO_EFFECTS,
     ...(inFlight ? ['正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。'] : []),
-  ];
+  ].join('')];
 }
 
 /**
@@ -2171,7 +2159,8 @@ export function baselineCancellationImpact(
  * summary, and 暂停 and 改计划重做 with the reasons they are not offered yet. `null` once the Run has ended, and
  * before it was admitted — a Run waiting for the network has its own 取消 (Issue #502).
  */
-function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: BaselineStoppedRunFacts): TaskPlanRunControlProjection | null {
+function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: BaselineStoppedRunFacts,
+  liveCancellation: BaselineCancellationRanges | null = null): TaskPlanRunControlProjection | null {
   const run = projection.run;
   if (run === null) return null;
   const under = run.state === 'admitted' || run.state === 'executing' || run.state === 'cancelling' || run.state === 'pausing' ||
@@ -2202,7 +2191,8 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     pausing,
     cancel: {
       reason: cancelling ? RUN_CONTROL_CANCELLING_REASON : pausing ? RUN_CONTROL_PAUSING_REASON : null,
-      impact: cancelling || pausing ? [] : baselineCancellationImpact(run, update, kept),
+      impact: cancelling || pausing ? [] : baselineCancellationImpact(run, update, run.progress !== null && liveCancellation !== null
+        ? { unitsSettled: run.progress.unitsSettled, unitsTotal: run.progress.unitsTotal, ...liveCancellation } : kept),
     },
     // CTRL-001 and CTRL-008: a Run executing its units, or admitted and waiting its turn, pauses in one click.
     pause: { reason: (run.state === 'executing' || run.state === 'admitted') && held ? null : RUN_CONTROL_PAUSE_REASON },
@@ -2324,6 +2314,12 @@ function unconfirmedApart(count: number): string {
  */
 function baselineResend(units: ReadonlyArray<number> | undefined): TaskPlanProjection['resend'] {
   return units === undefined || units.length === 0 ? null : { units: [...units], statement: resendDisclosure(units) };
+}
+
+/** Read-only cancellation detail; never continuation, redo or binding authority for an active Run. */
+export interface BaselineCancellationRanges {
+  readonly waiting: ReadonlyArray<{ readonly unitOrdinal: number; readonly answered: boolean }>;
+  readonly unconfirmed: ReadonlyArray<number>;
 }
 
 export interface BaselineStoppedRunFacts {

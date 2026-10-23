@@ -6,17 +6,17 @@ Versioned JSON policies, their schemas and their human projections are immutable
 
 ## Current runtime selection
 
-The #990 successor (wave 15, slice 15c) selects [active-policy-set v16](active-policy-set.v16.json), the direct successor of the #920 set v15; its selection becomes integrated only at the exact dev commit carrying this coherent successor:
+The #1044 successor (wave 19b) selects [active-policy-set v17](active-policy-set.v17.json), the direct successor of set v16; its selection becomes integrated only at the exact dev commit carrying this coherent successor:
 
 | Scope | Canonical JSON | Schema | Human projection |
 | --- | --- | --- | --- |
 | `development-ci` | [Provider Processing v1](provider-processing-policy.v1.json) | [schema](provider-processing-policy.v1.schema.json) | [projection](provider-processing-policy.md) |
 | `fixture-recording` | [Provider Processing v2](provider-processing-policy.v2.json) | [schema](provider-processing-policy.v2.schema.json) | [projection](provider-processing-policy.v2.md) |
-| `ordinary-production` | [Provider Processing v23](provider-processing-policy.v23.json) | [schema](provider-processing-policy.v23.schema.json) | [projection](provider-processing-policy.v23.md) |
+| `ordinary-production` | [Provider Processing v25](provider-processing-policy.v25.json) | [schema](provider-processing-policy.v25.schema.json) | [projection](provider-processing-policy.v25.md) |
 | `developer-live` | [Provider Processing v24](provider-processing-policy.v24.json) | [schema](provider-processing-policy.v24.schema.json) | [projection](provider-processing-policy.v24.md) |
 | External Export, all scopes | [External Export v2](external-export-policy.v2.json) | [schema](external-export-policy.v2.schema.json) | [projection](external-export-policy.v2.md) |
 
-The source checkout selects `development-ci` by default, `developer-live` through `--trusted-operational-scope developer-live`, or `ordinary-production` through `--trusted-operational-scope ordinary-production`. It does not select fixture-recording. One active set serves every launch, so a `development-ci` launch also reports active-set v16 while its Provider Processing pin stays v1. The developer-live executable pin stays Go `deepseek-v4.1-flash` with admitted sample lineage and protected capture, and admits ten rules across nine kinds of work. Since v24 the admitted samples are the five Public SampleBooks — exact `sample1` (ADR 0043) and the four public-domain works [ADR 0091](../adr/0091-admit-four-public-domain-works-as-public-samplebooks.md) admits, each by its exact bytes and SHA-256 in [SampleBooks/README.md](../../SampleBooks/README.md); v24 is v22 with only `authorityBasis` naming ADR 0091 and every rule's `source.admittedInputs` reading `owner-designated-public-samplebooks-under-adr-0043-and-adr-0091` ([projection](provider-processing-policy.v24.md)). The ten rules:
+The source checkout selects `development-ci` by default, `developer-live` through `--trusted-operational-scope developer-live`, or `ordinary-production` through `--trusted-operational-scope ordinary-production`. It does not select fixture-recording. One active set serves every launch, so a `development-ci` launch also reports active-set v17 while its Provider Processing pin stays v1. The developer-live executable pin stays Go `deepseek-v4.1-flash` with admitted sample lineage and protected capture, and admits ten rules across nine kinds of work. Since v24 the admitted samples are the five Public SampleBooks — exact `sample1` (ADR 0043) and the four public-domain works [ADR 0091](../adr/0091-admit-four-public-domain-works-as-public-samplebooks.md) admits, each by its exact bytes and SHA-256 in [SampleBooks/README.md](../../SampleBooks/README.md); v24 is v22 with only `authorityBasis` naming ADR 0091 and every rule's `source.admittedInputs` reading `owner-designated-public-samplebooks-under-adr-0043-and-adr-0091` ([projection](provider-processing-policy.v24.md)). The ten rules:
 
 - **Baseline manuscript analysis**, exactly as v9 admitted it, under the required Run ceiling.
 - **Enrolled background analysis** (since v14): baseline analysis dispatched by an active matching Background Analysis Enrollment in idle or quiet time, one exact Run per dispatch, only within the enrollment's mandatory tokens ceiling (split equally across a Series or all-Books enrollment's Books, remainder to the first) and at most the governor's capacity minus one background slots. It is the only rule that admits a background origin.
@@ -55,6 +55,10 @@ Provider Processing v24 directly succeeds v22, which directly succeeded v20, whi
 - Each new actual user Task performs its own model-dependent work, including deliberate repeated questions. Development live-once rules and similar-test fixtures never answer or refuse those business Tasks. Product Resume, incremental analysis and explicitly reusable completed steps retain their own semantics.
 - CI, the hosted Gate and ordinary automated regressions call no LLM and receive no product Provider credential.
 - Provider Processing never grants Apply, external export, publication or public release. Export still requires the exact user-selected local destination, payload and Effect Approval, with a receipt or classified outcome. Notes remain default-off; retained external sources and Evidence Links do not export. Cloud, email and network destinations remain outside the local export policy.
+
+## Selected model bindings and connection test
+
+Ordinary-production v25 preserves v23's task/source boundaries, adds independent persisted Main/Fast selection and a separate explicit bounded public synthetic connection-test purpose under ADR 0094 §1. The reviewed OpenAI `gpt-5.6-luna` and `gpt-5.6-sol` choices are buffered text only for 来源译文; tool/stream contracts remain unavailable. Saving a key is not a test, and a passed text probe proves neither tools nor streaming. See [v25's exact purpose and limits](provider-processing-policy.v25.md). Set v17 preserves every v16 pin except ordinary-production's successor; all predecessor bytes remain immutable.
 
 ## Immutable history and activation
 

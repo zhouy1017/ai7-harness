@@ -6,7 +6,7 @@ Issue [#1015](https://github.com/zhouy1017/ai7-harness/issues/1015) unifies sour
 
 ## Canonical inputs
 
-Root `package.json.version` owns the software SemVer, currently `0.1.0`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision **83** and service protocol **161** keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
+Root `package.json.version` owns the software SemVer, currently `0.1.0`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision **84** and service protocol **161** keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
 
 `pnpm run version:identity` prints this closed shape:
 

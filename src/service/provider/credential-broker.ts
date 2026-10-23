@@ -20,6 +20,8 @@ export interface CredentialSlotBinding {
   readonly modelRole: 'Main Editorial Role' | 'Fast Interaction Role';
   readonly slot: CredentialSlot;
   readonly credentialReference: string;
+  /** Revalidate the frozen production selection and credential generation across the asynchronous secret read. */
+  readonly isCurrent?: () => boolean;
 }
 
 export type CredentialReadiness = 'present' | 'missing';
@@ -45,6 +47,12 @@ function requireBinding(binding: CredentialSlotBinding): void {
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || (binding.modelRole !== 'Main Editorial Role' && binding.modelRole !== 'Fast Interaction Role') ||
       !CREDENTIAL_SLOTS.has(binding.slot) || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference)) {
     throw new CredentialBrokerError('CREDENTIAL_BINDING_INVALID', '凭据槽位绑定无效。');
+  }
+}
+
+function requireCurrentBinding(binding: CredentialSlotBinding): void {
+  if (binding.isCurrent?.() === false) {
+    throw new CredentialBrokerError('CREDENTIAL_BINDING_STALE', '模型选择或凭据已变化；本次凭据未释放，请重新确认。');
   }
 }
 
@@ -74,7 +82,9 @@ export class CredentialBroker {
   async checkReadiness(binding: CredentialSlotBinding): Promise<CredentialReadiness> {
     requireBinding(binding);
     this.#requireAdmittedReference(binding.credentialReference);
+    requireCurrentBinding(binding);
     const value = await this.#resolver.resolve(binding.credentialReference);
+    requireCurrentBinding(binding);
     return typeof value === 'string' && value.length > 0 ? 'present' : 'missing';
   }
 
@@ -111,7 +121,9 @@ export class CredentialBroker {
         (ticket.decision === 'transmit-remote' && binding.slot.startsWith('search-'))) {
       throw new CredentialBrokerError('CREDENTIAL_RELEASE_REFUSED', '没有本次绑定的 transmit-remote 决定；凭据未释放。');
     }
+    requireCurrentBinding(binding);
     const value = await this.#resolver.resolve(binding.credentialReference);
+    requireCurrentBinding(binding);
     if (typeof value !== 'string' || value.length === 0) {
       throw new CredentialBrokerError('CREDENTIAL_MISSING', '安全凭据库中没有该凭据引用的值。');
     }

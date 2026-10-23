@@ -8,7 +8,7 @@ Generated from the provider documents under [`config/providers/`](../../config/p
 
 - **Declared** — a document declares the route and the model. A declared model whose `answerChannel` is `none` is inert: it can read no response. A declared format is a claim about the request shape and nothing else (ADR 0073 §3).
 - **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.
-- **Bindable** — a route a Provider Resolution Plan may bind. No provider declaration makes a route bindable: that requires the selected Provider Processing policy rule naming the exact binding, the Owner's decision per provider, and a named first-transmission test item under ADR 0067. [Current runtime selection](../policies/README.md#current-runtime-selection) owns the active policy pins and admitted scopes. The developer-live binding is OpenCode Go `opencode-go` · `deepseek-v4.1-flash`; ordinary-production lets an editor configure that default binding or DeepSeek 开放平台（官方） `deepseek-open-platform` · `deepseek-flash` (Issue #811; `ExecutionRoute`, `src/service/provider/egress-gate.ts`).
+- **Bindable** — a route the selected Provider Processing policy admits for an exact role and operation; a declaration alone grants no authority. [Current runtime selection](../policies/README.md#current-runtime-selection) owns the active pins, scope and evidence requirements. Developer-live remains OpenCode Go `opencode-go` · `deepseek-v4.1-flash` under ADR 0067. Ordinary-production saves Main and Fast independently: Main retains Go or DeepSeek 开放平台（官方） `deepseek-open-platform` · `deepseek-flash`; Fast additionally admits OpenAI `gpt-5.6-luna` and `gpt-5.6-sol` only for buffered 来源译文 after a successful exact-binding fixed public connection probe. The separate explicit probe grants no editorial authority, tools or native streaming, and declarations are not account availability or live proof (Issue #1044; Provider Processing v25).
 
 Task research declarations (Issue #744, ADR 0080 rows 15/17) resolve to `webSearch: true`, `searchEngine: user-selected-backend` only when the task declares web research, the [selected policy rule](../policies/README.md#current-runtime-selection) admits AI7 platform tools and the exact route/model has recorded live tool-loop evidence. The admitted web-bearing kinds are 事实核查 and 学术道德与引用 review, writing, and AI7 初评 evaluation (its market section). 审稿意见 and 按我的评分重写评语 declare no web even where their evaluation policy rule allows tools; 出版政策与风险 remains excluded. Other kinds declare no web. The composition pins the effective declaration; the Run freezes the backend. Reports disclose 未联网核查, 联网核查未完成 with the refusal/breaker reason, or 联网核查已完成; completed tool execution alone establishes no supported factual conclusion.
 
@@ -339,7 +339,7 @@ Open:
 | --- | --- |
 | Document | [`config/providers/openai-platform.json`](../../config/providers/openai-platform.json) |
 | Credential slot | `openai-platform` |
-| Header form | `authorization: Bearer` — `vendor-documentation`, OpenAI API documentation, developers.openai.com/api/docs (platform.openai.com/docs redirects there) — Responses API, models, read 2026-09-10 |
+| Header form | `authorization: Bearer` — `vendor-documentation`, https://developers.openai.com/api/docs/models/gpt-5.6-sol ; https://developers.openai.com/api/docs/models/gpt-5.6-luna ; https://developers.openai.com/api/reference/overview ; https://developers.openai.com/api/reference/resources/responses/methods/create, read 2026-10-22 |
 
 ### `openai-platform`
 
@@ -351,9 +351,9 @@ Open:
 | Limit reading | `rate-limit-retryable` — `unverified` |
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
-| Per-turn output cap | none |
+| Per-turn output cap | 8,192 |
 
-`max_output_tokens` is optional on this shape and nothing has established a per-turn bound, so the route names none.
+Buffered text only with max_output_tokens 8192. The explicit synthetic connection test narrows this to 512; neither probe nor saved credential proves tools or native streaming.
 
 | Model id | Display name | Context | Tool calling | Web search tool |
 | --- | --- | --- | --- | --- |
@@ -362,21 +362,24 @@ Open:
 | `gpt-5.6-terra` | GPT-5.6 Terra | 1,050,000 | `none` | `provider-tool` |
 | `gpt-5.6-luna` | GPT-5.6 Luna | 1,050,000 | `none` | `provider-tool` |
 
-Inert: 4 of 4 (no declared answer channel). Established:
+Inert: 2 of 4 (no declared answer channel). Established:
 
-- every model · `requestShape: openai-responses` — `vendor-documentation`, OpenAI API documentation, developers.openai.com/api/docs (platform.openai.com/docs redirects there) — Responses API, models, read 2026-09-10
+- every model · `requestShape: openai-responses` — `vendor-documentation`, https://developers.openai.com/api/docs/models/gpt-5.6-sol ; https://developers.openai.com/api/docs/models/gpt-5.6-luna ; https://developers.openai.com/api/reference/overview ; https://developers.openai.com/api/reference/resources/responses/methods/create, read 2026-10-22
 - every model · `webSearchTool: provider-tool` — `vendor-documentation`, OpenAI API documentation, web search tool guide and models page, developers.openai.com/api/docs, read 2026-09-10
-- every model · context 1,050,000 — `vendor-documentation`, OpenAI API documentation, developers.openai.com/api/docs (platform.openai.com/docs redirects there) — Responses API, models, read 2026-09-10
+- every model · context 1,050,000 — `vendor-documentation`, https://developers.openai.com/api/docs/models/gpt-5.6-sol ; https://developers.openai.com/api/docs/models/gpt-5.6-luna ; https://developers.openai.com/api/reference/overview ; https://developers.openai.com/api/reference/resources/responses/methods/create, read 2026-10-22
+- `gpt-5.6-sol`, `gpt-5.6-luna` · `answerChannel: output-message-text` — `vendor-documentation`, https://developers.openai.com/api/docs/models/gpt-5.6-sol ; https://developers.openai.com/api/docs/models/gpt-5.6-luna ; https://developers.openai.com/api/reference/overview ; https://developers.openai.com/api/reference/resources/responses/methods/create, read 2026-10-22
+- `gpt-5.6-sol`, `gpt-5.6-luna` · `usageAttribution: includes-reasoning` — `vendor-documentation`, https://developers.openai.com/api/docs/models/gpt-5.6-sol ; https://developers.openai.com/api/docs/models/gpt-5.6-luna ; https://developers.openai.com/api/reference/overview ; https://developers.openai.com/api/reference/resources/responses/methods/create, read 2026-10-22
 
 Readings:
 
-- `openai-api-docs` — `vendor-documentation`, OpenAI API documentation, developers.openai.com/api/docs (platform.openai.com/docs redirects there) — Responses API, models, read 2026-09-10. Endpoint `https://api.openai.com/v1/responses`, `Authorization: Bearer`; models `gpt-6-astra`, `gpt-5.6-sol` (alias `gpt-5.6`), `gpt-5.6-terra`, `gpt-5.6-luna`, each 1.05M context / 128K output (ADR 0080 §3).
+- `openai-api-docs` — `vendor-documentation`, https://developers.openai.com/api/docs/models/gpt-5.6-sol ; https://developers.openai.com/api/docs/models/gpt-5.6-luna ; https://developers.openai.com/api/reference/overview ; https://developers.openai.com/api/reference/resources/responses/methods/create, read 2026-10-22. Official docs confirm exact gpt-5.6-sol and gpt-5.6-luna text input/output, 1,050,000 context, 128,000 maximum output, POST https://api.openai.com/v1/responses and Authorization: Bearer. Responses output message output_text and input_tokens/output_tokens with reasoning token details. Documentation is not per-account availability or live proof. This build admits buffered text only; tools, native streaming, structured output and reasoning control remain absent.
 - `openai-web-search-tool` — `vendor-documentation`, OpenAI API documentation, web search tool guide and models page, developers.openai.com/api/docs, read 2026-09-10. Server-side in the Responses API — `"tools": [{"type": "web_search"}]` — with `url_citation` annotations and a `sources` list; the models page lists Web search in every flagship's tools row (ADR 0080 §3).
 
 Open:
 
-- The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
-- Structured outputs (`text.format` with `json_schema`) and `reasoning.effort` are documented but not implemented by the adapter's Responses assembly, so both stay absent; whether structured outputs are GA is not stated on the pages read.
+- Account/model access requires the editor-initiated exact-binding text test; no live access was tested by Issue #1044.
+- Function tools, opaque reasoning replay, structured outputs, reasoning control and native streaming remain unadmitted.
+- 429/account denial is classified by the existing adapter; AI7 does not automatically retry or choose another binding.
 
 ## OpenCode Go
 

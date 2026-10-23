@@ -475,7 +475,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         ['route', 'connectionName', 'credentialReference', 'credentialOperationState'],
         tentativeId,
       );
-      if ((input.route !== 'opencode-go' && input.route !== 'deepseek-open-platform') || !isBoundedString(input.connectionName, 80) ||
+      if ((input.route !== 'opencode-go' && input.route !== 'deepseek-open-platform' && input.route !== 'openai-platform') || !isBoundedString(input.connectionName, 80) ||
           !(input.credentialReference === null || (isBoundedString(input.credentialReference, 36) && UUID_PATTERN.test(input.credentialReference))) ||
           (input.credentialOperationState !== 'ready' && input.credentialOperationState !== 'needs-attention')) {
         throw new ProtocolError(tentativeId);
@@ -483,9 +483,15 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     // The route new Tasks use (Issue #811): one of the two production routes.
+    case 'selectFastRoleModel':
+    case 'testModelServiceConnection': {
+      const input = requireInput(value.input, ['route', 'modelId'], tentativeId);
+      if (!['opencode-go', 'deepseek-open-platform', 'openai-platform'].includes(input.route as string) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'selectModelServiceRoute': {
       const input = requireInput(value.input, ['route'], tentativeId);
-      if (input.route !== 'opencode-go' && input.route !== 'deepseek-open-platform') throw new ProtocolError(tentativeId);
+      if (input.route !== 'opencode-go' && input.route !== 'deepseek-open-platform' && input.route !== 'openai-platform') throw new ProtocolError(tentativeId);
       break;
     }
     case 'setModelServiceCredentialState': {

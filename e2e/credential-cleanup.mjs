@@ -18,7 +18,7 @@ import { journeyCheckFailure } from './controller.mjs';
  * `tests/unit/credential-cleanup.test.ts` holds it equal to the highest `*_SCHEMA_VERSION` in
  * `src/service/task-authorization.ts`, so a schema slice moves it in the same pull request or a unit test fails.
  */
-export const CREDENTIAL_CLEANUP_SCHEMA_VERSION = 83;
+export const CREDENTIAL_CLEANUP_SCHEMA_VERSION = 84;
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -166,7 +166,7 @@ export async function removeSyntheticCredentialWithElectron(journey, executable,
  * Reads, without writing, what the store under `dataRoot` records of the one Main Editorial Role connection: nothing yet
  * (`not-started`), its credential already removed (`removed`), or the reference the direct cleanup must remove.
  */
-export async function recoverSyntheticCredentialCleanupState(journey, dataRoot, runRoot) {
+export async function recoverSyntheticCredentialCleanupState(journey, dataRoot, runRoot, route = 'deepseek-open-platform') {
   requireCleanup(journey, dataRoot === resolve(runRoot, 'data') && inside(runRoot, dataRoot), 'credential-cleanup-metadata-root');
   const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
   let metadata;
@@ -196,10 +196,10 @@ export async function recoverSyntheticCredentialCleanupState(journey, dataRoot, 
               adapter_revision, configuration_revision, approved_fallback_chain,
               credential_slot, credential_reference, credential_operation_state
        FROM model_service_connections
-       LIMIT 2`,
+       LIMIT 4`,
     ).all();
     // Revision 72 (Issue #811): one row per production route, the DeepSeek 官方 row and the Go row; a Journey saves the first.
-    requireCleanup(journey, rows.length <= 2, 'credential-cleanup-metadata-cardinality');
+    requireCleanup(journey, rows.length <= 3, 'credential-cleanup-metadata-cardinality');
     if (rows.length === 0) return { kind: 'not-started' };
     for (const candidate of rows) {
       const official = candidate.connection_id === 'main-editorial-deepseek-v4-pro' && candidate.provider_id === 'deepseek-open-platform' &&
@@ -208,7 +208,7 @@ export async function recoverSyntheticCredentialCleanupState(journey, dataRoot, 
         candidate.credential_slot === 'opencode-go' && candidate.model_id === 'deepseek-v4.1-flash';
       requireCleanup(
         journey,
-        (official || go) && candidate.role_id === 'main-editorial' &&
+        (official || go || (candidate.connection_id === 'openai-platform' && candidate.provider_id === 'openai-platform' && candidate.credential_slot === 'openai-platform' && ['gpt-5.6-luna', 'gpt-5.6-sol'].includes(candidate.model_id))) && candidate.role_id === 'main-editorial' &&
         typeof candidate.connection_name === 'string' && candidate.connection_name.isWellFormed() &&
         candidate.connection_name.trim().length >= 1 && candidate.connection_name.trim().length <= 80 &&
         candidate.adapter_revision === 1 && candidate.configuration_revision === 1 && candidate.approved_fallback_chain === '[]' &&
@@ -217,8 +217,8 @@ export async function recoverSyntheticCredentialCleanupState(journey, dataRoot, 
         'credential-cleanup-metadata-binding',
       );
     }
-    requireCleanup(journey, rows.length === 1, 'credential-cleanup-metadata-cardinality');
-    const row = rows[0];
+    const row = rows.find((candidate) => candidate.provider_id === route);
+    if (row === undefined) return { kind: 'not-started' };
     return row.credential_operation_state === 'missing'
       ? { kind: 'removed' }
       : { kind: 'reference', credentialReference: row.credential_reference };

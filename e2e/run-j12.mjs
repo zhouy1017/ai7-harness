@@ -306,7 +306,7 @@ async function configuredUnboundProviderNames() {
   const listed = new Set();
   for (const file of (await readdir(directory)).filter((name) => name.endsWith('.json') && !name.endsWith('.schema.json')).sort()) {
     const document = JSON.parse(await readFile(join(directory, file), 'utf8'));
-    if (document.providerId === 'deepseek-open-platform' || document.providerId === 'opencode-go') continue;
+    if (document.providerId === 'deepseek-open-platform' || document.providerId === 'opencode-go' || document.providerId === 'openai-platform') continue;
     names.add(document.displayName);
     listed.add(document.displayName);
     for (const route of document.routes) {
@@ -461,6 +461,7 @@ async function main() {
   let launchForCleanup;
   let managerForCleanup;
   let credentialMutationReached = false;
+  let openAiCredentialMutationReached = false;
   let credentialReferenceForCleanup;
   let productCredentialCleanupSucceeded = false;
   let credentialCleanupFailure;
@@ -602,6 +603,13 @@ async function main() {
         }
       }
       await closeOwnedBrowserForCleanup();
+      if (openAiCredentialMutationReached && dataRootForCleanup !== undefined && runRoot !== undefined) {
+        try {
+          const recovered = await recoverSyntheticCredentialCleanupState('J-12', dataRootForCleanup, runRoot, 'openai-platform');
+          if (recovered.kind === 'reference') await removeSyntheticCredentialWithElectron('J-12', electronExecutableForCleanup,
+            productEnvironment(electronExecutableForCleanup), recovered.credentialReference);
+        } catch (error) { credentialCleanupFailure ??= error; }
+      }
       const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
       try {
         await ownedLoopback?.close();
@@ -664,7 +672,7 @@ async function main() {
     await mkdir(resolve(shellRoot, 'crashes'));
     await writeFile(resolve(shellRoot, 'crashes', '2026-10-17T00-00-00.000Z-render-process-gone.json'), JSON.stringify({
       instant: '2026-10-17T00:00:00.000Z', kind: 'render-process-gone', reason: 'crashed', exitCode: 1,
-      appVersion: '0.1.0', schemaRevision: 83, protocol: 161, platform: process.platform, arch: process.arch,
+      appVersion: '0.1.0', schemaRevision: 84, protocol: 161, platform: process.platform, arch: process.arch,
       electron: '43.4.1', uptimeSeconds: 1, stack: '    at <redacted-path>:12:3',
     }), { flag: 'wx' });
     const executable = electronExecutable();
@@ -1293,7 +1301,7 @@ async function main() {
     const diagnosticsBundle = resolve(diagnosticsDestination, diagnosticsFolders[0]);
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
-    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v16.json'), 'utf8'));
+    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v17.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
     requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 161 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
@@ -1327,7 +1335,7 @@ async function main() {
         main?.dataset.modelRoleStatus==='setup-required' &&
         main.textContent.includes('DeepSeek 开放平台（官方）') && main.textContent.includes('OpenCode Go') && main.textContent.includes('DeepSeek V4.1 Flash') &&
         main.textContent.includes('已批准备用链') && main.textContent.includes('无') &&
-        JSON.stringify(Array.from(main.querySelectorAll('[data-model-route]')).map((node)=>node.dataset.modelRoute))===JSON.stringify(['opencode-go','deepseek-open-platform']) &&
+        JSON.stringify(Array.from(main.querySelectorAll('[data-model-route]')).map((node)=>node.dataset.modelRoute))===JSON.stringify(['opencode-go','deepseek-open-platform','openai-platform']) &&
         Array.from(main.querySelectorAll('[data-model-route]')).every((node)=>node.dataset.modelRouteInUse==='false'&&node.dataset.modelRouteStatus==='setup-required') &&
         roles.filter((node)=>node.dataset.modelRole!=='main-editorial').every((node)=>node.dataset.modelRoleStatus==='setup-required'&&!node.textContent.includes('DeepSeek')) &&
         statuses.length===4 && statuses.every((node)=>node.getAttribute('aria-label')?.includes(node.textContent??'')) &&
@@ -1400,15 +1408,15 @@ async function main() {
         firstConnection.binding?.modelId === 'deepseek-flash' &&
         firstConnection.connection?.selected === true &&
         JSON.stringify(firstConnection.routes?.map((route) => [route.route, route.isDefault, route.inUse, route.status])) ===
-          JSON.stringify([['opencode-go', true, false, 'setup-required'], ['deepseek-open-platform', false, true, 'available']]) &&
+          JSON.stringify([['opencode-go', true, false, 'setup-required'], ['deepseek-open-platform', false, true, 'available'], ['openai-platform', false, false, 'setup-required']]) &&
         firstConnection.unsupported?.length > 0 && firstConnection.unsupported.every((provider) => provider.statusLabel === '尚未支持') &&
         firstConnection.binding?.adapterRevision === 1 &&
         firstConnection.binding?.configurationRevision === 1 &&
         firstConnection.binding?.credentialSlot === 'deepseek-api-key' &&
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
-        // Synchronized delta with Issue #990: selected active set v16; Provider Processing remains v1.
-        firstConnection.policy?.activePolicySetVersion === 'v16' &&
+        // Synchronized delta with Issue #1044: selected active set v17; Provider Processing remains v1.
+        firstConnection.policy?.activePolicySetVersion === 'v17' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&
@@ -1417,6 +1425,26 @@ async function main() {
       'model-first-nonsecret-projection',
     );
     credentialReferenceForCleanup = firstConnection.connection.credentialReference;
+    at('model-service-openai-text-contract');
+    openAiCredentialMutationReached = true;
+    const openAiSecret = randomBytes(48).toString('base64url');
+    await fill(primary, '#main-editorial-openai-platform-connection-name', 'J12 OpenAI text', 'openai-connection-name');
+    await fill(primary, '#main-editorial-openai-platform-credential', openAiSecret, 'openai-synthetic-credential');
+    await click(primary, '保护并保存（OpenAI 官方）', 'openai-protected-save');
+    await waitFor(primary, `document.querySelector('[data-model-route="openai-platform"] [data-credential-state="ready"]')`, 'openai-protected-save-ready');
+    await assertRenderer(primary, `(() => { const card=document.querySelector('[data-model-route="openai-platform"]'); return card.textContent.includes('尚未测试') && card.querySelector('input[type="password"]').value==='' && card.querySelector('[data-action="test-model-connection"]') instanceof HTMLButtonElement; })()`, 'openai-explicit-test-surface');
+    await primary.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{
+      const route=settings.routeChoice.routes.find((item)=>item.route==='openai-platform');
+      return route.connection.credentialOperationState==='ready' && route.connection.connectionTest===null &&
+        route.models.map((model)=>model.modelId).join(',')==='gpt-5.6-luna,gpt-5.6-sol' &&
+        settings.roles.find((role)=>role.roleId==='main-editorial').connection.selected===true &&
+        settings.roles.find((role)=>role.roleId==='fast-interaction').connection.fastSelected===true;
+    })`), 'openai-saved-is-untested-models-independent-fast');
+    requireJourney(await primary.evaluate(`window.ai7.testModelServiceConnection({route:'openai-platform',modelId:'gpt-5.6-sol'}).then(()=>false,(error)=>error.code==='MODEL_CONNECTION_TEST_UNAVAILABLE')`), 'connection-test-ci-scope-denied');
+    requireJourney(await primary.evaluate(`window.ai7.selectFastRoleModel({route:'openai-platform',modelId:'gpt-5.6-sol'}).then(()=>false,(error)=>error.code==='MODEL_CONNECTION_TEST_REQUIRED')`), 'untested-model-selection-refused');
+    at('model-service-first-save');
+
     await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(primary, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.model-role-grid')).gridTemplateColumns.split(' ').length===1`, 'model-settings-zoom-reflow');
@@ -1426,6 +1454,8 @@ async function main() {
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await primary.send('Emulation.clearDeviceMetricsOverride');
     await close();
+    // Audit only after Electron releases its data-root file locks, as for the existing credential checks below.
+    await assertSecretsAbsentFromDataRoot('J-12', dataRoot, [openAiSecret], 'openai-secret-absent-from-data-root');
     await assertSecretsAbsentFromDataRoot('J-12', dataRoot, [secretOne], 'model-first-secret-absent-from-data-root');
 
     at('model-service-restart-and-replace');
@@ -1440,6 +1470,15 @@ async function main() {
         restartedConnection.connection?.credentialOperationState === 'ready',
       'model-credential-restart-ready-same-reference',
     );
+    at('model-service-openai-restart-removal');
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{
+      const route=settings.routeChoice.routes.find((item)=>item.route==='openai-platform');
+      return route.connection.connectionName==='J12 OpenAI text' && route.connection.connectionTest===null &&
+        route.connection.credentialOperationState==='ready' && settings.roles.find((role)=>role.roleId==='fast-interaction').binding.providerId==='deepseek-open-platform';
+    })`), 'openai-untested-restart-independent-fast');
+    await primary.evaluate(`window.ai7.removeModelServiceCredential({route:'openai-platform'})`);
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.routeChoice.routes.find((item)=>item.route==='openai-platform').connection.credentialOperationState==='missing')`), 'openai-removal-state');
+    at('model-service-restart-and-replace');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-replace-open-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-replace-open-settings-hub');
     await click(primary, '模型服务', 'model-replace-open');

@@ -52,9 +52,12 @@ export const DATA_VERSION_BASELINE_REVISION: number = 83;
 /**
  * Every schema revision after the baseline, classified (ADR 0079 §1.1): this list is what 「非必要不改」 means in code. Each new
  * revision from the freeze on is added here as additive or breaking, and a breaking one raises `DATA_VERSION` by one, which the
- * unit suite holds; a `breaking` class is the Owner's decision alone. None has come yet, so every revision reads as Data Version 1.
+ * unit suite holds; a `breaking` class is the Owner's decision alone. Revision 84 adds independent model selections and
+ * append-only translation-attempt metadata without rewriting existing records, so it remains inside Data Version 1.
  */
-export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = [];
+export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = [
+  { revision: 84, class: 'additive' },
+];
 
 /**
  * The schema revisions after the baseline that the classification does not name (Issue #967): each must be classified before

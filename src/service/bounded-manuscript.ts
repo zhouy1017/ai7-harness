@@ -141,7 +141,7 @@ import {
   EVALUATION_PROFILE_SCHEMA_VERSION,
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
-  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_UPDATE_SCHEMA_VERSION,
+  MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_UPDATE_SCHEMA_VERSION, MODEL_SELECTION_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
@@ -239,6 +239,10 @@ import {
   MATERIAL_INDEX_LAYER_FOREIGN_KEYS,
   MATERIAL_INDEX_LAYER_SCHEMA_SQL,
   MATERIAL_INDEX_LAYER_TRIGGER_SQL,
+  MATERIAL_TRANSLATION_ATTEMPT_FOREIGN_KEYS,
+  MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL,
+  MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL,
+  validateMaterialTranslationAttemptSchema,
   MATERIAL_INDEX_SCHEMA_SQL,
   MATERIAL_INDEX_TRIGGER_SQL,
 } from './material-index.js';
@@ -414,7 +418,7 @@ export const MODEL_SERVICE_CONNECTION_REVISION_11_SQL = `CREATE TABLE model_serv
  * Credential Reference, and `selected` naming the one the editor chose: `1` on at most one row (a unique column whose other
  * rows hold `NULL`, so the at-most-one rule needs no separate index).
  */
-export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_connections (
+export const MODEL_SERVICE_CONNECTION_REVISION_72_SQL = `CREATE TABLE model_service_connections (
   connection_id TEXT PRIMARY KEY CHECK(connection_id IN ('main-editorial-deepseek-v4-pro', 'main-editorial-opencode-go')),
   role_id TEXT NOT NULL CHECK(role_id = 'main-editorial'),
   connection_name TEXT NOT NULL CHECK(length(connection_name) BETWEEN 1 AND 80),
@@ -434,6 +438,34 @@ export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_c
   CHECK((connection_id = 'main-editorial-deepseek-v4-pro' AND provider_id = 'deepseek-open-platform' AND credential_slot = 'deepseek-api-key'
       AND model_id IN ('deepseek-v4-pro', 'deepseek-flash')) OR
     (connection_id = 'main-editorial-opencode-go' AND provider_id = 'opencode-go' AND credential_slot = 'opencode-go' AND model_id = 'deepseek-v4.1-flash'))
+) STRICT`;
+
+/** Revision 84: reviewed OpenAI text models, independent Fast selection and sanitized test status. */
+export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_connections (
+  connection_id TEXT PRIMARY KEY CHECK(connection_id IN ('main-editorial-deepseek-v4-pro', 'main-editorial-opencode-go', 'openai-platform')),
+  role_id TEXT NOT NULL CHECK(role_id = 'main-editorial'),
+  connection_name TEXT NOT NULL CHECK(length(connection_name) BETWEEN 1 AND 80),
+  provider_id TEXT NOT NULL CHECK(provider_id IN ('deepseek-open-platform', 'opencode-go', 'openai-platform')),
+  model_id TEXT NOT NULL CHECK(model_id IN ('deepseek-v4-pro', 'deepseek-flash', 'deepseek-v4.1-flash', 'gpt-5.6-luna', 'gpt-5.6-sol')),
+  adapter_revision INTEGER NOT NULL CHECK(adapter_revision = 1),
+  configuration_revision INTEGER NOT NULL CHECK(configuration_revision = 1),
+  approved_fallback_chain TEXT NOT NULL CHECK(approved_fallback_chain = '[]'),
+  credential_slot TEXT NOT NULL CHECK(credential_slot IN ('deepseek-api-key', 'opencode-go', 'openai-platform')),
+  credential_reference TEXT NOT NULL UNIQUE CHECK(length(credential_reference) = 36),
+  credential_operation_state TEXT NOT NULL CHECK(credential_operation_state IN ('ready', 'missing', 'needs-attention')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  credential_updated_at TEXT NOT NULL,
+  -- At most one selected row; unselected rows coexist as NULL (#811 brief revision 8).
+  selected INTEGER UNIQUE CHECK(selected = 1),
+  fast_selected INTEGER UNIQUE CHECK(fast_selected = 1),
+  connection_test TEXT CHECK(connection_test IS NULL OR json_valid(connection_test)),
+  CHECK(provider_id != 'openai-platform' OR selected IS NULL),
+  CHECK((connection_id = 'main-editorial-deepseek-v4-pro' AND provider_id = 'deepseek-open-platform' AND credential_slot = 'deepseek-api-key'
+      AND model_id IN ('deepseek-v4-pro', 'deepseek-flash')) OR
+    (connection_id = 'main-editorial-opencode-go' AND provider_id = 'opencode-go' AND credential_slot = 'opencode-go' AND model_id = 'deepseek-v4.1-flash') OR
+    (connection_id = 'openai-platform' AND provider_id = 'openai-platform' AND credential_slot = 'openai-platform'
+      AND model_id IN ('gpt-5.6-luna', 'gpt-5.6-sol')))
 ) STRICT`;
 
 /**
@@ -2037,6 +2069,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...IMPORTED_EXEMPLAR_FOREIGN_KEYS,
   ...RESEARCH_EVIDENCE_FOREIGN_KEYS,
   ...MATERIAL_INDEX_LAYER_FOREIGN_KEYS,
+  ...MATERIAL_TRANSLATION_ATTEMPT_FOREIGN_KEYS,
   ...FACTUAL_VERIFICATION_FOREIGN_KEYS,
   ...HOUSE_REVIEW_PREFERENCE_FOREIGN_KEYS,
   ...TASK_INTENT_DRAFT_FOREIGN_KEYS,
@@ -2780,6 +2813,7 @@ function requireManuscriptReimportTargetSchema(
   const includeResearchEvidenceTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= RESEARCH_EVIDENCE_SCHEMA_VERSION || committed(RESEARCH_EVIDENCE_SCHEMA_SQL);
   // Revision 76 (Issue #892): the Material Index's similarity vectors and 来源译文.
   const includeMaterialIndexLayerTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MATERIAL_INDEX_LAYER_SCHEMA_VERSION || committed(MATERIAL_INDEX_LAYER_SCHEMA_SQL);
+  const includeMaterialTranslationAttempts = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_SELECTION_SCHEMA_VERSION || committed(MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL);
   // Revision 77 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
   const includeFactualVerificationTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= FACTUAL_VERIFICATION_SCHEMA_VERSION || committed(FACTUAL_VERIFICATION_SCHEMA_SQL);
   // Revision 79 (Issue #911): 本社审阅偏好 versions and each review category Task's pin of the version it read.
@@ -2801,8 +2835,9 @@ function requireManuscriptReimportTargetSchema(
       // still hold revision 11's text.
       ...(includeModelServiceTable
         ? { model_service_connections: Number(db.prepare('PRAGMA user_version').get()?.user_version) < MODEL_SERVICE_ROUTES_SCHEMA_VERSION
-          ? [MODEL_SERVICE_CONNECTION_REVISION_11_SQL, MODEL_SERVICE_CONNECTION_SCHEMA_SQL]
-          : MODEL_SERVICE_CONNECTION_SCHEMA_SQL }
+          ? [MODEL_SERVICE_CONNECTION_REVISION_11_SQL, MODEL_SERVICE_CONNECTION_REVISION_72_SQL, MODEL_SERVICE_CONNECTION_SCHEMA_SQL]
+          : Number(db.prepare('PRAGMA user_version').get()?.user_version) < MODEL_SELECTION_SCHEMA_VERSION
+            ? [MODEL_SERVICE_CONNECTION_REVISION_72_SQL, MODEL_SERVICE_CONNECTION_SCHEMA_SQL] : MODEL_SERVICE_CONNECTION_SCHEMA_SQL }
         : {}),
       ...(includeNativeArtifactTables
         ? {
@@ -2951,6 +2986,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEvaluationProfileTables ? EVALUATION_PROFILE_SCHEMA_SQL : {}),
       ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_SCHEMA_SQL : {}),
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_SCHEMA_SQL : {}),
+      ...(includeMaterialTranslationAttempts ? MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL : {}),
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_SCHEMA_SQL : {}),
       ...(includeHousePreferenceTables ? HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL : {}),
       ...(includeTaskIntentDraftTables ? TASK_INTENT_DRAFT_SCHEMA_SQL : {}),
@@ -3018,6 +3054,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEvaluationProfileTables ? EVALUATION_PROFILE_TRIGGER_SQL : {}),
       ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_TRIGGER_SQL : {}),
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_TRIGGER_SQL : {}),
+      ...(includeMaterialTranslationAttempts ? MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL : {}),
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_TRIGGER_SQL : {}),
       ...(includeHousePreferenceTables ? HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL : {}),
       ...(includeTaskIntentDraftTables ? TASK_INTENT_DRAFT_TRIGGER_SQL : {}),
@@ -3026,6 +3063,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeImportedSkillUpdateTables ? IMPORTED_SKILL_UPDATE_TRIGGER_SQL : {}),
     },
   );
+  if (includeMaterialTranslationAttempts) validateMaterialTranslationAttemptSchema(db);
 }
 
 function requireV7TargetSchema(db: DatabaseSync): void {
@@ -5942,7 +5980,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5993,7 +6031,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
