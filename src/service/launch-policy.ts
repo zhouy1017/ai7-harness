@@ -16,20 +16,20 @@ import { SEARCH_BACKENDS } from './provider/search-backends.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v17, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v18, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
  * Provider Processing v24; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v25, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * and binds v26, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v17' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v17.json';
-const ACTIVE_SET_SHA256 = 'c2f3a4bcc8102f8693915bb4003b4268ba7b8b5c6c01ac04c41c8364e9a9ce8c';
+export const ACTIVE_SET_VERSION = 'v18' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v18.json';
+const ACTIVE_SET_SHA256 = '165ddae6775e892579356bf838f340b8f626bc5ae3c2ed15c0165e886ecc099e';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -42,9 +42,9 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v25',
-    canonicalPath: 'docs/policies/provider-processing-policy.v25.json',
-    sha256: 'd46a98dc4f99170b7e0706102af388a8b33e5dabbc351e76a5f47db374a2104c',
+    version: 'v26',
+    canonicalPath: 'docs/policies/provider-processing-policy.v26.json',
+    sha256: 'ab33c4fbab602a09e7233d3bf92cb4d59d841e3d532a933c5a155a2800d2063a',
   },
   'developer-live': {
     version: 'v24',
@@ -1537,6 +1537,78 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
 }
 
 /**
+ * Read v26's Wave 20 eligibility declarations exactly, then pass the existing runtime terms to the v25 reader.
+ * F-21b owns their projection and the later slices own consumption; this activation changes no tool registration,
+ * task admission, retry, synthesis or outbound payload. Missing, extra or differently shaped terms fail closed.
+ * The governor terms state configurable defaults only; their effective numbers are runtime configuration (ADR 0095 §2, §6).
+ */
+function readWave20Eligibility(policy: Record<string, unknown>): Record<string, unknown> {
+  requirePolicy(sameValue(policy['execution'], {
+    maxInFlightRequests: { configurable: true, default: 4 }, perRunUnitParallelism: { configurable: true, default: 3 },
+    backgroundShare: { configurable: true, default: 1 },
+  }) && sameValue(policy['transport'], {
+    requestDeadlineSeconds: 180, rateLimitRetry: { honourRetryAfter: true, maxRetries: 1 },
+  }) && sameValue(policy['research'], { searchesPerClaim: 3 }));
+  const categories = policy['outboundDataCategories'];
+  requirePolicy(isRecord(categories) && sameValue(categories['editor-task-instruction'], { labelZh: '编辑任务说明' }) &&
+    sameValue(categories['house-review-guideline-clause'], { labelZh: '本社审阅规范条款' }));
+  const legacyCategories = { ...categories };
+  delete legacyCategories['editor-task-instruction'];
+  delete legacyCategories['house-review-guideline-clause'];
+  const decision = policy['decision'];
+  requirePolicy(isRecord(decision) && Array.isArray(decision['providerAllowRules']));
+  const declarations = ['retrieve', 'exact_fetch', 'read_blocks', 'baseline_facts', 'guideline_clause', 'term_table', 'search_manuscript']
+    .map((name) => ({ name, readOnly: true, concurrencySafe: true }));
+  const rules = decision['providerAllowRules'].map((rule: unknown) => {
+    requirePolicy(isRecord(rule) && typeof rule['ruleId'] === 'string' && Object.hasOwn(ORDINARY_PRODUCTION_RULES, rule['ruleId']));
+    const reading = ORDINARY_PRODUCTION_RULES[rule['ruleId']]!;
+    const legacyTools = expectedLocalTools(!reading.noRetrieval);
+    requirePolicy(sameValue(rule['localTools'], {
+      ...legacyTools, ...(!reading.noRetrieval ? { declarations, parallelCallsAllowed: true } : {}),
+    }));
+    const legacy: Record<string, unknown> = { ...rule, localTools: legacyTools };
+    if (rule['ruleId'] === BACKGROUND_ANALYSIS_RULE_ID) {
+      const preconditions = rule['authorizationPreconditions'];
+      requirePolicy(isRecord(preconditions) && preconditions['backgroundShare'] === 'execution.backgroundShare' &&
+        !Object.hasOwn(preconditions, 'backgroundSlotShare'));
+      const legacyPreconditions = { ...preconditions };
+      delete legacyPreconditions['backgroundShare'];
+      legacy['authorizationPreconditions'] = { ...legacyPreconditions, backgroundSlotShare: 'capacity-minus-one' };
+    }
+    if (rule['ruleId'] === 'ordinary-production-review') {
+      requirePolicy(exactStrings(rule['allowedTaskKinds'], [...reading.taskKinds, 'editorial-review/publication-risk']) &&
+        exactStrings(rule['allowedOutboundDataCategories'], [...reading.policyCategories, 'editor-task-instruction', 'house-review-guideline-clause']));
+      requirePolicy(sameValue(rule['taskKindOverrides'], { 'editorial-review/publication-risk': { webSearch: false } }) &&
+        sameValue(rule['editorTaskInstruction'], {
+          category: 'editor-task-instruction', maxGraphemes: 1200, attributedToProcedureVersion: true,
+          personNamesAllowed: false, contractFramingOverrideAllowed: false,
+        }) && sameValue(rule['houseReviewGuidelineClause'], {
+          category: 'house-review-guideline-clause', maxClauses: 40, maxGraphemesPerClause: 300,
+          attributedToImportedDocumentVersion: true, personNamesAllowed: false,
+        }));
+      const transmissions = rule['transmissions'];
+      requirePolicy(isRecord(transmissions) && transmissions['crossUnitSynthesisAllowed'] === true &&
+        transmissions['plusDeclaredContractRetryAdaptations'] === true);
+      const legacyTransmissions = { ...transmissions };
+      delete legacyTransmissions['crossUnitSynthesisAllowed'];
+      delete legacyTransmissions['plusDeclaredContractRetryAdaptations'];
+      legacy['transmissions'] = legacyTransmissions;
+      legacy['allowedTaskKinds'] = [...reading.taskKinds];
+      legacy['allowedOutboundDataCategories'] = [...reading.policyCategories];
+      delete legacy['taskKindOverrides'];
+      delete legacy['editorTaskInstruction'];
+      delete legacy['houseReviewGuidelineClause'];
+    }
+    return legacy;
+  });
+  const legacy: Record<string, unknown> = { ...policy, outboundDataCategories: legacyCategories, decision: { ...decision, providerAllowRules: rules } };
+  delete legacy['execution'];
+  delete legacy['transport'];
+  delete legacy['research'];
+  return legacy;
+}
+
+/**
  * Provider Processing v23 (ordinary-production): default deny with ten eligible-only rules this launch can read, each bound to
  * a user-configured role binding, the three that may research each with the platform tools block the search backend registry implies. Everything is read whole and fails closed: a missing term, an unknown term, a rule id outside
  * `ORDINARY_PRODUCTION_RULES`, a repeated id, or any value that differs from the reading is a policy the launch cannot read.
@@ -1544,7 +1616,8 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
  */
 export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
-  const selectedBindingPolicy = policy['version'] === 'v25';
+  if (policy['version'] === 'v26') policy = readWave20Eligibility(policy);
+  const selectedBindingPolicy = policy['version'] === 'v25' || policy['version'] === 'v26';
   requirePolicy(exactKeys(policy, [...PRODUCTION_POLICY_TERMS, ...(selectedBindingPolicy ? ['connectionTest'] : [])]) && policy['operationalScope'] === 'ordinary-production' && policy['lifecycleStatus'] === 'active');
   requirePolicy(sameBlock(policy['trustedSelection'], {
     selectionAuthorityClass: 'trusted-build-or-launch-authority',
