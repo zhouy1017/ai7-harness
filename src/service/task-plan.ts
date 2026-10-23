@@ -813,6 +813,7 @@ export function withLedgerRunControls(
   blocks: ReadonlyArray<ManifestBlockInput>,
   stopped?: BaselineStoppedRunFacts,
   developerLive = false,
+  liveCancellation: BaselineCancellationRanges | null = null,
 ): TaskPlanProjection {
   const version = projection.planVersion;
   if (version === null || projection.providerResolutionPlan === null) return plan;
@@ -847,7 +848,7 @@ export function withLedgerRunControls(
       })),
     },
     runControl: (() => {
-      const control = baselineRunControl(projection, stopped);
+      const control = baselineRunControl(projection, stopped, liveCancellation);
       return control === null ? null : { ...control, cancel: { ...control.cancel, impact: impactWords(control.cancel.impact) } };
     })(),
     redo,
@@ -905,6 +906,8 @@ export function baselineAnalysisPlan(input: {
   defaultRule?: TaskPlanDefaultRuleProjection;
   /** What the store read of the Task's stopped Run (Issue #422, S76b); absent while no Run of it is stopped. */
   stopped?: BaselineStoppedRunFacts;
+  /** Exact already-recorded ranges for cancellation while execution still holds this Run. */
+  liveCancellation?: BaselineCancellationRanges | null;
   /** What the Task's Run asked the editor, and the answers (Issue #422, S76d); absent reads as nothing asked. */
   clarifications?: ReadonlyArray<ClarificationFacts>;
   /** The ranges this Task sends again whose earlier result could not be known (Issue #51, S16c); absent reads as none. */
@@ -1088,7 +1091,7 @@ export function baselineAnalysisPlan(input: {
     ],
     start: baselineStart(projection, envelope.digest),
     defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
-    runControl: baselineRunControl(projection, input.stopped),
+    runControl: baselineRunControl(projection, input.stopped, input.liveCancellation),
     redo: baselineRedo(projection, input.stopped),
     resend: baselineResend(input.resendUnits),
     unconfirmed: null,
@@ -2085,6 +2088,13 @@ export function baselineCancellationImpact(
   const progress = run.progress;
   const asked = kept?.waiting ?? [];
   const unconfirmed = kept?.unconfirmed ?? [];
+  const inFlight = progress?.stage === 'units' && progress.currentUnitOrdinal !== null;
+  const liveRemaining = progress === null ? 0 : Math.max(0, progress.unitsTotal - progress.unitsSettled - asked.length - (inFlight ? 1 : 0));
+  const stops = progress === null ? '这项任务已经停下；' : progress.stage !== 'units'
+    ? `正在进行的${STAGE_WORDS[progress.stage]}完成后停止，之后的步骤都不再进行，不再发送任何内容。`
+    : inFlight
+      ? `正在读的第 ${progress.currentUnitOrdinal} 个阅读范围读完后停止；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`
+      : `在这两个阅读范围之间停止；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`;
   // The existing redo caller supplies only aggregate progress. Preserve that disclosure without inventing zero
   // waiting/unknown counts; the cancellation owner supplies both arrays, even when they are empty.
   if (progress === null && kept !== null && kept.waiting === undefined && kept.unconfirmed === undefined) {
@@ -2105,11 +2115,11 @@ export function baselineCancellationImpact(
           : `已读完的 ${unitsSettled} 个阅读范围的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
     return [stops + consequence + CANCELLATION_NO_EFFECTS];
   }
-  if (progress === null && kept !== null) {
+  if (kept !== null && (progress === null || asked.length > 0 || unconfirmed.length > 0)) {
     const answered = asked.filter((entry) => entry.answered).length;
     // unitsSettled already includes unknown outcomes: subtract them once, never describe them as read or unattempted.
     const read = kept.unitsSettled === null ? null : Math.max(0, kept.unitsSettled - unconfirmed.length);
-    const remaining = kept.unitsSettled === null ? null : Math.max(0, kept.unitsTotal - kept.unitsSettled - asked.length);
+    const remaining = kept.unitsSettled === null ? null : Math.max(0, kept.unitsTotal - kept.unitsSettled - asked.length - (inFlight ? 1 : 0));
     const carried = kept.bindingHolds !== false && read !== null;
     const consequence = read === null ? '已保存的阅读进度无法核对，这次取消不会形成结果集修订版。'
       : read === 0 && asked.length === 0 && unconfirmed.length === 0 ? '这项任务还没有读完任何阅读范围，不会形成结果集修订版。'
@@ -2118,7 +2128,7 @@ export function baselineCancellationImpact(
     // The first, bounded entry is the complete decision summary even at the wire guard's minimum share.
     // Each subsequent entry names one exact range, so the existing list pager can always advance.
     return [
-      `这项任务已经停下；${read === null ? '已读完数量无法核对' : `已读完 ${read} 个阅读范围`}，等你回答 ${asked.length - answered} 个，你已回答但尚未续行 ${answered} 个，结果待确认 ${unconfirmed.length} 个，${remaining === null ? '未尝试数量无法核对' : `未尝试 ${remaining} 个`}。取消后，之后的归纳、抽样都不再进行，不再发送任何内容；等待回答的范围不再重试，结果待确认的请求不会再发，仍记为结果待确认的缺口，不记为未尝试。${consequence}${CANCELLATION_NO_EFFECTS}`,
+      `${stops}${read === null ? '已读完数量无法核对' : `已读完 ${read} 个阅读范围`}，等你回答 ${asked.length - answered} 个，你已回答但尚未续行 ${answered} 个，结果待确认 ${unconfirmed.length} 个，${remaining === null ? '未尝试数量无法核对' : `未尝试 ${remaining} 个`}。${progress === null ? '取消后，之后的归纳、抽样都不再进行，不再发送任何内容；' : ''}等待回答的范围不再重试，结果待确认的请求不会再发，仍记为结果待确认的缺口，不记为未尝试。${consequence}${CANCELLATION_NO_EFFECTS}${inFlight ? '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。' : ''}`,
       ...asked.map((entry) => `第 ${entry.unitOrdinal} 个阅读范围${entry.answered ? '你已回答，但还没有按回答接着做' : '在等你的回答'}；取消后不再重试${carried ? '，在这份修订版里记为缺口。' : '。'}`),
       ...unconfirmed.map((ordinal) => `第 ${ordinal} 个阅读范围的请求已发出、结果待确认；不会再发，${carried ? '在这份修订版里' : ''}记为结果待确认的缺口，不记为未尝试。`),
     ];
@@ -2135,13 +2145,6 @@ export function baselineCancellationImpact(
       CANCELLATION_NO_EFFECTS,
     ].join('')];
   }
-  const inFlight = progress.stage === 'units' && progress.currentUnitOrdinal !== null;
-  const remaining = Math.max(0, progress.unitsTotal - progress.unitsSettled - (inFlight ? 1 : 0));
-  const stops = progress.stage !== 'units'
-    ? `正在进行的${STAGE_WORDS[progress.stage]}完成后停止，之后的步骤都不再进行，不再发送任何内容。`
-    : inFlight
-      ? `正在读的第 ${progress.currentUnitOrdinal} 个阅读范围读完后停止；${restOf(remaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`
-      : `在这两个阅读范围之间停止；${restOf(remaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`;
   const settled = `已读完的 ${progress.unitsSettled} 个阅读范围${inFlight ? '和正在读的这一个' : ''}的结果与缺口${reusedKept}会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。`;
   return [[
     stops,
@@ -2156,7 +2159,8 @@ export function baselineCancellationImpact(
  * summary, and 暂停 and 改计划重做 with the reasons they are not offered yet. `null` once the Run has ended, and
  * before it was admitted — a Run waiting for the network has its own 取消 (Issue #502).
  */
-function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: BaselineStoppedRunFacts): TaskPlanRunControlProjection | null {
+function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: BaselineStoppedRunFacts,
+  liveCancellation: BaselineCancellationRanges | null = null): TaskPlanRunControlProjection | null {
   const run = projection.run;
   if (run === null) return null;
   const under = run.state === 'admitted' || run.state === 'executing' || run.state === 'cancelling' || run.state === 'pausing' ||
@@ -2187,7 +2191,8 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     pausing,
     cancel: {
       reason: cancelling ? RUN_CONTROL_CANCELLING_REASON : pausing ? RUN_CONTROL_PAUSING_REASON : null,
-      impact: cancelling || pausing ? [] : baselineCancellationImpact(run, update, kept),
+      impact: cancelling || pausing ? [] : baselineCancellationImpact(run, update, run.progress !== null && liveCancellation !== null
+        ? { unitsSettled: run.progress.unitsSettled, unitsTotal: run.progress.unitsTotal, ...liveCancellation } : kept),
     },
     // CTRL-001 and CTRL-008: a Run executing its units, or admitted and waiting its turn, pauses in one click.
     pause: { reason: (run.state === 'executing' || run.state === 'admitted') && held ? null : RUN_CONTROL_PAUSE_REASON },
@@ -2309,6 +2314,12 @@ function unconfirmedApart(count: number): string {
  */
 function baselineResend(units: ReadonlyArray<number> | undefined): TaskPlanProjection['resend'] {
   return units === undefined || units.length === 0 ? null : { units: [...units], statement: resendDisclosure(units) };
+}
+
+/** Read-only cancellation detail; never continuation, redo or binding authority for an active Run. */
+export interface BaselineCancellationRanges {
+  readonly waiting: ReadonlyArray<{ readonly unitOrdinal: number; readonly answered: boolean }>;
+  readonly unconfirmed: ReadonlyArray<number>;
 }
 
 export interface BaselineStoppedRunFacts {

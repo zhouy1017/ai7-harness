@@ -226,7 +226,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
 });
 
 // 取消任务 (Issue #422, plan slice S76a): the Cancellation Impact Summary names exactly where the Run stands, from the
-// Run Liveness Signal alone, and the two controls this slice does not bring say why.
+// Run Liveness Signal and recorded range facts, and the two controls this slice does not bring say why.
 describe('the Cancellation Impact Summary (CTRL-004)', () => {
   type Run = NonNullable<BaselineAnalysisProjection['run']>;
   const progress = (overrides: Partial<NonNullable<Run['progress']>> = {}): NonNullable<Run['progress']> => ({
@@ -277,6 +277,25 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
     expect(impact[0]).toContain('未尝试数量无法核对');
     expect(impact[0]).toContain('不会形成结果集修订版');
     expect(impact).toHaveLength(3);
+  });
+
+  it('separates pending and unknown ranges between active units and after the unit stage', () => {
+    const between = baselineCancellationImpact(run('executing', progress({ unitsTotal: 10, unitsSettled: 5, currentUnitOrdinal: null })), null, {
+      unitsSettled: 5, unitsTotal: 10, waiting: [{ unitOrdinal: 6, answered: false }, { unitOrdinal: 7, answered: true }], unconfirmed: [4],
+    });
+    expect(between[0]).toContain('在这两个阅读范围之间停止；其余 3 个阅读范围和');
+    expect(between[0]).toContain('已读完 4 个阅读范围，等你回答 1 个，你已回答但尚未续行 1 个，结果待确认 1 个，未尝试 3 个');
+    expect(between.slice(1)).toHaveLength(3);
+    expect(between[0]).not.toContain('这项任务已经停下');
+    for (const stage of ['cross-unit-reduction', 'assurance-sampling', 'run-report-reflection'] as const) {
+      const afterUnits = baselineCancellationImpact(run('executing', progress({ stage, unitsSettled: 8, currentUnitOrdinal: null })), null, {
+        unitsSettled: 8, unitsTotal: 8, waiting: [], unconfirmed: [4],
+      });
+      expect(afterUnits[0]).toContain('完成后停止，之后的步骤都不再进行');
+      expect(afterUnits[0]).toContain('已读完 7 个阅读范围，等你回答 0 个，你已回答但尚未续行 0 个，结果待确认 1 个，未尝试 0 个');
+      expect(afterUnits[0]).toContain(CANCELLATION_NO_EFFECTS);
+      expect(afterUnits.slice(1)).toEqual(['第 4 个阅读范围的请求已发出、结果待确认；不会再发，在这份修订版里记为结果待确认的缺口，不记为未尝试。']);
+    }
   });
 
   it('says why 暂停 and 改计划重做 are not offered, and that the analysis leaves nothing committed', () => {

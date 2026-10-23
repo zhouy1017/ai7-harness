@@ -256,6 +256,58 @@ describe('schema revision 32 over the real store', () => {
 });
 
 describe('取消任务 over the real store', () => {
+  it('keeps an active unknown range distinct from read and unattempted ranges before cancelling', async () => {
+    fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-outcome-unknown');
+    const store = await openWithRoute();
+    let held = false;
+    let releaseHold!: () => void;
+    const holding = new Promise<void>((resolve) => { releaseHold = resolve; });
+    const execution = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
+      unitHold: async (settled) => { if (settled === 5) { held = true; await holding; } },
+    });
+    try {
+      const { bookId, prepared } = await preparedBook(store, 'L2 sample1 运行中取消待确认范围');
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runRecordId);
+      await until(() => held, 'unit 6 held after unknown unit 4 and settled unit 5');
+      const progress = (id: string) => execution.progressFor(id);
+      expect(progress(runRecordId)).toMatchObject({ unitsSettled: 5, currentUnitOrdinal: 6 });
+      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, progress);
+      const impact = plan.runControl!.cancel.impact;
+      expect(impact[0]).toContain('已读完 4 个阅读范围，等你回答 0 个，你已回答但尚未续行 0 个，结果待确认 1 个，未尝试 2 个');
+      expect(impact[0]).toContain('正在读的第 6 个阅读范围读完后停止');
+      expect(impact[0]).toContain('新的结果集修订版');
+      expect(impact[0]).toContain('这项分析不改稿，没有需要撤回的受控动作。');
+      expect(impact.slice(1)).toEqual(['第 4 个阅读范围的请求已发出、结果待确认；不会再发，在这份修订版里记为结果待确认的缺口，不记为未尝试。']);
+      const beforeReads = store.inspectBaselineAnalysis(bookId, progress);
+      const digest = createHash('sha256').update(JSON.stringify(impact)).digest('hex');
+      for (const afterOrdinal of [1, 0, 1]) {
+        const page = store.getTaskPlanPage({ bookId, kind: 'baseline-analysis', ref: taskIntentId,
+          path: 'runControl.cancel.impact', afterOrdinal, digest },
+        store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, progress));
+        expect(page.items).toEqual(impact.slice(afterOrdinal));
+        expect(page.digest).toBe(digest);
+      }
+      expect(store.inspectBaselineAnalysis(bookId, progress)).toEqual(beforeReads);
+      expect(store.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
+      expect(execution.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('stopping');
+      releaseHold();
+      await execution.whenIdle();
+      const cancelled = store.inspectBaselineAnalysis(bookId, progress);
+      expect(cancelled.run!.state).toBe('cancelled');
+      expect(cancelled.resultSetRevision!.coverage.unitsClosed).toBe(5);
+      expect(cancelled.resultSetRevision!.gaps.map((gap) => [gap.unitOrdinal, gap.code]))
+        .toEqual([[4, 'outcome-unknown'], [7, 'not-attempted'], [8, 'not-attempted']]);
+      store.markCleanShutdown();
+    } finally {
+      releaseHold();
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('stops a Run at the next unit boundary, lets the unit in flight finish, and keeps what it completed', async () => {
     const holdPath = join(roots.dataRoot, '..', 'j10-unit-hold.txt');
     writeFileSync(holdPath, '2');
