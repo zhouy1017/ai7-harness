@@ -275,11 +275,16 @@ async function attachRenderer(browser, excludedTargetId = null) {
   };
 }
 
-async function waitFor(renderer, expression, name, timeout = 60_000) {
+async function waitFor(renderer, expression, name, timeout = 60_000, detailExpression) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     if (await renderer.evaluate(`Boolean(${expression})`)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  if (detailExpression !== undefined) {
+    const detail = await renderer.evaluate(detailExpression);
+    // Only boolean/null control state enters the content-free check marker; retain the object for local debug too.
+    requireJourney(false, `${name}-present-${detail.present}-checked-${detail.checked}-disabled-${detail.disabled}`, detail);
   }
   throw journeyCheckFailure('J-11', name);
 }
@@ -3220,6 +3225,11 @@ async function main() {
 
     // F-05 part 1 (#1082): local signals and explicit memory, with a preference only for future asks.
     at('editorial-memory-page');
+    // run() repaints the whole section while busy; visible results alone do not mean its controls have settled.
+    const waitForMemoryControl = async (controlExpression, name, checked = null) => {
+      const stateExpression = `(() => { const control=${controlExpression}; return {present:!!control,checked:control instanceof HTMLInputElement ? control.checked : null,disabled:control?.disabled ?? null}; })()`;
+      await waitFor(renderer, `(() => { const state=${stateExpression}; return state.present && state.disabled === false && state.checked === ${JSON.stringify(checked)}; })()`, name, 60_000, stateExpression);
+    };
     await toLanding('editorial-memory');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'editorial-memory-knowledge');
     await click(renderer, '社级编辑记忆', 'editorial-memory-tab');
@@ -3233,11 +3243,14 @@ async function main() {
     await waitFor(renderer, `document.querySelectorAll('[data-memory-item]').length === 1`, 'editorial-memory-created');
     const createdMemory = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page => { const item=page.items[0]; return {itemId:item.current.itemId,versionId:item.current.versionId,bookId:[...item.current.positiveExamples,...item.current.negativeExamples][0].bookId,usable:item.usable,signals:item.current.signalIds.length,supervision:item.current.supervisionDirectiveRefs.length,referenceOnly:![...item.current.positiveExamples,...item.current.negativeExamples].some(source => 'text' in source || 'editedText' in source || 'proposedText' in source)}; })`);
     requireJourney(createdMemory.usable && createdMemory.signals === 1 && createdMemory.supervision === 0 && createdMemory.referenceOnly, 'editorial-memory-lineage');
+    await waitForMemoryControl(`Array.from(document.querySelector('[data-memory-item]')?.querySelectorAll('button') ?? []).find(button=>button.textContent==='停用')`, 'editorial-memory-keyboard-ready');
     await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelector('[data-memory-item]').querySelectorAll('button')).find(button=>button.textContent==='停用'); if(!button || button.disabled)return false; button.focus(); return document.activeElement===button; })()`, 'editorial-memory-keyboard-focus');
     await pressEnter(renderer);
     await waitFor(renderer, `document.querySelector('[data-memory-item]')?.textContent.includes('已停用')`, 'editorial-memory-inactive');
+    await waitForMemoryControl(`Array.from(document.querySelector('[data-memory-item]')?.querySelectorAll('button') ?? []).find(button=>button.textContent==='排除本书')`, 'editorial-memory-exclude-book-ready');
     await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelector('[data-memory-item]').querySelectorAll('button')).find(button=>button.textContent==='排除本书'); if(!button || button.disabled)return false; button.click();return true; })()`, 'editorial-memory-exclude-book');
     await waitFor(renderer, `document.querySelector('[data-editorial-memory] details')?.textContent.includes('已排除')`, 'editorial-memory-excluded');
+    await waitForMemoryControl(`document.querySelector('[data-learning-enabled]')`, 'editorial-memory-switch-ready', true);
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-learning-enabled]'); if(!(input instanceof HTMLInputElement)||!input.checked||input.disabled)return false;input.click();return true; })()`, 'editorial-memory-switch-off');
     await waitFor(renderer, `document.querySelector('[data-learning-enabled]')?.checked === false && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'editorial-memory-switch-off-saved');
 
