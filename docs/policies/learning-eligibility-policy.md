@@ -6,15 +6,23 @@ This is the canonical design-phase Policy Document for deciding whether identifi
 
 ## Current authority boundary
 
-1. The user approves the eligible material types and Book, Series, or House scopes.
-2. A new policy begins in recommendation-only calibration mode.
-3. After sufficient audited examples, high-confidence matches may include or exclude material automatically only inside the approved boundary.
+The following local-learning boundary follows [ADR 0094 §3](../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md#3-opt-out-local-learning-with-intelligent-curation). It records accepted design; it does not install a runtime rule, select an active policy, establish completed curation, admit new material, or migrate existing records. Existing immutable runtime policy versions and selections remain unchanged.
+
+1. Default local learning admits eligible editorial acceptance/rejection reasons, editor rewrites and imported Word revision pairs into the local Working Corpus learning pipeline. Disclose collection and future cross-Book influence, with a visible global disable control and per-Book/material/scope exclusions; explicit exclusions and narrower scope prevail immediately.
+2. Automatic local admission records its governing basis and provenance, never a fabricated human inclusion decision. Local capture alone sends no model request and activates no memory.
+3. Governed intelligent curation may propose or automatically activate sufficiently supported derived editorial preferences only inside ADR 0094 §3's disclosed local operating envelope. Eligibility alone does not establish a useful preference or activate memory.
 4. Novel, conflicting, low-confidence, and out-of-boundary cases require review.
 5. Every decision records its reason, confidence, policy version, and Learning Lineage.
 6. An explicit user decision overrides an inferred rule and becomes evidence for future policy review.
 7. The policy cannot expand its own material types, scopes, actions, or authority.
-8. Eligibility permits creation of Editorial Learning Signals or Memory Candidates only. It does not approve memory, grant task source access, authorize publication, or train a Foundation Model.
+8. Eligibility grants no ambient manuscript retrieval, external egress, Series membership or Series Knowledge promotion, publication authority, or Foundation Model training. Ordinary task execution retains its exact task/source/processing authorization; manuscript Apply remains a separate explicit authority.
 9. The user can disable a rule, roll back the active version, return to recommendation-only mode, or disable automation.
+
+Local capture and intelligent curation are separate stages. The disclosed enabled-learning state records the automatic-curation authorization envelope: eligible source/material and outbound categories, selected provider/model and policy, scope, supervision, budget, and disable/exclusion consequences. Threshold or import events may schedule only the exact model-driven processing within that active envelope, with task/dispatch provenance and preflight; missing or exceeded authority blocks the pass. Background Analysis Enrollment is specific to manuscript analysis and supplies no generic curation grant.
+
+A Curation Pass filters noise, merges duplicates and identifies recurring patterns before proposing or activating inspectable Global Editorial Memory Items and Editorial Exemplars. Roughly 5–10 effective decisions or one imported revision batch may trigger evaluation; six decisions do not prove that a useful rule exists. A deterministic summary is not intelligent curation. Keep uncertain or conflicting patterns inspectable without inventing a rule; retain title, Editorial Dimension, positive/negative examples, confidence, exact decision/source lineage and activation history for derived items.
+
+Later consumption pins exact eligible memory/exemplar revisions, records actual use and revalidates exclusions, supervision and source/egress eligibility. A preference cannot establish factual truth or override task-specific direction. Disabling learning stops new capture, curation and use as applicable; exclusion/remediation invalidates later consumption without rewriting completed history. The approved local operating envelope does not authorize the policy to enlarge itself: independent Proposed Policy Revisions and out-of-envelope activation remain subject to the safeguards below.
 
 ## Policy-document contract
 
