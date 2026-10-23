@@ -6,6 +6,7 @@ import {
   ProviderResultCache,
   ProviderResultCacheError,
   isModelCallLine,
+  isSupportedProviderTestItemId,
   providerCacheKey,
   providerEvidenceGeneration,
   providerRequestDigest,
@@ -124,6 +125,22 @@ export async function transmitOnce(
   return cache.withRequestTurn(claimKey, async () => {
     await cache.refresh();
     identity = { ...identity, evidencePosition: cache.lines.length };
+    // Foreign metadata grants no answer or retry authority. A missing capture/claim cannot erase a
+    // possibly billed send; completed history releases only through the existing retirement rules.
+    const foreignHistory = cache.lines.filter(isModelCallLine).filter((line) => !isSupportedProviderTestItemId(line.itemId) &&
+      line.model === model && (line.route === undefined || line.route === namespace.route) &&
+      (line.endpoint === undefined || line.endpoint === namespace.endpoint) &&
+      (line.requestShape === undefined || line.requestShape === namespace.requestShape) &&
+      (line.requestDigest === requestDigest || line.semanticDigest === semanticDigest) &&
+      (line.classification === 'outcome-unknown' || (line.outcome === 'transmitted' && !cache.isRetired(line.itemId,
+        line.validation === undefined ? null : {
+          family: line.validation.family, case: line.validation.case, capturedAt: line.recordedAt,
+          ...(line.evidencePosition === undefined ? {} : { evidencePosition: line.evidencePosition }),
+        }))));
+    if (foreignHistory.length > 0) {
+      throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN',
+        '其他切片已记录这个请求的发送或未知结果；未回放或重新发送可能已经计费的请求。', items(foreignHistory));
+    }
     // 1. The exact request.
     const exact = await cache.readEntry(cacheKey);
     if (exact.state === 'corrupt') {

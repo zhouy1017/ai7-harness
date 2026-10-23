@@ -23,18 +23,24 @@ const PROVIDER_CLAIM_SCHEMA = 'ai7.provider-claim/1';
 /** The plan slice that owns every model-call test item the analysis path mints; the default slice of `nextItemId`. */
 export const PROVIDER_TEST_ITEM_SLICE = 'S40';
 /**
- * Every plan slice a test item id may name (Issue #473, S87-f3a). S40 owns the analysis path's model calls and every line
- * the ledger already carries; S87 owns the platform tools' search and fetch items (ADR 0080 §7.6); S17c owns the live
+ * Every plan slice this checkout may write (Issue #473, S87-f3a). S40 owns the analysis path's model calls;
+ * S87 owns the platform tools' search and fetch items (ADR 0080 §7.6); S17c owns the live
  * dialogue's items (ADR 0088 §1.8); S84 owns writing's items (#810); S30 owns 润色这段's and S22 稿件冲突 › 基于当前稿件重新生成建议's
- * (Issue #842); S80 owns 生成来源译文's (Issue #892). A slice outside this closed set is not a test item, so no id can be minted
- * for it, and a ledger line naming one
- * refuses the whole shared ledger. The slice only numbers records: the purpose a call answers is its validation family and case,
+ * (Issue #842); S80 owns 生成来源译文's (Issue #892). Only this closed set may mint or write items. A shared ledger can also carry
+ * readable metadata from other slices, without granting those rows positive evidence or mutation authority.
+ * The slice only numbers records: the purpose a call answers is its validation family and case,
  * never this.
  */
 export const PROVIDER_TEST_ITEM_SLICES = ['S40', 'S87', 'S17c', 'S84', 'S30', 'S22', 'S80'] as const;
 export type ProviderTestItemSlice = (typeof PROVIDER_TEST_ITEM_SLICES)[number];
 const ITEM_ID_PATTERN = /^(?:S40|S87|S17c|S84|S30|S22|S80)\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
+const LEDGER_ITEM_ID_PATTERN = /^[A-Za-z0-9]+\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
+
+/** Readable foreign identities never acquire the authority of a locally supported test item. */
+export function isSupportedProviderTestItemId(itemId: string): boolean {
+  return ITEM_ID_PATTERN.test(itemId);
+}
 /**
  * What one ledger line records the sending of. A line without `kind` is a model call: every line written before the
  * platform tools existed reads that way, and a model-call line is still written without the field.
@@ -182,6 +188,15 @@ export interface ProviderInvalidationLine {
 export type ProviderItemLine = ProviderLedgerLine | ProviderToolLedgerLine;
 /** Any one ledger line. */
 export type ProviderLedgerEntry = ProviderItemLine | ProviderInvalidationLine;
+
+/** A bounded report projection, never a payload, path, or evidence grant. Positions count nonempty records from zero. */
+export interface ProviderForeignRowMetadata {
+  readonly position: number;
+  /** At most 160 characters; the original identity remains untouched in the ledger. */
+  readonly itemId: string;
+  readonly kind: ProviderTestItemKind | 'invalidation';
+  readonly outcome: ProviderItemLine['outcome'] | null;
+}
 
 /** Whether one ledger line records a model call; a line without `kind` does. */
 export function isModelCallLine(line: ProviderLedgerEntry): line is ProviderLedgerLine {
@@ -381,7 +396,7 @@ function parseLedgerLine(line: string): ProviderLedgerEntry {
   const kind = (parsed as { kind?: unknown }).kind;
   if (kind === 'invalidation') {
     const { target, reason, recordedAt } = parsed as { target?: unknown; reason?: unknown; recordedAt?: unknown };
-    requireCache(validInvalidationTarget(target) && typeof reason === 'string' && reason.length > 0 && typeof recordedAt === 'string',
+    requireCache(validInvalidationTarget(target, LEDGER_ITEM_ID_PATTERN) && typeof reason === 'string' && reason.length > 0 && validTimestamp(recordedAt),
       'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 的作废记录无效。');
     return parsed as ProviderInvalidationLine;
   }
@@ -389,26 +404,85 @@ function parseLedgerLine(line: string): ProviderLedgerEntry {
   requireCache(kind === undefined || kind === 'model-call' || kind === 'search-call' || kind === 'fetch',
     'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 记录的测试项类别无效。');
   const item = parsed as Partial<ProviderLedgerLine>;
-  requireCache(ITEM_ID_PATTERN.test(item.itemId!) && typeof item.purpose === 'string' &&
-    typeof item.recordedAt === 'string' && Number.isFinite(Date.parse(item.recordedAt)) &&
+  requireCache(LEDGER_ITEM_ID_PATTERN.test(item.itemId!) && typeof item.purpose === 'string' &&
+    validTimestamp(item.recordedAt) && (item.status === null || (Number.isSafeInteger(item.status) && item.status! >= 100 && item.status! <= 599)) &&
     (item.stale === undefined || typeof item.stale === 'boolean') &&
     ['transmitted', 'replayed', 'failed', 'refused'].includes(item.outcome ?? ''),
   'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 测试项字段无效。');
   if (kind === undefined || kind === 'model-call') {
     requireCache(typeof item.model === 'string' && DIGEST_PATTERN.test(item.requestDigest ?? '') &&
       DIGEST_PATTERN.test(item.promptContractDigest ?? '') && (item.usage === null || validUsage(item.usage)) &&
-      (item.incurredUsage === undefined || item.incurredUsage === null || validUsage(item.incurredUsage)) &&
-      (item.status === null || Number.isSafeInteger(item.status)), 'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 模型记录无效。');
+      (item.incurredUsage === undefined || item.incurredUsage === null || validUsage(item.incurredUsage)),
+    'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 模型记录无效。');
     requireCache(item.evidencePosition === undefined || (Number.isSafeInteger(item.evidencePosition) && item.evidencePosition >= 0),
       'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 证据位置无效。');
+    requireCache(validModelMetadata(item), 'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 模型元数据无效。');
+    // A supported capture mismatch keeps its existing EVIDENCE_UNAVAILABLE classification in validEvidence.
+    // Foreign metadata has no payload owner here: check only relationships computable from the row itself.
+    if (!isSupportedProviderTestItemId(item.itemId!)) {
+      requireCache(validForeignIdentity(item), 'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 外部切片身份无效。');
+    }
+  } else {
+    const tool = parsed as Partial<ProviderToolLedgerLine>;
+    requireCache(tool.outcome !== undefined && ['transmitted', 'replayed', 'failed'].includes(tool.outcome) &&
+      validDigest(tool.argumentsDigest) && typeof tool.host === 'string' &&
+      (tool.resultDigest === null || validDigest(tool.resultDigest)) &&
+      (tool.resultBytes === null || (Number.isSafeInteger(tool.resultBytes) && tool.resultBytes! >= 0)) &&
+      (tool.elapsedMs === null || (typeof tool.elapsedMs === 'number' && Number.isFinite(tool.elapsedMs) && tool.elapsedMs >= 0)),
+    'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 工具记录无效。');
   }
   return parsed as ProviderItemLine;
 }
 
-function validInvalidationTarget(target: unknown): target is ProviderInvalidationTarget {
+function validTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+
+function validDigest(value: unknown): value is string {
+  return typeof value === 'string' && DIGEST_PATTERN.test(value);
+}
+
+function validValidation(value: unknown): value is ProviderValidationRecord {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Partial<ProviderValidationRecord>;
+  const delta = record.delta;
+  return typeof record.family === 'string' && typeof record.case === 'string' && typeof record.step === 'string' &&
+    (delta === null || (delta !== undefined && typeof delta === 'object' && !Array.isArray(delta) &&
+      ['input', 'retry-unknown'].includes(delta.kind) && typeof delta.rationale === 'string' && delta.rationale.length > 0)) &&
+    ['exact-replay', 'refused', 'first-capture', 'config-delta', 'input-delta', 'retry-unknown'].includes(record.decision ?? '') &&
+    Array.isArray(record.evidence) && record.evidence.every((id) => typeof id === 'string' &&
+      (LEDGER_ITEM_ID_PATTERN.test(id) || (record.decision === 'refused' && id === 'unreadable'))) &&
+    (record.changed === undefined || (Array.isArray(record.changed) && record.changed.every((field) =>
+      ['route', 'endpoint', 'requestShape', 'model', 'promptContractDigest', 'taskPromptContractDigest'].includes(field)))) &&
+    (record.refusal === undefined || typeof record.refusal === 'string');
+}
+
+function validModelMetadata(item: Partial<ProviderLedgerLine>): boolean {
+  return ['taskPromptContractDigest', 'cacheKey', 'claimKey', 'semanticDigest', 'generation', 'responseDigest'].every((field) => {
+    const value = (item as Record<string, unknown>)[field];
+    // A response digest's shape can be checked here, never its correspondence to an absent payload.
+    return value === undefined || validDigest(value);
+  }) && ['route', 'endpoint', 'requestShape', 'resetWindow'].every((field) => {
+    const value = (item as Record<string, unknown>)[field];
+    return value === undefined || typeof value === 'string';
+  }) && (item.classification === undefined || ['quota-exhausted', 'outcome-unknown'].includes(item.classification)) &&
+    (item.capturedAt === undefined || validTimestamp(item.capturedAt)) &&
+    (item.evidenceScope === undefined || item.evidenceScope === 'legacy-unnamespaced') &&
+    (item.validation === undefined || validValidation(item.validation));
+}
+
+function validForeignIdentity(item: Partial<ProviderLedgerLine>): boolean {
+  const namespace = typeof item.route === 'string' && typeof item.endpoint === 'string' && typeof item.requestShape === 'string' &&
+    typeof item.model === 'string' ? { route: item.route, endpoint: item.endpoint, requestShape: item.requestShape, model: item.model } : null;
+  return (item.cacheKey === undefined || (namespace !== null && item.cacheKey === providerCacheKey(namespace, item.requestDigest!))) &&
+    (item.claimKey === undefined || (namespace !== null && item.semanticDigest !== undefined && item.claimKey === providerCacheKey(namespace, item.semanticDigest))) &&
+    (item.generation === undefined || (namespace !== null && item.generation === providerEvidenceGeneration(namespace, item.promptContractDigest!, item.taskPromptContractDigest)));
+}
+
+function validInvalidationTarget(target: unknown, pattern = ITEM_ID_PATTERN): target is ProviderInvalidationTarget {
   if (target === null || typeof target !== 'object' || Array.isArray(target)) return false;
   const keys = Object.keys(target).sort().join(',');
-  if (keys === 'itemId') return ITEM_ID_PATTERN.test(String((target as { itemId: unknown }).itemId));
+  if (keys === 'itemId') return typeof (target as { itemId: unknown }).itemId === 'string' && pattern.test((target as { itemId: string }).itemId);
   return keys === 'case,family' && typeof (target as { family: unknown }).family === 'string' &&
     typeof (target as { case: unknown }).case === 'string';
 }
@@ -451,6 +525,18 @@ export class ProviderResultCache {
     return this.#lines;
   }
 
+  /** At most 100 foreign rows, with bounded identities and no parsed-row or content disclosure. */
+  get foreignRows(): ReadonlyArray<ProviderForeignRowMetadata> {
+    const rows: ProviderForeignRowMetadata[] = [];
+    for (const [position, line] of this.#lines.entries()) {
+      const itemId = isItemLine(line) ? line.itemId : 'itemId' in line.target ? line.target.itemId : null;
+      if (itemId === null || isSupportedProviderTestItemId(itemId)) continue;
+      rows.push({ position, itemId: itemId.slice(0, 160), kind: line.kind ?? 'model-call', outcome: isItemLine(line) ? line.outcome : null });
+      if (rows.length === 100) break;
+    }
+    return rows;
+  }
+
   /** Create the root and read the existing ledger. A malformed line is a refusal, never a silent reset. */
   async open(): Promise<void> {
     if (this.#opened) return;
@@ -471,10 +557,15 @@ export class ProviderResultCache {
     } catch (error) {
       if (!isCode(error, 'ENOENT')) throw error;
     }
+    const occupied = new Set<string>();
     this.#lines = raw.split('\n').filter((line) => line.trim().length > 0).map((text, index) => {
       const line = parseLedgerLine(text);
       requireCache(!isModelCallLine(line) || line.evidencePosition === undefined || line.evidencePosition <= index,
         'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 证据顺序无效。');
+      if (isItemLine(line) && line.stale !== true) {
+        requireCache(!occupied.has(line.itemId), 'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 含有重复的有效测试项。');
+        occupied.add(line.itemId);
+      }
       return line;
     });
   }
@@ -551,6 +642,7 @@ export class ProviderResultCache {
 
   /** Store one result under its legacy key. Kept for the entries and tests that predate #808; `keep` is the current writer. */
   async store(entry: ProviderCacheEntry): Promise<void> {
+    requireCache(entry.itemId === undefined || ITEM_ID_PATTERN.test(entry.itemId), 'PROVIDER_TEST_ITEM_INVALID', '缓存测试项所属切片无效。');
     await writeFile(this.#legacyEntryPath(entry.model, entry.requestDigest), `${JSON.stringify(entry)}\n`, 'utf8');
   }
 
@@ -587,6 +679,7 @@ export class ProviderResultCache {
    * capture, or an unreadable file — is moved aside first, never overwritten, so retired evidence keeps its identity.
    */
   async keep(entry: ProviderCacheEntry & { readonly cacheKey: string }): Promise<void> {
+    requireCache(typeof entry.itemId === 'string' && ITEM_ID_PATTERN.test(entry.itemId), 'PROVIDER_TEST_ITEM_INVALID', '缓存测试项所属切片无效。');
     const path = this.#entryPath(entry.cacheKey);
     await this.#setAside(path);
     await writeWhole(path, `${JSON.stringify(entry)}\n`);
@@ -632,6 +725,7 @@ export class ProviderResultCache {
    * gets `false` sends nothing.
    */
   async claim(claim: Omit<ProviderClaim, 'schema' | 'state'>): Promise<boolean> {
+    requireCache(ITEM_ID_PATTERN.test(claim.itemId), 'PROVIDER_TEST_ITEM_INVALID', '发送认领测试项所属切片无效。');
     let handle;
     try {
       handle = await open(this.#claimPath(claim.cacheKey), 'wx');
@@ -650,11 +744,13 @@ export class ProviderResultCache {
 
   /** Turn a claim into a lasting hold: the request was sent and its result is unknown, possibly processed and billed. */
   async holdUnknown(claim: Omit<ProviderClaim, 'schema' | 'state'>): Promise<void> {
+    requireCache(ITEM_ID_PATTERN.test(claim.itemId), 'PROVIDER_TEST_ITEM_INVALID', '发送认领测试项所属切片无效。');
     await writeWhole(this.#claimPath(claim.cacheKey), `${JSON.stringify({ schema: PROVIDER_CLAIM_SCHEMA, ...claim, state: 'outcome-unknown' })}\n`);
   }
 
   /** Keep the terminal claim as evidence even if its cache entry or ledger is subsequently lost. */
   async settle(claim: Omit<ProviderClaim, 'schema' | 'state'>, state: 'completed' | 'failed'): Promise<void> {
+    requireCache(ITEM_ID_PATTERN.test(claim.itemId), 'PROVIDER_TEST_ITEM_INVALID', '发送认领测试项所属切片无效。');
     await writeWhole(this.#claimPath(claim.cacheKey), `${JSON.stringify({ schema: PROVIDER_CLAIM_SCHEMA, ...claim, state })}\n`);
   }
 
@@ -731,7 +827,7 @@ export class ProviderResultCache {
    */
   async validEvidence(): Promise<ProviderLedgerLine[]> {
     const evidence = this.#lines.filter(isModelCallLine).filter((line) =>
-      line.outcome === 'transmitted' && line.validation !== undefined && line.semanticDigest !== undefined &&
+      isSupportedProviderTestItemId(line.itemId) && line.outcome === 'transmitted' && line.validation !== undefined && line.semanticDigest !== undefined &&
       line.generation !== undefined && !this.isRetired(line.itemId, {
         family: line.validation.family, case: line.validation.case, capturedAt: line.recordedAt,
         ...(line.evidencePosition === undefined ? {} : { evidencePosition: line.evidencePosition }),
