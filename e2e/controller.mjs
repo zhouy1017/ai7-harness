@@ -680,6 +680,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'restart-and-data-location',
     'diagnostics-bundle-export',
     'model-service-first-save',
+    'model-service-openai-text-contract',
+    'model-service-openai-restart-removal',
     'model-service-search-backends',
     'model-service-restart-and-replace',
     // Issue #434 (S86a): 导出数据库 with a credential protected.
@@ -929,6 +931,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
   'J-05': Object.freeze([
+    'selected-fast-text-scope-refusal',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',

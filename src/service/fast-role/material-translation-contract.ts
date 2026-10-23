@@ -2,7 +2,7 @@ import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { MATERIAL_TRANSLATION_LABEL } from '../../shared/protocol.js';
 import { FastRoleError } from './fast-role-error.js';
 import { MATERIAL_TRANSLATION_KIND } from '../launch-policy.js';
-import type { FastRoleExecutionOwner } from './fast-role-execution.js';
+import type { FastRoleExecutionOwner, FastRoleProvenance } from './fast-role-execution.js';
 
 /**
  * Material Translation Contract v1 (Issue #892; editor-surfaces §8.4, V2-UX-KB-009): the frozen text 生成来源译文 carries. One
@@ -113,6 +113,7 @@ export interface MaterialTranslationMade {
   readonly route: string;
   readonly policyRuleId: string | null;
   readonly promptContractDigest: string;
+  readonly provenance?: FastRoleProvenance;
 }
 
 /** Who makes 来源译文 for the store: whether it may be asked for an item now, and one batch translated. */
@@ -121,7 +122,7 @@ export interface MaterialTranslator {
   refusal(originalSha256: string): string | null;
   translate(originalSha256: string, paragraphs: readonly string[], step: string): Promise<
     | { readonly kind: 'translated'; readonly texts: readonly string[]; readonly made: MaterialTranslationMade }
-    | { readonly kind: 'failed'; readonly message: string }
+    | { readonly kind: 'failed'; readonly message: string; readonly provenance?: FastRoleProvenance }
   >;
 }
 
@@ -155,9 +156,10 @@ export function materialTranslator(
       } catch (error) {
         return { kind: 'failed', message: error instanceof FastRoleError ? error.message : '生成来源译文没有完成；没有记录任何译文。' };
       }
-      if (answer.kind === 'failed') return { kind: 'failed', message: answer.message };
+      if (answer.kind === 'failed') return { kind: 'failed', message: answer.message, ...(answer.provenance === undefined ? {} : { provenance: answer.provenance }) };
       const texts = readMaterialTranslationAnswer(answer.text, paragraphs.length);
-      if (texts === null) return { kind: 'failed', message: `模型给出的${MATERIAL_TRANSLATION_LABEL}没有与原文逐段对齐；这一批没有记录任何译文。` };
+      if (texts === null) return { kind: 'failed', message: `模型给出的${MATERIAL_TRANSLATION_LABEL}没有与原文逐段对齐；这一批没有记录任何译文。`,
+        ...(answer.binding.provenance === undefined ? {} : { provenance: { ...answer.binding.provenance, failureCode: 'MATERIAL_TRANSLATION_CONTRACT_INVALID' } }) };
       return {
         kind: 'translated',
         texts,
@@ -166,6 +168,7 @@ export function materialTranslator(
           route: answer.binding.route,
           policyRuleId: answer.binding.policyRuleId,
           promptContractDigest: answer.binding.promptContractDigest,
+          ...(answer.binding.provenance === undefined ? {} : { provenance: answer.binding.provenance }),
         },
       };
     },

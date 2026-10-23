@@ -560,6 +560,12 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
       if (profile === DEEPSEEK_V4_PRO_PROFILE || profile === OPENCODE_GO_V4_FLASH_PROFILE || profile === OPENCODE_GO_V41_FLASH_PROFILE) continue;
       // Issue #811: the official route's V4.1 Flash, which ordinary production binds, reads its documented channels.
       if (profile.key === 'deepseek-open-platform/deepseek-flash') continue;
+      if (profile.key === 'openai-platform/gpt-5.6-sol' || profile.key === 'openai-platform/gpt-5.6-luna') {
+        expect(profile.capabilities.answerChannel).toBe('output-message-text');
+        expect(profile.capabilities.toolCalling).toBe('none');
+        expect(profile.capabilities.streaming ?? 'none').toBe('none');
+        continue;
+      }
       // A declared format is a claim about the request shape and nothing else (ADR 0073 §3).
       expect(profile.capabilities.answerChannel, profile.key).toBe('none');
       expect(profile.capabilities.reasoningChannel, profile.key).toBe('none');

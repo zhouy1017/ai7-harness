@@ -2327,3 +2327,17 @@ describe('search backend settings frames', () => {
     ]) expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), ...frame })))).toThrow(ProtocolError);
   });
 });
+
+
+describe('the exact model Settings commands (Issue #1044)', () => {
+  it('admits only channel/model identity, with no arbitrary test question or endpoint', () => {
+    for (const op of ['selectFastRoleModel', 'testModelServiceConnection']) {
+      const input = { route: 'openai-platform', modelId: 'gpt-5.6-luna' };
+      expect(decodeRequest(Buffer.from(JSON.stringify({ id: '00000000-0000-4000-8000-000000000104', op, input })))).toMatchObject({ op, input });
+      for (const extra of [{ question: 'arbitrary words' }, { bookId: '00000000-0000-4000-8000-000000000001' },
+        { endpoint: 'https://example.invalid' }, { secret: 'synthetic-placeholder' }]) {
+        expect(() => decodeRequest(Buffer.from(JSON.stringify({ id: '00000000-0000-4000-8000-000000000104', op, input: { ...input, ...extra } })))).toThrow();
+      }
+    }
+  });
+});

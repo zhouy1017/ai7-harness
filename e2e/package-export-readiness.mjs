@@ -3,7 +3,7 @@ import { journeyCheckFailure } from './controller.mjs';
  * Publication and the package load independently after relaunch. Wait for the current package's
  * own action using the Journey's usual readiness bound, then check and click in one renderer turn.
  */
-export async function openRemainingPackageExport(renderer) {
+async function openCurrentPackageExport(renderer, name) {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     const opened = await renderer.evaluate(`(() => {
@@ -15,5 +15,13 @@ export async function openRemainingPackageExport(renderer) {
     if (opened) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw journeyCheckFailure('J-07', 'package-export-remaining-open');
+  throw journeyCheckFailure('J-07', name);
+}
+
+export function openRemainingPackageExport(renderer) {
+  return openCurrentPackageExport(renderer, 'package-export-remaining-open');
+}
+
+export function openArchivePackageExport(renderer) {
+  return openCurrentPackageExport(renderer, 'package-archive-open');
 }

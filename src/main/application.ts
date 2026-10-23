@@ -68,6 +68,7 @@ import {
   type J04ModelAdapterControl,
   type J08RecoveryControl,
   type ModelServiceSettingsProjection,
+  modelServiceModels,
   type ModelServiceConnectionProjection,
   type ModelServiceCredentialInput,
   type ModelServiceRouteId,
@@ -627,6 +628,7 @@ function registerRendererHandlers(
   saveModelServiceProxy: (input: ServiceOperationMap['saveModelServiceProxy']['input']) => Promise<ModelServiceSettingsProjection>,
   saveModelServiceCredential: (input: ModelServiceCredentialInput) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: (input?: { route: ModelServiceRouteId }) => Promise<ModelServiceSettingsProjection>,
+  modelOps: Pick<RendererApi, 'selectFastRoleModel' | 'testModelServiceConnection'>,
   searchOps: Pick<RendererApi, 'selectSearchBackend' | 'probeSearchBackend' | 'saveSearchBackendCredential' | 'removeSearchBackendCredential'>,
   consumeLostApplyAcknowledgement: () => boolean,
   consumeInjectedSavePath: () => string | undefined,
@@ -2577,6 +2579,12 @@ function registerRendererHandlers(
       return serializeEffect(() => saveModelServiceProxy(input));
     }),
   );
+  for (const op of ['selectFastRoleModel', 'testModelServiceConnection'] as const) {
+    ipcMain.handle(IPC_CHANNELS[op], (event, input: Parameters<RendererApi[typeof op]>[0]) => envelope(async () => {
+      requireSender(event); requireAuthority();
+      return serializeEffect(() => modelOps[op](input));
+    }));
+  }
   ipcMain.handle(IPC_CHANNELS.getModelServiceSettings, (event) =>
     envelope(async () => {
       requireSender(event);
@@ -6468,7 +6476,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 83, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 84, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -6772,7 +6780,7 @@ export async function runApplication(): Promise<void> {
       }
       requireDesktop(parent !== undefined && isAbsolute(parent));
       // Read the shipped policy set, never infer its version from the source branch or preferences.
-      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v16.json'), 'utf8')) as { version: string };
+      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v17.json'), 'utf8')) as { version: string };
       await writeDiagnosticsBundle(parent, {
         facts: { ...crashFacts(), policySetVersion: policySet.version, node: process.versions.node,
           locale: app.getLocale(), windowCount: ownedWindows.size },
@@ -6829,7 +6837,12 @@ export async function runApplication(): Promise<void> {
       const connection = inUseRoute === null ? null : connectionOf(inUseRoute);
       const mainStatus = statusOf(connection);
       const mainStatusLabel = labelOf(mainStatus);
-      const mainBinding = MODEL_SERVICE_ROUTE_BINDINGS[inUseRoute ?? 'opencode-go'];
+      const mainBinding = connection?.binding ?? MODEL_SERVICE_ROUTE_BINDINGS[inUseRoute ?? 'opencode-go'];
+      const fastConnection = connections.find((candidate) => candidate.fastSelected) ?? connectionOf('opencode-go');
+      const fastStatus = fastConnection?.binding.providerId === 'openai-platform' &&
+        (fastConnection.connectionTest?.outcome !== 'passed' || fastConnection.connectionTest.modelId !== fastConnection.binding.modelId ||
+          fastConnection.connectionTest.credentialUpdatedAt !== fastConnection.credentialUpdatedAt) ? 'needs-attention' as const : statusOf(fastConnection);
+      const fastBinding = fastConnection?.binding ?? null;
       const mainStatusDetail = protectedSecretStore === undefined
         ? '当前操作系统安全凭据库不可用；未启用替代存储。'
         : mainStatus === 'available'
@@ -6852,19 +6865,21 @@ export async function runApplication(): Promise<void> {
         connection: null,
       });
       // Under ordinary-production the Fast Interaction Role takes the one route the editor chose, as the main role does.
-      const fastInteraction = state.launchPolicy.operationalScope === 'ordinary-production'
+      const fastInteraction = fastConnection !== null
         ? {
             roleId: 'fast-interaction' as const,
             roleLabel: '快速交互角色' as const,
             purposeLabel: '快速交互与低风险候选生成',
-            status: mainStatus,
-            statusLabel: mainStatusLabel,
-            statusDetail: '与主编辑角色使用同一条模型服务路线和同一个凭据。',
-            binding: mainBinding,
-            connection,
+            status: fastStatus,
+            statusLabel: labelOf(fastStatus),
+            statusDetail: fastBinding?.providerId === 'openai-platform'
+              ? '独立选择；仅来源译文的缓冲文本已准入。工具、交互对话与原生流式尚未支持。'
+              : '独立保存快速交互模型；主编辑角色的切换不会改变此选择。',
+            binding: fastBinding,
+            connection: fastConnection,
           }
         : unconfigured('fast-interaction', '快速交互角色', '快速交互与低风险候选生成');
-      const supportedLabels = new Set([CONFIGURED_PROVIDER_LABELS['opencode-go'], CONFIGURED_PROVIDER_LABELS['deepseek-open-platform']]);
+      const supportedLabels = new Set([CONFIGURED_PROVIDER_LABELS['opencode-go'], CONFIGURED_PROVIDER_LABELS['deepseek-open-platform'], CONFIGURED_PROVIDER_LABELS['openai-platform']]);
       const unsupportedProviders: ModelServiceUnsupportedProviderProjection[] = [];
       for (const route of CONFIGURED_ROUTE_IDS) {
         const providerLabel = CONFIGURED_PROVIDER_LABELS[route];
@@ -6895,7 +6910,8 @@ export async function runApplication(): Promise<void> {
             const status = statusOf(routeConnection);
             return {
               route,
-              binding: MODEL_SERVICE_ROUTE_BINDINGS[route],
+              binding: routeConnection?.binding ?? MODEL_SERVICE_ROUTE_BINDINGS[route],
+              models: modelServiceModels(route),
               isDefault: route === 'opencode-go',
               inUse: route === inUseRoute,
               status,
@@ -6916,7 +6932,7 @@ export async function runApplication(): Promise<void> {
       };
     };
     const routeOf = (value: unknown): ModelServiceRouteId => {
-      if (value !== 'opencode-go' && value !== 'deepseek-open-platform') {
+      if (value !== 'opencode-go' && value !== 'deepseek-open-platform' && value !== 'openai-platform') {
         throw new ServiceCallError('MODEL_SERVICE_CREDENTIAL_INVALID', '模型服务路线无效。');
       }
       return value;
@@ -7041,6 +7057,10 @@ export async function runApplication(): Promise<void> {
       async (input) => { await service!.call('saveModelServiceProxy', input); return settingsProjection(); },
       saveModelServiceCredential,
       removeModelServiceCredential,
+      {
+        selectFastRoleModel: async (input) => { await service!.call('selectFastRoleModel', input); return settingsProjection(); },
+        testModelServiceConnection: async (input) => { await service!.call('testModelServiceConnection', input); return settingsProjection(); },
+      },
       searchOps,
       (() => {
         let pending = launch.applyControl === 'lose-first-acknowledgement';

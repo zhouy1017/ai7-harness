@@ -491,6 +491,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
       DROP TABLE proposal_decisions;
       DROP TABLE proposal_decision_drafts;
       DROP TABLE proposal_atomic_groups;
+      DROP TABLE material_translation_attempts;
       DROP TABLE material_index_translations;
       DROP TABLE material_index_vectors;
       DROP TABLE analysis_outcome_resolutions;

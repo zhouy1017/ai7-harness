@@ -36,6 +36,7 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protecte
 import {
   DEVELOPER_LIVE_POLICY_BINDING,
   ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
+  ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS,
   allowedProductionBindingOf,
   resolveDeveloperLiveLaunch,
   type ConfiguredProviderBinding,
@@ -113,7 +114,7 @@ function failureResponse(
   error: unknown,
   StoreErrorClass?: typeof import('./store.js').StoreError,
 ): ServiceFailureResponse {
-  if ((StoreErrorClass && error instanceof StoreErrorClass) || error instanceof ProtocolError || error instanceof ImportedExemplarError) {
+  if ((StoreErrorClass && error instanceof StoreErrorClass) || error instanceof ProtocolError || error instanceof ImportedExemplarError || error instanceof FastRoleError) {
     return { id: requestId, ok: false, error: { code: error.code, message: error.message } };
   }
   return { id: requestId, ok: false, error: { code: 'SERVICE_REQUEST_FAILED', message: '服务请求失败。' } };
@@ -200,6 +201,7 @@ async function dispatch(
    * results: under ordinary-production the route new Tasks use; under every other scope the launch's own, unchanged.
    */
   modelServiceChanged: () => Promise<LaunchPolicyProjection> = async () => launchPolicy,
+  testConnection: (input: import('../shared/protocol.js').FastModelSelectionInput) => Promise<import('../shared/protocol.js').ModelConnectionTestStatus> = async () => { throw new Error('MODEL_CONNECTION_TEST_UNAVAILABLE'); },
   probeBackend: (id: string) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
@@ -238,6 +240,15 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.saveSearchBackendCredential(request.input.backendId, null, 'missing') };
     case 'probeSearchBackend':
       return { id: request.id, ok: true, op: request.op, result: await probeBackend(request.input.backendId) };
+    case 'selectFastRoleModel':
+      store.selectFastRoleModel(request.input.route, request.input.modelId);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'testModelServiceConnection': {
+      const result = await testConnection(request.input);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     case 'getModelServiceStoredState':
       return {
         id: request.id,
@@ -1825,20 +1836,7 @@ function parseArguments(argv: string[]): {
  * Go route once its credential is ready; else none, and every model-calling action says 模型服务需设置.
  */
 function configuredRoleBindingOf(store: EditorialStore): ConfiguredProviderBinding | null {
-  const connections = store.getModelServiceConnections();
-  const selected = connections.find((connection) => connection.selected) ?? null;
-  const connection = selected !== null
-    ? (selected.credentialOperationState === 'missing' ? null : selected)
-    : connections.find((candidate) => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready') ?? null;
-  if (connection === null) return null;
-  const allowed = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === connection.binding.providerId);
-  return allowed === undefined ? null : {
-    route: allowed.route,
-    endpoint: allowed.endpoint,
-    model: allowed.model,
-    credentialSlot: allowed.credentialSlot,
-    credentialReference: connection.credentialReference,
-  };
+  return store.getConfiguredModelRoleBinding('main-editorial');
 }
 
 /** The launch binding a configured route gives the ledgers: its exact facts, and a Run ceiling left to the editor (S16a). */
@@ -1907,9 +1905,9 @@ async function run(): Promise<void> {
     const endpoint = new URL(DEVELOPER_LIVE_POLICY_BINDING.endpoint);
     armSingleHostAllowance({ host: endpoint.hostname, port: endpoint.port === '' ? 443 : Number(endpoint.port) });
   } else if (launchForm.trustedOperationalScope === 'ordinary-production') {
-    // Ordinary production (Issue #811): the two allowed bindings' endpoint hosts, so the editor may choose the route for their
+    // Ordinary production (Issue #811): the admitted bindings' endpoint hosts, so the editor may choose the route for their
     // next Task without restarting AI7. Which one a Run reaches is its frozen plan's, checked again by the Egress Gate.
-    armHostAllowanceSet(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.map(({ endpoint }) => {
+    armHostAllowanceSet(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.map(({ endpoint }) => {
       const url = new URL(endpoint);
       return { host: url.hostname, port: url.port === '' ? 443 : Number(url.port) };
     }));
@@ -1927,7 +1925,7 @@ async function run(): Promise<void> {
     { createKeyringSecretResolver },
     { ReviewRunDriver },
     { DialogueExecutionOwner, dialogueLiveRoute, productionDialogueRoute },
-    { FastRoleExecutionOwner, fastRoleLiveRoutes, productionFastRoleRoutes },
+    { FastRoleExecutionOwner, fastRoleLiveRoutes, productionFastRoleRoutes, testModelServiceConnection },
     { FastRoleRequests: FastRoleRequestsClass, fastInteractionRoutes },
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
     { baselinePromptContractForLaunch },
@@ -2036,12 +2034,13 @@ async function run(): Promise<void> {
     reachServiceStartup('owners');
     // Under ordinary-production the binding is the editor's configured route (Issue #811), read now and after every settings
     // change; a plan freezes whichever binding is configured when it is frozen, so a route switch reaches new Tasks only.
-    const productionState: { live: OrdinaryProductionLaunchBinding | null } = { live: null };
+    const productionState: { live: OrdinaryProductionLaunchBinding | null; fast: ConfiguredProviderBinding | null } = { live: null, fast: null };
     const openedStore = store;
     const modelServiceChanged = async (): Promise<LaunchPolicyProjection> => {
       if (production === null) return launchPolicy;
       const configured = configuredRoleBindingOf(openedStore);
-      launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', configured);
+      productionState.fast = openedStore.getConfiguredModelRoleBinding('fast-interaction');
+      launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', configured, productionState.fast);
       productionState.live = launchPolicy.operationalScope === 'ordinary-production' && launchPolicy.providerProcessing.bindingState === 'configured'
         ? productionLaunchBindingOf(configured)
         : null;
@@ -2194,7 +2193,7 @@ async function run(): Promise<void> {
         ? dialogueLiveRoute(developerLive, launchPolicy, createKeyringSecretResolver())
         // Ordinary production (Issue #811): the route and reference the editor configured, read at each question.
         : production !== null
-          ? productionDialogueRoute(production, () => launchPolicy, () => productionState.live?.credentialReference ?? null, createKeyringSecretResolver())
+          ? productionDialogueRoute(production, () => launchPolicy, () => productionState.fast?.credentialReference ?? null, createKeyringSecretResolver())
           : null,
       answerHold: answerHoldPath === undefined ? null : controlledAnswerHold(answerHoldPath),
     });
@@ -2205,7 +2204,11 @@ async function run(): Promise<void> {
       live: developerLive !== null
         ? fastRoleLiveRoutes(developerLive, launchPolicy, createKeyringSecretResolver())
         : production !== null
-          ? productionFastRoleRoutes(production, () => launchPolicy, () => productionState.live?.credentialReference ?? null, createKeyringSecretResolver())
+          ? productionFastRoleRoutes(production, () => launchPolicy, () => productionState.fast?.credentialReference ?? null, createKeyringSecretResolver(),
+            (reference, route) => { const current = openedStore.getConfiguredModelRoleBinding('fast-interaction');
+              return current?.credentialReference === reference && current.route === route.profile.route && current.model === route.modelProfile.model &&
+                current.endpoint === route.profile.endpoint && current.credentialSlot === route.profile.credentialSlot; },
+            () => openedStore.getModelServiceConnections().find((connection) => connection.credentialReference === productionState.fast?.credentialReference)?.credentialUpdatedAt ?? null)
           : null,
     });
     fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store) };
@@ -2319,7 +2322,7 @@ async function run(): Promise<void> {
       let response: ServiceResponse;
       try {
         response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace, request, importControl, launchPolicy, connectivity,
-          background, modelServiceChanged, probeBackend);
+          background, modelServiceChanged, (input) => testModelServiceConnection(openedStore, codeRoot, production, input, createKeyringSecretResolver()), probeBackend);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();

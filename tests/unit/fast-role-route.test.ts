@@ -64,3 +64,24 @@ describe('admittedFastRoleRoute', () => {
     expect([...dialogue.outboundDataCategories]).toEqual(['editor-selected-manuscript-excerpt']);
   });
 });
+
+
+describe('the selected OpenAI buffered text route (Issue #1044)', () => {
+  it('admits only the exact reviewed text binding and rejects endpoint/slot/tool/stream mismatches', async () => {
+    const binding = { route: 'openai-platform', endpoint: 'https://api.openai.com/v1/responses', model: 'gpt-5.6-sol',
+      credentialSlot: 'openai-platform', credentialReference: '00000000-0000-4000-8000-000000000104' };
+    const policy = await resolveSourceCheckoutLaunchPolicy(await resolveCodeRoot(), 'ordinary-production', null, binding);
+    const route = admittedFastRoleRoute(policy, 'material-translation', 'frozen-material-reference-excerpt');
+    expect(route?.modelProfile.model).toBe(binding.model);
+    expect(route?.modelProfile.capabilities.toolCalling).toBe('none');
+    expect(route?.modelProfile.capabilities.streaming ?? 'none').toBe('none');
+    expect(admittedDialogueRoute(policy)).toBeNull();
+    expect(admittedFastRoleRoute(policy, 'editorial-polish', 'editor-selected-manuscript-excerpt')).toBeNull();
+    for (const changed of [{ ...binding, endpoint: 'https://example.invalid/v1/responses' }, { ...binding, credentialSlot: 'opencode-go' },
+      { ...binding, model: 'gpt-6-astra' }]) {
+      const rejected = await resolveSourceCheckoutLaunchPolicy(await resolveCodeRoot(), 'ordinary-production', null, changed);
+      expect(rejected.providerProcessing.liveTransmissionAllowed).toBe(false);
+      expect(admittedFastRoleRoute(rejected, 'model-connection-test', 'public-or-synthetic')).toBeNull();
+    }
+  });
+});

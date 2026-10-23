@@ -1222,6 +1222,62 @@ describe('what a merge refuses, puts back and brings forward', () => {
     }
   }, 180_000);
 
+  it('merges the Book without source-machine translation attempts and preserves destination attempts exactly', async () => {
+    let calls = 0;
+    const failedAttempt = async (store: EditorialStore, title: string) => {
+      const materialId = await libraryItem(store, title, `${title}. This public synthetic reference paragraph is used only for the database merge test.`);
+      store.startMaterialIndexing(); await store.settleMaterialIndexing();
+      // A synthetic translator supplies closed metadata to exercise database ownership, not live model behavior.
+      store.useMaterialTranslator({ refusal: () => null, translate: async () => {
+        calls += 1;
+        return { kind: 'failed', message: 'Public synthetic failure.', provenance: {
+          role: 'Fast Interaction Role', route: 'openai-platform', model: 'gpt-5.6-luna', endpoint: 'https://api.openai.com/v1/responses',
+          credentialSlot: 'openai-platform', credentialReference: randomUUID(), policyVersion: 'v25', bindingDigest: sha256Hex(title),
+          usage: { inputTokens: 12, outputTokens: 3 }, failureCode: 'PUBLIC_SYNTHETIC_FAILURE',
+        } };
+      } });
+      store.requestMaterialTranslation(materialId); await store.settleMaterialLayers();
+      expect(store.inspectLibraryMaterial(materialId).index.translation?.lastAttempt?.outcome).toBe('failed');
+      return materialId;
+    };
+    const records = (root: string) => {
+      const database = new DatabaseSync(storeOf(root), { readOnly: true });
+      try { return database.prepare('SELECT * FROM material_translation_attempts ORDER BY attempt_id').all(); }
+      finally { database.close(); }
+    };
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string; let sourceItem: string; let bookId: string;
+    try {
+      bookId = emptyBook(source, '来源尝试所属图书');
+      sourceItem = await failedAttempt(source, 'Public source attempt');
+      attribute(source, sourceItem, 0, bookId);
+      packagePath = await exportedFrom(source, 'public-attempt-merge.ai7db');
+    } finally { source.close(); }
+    const sourceRecords = records(roots.dataRoot);
+    expect(sourceRecords).toHaveLength(1);
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    let localItem: string; let localRecords: ReturnType<typeof records>;
+    try {
+      localItem = await failedAttempt(target, 'Public destination attempt');
+      localRecords = records(otherRoot);
+      const preview = await target.inspectDatabaseImport(packagePath);
+      await target.prepareDatabaseMerge(preview.previewId, T);
+    } finally { target.close(); }
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect((await target.inspectDatabaseReplacements()).replacements[0]?.outcome).toBe('applied');
+      expect(target.listBooks(null).items.map((book) => book.bookId)).toContain(bookId);
+      expect(target.inspectLibraryMaterial(sourceItem).index.translation?.lastAttempt).toBeUndefined();
+      expect(target.inspectLibraryMaterial(localItem).index.translation?.lastAttempt?.outcome).toBe('failed');
+      expect(records(otherRoot)).toEqual(localRecords);
+      expect(records(roots.dataRoot)).toEqual(sourceRecords);
+      const database = new DatabaseSync(storeOf(otherRoot), { readOnly: true });
+      try { expect(database.prepare('SELECT count(*) AS count FROM material_index_translations').get()!.count).toBe(0); }
+      finally { database.close(); }
+      expect(calls).toBe(2);
+    } finally { target.close(); }
+  });
+
   it('refuses a merge whose 资料库 item is here already as another, says so before anything is prepared, and records one the data came to refuse meanwhile (Issue #434 review)', async () => {
     const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let packagePath: string;
