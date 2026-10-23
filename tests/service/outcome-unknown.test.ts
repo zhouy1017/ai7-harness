@@ -297,7 +297,7 @@ describe('结果待确认 over the real store', () => {
           ? { ...entry, response: { kind: 'outcome-unknown' as const, message: '合成：回答没有完整传回。' } }
           : entry])),
     });
-    const UNKNOWN_SUBOPERATION = `${UNKNOWN_REASON}；${OUTCOME_UNKNOWN_NOT_RESENT}。`;
+    const UNKNOWN_SUBOPERATION = `${UNKNOWN_REASON.replace('该单元结果未知', '结果待确认')}；${OUTCOME_UNKNOWN_NOT_RESENT}。`;
     // Each variant on its own Agent Data Root, since a route is bound when the store opens.
     const runOver = async (route: ResolvedModelFixture, title: string) => {
       const outer = roots;
