@@ -196,7 +196,7 @@ describe('学习回溯 over the real store', () => {
         [1, 'book', false, true, 'learning-eligibility', { peopleVersion: 1, authors: ['周一'], editors: ['郑三'] }],
       ]);
       expect(lineage.decisions[0]!.audit).toMatchObject({ materialDigest: lineage.material.digest, supersedes: null, remediationPreview: null,
-        basis: 'ai7.learning-eligibility-policy@1 · recommendation-only' });
+        basis: 'ai7.learning-eligibility-policy@2 · opt-out-local' });
 
       // A batch over one Book: the first included sets the scope and kind; the others are left out and named with why.
       const current = materials();

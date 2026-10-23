@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { sha256Hex } from '../../src/service/analysis/canonical.js';
-import { LOCAL_LEARNING_POLICY_BASIS, LEARNING_ELIGIBILITY_POLICY_BASIS, LEARNING_ELIGIBILITY_TRIGGER_SQL } from '../../src/service/learning-eligibility.js';
+import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { LEARNING_ELIGIBILITY_POLICY_BASIS, LEARNING_ELIGIBILITY_SCHEMA_SQL, LOCAL_LEARNING_POLICY_BASIS, LEARNING_ELIGIBILITY_TRIGGER_SQL, LearningEligibilityLedger,
+  learningMaterialDigest, reviewDispositionCandidate } from '../../src/service/learning-eligibility.js';
 import { fileURLToPath } from 'node:url';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -107,6 +108,32 @@ function attention(store: EditorialStore): Array<[string, GlobalAttentionItemPro
     .filter((item) => item.object.kind === 'learning-materials')
     .map((item) => [group.key, item.state, item.book.title, item.object, item.nextStep, item.target] as [string, GlobalAttentionItemProjection['state'], string | null, unknown, string, unknown]));
 }
+
+describe('学习准入 policy bases', () => {
+  it('reads a decision made under basis version 1 and records the next one under version 2 (Issue #1082)', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec('CREATE TABLE books (book_id TEXT PRIMARY KEY) STRICT');
+      for (const sql of Object.values(LEARNING_ELIGIBILITY_SCHEMA_SQL)) db.exec(sql);
+      for (const sql of Object.values(LEARNING_ELIGIBILITY_TRIGGER_SQL)) db.exec(sql);
+      const bookId = randomUUID();
+      db.prepare('INSERT INTO books VALUES (?)').run(bookId);
+      const candidate = reviewDispositionCandidate({ signalId: randomUUID(), reviewRunId: randomUUID(), findingId: 'rvf_basis', categoryLabel: '文字',
+        reason: '准入版本理由', recordedAt: '2026-10-23T00:00:00.000Z' }, false);
+      const digest = learningMaterialDigest(candidate);
+      const decisionId = randomUUID(); const recordedAt = '2026-10-23T00:00:01.000Z';
+      const attribution = { peopleVersion: 0, authors: [], editors: [] };
+      const record = canonicalRecord({ schema: 'ai7.learning-eligibility-decision/1', decisionId, bookId, materialKey: candidate.materialKey, materialDigest: digest,
+        kind: candidate.kind, ordinal: 1, choice: 'book', note: null, basis: LEARNING_ELIGIBILITY_POLICY_BASIS, attribution, supersedes: null, actor: '本机编辑', recordedAt });
+      db.prepare('INSERT INTO learning_eligibility_decisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(decisionId, bookId, candidate.materialKey, digest, 1, 'book', null, recordedAt, record.json, record.digest);
+      const ledger = new LearningEligibilityLedger(db);
+      ledger.decide({ bookId, candidate, expectedDecisions: 1, choice: 'excluded', note: null, attribution });
+      expect(ledger.history(bookId, candidate.materialKey).map((entry) => [entry.choice, entry.basis])).toEqual([
+        ['book', LEARNING_ELIGIBILITY_POLICY_BASIS], ['excluded', LOCAL_LEARNING_POLICY_BASIS]]);
+    } finally { db.close(); }
+  });
+});
 
 describe('学习准入 over the real store', () => {
   it('captures local decisions with reference-only memory, stops at scope overrides and preserves immutable history on restart', async () => {
@@ -361,7 +388,7 @@ describe('学习准入 over the real store', () => {
       expect(records.slice(0, 4).map((record) => record.choice)).toEqual(['book', 'deferred', 'house', 'excluded']);
       // Each names the policy it was made under by identity, mode and version, with its words (Issue #61 review).
       for (const record of records) {
-        expect(record.basis).toEqual(LEARNING_ELIGIBILITY_POLICY_BASIS);
+        expect(record.basis).toEqual(LOCAL_LEARNING_POLICY_BASIS);
         expect(record.attribution).toEqual({ authors: ['周一'], editors: ['郑三'], peopleVersion: 1 });
       }
       expect(() => database.exec("UPDATE learning_eligibility_decisions SET choice = 'book'")).toThrowError(/LEARNING_ELIGIBILITY_LEDGER_IMMUTABLE/u);
@@ -392,7 +419,7 @@ describe('学习准入 over the real store', () => {
     let planted: { decision_id: string; canonical_json: string; sha256: string } | undefined;
     expect(await rewrite((database) => {
       planted = database.prepare('SELECT decision_id, canonical_json, sha256 FROM learning_eligibility_decisions ORDER BY recorded_at LIMIT 1').get() as typeof planted;
-      const unknownBasis = planted!.canonical_json.replace('"version":1}', '"version":2}');
+      const unknownBasis = planted!.canonical_json.replace('"version":2}', '"version":3}');
       expect(unknownBasis).not.toBe(planted!.canonical_json);
       database.prepare('UPDATE learning_eligibility_decisions SET canonical_json = ?, sha256 = ? WHERE decision_id = ?').run(unknownBasis, sha256Hex(unknownBasis), planted!.decision_id);
     })).toBe('LEARNING_ELIGIBILITY_RECORD_INVALID:学习准入记录已损坏。');

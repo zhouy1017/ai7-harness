@@ -36,9 +36,10 @@ import { weighedPage } from './series.js';
  * 质量与学习 › 学习准入 (Issue #61, plan slice S26b; V2-UX-LEARN-001 to LEARN-012, ATTN-009, FDBK-013). A Learning Material is
  * identified quietly from what the editor already recorded — a 修改建议 decided with their reason or their own wording, a
  * judgment of an analysis result that says why, a 审阅 finding ignored with its reason — and never by asking again after the
- * feedback that made it (LEARN-001). The Learning Eligibility Policy is still recommendation-only, with no material type or
- * scope approved for automatic inclusion, so every material waits for the editor's explicit decision: `仅纳入当前图书`,
- * recommended and unselected, `纳入出版社经验`, `明确排除` or `稍后决定`. `纳入当前书系` waits for Series (Issue #63, S28).
+ * feedback that made it (LEARN-001). Each material takes the editor's explicit decision here: `仅纳入当前图书`, recommended and
+ * unselected, `纳入出版社经验`, `明确排除` or `稍后决定`. `纳入当前书系` waits for Series (Issue #63, S28). A new decision records
+ * basis version 2, the disclosed opt-out envelope the card states and local capture runs under (Issue #1082; ADR 0094 §3);
+ * every decision made under version 1, recommendation-only, still reads.
  *
  * A decision binds the exact version of the material it was made on. A material that changes afterwards — a reason changed,
  * a judgment succeeded — is decided again, and the decision it had stays on record (LEARN-007). A decision permits only
@@ -563,7 +564,6 @@ export class LearningEligibilityLedger {
     readonly attribution: LearningAttribution;
     /** The 学习补救影响预览 an exclusion from 学习回溯 was confirmed against (Issue #62, S27a). */
     readonly remediationPreview?: string;
-    readonly basis?: typeof LOCAL_LEARNING_POLICY_BASIS;
   }): void {
     requireLearning(CHOICES.includes(input.choice), 'LEARNING_ELIGIBILITY_INVALID', '学习准入的选择无效。');
     requireLearning(input.remediationPreview === undefined || (input.choice === 'excluded' && HEX_DIGEST.test(input.remediationPreview)),
@@ -589,7 +589,7 @@ export class LearningEligibilityLedger {
       ordinal,
       choice: input.choice,
       note,
-      basis: input.basis ?? LEARNING_ELIGIBILITY_POLICY_BASIS,
+      basis: LOCAL_LEARNING_POLICY_BASIS,
       attribution: { peopleVersion: input.attribution.peopleVersion, authors: [...input.attribution.authors], editors: [...input.attribution.editors] },
       supersedes: latest?.decisionId ?? null,
       actor: ACTOR,

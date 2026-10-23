@@ -225,7 +225,7 @@ export class EditorialLearningLedger {
       const eligibility = new LearningEligibilityLedger(this.db);
       const last = eligibility.history(signal.source.bookId, candidate.materialKey).at(-1);
       if (last?.choice !== 'excluded') eligibility.decide({ bookId: signal.source.bookId, candidate, expectedDecisions: last?.ordinal ?? 0,
-        choice: 'excluded', note: null, attribution: this.#attribution(signal.source.bookId, new Date().toISOString()), basis: LOCAL_LEARNING_POLICY_BASIS });
+        choice: 'excluded', note: null, attribution: this.#attribution(signal.source.bookId, new Date().toISOString()) });
       return;
     }
     requireLearning(input.expectedEntries === controls.entries);
