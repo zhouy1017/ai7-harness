@@ -23,7 +23,8 @@ import {
   APPEARANCE_STATUS,
   APPEARANCE_TITLE,
 } from './appearance-labels.js';
-import { renderHouseReviewPreference } from './knowledge-base-memory.js';
+import { renderHouseReviewPreference, mountEditorialMemory } from './knowledge-base-memory.js';
+import { mountLearningAskFrequency } from './learning-settings.js';
 import { mountDiagnostics } from './diagnostics.js';
 import { DIAGNOSTICS_OPENED } from './diagnostics-labels.js';
 import { mountEditQualitySignals } from './quality-learning.js';
@@ -5758,7 +5759,10 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
   // 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005): the profile each 评估 version snapshots, and its use.
   if (tab === 'memory') {
     try {
-      renderHouseReviewPreference(panelNode, await window.ai7.inspectHouseReviewPreference(), window.ai7);
+      const preferenceHost = element('div'); const memoryHost = element('div');
+      panelNode.append(preferenceHost, memoryHost);
+      renderHouseReviewPreference(preferenceHost, await window.ai7.inspectHouseReviewPreference(), window.ai7);
+      await mountEditorialMemory(memoryHost, window.ai7);
       if (content.isConnected) setStatus('本社审阅偏好已打开');
     } catch (error) { setStatus(rendererErrorMessage(error, '无法读取本社审阅偏好。'), 'error'); }
     return;
@@ -6818,6 +6822,7 @@ function renderSettingsHub(): void {
     section.append(heading, list);
     content.append(section);
   }
+  mountLearningAskFrequency(content, window.ai7);
   replaceScreen('settings', content);
   setStatus(SETTINGS_HUB_WORDS.opened);
 }

@@ -279,6 +279,7 @@ export async function readSampleGuidance(isSample: boolean, state: OnboardingSta
   }
 }
 
+export type LearningAskFrequency = 'often' | 'occasionally' | 'off';
 export const PREFERENCE_KEYS = Object.freeze({
   'usage.unitPrices': preference(isUnitPrices, {} as UnitPrices),
   'keyboard.bindings': preference(isKeyboardBindings, {} as KeyboardBindings),
@@ -304,6 +305,7 @@ export const PREFERENCE_KEYS = Object.freeze({
   // 12b: the last analysis panel actually viewed for each Book, local UI state only.
   'analysis.lastViewedRevision': preference(isAnalysisLastViewed, {} as AnalysisLastViewed),
   'onboarding.state': preference((value: unknown): value is OnboardingState => value === null || value === 'skipped' || value === 'completed', null as OnboardingState),
+  'learning.askFrequency': preference((value: unknown): value is LearningAskFrequency => value === 'often' || value === 'occasionally' || value === 'off', 'occasionally' as LearningAskFrequency),
 });
 
 export type PreferenceKey = keyof typeof PREFERENCE_KEYS;

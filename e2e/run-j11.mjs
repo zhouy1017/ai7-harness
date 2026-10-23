@@ -123,7 +123,7 @@ const LEARNING_NOTE = '（旅程示例）只在这本书里参考';
 /** 反馈历史's words (Issue #61, S26c), and the stand-in people the Journey gives 评估旅程丙. */
 const FEEDBACK_HISTORY_NOTE = '这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。';
 const THIRD_PEOPLE = Object.freeze({ authors: '冯五', editors: '郑三', laterEditors: '王六' });
-const LEARNING_BASIS = '学习准入策略还在「仅建议」阶段：没有批准任何可以自动纳入的材料或范围，所以每一条都由你决定。';
+const LEARNING_BASIS = '本机学习默认开启：记录符合准入的处理与改写，供以后跨书参考；可随时关闭全局开关，或排除某本书、某条材料。明确排除或更窄范围立即优先。仅本机收集，不发送内容，也不训练基础模型。';
 const LEARNING_INFLUENCE = '纳入以后，它只可能在所选范围内帮 AI7 以后的建议更接近你的判断：不会改动稿件或它来自的记录，不会自动生效为规则，不会启用记忆，也不会被发送出去。';
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-11', 'browser-close-timeout');
@@ -3217,6 +3217,47 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="book-evaluation"] .evaluation-item')`, 'profile-editing-old-ready');
     const keptProfiles = await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then((page)=>JSON.stringify([page.record.profile,page.initial.latest.profile]))`);
     requireJourney(keptProfiles === profileSnapshots, 'profile-editing-old-snapshots');
+
+    // F-05 part 1 (#1082): local signals and explicit memory, with a preference only for future asks.
+    at('editorial-memory-page');
+    await toLanding('editorial-memory');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'editorial-memory-knowledge');
+    await click(renderer, '社级编辑记忆', 'editorial-memory-tab');
+    await waitFor(renderer, `document.querySelector('[data-editorial-memory] [data-learning-enabled]')`, 'editorial-memory-ready');
+    const signalForMemory = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page => ({enabled:page.enabled,items:page.items.length,signal:page.signals.find(signal => signal.currentEligibility === 'house')?.signalId ?? null}))`);
+    requireJourney(signalForMemory.enabled && signalForMemory.items === 0 && typeof signalForMemory.signal === 'string', 'editorial-memory-local-signals');
+    const signalSelector = `[data-learning-signal="${signalForMemory.signal}"]`;
+    await fill(renderer, `${signalSelector} [name="memory-title"]`, '旅程示例：统一编辑用语', 'editorial-memory-title');
+    await fill(renderer, `${signalSelector} [name="memory-dimension"]`, '语言', 'editorial-memory-dimension');
+    await clickSelector(renderer, `${signalSelector} button[type="submit"]`, 'editorial-memory-create');
+    await waitFor(renderer, `document.querySelectorAll('[data-memory-item]').length === 1`, 'editorial-memory-created');
+    const createdMemory = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page => { const item=page.items[0]; return {itemId:item.current.itemId,versionId:item.current.versionId,bookId:[...item.current.positiveExamples,...item.current.negativeExamples][0].bookId,usable:item.usable,signals:item.current.signalIds.length,supervision:item.current.supervisionDirectiveRefs.length,referenceOnly:![...item.current.positiveExamples,...item.current.negativeExamples].some(source => 'text' in source || 'editedText' in source || 'proposedText' in source)}; })`);
+    requireJourney(createdMemory.usable && createdMemory.signals === 1 && createdMemory.supervision === 0 && createdMemory.referenceOnly, 'editorial-memory-lineage');
+    await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelector('[data-memory-item]').querySelectorAll('button')).find(button=>button.textContent==='停用'); if(!button || button.disabled)return false; button.focus(); return document.activeElement===button; })()`, 'editorial-memory-keyboard-focus');
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.querySelector('[data-memory-item]')?.textContent.includes('已停用')`, 'editorial-memory-inactive');
+    await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelector('[data-memory-item]').querySelectorAll('button')).find(button=>button.textContent==='排除本书'); if(!button || button.disabled)return false; button.click();return true; })()`, 'editorial-memory-exclude-book');
+    await waitFor(renderer, `document.querySelector('[data-editorial-memory] details')?.textContent.includes('已排除')`, 'editorial-memory-excluded');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-learning-enabled]'); if(!(input instanceof HTMLInputElement)||!input.checked||input.disabled)return false;input.click();return true; })()`, 'editorial-memory-switch-off');
+    await waitFor(renderer, `document.querySelector('[data-learning-enabled]')?.checked === false && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'editorial-memory-switch-off-saved');
+
+    at('learning-ask-frequency');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'learning-frequency-settings');
+    await waitFor(renderer, `document.querySelector('[data-settings-group="editorial"] [data-learning-ask-frequency]')?.disabled === false`, 'learning-frequency-ready');
+    await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-learning-ask-frequency]'); return select.value==='occasionally' && Array.from(select.options,option=>option.textContent).join('/')==='经常/偶尔/关闭'; })()`, 'learning-frequency-default');
+    await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-learning-ask-frequency]');select.value='off';select.dispatchEvent(new Event('change',{bubbles:true}));return true; })()`, 'learning-frequency-off');
+    await waitFor(renderer, `document.querySelector('[data-learning-settings] [role="status"]')?.textContent === '学习询问设置已保存。'`, 'learning-frequency-saved');
+    await close();
+    cancellation.throwIfRequested();
+    await launch();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'learning-memory-restart');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'learning-frequency-restart-settings');
+    await waitFor(renderer, `document.querySelector('[data-learning-ask-frequency]')?.disabled === false && document.querySelector('[data-learning-ask-frequency]')?.value === 'off'`, 'learning-frequency-persisted');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'editorial-memory-restart-knowledge');
+    await click(renderer, '社级编辑记忆', 'editorial-memory-restart-tab');
+    await waitFor(renderer, `document.querySelector('[data-memory-item]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.checked === false`, 'editorial-memory-restart-state');
+    const restartedMemory = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page => ({enabled:page.enabled,excluded:page.excludedBooks.some(book=>book.bookId===${JSON.stringify(createdMemory.bookId)}),history:page.items[0].history.map(version=>version.activation),itemId:page.items[0].current.itemId,usable:page.items[0].usable}))`);
+    requireJourney(!restartedMemory.enabled && restartedMemory.excluded && !restartedMemory.usable && restartedMemory.itemId === createdMemory.itemId && JSON.stringify(restartedMemory.history) === JSON.stringify(['active','inactive']), 'editorial-memory-persisted');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

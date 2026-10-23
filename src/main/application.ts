@@ -4374,6 +4374,27 @@ function registerRendererHandlers(
   );
   // 知识库 › 社级编辑记忆 and 质量与学习 (Issue #911): house-wide, bound to no Book route. 更新本社审阅偏好 appends a version,
   // so it is serialized with every other effect.
+  ipcMain.handle(IPC_CHANNELS.inspectEditorialLearning, (event, input: ServiceOperationMap['inspectEditorialLearning']['input']) => envelope(async () => {
+    requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+    requireAuthority();
+    return service.call('inspectEditorialLearning', input);
+  }));
+  ipcMain.handle(IPC_CHANNELS.changeEditorialLearning, (event, input: ServiceOperationMap['changeEditorialLearning']['input']) => envelope(async () => {
+    requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+    return serializeEffect(async () => { requireAuthority(); return service.call('changeEditorialLearning', input); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.createEditorialMemory, (event, input: ServiceOperationMap['createEditorialMemory']['input']) => envelope(async () => {
+    requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+    return serializeEffect(async () => { requireAuthority(); return service.call('createEditorialMemory', input); });
+  }));
+  ipcMain.handle(IPC_CHANNELS.deactivateEditorialMemory, (event, input: ServiceOperationMap['deactivateEditorialMemory']['input']) => envelope(async () => {
+    requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+    return serializeEffect(async () => { requireAuthority(); return service.call('deactivateEditorialMemory', input); });
+  }));
   ipcMain.handle(IPC_CHANNELS.inspectHouseReviewPreference, (event) => envelope(async () => {
     requireSender(event); requireAuthority();
     return service.call('inspectHouseReviewPreference', {});
@@ -6476,7 +6497,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 85, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 86, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });

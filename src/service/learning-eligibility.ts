@@ -125,7 +125,15 @@ export const LEARNING_ELIGIBILITY_POLICY_BASIS = {
   text: LEARNING_ELIGIBILITY_BASIS,
 } as const;
 /** Every basis a stored decision may name. */
-const KNOWN_LEARNING_ELIGIBILITY_BASES: ReadonlyArray<unknown> = [LEARNING_ELIGIBILITY_POLICY_BASIS];
+export const LOCAL_LEARNING_POLICY_BASIS = {
+  policy: 'ai7.learning-eligibility-policy',
+  mode: 'opt-out-local',
+  version: 2,
+  authority: 'ADR 0094 §3',
+  rules: [2, 5],
+  text: '本机学习默认开启：记录符合准入的处理与改写，供以后跨书参考；可随时关闭全局开关，或排除某本书、某条材料。明确排除或更窄范围立即优先。仅本机收集，不发送内容，也不训练基础模型。',
+} as const;
+const KNOWN_LEARNING_ELIGIBILITY_BASES: ReadonlyArray<unknown> = [LEARNING_ELIGIBILITY_POLICY_BASIS, LOCAL_LEARNING_POLICY_BASIS];
 
 function knownBasis(value: unknown): boolean {
   return KNOWN_LEARNING_ELIGIBILITY_BASES.some((basis) => canonicalJson(basis) === canonicalJson(value));
@@ -551,6 +559,7 @@ export class LearningEligibilityLedger {
     readonly attribution: LearningAttribution;
     /** The 学习补救影响预览 an exclusion from 学习回溯 was confirmed against (Issue #62, S27a). */
     readonly remediationPreview?: string;
+    readonly basis?: typeof LOCAL_LEARNING_POLICY_BASIS;
   }): void {
     requireLearning(CHOICES.includes(input.choice), 'LEARNING_ELIGIBILITY_INVALID', '学习准入的选择无效。');
     requireLearning(input.remediationPreview === undefined || (input.choice === 'excluded' && HEX_DIGEST.test(input.remediationPreview)),
@@ -576,7 +585,7 @@ export class LearningEligibilityLedger {
       ordinal,
       choice: input.choice,
       note,
-      basis: LEARNING_ELIGIBILITY_POLICY_BASIS,
+      basis: input.basis ?? LEARNING_ELIGIBILITY_POLICY_BASIS,
       attribution: { peopleVersion: input.attribution.peopleVersion, authors: [...input.attribution.authors], editors: [...input.attribution.editors] },
       supersedes: latest?.decisionId ?? null,
       actor: ACTOR,
@@ -641,7 +650,7 @@ export const LEARNING_REMEDIATION_NAMED = 5;
  * version's lines they support and the Review Run category Tasks whose pinned version reads them.
  */
 export type LearningRemediationReach = (materialKeys: ReadonlyArray<string>) => Pick<LearningRemediationPreviewProjection['groups'],
-  'currentVersion' | 'linesAffected' | 'running' | 'prepared' | 'completed' | 'runningNamed' | 'completedNamed'>;
+  'currentVersion' | 'linesAffected' | 'running' | 'prepared' | 'completed' | 'runningNamed' | 'completedNamed'> & { readonly memory?: number };
 
 const NO_REACH: LearningRemediationReach = () => ({ currentVersion: null, linesAffected: 0, running: 0, prepared: 0, completed: 0, runningNamed: [], completedNamed: [] });
 
@@ -696,8 +705,8 @@ export function learningRemediationPreview(
   }
   const groups = {
     future: included.length,
+    memory: 0,
     ...(included.length === 0 ? NO_REACH([]) : reach(included.map((entry) => entry.materialKey))),
-    memory: 0 as const,
     decisionsKept: included.reduce((sum, entry) => sum + entry.decisions, 0),
   };
   const previewDigest = sha256Hex(canonicalJson({

@@ -851,6 +851,14 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.saveCorrectionProposal(request.input) };
     case 'decideLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
+    case 'inspectEditorialLearning':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEditorialLearning(request.input) };
+    case 'changeEditorialLearning':
+      return { id: request.id, ok: true, op: request.op, result: store.changeEditorialLearning(request.input) };
+    case 'createEditorialMemory':
+      return { id: request.id, ok: true, op: request.op, result: store.createEditorialMemory(request.input) };
+    case 'deactivateEditorialMemory':
+      return { id: request.id, ok: true, op: request.op, result: store.deactivateEditorialMemory(request.input) };
     case 'inspectHouseReviewPreference':
       return { id: request.id, ok: true, op: request.op, result: store.inspectHouseReviewPreference() };
     case 'rebuildHouseReviewPreference':
