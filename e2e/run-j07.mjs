@@ -8,7 +8,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
-import { openRemainingPackageExport } from './package-export-readiness.mjs';
+import { openArchivePackageExport, openRemainingPackageExport } from './package-export-readiness.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -2159,7 +2159,7 @@ async function main() {
     await close();
     renderer = await launch({ save: packageArchive });
     await reopenDeliverables(renderer, 'package-archive');
-    await clickSelector(renderer, packageAction('export'), 'package-archive-open');
+    await openArchivePackageExport(renderer);
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready'`, 'package-archive-reviewed', 60_000);
     // 导出为压缩包 is a radio of the export card, not a button.
     await assertRenderer(renderer, `(() => { const radio = window.__j07.packageExport()?.querySelector('input[type="radio"][name="package-export-route"][value="archive"]'); if (!(radio instanceof HTMLInputElement) || radio.disabled || radio.checked) return false; radio.click(); return radio.checked; })()`, 'package-archive-route');
