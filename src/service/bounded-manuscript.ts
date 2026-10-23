@@ -2827,8 +2827,9 @@ function requireManuscriptReimportTargetSchema(
   // Revision 82 (Issue #922, slice 7f): the house's 自定义分析维度, their versions and their states.
   const includeCustomAnalysisTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= CUSTOM_ANALYSIS_SCHEMA_VERSION || committed(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL);
   // Revision 83 (Issue #89; ADR 0090 §3): foreign Skill update candidates, the Artifact Update Rule ledger and current selections.
-  const includeProcedureDefinitions = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= PROCEDURE_DEFINITION_SCHEMA_VERSION || committed(PROCEDURE_DEFINITION_SCHEMA_SQL);
   const includeImportedSkillUpdateTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || committed(IMPORTED_SKILL_UPDATE_SCHEMA_SQL);
+  // Revision 85 (Issue #1081, F-26a; ADR 0095 §1): the pre-installed Procedure Definition versions and the plans' sibling pins.
+  const includeProcedureDefinitions = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= PROCEDURE_DEFINITION_SCHEMA_VERSION || committed(PROCEDURE_DEFINITION_SCHEMA_SQL);
   requireExactSchema(
     db,
     {

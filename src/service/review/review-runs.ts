@@ -1,4 +1,5 @@
 import { resolveProcedureDefinition } from '../procedures/definition-store.js';
+import { reviewProcedureId } from '../procedures/preinstalled.js';
 import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { HouseReviewPreferenceLedger, housePreferenceLabel } from '../house-review-preference.js';
 import { LearningEligibilityError } from '../learning-eligibility.js';
@@ -1300,7 +1301,7 @@ export class ReviewRunStore {
         configuration: this.#configurationPin(work.configuration),
         categories: work.prepared,
         preinstalledProcedures: work.prepared.map((category) => ({ categoryId: category.categoryId,
-          procedure: resolveProcedureDefinition(this.#db, `ai7-procedure/review-${category.categoryId}`).pin })),
+          procedure: resolveProcedureDefinition(this.#db, reviewProcedureId(category.categoryId)).pin })),
       };
       const record = canonicalRecord(snapshot);
       this.#db.prepare(

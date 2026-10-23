@@ -2,7 +2,7 @@ import { procedureIdForKind } from '../procedures/preinstalled.js';
 import { recordProcedurePlanPin, readProcedurePlanPin } from '../procedures/definition-store.js';
 import { kindResearchDeclaration } from './live-kind-admission.js';
 import { factualReviewDefinitionsByDigest, factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from './kind-definition.js';
-import { FACTUAL_REVIEW_KIND, type EvidenceAssuranceLevel } from '../../shared/protocol.js';
+import { FACTUAL_REVIEW_KIND, type EvidenceAssuranceLevel, type ProcedureDefinitionPin } from '../../shared/protocol.js';
 import { FACTUAL_VERIFICATION_POLICY_VERSION } from './factual-review-contract.js';
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
@@ -2602,7 +2602,7 @@ export class BaselineAnalysisStore {
     const blockedBy = current.state === 'blocked-before-dispatch' ? (currentRecord.cause === 'plan-moved' ? 'plan-moved' : 'launch') : null;
     return {
       runRecordId,
-      procedure: (parseCanonicalJson(asString(runRecord.canonical_json)) as { procedure?: import('../../shared/protocol.js').ProcedureDefinitionPin }).procedure ?? null,
+      procedure: (parseCanonicalJson(asString(runRecord.canonical_json)) as { procedure?: ProcedureDefinitionPin }).procedure ?? null,
       state: current.state,
       stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
         : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL

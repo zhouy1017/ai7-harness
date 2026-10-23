@@ -871,7 +871,6 @@ export class CapturedProcedures {
     return {
       procedureId,
       title: latest.document.title,
-      kindLabel: '审阅专用前身',
       versionCount: versions.length,
       latestVersion: latest.version,
       latestState: latest.state,

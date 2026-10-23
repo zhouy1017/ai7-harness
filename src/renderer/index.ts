@@ -6095,11 +6095,12 @@ function knowledgeBasePage(tab: KnowledgeBaseTab, tabFocused: boolean): { conten
 function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjection, tabFocused = false, procedures: KnowledgeProceduresProjection | null = null): void {
   const { content, panelNode } = knowledgeBasePage('rules', tabFocused);
   content.dataset['ruleCount'] = String(projection.rules.length);
-  // The expert 工序 (Issue #427, S79d; KB-010): what each does, its version, state and use, then the native artifact.
+  // The expert 工序 (Issue #427, S79d; KB-010), since Issue #1081 the pre-installed procedure library: what each does, its
+  // version, state, use and stages, then the native artifact.
   if (procedures !== null) {
     const section = element('section', 'knowledge-procedures');
-    section.dataset['procedureCount'] = String(procedures.preinstalled?.length ?? 0);
-    const list = renderProcedureLibrary(procedures.preinstalled ?? []);
+    section.dataset['procedureCount'] = String(procedures.preinstalled.length);
+    const list = renderProcedureLibrary(procedures.preinstalled);
     const artifacts = element('ul', 'knowledge-artifact-list');
     for (const artifact of procedures.artifacts) {
       const item = element('li', undefined, artifactLine(artifact));
@@ -6120,7 +6121,7 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
           ? []
           : [element('dt', undefined, '权限侧车 SHA-256'), element('dd', 'technical-identity', artifact.technical.sidecarSha256)]),
       ]),
-      ...procedures.procedures.flatMap((procedure) => [element('dt', undefined, procedure.title), element('dd', 'technical-identity', procedure.procedureId)]),
+      ...procedures.preinstalled.flatMap((procedure) => [element('dt', undefined, procedure.title), element('dd', 'technical-identity', procedure.procedureId)]),
     );
     section.append(element('h3', undefined, PROCEDURES_HEADING), list, artifacts, identities);
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): apart from the built-in 工序, read on their own.

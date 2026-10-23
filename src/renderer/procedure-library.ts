@@ -1,4 +1,5 @@
 import type { PreinstalledProcedureProjection } from '../shared/protocol/procedures.js';
+import { PROCEDURE_PREDECESSOR_NOTE, PROCEDURE_STATE_LABELS, procedureLine, procedureStagesLine } from './knowledge-base-labels.js';
 
 /** The pre-installed library is read-only in F-26a; Book-dependent availability stays on the ordinary task sheet. */
 export function renderProcedureLibrary(procedures: readonly PreinstalledProcedureProjection[]): HTMLElement {
@@ -14,19 +15,19 @@ export function renderProcedureLibrary(procedures: readonly PreinstalledProcedur
     item.dataset['procedureState'] = procedure.state;
     item.dataset['procedureRuns'] = String(procedure.uses);
     const pill = document.createElement('span');
-    pill.className = 'status-pill procedure-state-enabled';
-    pill.textContent = '已启用';
+    pill.className = `status-pill procedure-state-${procedure.state}`;
+    pill.textContent = PROCEDURE_STATE_LABELS[procedure.state];
     const words = document.createElement('span');
-    words.textContent = ` ${procedure.title} · 第 ${procedure.version} 版 · 预装 · 已使用 ${procedure.uses} 次`;
+    words.textContent = ` ${procedureLine(procedure)}`;
     const stages = document.createElement('span');
     stages.className = 'field-note procedure-stages';
-    stages.textContent = ` · ${procedure.stages.map((stage) => stage.label).join(' → ')}`;
+    stages.textContent = ` · ${procedureStagesLine(procedure)}`;
     item.append(pill, words, stages);
     list.append(item);
   }
   const predecessor = document.createElement('p');
   predecessor.className = 'field-note procedure-predecessor';
-  predecessor.textContent = '下方的可复用工序是审阅专用前身，仅用于审阅；已保存的版本仍可查看和运行。';
+  predecessor.textContent = PROCEDURE_PREDECESSOR_NOTE;
   section.append(list, predecessor);
   return section;
 }

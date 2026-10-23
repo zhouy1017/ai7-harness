@@ -1,19 +1,25 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { PreinstalledProcedureProjection } from '../../shared/protocol/procedures.js';
+import { BASELINE_ANALYSIS_KIND } from '../../shared/protocol.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION } from '../review/category-configuration.js';
 import { resolveProcedureDefinition } from './definition-store.js';
-import { preinstalledProcedureDefinitions } from './preinstalled.js';
+import { BASELINE_PROCEDURE_ID, preinstalledProcedureDefinitions, reviewProcedureId } from './preinstalled.js';
 import { PROCEDURE_STAGE_LABELS } from './stage-types.js';
 
-export function readPreinstalledProcedures(db: DatabaseSync): readonly PreinstalledProcedureProjection[] {
+/**
+ * 知识库's procedure library (Issue #1081, F-26a; ADR 0095 §1). A version 1 re-expresses its kind byte for byte, so its uses
+ * are the approved runs of that kind — each category's approved Review Runs, as `reviewRuns` counts them, and every authorized
+ * baseline Run — including those recorded before revision 85 pinned a procedure.
+ */
+export function readPreinstalledProcedures(db: DatabaseSync, reviewRuns: ReadonlyMap<string, number>): readonly PreinstalledProcedureProjection[] {
+  const uses = new Map([
+    ...BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((entry) => [reviewProcedureId(entry.categoryId), reviewRuns.get(entry.categoryId) ?? 0] as const),
+    [BASELINE_PROCEDURE_ID, Number(db.prepare(`SELECT count(*) total FROM analysis_run_records r
+      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE t.kind = ?`).get(BASELINE_ANALYSIS_KIND)!.total)] as const,
+  ]);
   return preinstalledProcedureDefinitions().map((definition) => {
     const { document, pin } = resolveProcedureDefinition(db, definition.id);
-    const uses = document.id === 'ai7-procedure/baseline-analysis'
-      ? Number(db.prepare("SELECT count(*) total FROM analysis_run_records WHERE json_extract(canonical_json, '$.procedure.procedureId') = ?")
-        .get(document.id)!.total)
-      : Number(db.prepare(`SELECT count(DISTINCT r.review_run_id) total FROM review_runs r, json_each(r.canonical_json, '$.preinstalledProcedures') p
-          WHERE json_extract(p.value, '$.procedure.procedureId') = ?
-          AND EXISTS (SELECT 1 FROM review_run_authorizations a WHERE a.review_run_id = r.review_run_id)`).get(document.id)!.total);
-    return { ...pin, title: document.title, state: 'enabled' as const, uses,
+    return { ...pin, title: document.title, state: 'enabled' as const, uses: uses.get(document.id) ?? 0,
       stages: document.stages.map((stage) => ({ stageType: stage.stageType, label: PROCEDURE_STAGE_LABELS[stage.stageType] })) };
   });
 }

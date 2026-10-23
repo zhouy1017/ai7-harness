@@ -7,7 +7,14 @@ import {
 import { baselineAnalysisKindDefinition, factualReviewKindDefinition, type AnalysisKindDefinition } from '../analysis/kind-definition.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, type ReviewCategoryConfigurationEntry } from '../review/category-configuration.js';
 import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA } from '../review/review-category-contract.js';
-import { BASELINE_ANALYSIS_KIND, FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
+import { BASELINE_ANALYSIS_KIND, FACTUAL_REVIEW_KIND, reviewCategoryIdOfKind } from '../../shared/protocol.js';
+
+export const BASELINE_PROCEDURE_ID = 'ai7-procedure/baseline-analysis';
+
+/** The pre-installed procedure one built-in review category runs (ADR 0095 §1). */
+export function reviewProcedureId(categoryId: string): string {
+  return `ai7-procedure/review-${categoryId}`;
+}
 
 function stage(stageType: ProcedureStageType, inputs: readonly string[], outputTemplateId: string, web = false): ProcedureStageDefinition {
   // v1 describes today's serial executor. Parallel execution and new tools belong to later slices.
@@ -18,7 +25,7 @@ function stage(stageType: ProcedureStageType, inputs: readonly string[], outputT
 export function baselineProcedureDefinition(definition: AnalysisKindDefinition = baselineAnalysisKindDefinition()): ProcedureDefinitionDocument {
   return {
     schema: PROCEDURE_DEFINITION_SCHEMA,
-    id: 'ai7-procedure/baseline-analysis',
+    id: BASELINE_PROCEDURE_ID,
     version: 1,
     title: '基线分析',
     role: definition.expectedOutcome,
@@ -39,7 +46,7 @@ export function reviewProcedureDefinition(entry: ReviewCategoryConfigurationEntr
   const resultSchema = factual ? factualReviewKindDefinition().unitResultSchema : REVIEW_CATEGORY_UNIT_RESULT_SCHEMA;
   return {
     schema: PROCEDURE_DEFINITION_SCHEMA,
-    id: `ai7-procedure/review-${entry.categoryId}`,
+    id: reviewProcedureId(entry.categoryId),
     version: 1,
     title: entry.procedure.title,
     role: entry.description,
@@ -61,9 +68,9 @@ export function preinstalledProcedureDefinitions(): readonly ProcedureDefinition
 
 /** Only the ten pre-installed definitions are admitted in F-26a. */
 export function procedureIdForKind(kind: string): string | null {
-  if (kind === BASELINE_ANALYSIS_KIND) return 'ai7-procedure/baseline-analysis';
-  if (kind === FACTUAL_REVIEW_KIND) return 'ai7-procedure/review-factual-review';
-  const categoryId = kind.startsWith('editorial-review/') ? kind.slice('editorial-review/'.length) : null;
+  if (kind === BASELINE_ANALYSIS_KIND) return BASELINE_PROCEDURE_ID;
+  if (kind === FACTUAL_REVIEW_KIND) return reviewProcedureId('factual-review');
+  const categoryId = reviewCategoryIdOfKind(kind);
   return BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.some((entry) => entry.categoryId === categoryId)
-    ? `ai7-procedure/review-${categoryId}` : null;
+    ? reviewProcedureId(categoryId!) : null;
 }
