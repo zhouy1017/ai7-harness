@@ -1,3 +1,4 @@
+import { SupervisionDirectives, governedMemoryItems, preferenceItems } from './learning/supervision-directives.js';
 import { liveMaterialContract, materialContractDefinition } from './task-material-references.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
@@ -203,18 +204,70 @@ export class HouseReviewPreferenceLedger {
       .sort((a, b) => a.bookId.localeCompare(b.bookId) || a.materialDigest.localeCompare(b.materialDigest));
     const materialSetDigest = sha256Hex(canonicalJson(eligible.map(({ bookId, categoryId, materialDigest, decisionId, eligibilityDecisionId, eligibility }) =>
       ({ bookId, categoryId, materialDigest, decisionId, eligibilityDecisionId, eligibility }))));
-    const lines = preferenceLines(eligible, names);
+    const baseLines = preferenceLines(eligible, names);
+    const governance = this.#govern(scope, baseLines, materialSetDigest, names);
+    const lines = governance.lines;
     const previous = this.history(scope).at(-1) ?? null;
     const readAs = (entries: HouseReviewPreferenceVersion['lines']) => canonicalJson(entries.map(({ text, categoryId, bookId }) => ({ text, categoryId, bookId })));
-    if (previous === null ? eligible.length === 0 : previous.materialSetDigest === materialSetDigest && readAs(previous.lines) === readAs(lines)) return previous;
+    if (previous === null ? eligible.length === 0 : previous.materialSetDigest === materialSetDigest && readAs(previous.lines) === readAs(lines) && previous.governance?.headDirectiveId === governance.governance?.headDirectiveId) return previous;
     const record: HouseReviewPreferenceVersion = {
       schema: 'ai7.house-review-preference/1', versionId: randomUUID(), ordinal: (previous?.ordinal ?? 0) + 1, supersedes: previous?.versionId ?? null,
       operationalScope: scope, materialSetDigest, recordedAt: new Date().toISOString(), lines, sourceCount: eligible.length,
+      ...(governance.governance === undefined ? {} : { governance: governance.governance }),
     };
     const canonical = canonicalRecord(record);
     this.db.prepare('INSERT INTO house_review_preference_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
       record.versionId, scope, record.ordinal, record.supersedes, materialSetDigest, record.recordedAt, canonical.json, canonical.digest);
     return record;
+  }
+
+  #govern(scope: TrustedOperationalScope, baseLines: HouseReviewPreferenceVersion['lines'], materialSetDigest: string, names: Iterable<string>):
+    { lines: HouseReviewPreferenceVersion['lines']; governance?: NonNullable<HouseReviewPreferenceVersion['governance']> } {
+    if (this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() === undefined) return { lines: baseLines };
+    const directives = new SupervisionDirectives(this.db).history(scope);
+    const head = directives.at(-1);
+    if (head === undefined) return { lines: baseLines };
+    const base = preferenceItems({ lines: baseLines, versionId: 'base' });
+    const byId = new Map(base.map((item, index) => [item.itemId, baseLines[index]!]));
+    const all = governedMemoryItems(base, directives);
+    const governed = all.filter((item) => item.state === 'active');
+    const sourcesOf = (itemId: string, seen = new Set<string>()): HouseReviewPreferenceVersion['lines'][number]['sources'] => {
+      if (seen.has(itemId)) return [];
+      seen.add(itemId);
+      const original = byId.get(itemId);
+      if (original !== undefined) return original.sources;
+      const item = all.find((entry) => entry.itemId === itemId);
+      return item?.lineage.flatMap((pin) => sourcesOf(pin.itemId, seen)) ?? [];
+    };
+    const stripped = [...new Set([...baseLines.flatMap((line) => line.sources.flatMap((source) =>
+      [...source.attribution.authors, ...source.attribution.editors])), ...names])]
+      .map((name) => name.trim()).filter(Boolean).sort((a, b) => b.length - a.length || a.localeCompare(b, 'en'));
+    const lines = governed.map((item) => {
+      let text = item.text;
+      for (const name of stripped) text = text.replaceAll(name, '');
+      return { text: text.trim(), categoryId: item.categoryId, bookId: item.bookId, sources: sourcesOf(item.itemId) };
+    }).filter((line) => line.text.length > 0);
+    if (lines.length > HOUSE_REVIEW_PREFERENCE_MAX_LINES || lines.reduce((sum, line) => sum + graphemesOf(line.text).length, 0) > HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES)
+      throw new LearningEligibilityError('GLOBAL_AGENT_MEMORY_LIMIT', '本社审阅偏好最多 12 条，合计最多 200 字；请先合并或停用已有条目。');
+    return { lines, governance: { baseLines, baseMaterialSetDigest: materialSetDigest, headDirectiveId: head.directiveId } };
+  }
+
+  /** Append a preference version after an explicit governance action, preserving its derived source lineage. */
+  refreshGovernance(scope: TrustedOperationalScope, names: Iterable<string> = []): void {
+    const prior = this.history(scope).at(-1);
+    const baseLines = prior?.governance?.baseLines ?? prior?.lines ?? [];
+    const materialSetDigest = prior?.governance?.baseMaterialSetDigest ?? prior?.materialSetDigest ?? sha256Hex(canonicalJson([]));
+    const governed = this.#govern(scope, baseLines, materialSetDigest, names);
+    if (governed.governance === undefined || prior?.governance?.headDirectiveId === governed.governance.headDirectiveId &&
+      canonicalJson(prior.lines) === canonicalJson(governed.lines)) return;
+    const record: HouseReviewPreferenceVersion = {
+      schema: 'ai7.house-review-preference/1', versionId: randomUUID(), ordinal: (prior?.ordinal ?? 0) + 1,
+      supersedes: prior?.versionId ?? null, operationalScope: scope, materialSetDigest,
+      recordedAt: new Date().toISOString(), sourceCount: prior?.sourceCount ?? 0, ...governed,
+    };
+    const canonical = canonicalRecord(record);
+    this.db.prepare('INSERT INTO house_review_preference_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+      record.versionId, scope, record.ordinal, record.supersedes, materialSetDigest, record.recordedAt, canonical.json, canonical.digest);
   }
 
   /**

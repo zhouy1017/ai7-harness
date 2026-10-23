@@ -4395,6 +4395,23 @@ function registerRendererHandlers(
     requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
     return serializeEffect(async () => { requireAuthority(); return service.call('deactivateEditorialMemory', input); });
   }));
+  ipcMain.handle(IPC_CHANNELS.inspectGlobalAgentDialogue, (event, input: ServiceOperationMap['inspectGlobalAgentDialogue']['input']) => envelope(async () => {
+    requireSender(event); requireAuthority();
+    return service.call('inspectGlobalAgentDialogue', input);
+  }));
+  ipcMain.handle(IPC_CHANNELS.inspectGlobalAgent, (event) => envelope(async () => {
+    requireSender(event); requireAuthority();
+    return service.call('inspectGlobalAgent', {});
+  }));
+  for (const operation of ['recordLearningSupervision', 'askGlobalAgent', 'stopGlobalAgentAnswer', 'continueGlobalAgentAnswer', 'regenerateGlobalAgentAnswer'] as const) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: ServiceOperationMap[typeof operation]['input']) => envelope(async () => {
+      requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call(operation, input);
+      });
+    }));
+  }
   ipcMain.handle(IPC_CHANNELS.inspectHouseReviewPreference, (event) => envelope(async () => {
     requireSender(event); requireAuthority();
     return service.call('inspectHouseReviewPreference', {});
@@ -6497,7 +6514,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 86, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 87, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });

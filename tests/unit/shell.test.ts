@@ -39,9 +39,9 @@ describe('the sidebar', () => {
       expect(contextHeading(state!, active, null)).toEqual({ title: '设置', position, book: false });
     }
   });
-  it('lists the five global destinations in their fixed order, each with a one-character icon of its own name', () => {
+  it('lists the six global destinations in their fixed order, each with a one-character icon of its own name', () => {
     expect(SHELL_DESTINATIONS.map((entry) => [entry.key, entry.label])).toEqual([
-      ['attention', '待我处理'], ['library', '书库'], ['series', '书系'], ['knowledge', '知识库'], ['quality', '质量与学习'],
+      ['attention', '待我处理'], ['library', '书库'], ['series', '书系'], ['knowledge', '知识库'], ['quality', '质量与学习'], ['global-agent', '全域智能体（记忆与全局指导）'],
     ]);
     for (const entry of [...SHELL_DESTINATIONS, SHELL_SETTINGS]) {
       expect([...entry.icon]).toHaveLength(1);

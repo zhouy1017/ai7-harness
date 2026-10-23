@@ -500,7 +500,8 @@ export const IMPORTED_SKILL_UPDATE_SCHEMA_VERSION = 83;
 export const MODEL_SELECTION_SCHEMA_VERSION = 84;
 export const PROCEDURE_DEFINITION_SCHEMA_VERSION = 85;
 export const EDITORIAL_LEARNING_SCHEMA_VERSION = 86;
-export const LATEST_SCHEMA_VERSION = EDITORIAL_LEARNING_SCHEMA_VERSION;
+export const GLOBAL_AGENT_SCHEMA_VERSION = 87;
+export const LATEST_SCHEMA_VERSION = GLOBAL_AGENT_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -2417,10 +2418,11 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === MATERIAL_INDEX_SCHEMA_VERSION || version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION ||
       version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION ||
-      version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION,
+      version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === EDITORIAL_LEARNING_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === GLOBAL_AGENT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === EDITORIAL_LEARNING_SCHEMA_VERSION) return advanceToTerminalRevision(db);
   if (version === PROCEDURE_DEFINITION_SCHEMA_VERSION) return advanceToTerminalRevision(db);
   if (version === MODEL_SELECTION_SCHEMA_VERSION) return advanceToTerminalRevision(db);
   if (version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION) return advanceToTerminalRevision(db);

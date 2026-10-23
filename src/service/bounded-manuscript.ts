@@ -1,5 +1,8 @@
 import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL, PROCEDURE_DEFINITION_FOREIGN_KEYS, validateProcedureDefinitions, validateProcedurePlanPins } from './procedures/definition-store.js';
 import { EDITORIAL_LEARNING_SCHEMA_SQL, EDITORIAL_LEARNING_TRIGGER_SQL, EDITORIAL_LEARNING_FOREIGN_KEYS } from './learning/ledger.js';
+import { DIALOGUE_TASKS_REVISION_86_SQL } from './dialogue/dialogue-ledger.js';
+import { SUPERVISION_SCHEMA_SQL, SUPERVISION_TRIGGER_SQL, SUPERVISION_FOREIGN_KEYS } from './learning/supervision-directives.js';
+import { GLOBAL_AGENT_SCHEMA_VERSION } from './task-authorization.js';
 import { IMPORTED_SKILL_FOREIGN_KEYS, IMPORTED_SKILL_SCHEMA_SQL, IMPORTED_SKILL_TRIGGER_SQL, IMPORTED_SKILL_UPDATE_FOREIGN_KEYS, IMPORTED_SKILL_UPDATE_SCHEMA_SQL, IMPORTED_SKILL_UPDATE_TRIGGER_SQL } from './imported-skill-schema.js';
 import { HOUSE_REVIEW_PREFERENCE_FOREIGN_KEYS, HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from './house-review-preference.js';
 import { TASK_INTENT_DRAFT_FOREIGN_KEYS, TASK_INTENT_DRAFT_SCHEMA_SQL, TASK_INTENT_DRAFT_TRIGGER_SQL } from './task-intent-drafts.js';
@@ -2075,6 +2078,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...FACTUAL_VERIFICATION_FOREIGN_KEYS,
   ...HOUSE_REVIEW_PREFERENCE_FOREIGN_KEYS,
   ...EDITORIAL_LEARNING_FOREIGN_KEYS,
+  ...SUPERVISION_FOREIGN_KEYS,
   ...TASK_INTENT_DRAFT_FOREIGN_KEYS,
   ...IMPORTED_SKILL_FOREIGN_KEYS,
   ...CUSTOM_ANALYSIS_DIMENSION_FOREIGN_KEYS,
@@ -2823,6 +2827,7 @@ function requireManuscriptReimportTargetSchema(
   // Revision 86 (Issue #1082): reference-only Learning Signals, the learning controls and explicit editorial memory.
   const includeEditorialLearningTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= EDITORIAL_LEARNING_SCHEMA_VERSION || committed(EDITORIAL_LEARNING_SCHEMA_SQL);
   // Revision 79 (Issue #911): 本社审阅偏好 versions and each review category Task's pin of the version it read.
+  const includeSupervisionTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 87 || committed(SUPERVISION_SCHEMA_SQL);
   const includeHousePreferenceTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || committed(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL);
   // Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts, their versions and their one promotion each.
   const includeTaskIntentDraftTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= TASK_INTENT_DRAFT_SCHEMA_VERSION || committed(TASK_INTENT_DRAFT_SCHEMA_SQL);
@@ -2966,6 +2971,8 @@ function requireManuscriptReimportTargetSchema(
       // revision 71 (S17c) widens the bindings for the live route, and revision 72 (Issue #811) for ordinary production: a store
       // below 71 may still hold revision 60's or 71's text, and one at 71 revision 71's.
       ...(includeDialogueTables ? DIALOGUE_SCHEMA_SQL : {}),
+      ...(includeDialogueTables && Number(db.prepare('PRAGMA user_version').get()?.user_version) < 87
+        ? { dialogue_tasks: [DIALOGUE_TASKS_REVISION_86_SQL, DIALOGUE_SCHEMA_SQL.dialogue_tasks] } : {}),
       ...(includeDialogueTables && Number(db.prepare('PRAGMA user_version').get()?.user_version) < MODEL_SERVICE_ROUTES_SCHEMA_VERSION
         ? {
             dialogue_execution_bindings: Number(db.prepare('PRAGMA user_version').get()?.user_version) < DIALOGUE_LIVE_BINDING_SCHEMA_VERSION
@@ -2998,6 +3005,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_SCHEMA_SQL : {}),
       ...(includeHousePreferenceTables ? HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL : {}),
       ...(includeEditorialLearningTables ? EDITORIAL_LEARNING_SCHEMA_SQL : {}),
+      ...(includeSupervisionTables ? SUPERVISION_SCHEMA_SQL : {}),
       ...(includeTaskIntentDraftTables ? TASK_INTENT_DRAFT_SCHEMA_SQL : {}),
       ...(includeImportedSkillTables ? IMPORTED_SKILL_SCHEMA_SQL : {}),
       ...(includeCustomAnalysisTables ? CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL : {}),
@@ -3068,6 +3076,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_TRIGGER_SQL : {}),
       ...(includeHousePreferenceTables ? HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL : {}),
       ...(includeEditorialLearningTables ? EDITORIAL_LEARNING_TRIGGER_SQL : {}),
+      ...(includeSupervisionTables ? SUPERVISION_TRIGGER_SQL : {}),
       ...(includeTaskIntentDraftTables ? TASK_INTENT_DRAFT_TRIGGER_SQL : {}),
       ...(includeImportedSkillTables ? IMPORTED_SKILL_TRIGGER_SQL : {}),
       ...(includeCustomAnalysisTables ? CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL : {}),
@@ -5993,7 +6002,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -6044,7 +6053,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(

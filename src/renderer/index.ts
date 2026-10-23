@@ -1,4 +1,5 @@
 import { renderProcedureLibrary } from './procedure-library.js';
+import { mountGlobalAgent } from './global-agent.js';
 import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
 import { ANALYSIS_MORE_RANGES, ANALYSIS_READ_FAILED, ANALYSIS_READING, ANALYSIS_MORE_REPORT_ROWS, ANALYSIS_MORE_CHOICES, ANALYSIS_EARLIER_HISTORY, ANALYSIS_PAGED_LIST_LABELS } from './analysis-paging-labels.js';
@@ -1054,6 +1055,7 @@ const shell = mountShell({
     if (authorityInterrupted) return;
     if (destination === 'library') void leaveThen(() => returnToLibrary());
     else if (destination === 'series') void leaveThen(() => renderSeriesList(null));
+    else if (destination === 'global-agent') void leaveThen(() => renderGlobalAgent());
     else if (destination === 'knowledge') void leaveThen(() => renderKnowledgeBase('guidelines'));
     else void leaveThen(() => renderQualityLearning('learning', null));
   },
@@ -1525,6 +1527,9 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
       await renderQualityLearning('learning', target.bookId);
       return;
     // A dialogue (Issue #52, S17a): the Book's 工作概览 with the dialogue in the foreground beside it.
+    case 'global-agent-dialogue':
+      await renderGlobalAgent(target.dialogueId);
+      return;
     case 'dialogue':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
         renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
@@ -1707,6 +1712,13 @@ async function renderOwnedBookWorkbenchRoute(): Promise<void> {
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法读取精确图书工作台路由。'), 'error');
   }
+}
+
+async function renderGlobalAgent(dialogueId?: string): Promise<void> {
+  await window.ai7.leaveBookWorkbench();
+  shell.leaveBook();
+  replaceScreen('global-agent', mountGlobalAgent({ api: window.ai7, setStatus, errorMessage: rendererErrorMessage,
+    ...(dialogueId === undefined ? {} : { dialogueId }), openAudit: () => void leaveThen(() => renderQualityLearning('audit', null)) }));
 }
 
 async function returnToLibrary(): Promise<void> {
@@ -6007,6 +6019,7 @@ async function renderQualityLearning(tab: QualityLearningTab, bookId: string | n
     all.dataset['learningAction'] = 'all-books';
     back.append(all);
   }
+  back.append(button('全域对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
   back.append(button('返回', 'quiet', () => void initializeStartup()));
   if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
   content.append(

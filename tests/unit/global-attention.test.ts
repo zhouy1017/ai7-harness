@@ -1,3 +1,4 @@
+import type { GlobalAgentDialogueProjection } from '../../src/shared/protocol.js';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
@@ -504,4 +505,23 @@ describe('the bounds', () => {
     const answer = JSON.stringify({ id: randomUUID(), ok: true, op: 'inspectGlobalAttention', result: projection });
     expect(Buffer.byteLength(answer, 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
   });
+});
+
+
+it('follows a Book-less Global Agent answer without exposing foreground fragments or borrowing a Book target', () => {
+  const dialogue: GlobalAgentDialogueProjection = { dialogueId: randomUUID(), bookId: null, question: '合成学习方向问题',
+    sources: [], askedAt: minutesAgo(2), actions: { stop: true, continue: false, regenerate: false },
+    attempts: [{ attemptId: randomUUID(), ordinal: 1, kind: 'ask', state: 'answering', fragments: [], fragmentsFrom: 0,
+      fragmentTotal: 0, source: 'live', causeCode: null, startedAt: minutesAgo(2), settledAt: null, convertedMarkIds: [] }] };
+  const active = composeGlobalAttention(readings({ globalDialogues: [dialogue] }), NOW);
+  expect(active.running).toBe(true);
+  expect(active.actionableCount).toBe(0);
+  expect(group(active, 'active')[0]).toMatchObject({ book: { bookId: null, title: null },
+    target: { kind: 'global-agent-dialogue', dialogueId: dialogue.dialogueId }, object: { kind: 'dialogue', question: dialogue.question } });
+  const completed: GlobalAgentDialogueProjection = { ...dialogue, attempts: [{ ...dialogue.attempts[0]!, state: 'completed',
+    settledAt: minutesAgo(1), fragments: [{ text: '合成回答。', breakAfter: false }], fragmentTotal: 1 }] };
+  const settled = composeGlobalAttention(readings({ globalDialogues: [completed] }), NOW);
+  expect(settled.running).toBe(false);
+  expect(group(settled, 'recent')).toHaveLength(1);
+  expect(JSON.stringify(settled)).not.toContain('合成回答。');
 });

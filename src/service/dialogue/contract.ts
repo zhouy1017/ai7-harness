@@ -1,3 +1,4 @@
+import type { GlobalMemoryPin } from '../../shared/protocol.js';
 import { MAX_DIALOGUE_QUESTION_CHARACTERS } from '../../shared/protocol.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { DialogueError } from './dialogue-ledger.js';
@@ -65,6 +66,7 @@ export function dialogueRequestDigest(contractDigest: string, kind: DialogueTurn
 }
 
 export interface DialogueMessageInput {
+  readonly globalSources?: ReadonlyArray<GlobalMemoryPin & { readonly text: string }>;
   readonly kind: DialogueTurnKind;
   readonly selection: string;
   readonly question: string;
@@ -74,6 +76,7 @@ export interface DialogueMessageInput {
 
 /** The one user message a turn sends: its header, the selected words, the question, and for `continue` what was kept. */
 export function buildDialogueMessage(input: DialogueMessageInput): string {
+  if (input.globalSources !== undefined) return `AI7 全域对话\n${canonicalJson({ kind: input.kind, sources: input.globalSources, question: input.question, kept: input.kept })}`;
   const contract = DIALOGUE_PROMPT_CONTRACT;
   const header = contract.messageHeader
     .replace('{kind}', contract.kindLabels[input.kind])
@@ -102,6 +105,18 @@ export function questionHoldsContractMarks(question: string): boolean {
  * the stopped answer kept — exactly as `buildDialogueMessage` wrote them, or `null` for any other message.
  */
 export function parseDialogueMessage(text: string): DialogueMessageInput | null {
+  if (text.startsWith('AI7 全域对话\n')) {
+    try {
+      const record = JSON.parse(text.slice('AI7 全域对话\n'.length)) as { kind: DialogueTurnKind; sources: DialogueMessageInput['globalSources']; question: string; kept: string | null };
+      if ((record.kind !== 'ask' && record.kind !== 'continue') || typeof record.question !== 'string' ||
+          !(record.kept === null || typeof record.kept === 'string') || !Array.isArray(record.sources) || record.sources.length > 12 ||
+          record.sources.some((source) => source === null || typeof source !== 'object' || Object.keys(source).sort().join(',') !== 'itemId,revisionId,text' ||
+            typeof source.itemId !== 'string' || source.itemId.length > 180 || typeof source.revisionId !== 'string' || source.revisionId.length > 180 ||
+            typeof source.text !== 'string' || [...source.text].length > 200)) return null;
+      const parsed: DialogueMessageInput = { kind: record.kind, selection: '', question: record.question, kept: record.kept, globalSources: record.sources };
+      return buildDialogueMessage(parsed) === text ? parsed : null;
+    } catch { return null; }
+  }
   const header = parseDialogueMessageHeader(text);
   if (header === null) return null;
   const contract = DIALOGUE_PROMPT_CONTRACT;

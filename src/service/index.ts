@@ -1536,6 +1536,33 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.transitionProductionDocumentPhase(request.input) };
     // 待我处理 (Issue #424, plan slice S78): a read across every Book. The one owner's progress reader and its
     // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
+    case 'inspectGlobalAgent':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id)) };
+    case 'recordLearningSupervision':
+      return { id: request.id, ok: true, op: request.op, result: store.recordLearningSupervision(request.input) };
+    case 'askGlobalAgent': {
+      const route = globalDialogueReady(dialogues, launchPolicy);
+      const turn = store.askGlobalAgent(request.input);
+      dialogues.beginGlobal(turn, route, () => store.globalAgentSourcesCurrent(request.input.sources));
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(turn.dialogueId, (id) => dialogues.liveText(id)) };
+    }
+    case 'inspectGlobalAgentDialogue':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(request.input.dialogueId, (id) => dialogues.liveText(id)) };
+    case 'stopGlobalAgentAnswer': {
+      const attempt = store.globalAgentAttempt(request.input, 'stop');
+      if (typeof attempt !== 'string') throw new StoreErrorClass('DIALOGUE_INVALID', '回答标识无效。');
+      await dialogues.stop(attempt);
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(request.input.dialogueId, (id) => dialogues.liveText(id)) };
+    }
+    case 'continueGlobalAgentAnswer':
+    case 'regenerateGlobalAgentAnswer': {
+      const route = globalDialogueReady(dialogues, launchPolicy);
+      const turn = store.globalAgentAttempt(request.input, request.op === 'continueGlobalAgentAnswer' ? 'continue' : 'regenerate');
+      if (typeof turn === 'string') throw new StoreErrorClass('DIALOGUE_INVALID', '回答标识无效。');
+      const pins = turn.message.globalSources!;
+      dialogues.beginGlobal(turn, route, () => store.globalAgentSourcesCurrent(pins));
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(turn.dialogueId, (id) => dialogues.liveText(id)) };
+    }
     case 'inspectGlobalAttention':
       return {
         id: request.id, ok: true, op: request.op,
@@ -1664,6 +1691,14 @@ async function dispatch(
 }
 
 /** A dialogue refusal from the execution owner, said as the store says its own; the Book's source decides a live route. */
+function globalDialogueReady(dialogues: DialogueExecutionOwner, policy: LaunchPolicyProjection) {
+  try { return dialogues.requireGlobalReady(policy); }
+  catch (error) {
+    if (error instanceof DialogueError) throw new StoreErrorClass(error.code, error.message);
+    throw error;
+  }
+}
+
 function dialogueReady(dialogues: DialogueExecutionOwner, sourceDigest: string | null): void {
   try {
     dialogues.requireReady(sourceDigest);

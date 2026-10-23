@@ -1,3 +1,4 @@
+import { validSupervisionInput } from './learning/supervision-directives.js';
 import { AnalysisError } from './analysis/canonical.js';
 import { baselineAnalysisOutbound } from './analysis/baseline-analysis-wire.js';
 import { taskPlanOutbound } from './task-plan.js';
@@ -399,6 +400,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'getModelServiceStoredState':
     case 'getSearchBackendSettings':
     // 待我处理 (Issue #424) reads across every Book, so it names none.
+    case 'inspectGlobalAgent':
     case 'inspectGlobalAttention':
     case 'runReconnectPreflight':
     case 'inspectDefaultExecutionRules':
@@ -2520,6 +2522,30 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !isBoundedString(input.question, 4 * MAX_DIALOGUE_QUESTION_CHARACTERS)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    case 'inspectGlobalAgentDialogue': {
+      const input = requireInput(value.input, ['dialogueId'], tentativeId);
+      if (!validUuid(input.dialogueId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'stopGlobalAgentAnswer':
+    case 'continueGlobalAgentAnswer':
+    case 'regenerateGlobalAgentAnswer': {
+      const input = requireInput(value.input, ['dialogueId', 'attemptId'], tentativeId);
+      if (!validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'recordLearningSupervision': {
+      const input = requireInput(value.input, ['operation', 'targets', 'scope', 'text', 'categoryId', 'effect'], tentativeId);
+      if (!validSupervisionInput(input)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'askGlobalAgent': {
+      const input = requireInput(value.input, ['question', 'sources'], tentativeId);
+      if (!isBoundedString(input.question, MAX_DIALOGUE_QUESTION_CHARACTERS) || !Array.isArray(input.sources) || input.sources.length > 12 ||
+          input.sources.some((pin) => !isRecord(pin) || !hasExactKeys(pin, ['itemId', 'revisionId']) ||
+            !isBoundedString(pin.itemId, 180) || !isBoundedString(pin.revisionId, 180))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectDialogue': {

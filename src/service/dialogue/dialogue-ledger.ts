@@ -1,3 +1,4 @@
+import type { GlobalMemoryPin } from '../../shared/protocol.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
@@ -27,7 +28,7 @@ import type { DialogueMessageInput } from './contract.js';
  * route — Go or DeepSeek 开放平台（官方） — and names its policy version and rule exactly as a developer-live one does;
  * developer-live attempts stay on the Go route only.
  */
-export const DIALOGUE_SCHEMA_SQL = {
+const LEGACY_DIALOGUE_SCHEMA_SQL = {
   dialogue_tasks: `CREATE TABLE dialogue_tasks (
   dialogue_id TEXT PRIMARY KEY,
   book_id TEXT NOT NULL REFERENCES books(book_id),
@@ -105,6 +106,18 @@ export const DIALOGUE_SCHEMA_SQL = {
   canonical_json TEXT NOT NULL,
   sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
 ) STRICT`,
+} as const;
+
+export const DIALOGUE_TASKS_REVISION_86_SQL = LEGACY_DIALOGUE_SCHEMA_SQL.dialogue_tasks;
+/** Revision 87 admits an all-null manuscript binding for an explicitly scoped Global Agent turn. */
+export const DIALOGUE_SCHEMA_SQL = {
+  ...LEGACY_DIALOGUE_SCHEMA_SQL,
+  dialogue_tasks: DIALOGUE_TASKS_REVISION_86_SQL.replace(
+    /((?:book_id|manuscript_id|branch_id|revision_id|journal_sequence|block_id|from_grapheme|to_grapheme|block_digest) (?:TEXT|INTEGER)) NOT NULL/gu, '$1',
+  ).replace(') STRICT', `, CHECK(
+    (book_id IS NULL AND manuscript_id IS NULL AND branch_id IS NULL AND revision_id IS NULL AND journal_sequence IS NULL AND block_id IS NULL AND from_grapheme IS NULL AND to_grapheme IS NULL AND block_digest IS NULL)
+    OR (book_id IS NOT NULL AND manuscript_id IS NOT NULL AND branch_id IS NOT NULL AND revision_id IS NOT NULL AND journal_sequence IS NOT NULL AND block_id IS NOT NULL AND from_grapheme IS NOT NULL AND to_grapheme IS NOT NULL AND block_digest IS NOT NULL)
+  )) STRICT`),
 } as const;
 
 export const DIALOGUE_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
@@ -241,7 +254,9 @@ function widenDialogueExecutionBindings(db: DatabaseSync, from: 'revision-60' | 
 export function initializeDialogueSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'dialogue_tasks'").get() !== undefined;
   const shape = existing ? dialogueExecutionBindingsShape(db) : null;
-  if (shape === 'current') return;
+  const taskSql = existing ? String(db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_tasks'").get()!.sql) : null;
+  const legacyTasks = taskSql !== null && foldedSql(taskSql) === foldedSql(DIALOGUE_TASKS_REVISION_86_SQL);
+  if (shape === 'current' && !legacyTasks) return;
   const foreignKeys = (): number => integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
   const restoreForeignKeys = existing && foreignKeys() === 1;
   if (existing) {
@@ -252,7 +267,16 @@ export function initializeDialogueSchema(db: DatabaseSync): void {
     db.exec('BEGIN IMMEDIATE');
     try {
       if (shape !== null) {
-        widenDialogueExecutionBindings(db, shape);
+        if (shape !== 'current') widenDialogueExecutionBindings(db, shape);
+        if (legacyTasks) {
+          db.exec('CREATE TEMP TABLE migrate_global_dialogue_tasks AS SELECT rowid AS migrate_rowid, * FROM dialogue_tasks');
+          db.exec('DROP TABLE dialogue_tasks');
+          db.exec(DIALOGUE_SCHEMA_SQL.dialogue_tasks);
+          db.exec('INSERT INTO dialogue_tasks SELECT dialogue_id, book_id, manuscript_id, branch_id, revision_id, journal_sequence, block_id, from_grapheme, to_grapheme, block_digest, selection_sha256, question_sha256, presentation_mode, asked_at, canonical_json, sha256 FROM temp.migrate_global_dialogue_tasks ORDER BY migrate_rowid');
+          db.exec('DROP TABLE temp.migrate_global_dialogue_tasks');
+          db.exec(DIALOGUE_TRIGGER_SQL.dialogue_tasks_no_update!);
+          db.exec(DIALOGUE_TRIGGER_SQL.dialogue_tasks_no_delete!);
+        }
         requireDialogue(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
       } else {
         for (const sql of Object.values(DIALOGUE_SCHEMA_SQL)) db.exec(sql);
@@ -309,6 +333,16 @@ export interface DialogueTurnStart {
   readonly message: DialogueMessageInput;
 }
 export type DialogueOutcome = 'completed' | 'stopped' | 'interrupted' | 'failed';
+
+export interface StoredGlobalDialogueTask {
+  readonly dialogueId: string;
+  readonly bookId: null;
+  readonly sources: ReadonlyArray<GlobalMemoryPin>;
+  readonly operationalScope: import('../../shared/protocol.js').TrustedOperationalScope;
+  readonly sourcesSha256: string;
+  readonly questionSha256: string;
+  readonly askedAt: string;
+}
 
 export interface StoredDialogueTask {
   readonly dialogueId: string;
@@ -452,6 +486,36 @@ export class DialogueLedger {
     return { task, attemptId };
   }
 
+  askGlobal(scope: import('../../shared/protocol.js').TrustedOperationalScope, sources: ReadonlyArray<GlobalMemoryPin>, questionSha256: string, now: Date): { task: StoredGlobalDialogueTask; attemptId: string } {
+    requireDialogue(DIGEST_PATTERN.test(questionSha256) && sources.length <= 12, 'DIALOGUE_INVALID', '全域对话范围无效。');
+    const task: StoredGlobalDialogueTask = { dialogueId: randomUUID(), bookId: null, sources, operationalScope: scope,
+      sourcesSha256: sha256Hex(canonicalJson(sources)), questionSha256, askedAt: now.toISOString() };
+    const seal = sealed({ schema: 'ai7.global-agent-dialogue/1', ...task, presentationMode: 'interactive-stream' });
+    this.#db.prepare(`INSERT INTO dialogue_tasks (dialogue_id, selection_sha256, question_sha256, presentation_mode, asked_at, canonical_json, sha256)
+      VALUES (?, ?, ?, 'interactive-stream', ?, ?, ?)`).run(task.dialogueId, task.sourcesSha256, questionSha256, task.askedAt, seal.json, seal.sha256);
+    return { task, attemptId: this.#insertAttempt(task.dialogueId, 1, 'ask', null, now) };
+  }
+
+  globalTask(dialogueId: string): StoredGlobalDialogueTask | null {
+    requireDialogue(UUID_PATTERN.test(dialogueId), 'DIALOGUE_INVALID', '对话标识无效。');
+    const row = this.#db.prepare('SELECT * FROM dialogue_tasks WHERE dialogue_id = ? AND book_id IS NULL').get(dialogueId) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const record = JSON.parse(text(row.canonical_json)) as StoredGlobalDialogueTask;
+    const task: StoredGlobalDialogueTask = { dialogueId: text(row.dialogue_id), bookId: null, sources: record.sources, operationalScope: record.operationalScope,
+      sourcesSha256: text(row.selection_sha256), questionSha256: text(row.question_sha256), askedAt: text(row.asked_at) };
+    requireDialogue(['development-ci', 'developer-live', 'ordinary-production'].includes(task.operationalScope) && DIGEST_PATTERN.test(task.questionSha256) && Array.isArray(task.sources) && task.sources.length <= 12 && task.sources.every((pin) => pin !== null && typeof pin === 'object' &&
+      Object.keys(pin).sort().join(',') === 'itemId,revisionId' && typeof pin.itemId === 'string' && pin.itemId.length > 0 && pin.itemId.length <= 180 &&
+      typeof pin.revisionId === 'string' && pin.revisionId.length > 0 && pin.revisionId.length <= 180) && sha256Hex(canonicalJson(task.sources)) === task.sourcesSha256,
+      'DIALOGUE_RECORD_INVALID', INVALID);
+    verified(row, { schema: 'ai7.global-agent-dialogue/1', ...task, presentationMode: 'interactive-stream' });
+    return task;
+  }
+
+  globalTasks(): StoredGlobalDialogueTask[] {
+    return this.#db.prepare('SELECT dialogue_id FROM dialogue_tasks WHERE book_id IS NULL ORDER BY asked_at DESC, dialogue_id DESC LIMIT ?')
+      .all(DIALOGUE_TASKS_READ_LIMIT).map((row) => this.globalTask(String(row.dialogue_id))!);
+  }
+
   #taskRecord(task: StoredDialogueTask): Record<string, unknown> {
     return { schema: TASK_SCHEMA, ...task, presentationMode: 'interactive-stream' };
   }
@@ -460,7 +524,7 @@ export class DialogueLedger {
   task(dialogueId: string): StoredDialogueTask | null {
     requireDialogue(UUID_PATTERN.test(dialogueId), 'DIALOGUE_INVALID', '对话标识无效。');
     const row = this.#db.prepare('SELECT * FROM dialogue_tasks WHERE dialogue_id = ?').get(dialogueId) as SqlRow | undefined;
-    return row === undefined ? null : this.#task(row);
+    return row === undefined || row.book_id === null ? null : this.#task(row);
   }
 
   #task(row: SqlRow): StoredDialogueTask {

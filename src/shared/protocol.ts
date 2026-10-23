@@ -1,3 +1,5 @@
+import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
+export * from './protocol/global-agent.js';
 import type {
   QuickStartBaselineAnalysisResult,
   HISTORICALLY_AFFECTED_RESULT_MARKER,
@@ -123,7 +125,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 163 as const;
+export const SERVICE_PROTOCOL_VERSION = 164 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -516,6 +518,13 @@ export const IPC_CHANNELS = {
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
   recordProductionDocumentDelivery: 'ai7:j07:record-production-document-delivery',
   transitionProductionDocumentPhase: 'ai7:j07:transition-production-document-phase',
+  inspectGlobalAgentDialogue: 'ai7:global-agent:dialogue',
+  stopGlobalAgentAnswer: 'ai7:global-agent:stop',
+  continueGlobalAgentAnswer: 'ai7:global-agent:continue',
+  regenerateGlobalAgentAnswer: 'ai7:global-agent:regenerate',
+  inspectGlobalAgent: 'ai7:global-agent:inspect',
+  recordLearningSupervision: 'ai7:global-agent:supervise',
+  askGlobalAgent: 'ai7:global-agent:ask',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
   inspectBookTasks: 'ai7:j16:inspect-book-tasks',
   askAboutSelection: 'ai7:j16:ask-about-selection',
@@ -6777,6 +6786,7 @@ export interface HouseReviewPreferenceUse {
 }
 export interface HouseReviewPreferenceVersion {
   schema: 'ai7.house-review-preference/1';
+  governance?: { baseLines: HouseReviewPreferenceVersion['lines']; baseMaterialSetDigest: string; headDirectiveId: string };
   versionId: string;
   ordinal: number;
   supersedes: string | null;
@@ -10251,6 +10261,7 @@ export type GlobalAttentionTarget =
   | { kind: 'learning-materials'; bookId: string }
   // The dialogue in the side slot, in the foreground (Issue #52, S17a).
   | { kind: 'dialogue'; bookId: string; dialogueId: string }
+  | { kind: 'global-agent-dialogue'; dialogueId: string }
   // A Task kind's plan in the Task Drawer, on the surface that owns it — ②A, 审阅, 评估 for AI7 初评, 审稿意见 and 按我的评分重写评语,
   // 交付物 for a 写作任务: a waiting ledger Task of another kind, named by its Task (Issue #760, S74c), and 结果待确认 a Run left,
   // on the Book's current Task of the kind or, for a review, its latest Review Run (Issue #757).
@@ -11346,7 +11357,7 @@ export interface UsageProjection {
 /** The result of 导出为 CSV…: a file of numbers and ids, written where the editor chose. */
 export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'written'; rows: number };
 
-export interface ServiceOperationMap {
+export interface ServiceOperationMap extends GlobalAgentOperations {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
   selectSearchBackend: { input: { backendId: string }; output: SearchBackendSettingsProjection };
   probeSearchBackend: { input: { backendId: string }; output: SearchBackendProbeProjection };
@@ -12424,7 +12435,7 @@ export type PickerReselectResult =
   | { status: 'cancelled' }
   | { status: 'reselected'; continuation: ContinueImportProjection };
 
-export interface RendererApi {
+export interface RendererApi extends GlobalAgentRendererApi {
   selectSearchBackend(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
   probeSearchBackend(input: { backendId: string }): Promise<SearchBackendProbeProjection>;
   saveSearchBackendCredential(input: { backendId: string; secret: string }): Promise<ModelServiceSettingsProjection>;
