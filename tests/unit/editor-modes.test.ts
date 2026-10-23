@@ -101,6 +101,9 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
   // Source contracts only: mini-dom has no stylesheet/layout engine. J03 owns geometry evidence.
   const stylesheet = readFileSync(new URL('../../src/renderer/styles.css', import.meta.url), 'utf8');
   const compact = (value: string) => value.replace(/\s+/gu, '');
+  // Normalize formatting inside these guards, but retain descendant spaces between selector subjects.
+  const selectorText = (value: string) => value.trim().replace(/\s+/gu, ' ')
+    .replace(/([[(=]) /gu, '$1').replace(/ ([\])=])/gu, '$1');
   const drawer = 'body[data-task-drawer="open"]';
   const guards = [':root:not([data-sidebar="icons"])', drawer, ':has(.editor-workspace)'];
   const fallbackSelector = `${guards[0]} ${drawer}${guards[2]}`;
@@ -124,7 +127,7 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
     for (const [, selectors, declarations] of rules) {
       for (const selector of selectors!.split(',')) {
         // Compare each complete selector: a guarded list member cannot conceal a broad sibling or different subject.
-        const effect = fallbackEffects.find(({ target }) => compact(selector) === compact(`${fallbackSelector} ${target}`));
+        const effect = fallbackEffects.find(({ target }) => selectorText(selector) === selectorText(`${fallbackSelector} ${target}`));
         expect(effect, selector.trim()).toBeDefined();
         expect(declarations!.split(';').map(compact).filter(Boolean)).toEqual([effect!.declaration]);
         seen.add(effect!.target);
@@ -140,7 +143,7 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
       { target: '.status-bar', declaration: 'right:calc(var(--task-drawer-width)+1.2rem)' },
       { target: '#task-drawer-separator', declaration: 'display:block' },
     ]) {
-      const declarations = columnRules.filter(([, selectors]) => selectors!.split(',').some((selector) => compact(selector) === compact(`${drawer} ${target}`)))
+      const declarations = columnRules.filter(([, selectors]) => selectors!.split(',').some((selector) => selectorText(selector) === selectorText(`${drawer} ${target}`)))
         .flatMap(([, , body]) => body!.split(';').map(compact).filter(Boolean));
       expect(declarations, `focus off: ${target || 'body'}`).toEqual([declaration]);
     }
@@ -150,13 +153,14 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
   it('limits the inclusive 1120–1184px drawer fallback to manuscripts with the expanded sidebar, preserving ordinary columns', () => {
     assertDrawerStyles(stylesheet);
     assertDrawerStyles(stylesheet.replaceAll('{', ' { /* formatting only */\n').replaceAll(';', ' ;\n'));
+    assertDrawerStyles(stylesheet.replaceAll(fallbackSelector, ':root:not( [ data-sidebar = "icons" ] )\n\tbody[ data-task-drawer = "open" ]:has( .editor-workspace )'));
   });
 
   it('rejects missing guards in every fallback rule and every added selector-list member', () => {
     const { css, rules } = assertDrawerStyles(stylesheet);
     for (const { target } of fallbackEffects) {
       const selector = `${fallbackSelector}${target ? ` ${target}` : ''}`;
-      const original = rules.find(([, selectors]) => compact(selectors!) === compact(selector))![1]!;
+      const original = rules.find(([, selectors]) => selectorText(selectors!) === selectorText(selector))![1]!;
       for (const guard of guards) {
         const broad = selector.replace(guard, '');
         expect(() => assertDrawerStyles(css.replace(original, broad)), `${target || 'body'} missing ${guard}`).toThrow();
@@ -172,8 +176,27 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
     }
     for (const { target, declaration } of fallbackEffects) {
       const selector = `${fallbackSelector}${target ? ` ${target}` : ''}`;
-      const rule = rules.find(([, selectors]) => compact(selectors!) === compact(selector))![0];
+      const rule = rules.find(([, selectors]) => selectorText(selectors!) === selectorText(selector))![0];
       expect(() => assertDrawerStyles(css.replace(rule, `${rule}\n${drawer} ${target} { ${declaration}; }`))).toThrow();
+    }
+  });
+
+  it('rejects selector changes that move a guard or effect to a different subject', () => {
+    const { css, rules } = assertDrawerStyles(stylesheet);
+    for (const { target } of fallbackEffects) {
+      const selector = `${fallbackSelector}${target ? ` ${target}` : ''}`;
+      const original = rules.find(([, selectors]) => selectorText(selectors!) === selectorText(selector))![1]!;
+      const changedSelectors = [
+        selector.replace(':has(', ' :has('),
+        selector.replace(`${guards[0]} `, guards[0]!),
+        ...(target ? [selector.replace(` ${target}`, target)] : []),
+      ];
+      for (const changed of changedSelectors) {
+        expect(() => assertDrawerStyles(css.replace(original, changed)), changed).toThrow();
+      }
+      if (target) {
+        expect(() => assertDrawerStyles(css.replace(`${drawer} ${target}`, `${drawer}${target}`)), `column subject: ${target}`).toThrow();
+      }
     }
   });
 
