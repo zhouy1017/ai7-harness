@@ -1,3 +1,4 @@
+import { readPreinstalledProcedures } from './procedures/library.js';
 import type { DatabaseSync } from 'node:sqlite';
 import type { KnowledgeProceduresProjection } from '../shared/protocol.js';
 import { isRecord } from './analysis/canonical.js';
@@ -56,6 +57,7 @@ export function readKnowledgeProcedures(
   }));
   return {
     procedures,
+    preinstalled: readPreinstalledProcedures(db),
     artifacts: [{
       title: HOUSE_PROFILE_TITLE,
       revision: profile.revision,

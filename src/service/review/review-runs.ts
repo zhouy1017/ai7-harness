@@ -1,3 +1,5 @@
+import { resolveProcedureDefinition } from '../procedures/definition-store.js';
+import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { HouseReviewPreferenceLedger, housePreferenceLabel } from '../house-review-preference.js';
 import { LearningEligibilityError } from '../learning-eligibility.js';
 import type { HouseReviewPreferenceUse, LearningLedgerMaterialKind, ReviewRunInfluenceProjection } from '../../shared/protocol.js';
@@ -625,6 +627,7 @@ interface SnapshotCategory {
 
 /** The canonical record of `review_runs`. */
 interface RunSnapshot {
+  readonly preinstalledProcedures?: ReadonlyArray<{ categoryId: string; procedure: ProcedureDefinitionPin }>;
   /** By category kind, the version each category Task reads; empty when the house has lines but the selected rule is closed to them. */
   readonly housePreferences?: Readonly<Record<string, HouseReviewPreferenceUse>> | undefined;
   readonly materialReferences?: TaskMaterialBoundary;
@@ -1296,6 +1299,8 @@ export class ReviewRunStore {
         },
         configuration: this.#configurationPin(work.configuration),
         categories: work.prepared,
+        preinstalledProcedures: work.prepared.map((category) => ({ categoryId: category.categoryId,
+          procedure: resolveProcedureDefinition(this.#db, `ai7-procedure/review-${category.categoryId}`).pin })),
       };
       const record = canonicalRecord(snapshot);
       this.#db.prepare(
@@ -4133,6 +4138,7 @@ export class ReviewRunStore {
         influence: this.#influenceProjection(snapshot),
         scopeStop: view.scopeStop,
         procedure: readReviewRunProcedurePin(this.#db, snapshot.reviewRunId),
+        preinstalledProcedures: snapshot.preinstalledProcedures ?? [],
         capture: (() => {
           const reason = this.#captureOf(view).unavailableReason;
           return { available: reason === null, unavailableReason: reason };

@@ -1,3 +1,5 @@
+import { procedureIdForKind } from '../procedures/preinstalled.js';
+import { recordProcedurePlanPin, readProcedurePlanPin } from '../procedures/definition-store.js';
 import { kindResearchDeclaration } from './live-kind-admission.js';
 import { factualReviewDefinitionsByDigest, factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from './kind-definition.js';
 import { FACTUAL_REVIEW_KIND, type EvidenceAssuranceLevel } from '../../shared/protocol.js';
@@ -1430,6 +1432,7 @@ export class BaselineAnalysisStore {
       executionPlan: plan['execution-plan'] as BaselineAnalysisProjection['executionPlan'],
       planEnvelope: {
         digest: asString(digests['plan-envelope']),
+        procedure: readProcedurePlanPin(this.#db, asString(digests['plan-envelope'])),
         dispatchAllowed: envelope.dispatchAllowed === true,
         providerStatus: envelope.providerStatus as 'remote-denied-local-deterministic' | 'remote-denied-no-route',
         summary: asString(envelope.summary),
@@ -2599,6 +2602,7 @@ export class BaselineAnalysisStore {
     const blockedBy = current.state === 'blocked-before-dispatch' ? (currentRecord.cause === 'plan-moved' ? 'plan-moved' : 'launch') : null;
     return {
       runRecordId,
+      procedure: (parseCanonicalJson(asString(runRecord.canonical_json)) as { procedure?: import('../../shared/protocol.js').ProcedureDefinitionPin }).procedure ?? null,
       state: current.state,
       stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
         : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
@@ -3926,6 +3930,8 @@ export class BaselineAnalysisStore {
       `INSERT INTO analysis_plan_versions(plan_version_id, task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(planVersionId, taskIntentId, ordinal, input.planRevisionId, envelope.digest, instant, version.json, version.digest);
+    const procedureId = procedureIdForKind(this.#definition.kind);
+    if (procedureId !== null) recordProcedurePlanPin(this.#db, taskIntentId, envelope.digest, procedureId);
     return { planVersionId, planEnvelopeDigest: envelope.digest };
   }
 
@@ -4007,7 +4013,9 @@ export class BaselineAnalysisStore {
       ...(origin.kind === 'default-execution-rule' ? { ruleVersionId: origin.ruleVersionId } : {}),
       ...(origin.kind === 'background-analysis-enrollment' ? { enrollmentVersionId: origin.enrollmentVersionId } : {}),
     });
-    const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant });
+    const procedure = readProcedurePlanPin(this.#db, planEnvelopeDigest);
+    const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant,
+      ...(procedure === null ? {} : { procedure }) });
     transact(this.#db, () => {
       this.#db.prepare(
         `INSERT INTO analysis_run_authorizations(authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256)

@@ -1,3 +1,4 @@
+import { renderProcedureLibrary } from './procedure-library.js';
 import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
 import { ANALYSIS_MORE_RANGES, ANALYSIS_READ_FAILED, ANALYSIS_READING, ANALYSIS_MORE_REPORT_ROWS, ANALYSIS_MORE_CHOICES, ANALYSIS_EARLIER_HISTORY, ANALYSIS_PAGED_LIST_LABELS } from './analysis-paging-labels.js';
@@ -190,10 +191,8 @@ import {
 } from './evaluation-labels.js';
 import {
   PROCEDURES_HEADING,
-  PROCEDURE_STATE_LABELS,
   RULES_HEADING,
   artifactLine,
-  procedureLine,
   EXEMPLARS_EMPTY,
   EXEMPLARS_LATER,
   EXEMPLARS_MORE,
@@ -6099,17 +6098,8 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
   // The expert 工序 (Issue #427, S79d; KB-010): what each does, its version, state and use, then the native artifact.
   if (procedures !== null) {
     const section = element('section', 'knowledge-procedures');
-    section.dataset['procedureCount'] = String(procedures.procedures.length);
-    const list = element('ul', 'knowledge-procedure-list');
-    for (const procedure of procedures.procedures) {
-      const item = element('li', undefined);
-      item.dataset['procedureId'] = procedure.procedureId;
-      item.dataset['procedureState'] = procedure.state;
-      item.dataset['procedureRuns'] = String(procedure.reviewRuns);
-      item.append(element('span', `status-pill procedure-state-${procedure.state}`, PROCEDURE_STATE_LABELS[procedure.state]), element('span', undefined, ` ${procedureLine(procedure)}`));
-      if (procedure.unavailableReason !== null) item.append(element('span', 'field-note procedure-reason', ` · ${procedure.unavailableReason}`));
-      list.append(item);
-    }
+    section.dataset['procedureCount'] = String(procedures.preinstalled?.length ?? 0);
+    const list = renderProcedureLibrary(procedures.preinstalled ?? []);
     const artifacts = element('ul', 'knowledge-artifact-list');
     for (const artifact of procedures.artifacts) {
       const item = element('li', undefined, artifactLine(artifact));

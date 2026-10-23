@@ -46,7 +46,7 @@ describe('数据版本', () => {
   it('holds the Data Version to the classification of every schema revision after the release baseline (Issue #433, S85b)', () => {
     // Frozen at the 1.0.0 boundary (Issue #967): baseline 83 remains fixed; revision 84 adds model selections and
     // translation-attempt metadata additively, so both revisions remain inside Data Version 1.
-    expect([DATA_VERSION_BASELINE_REVISION, SCHEMA_REVISION_CLASSES]).toEqual([83, [{ revision: 84, class: 'additive' }]]);
+    expect([DATA_VERSION_BASELINE_REVISION, SCHEMA_REVISION_CLASSES]).toEqual([83, [{ revision: 84, class: 'additive' }, { revision: 85, class: 'additive' }]]);
     // The software's Data Version is always the classification's at its terminal revision: a breaking revision added to the
     // list without raising DATA_VERSION, or DATA_VERSION raised without one, fails here.
     expect(DATA_VERSION).toBe(dataVersionAt(LATEST_SCHEMA_VERSION));

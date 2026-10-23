@@ -485,6 +485,10 @@ describe('a Review Run over the real store on exact sample1', () => {
 
       // Ticked in any order, a Run keeps the configuration's order.
       const prepared = prepare(session, book, [LITERARY, PLOT, STYLE, TYPOS], WHOLE);
+      expect(prepared.preinstalledProcedures?.map((entry) => [entry.categoryId, entry.procedure.procedureId, entry.procedure.version])).toEqual(
+        [TYPOS, STYLE, PLOT, LITERARY].map((categoryId) => [categoryId, `ai7-procedure/review-${categoryId}`, 1]),
+      );
+      expect(prepared.preinstalledProcedures?.every((entry) => /^[a-f0-9]{64}$/u.test(entry.procedure.digest))).toBe(true);
       expect(prepared).toMatchObject({ ordinal: 1, label: '第 1 次', scope: { kind: 'whole', label: '全书', selectedRange: null }, authorization: null, canContinue: false });
       expect(prepared.categories.map((category) => [category.categoryId, category.state])).toEqual([
         [TYPOS, 'prepared'], [STYLE, 'prepared'], [PLOT, 'prepared'], [LITERARY, 'prepared'],

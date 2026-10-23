@@ -1,3 +1,5 @@
+import type { ProcedureDefinitionPin, PreinstalledProcedureProjection } from './protocol/procedures.js';
+export * from './protocol/procedures.js';
 import type {
   QuickStartBaselineAnalysisResult,
   HISTORICALLY_AFFECTED_RESULT_MARKER,
@@ -115,7 +117,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 161 as const;
+export const SERVICE_PROTOCOL_VERSION = 162 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -4712,6 +4714,8 @@ export interface BaselineAnalysisProjection {
     dispatchAllowed: boolean;
     providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route' | 'remote-eligible-developer-live' | 'remote-eligible-ordinary-production';
     summary: string;
+    /** Append-only sibling pin; the canonical envelope and its legacy digest stay unchanged. */
+    procedure?: ProcedureDefinitionPin | null;
     promptContractDigest: string;
     behaviorCompositionDigest: string;
     /** The plan version this envelope freezes; `null` for an envelope recorded before plan versions existed. */
@@ -4746,6 +4750,7 @@ export interface BaselineAnalysisProjection {
   };
   run: null | {
     runRecordId: string;
+    procedure?: ProcedureDefinitionPin | null;
     state: BaselineAnalysisRunState;
     stateLabel: string;
     recordedAt: string;
@@ -6899,6 +6904,7 @@ export interface ReviewRunProjection {
   scopeStop: null | 'series-knowledge' | 'house-review-preference';
   /** The Captured Procedure version the Run was prepared from, pinned (Issue #65, S30; ADR 0087 §4); `null` for one chosen by hand. */
   procedure: ReviewRunProcedureProjection | null;
+  preinstalledProcedures?: ReadonlyArray<{ categoryId: string; procedure: ProcedureDefinitionPin }>;
   /** Whether `将以上工序保存为可复用工序` is offered on this Run, and why not (ADR 0087 §2). */
   capture: ReviewAvailabilityProjection;
 }
@@ -8024,6 +8030,7 @@ export interface KnowledgeArtifactProjection {
 }
 
 export interface KnowledgeProceduresProjection {
+  readonly preinstalled?: ReadonlyArray<PreinstalledProcedureProjection>;
   readonly procedures: ReadonlyArray<KnowledgeProcedureProjection>;
   readonly artifacts: ReadonlyArray<KnowledgeArtifactProjection>;
 }
@@ -8417,6 +8424,7 @@ export interface CapturedProcedureVersionProjection {
 
 /** A Captured Procedure as 工序与规则's list names it: its newest title and state, how many versions it has, whether it runs. */
 export interface CapturedProcedureSummaryProjection {
+  readonly kindLabel?: '审阅专用前身';
   readonly procedureId: string;
   /** Its newest version's title. */
   readonly title: string;
