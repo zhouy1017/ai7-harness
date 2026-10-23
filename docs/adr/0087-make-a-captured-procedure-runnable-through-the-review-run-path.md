@@ -93,7 +93,7 @@ Deferred:
 | --- | --- | --- |
 | [V2-UX-REUSE-003](../ui-ux-v2/requirements.md) | "One capture creates exactly one result type: Default Execution Rule draft, native DSH Skill draft, Workflow-definition draft … or Developer Capability Proposal" | Adds Captured Procedure (§1); still exactly one type per capture |
 | [V2-UX-REUSE-005](../ui-ux-v2/requirements.md) | AI7 recommends a native DSH Skill draft for reusable model-assisted work | Except work that existing executors perform: a completed Review Run is captured as a Captured Procedure (§1) |
-| [V2-UX-REUSE-012](../ui-ux-v2/requirements.md) | "add, remove and reorder" | A Captured Procedure keeps the configuration's order (§2) | ADR 0095 §1 replaces this capture restriction for Procedure Definitions: their stages may be rearranged into a new immutable version.
+| [V2-UX-REUSE-012](../ui-ux-v2/requirements.md) | "add, remove and reorder" | The review-only Captured Procedure keeps the configuration's order (§2); ADR 0095 §1 replaces this capture restriction for Procedure Definitions, whose stages may be rearranged into a new immutable version. |
 | [Interaction specification](../ui-ux-v2/interaction-spec.md), Reusable procedure classification | Four recommended results | Adds Captured Procedure: runnable as a Review Run after `验证并启用` |
 | [UI context](../ui-ux-v2/CONTEXT.md), Reusable Procedure Classification Preview | Recommends one of four results | One of five; adds the term Captured Procedure (`可复用工序`) |
 | [Execution context](../domain/execution/CONTEXT.md), Authority Ceiling | For "one exact native DSH artifact revision" | Also for one Captured Procedure version (§4) |
