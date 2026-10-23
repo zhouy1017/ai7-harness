@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { GlobalMemoryItem, GlobalMemoryPin, HouseReviewPreferenceVersion, LearningSupervisionDirective, RecordLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
+import type { GlobalEditorialMemoryVersion, GlobalMemoryItem, GlobalMemoryPin, HouseReviewPreferenceVersion, LearningSupervisionDirective, RecordLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex, UUID_PATTERN } from '../analysis/canonical.js';
 import { LearningEligibilityError } from '../learning-eligibility.js';
 
@@ -26,16 +26,12 @@ export const SUPERVISION_FOREIGN_KEYS = {
   learning_supervision_directives: ['supersedes>learning_supervision_directives.directive_id:NO ACTION/NO ACTION/NONE'],
 };
 
-/** The F-05 owner keeps examples, eligibility and version writes. This seam never reads their manuscript references. */
-export interface EditorialMemoryGovernanceRevision {
-  readonly itemId: string;
-  readonly versionId: string;
-  readonly title: string;
-  readonly editorialDimension: string;
-  readonly activation: 'active' | 'inactive';
-  readonly signalIds: ReadonlyArray<string>;
-  readonly supervisionDirectiveRefs: ReadonlyArray<string>;
-}
+/**
+ * The F-05 owner (Issue #1082) keeps examples, eligibility and version writes; this seam reads its memory versions by their
+ * own shape and never their manuscript references. Declared only: F-06 part 2 wires it together with the tools (#1025).
+ */
+export type EditorialMemoryGovernanceRevision = Pick<GlobalEditorialMemoryVersion,
+  'itemId' | 'versionId' | 'title' | 'editorialDimension' | 'activation' | 'signalIds' | 'supervisionDirectiveRefs'>;
 export interface EditorialMemoryGovernanceHooks {
   /** Must page EditorialLearningLedger.inspect and use its current `usable` decision, including exclusions. */
   revisions(): ReadonlyArray<{ readonly current: EditorialMemoryGovernanceRevision; readonly usable: boolean }>;
