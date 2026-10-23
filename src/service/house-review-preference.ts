@@ -500,6 +500,9 @@ export function houseReviewPreferenceKindDefinition(base: AnalysisKindDefinition
   const promptContractDigest = digestOf(base.promptContractDigest);
   const definition: AnalysisKindDefinition = { ...base, systemPrompt: `${base.systemPrompt}\n${block}`, promptContractDigest,
     schemaDigest: sha256Hex(canonicalJson({ baseSchemaDigest: base.schemaDigest, promptContractDigest })),
+    ...(base.contractIdentity?.categoryConfiguration === undefined ? {} : { contractIdentity: { ...base.contractIdentity,
+      categoryConfiguration: { version: base.contractIdentity.categoryConfiguration.version,
+        digest: sha256Hex(canonicalJson({ base: base.contractIdentity.categoryConfiguration, preference })) } } }),
     ...(base.livePromptContractDigest === undefined ? {} : { livePromptContractDigest: () => digestOf(base.livePromptContractDigest!()) }),
     requestDigest: (ordinal, unitDigest) => sha256Hex(canonicalJson({ promptContractDigest, baseRequestDigest: base.requestDigest(ordinal, unitDigest) })),
   };

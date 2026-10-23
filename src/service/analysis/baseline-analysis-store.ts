@@ -403,6 +403,7 @@ export function assuranceContractMoved(definition: Pick<AnalysisKindDefinition, 
 }
 
 export interface BaselineAnalysisRouteFacts {
+  readonly reviewContractVersion?: 1 | 2;
   readonly fixtureIdentity: string;
   readonly fixtureSha256: string;
   readonly fixtureLineage: ReadonlyArray<{ identity: string; sha256: string }>;
@@ -659,6 +660,8 @@ interface PlanVersionFacts {
 
 /** The input of one `safe-retry` Plan Adaptation the execution owner records before it dispatches the retry. */
 export interface PlanAdaptationInput {
+  readonly adaptationClass?: 'safe-retry' | 'contract-retry';
+  readonly attemptIndex?: 2 | 3;
   readonly attemptId: string;
   readonly runRecordId: string;
   readonly taskIntentId: string;
@@ -1144,6 +1147,7 @@ export class BaselineAnalysisStore {
    */
   definitionForDigest(promptContractDigest: string): AnalysisKindDefinition {
     const current = this.definition;
+    if (current.kind.startsWith('editorial-review/')) return current.legacyReviewContract?.promptContractDigest === promptContractDigest ? current.legacyReviewContract : current;
     if (current.kind !== FACTUAL_REVIEW_KIND) return current;
     for (const level of ['standard', 'strict', 'quick'] as const) {
       const candidate = this.#factualDefinitionFor(level);
@@ -1488,11 +1492,11 @@ export class BaselineAnalysisStore {
       // An adaptation recorded before Issue #286 names no unit-message digest, and reads as one that kept none.
       const record = parseCanonicalJson(asString(row.canonical_json)) as Omit<PlanAdaptationRecord, 'firstUnitMessageDigest'> & { firstUnitMessageDigest?: string | null };
       const first = record.firstUnitMessageDigest ?? null;
-      requireAnalysis(record.adaptationId === row.adaptation_id && record.adaptationClass === 'safe-retry', 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
+      requireAnalysis(record.adaptationId === row.adaptation_id && (record.adaptationClass === 'safe-retry' || record.adaptationClass === 'contract-retry'), 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
       const retry = this.#retryTurnOf(asString(row.attempt_id), asNumber(row.unit_ordinal), record.adaptationId, record.firstUnitMessageDigest === undefined);
       const repetition: SafeRetryRepetition = first === null || retry === null || retry.unitMessageDigest === null ? 'unrecorded'
         : retry.unitMessageDigest === first ? 'byte-identical' : 'differs';
-      return { ...record, firstUnitMessageDigest: first, retry, repetition, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason, repetition) };
+      return { ...record, firstUnitMessageDigest: first, retry, repetition, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason, repetition, record.adaptationClass) };
     });
   }
 
@@ -2424,6 +2428,7 @@ export class BaselineAnalysisStore {
         kind: this.#definition.kind,
         contractVersion: this.#definition.contractVersion,
         schemaDigest: this.#definition.schemaDigest,
+        ...(this.#definition.contractIdentity?.categoryConfiguration === undefined ? {} : { categoryConfigurationIdentity: canonicalJson(this.#definition.contractIdentity.categoryConfiguration) }),
         mode,
         recompute: this.#definition.mode(mode).recompute,
         selectedRange,
@@ -2888,7 +2893,7 @@ export class BaselineAnalysisStore {
       ordinal,
       createdAt: asString(row.created_at),
       digest: asString(row.sha256),
-      contractVersion: this.#definition.contractVersion,
+      contractVersion: asString(row.contract_version),
       manuscriptPin,
       coverageManifestDigest: asString(row.coverage_manifest_sha256),
       schemaDigest: asString(body.schemaDigest),
@@ -3059,6 +3064,7 @@ export class BaselineAnalysisStore {
     return {
       ...facts,
       schemaDigest: asString(this.#revisionBody(row).schemaDigest),
+      ...(typeof this.#revisionBody(row).categoryConfigurationIdentity === 'string' ? { categoryConfigurationIdentity: asString(this.#revisionBody(row).categoryConfigurationIdentity) } : {}),
       unreviewedUnitOrdinals,
       changedUnreadUnitOrdinals: [...this.#unreadWalk(row).changed.keys()].sort((left, right) => left - right),
     };
@@ -3906,10 +3912,11 @@ export class BaselineAnalysisStore {
       providerResolutionPlanDigest: records['provider-resolution-plan']!.digest,
       executionPlanDigest: records['execution-plan']!.digest,
       promptContractDigest,
+      ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
-      boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? []),
+      boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? [], definition.contractIdentity?.version === 2),
     };
     const envelope = canonicalRecord(reusePlan === null ? envelopeBase : {
       ...envelopeBase,
@@ -3931,7 +3938,7 @@ export class BaselineAnalysisStore {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(planVersionId, taskIntentId, ordinal, input.planRevisionId, envelope.digest, instant, version.json, version.digest);
     const procedureId = procedureIdForKind(this.#definition.kind);
-    if (procedureId !== null) recordProcedurePlanPin(this.#db, taskIntentId, envelope.digest, procedureId);
+    if (procedureId !== null) recordProcedurePlanPin(this.#db, taskIntentId, envelope.digest, procedureId, definition.contractVersion === 'ai7.editorial-review/1' ? 1 : undefined);
     return { planVersionId, planEnvelopeDigest: envelope.digest };
   }
 
@@ -5040,11 +5047,11 @@ export class BaselineAnalysisStore {
   recordAdaptation(input: PlanAdaptationInput): { adaptationId: string; digest: string; recordedAt: string } {
     const adaptationId = randomUUID();
     const recordedAt = new Date().toISOString();
-    const built = buildPlanAdaptationRecord({ adaptationId, ...input, attemptIndex: 2, recordedAt });
+    const built = buildPlanAdaptationRecord({ adaptationId, ...input, attemptIndex: input.attemptIndex ?? 2, recordedAt });
     this.#db.prepare(
       `INSERT INTO analysis_plan_adaptations(adaptation_id, attempt_id, ordinal, unit_ordinal, adaptation_class, recorded_at, canonical_json, sha256)
-       VALUES (?, ?, ?, ?, 'safe-retry', ?, ?, ?)`,
-    ).run(adaptationId, input.attemptId, input.ordinal, input.unitOrdinal, recordedAt, built.json, built.digest);
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(adaptationId, input.attemptId, input.ordinal, input.unitOrdinal, input.adaptationClass ?? 'safe-retry', recordedAt, built.json, built.digest);
     return { adaptationId, digest: built.digest, recordedAt };
   }
 
@@ -5117,6 +5124,7 @@ export class BaselineAnalysisStore {
         coverageManifestDigest: facts.manifestDigest,
         // The contract the Run executed (Issue #901): a factual level's own; every other kind's, and an earlier plan's, as before.
         schemaDigest: this.definitionForRun(facts.runRecordId, facts.promptContractDigest).schemaDigest,
+        ...(this.#definition.contractIdentity?.categoryConfiguration === undefined ? {} : { categoryConfigurationIdentity: canonicalJson(this.#definition.contractIdentity.categoryConfiguration) }),
         reducerDigest: this.#definition.reducerDigest,
         // The revision pins the route that produced it: the fixture on the deterministic route, the
         // live route's own identity when the Run actually transmitted.

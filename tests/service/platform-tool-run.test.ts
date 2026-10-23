@@ -65,7 +65,7 @@ async function setup(maxTotalTokens: number): Promise<void> {
         tool_calls: [{ id: `call_${header.ordinal}`, type: 'function', function: { name: 'websearch', arguments: JSON.stringify({ query: QUERY }) } }] }, finish_reason: 'tool_calls' }], usage }), { status: 200 });
     }
     const last = body.messages.at(-1)!.content ?? '';
-    const result = header !== null ? { schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: header.ordinal, findings: [] }
+    const result = header !== null ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }
       : last.startsWith('保证抽样 ') ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(last).map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
         : { schema: 'ai7.analysis.run-report-reflection-result/1', items: [{ suggestion: '复查联网结果。', basis: '合成回归账目。' }] };
     return new Response(JSON.stringify({ model: DEVELOPER_LIVE_POLICY_BINDING.model, choices: [{ message: { content: JSON.stringify(result), reasoning_content: '合成推理通道。' }, finish_reason: 'stop' }], usage }), { status: 200 });

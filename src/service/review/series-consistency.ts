@@ -385,7 +385,7 @@ export function seriesConsistencyKindDefinition(db: DatabaseSync, base: Analysis
     const resolved = seriesConsistencyFromSources(scopes.map((scope) => ({ seriesId: scope.seriesId, title: scope.title })), sources);
     requireAnalysis(resolved.kind === 'available', 'SERIES_SCOPE_INVALID', '书系一致性依据无法核对。');
     const entry = seriesConsistencyEntry(BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.categoryId === 'series-consistency')!, resolved);
-    const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(entry));
+    const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(entry), base.contractVersion === 'ai7.editorial-review/1' ? 1 : 2);
     return { digest: definition.promptContractDigest, system: definition.systemPrompt };
   };
   const proof = derive();
@@ -405,6 +405,10 @@ export function seriesScopeKindDefinition(db: DatabaseSync, base: AnalysisKindDe
   const system = `${base.systemPrompt}\n${instruction}\n${canonicalJson(words)}`;
   const definition: AnalysisKindDefinition = { ...base, seriesScopes: structuredClone(scopes), systemPrompt: system,
     promptContractDigest: digest, schemaDigest: sha256Hex(canonicalJson({ base: base.schemaDigest, digest })),
+    // Review contract v2 reuses by semantic identity (#1084): the Series words read are part of it, as materials and preference are.
+    ...(base.contractIdentity?.categoryConfiguration === undefined ? {} : { contractIdentity: { ...base.contractIdentity,
+      categoryConfiguration: { version: base.contractIdentity.categoryConfiguration.version,
+        digest: sha256Hex(canonicalJson({ base: base.contractIdentity.categoryConfiguration, words })) } } }),
     requestDigest: (ordinal, unitDigest) => base.kind === 'evaluation' ? initialEvaluationRequestDigest(digest, ordinal, unitDigest)
       : reviewCategoryRequestDigest(digest, base.kind.slice('editorial-review/'.length), ordinal, unitDigest),
     ...(base.crossUnit?.step === undefined ? {} : { crossUnit: { ...base.crossUnit, promptContractDigest: digest, step: { ...base.crossUnit.step,

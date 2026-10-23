@@ -1,3 +1,4 @@
+import { reviewFixtureContractVersion } from './provider/model-fixture.js';
 import { ImportedExemplarError } from './imported-exemplars.js';
 import { dataVersionStartupRefusal } from '../shared/data-version-labels.js';
 import { isAbsolute, resolve } from 'node:path';
@@ -1126,6 +1127,7 @@ async function dispatch(
         op: request.op,
         result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress, {
           findingsAfterOrdinal: request.input.findingsAfterOrdinal ?? null,
+          excludedAfterOrdinal: request.input.excludedAfterOrdinal ?? null,
           categoryId: request.input.categoryId ?? null,
           severity: request.input.severity ?? null,
           status: request.input.status ?? null,
@@ -2079,7 +2081,7 @@ async function run(): Promise<void> {
       interruptAfterAbandonObjectRemoval: importControl === 'after-abandon-object-delete-before-finalize',
       baselineAnalysisRoute: fixture === null
         ? null
-        : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+        : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
       baselinePromptContract,
       // J-11's calibration gate (Issue #429, EVAL-011a): the product's ten Books in every other launch.
       ...(calibrationMinBooks === undefined ? {} : { calibrationMinAdjustments: calibrationMinBooks }),

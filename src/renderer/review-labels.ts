@@ -574,3 +574,5 @@ export function reviewOverviewLine(workspace: Pick<ReviewWorkspaceProjection, 'r
 /** 查看任务 on a Mark Card while the mark's Review Run is looked up, and when there is none to open. */
 export const REVIEW_VIEW_TASK_RESOLVING = '正在查找这条标记来自哪次审阅…';
 export const REVIEW_VIEW_TASK_ABSENT = '找不到产生这条标记的审阅记录。';
+
+export function reviewExcludedHeading(count: number): string { return `未列为发现的 ${count} 条`; }

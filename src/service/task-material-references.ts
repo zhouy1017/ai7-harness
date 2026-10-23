@@ -193,6 +193,9 @@ export function taskMaterialKindDefinition(
   const definition: AnalysisKindDefinition = {
     ...base,
     materialReferences: { sources, basePromptContractDigest: base.promptContractDigest },
+    ...(base.contractIdentity?.categoryConfiguration === undefined ? {} : { contractIdentity: { ...base.contractIdentity,
+      categoryConfiguration: { version: base.contractIdentity.categoryConfiguration.version,
+        digest: sha256Hex(canonicalJson({ base: base.contractIdentity.categoryConfiguration, sources })) } } }),
     systemPrompt: refusal === null ? [base.systemPrompt, contract.instruction, ...readings.flatMap((reading) =>
       reading.paragraphs!.map((paragraph, index) => `《${reading.source.title}》第 ${index + 1} 段：${paragraph}`))].join('\n') : base.systemPrompt,
     promptContractDigest,

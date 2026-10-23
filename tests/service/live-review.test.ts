@@ -31,13 +31,14 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 // #809 / J-04, J-05: real store, broker, Go adapter, egress, accounting and review drive loop.
 // The transport supplies the real route's JSON shape without a socket or real credential. Quotes
 // are composed from exact sample1 at runtime and comparisons never print manuscript text.
+let control: NonNullable<Parameters<typeof EditorialStore.open>[2]>;
 let roots: ServiceTestRoots;
 let policy: LaunchPolicyProjection;
 let store: EditorialStore;
 let owner: BaselineAnalysisExecutionOwner;
 let driver: ReviewRunDriver;
 let sent: number;
-let failure: 'none' | 'unknown' | 'quota';
+let failure: 'none' | 'unknown' | 'quota' | 'invalid-envelope';
 let holdTurn: number | 'sampling' | null;
 let arrived: Promise<void>;
 let announce: () => void;
@@ -50,10 +51,11 @@ let requests: Array<{ system: string; last: string }>;
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-live-review-');
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
-  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+  control = {
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null,
-  });
+  };
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
   const launch = {
     operationalScope: 'developer-live' as const, policy,
     live: {
@@ -84,6 +86,7 @@ beforeEach(async () => {
     if (sent === 1 && failure === 'quota') return new Response(JSON.stringify({ error: { message: 'synthetic account limit' } }), { status: 429 });
     requests.push({ system: body.messages.filter((entry) => entry.role === 'system').map((entry) => entry.content).join('\n'), last: message });
     const header = parseReviewCategoryUnitMessageHeader(message);
+    if (sent === 1 && failure === 'invalid-envelope') return new Response(JSON.stringify({ model: launch.live.model, choices: [{ message: { content: '{invalid', reasoning_content: '合成推理通道。' }, finish_reason: 'stop' }], usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
     let result: unknown;
     let capturedText: string | null = null;
     let responseUsage = { inputTokens: 40, outputTokens: 20 };
@@ -96,13 +99,13 @@ beforeEach(async () => {
       responseUsage = entry.response.usage;
     } else if (header !== null) {
       const blocks = message.split('\n').flatMap((line) => {
-        const match = /^\[blk_[0-9a-f]{24}\] \((?:title|heading|paragraph)(?: h[1-6])?\) (.*)$/u.exec(line);
+        const match = /^(?:\[[1-9][0-9]*\] )?\[blk_[0-9a-f]{24}\] \((?:title|heading|paragraph)(?: h[1-6])?\) (.*)$/u.exec(line);
         return match === null ? [] : [match[1]!];
       });
       const blockIndex = blocks.findIndex((text) => text.length >= 10 && text.length <= 80);
       const quote = blockIndex < 0 ? null : blocks[blockIndex]!;
       result = {
-        schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: header.ordinal,
+        schema: control.baselineAnalysisRoute?.reviewContractVersion === 1 ? 'ai7.editorial-review.unit-result/1' : 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal,
         findings: header.ordinal !== 1 || quote === null || header.categoryId === 'series-consistency' ? [] : [{
           quote, blockOrdinal: blockIndex + 1, severity: 'should', note: '合成回归建议；仅验证处置流程。',
           ...(header.categoryId === 'style-and-format' ? {} : { replacement: `${sliceGraphemes(quote, 0, 30)}（合成修改）` }),
@@ -141,6 +144,24 @@ function approvals(run: ReviewRunProjection) {
 }
 
 describe('reference-free review on the Go execution path', () => {
+  it('does not resend an invalid v2 envelope when the selected live policy does not admit contract retries (#1084)', async () => {
+    failure = 'invalid-envelope';
+    const book = await importSample1Book(store, roots.codeRoot, 'L2 contract retry denied');
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+    recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
+    expect(ruleFor(policy, 'editorial-review/typos-and-usage').plusDeclaredContractRetryAdaptations).not.toBe(true);
+    let work = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+    while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+    const run = work.projection!.run!;
+    store.authorizeReviewRun(book.bookId, run.reviewRunId, approvals(run));
+    await driver.drive(run.reviewRunId);
+    const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+    const projection = store.inspectReviewCategory(book.bookId, definition);
+    expect(projection.run!.adaptations).toEqual([]);
+    expect(projection.resultSetRevision!.gaps).toEqual(expect.arrayContaining([expect.objectContaining({ unitOrdinal: 1, code: 'contract-invalid' })]));
+    expect(requests.filter((request) => parseReviewCategoryUnitMessageHeader(request.last)?.ordinal === 1)).toHaveLength(1);
+  });
+
   it('admits the owner-rederived consistency base only when its listed kind has both the Series flag and category', async () => {
     const book = await importSample1Book(store, roots.codeRoot, 'L2 consistency admission');
     await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
@@ -233,6 +254,7 @@ describe('reference-free review on the Go execution path', () => {
         expect(fixture.provenance).toBe('recorded');
         expect([...fixture.entries.values()].every((entry) => entry.capture?.model === DEVELOPER_LIVE_POLICY_BINDING.model)).toBe(true);
         recorded.set(id, fixture);
+        control.baselineAnalysisRoute = { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: 1 };
       }
     }
     const book = await importSample1Book(store, roots.codeRoot, 'L2 sample1 live review');
@@ -246,13 +268,13 @@ describe('reference-free review on the Go execution path', () => {
     store.authorizeReviewRun(book.bookId, run.reviewRunId, approvals(run));
     await driver.drive(run.reviewRunId);
     const settled = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
-    expect(settled.categories.map((category) => category.state)).toEqual(['settled', 'settled', 'settled']);
+    expect(settled.categories.map((category) => category.state === 'settled' ? category.state : category.detail)).toEqual(['settled', 'settled', 'settled']);
     const findings = settled.findings;
     expect(findings.length).toBeGreaterThanOrEqual(source === 'recorded' ? 1 : 3);
     if (source === 'recorded') {
       // Re-reduce the unchanged recorded answers under the current locator: unique quotations recover
       // inside their authorized units. This checks exact grounding, not current live-model quality.
-      const counts = (id: string) => (store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry(id)!)))
+      const counts = (id: string) => (store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry(id)!), control.baselineAnalysisRoute?.reviewContractVersion === 1 ? 1 : 2))
         .resultSetRevision as ReviewCategoryResultSetRevisionProjection).findingCounts;
       expect(counts('typos-and-usage')).toMatchObject({ listed: 27, located: 27, excluded: 0 });
       expect(counts('style-and-format')).toMatchObject({ listed: 9, located: 9, excluded: 0 });

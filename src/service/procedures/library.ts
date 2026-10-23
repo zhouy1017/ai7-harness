@@ -20,6 +20,10 @@ export function readPreinstalledProcedures(db: DatabaseSync, reviewRuns: Readonl
   return preinstalledProcedureDefinitions().map((definition) => {
     const { document, pin } = resolveProcedureDefinition(db, definition.id);
     return { ...pin, title: document.title, state: 'enabled' as const, uses: uses.get(document.id) ?? 0,
+      ...(pin.version === 1 ? {} : { previousVersions: preinstalledProcedureDefinitions(1).filter((previous) => previous.id === document.id).map((previous) => {
+        const retained = resolveProcedureDefinition(db, previous.id, previous.version);
+        return { ...retained.pin, stages: retained.document.stages.map((stage) => ({ stageType: stage.stageType, label: PROCEDURE_STAGE_LABELS[stage.stageType] })) };
+      }) }),
       stages: document.stages.map((stage) => ({ stageType: stage.stageType, label: PROCEDURE_STAGE_LABELS[stage.stageType] })) };
   });
 }

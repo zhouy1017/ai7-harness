@@ -12,7 +12,7 @@ import { graphemeCount } from '../analysis/factual-review-contract.js';
 import type { ReviewDeliverableParticipant } from '../production-documents.js';
 
 /**
- * Editorial Review Contract v1 (Issue #417, plan slice S69): the one product-built, exact-versioned
+ * Editorial Review Contract (v1 retained from #417; numbered, tolerant v2 in #1084): the one product-built, exact-versioned
  * contract every Review Category is read under. One typed partial result per Analysis Unit — every
  * finding the category's guideline clauses call for, each with its verbatim quotation, the block that
  * quotation comes from, a severity, a note, and, for a category whose findings become 修改建议, the
@@ -31,8 +31,9 @@ import type { ReviewDeliverableParticipant } from '../production-documents.js';
  * `locateQuotation`, reused rather than restated — is the only anchor a finding ever carries, and what
  * becomes of a finding is the editor's (V2-UX-REV-003).
  */
-export const REVIEW_CATEGORY_UNIT_RESULT_SCHEMA = 'ai7.editorial-review.unit-result/1' as const;
-export const REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA = 'ai7.editorial-review.prompt-contract/1' as const;
+export const REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1 = 'ai7.editorial-review.unit-result/1' as const;
+export const REVIEW_CATEGORY_UNIT_RESULT_SCHEMA = 'ai7.editorial-review.unit-result/2' as const;
+export const REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA = 'ai7.editorial-review.prompt-contract/2' as const;
 export const REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA = 'ai7.editorial-review.result-set-revision/1' as const;
 /** The shape that carries scope-plan facts and per-unit lineage: every update, and a first review of one range. */
 export const REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA = 'ai7.editorial-review.result-set-revision/2' as const;
@@ -80,17 +81,27 @@ export interface ReviewUnitFinding {
 }
 
 export interface ReviewCategoryUnitResult {
-  readonly schema: typeof REVIEW_CATEGORY_UNIT_RESULT_SCHEMA;
+  readonly schema: typeof REVIEW_CATEGORY_UNIT_RESULT_SCHEMA | typeof REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1;
   readonly unitOrdinal: number;
   readonly findings: ReadonlyArray<ReviewUnitFinding>;
+  readonly rejected?: ReadonlyArray<RejectedReviewFinding>;
+  readonly acceptedIndexes?: ReadonlyArray<number>;
+}
+
+export interface RejectedReviewFinding {
+  /** Zero-based position in the model's original findings array. */
+  readonly index: number;
+  readonly reasonCode: ReviewCategoryUnitResultParseFailureCode;
+  /** The complete JSON finding, including malformed fields; it never becomes a mark. */
+  readonly text: string;
 }
 
 /**
  * Why a unit result did not parse. The first four are the factual parser's own codes and mean what
  * they mean there. The last three are this contract's: a 修改建议 category's finding without its
  * replacement, a 批注 category's finding with one, and a clause the category does not list. Each is a
- * refused unit result rather than a dropped finding, because a model that ignored the category's
- * output kind has not answered the contract it was given.
+ * unit-level failures in retained v1. V2 rejects those findings individually and keeps the original
+ * text and code beside accepted siblings; only envelope errors refuse a whole unit.
  */
 export type ReviewCategoryUnitResultParseFailureCode =
   | 'not-json'
@@ -102,7 +113,7 @@ export type ReviewCategoryUnitResultParseFailureCode =
   | 'clause-unknown';
 
 export type ReviewCategoryUnitResultParse =
-  | { ok: true; result: ReviewCategoryUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; result: ReviewCategoryUnitResult; canonicalJson: string; digest: string; accepted?: ReadonlyArray<ReviewUnitFinding>; rejected?: ReadonlyArray<RejectedReviewFinding> }
   | { ok: false; code: ReviewCategoryUnitResultParseFailureCode; detail: string };
 
 function boundedLine(value: unknown, maximumGraphemes: number): value is string {
@@ -204,29 +215,32 @@ function systemPromptOf(category: ReviewCategoryContractInput): string {
 
 /** The frozen prompt contract: category rules and, for cross-deliverable review, the bounded read-only participant input. */
 export interface ReviewCategoryPromptContract {
-  readonly schema: typeof REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA;
-  readonly contractVersion: typeof EDITORIAL_REVIEW_CONTRACT_VERSION;
-  readonly responseSchema: typeof REVIEW_CATEGORY_UNIT_RESULT_SCHEMA;
+  readonly schema: typeof REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA | 'ai7.editorial-review.prompt-contract/1';
+  readonly contractVersion: typeof EDITORIAL_REVIEW_CONTRACT_VERSION | 'ai7.editorial-review/1';
+  readonly responseSchema: typeof REVIEW_CATEGORY_UNIT_RESULT_SCHEMA | typeof REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1;
   readonly category: ReviewCategoryContractInput;
   readonly systemPrompt: string;
   readonly unitMessageHeader: typeof UNIT_MESSAGE_HEADER;
   readonly overlapHeader: typeof OVERLAP_HEADER;
   readonly ownHeader: typeof OWN_HEADER;
-  readonly blockLine: typeof BLOCK_LINE;
+  readonly blockLine: string;
 }
 
-export function reviewCategoryContract(input: ReviewCategoryContractInput): ReviewCategoryPromptContract {
+export function reviewCategoryContract(input: ReviewCategoryContractInput, version: 1 | 2 = 2): ReviewCategoryPromptContract {
   const category = frozenCategory(input);
   return {
-    schema: REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA,
-    contractVersion: EDITORIAL_REVIEW_CONTRACT_VERSION,
-    responseSchema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
+    schema: version === 1 ? 'ai7.editorial-review.prompt-contract/1' : REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA,
+    contractVersion: version === 1 ? 'ai7.editorial-review/1' : EDITORIAL_REVIEW_CONTRACT_VERSION,
+    responseSchema: version === 1 ? REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1 : REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
     category,
-    systemPrompt: systemPromptOf(category),
+    systemPrompt: version === 1 ? systemPromptOf(category) : systemPromptOf(category)
+      .replace('ai7.editorial-review.unit-result/1', REVIEW_CATEGORY_UNIT_RESULT_SCHEMA)
+      .replace('内容块序号从 1 开始，按用户消息中列出的顺序计数：先是重叠上下文的内容块，然后是本单元的内容块。',
+        '每个内容块以 [n] [blk_…] 开头；blockOrdinal 必须照抄该块开头的数字 n（从 1 开始，重叠上下文在前）。不要自行重新计数，不要填写块标识。'),
     unitMessageHeader: UNIT_MESSAGE_HEADER,
     overlapHeader: OVERLAP_HEADER,
     ownHeader: OWN_HEADER,
-    blockLine: BLOCK_LINE,
+    blockLine: version === 1 ? BLOCK_LINE : '[{ordinal}] ' + BLOCK_LINE,
   };
 }
 
@@ -234,7 +248,7 @@ export function reviewCategoryContractDigest(contract: ReviewCategoryPromptContr
   return sha256Hex(canonicalJson(contract));
 }
 
-export function parseReviewCategoryUnitResult(
+function parseReviewCategoryUnitResultV1(
   text: string,
   expected: { unitOrdinal: number; blockCount: number; output: ReviewCategoryOutputKind; clauseIds: ReadonlyArray<string>; deliverableRefs?: readonly string[] },
 ): ReviewCategoryUnitResultParse {
@@ -250,7 +264,7 @@ export function parseReviewCategoryUnitResult(
   if (!isRecord(parsed) || !hasExactKeys(parsed, ['schema', 'unitOrdinal', 'findings'])) {
     return invalid('单元结果键集合不符合编辑审阅契约 v1。');
   }
-  if (parsed.schema !== REVIEW_CATEGORY_UNIT_RESULT_SCHEMA) return invalid('单元结果 schema 不是编辑审阅契约 v1。');
+  if (parsed.schema !== REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1) return invalid('单元结果 schema 不是编辑审阅契约 v1。');
   if (!Number.isSafeInteger(parsed.unitOrdinal) || (parsed.unitOrdinal as number) < 1) return invalid('单元序号无效。');
   if (parsed.unitOrdinal !== expected.unitOrdinal) {
     return {
@@ -313,9 +327,39 @@ export function parseReviewCategoryUnitResult(
       ...('clauseId' in candidate ? { clauseId: candidate.clauseId as string } : {}),
     });
   }
-  const result: ReviewCategoryUnitResult = { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, findings };
+  const result: ReviewCategoryUnitResult = { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1, unitOrdinal: expected.unitOrdinal, findings };
   const canonical = canonicalJson(result);
   return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
+}
+
+/** Envelope errors lose the unit; finding errors lose only that finding, with its original text. */
+export function parseReviewCategoryUnitResult(
+  text: string,
+  expected: Parameters<typeof parseReviewCategoryUnitResultV1>[1] & { version?: 1 | 2 },
+): ReviewCategoryUnitResultParse {
+  if (expected.version === 1) return parseReviewCategoryUnitResultV1(text, expected);
+  const body = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text)?.[1] ?? text;
+  let parsed: unknown;
+  try { parsed = JSON.parse(body) as unknown; } catch { return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' }; }
+  if (!isRecord(parsed) || !hasExactKeys(parsed, ['schema', 'unitOrdinal', 'findings']) ||
+      parsed.schema !== REVIEW_CATEGORY_UNIT_RESULT_SCHEMA || !Number.isSafeInteger(parsed.unitOrdinal) ||
+      (parsed.unitOrdinal as number) < 1 || !Array.isArray(parsed.findings) || parsed.findings.length > MAX_FINDINGS) {
+    return { ok: false, code: 'schema-invalid', detail: '单元结果信封不符合编辑审阅契约 v2。' };
+  }
+  if (parsed.unitOrdinal !== expected.unitOrdinal) return { ok: false, code: 'unit-mismatch', detail: '单元结果序号与请求不一致。' };
+  const accepted: ReviewUnitFinding[] = [];
+  const acceptedIndexes: number[] = [];
+  const rejected: RejectedReviewFinding[] = [];
+  parsed.findings.forEach((candidate: unknown, index: number) => {
+    const one = parseReviewCategoryUnitResultV1(JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1,
+      unitOrdinal: parsed.unitOrdinal, findings: [candidate] }), expected);
+    if (one.ok) { accepted.push(one.result.findings[0]!); acceptedIndexes.push(index); }
+    else rejected.push({ index, reasonCode: one.code, text: JSON.stringify(candidate) });
+  });
+  const result: ReviewCategoryUnitResult = { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal,
+    findings: accepted, rejected, acceptedIndexes };
+  const canonical = canonicalJson(result);
+  return { ok: true, result, accepted, rejected, canonicalJson: canonical, digest: sha256Hex(canonical) };
 }
 
 // ---- the unit message ------------------------------------------------------------------------------
@@ -327,8 +371,9 @@ export function parseReviewCategoryUnitResult(
  */
 const HEADER_PATTERN = /^审阅单元 (\d+)\/(\d+) · 类别 ([a-z][a-z0-9]*(?:-[a-z0-9]+)*) · 单元摘要 ([0-9a-f]{64})$/u;
 
-function blockLine(block: Pick<ManifestBlockInput, 'blockId' | 'kind' | 'level' | 'text'>): string {
-  return BLOCK_LINE
+function blockLine(block: Pick<ManifestBlockInput, 'blockId' | 'kind' | 'level' | 'text'>, template: string, ordinal: number): string {
+  return template
+    .replace('{ordinal}', String(ordinal))
     .replace('{blockId}', block.blockId)
     .replace('{kind}', block.kind)
     .replace('{level}', block.level === null ? '' : ` h${block.level}`)
@@ -360,12 +405,13 @@ export function buildReviewCategoryUnitMessage(
       .replace('{categoryId}', contract.category.categoryId)
       .replace('{unitDigest}', unit.digest),
   ];
+  let ordinal = 0;
   if (unit.overlapBlockIds.length > 0) {
     lines.push(contract.overlapHeader);
-    for (const blockId of unit.overlapBlockIds) lines.push(blockLine(requireBlock(blocksById, blockId)));
+    for (const blockId of unit.overlapBlockIds) lines.push(blockLine(requireBlock(blocksById, blockId), contract.blockLine, ++ordinal));
   }
   lines.push(contract.ownHeader);
-  for (const blockId of unit.blockIds) lines.push(blockLine(requireBlock(blocksById, blockId)));
+  for (const blockId of unit.blockIds) lines.push(blockLine(requireBlock(blocksById, blockId), contract.blockLine, ++ordinal));
   if (contract.category.deliverables !== undefined) {
     lines.push('以下为只读交付物定稿片段（与稿件内容块分开编号）：');
     for (const document of contract.category.deliverables) {

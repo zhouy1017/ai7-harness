@@ -1,5 +1,7 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 export * from './protocol/global-agent.js';
+export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason } from './protocol/review.js';
+import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason } from './protocol/review.js';
 import type {
   QuickStartBaselineAnalysisResult,
   HISTORICALLY_AFFECTED_RESULT_MARKER,
@@ -125,7 +127,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 164 as const;
+export const SERVICE_PROTOCOL_VERSION = 165 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -2629,6 +2631,7 @@ export type OutboundDataCategoryId =
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
 export interface AdmittedProviderRule {
+  readonly plusDeclaredContractRetryAdaptations?: boolean;
   /** `true` on the v22/v23 review rule alone (`source.seriesKnowledgeAllowed`); absent on every other rule and policy, which refuses Series knowledge. */
   readonly seriesKnowledgeAllowed?: boolean;
   readonly ruleId: string;
@@ -3878,7 +3881,7 @@ export const WRITING_MATERIAL_LIVE_UNAVAILABLE =
  * frozen into each Task's prompt contract instead.
  */
 export const EDITORIAL_REVIEW_KIND_PREFIX = 'editorial-review/' as const;
-export const EDITORIAL_REVIEW_CONTRACT_VERSION = 'ai7.editorial-review/1' as const;
+export const EDITORIAL_REVIEW_CONTRACT_VERSION = 'ai7.editorial-review/2' as const;
 export type ReviewCategoryKindId = `${typeof EDITORIAL_REVIEW_KIND_PREFIX}${string}`;
 /** A category identity: lower-case words joined by single hyphens, as the built-in nine are spelled. */
 export const REVIEW_CATEGORY_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
@@ -4352,7 +4355,7 @@ export type PlanEditField = 'steps.assurance-sampling' | 'adaptations.safe-retry
 
 /** The Plan Boundary Split inside the canonical envelope: declared in-envelope adaptations, material fields, and expected editor participation. */
 export interface PlanBoundarySplitProjection {
-  adaptable: ReadonlyArray<{ adaptationClass: 'safe-retry'; label: string; statement: string }>;
+  adaptable: ReadonlyArray<{ adaptationClass: 'safe-retry' | 'contract-retry'; label: string; statement: string }>;
   /** The adaptations the editor moved into 先问你 (Issue #422, S76d); named only when there is one. */
   askFirst?: ReadonlyArray<{ adaptationClass: 'safe-retry'; label: string; statement: string }>;
   material: ReadonlyArray<{ field: MaterialPlanField; label: string }>;
@@ -4418,7 +4421,7 @@ export interface BaselineAnalysisPlanAdaptationProjection {
   taskIntentId: string;
   ordinal: number;
   unitOrdinal: number;
-  adaptationClass: 'safe-retry';
+  adaptationClass: 'safe-retry' | 'contract-retry';
   attemptIndex: number;
   classifiedReason: string;
   failureCode: string;
@@ -5679,10 +5682,12 @@ export interface ReviewCategoryFindingProjection {
  * not in the block it named, or is there more than once — and the third is a 修改建议 whose replacement
  * is exactly the text already there, which proposes nothing.
  */
-export type ReviewFindingExclusionReason = 'quote-not-found' | 'quote-ambiguous' | 'replacement-identical' | 'not-exact-fetched';
+export type ReviewFindingExclusionReason = 'quote-not-found' | 'quote-ambiguous' | 'replacement-identical' | 'not-exact-fetched' | ReviewContractRejectionReason;
 
 /** The excluded appendix: what the model listed that the service could not anchor; never a mark. */
 export interface ReviewCategoryExcludedProjection {
+  rawText?: string;
+  findingIndex?: number;
   findingId: string;
   unitOrdinal: number;
   /** The block the model named, when its ordinal resolved to one of the unit's blocks. */
@@ -5803,7 +5808,7 @@ export interface ReviewCategoryResultSetRevisionProjection {
   ordinal: number;
   createdAt: string;
   digest: string;
-  contractVersion: typeof EDITORIAL_REVIEW_CONTRACT_VERSION;
+  contractVersion: typeof EDITORIAL_REVIEW_CONTRACT_VERSION | 'ai7.editorial-review/1';
   manuscriptPin: { bookId: string; manuscriptId: string; revisionId: string; revisionLabel: string; revisionDigest: string };
   coverageManifestDigest: string;
   schemaDigest: string;
@@ -5868,7 +5873,7 @@ export interface ReviewCategoryUpdateControlsProjection extends Omit<BaselineAna
 
 export interface ReviewCategoryHistoryEntryProjection extends Omit<BaselineAnalysisHistoryEntryProjection, 'mode' | 'contractVersion' | 'counts'> {
   mode: ReviewCategoryTaskMode;
-  contractVersion: typeof EDITORIAL_REVIEW_CONTRACT_VERSION;
+  contractVersion: typeof EDITORIAL_REVIEW_CONTRACT_VERSION | 'ai7.editorial-review/1';
   counts: ReviewScopePlanCounts;
 }
 
@@ -5889,7 +5894,7 @@ export interface ReviewCategoryProjection extends Omit<
   'kind' | 'contractVersion' | 'taskIntent' | 'executionPlan' | 'resultSetRevision' | 'update' | 'updateControls' | 'history' | 'inspectedRevision'
 > {
   kind: ReviewCategoryKindId;
-  contractVersion: typeof EDITORIAL_REVIEW_CONTRACT_VERSION;
+  contractVersion: typeof EDITORIAL_REVIEW_CONTRACT_VERSION | 'ai7.editorial-review/1';
   taskIntent: null | {
     taskIntentId: string;
     goal: ReviewCategoryGoal;
@@ -6896,6 +6901,10 @@ export interface ReviewRunProjection {
    * crosses the service boundary in one frame. The next page is read with `findingsAfterOrdinal` set to
    * the last ordinal here and the same filters.
    */
+  excluded?: ReadonlyArray<ReviewExcludedFindingProjection>;
+  excludedTotal?: number;
+  excludedTruncated?: boolean;
+  excludedNextOrdinal?: number | null;
   findings: ReadonlyArray<ReviewFindingProjection>;
   /** How many findings pass the filters, before any page is taken; unfiltered, every finding of the Run. */
   findingsTotal: number;
@@ -6984,6 +6993,7 @@ export const REVIEW_FINDING_STATUSES: readonly ReviewFindingStatus[] = ['pending
  * stays small; it is a view only and changes no finding, disposition or mark.
  */
 export interface ReviewFindingPageRequest {
+  excludedAfterOrdinal?: number | null;
   /** The last ordinal the previous page ended at; `null` starts at the first finding. */
   findingsAfterOrdinal: number | null;
   categoryId: string | null;
@@ -6993,7 +7003,7 @@ export interface ReviewFindingPageRequest {
   chapterBlockId: string | null;
 }
 /** The optional keys an inspection of the 审阅 workspace may carry beside the Book and the Run. */
-export const REVIEW_FINDING_PAGE_KEYS = ['findingsAfterOrdinal', 'categoryId', 'severity', 'status', 'chapterBlockId'] as const satisfies
+export const REVIEW_FINDING_PAGE_KEYS = ['findingsAfterOrdinal', 'categoryId', 'severity', 'status', 'chapterBlockId', 'excludedAfterOrdinal'] as const satisfies
   ReadonlyArray<keyof ReviewFindingPageRequest>;
 
 /**

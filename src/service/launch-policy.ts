@@ -1112,6 +1112,7 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
       credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot,
       outboundDataCategories: [...reading.outboundDataCategories],
       crossUnitSynthesisAllowed: reading.crossUnitSynthesisAllowed,
+      ...((rule['transmissions'] as Record<string, unknown>)['plusDeclaredContractRetryAdaptations'] === true ? { plusDeclaredContractRetryAdaptations: true } : {}),
       materialReferencesAllowed: sourceFlag(rule, 'materialReferencesAllowed'),
       editorialDeliverablesAllowed: sourceFlag(rule, 'editorialDeliverablesAllowed'),
       // The flag verified above (v22's review rule alone), projected for its consumer (Issue #64, 7b); absent on every other rule.
@@ -1769,6 +1770,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
       credentialSlot: allowed.credentialSlot,
       outboundDataCategories: [...kind.outboundDataCategories],
       crossUnitSynthesisAllowed: kind.crossUnitSynthesisAllowed,
+      ...(kind.blocks.transmissions['plusDeclaredContractRetryAdaptations'] === true ? { plusDeclaredContractRetryAdaptations: true } : {}),
       materialReferencesAllowed: kind.blocks.source['materialReferencesAllowed'] === true,
       editorialDeliverablesAllowed: kind.blocks.source['editorialDeliverablesAllowed'] === true,
       // The flag verified at reading (v23's review rule alone), projected for its consumer (Issue #64, 7b); absent on every other rule.

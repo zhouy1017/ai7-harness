@@ -6,7 +6,7 @@ import {
 } from '../../shared/protocol/procedures.js';
 import { baselineAnalysisKindDefinition, factualReviewKindDefinition, type AnalysisKindDefinition } from '../analysis/kind-definition.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, type ReviewCategoryConfigurationEntry } from '../review/category-configuration.js';
-import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA } from '../review/review-category-contract.js';
+import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1 } from '../review/review-category-contract.js';
 import { BASELINE_ANALYSIS_KIND, FACTUAL_REVIEW_KIND, reviewCategoryIdOfKind } from '../../shared/protocol.js';
 
 export const BASELINE_PROCEDURE_ID = 'ai7-procedure/baseline-analysis';
@@ -40,14 +40,14 @@ export function baselineProcedureDefinition(definition: AnalysisKindDefinition =
 }
 
 /** Category identity and existing executor stay distinct from the legacy prompt's procedure identity. */
-export function reviewProcedureDefinition(entry: ReviewCategoryConfigurationEntry): ProcedureDefinitionDocument {
+export function reviewProcedureDefinition(entry: ReviewCategoryConfigurationEntry, version: 1 | 2 = 2): ProcedureDefinitionDocument {
   const leads = entry.executor === 'baseline-leads';
   const factual = entry.executor === 'factual-review-kind';
-  const resultSchema = factual ? factualReviewKindDefinition().unitResultSchema : REVIEW_CATEGORY_UNIT_RESULT_SCHEMA;
+  const resultSchema = factual ? factualReviewKindDefinition().unitResultSchema : version === 1 ? REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1 : REVIEW_CATEGORY_UNIT_RESULT_SCHEMA;
   return {
     schema: PROCEDURE_DEFINITION_SCHEMA,
     id: reviewProcedureId(entry.categoryId),
-    version: 1,
+    version: !leads && !factual ? version : 1,
     title: entry.procedure.title,
     role: entry.description,
     editorInstruction: '',
@@ -62,8 +62,13 @@ export function reviewProcedureDefinition(entry: ReviewCategoryConfigurationEntr
   };
 }
 
-export function preinstalledProcedureDefinitions(): readonly ProcedureDefinitionDocument[] {
-  return [...BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map(reviewProcedureDefinition), baselineProcedureDefinition()];
+export function preinstalledProcedureDefinitions(version: 1 | 2 = 2): readonly ProcedureDefinitionDocument[] {
+  return [...BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((entry) => reviewProcedureDefinition(entry, version)), baselineProcedureDefinition()];
+}
+
+/** Immutable predecessors remain admitted beside the current versions. */
+export function allPreinstalledProcedureDefinitions(): readonly ProcedureDefinitionDocument[] {
+  return [...preinstalledProcedureDefinitions(1), ...preinstalledProcedureDefinitions(2).filter((document) => document.version === 2)];
 }
 
 /** Only the ten pre-installed definitions are admitted in F-26a. */

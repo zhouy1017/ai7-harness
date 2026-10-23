@@ -34,12 +34,13 @@ import {
   reviewCategoryRequestDigest,
   type ReviewCategoryContractInput,
   type ReviewCategoryUnitResult,
+  REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1,
 } from './review-category-contract.js';
 import { reduceReviewCategory, type ReviewUnitOutcome } from './review-category-reducers.js';
 
 /**
  * One Review Category as an analysis kind (Issue #417, plan slice S69): `editorial-review/<categoryId>`,
- * read under `ai7.editorial-review/1`, on the same real path as the baseline and the factual kind —
+ * read under its frozen `ai7.editorial-review/1` or `/2`, on the same real path as the baseline and the factual kind —
  * Task Intent, input checkpoint, Coverage Manifest, Plan Envelope, standard Run Authorization, Run,
  * Result Set Revision — through the same ledger, execution owner, Egress Gate and adapter.
  *
@@ -89,16 +90,16 @@ const REVIEW_SAFE_NEXT_ACTIONS = {
 } as const;
 
 /** The schema digest of one category: the contract version, the unit result schema, and the category's own frozen contract. */
-export function reviewCategorySchemaDigest(promptContractDigest: string): string {
+export function reviewCategorySchemaDigest(promptContractDigest: string, version: 1 | 2 = 2): string {
   return sha256Hex(canonicalJson({
-    contractVersion: EDITORIAL_REVIEW_CONTRACT_VERSION,
-    unitResultSchema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
+    contractVersion: version === 1 ? 'ai7.editorial-review/1' : EDITORIAL_REVIEW_CONTRACT_VERSION,
+    unitResultSchema: version === 1 ? REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1 : REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
     promptContractDigest,
   }));
 }
 
-export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput): AnalysisKindDefinition {
-  const contract = reviewCategoryContract(input);
+export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput, version: 1 | 2 = 2): AnalysisKindDefinition {
+  const contract = reviewCategoryContract(input, version);
   const category = contract.category;
   const promptContractDigest = reviewCategoryContractDigest(contract);
   const clauseIds = category.clauses.map((clause) => clause.clauseId);
@@ -118,10 +119,12 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
     rangeBound: MODE_FACTS[mode].recompute === 'selected-range',
     recompute: MODE_FACTS[mode].recompute,
   }));
-  const executionSteps = ['派生覆盖清单', `逐单元执行编辑审阅契约 v1 ·「${category.label}」`, '按内容块文本确定性定位每条引文', '归约为审阅发现', '形成结果集修订版'];
-  return {
+  const executionSteps = ['派生覆盖清单', `逐单元执行编辑审阅契约 v${version} ·「${category.label}」`, '按内容块文本确定性定位每条引文', '归约为审阅发现', '形成结果集修订版'];
+  const definition: AnalysisKindDefinition = {
+    ...(version === 1 ? {} : { legacyReviewContract: reviewCategoryKindDefinition(input, 1) }),
     kind: reviewCategoryKindId(category.categoryId),
-    contractVersion: EDITORIAL_REVIEW_CONTRACT_VERSION,
+    contractVersion: contract.contractVersion,
+    ...(version === 1 ? {} : { contractIdentity: { contractId: 'ai7.editorial-review' as const, version, digest: promptContractDigest, categoryConfiguration: { version: category.procedure.version, digest: sha256Hex(canonicalJson(category)) } } }),
     expectedOutcome: reviewCategoryExpectedOutcome(category.label),
     taskGoal: reviewCategoryModeGoal(category.label, 'review-first'),
     initialMode: 'review-first',
@@ -132,11 +135,11 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
     outOfScope: 'leave-unreviewed',
     systemPrompt: contract.systemPrompt,
     promptContractDigest,
-    ...(category.deliverables === undefined ? {} : { livePromptContractDigest: () => reviewCategoryContractDigest(reviewCategoryContract(input)) }),
-    unitResultSchema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
+    ...(category.deliverables === undefined ? {} : { livePromptContractDigest: () => reviewCategoryContractDigest(reviewCategoryContract(input, version)) }),
+    unitResultSchema: contract.responseSchema,
     revisionSchema: REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA,
     successorRevisionSchema: REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA,
-    schemaDigest: reviewCategorySchemaDigest(promptContractDigest),
+    schemaDigest: reviewCategorySchemaDigest(promptContractDigest, version),
     reducerDigest: REVIEW_CATEGORY_REDUCER_DIGEST,
     reducerStages: REVIEW_CATEGORY_REDUCER_STAGES,
     executionSteps,
@@ -191,6 +194,7 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
     },
     requestDigest: (unitOrdinal, unitDigest) => reviewCategoryRequestDigest(promptContractDigest, category.categoryId, unitOrdinal, unitDigest),
     parseUnitResult: (text, unit) => parseReviewCategoryUnitResult(text, {
+      version,
       unitOrdinal: unit.ordinal,
       blockCount: reviewCategoryMessageBlockIds(unit).length,
       output: category.output,
@@ -220,10 +224,14 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
         conflictCount: 0,
       };
     },
-    unitRecord: (result) => ({ findings: (result as ReviewCategoryUnitResult).findings }),
+    unitRecord: (result) => {
+      const unit = result as ReviewCategoryUnitResult;
+      return { findings: unit.findings, ...(unit.rejected === undefined ? {} : { rejected: unit.rejected, acceptedIndexes: unit.acceptedIndexes }) };
+    },
     unitResultOfRecord: (record, unitOrdinal): ReviewCategoryUnitResult => ({
-      schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
+      schema: contract.responseSchema,
       unitOrdinal,
+      ...(record.rejected === undefined ? {} : { rejected: record.rejected as NonNullable<ReviewCategoryUnitResult['rejected']>, acceptedIndexes: record.acceptedIndexes as number[] }),
       findings: record.findings as ReviewCategoryUnitResult['findings'],
     }),
     // The contract names a block by its position in the unit message, which a reused unit keeps.
@@ -238,4 +246,5 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
     conflictCountOf: () => 0,
     mode: modeIndex(modes),
   };
+  return definition;
 }

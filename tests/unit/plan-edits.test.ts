@@ -28,7 +28,7 @@ import { ASK_FIRST_SAFE_RETRY_STATEMENT, planBoundarySplit } from '../../src/ser
 describe('what an editor may leave out of a baseline analysis plan', () => {
   it('names only what the Run honours, in the plan\'s words', () => {
     expect(PLAN_EDIT_STEP_LABELS).toEqual({ 'assurance-sampling': '核对与抽检' });
-    expect(PLAN_EDIT_ADAPTATION_LABELS).toEqual({ 'safe-retry': '模型服务暂时出错时，同一个阅读范围安全地再试一次' });
+    expect(PLAN_EDIT_ADAPTATION_LABELS).toEqual({ 'safe-retry': '模型服务暂时出错时，同一个阅读范围安全地再试一次', 'contract-retry': '契约重试（同一消息再发一次）' });
     expect(ASSURANCE_SAMPLING_REMOVED).toBe('按你修改的计划，这次运行不做核对与抽检；保证抽样未发起。');
     expect(SAFE_RETRY_WITHHELD).toBe('按你修改的计划，这次运行不自动重试');
   });

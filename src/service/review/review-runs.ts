@@ -1,6 +1,7 @@
-import { resolveProcedureDefinition } from '../procedures/definition-store.js';
+import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/definition-store.js';
 import { reviewProcedureId } from '../procedures/preinstalled.js';
 import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
+import { REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 import { HouseReviewPreferenceLedger, housePreferenceLabel } from '../house-review-preference.js';
 import { LearningEligibilityError } from '../learning-eligibility.js';
 import type { HouseReviewPreferenceUse, LearningLedgerMaterialKind, ReviewRunInfluenceProjection } from '../../shared/protocol.js';
@@ -49,6 +50,7 @@ import {
   type ReviewChapterOptionProjection,
   type ReviewCoverageRowProjection,
   type ReviewFindingPageRequest,
+  type ReviewExcludedFindingProjection,
   type ReviewFindingProjection,
   type ReviewFindingSeverity,
   type ReviewFindingStatus,
@@ -235,6 +237,15 @@ export const REVIEW_RUN_SCHEMA_SQL = {
   CHECK(state NOT IN ('settled', 'materialized') OR result_set_revision_id IS NOT NULL),
   UNIQUE(review_run_id, category_id, sequence)
 ) STRICT`,
+  review_excluded_findings: `CREATE TABLE review_excluded_findings (
+  review_run_id TEXT NOT NULL REFERENCES review_runs(review_run_id),
+  category_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+  result_set_revision_id TEXT NOT NULL REFERENCES analysis_result_set_revisions(revision_id),
+  canonical_json TEXT NOT NULL,
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+  PRIMARY KEY(review_run_id, category_id, ordinal)
+) STRICT`,
   review_findings: `CREATE TABLE review_findings (
   review_run_id TEXT NOT NULL REFERENCES review_runs(review_run_id),
   finding_id TEXT NOT NULL CHECK(length(finding_id) = 28 AND substr(finding_id, 1, 4) = 'rvf_'),
@@ -331,6 +342,7 @@ export const REVIEW_RUN_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<stri
     'review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE',
     'run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE',
   ],
+  review_excluded_findings: ['result_set_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE', 'review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE'],
   review_findings: [
     'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
     'mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
@@ -386,11 +398,19 @@ export function selectionExcludedLine(count: number): string {
  */
 export function initializeReviewRunSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'review_runs'").get();
-  if (existing !== undefined) return;
+  if (existing !== undefined && db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'review_excluded_findings'").get() !== undefined) return;
+  requireReview(existing === undefined || Number(db.prepare('PRAGMA user_version').get()?.user_version) < REVIEW_CONTRACT_SCHEMA_VERSION,
+    'SCHEMA_INVALID', '数据库缺少本版本的审阅排除记录。');
   db.exec('BEGIN IMMEDIATE');
   try {
-    for (const sql of Object.values(REVIEW_RUN_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(REVIEW_RUN_TRIGGER_SQL)) db.exec(sql);
+    if (existing === undefined) {
+      for (const sql of Object.values(REVIEW_RUN_SCHEMA_SQL)) db.exec(sql);
+      for (const sql of Object.values(REVIEW_RUN_TRIGGER_SQL)) db.exec(sql);
+    } else {
+      db.exec(REVIEW_RUN_SCHEMA_SQL.review_excluded_findings);
+      db.exec(REVIEW_RUN_TRIGGER_SQL['review_excluded_findings_no_update']!);
+      db.exec(REVIEW_RUN_TRIGGER_SQL['review_excluded_findings_no_delete']!);
+    }
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
@@ -422,7 +442,8 @@ const FIRST_FINDING_PAGE: ReviewFindingPageRequest = { findingsAfterOrdinal: nul
 
 /** The store's own reading of a page: the request frame already holds a renderer's to the same shape. */
 function validFindingPage(page: ReviewFindingPageRequest): boolean {
-  return isRecord(page) && hasExactKeys(page, ['findingsAfterOrdinal', 'categoryId', 'severity', 'status', 'chapterBlockId']) &&
+  return isRecord(page) && hasExactKeys(page, ['findingsAfterOrdinal', 'categoryId', 'severity', 'status', 'chapterBlockId', ...(Object.hasOwn(page, 'excludedAfterOrdinal') ? ['excludedAfterOrdinal'] : [])]) &&
+    (page.excludedAfterOrdinal == null || (Number.isSafeInteger(page.excludedAfterOrdinal) && page.excludedAfterOrdinal >= 1)) &&
     (page.findingsAfterOrdinal === null || (Number.isSafeInteger(page.findingsAfterOrdinal) && page.findingsAfterOrdinal >= 1)) &&
     (page.categoryId === null || (typeof page.categoryId === 'string' && page.categoryId.length >= 1 && page.categoryId.length <= 48)) &&
     (page.severity === null || REVIEW_FINDING_SEVERITIES.includes(page.severity)) &&
@@ -594,7 +615,7 @@ function boundedTitle(title: string): string {
  * kind's, and the leads read the baseline's.
  */
 export interface ReviewRunLedgers {
-  ledgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string, preference?: HouseReviewPreferenceUse | null): BaselineAnalysisStore;
+  ledgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string, preference?: HouseReviewPreferenceUse | null, contractVersion?: 1 | 2): BaselineAnalysisStore;
   /**
    * The house's 本社审阅偏好 for one category of one Book (Issue #911): its use when the category has lines and the kind's one rule
    * names the outbound category, `'closed'` when it has lines and the rule does not, `null` when it has none.
@@ -1301,7 +1322,7 @@ export class ReviewRunStore {
         configuration: this.#configurationPin(work.configuration),
         categories: work.prepared,
         preinstalledProcedures: work.prepared.map((category) => ({ categoryId: category.categoryId,
-          procedure: resolveProcedureDefinition(this.#db, reviewProcedureId(category.categoryId)).pin })),
+          procedure: (category.task === null ? null : readProcedurePlanPin(this.#db, category.task.planEnvelopeDigest)) ?? resolveProcedureDefinition(this.#db, reviewProcedureId(category.categoryId)).pin })),
       };
       const record = canonicalRecord(snapshot);
       this.#db.prepare(
@@ -1764,14 +1785,15 @@ export class ReviewRunStore {
     if (category.task === null || category.entry.executor !== 'review-category-contract') return this.#ledgers.ledgerOf(category.entry);
     const frozen = this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
     const execution = frozen.components['execution-plan'] as Record<string, unknown>;
-    const preference = new HouseReviewPreferenceLedger(this.#db).pinned(category.task.taskIntentId);
-    if (execution.materialReferences === undefined) return this.#ledgers.ledgerOf(category.entry, undefined, undefined, undefined, preference);
-    const references = taskMaterialSources(execution.materialReferences);
     const envelope = frozen.components['plan-envelope'] as Record<string, unknown>;
+    const contractVersion = isRecord(envelope.contractIdentity) && envelope.contractIdentity.version === 2 ? 2 : 1;
+    const preference = new HouseReviewPreferenceLedger(this.#db).pinned(category.task.taskIntentId);
+    if (execution.materialReferences === undefined) return this.#ledgers.ledgerOf(category.entry, undefined, undefined, undefined, preference, contractVersion);
+    const references = taskMaterialSources(execution.materialReferences);
     const intent = this.#db.prepare('SELECT book_id FROM analysis_task_intents WHERE task_intent_id = ?').get(category.task.taskIntentId) as SqlRow;
     const materialPromptDigest = clarificationPlanBaseDigest(execution, envelope);
     requireReview(materialPromptDigest !== null, 'REVIEW_RECORD_INVALID', '任务澄清指令的基础契约与计划不一致。');
-    return this.#ledgers.ledgerOf(category.entry, { bookId: text(intent.book_id), references }, materialPromptDigest, undefined, preference);
+    return this.#ledgers.ledgerOf(category.entry, { bookId: text(intent.book_id), references }, materialPromptDigest, undefined, preference, contractVersion);
   }
 
   #materialReadings(snapshot: RunSnapshot): ReadonlyArray<TaskMaterialReading> {
@@ -2349,6 +2371,7 @@ export class ReviewRunStore {
     };
     let findings: MaterializedFinding[];
     let excludedCount: number;
+    let excluded: ReviewExcludedFindingProjection[] = [];
     let outside = 0;
     if (category.executor === 'factual-review-kind') {
       const factual = revision as FactualReviewResultSetRevisionProjection;
@@ -2390,7 +2413,12 @@ export class ReviewRunStore {
         body: `${disclosure}${category.entry.riskPointsOnly ? RISK_POINT_PREFIX : ''}${finding.note}`,
         basis: this.#clauseBasis(category.entry, finding.clauseId),
       }));
-      excludedCount = review.excluded.filter((excluded) => recomputed.has(excluded.unitOrdinal)).length;
+      excluded = review.excluded.filter((finding) => recomputed.has(finding.unitOrdinal)).map((finding) => ({
+        categoryId: category.categoryId, categoryLabel: category.entry.label, unitOrdinal: finding.unitOrdinal,
+        text: finding.rawText ?? JSON.stringify({ quote: finding.quote, note: finding.note, replacement: finding.replacement }),
+        reasonCode: finding.reason, reasonLabel: finding.reasonLabel,
+      }));
+      excludedCount = excluded.length;
     }
     // 当前选区 (Issue #423 review, P1-1; V2-UX-TASK-003): the reading ranges are read whole, as context, and only what lies on the
     // selected paragraphs is put on the manuscript. The rest is counted, never stored as a mark, so the editor can widen to 选章.
@@ -2404,6 +2432,7 @@ export class ReviewRunStore {
       runRecordId: settled.runRecordId,
       resultSetRevisionId: settled.resultSetRevisionId,
       excludedCount,
+      excluded,
       outsideSelection: outside,
       selection: selected !== null,
       adapterPin: { route: revision.adapterPin.route, model: revision.adapterPin.model, fixtureIdentity: revision.adapterPin.fixtureIdentity, fixtureSha256: revision.adapterPin.fixtureSha256 },
@@ -2527,6 +2556,7 @@ export class ReviewRunStore {
       runRecordId: string | null;
       resultSetRevisionId: string;
       excludedCount: number;
+      excluded?: ReadonlyArray<ReviewExcludedFindingProjection>;
       /** Findings of a 当前选区 Run's reading ranges that lie outside the selected paragraphs: counted, not marked. */
       outsideSelection: number;
       /** A 当前选区 Run: its unplaceable quotes belong to the reading ranges, which its line says (P3-1). */
@@ -2539,6 +2569,11 @@ export class ReviewRunStore {
       const events = this.#events(reviewRunId, category.categoryId);
       if (events.some((event) => event.state === 'materialized')) return;
       requireReview(!events.some((event) => TERMINAL_CATEGORY_EVENTS.has(event.state)), 'REVIEW_CATEGORY_FINISHED', '这一类已经结束，不能再写入发现。');
+      const excludedInsert = this.#db.prepare('INSERT INTO review_excluded_findings(review_run_id, category_id, ordinal, result_set_revision_id, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)');
+      (source.excluded ?? []).forEach((finding, index) => {
+        const record = canonicalRecord(finding);
+        excludedInsert.run(reviewRunId, category.categoryId, index + 1, source.resultSetRevisionId, record.json, record.digest);
+      });
       const earlier = this.#db.prepare(
         `SELECT f.mark_id FROM review_findings f JOIN review_runs r ON r.review_run_id = f.review_run_id
          WHERE r.book_id = ? AND f.category_id = ? AND f.kind_ref = ? AND f.mark_id IS NOT NULL
@@ -4090,6 +4125,28 @@ export class ReviewRunStore {
       (page.severity === null || finding.severity === page.severity) &&
       (page.status === null || finding.status === page.status) &&
       (page.chapterBlockId === null || finding.chapterBlockId === page.chapterBlockId));
+    const excludedRows = this.#db.prepare('SELECT canonical_json, sha256 FROM review_excluded_findings WHERE review_run_id = ? ORDER BY category_id, ordinal').all(snapshot.reviewRunId) as SqlRow[];
+    const excludedParts = excludedRows.flatMap((row): ReviewExcludedFindingProjection[] => {
+      const json = text(row.canonical_json);
+      requireReview(sha256Hex(json) === row.sha256, 'REVIEW_RECORD_INVALID', '未列为发现的记录与摘要不一致。');
+      const entry = JSON.parse(json) as ReviewExcludedFindingProjection;
+      // Even a malformed finding may contain a long string. Persist it whole and page its text without loss.
+      const characters = Array.from(entry.text);
+      const total = Math.max(1, Math.ceil(characters.length / 8192));
+      if (total === 1) return [entry];
+      return Array.from({ length: total }, (_part, index) => ({ ...entry,
+        text: characters.slice(index * 8192, (index + 1) * 8192).join(''), textPart: { index: index + 1, total } }));
+    });
+    const excluded: ReviewExcludedFindingProjection[] = [];
+    let excludedBytes = 0;
+    const excludedAfter = page.excludedAfterOrdinal ?? 0;
+    // As with findings, at least one entry while any remain, so paging always reaches the end.
+    for (const entry of excludedParts.slice(excludedAfter)) {
+      const weight = wireBytes(entry);
+      if (excluded.length >= MAX_REVIEW_FINDINGS_PER_PAGE || (excluded.length > 0 && excludedBytes + weight > MAX_FRAME_BYTES / 8)) break;
+      excludedBytes += weight;
+      excluded.push(entry);
+    }
     const after = page.findingsAfterOrdinal;
     return {
       projection: {
@@ -4112,6 +4169,10 @@ export class ReviewRunStore {
         configurationDigest: snapshot.configuration.digest,
         authorization: view.authorization === null ? null : { authorizedAt: view.authorization.authorizedAt },
         categories,
+        excluded,
+        excludedTotal: excludedRows.length,
+        excludedTruncated: excludedAfter + excluded.length < excludedParts.length,
+        excludedNextOrdinal: excludedAfter + excluded.length < excludedParts.length ? excludedAfter + excluded.length : null,
         findings: [],
         findingsTotal: matching.length,
         findingsTruncated: false,

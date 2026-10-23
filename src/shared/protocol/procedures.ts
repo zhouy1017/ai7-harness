@@ -38,6 +38,7 @@ export interface ProcedureDefinitionPin {
 export interface PreinstalledProcedureProjection extends ProcedureDefinitionPin {
   readonly title: string;
   readonly stages: readonly { readonly stageType: ProcedureStageType; readonly label: string }[];
+  readonly previousVersions?: readonly (ProcedureDefinitionPin & { readonly stages: readonly { readonly stageType: ProcedureStageType; readonly label: string }[] })[];
   readonly state: 'enabled';
   readonly uses: number;
 }

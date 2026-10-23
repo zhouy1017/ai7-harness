@@ -211,6 +211,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   review_run_authorizations: 'owned',
   review_run_category_events: 'owned',
   review_findings: 'owned',
+  review_excluded_findings: 'owned',
   review_finding_dispositions: 'owned',
   review_reports: 'owned',
   quality_signals: 'owned',

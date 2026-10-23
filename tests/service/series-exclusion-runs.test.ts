@@ -1,3 +1,4 @@
+import { reviewFixtureContractVersion } from '../../src/service/provider/model-fixture.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -24,7 +25,9 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { J13_PLACE, J13_SERIES_TITLE, makeJ13Series } from '../support/series-consistency.js';
 import { leaveSeries, takeInNewItem, takeInRevision } from '../support/series-consistency.js';
-import { seriesScopeTooManyReason } from '../../src/service/review/series-consistency.js';
+import { freezeSeriesScope, seriesScopeKindDefinition, seriesScopeTooManyReason } from '../../src/service/review/series-consistency.js';
+import { reviewCategoryContractInput, reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
+import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { withSeriesKnowledgeFor } from '../support/policy-rules.js';
 import { sheetProcedureOption, SHEET_PROCEDURE_NONE } from '../../src/renderer/captured-procedure-labels.js';
 
@@ -82,7 +85,7 @@ async function withSession(body: (session: Session, bookId: string) => Promise<v
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
   });
   const owner = new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, unitHold,
@@ -192,6 +195,27 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: itemOf(store, seriesId) } });
       expect(store.seriesScopeGuard(authorization.dispatchRunRecordId!)).toContain(ITEM_LABEL);
       expect(category.planEnvelopeDigest).toBeTruthy();
+    }, null, REVIEW_FIXTURE);
+  }, 300_000);
+
+  it('moves the v2 review identity with the Series knowledge it adds, so units read under a revised item are not reused (#1084)', async () => {
+    await withSession(async ({ store, seriesId }, bookId) => {
+      const base = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+      const identity = () => {
+        const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+        try {
+          const definition = seriesScopeKindDefinition(db, base, [freezeSeriesScope(db, bookId, seriesId)]);
+          expect(definition.contractVersion).toBe(base.contractVersion);
+          return definition.contractIdentity!.categoryConfiguration!;
+        } finally { db.close(); }
+      };
+      const before = identity();
+      expect(identity()).toEqual(before);
+      expect(before).not.toEqual(base.contractIdentity!.categoryConfiguration);
+      takeInRevision(store, seriesId, itemOf(store, seriesId), '更新后的合成知识，用于后续任务。', 'series-tasks');
+      const after = identity();
+      expect(after.version).toBe(before.version);
+      expect(after.digest).not.toBe(before.digest);
     }, null, REVIEW_FIXTURE);
   }, 300_000);
 

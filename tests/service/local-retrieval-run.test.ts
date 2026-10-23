@@ -92,7 +92,7 @@ describe('registered local retrieval in a non-web authorized Run', () => {
           const candidates = JSON.parse(tools[0]!) as Array<{ candidateId: string }>;
           exactCalls += 1; return call('exact_fetch', { candidateId: candidates[0]!.candidateId });
         }
-        return answer(JSON.stringify({ schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: header.ordinal, findings: [] }));
+        return answer(JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }));
       });
       await s.run();
       const category = s.category();
@@ -135,7 +135,7 @@ describe('registered local retrieval in a non-web authorized Run', () => {
         if (tools.length > 0) results.push(JSON.parse(tools.at(-1)!) as typeof results[number]);
         if (tools.length === 0) return call('retrieve', { query: 'zqxunpinned', k: 8 });
         if (tools.length === 1) return call('retrieve', { query: 'zqxpinned', k: 8, sourceKinds: ['material'] });
-        return answer(JSON.stringify({ schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: header.ordinal, findings: [] }));
+        return answer(JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }));
       });
       await s.run([pinned]);
       expect(results.length).toBeGreaterThan(1);
@@ -164,7 +164,7 @@ describe('registered local retrieval in a non-web authorized Run', () => {
         if (tools.length === 1 && header.ordinal !== 1) return call('exact_fetch', { candidateId: candidate!.candidateId });
         const quote = tools.length === 2 ? (JSON.parse(tools[1]!) as { text: string }).text.slice(0, 10) : '合成引文';
         const finding = { quote, blockOrdinal: 1, severity: 'note', note: '合成说明。', replacement: `${quote}。`, retrievalAnchor: { candidateId: candidate!.candidateId } };
-        const text = JSON.stringify({ schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: header.ordinal, findings: [finding] });
+        const text = JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [finding] });
         return answer(header.ordinal === 1 ? text : `\`\`\`json\n${text}\n\`\`\``);
       });
       await s.run();

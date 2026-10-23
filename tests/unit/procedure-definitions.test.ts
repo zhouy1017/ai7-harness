@@ -39,7 +39,7 @@ describe('pre-installed procedures v1', () => {
   it('freezes the ten version-1 documents every revision-85 store holds', () => {
     // Every open compares the stored versions with these documents and refuses a store that differs, so a change to a
     // category's words, a kind's outcome or a contract id read here needs a version 2 beside version 1, never a new version 1.
-    expect(Object.fromEntries(preinstalledProcedureDefinitions().map((definition) => [definition.id, sha256Hex(canonicalJson(definition))]))).toEqual({
+    expect(Object.fromEntries(preinstalledProcedureDefinitions(1).map((definition) => [definition.id, sha256Hex(canonicalJson(definition))]))).toEqual({
       'ai7-procedure/review-typos-and-usage': '4be7d8ca9fbfc8b312fc163e9d1ee57b53372366adb576207ce6ee31741e4e5d',
       'ai7-procedure/review-style-and-format': 'c18a236a7d304876fd229cf225bdbbb2812206ad248b7a0b7b07a3e718419545',
       'ai7-procedure/review-plot-consistency': '20aee9cffceabb4f4b017b6dc38c2716125157fa5b87b47b3eba18e4d9a5be50',
