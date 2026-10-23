@@ -6818,7 +6818,7 @@ export async function runApplication(): Promise<void> {
       }
       requireDesktop(parent !== undefined && isAbsolute(parent));
       // Read the shipped policy set, never infer its version from the source branch or preferences.
-      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v17.json'), 'utf8')) as { version: string };
+      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v18.json'), 'utf8')) as { version: string };
       await writeDiagnosticsBundle(parent, {
         facts: { ...crashFacts(), policySetVersion: policySet.version, node: process.versions.node,
           locale: app.getLocale(), windowCount: ownedWindows.size },

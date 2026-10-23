@@ -267,7 +267,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     const bookId = await sample1Book(store, 'L2 正式后台分析');
     const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
     const selected = production.policy;
-    expect(selected.providerProcessing.version).toBe('v25');
+    expect(selected.providerProcessing.version).toBe('v26');
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'])?.backgroundOrigin).toBe(false);
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'], 'background')?.ruleId)
       .toBe('enrolled-background-manuscript-analysis-processing');
@@ -357,7 +357,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(prepared.planEnvelope).toMatchObject({ providerStatus: 'remote-eligible-ordinary-production', dispatchAllowed: true });
     expect(prepared.providerResolutionPlan).toMatchObject({
       remoteBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-flash', credentialSlot: 'deepseek-api-key', credentialReference: reference,
-        providerProcessing: { operationalScope: 'ordinary-production', version: 'v25' } },
+        providerProcessing: { operationalScope: 'ordinary-production', version: 'v26' } },
       executionRoute: { kind: 'deepseek-open-platform', model: 'deepseek-flash', endpoint: OFFICIAL.endpoint },
       outboundDataCategory: 'unpublished-excerpts',
       runBudgetCeiling: 'unset',
@@ -374,8 +374,8 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)).not.toContain(reference);
     const binding = store.baselineAnalysisLedger.executionBindingOf(settled.run!.runRecordId)!;
     expect(binding.binding).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', outboundDataCategory: 'unpublished-excerpts',
-      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v25' } });
-    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v25' });
+      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v26' } });
+    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v26' });
   });
 
   it('restarts beside an exact seeded development response, reads no cache file, and sends identical Tasks twice', async () => {
@@ -653,7 +653,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       expect(result.kind).toBe('translated');
       if (result.kind !== 'translated') throw new Error('production translation failed');
       expect(result.made).toMatchObject({ model: fast.model, route: fast.route, policyRuleId: 'ordinary-production-material-translation',
-        provenance: { role: 'Fast Interaction Role', endpoint: fast.endpoint, credentialReference: fast.credentialReference, policyVersion: 'v25',
+        provenance: { role: 'Fast Interaction Role', endpoint: fast.endpoint, credentialReference: fast.credentialReference, policyVersion: 'v26',
           usage: { inputTokens: 12, outputTokens: 7 }, failureCode: null } });
       expect(calls).toEqual([{ url: fast.endpoint, model: 'gpt-5.6-sol', cap: 512 },
         { url: fast.endpoint, model: fast.model, cap: 512 }, { url: fast.endpoint, model: fast.model, cap: 8192 }]);
@@ -676,7 +676,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const record = JSON.parse(String(translations[0]!.canonical_json));
         expect(record.provenance).toMatchObject({ role: 'Fast Interaction Role', route: fast.route, model: fast.model,
           endpoint: fast.endpoint, credentialSlot: fast.credentialSlot, credentialReference: fast.credentialReference,
-          policyVersion: 'v25', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 }, failureCode: null });
+          policyVersion: 'v26', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 }, failureCode: null });
         expect(record.label).toBe('来源译文');
         expect(JSON.stringify(record)).not.toContain('public-synthetic-opaque-reasoning');
       } finally { database.close(); }
