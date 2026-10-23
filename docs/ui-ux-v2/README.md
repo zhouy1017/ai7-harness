@@ -54,7 +54,7 @@ Editors experience one continuous Manuscript rather than technical windows or Ma
 
 ### D-009 — Navigation-first outline with explicit structure adjustment
 
-The virtualized hierarchical outline is normally a navigator in the right contextual navigation. A separate Whole-manuscript Position Rail provides sparse global markers. Reordering, level changes, or other structural edits require an explicit Structure Adjustment Mode with affected-range disclosure and durable undo; model-suggested structural changes remain Proposals. The right navigation also contains a persistent `搜索与跳转` entry, whose detailed search behavior is decided separately.
+The virtualized hierarchical outline is normally a navigator in the right contextual navigation. A separate Whole-manuscript Position Rail provides sparse global markers. Section moves, multi-heading hierarchy changes or other outline-driven structural edits require an explicit Structure Adjustment Mode with affected-range disclosure and durable undo; splitting, merging, inserting or deleting a paragraph and changing one heading's level at the caret are ordinary edits ([root ADR 0096 §1](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#1-structural-edits-are-ordinary-edits)); model-suggested structural changes remain Proposals. The right navigation also contains a persistent `搜索与跳转` entry, whose detailed search behavior is decided separately.
 
 ### D-010 — Manuscript-scoped Search and Jump
 

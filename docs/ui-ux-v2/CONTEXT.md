@@ -137,7 +137,7 @@ The compact editor-edge projection of coarse manuscript position and sparse mark
 _Avoid_: local scrollbar, minimap of loaded text, status authority
 
 **Structure Adjustment Mode** (`结构调整模式`):
-An explicitly entered outline state for editor-authored structural moves or hierarchy changes that discloses the affected text range and retains durable undo; model-suggested structural changes remain Proposals.
+An explicitly entered outline state for editor-authored section moves or multi-heading hierarchy changes that discloses the affected text range and retains durable undo; model-suggested structural changes remain Proposals. Single-block structural edits at the caret — split, merge, insert, delete, one heading's level — are ordinary edits outside this mode ([root ADR 0096 §1](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#1-structural-edits-are-ordinary-edits)).
 _Avoid_: normal outline navigation, drag-by-default, proposal application
 
 **Search and Jump Entry** (`搜索与跳转入口`):
