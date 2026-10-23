@@ -1496,7 +1496,7 @@ export class BaselineAnalysisStore {
       const retry = this.#retryTurnOf(asString(row.attempt_id), asNumber(row.unit_ordinal), record.adaptationId, record.firstUnitMessageDigest === undefined);
       const repetition: SafeRetryRepetition = first === null || retry === null || retry.unitMessageDigest === null ? 'unrecorded'
         : retry.unitMessageDigest === first ? 'byte-identical' : 'differs';
-      return { ...record, firstUnitMessageDigest: first, retry, repetition, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason, repetition).replace('安全重试', record.adaptationClass === 'contract-retry' ? '契约重试' : '安全重试') };
+      return { ...record, firstUnitMessageDigest: first, retry, repetition, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason, repetition, record.adaptationClass) };
     });
   }
 

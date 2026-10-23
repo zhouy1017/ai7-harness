@@ -283,8 +283,9 @@ export const SAFE_RETRY_REPETITION_DIFFERS = '重试发出的稿件与第 1 次�
  * The timeline and Overview wording of one adaptation: `计划内调整 · 单元 N 安全重试 1 次 · <classified reason>`, and the
  * violation after it when the retry's unit message was not the first attempt's (Issue #286).
  */
-export function planAdaptationLabel(unitOrdinal: number, classifiedReason: string, repetition: SafeRetryRepetition): string {
-  const label = `计划内调整 · 单元 ${unitOrdinal} 安全重试 1 次 · ${classifiedReason}`;
+export function planAdaptationLabel(unitOrdinal: number, classifiedReason: string, repetition: SafeRetryRepetition,
+  adaptationClass: 'safe-retry' | 'contract-retry' = 'safe-retry'): string {
+  const label = `计划内调整 · 单元 ${unitOrdinal} ${adaptationClass === 'contract-retry' ? '契约重试' : '安全重试'} 1 次 · ${classifiedReason}`;
   return repetition === 'differs' ? `${label} · ${SAFE_RETRY_REPETITION_DIFFERS}` : label;
 }
 

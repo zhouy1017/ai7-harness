@@ -4140,9 +4140,10 @@ export class ReviewRunStore {
     const excluded: ReviewExcludedFindingProjection[] = [];
     let excludedBytes = 0;
     const excludedAfter = page.excludedAfterOrdinal ?? 0;
+    // As with findings, at least one entry while any remain, so paging always reaches the end.
     for (const entry of excludedParts.slice(excludedAfter)) {
       const weight = wireBytes(entry);
-      if (excluded.length >= MAX_REVIEW_FINDINGS_PER_PAGE || excludedBytes + weight > MAX_FRAME_BYTES / 8) break;
+      if (excluded.length >= MAX_REVIEW_FINDINGS_PER_PAGE || (excluded.length > 0 && excludedBytes + weight > MAX_FRAME_BYTES / 8)) break;
       excludedBytes += weight;
       excluded.push(entry);
     }
