@@ -27,7 +27,7 @@ The P0 reuse slice [#808](https://github.com/zhouy1017/ai7-harness/issues/808) e
 
 ## Spend and account limits
 
-Use the existing product Run Budget Ceiling and the subscription's account limits; avoid duplicate work and unproductive loops while completing the task. Record actual live usage separately from replayed usage. The gateway's stated account-limit response ends the live attempt as `quota-exhausted`; keep any stated reset window, report it, and stop without fallback to Zen balance or another paid route. No numeric subscription allowance is asserted by this document.
+Use the existing product Run Budget Ceiling and the subscription's account limits; avoid duplicate work and unproductive loops while completing the task. Record actual live usage separately from replayed usage. The gateway's stated account-limit response — a 402, or a body naming quota or balance; a bare 429 on a route declared rate-limit-retryable is a rate limit handled by backoff under [ADR 0095 §2](./0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#2-an-execution-governor-and-real-throughput) — ends the live attempt as `quota-exhausted`; keep any stated reset window, report it, and stop without fallback to Zen balance or another paid route. No numeric subscription allowance is asserted by this document.
 
 ## Development and production
 

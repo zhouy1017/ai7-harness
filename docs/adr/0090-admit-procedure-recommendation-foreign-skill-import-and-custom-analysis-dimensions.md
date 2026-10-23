@@ -60,7 +60,7 @@ The editor may bring a Claude-, Codex- or other Agent-Skill file or folder from 
 
 ### 4. A Custom Analysis Dimension is admitted
 
-*Amends ADR 0087 §1 ("carries no prompt text of its own") for this new document type only, and ADR 0045's single-instruction-unit principle for it; admits row 21 and serves product story 145.*
+*Amends ADR 0087 §1 ("carries no prompt text of its own") for this new document type only, and ADR 0045's single-instruction-unit principle for it; admits row 21 and serves product story 145. Under [ADR 0095 §1](./0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#1-every-task-is-one-run-of-a-procedure) the dimension is one instruction form of a 分块审读 stage of a procedure, and its bounded-template rule becomes the rule for the editor's 编辑任务说明.*
 
 A **Custom Analysis Dimension** (`自定义分析维度`) is an AI7-owned, versioned, digest-pinned document, schema `ai7.custom-analysis-dimension/1`, defined by the editor in 知识库 › 工序与规则. One version is one immutable document of:
 

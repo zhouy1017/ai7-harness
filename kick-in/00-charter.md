@@ -29,7 +29,7 @@ As an editorial professional in a leading literary publishing house in mainland 
 ## Design principles
 
 1. **Preserve concepts and evidence, not old decomposition.** Keep user promises, domain invariants, and proven journeys; freely replace module, storage, UI, and process boundaries.
-2. **One execution control plane.** Harness owns the generic agent loop, model invocation, tool pipeline, session log, and agent orchestration. AI7 must not retain a parallel scheduler for the same work.
+2. **One execution control plane.** Harness owns the generic agent loop, model invocation, tool pipeline, session log, and agent orchestration. AI7 must not retain a parallel scheduler for the same work. Amended by [ADR 0095 §4](../docs/adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#4-dsh-is-the-harness-for-complex-tasks): AI7 schedules Runs and their two-layer governor and idle lane; DSH composes tools and sub-agents inside each authorized attempt, without a second generic loop.
 3. **AI7 owns editorial truth.** Books, manuscripts, revisions, proposals, workflow state, Task Ledger records, external Effects, and commit receipts remain AI7 domain concepts; Harness owns the technical execution event stream.
 4. **Model-visible means reconstructable.** Anything sent to a model must be derivable from durable records and exact source revisions.
 5. **Textual fidelity is not factual truth.** Exact quotations come only from a Textual Source of Record; Manuscript Assertions remain subject to Factual Verification and Semantic Review through separate capabilities.
