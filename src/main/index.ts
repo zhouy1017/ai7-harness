@@ -16,7 +16,13 @@ try {
 
 if (process.exitCode !== 1) {
   journeyStartup('application-import');
-  void import('./application.js')
+  void (async () => {
+    if (process.platform === 'win32') {
+      const { app } = await import('electron');
+      app.setAppUserModelId('AI7');
+    }
+    return import('./application.js');
+  })()
     .then(({ runApplication }) => runApplication())
     .catch(async () => {
       process.stderr.write('AI7_STARTUP_FAILED/application-import\n');
