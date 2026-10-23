@@ -38,10 +38,19 @@ export function prepareRetrievalResult(text: string, index: RetrievalIndex | nul
   return { text: changed ? JSON.stringify(value) : text, rejected };
 }
 
-/** Persist the validator's decision with the unit finding so continuations/reuse preserve the exclusion. */
+/**
+ * Persist the validator's decision with the unit finding so continuations/reuse preserve the exclusion. Review contract v2
+ * (#1084) keeps only the findings it accepted, so a citation's original position is read through `acceptedIndexes`; a
+ * finding the contract already rejected carries its own reason and nothing is marked in its place.
+ */
 export function markRetrievalResult(result: unknown, rejected: readonly RejectedCitation[]): void {
   if (!isRecord(result)) return;
-  for (const { collection, ordinal, path } of rejected) {
+  const accepted = Array.isArray(result.acceptedIndexes) ? result.acceptedIndexes as readonly unknown[] : null;
+  for (const citation of rejected) {
+    const { collection } = citation;
+    const ordinal = accepted === null || collection !== 'findings' ? citation.ordinal : accepted.indexOf(citation.ordinal);
+    if (ordinal < 0) continue;
+    const path = accepted === null || collection !== 'findings' ? citation.path : citation.path?.map((key, depth) => depth === 1 ? ordinal : key);
     const entries = result[collection];
     const item = Array.isArray(entries) ? entries[ordinal] as unknown : null;
     if (isRecord(item)) item.retrievalValidation = 'not-exact-fetched';

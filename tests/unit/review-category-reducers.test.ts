@@ -2,10 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { deriveCoverageManifest, UNIT_BUDGET_GRAPHEMES, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
 import { OUT_OF_SCOPE_GAP_REASON } from '../../src/service/analysis/reuse-plan.js';
-import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
+import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, parseReviewCategoryUnitResult, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
 import { graphemeCount, locateQuotation, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { reduceReviewCategory, type ReviewUnitOutcome } from '../../src/service/review/review-category-reducers.js';
-import { markRetrievalResult } from '../../src/service/retrieval/result-validator.js';
+import { markRetrievalResult, prepareRetrievalResult } from '../../src/service/retrieval/result-validator.js';
 
 // A review category's reduction over a synthetic manifest (Issue #417): Reference Integrity anchors
 // every finding in the block it named or excludes it with the reason, duplicates merge, identities are
@@ -134,6 +134,20 @@ describe('a review category reduction', () => {
     expect(reduction.findings.length).toBe(0);
     expect(reduction.excluded.map((item) => [item.reason, item.reasonLabel])).toEqual([['not-exact-fetched', '未经精确取文']]);
     expect(reduction.excluded[0]).not.toHaveProperty('sourceRange');
+  });
+  it('marks the cited finding, not its accepted neighbour, when a v2 sibling was rejected before it (#1084)', () => {
+    const anchored = { ...located, retrievalAnchor: { candidateId: 'c'.repeat(64) } };
+    const text = JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1,
+      findings: [{ ...located, replacement: located.quote }, anchored, { quote: '秤杆', blockOrdinal: 2, severity: 'note', note: '合成的说明。', replacement: '杆秤' }] });
+    const validated = prepareRetrievalResult(text, null);
+    expect(validated.rejected.map((entry) => [entry.collection, entry.ordinal])).toEqual([['findings', 1]]);
+    const parsed = parseReviewCategoryUnitResult(validated.text, { unitOrdinal: 1, blockCount: 5, output: 'change-suggestion', clauseIds: ['typos-and-usage/1'] });
+    if (!parsed.ok) throw new Error(parsed.code);
+    expect(parsed.result.acceptedIndexes).toEqual([1, 2]);
+    markRetrievalResult(parsed.result, validated.rejected);
+    const reduction = reduceReviewCategory({ categoryId: 'typos-and-usage', manifest, blocks: byId, outcomes: [{ unitOrdinal: 1, state: 'closed', result: parsed.result }] });
+    expect(reduction.findings.map((finding) => finding.quote)).toEqual(['秤杆']);
+    expect(reduction.excluded.map((entry) => [entry.reason, entry.findingIndex ?? entry.quote])).toEqual([['contract-schema-invalid', 0], ['not-exact-fetched', located.quote]]);
   });
   it('reads two units over the two synthetic sections', () => {
     expect(manifest.units).toHaveLength(2);
