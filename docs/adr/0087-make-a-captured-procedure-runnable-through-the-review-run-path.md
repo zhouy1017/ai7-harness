@@ -7,6 +7,8 @@ amends: V2-UX-REUSE-003 and REUSE-005 — a captured Review Run is saved as an A
 
 > Amended by [ADR 0090](./0090-admit-procedure-recommendation-foreign-skill-import-and-custom-analysis-dimensions.md) (§1, §2, §3, §4, §5): 工序推荐 is admitted (§4's recommendation exclusion and §6's deferral); foreign Skill import and update are admitted but inert until a Skill executor exists (§6); the Custom Analysis Dimension is a separate document type that carries a bounded question template (§1); `ai7.captured-procedure/2` adds a `series` run-source scope beside `current-book` (§4). A Captured Procedure still carries no prompt text and never starts by itself.
 
+> Amended by [ADR 0095 §1](./0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#1-every-task-is-one-run-of-a-procedure): the Captured Procedure is the review-only predecessor form of the Procedure Definition (`ai7.procedure-definition/2`), under which every task is one run of a procedure, pre-installed procedures re-express the built-in kinds, a procedure carries the editor's bounded task instruction and stage templates, and the house may rewrite, create, capture from any completed run, reorder and version it. §1's "built only from a completed Review Run and runs only as a Review Run" and "carries no prompt text of its own", §4's "never starts by itself" (now: never starts without an explicit start or an enrolled idle-lane dispatch under ADR 0095 §3) and §6's deferrals of capture from other Runs, reordering and in-place editing are replaced accordingly. The exact-anchor gate, Plan → Run Authorization and the single-use Apply are unchanged.
+
 # Make a captured procedure runnable through the Review Run path
 
 On 2026-10-08, answering the questions S30 (#65) raised, the Owner decided two things. A procedure saved with `将以上工序保存为可复用工序` must be runnable in this version (「要能运行」), not only saved. A Developer Capability Proposal is kept locally and may be exported to a file; AI7 never sends it. This record decides the smallest carrier, validation and run path that make the first true without widening any authority. The Owner accepted this text on 2026-10-08.
@@ -22,7 +24,7 @@ On 2026-10-08, answering the questions S30 (#65) raised, the Owner decided two t
 
 ### 1. A Captured Procedure is AI7 configuration over the Review Run executors
 
-A **Captured Procedure** (`可复用工序`) is an AI7-owned, versioned, digest-pinned procedure document. In this version it is built only from a completed Review Run and runs only as a Review Run. It is not a DSH Skill, a second instruction format or a runtime: it selects and orders review categories AI7 already executes, and carries no prompt text of its own.
+A **Captured Procedure** (`可复用工序`) is an AI7-owned, versioned, digest-pinned procedure document. As first delivered it is built only from a completed Review Run and runs only as a Review Run, selecting and ordering review categories AI7 already executes and carrying no prompt text of its own; [ADR 0095 §1](./0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#1-every-task-is-one-run-of-a-procedure) generalizes it into the Procedure Definition, which carries a bounded editor task instruction and stage templates while remaining an AI7 document rather than a DSH Skill, a second instruction format or a runtime.
 
 One version is one immutable document, schema `ai7.captured-procedure/1`, canonical JSON with its SHA-256:
 
@@ -83,7 +85,7 @@ Deferred:
 - the Workflow-definition branch;
 - catalog sources, trust tiers, sandboxing and recommendation;
 - Default Execution Rules over a Captured Procedure;
-- capture from any Run other than a Review Run, branches, reordering, editing a version in place, and permanent deletion (REUSE-039).
+- branches and permanent deletion (REUSE-039). Capture from any completed run, reordering and editing into a new version are admitted by [ADR 0095 §1](./0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#1-every-task-is-one-run-of-a-procedure).
 
 ### 7. Clauses amended
 

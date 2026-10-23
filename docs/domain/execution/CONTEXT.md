@@ -404,6 +404,36 @@ An explicit revocable authority allowing new background Runs for named manuscrip
 _中文_: 后台分析登记
 _Avoid_: Provider setup, artifact enablement, Default Execution Rule, general scheduler permission
 
+**Background Processing Enrollment**:
+The per-kind generalization of Background Analysis Enrollment ([ADR 0095 §3](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#3-an-idle-time-background-lane)): an explicit, disclosed, revocable authority with a mandatory budget ceiling under which named kinds that need no immediate result — analysis sync, index and embedding builds, learning curation passes, factual re-checks, custom analysis, deferred procedure stages — may dispatch during the editor's idle time, each dispatch separately recorded and policy-gated.
+_中文_: 后台处理登记
+_Avoid_: Background Analysis Enrollment (the manuscript-analysis special case), scheduler, standing Provider permission
+
+**Deferred Start**:
+The editor's choice, made when starting one task, that its Run waits for idle time instead of starting now; it is an explicit start, carries the same exact Plan and authorization, and yields its foreground place when the editor returns to the keyboard.
+_中文_: 空闲时处理
+_Avoid_: background authority, Enrollment, pause
+
+**Procedure Definition**:
+An AI7-owned, versioned, digest-pinned document (`ai7.procedure-definition/2`) stating a role and the editor's bounded task instruction, an ordered list of Procedure Stages with their stage types, inputs, tool whitelists, parallelism, output templates, exemption rules and budget shares, and the output kinds a run produces. Every task is one run of a Procedure Definition; pre-installed procedures re-express the built-in kinds, and the house may rewrite, create, capture, version and reuse procedures ([ADR 0095 §1](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#1-every-task-is-one-run-of-a-procedure)). It grants no Run, Provider, Apply or export authority.
+_中文_: 工序定义
+_Avoid_: Captured Procedure (its review-only predecessor), DSH Skill, prompt, template, automation
+
+**Procedure Stage**:
+One step of a Procedure Definition, of a stage type from the product-built registry — 通读记账, 分块审读, 确定性检查, 断言抽取, 联网取证, 跨单元归并与跨章一致性, 综合, 起草, 派生报告 — executed inside the Run's Plan Envelope as a declared operation class.
+_中文_: 工序阶段
+_Avoid_: Analysis Unit, turn, tool call
+
+**Stage Artifact**:
+The durable product of one Procedure Stage within one Run, carrying its source units and exact anchors, consumed by later stages and never itself a manuscript change.
+_中文_: 阶段产物
+_Avoid_: Result Set Revision, Editorial Artifact, mark
+
+**Editorial Task Instruction**:
+The editor's own instruction for one procedure run, bounded in length, attributed to the procedure version, free of any house person's name, transmitted under its own outbound data category 编辑任务说明, and never an override of AI7's contract framing.
+_中文_: 编辑任务说明
+_Avoid_: prompt, system instruction, Task Intent goal label
+
 **Execution Grant**:
 One-shot authority for an agent to execute one frozen guarded step within an authorized Run and unchanged Plan Envelope.
 _中文_: 单次执行许可
@@ -435,9 +465,9 @@ _中文_: 受控动作回执
 _Avoid_: Effect Approval, tool result, success toast
 
 **Ambiguous External Outcome**:
-The state in which an external Effect may have completed but available evidence cannot prove either completion or safe non-completion.
+The state in which an external Effect may have completed but available evidence cannot prove either completion or safe non-completion. A model request whose outcome is unknown is not an Ambiguous External Outcome: it settles its own unit as an outcome-unknown gap, the Run completes, nothing is resent automatically, and a later attempt for that unit is newly authorized with its possible double billing disclosed ([ADR 0095 §2](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#2-an-execution-governor-and-real-throughput)).
 _中文_: 外部动作结果不明
-_Avoid_: Failure, timeout, retryable error
+_Avoid_: Failure, timeout, retryable error, unit outcome unknown
 
 **Manual Outcome Resolution**:
 An evidence-bound user determination about one Ambiguous External Outcome, retained with its manual evidence class rather than presented as system verification.

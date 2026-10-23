@@ -1033,7 +1033,7 @@ Every formal agent-originated Manuscript mutation, including work from Agent Wor
 | `已应用` | Verified old→new revision, atomic count, Effect identity, actor/time, Proposal Decision | View manuscript/proposal/full receipt; prepare reversal |
 | `未应用` | Confirmed zero commit plus failed/stopped stage and reason | Retry only when replay safety is proven; otherwise re-prepare |
 | `正在确认应用结果` | Stable Effect identity and current recovery source | Wait/navigate; never repeat dispatch |
-| `结果待确认` | What is known, what is missing, last authoritative evidence | Resolve/recover outcome; no repeat-shaped action |
+| `结果待确认` | What is known, what is missing, last authoritative evidence | Resolve/recover outcome; no repeat-shaped action (external Effects; a unit whose model request's outcome is unknown is a gap in a completed Run with a disclosed new-attempt action, ADR 0095 §2) |
 
 ### Receipt rules
 

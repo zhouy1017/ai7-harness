@@ -296,6 +296,18 @@ _Avoid_: saved asset, generic template type, authority decision
 An AI7-owned, versioned, digest-pinned procedure document (`ai7.captured-procedure/1`) captured from a completed Review Run: its title, its ordered review-category steps with each 工序 version, output kind and model and search-engine use, one scope parameter and its Authority Ceiling — nothing of the Book. It runs only as an ordinary Review Run after `验证并启用`, pinned to the exact version; it is not a DSH Skill or an instruction carrier ([ADR 0087](../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md)).
 _Avoid_: Skill, macro, recipe, template, automatic procedure
 
+**Procedure Library** (`工序库`):
+The 知识库 › 工序与规则 projection under [root ADR 0095 §1](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#1-every-task-is-one-run-of-a-procedure): pre-installed and house Procedure Definitions by professional outcome, each with its stages, versions, state and uses, and the actions `改写为新版本`, `新建工序`, `从本次运行捕获` and `运行此工序…`. Listing or enabling a procedure grants no Run, Provider, Apply or export authority.
+_Avoid_: Skill catalog, template gallery, automation list
+
+**Idle-time Start** (`空闲时处理`):
+The start option on a procedure sheet or Task Composer that projects the execution context's Deferred Start: the Run is authorized now and dispatched when the editor is idle, shown in 待我处理 under `运行中与已暂停` with `等待空闲` as its state word.
+_Avoid_: background authority, Enrollment, pause
+
+**Live Processing Indicator** (`处理状态指示`):
+The context header's state word derived from the execution owner — `本地处理` with no request in flight, `正在发送至〈渠道〉` while a request is out, `等待网络` during a connectivity wait — replacing any static locality label ([root ADR 0096 §3](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#3-less-ceremony-more-trust)).
+_Avoid_: privacy badge, offline mode, decoration
+
 **Procedure Capture Source Set** (`工序捕获来源集合`):
 The exact user-selected completed Run or ordered completed user-visible editorial steps from which reusable structure may be extracted, excluding hidden Harness activity and unsuccessful instance outcomes by default.
 _Avoid_: recent-activity feed, transcript, whole Book history
