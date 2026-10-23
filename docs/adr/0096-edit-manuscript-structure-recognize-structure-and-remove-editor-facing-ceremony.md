@@ -1,5 +1,5 @@
 ---
-status: proposed — drafted on 2026-10-23 from the Owner's decisions of that day, recorded in #1065; it becomes `accepted` only when the Owner explicitly accepts this text
+status: accepted — drafted on 2026-10-23 from the Owner's decisions of that day, recorded in #1065, and accepted by the Owner on 2026-10-23 in the Commander session (「接受 ADR 0095/0096，按推荐顺序派发」), which this record names as its acceptance
 date: 2026-10-23
 deciders: Owner
 amends: ADR 0006 and ADR 0025 (structural edits as ordinary journal edits; note and table block kinds); ADR 0086 §2 rows 脚注与尾注, 表格 and 图片与图注, and its rejected prototype reading as far as a note block is concerned; ADR 0072 (heading classification by style only); ADR 0045 staged admission (the default workspace profile is pinned at Book creation); ADR 0094 §6 (the one explicit action extends to starting a procedure from its sheet); V2-UX-ED-017/018/019/044, IMP-002, IMP-055, AUTH-001/002/004, PLAN-007/008, PDEC-001/002/006/012, EAPP-003/004, LIVE-004, TASK-017; UI ADR 0011; editor surfaces §0.1, §1, §6, §7; the manuscript block definition of the editorial CONTEXT
