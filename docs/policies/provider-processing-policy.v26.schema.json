@@ -2043,8 +2043,14 @@
       ]
     },
     "execution": {
-      "maxInFlightRequests": 4,
-      "perRunUnitParallelism": 3,
+      "maxInFlightRequests": {
+        "configurable": true,
+        "default": 4
+      },
+      "perRunUnitParallelism": {
+        "configurable": true,
+        "default": 3
+      },
       "backgroundShare": {
         "configurable": true,
         "default": 1

@@ -42,7 +42,7 @@ const CARRIED_PATHS = [
 const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
-  'ordinary-production': ['v26', 'docs/policies/provider-processing-policy.v26.json', '26acbcc22fbd4c19fb75dd80397b2d9ea2d2c47e2d6e3a9f305deaf6eeafe9f9'],
+  'ordinary-production': ['v26', 'docs/policies/provider-processing-policy.v26.json', 'ab33c4fbab602a09e7233d3bf92cb4d59d841e3d532a933c5a155a2800d2063a'],
   'developer-live': ['v24', 'docs/policies/provider-processing-policy.v24.json', '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6'],
 } as const;
 /** Every immutable predecessor asset keeps its exact bytes: v6, v13, v15, v17, v19 and v21 (the old ordinary-production), v11, v12, v14, v16, v18, v20 and v22 (the old developer-live), and sets v9 to v15. */
@@ -75,7 +75,7 @@ const RETAINED_PREDECESSOR_DIGESTS = {
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v16 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = '6c81050d7afd07da8d4dd882c6c3e357d4c490074a9e4e54c1f10bfe5ba421eb';
+const ACTIVE_SET_SHA256 = '165ddae6775e892579356bf838f340b8f626bc5ae3c2ed15c0165e886ecc099e';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -436,8 +436,9 @@ describe('Provider Processing v26 Wave 20 eligibility', () => {
   const predecessorPath = 'docs/policies/provider-processing-policy.v25.json';
   const reviewPrefix = ['decision', 'providerAllowRules', '2'];
   const newTerms = [
-    ['execution'], ['execution', 'maxInFlightRequests'], ['execution', 'perRunUnitParallelism'],
-    ['execution', 'backgroundShare'], ['execution', 'backgroundShare', 'configurable'], ['execution', 'backgroundShare', 'default'],
+    ['execution'],
+    ...['maxInFlightRequests', 'perRunUnitParallelism', 'backgroundShare'].flatMap((term) =>
+      [['execution', term], ['execution', term, 'configurable'], ['execution', term, 'default']]),
     ['transport'], ['transport', 'requestDeadlineSeconds'], ['transport', 'rateLimitRetry'],
     ['transport', 'rateLimitRetry', 'honourRetryAfter'], ['transport', 'rateLimitRetry', 'maxRetries'],
     ['research'], ['research', 'searchesPerClaim'],

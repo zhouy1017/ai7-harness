@@ -29,7 +29,7 @@ const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
 export const ACTIVE_SET_VERSION = 'v18' as const;
 const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v18.json';
-const ACTIVE_SET_SHA256 = '6c81050d7afd07da8d4dd882c6c3e357d4c490074a9e4e54c1f10bfe5ba421eb';
+const ACTIVE_SET_SHA256 = '165ddae6775e892579356bf838f340b8f626bc5ae3c2ed15c0165e886ecc099e';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -44,7 +44,7 @@ const PROVIDER_PINS = {
   'ordinary-production': {
     version: 'v26',
     canonicalPath: 'docs/policies/provider-processing-policy.v26.json',
-    sha256: '26acbcc22fbd4c19fb75dd80397b2d9ea2d2c47e2d6e3a9f305deaf6eeafe9f9',
+    sha256: 'ab33c4fbab602a09e7233d3bf92cb4d59d841e3d532a933c5a155a2800d2063a',
   },
   'developer-live': {
     version: 'v24',
@@ -1540,10 +1540,12 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
  * Read v26's Wave 20 eligibility declarations exactly, then pass the existing runtime terms to the v25 reader.
  * F-21b owns their projection and the later slices own consumption; this activation changes no tool registration,
  * task admission, retry, synthesis or outbound payload. Missing, extra or differently shaped terms fail closed.
+ * The governor terms state configurable defaults only; their effective numbers are runtime configuration (ADR 0095 §2, §6).
  */
 function readWave20Eligibility(policy: Record<string, unknown>): Record<string, unknown> {
   requirePolicy(sameValue(policy['execution'], {
-    maxInFlightRequests: 4, perRunUnitParallelism: 3, backgroundShare: { configurable: true, default: 1 },
+    maxInFlightRequests: { configurable: true, default: 4 }, perRunUnitParallelism: { configurable: true, default: 3 },
+    backgroundShare: { configurable: true, default: 1 },
   }) && sameValue(policy['transport'], {
     requestDeadlineSeconds: 180, rateLimitRetry: { honourRetryAfter: true, maxRetries: 1 },
   }) && sameValue(policy['research'], { searchesPerClaim: 3 }));
