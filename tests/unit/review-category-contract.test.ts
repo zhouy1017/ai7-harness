@@ -147,10 +147,10 @@ describe('the Editorial Review Contract', () => {
 });
 
 describe('a review unit result', () => {
-  const suggestion = { unitOrdinal: 3, blockCount: 4, output: 'change-suggestion' as const, clauseIds: ['typos-and-usage/1'] };
-  const annotation = { unitOrdinal: 3, blockCount: 4, output: 'annotation' as const, clauseIds: ['style-and-format/1'] };
+  const suggestion = { version: 1 as const, unitOrdinal: 3, blockCount: 4, output: 'change-suggestion' as const, clauseIds: ['typos-and-usage/1'] };
+  const annotation = { version: 1 as const, unitOrdinal: 3, blockCount: 4, output: 'annotation' as const, clauseIds: ['style-and-format/1'] };
   const body = (findings: unknown[], extra: Record<string, unknown> = {}): string =>
-    JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 3, findings, ...extra });
+    JSON.stringify({ schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: 3, findings, ...extra });
   const finding = { quote: '合成的引文', blockOrdinal: 2, severity: 'must', note: '合成的说明。' };
 
   it('parses a 修改建议 finding with its replacement, and a 批注 finding without one', () => {
@@ -173,7 +173,7 @@ describe('a review unit result', () => {
     };
     expect(code('不是 JSON', suggestion)).toBe('not-json');
     expect(code(body([], { extra: true }), suggestion)).toBe('schema-invalid');
-    expect(code(JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 4, findings: [] }), suggestion)).toBe('unit-mismatch');
+    expect(code(JSON.stringify({ schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: 4, findings: [] }), suggestion)).toBe('unit-mismatch');
     expect(code(body([finding]), suggestion)).toBe('replacement-required');
     expect(code(body([{ ...finding, replacement: '合成的改文' }]), annotation)).toBe('replacement-refused');
     expect(code(body([{ ...finding, replacement: '合成的改文', clauseId: 'typos-and-usage/9' }]), suggestion)).toBe('clause-unknown');
@@ -181,5 +181,36 @@ describe('a review unit result', () => {
     expect(code(body([{ ...finding, severity: 'critical', replacement: '合成的改文' }]), suggestion)).toBe('schema-invalid');
     expect(code(body([{ ...finding, replacement: finding.quote }]), suggestion)).toBe('schema-invalid');
     expect(code(body([{ ...finding, verdict: '合规' }]), annotation)).toBe('schema-invalid');
+  });
+});
+
+
+describe('review contract v2 tolerance', () => {
+  it('preserves valid siblings and the complete rejected JSON with original indexes', () => {
+    const finding = { quote: '合成引文', blockOrdinal: 1, severity: 'should', note: '合成说明', replacement: '合成改文' };
+    const bad = { ...finding, replacement: finding.quote };
+    const parsed = parseReviewCategoryUnitResult(JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1,
+      findings: [finding, bad, null, { ...finding, blockOrdinal: 99 }, finding] }),
+      { unitOrdinal: 1, blockCount: 2, output: 'change-suggestion', clauseIds: [] });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.accepted).toEqual([finding, finding]);
+    expect(parsed.result.acceptedIndexes).toEqual([0, 4]);
+    expect(parsed.rejected!.map((entry) => [entry.index, entry.reasonCode])).toEqual([[1, 'schema-invalid'], [2, 'schema-invalid'], [3, 'quote-not-in-block']]);
+    expect(JSON.parse(parsed.rejected![0]!.text)).toEqual(bad);
+  });
+  it('numbers overlap and own blocks continuously while keeping v1 bytes available', () => {
+    const definition = reviewCategoryKindDefinition(TYPOS);
+    const ids = ['blk_' + 'a'.repeat(24), 'blk_' + 'b'.repeat(24)];
+    const blocks = new Map(ids.map((blockId) => [blockId, { blockId, kind: 'paragraph' as const, level: null, text: '合成段落' }]));
+    const unit = { ordinal: 2, sectionOrdinal: 1, subUnitIndex: 1, subUnitCount: 1, headingBlockId: null, headingText: null, headingLevel: null, blockDigests: ['b'.repeat(64)], digest: 'a'.repeat(64), overlapBlockIds: [ids[0]!], blockIds: [ids[1]!], startPosition: 2, endPosition: 2, graphemes: 4 };
+    const message = definition.buildUnitMessage(unit, 2, blocks);
+    expect(message).toContain(`[1] [${ids[0]}] (paragraph)`);
+    expect(message).toContain(`[2] [${ids[1]}] (paragraph)`);
+    expect(definition.systemPrompt).toContain('照抄该块开头的数字 n');
+    const legacy = reviewCategoryKindDefinition(TYPOS, 1);
+    expect(legacy.buildUnitMessage(unit, 2, blocks)).not.toContain('[1] [');
+    expect(legacy.systemPrompt).toContain('ai7.editorial-review.unit-result/1');
+    expect(legacy.promptContractDigest).not.toBe(definition.promptContractDigest);
   });
 });

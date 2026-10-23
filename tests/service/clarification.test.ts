@@ -618,7 +618,7 @@ describe('Clarification Requests over the real store', () => {
         reading: () => 'online', reachesNetwork: () => false, slotBusy: () => false, carriesStoppedRun: (id) => carrier.carriesStoppedRun(id),
       }, () => null);
       expect(moved.clarifications[0]!.answerable.reason).toBe(RESUME_BLOCKED_BINDING);
-      expect(moved.runControl?.cancel.impact[0]).toContain('已读完 7 个阅读范围，等你回答 1 个，你已回答但尚未续行 0 个，结果待确认 0 个，未尝试 0 个');
+      expect(moved.runControl?.cancel.impact[0]).toContain('已读完 7 个阅读范围，等你回答 1 个，你已回答但尚未续行 0 个，结果未知 0 个，未尝试 0 个');
       expect(moved.runControl?.cancel.impact[0]).toContain('执行绑定已经变化，这次取消不会形成结果集修订版。');
       expect(moved.runControl?.cancel.impact.slice(1)).toEqual(['第 5 个阅读范围在等你的回答；取消后不再重试。']);
       store.markCleanShutdown();

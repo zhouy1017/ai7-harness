@@ -510,6 +510,10 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['recordProposalDecisionReason']['output']>(IPC_CHANNELS.recordProposalDecisionReason, input),
   recordProposalDecisionFeedback: (input: ServiceOperationMap['recordProposalDecisionFeedback']['input']) =>
     invoke<ServiceOperationMap['recordProposalDecisionFeedback']['output']>(IPC_CHANNELS.recordProposalDecisionFeedback, input),
+  inspectEditorialLearning: (input: ServiceOperationMap['inspectEditorialLearning']['input']) => invoke<ServiceOperationMap['inspectEditorialLearning']['output']>(IPC_CHANNELS.inspectEditorialLearning, input),
+  changeEditorialLearning: (input: ServiceOperationMap['changeEditorialLearning']['input']) => invoke<ServiceOperationMap['changeEditorialLearning']['output']>(IPC_CHANNELS.changeEditorialLearning, input),
+  createEditorialMemory: (input: ServiceOperationMap['createEditorialMemory']['input']) => invoke<ServiceOperationMap['createEditorialMemory']['output']>(IPC_CHANNELS.createEditorialMemory, input),
+  deactivateEditorialMemory: (input: ServiceOperationMap['deactivateEditorialMemory']['input']) => invoke<ServiceOperationMap['deactivateEditorialMemory']['output']>(IPC_CHANNELS.deactivateEditorialMemory, input),
   inspectHouseReviewPreference: () => invoke<ServiceOperationMap['inspectHouseReviewPreference']['output']>(IPC_CHANNELS.inspectHouseReviewPreference, {}),
   rebuildHouseReviewPreference: () => invoke<ServiceOperationMap['rebuildHouseReviewPreference']['output']>(IPC_CHANNELS.rebuildHouseReviewPreference, {}),
   inspectEditQualitySignals: (input: ServiceOperationMap['inspectEditQualitySignals']['input']) => invoke<ServiceOperationMap['inspectEditQualitySignals']['output']>(IPC_CHANNELS.inspectEditQualitySignals, input),
@@ -740,6 +744,13 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['saveProductionDocumentVersion']['output']>(IPC_CHANNELS.saveProductionDocumentVersion, input),
   recordProductionDocumentDelivery: (input: Omit<ServiceOperationMap['recordProductionDocumentDelivery']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['recordProductionDocumentDelivery']['output']>(IPC_CHANNELS.recordProductionDocumentDelivery, input),
+  inspectGlobalAgentDialogue: (input: ServiceOperationMap['inspectGlobalAgentDialogue']['input']) => invoke<ServiceOperationMap['inspectGlobalAgentDialogue']['output']>(IPC_CHANNELS.inspectGlobalAgentDialogue, input),
+  stopGlobalAgentAnswer: (input: ServiceOperationMap['stopGlobalAgentAnswer']['input']) => invoke<ServiceOperationMap['stopGlobalAgentAnswer']['output']>(IPC_CHANNELS.stopGlobalAgentAnswer, input),
+  continueGlobalAgentAnswer: (input: ServiceOperationMap['continueGlobalAgentAnswer']['input']) => invoke<ServiceOperationMap['continueGlobalAgentAnswer']['output']>(IPC_CHANNELS.continueGlobalAgentAnswer, input),
+  regenerateGlobalAgentAnswer: (input: ServiceOperationMap['regenerateGlobalAgentAnswer']['input']) => invoke<ServiceOperationMap['regenerateGlobalAgentAnswer']['output']>(IPC_CHANNELS.regenerateGlobalAgentAnswer, input),
+  inspectGlobalAgent: () => invoke<ServiceOperationMap['inspectGlobalAgent']['output']>(IPC_CHANNELS.inspectGlobalAgent, {}),
+  recordLearningSupervision: (input: ServiceOperationMap['recordLearningSupervision']['input']) => invoke<ServiceOperationMap['recordLearningSupervision']['output']>(IPC_CHANNELS.recordLearningSupervision, input),
+  askGlobalAgent: (input: ServiceOperationMap['askGlobalAgent']['input']) => invoke<ServiceOperationMap['askGlobalAgent']['output']>(IPC_CHANNELS.askGlobalAgent, input),
   inspectGlobalAttention: () =>
     invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
   reviewManuscriptExport: (input: Parameters<RendererApi['reviewManuscriptExport']>[0]) =>

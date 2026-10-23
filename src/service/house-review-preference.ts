@@ -1,8 +1,9 @@
+import { SupervisionDirectives, governedMemoryItems, preferenceItems } from './learning/supervision-directives.js';
 import { liveMaterialContract, materialContractDefinition } from './task-material-references.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AnalysisKindDefinition } from './analysis/kind-definition.js';
-import { canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
+import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import type { HouseReviewPreferenceVersion, HouseReviewPreferenceUse, LearningEligibilityChoice, LearningMaterialState, TrustedOperationalScope } from '../shared/protocol.js';
 import { EDITORIAL_REVIEW_KIND_PREFIX } from '../shared/protocol.js';
@@ -176,6 +177,19 @@ export function preferenceLines(sources: readonly HousePreferenceSource[], names
   return lines;
 }
 
+/** Every person the lines' sources name and every name the house holds now, longest first: what no preference text may carry. */
+export function preferenceNames(lines: HouseReviewPreferenceVersion['lines'], names: Iterable<string>): string[] {
+  return [...new Set([...lines.flatMap((line) => line.sources.flatMap((source) => [...source.attribution.authors, ...source.attribution.editors])), ...names]
+    .map((name) => name.trim()).filter((name) => name.length > 0))].sort((a, b) => b.length - a.length || a.localeCompare(b, 'en'));
+}
+
+/** An editor's governed preference text as a Run or the Global Agent may read it: without any of `names` (Issue #1083). */
+export function withoutNames(text: string, names: ReadonlyArray<string>): string {
+  let result = text;
+  for (const name of names) result = result.replaceAll(name, '');
+  return result.trim();
+}
+
 export class HouseReviewPreferenceLedger {
   constructor(readonly db: DatabaseSync) {}
 
@@ -188,7 +202,10 @@ export class HouseReviewPreferenceLedger {
       valid(record.schema === 'ai7.house-review-preference/1' && record.ordinal === ++ordinal && record.versionId === row.version_id && record.ordinal === row.ordinal && record.operationalScope === scope && record.supersedes === previous &&
         record.materialSetDigest === row.material_set_digest && record.recordedAt === row.recorded_at && Array.isArray(record.lines) && record.lines.length <= HOUSE_REVIEW_PREFERENCE_MAX_LINES &&
         record.lines.every((line) => typeof line.text === 'string' && line.text.length <= 2_048) &&
-        record.lines.reduce((sum, line) => sum + graphemesOf(line.text).length, 0) <= HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES);
+        record.lines.reduce((sum, line) => sum + graphemesOf(line.text).length, 0) <= HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES &&
+        // Governance (Issue #1083): the derived lines it was replayed over, their material set and the directive it read up to.
+        (record.governance === undefined || Array.isArray(record.governance.baseLines) && record.governance.baseLines.length <= HOUSE_REVIEW_PREFERENCE_MAX_LINES &&
+          DIGEST_PATTERN.test(record.governance.baseMaterialSetDigest) && UUID_PATTERN.test(record.governance.headDirectiveId)));
       previous = record.versionId;
       return record;
     });
@@ -203,18 +220,102 @@ export class HouseReviewPreferenceLedger {
       .sort((a, b) => a.bookId.localeCompare(b.bookId) || a.materialDigest.localeCompare(b.materialDigest));
     const materialSetDigest = sha256Hex(canonicalJson(eligible.map(({ bookId, categoryId, materialDigest, decisionId, eligibilityDecisionId, eligibility }) =>
       ({ bookId, categoryId, materialDigest, decisionId, eligibilityDecisionId, eligibility }))));
-    const lines = preferenceLines(eligible, names);
+    const baseLines = preferenceLines(eligible, names);
+    const governance = this.#govern(scope, baseLines, materialSetDigest, names);
+    const lines = governance.lines;
     const previous = this.history(scope).at(-1) ?? null;
     const readAs = (entries: HouseReviewPreferenceVersion['lines']) => canonicalJson(entries.map(({ text, categoryId, bookId }) => ({ text, categoryId, bookId })));
-    if (previous === null ? eligible.length === 0 : previous.materialSetDigest === materialSetDigest && readAs(previous.lines) === readAs(lines)) return previous;
+    if (previous === null ? eligible.length === 0 : previous.materialSetDigest === materialSetDigest && readAs(previous.lines) === readAs(lines) && previous.governance?.headDirectiveId === governance.governance?.headDirectiveId) return previous;
     const record: HouseReviewPreferenceVersion = {
       schema: 'ai7.house-review-preference/1', versionId: randomUUID(), ordinal: (previous?.ordinal ?? 0) + 1, supersedes: previous?.versionId ?? null,
       operationalScope: scope, materialSetDigest, recordedAt: new Date().toISOString(), lines, sourceCount: eligible.length,
+      ...(governance.governance === undefined ? {} : { governance: governance.governance }),
     };
     const canonical = canonicalRecord(record);
     this.db.prepare('INSERT INTO house_review_preference_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
       record.versionId, scope, record.ordinal, record.supersedes, materialSetDigest, record.recordedAt, canonical.json, canonical.digest);
     return record;
+  }
+
+  /**
+   * The lines explicit governance (Issue #1083) makes of `baseLines`: every directive replayed over them, each line without the
+   * names the house holds. An editor's own line never yields to a derived one; a rebuild never fails for governance, so derived
+   * lines past the block's bound are left out, from the last. Only the editor's action that adds text (`strict`) is refused.
+   */
+  #govern(scope: TrustedOperationalScope, baseLines: HouseReviewPreferenceVersion['lines'], materialSetDigest: string, names: Iterable<string>, strict = false):
+    { lines: HouseReviewPreferenceVersion['lines']; governance?: NonNullable<HouseReviewPreferenceVersion['governance']> } {
+    if (this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() === undefined) return { lines: baseLines };
+    const directives = new SupervisionDirectives(this.db).history(scope);
+    const head = directives.at(-1);
+    if (head === undefined) return { lines: baseLines };
+    const base = preferenceItems({ lines: baseLines, versionId: 'base' });
+    const byId = new Map(base.map((item, index) => [item.itemId, baseLines[index]!]));
+    const all = governedMemoryItems(base, directives);
+    const governed = all.filter((item) => item.state === 'active');
+    const sourcesOf = (itemId: string, seen = new Set<string>()): HouseReviewPreferenceVersion['lines'][number]['sources'] => {
+      if (seen.has(itemId)) return [];
+      seen.add(itemId);
+      const original = byId.get(itemId);
+      if (original !== undefined) return original.sources;
+      const item = all.find((entry) => entry.itemId === itemId);
+      return item?.lineage.flatMap((pin) => sourcesOf(pin.itemId, seen)) ?? [];
+    };
+    const stripped = preferenceNames(baseLines, names);
+    const entries = governed.map((item) => ({ derived: item.revisionId === 'base',
+      line: { text: withoutNames(item.text, stripped), categoryId: item.categoryId, bookId: item.bookId, sources: sourcesOf(item.itemId) } }))
+      .filter((entry) => entry.line.text.length > 0);
+    const over = (): boolean => entries.length > HOUSE_REVIEW_PREFERENCE_MAX_LINES ||
+      entries.reduce((sum, entry) => sum + graphemesOf(entry.line.text).length, 0) > HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES;
+    const addsText = head.operation === 'create' || head.operation === 'merge' || head.operation === 'correct' ||
+      head.operation === 'supervise' && head.effect === 'correct';
+    const limit = (): never => { throw new LearningEligibilityError('GLOBAL_AGENT_MEMORY_LIMIT', '本社审阅偏好最多 12 条，合计最多 200 字；请先合并或停用已有条目。'); };
+    if (strict && addsText && over()) limit();
+    while (over()) {
+      const last = entries.findLastIndex((entry) => entry.derived);
+      if (last < 0) limit();
+      entries.splice(last, 1);
+    }
+    return { lines: entries.map((entry) => entry.line), governance: { baseLines, baseMaterialSetDigest: materialSetDigest, headDirectiveId: head.directiveId } };
+  }
+
+  /**
+   * Append a preference version after an explicit governance action or a change of the house's people, preserving its derived
+   * source lineage; `strict` for the editor's own action, refused when the text it adds cannot fit.
+   */
+  refreshGovernance(scope: TrustedOperationalScope, names: Iterable<string> = [], strict = false): void {
+    const prior = this.history(scope).at(-1);
+    const baseLines = prior?.governance?.baseLines ?? prior?.lines ?? [];
+    const materialSetDigest = prior?.governance?.baseMaterialSetDigest ?? prior?.materialSetDigest ?? sha256Hex(canonicalJson([]));
+    const governed = this.#govern(scope, baseLines, materialSetDigest, names, strict);
+    if (governed.governance === undefined || prior?.governance?.headDirectiveId === governed.governance.headDirectiveId &&
+      canonicalJson(prior.lines) === canonicalJson(governed.lines)) return;
+    const record: HouseReviewPreferenceVersion = {
+      schema: 'ai7.house-review-preference/1', versionId: randomUUID(), ordinal: (prior?.ordinal ?? 0) + 1,
+      supersedes: prior?.versionId ?? null, operationalScope: scope, materialSetDigest,
+      recordedAt: new Date().toISOString(), sourceCount: prior?.sourceCount ?? 0, ...governed,
+    };
+    const canonical = canonicalRecord(record);
+    this.db.prepare('INSERT INTO house_review_preference_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+      record.versionId, scope, record.ordinal, record.supersedes, materialSetDigest, record.recordedAt, canonical.json, canonical.digest);
+  }
+
+  /**
+   * Whether explicit governance, or a person the house names now, changed what a category Task's pin reads since it was
+   * prepared (Issue #1083): the pinned version's own derived lines governed by every directive now, against the pin's lines. A
+   * version in a scope no directive governs reads as it did, so this never stops a Run the derived path alone prepared.
+   */
+  governanceChanged(taskIntentId: string, names: () => Iterable<string>): boolean {
+    const preference = this.pinned(taskIntentId);
+    if (preference === null) return false;
+    const version = this.version(preference.versionId);
+    valid(version !== null);
+    const task = this.db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
+    valid(task !== undefined && String(task.kind).startsWith(EDITORIAL_REVIEW_KIND_PREFIX));
+    const categoryId = String(task.kind).slice(EDITORIAL_REVIEW_KIND_PREFIX.length);
+    const { lines } = this.#govern(version.operationalScope, version.governance?.baseLines ?? version.lines,
+      version.governance?.baseMaterialSetDigest ?? version.materialSetDigest, names());
+    const now = lines.filter((line) => line.categoryId === categoryId && (line.bookId === null || line.bookId === String(task.book_id)));
+    return canonicalJson(now.map((line) => line.text)) !== canonicalJson(preference.lines);
   }
 
   /**
@@ -399,6 +500,9 @@ export function houseReviewPreferenceKindDefinition(base: AnalysisKindDefinition
   const promptContractDigest = digestOf(base.promptContractDigest);
   const definition: AnalysisKindDefinition = { ...base, systemPrompt: `${base.systemPrompt}\n${block}`, promptContractDigest,
     schemaDigest: sha256Hex(canonicalJson({ baseSchemaDigest: base.schemaDigest, promptContractDigest })),
+    ...(base.contractIdentity?.categoryConfiguration === undefined ? {} : { contractIdentity: { ...base.contractIdentity,
+      categoryConfiguration: { version: base.contractIdentity.categoryConfiguration.version,
+        digest: sha256Hex(canonicalJson({ base: base.contractIdentity.categoryConfiguration, preference })) } } }),
     ...(base.livePromptContractDigest === undefined ? {} : { livePromptContractDigest: () => digestOf(base.livePromptContractDigest!()) }),
     requestDigest: (ordinal, unitDigest) => sha256Hex(canonicalJson({ promptContractDigest, baseRequestDigest: base.requestDigest(ordinal, unitDigest) })),
   };

@@ -25,5 +25,5 @@ export const TASK_PAGE_NAMES: Readonly<Record<string, string>> = {
 };
 export const taskPageMore = (name: string, shown: number, total: number): string => `继续读取${name}（已显示 ${shown} / ${total}）`;
 export const taskPageShown = (name: string, shown: number, total: number): string => `${name} · 已显示 ${shown} / ${total} 条`;
-export const taskResendSummary = (total: number): string => `共 ${total} 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。`;
+export const taskResendSummary = (total: number): string => `共 ${total} 个阅读范围上一次的请求已发出、结果未知，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。`;
 export const TASK_SELECTED_CHAPTER_NOT_LOADED = '已选章节（继续读取章节以查看）';

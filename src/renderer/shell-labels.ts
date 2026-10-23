@@ -5,15 +5,16 @@ import type { ShellBookSection } from '../shared/preferences.js';
 // character of its own name, drawn by the stylesheet from a data attribute, so a row's text is exactly its label and a
 // collapsed row keeps that label as its accessible name.
 
-export type ShellDestination = 'attention' | 'library' | 'series' | 'knowledge' | 'quality';
+export type ShellDestination = 'attention' | 'library' | 'series' | 'knowledge' | 'quality' | 'global-agent';
 
-/** The five global destinations in their fixed order (IA-007): 待我处理 · 书库 · 书系 · 知识库 · 质量与学习. */
+/** The six global destinations in their fixed order (IA-007): 待我处理 · 书库 · 书系 · 知识库 · 质量与学习 · 全域智能体（Issue #1083）. */
 export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination; readonly label: string; readonly icon: string }> = Object.freeze([
   { key: 'attention', label: '待我处理', icon: '待' },
   { key: 'library', label: '书库', icon: '库' },
   { key: 'series', label: '书系', icon: '系' },
   { key: 'knowledge', label: '知识库', icon: '知' },
   { key: 'quality', label: '质量与学习', icon: '质' },
+  { key: 'global-agent', label: '全域智能体（记忆与全局指导）', icon: '智' },
 ]);
 
 /** The current Book's three groups (IA-012): 工作 · 处理 · 资料与记录. */

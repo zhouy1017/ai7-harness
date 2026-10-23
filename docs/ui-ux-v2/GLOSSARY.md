@@ -82,6 +82,12 @@ Shared artifact, analysis, Enrollment and Apply meanings route to root contexts;
 | Native DSH Artifact Recommendation | 原生 DSH 构件建议 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Reusable Procedure Capture | 保存为可复用工序 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Reusable Procedure Classification Preview | 可复用工序分类预览 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Procedure Library | 工序库 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Idle-time Start | 空闲时处理 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Live Processing Indicator | 处理状态指示 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Procedure Definition | 工序定义 | [AI7 Execution](../domain/execution/CONTEXT.md) |
+| Background Processing Enrollment | 后台处理登记 | [AI7 Execution](../domain/execution/CONTEXT.md) |
+| Review Report | 审阅报告 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
 | Procedure Capture Source Set | 工序捕获来源集合 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Reusable Procedure Extraction Preview | 可复用工序提取预览 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Artifact and Automation Management Projection | 构件与自动化管理视图 | [AI7 V2 UI/UX](./CONTEXT.md) |

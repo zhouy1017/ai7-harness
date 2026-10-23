@@ -33,7 +33,7 @@ No generic absolute `complete` flag may collapse those axes.
 
 Covered analysis produces a Book-bound **Manuscript Analysis Result Set** with immutable Result Set Revisions. Each revision binds one exact Manuscript Pin, Coverage Manifest, exact DSH analysis contract and relevant schema/reducer digests, unit results, synthesis/conflict/gap state, execution provenance, reuse lineage and cost. A Task Outcome links the produced revision; only a separate explicit promotion creates an Editorial Artifact.
 
-Cross-Run reuse lives in this AI7-owned durable, non-authoritative record, never in shared DSH scratch or cache. Prior revisions remain valid history for their original pin and are never rebound to newer manuscript text.
+Cross-Run reuse lives in this AI7-owned durable, non-authoritative record, never in shared DSH scratch or cache. Prior revisions remain valid history for their original pin and are never rebound to newer manuscript text. Under [ADR 0095](0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) §1 and §5 the analysis contract and reducer stages are stage types of a pre-installed procedure, a contract is identified by its version id over immutable bytes, and reuse compatibility is defined by that version.
 
 Three distinct updates append new Result Set Revisions:
 

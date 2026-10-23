@@ -117,6 +117,9 @@ describe('material plan drift', () => {
     expect(planAdaptationLabel(5, '适配器失败（PROVIDER_ERROR · 503）。', 'unrecorded')).toBe(planAdaptationLabel(5, '适配器失败（PROVIDER_ERROR · 503）。', 'byte-identical'));
     expect(planAdaptationLabel(5, '适配器失败（PROVIDER_ERROR · 503）。', 'differs'))
       .toBe(`计划内调整 · 单元 5 安全重试 1 次 · 适配器失败（PROVIDER_ERROR · 503）。 · ${SAFE_RETRY_REPETITION_DIFFERS}`);
+    // Review contract v2's declared retry is named as its own class (#1084).
+    expect(planAdaptationLabel(1, '单元结果信封无法解析，以相同消息重试一次。', 'byte-identical', 'contract-retry'))
+      .toBe('计划内调整 · 单元 1 契约重试 1 次 · 单元结果信封无法解析，以相同消息重试一次。');
     expect(SAFE_RETRY_REPETITION_DIFFERS).toBe('重试发出的稿件与第 1 次不同');
     expect(PLAN_REVISION_REQUIRED_REASON).toBe('plan-revision-required');
   });

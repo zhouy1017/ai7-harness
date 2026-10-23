@@ -49,9 +49,9 @@ The review shows the first nine as rows under the columns 内容类 · 数量 ·
 | --- | --- |
 | 行内样式 | `完整保留（随文件保留）`, with 「改过的段落，导出时逐段说明格式能否原样恢复」 |
 | 批注与修订 | Comments retain author-attributed marks. [ADR 0094 §5](0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md#5-two-tracked-change-import-choices) requires an explicit choice of final imported baseline or AI7 suggestion marks for tracked insertions/deletions/moves; both preserve the original and eligible local learning pairs. |
-| 脚注与尾注 | `降级导入` until the manuscript has a note block. The manuscript shows neither the reference nor the note; the notes stay with the Source Version; the row says both (IMP-004) |
-| 表格 | `完整保留（随文件保留）`, with the same line as 行内样式. The cells' text enters the manuscript as paragraphs in reading order; the table's structure stays with the file |
-| 图片与图注 | `完整保留（随文件保留）`. The image stays with the Source Version and is restored on export. The manuscript keeps the caption as text and draws no placeholder yet: a placeholder needs a non-text block, which the manuscript does not have |
+| 脚注与尾注 | `完整保留` once the note block of [ADR 0096 §1](0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#1-structural-edits-are-ordinary-edits) exists: the reference position and the note are shown and editable in the manuscript; until it ships the row reads `降级导入` with the notes kept by the Source Version (IMP-004) |
+| 表格 | `完整保留（随文件保留）`, with the same line as 行内样式. The cells are shown read-only in a table block (ADR 0096 §1); the table's structure stays with the file |
+| 图片与图注 | `完整保留（随文件保留）`. The image stays with the Source Version, is shown read-only from it (ADR 0096 §1) and is restored on export; the manuscript keeps the caption as text |
 | 分节（含页面设置） | `完整保留（随文件保留）`. Page size, margins, columns and the document grid are section properties, so page setup is counted here |
 | 页眉与页脚 | `完整保留（随文件保留）` |
 | 文本框 | `完整保留（随文件保留）`, with `保留为文本框` (the default) or `并入正文`. Kept as a text box, it stays with the file, is not shown in the manuscript, and is restored on export. Merged, its paragraphs enter the manuscript right after the paragraph that anchors it, and export no longer writes the original box. A file with a text box, refused today, can be imported |
@@ -101,5 +101,5 @@ Where the prototype differs, this record decides:
 
 ## Rejected alternatives
 
-- **The prototype as drawn.** Restoring 内联样式 and 表格 unchanged after edits needs formatted runs in the manuscript model, the editor and the store. That work would come ahead of S61 and push back S62, S64, S66 and S67. Rejected by the Owner on 2026-09-22.
+- **The prototype as drawn.** Restoring 内联样式 and 表格 unchanged after edits needs formatted runs in the manuscript model, the editor and the store. That work would come ahead of S61 and push back S62, S64, S66 and S67. Rejected by the Owner on 2026-09-22; [ADR 0096](0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) later admits the note block, read-only table and image blocks and structure recognition without formatted runs.
 - **Exactly eight rows.** No record would be needed, but the text box's `保留 / 并入` and the table-of-contents field's `降级导入`, IMP-055's own examples, would have no row. Rejected by the Owner on 2026-09-22.

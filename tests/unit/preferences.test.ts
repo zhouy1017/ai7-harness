@@ -46,6 +46,15 @@ function refusal(operation: () => unknown): PreferenceError {
 }
 
 describe('the preferences registry', () => {
+  it('persists learning ask frequency, defaults to occasional and rejects unsupported values', () => {
+    const store = createPreferenceStore(sandbox);
+    expect(store.read().values['learning.askFrequency']).toBe('occasionally');
+    for (const value of ['often', 'occasionally', 'off'] as const) {
+      store.save({ key: 'learning.askFrequency', value });
+      expect(createPreferenceStore(sandbox).read().values['learning.askFrequency']).toBe(value);
+    }
+    expect(PREFERENCE_KEYS['learning.askFrequency'].validate('always')).toBe(false);
+  });
   it('persists every notification switch in the existing preference file across restart', () => {
     const store = createPreferenceStore(sandbox);
     const keys = ['notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName'] as const;
@@ -55,12 +64,12 @@ describe('the preferences registry', () => {
   });
   it('declares the shell keys with their defaults, and each default passes its own validator', () => {
     expect(Object.keys(PREFERENCE_KEYS)).toEqual(['usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme',
-      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName', 'editor.density', 'editor.typography', 'layout.regions', 'analysis.lastViewedRevision', 'onboarding.state']);
+      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName', 'editor.density', 'editor.typography', 'layout.regions', 'analysis.lastViewedRevision', 'onboarding.state', 'learning.askFrequency']);
     expect(preferenceDefaults()).toEqual({ 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
       'notifications.enabled': false, 'notifications.completions': false, 'notifications.sound': false, 'notifications.bookName': false,
       'editor.density': 'standard',
       'editor.typography': { preset: 'editing', fontFamily: 'serif', fontSize: 17, lineHeight: 1.9, columnWidth: 38, alignment: 'start' },
-      'layout.regions': { supportingWidth: null, drawerWidth: null, hidden: [] }, 'analysis.lastViewedRevision': {}, 'onboarding.state': null });
+      'layout.regions': { supportingWidth: null, drawerWidth: null, hidden: [] }, 'analysis.lastViewedRevision': {}, 'onboarding.state': null, 'learning.askFrequency': 'occasionally' });
     for (const definition of Object.values(PREFERENCE_KEYS)) expect(definition.validate(definition.default)).toBe(true);
   });
 

@@ -66,7 +66,7 @@ const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const LEDGER_ITEM_ID_PATTERN = /^[A-Za-z0-9]+\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
 const UNIT_MESSAGE_HEADER = /^分析单元 (\d+)\/(\d+) · 单元摘要 ([0-9a-f]{64})$/u;
 const OWN_BLOCKS_HEADER = '以下为本单元需要归纳的内容块：';
-const BLOCK_LINE = /^\[(blk_[0-9a-f]{24})\] /u;
+const BLOCK_LINE = /^(?:\[[1-9][0-9]*\] )?\[(blk_[0-9a-f]{24})\] /u;
 const BLOCK_KIND_MARKER = /^\((?:title|heading|paragraph)(?: h[1-6])?\) /u;
 const PROVIDER_LEDGER_FILE = 'ledger.jsonl';
 const PROVIDER_CACHE_DIRECTORY = 'entries';
@@ -546,9 +546,11 @@ export async function verifySample1Capture(request, selection, parsed) {
           typeId, title, paragraphs: paragraphs.map(({ position, text, truncated }) => ({ position, text, truncated })),
         }))));
       }
-      const prompt = owners.reviewCategoryContract(input);
+      const contractVersion = database.prepare('SELECT contract_version FROM analysis_task_intents WHERE task_intent_id = ?').get(request.sample1Task)?.contract_version;
+      const version = contractVersion === 'ai7.editorial-review/1' ? 1 : 2;
+      const prompt = owners.reviewCategoryContract(input, version);
       contract = { prompt, digest: owners.reviewCategoryContractDigest(prompt) };
-      definition = owners.reviewCategoryKindDefinition(input);
+      definition = owners.reviewCategoryKindDefinition(input, version);
       if (category.task.kind !== definition.kind) fail();
       definition = wrapMaterials(definition);
       contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };

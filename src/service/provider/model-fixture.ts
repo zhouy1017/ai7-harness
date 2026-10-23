@@ -448,3 +448,19 @@ export async function loadModelFixture(fixturesRoot: string, identity: string): 
     sha256: sha256Hex(lineage.map((link) => `${link.identity}:${link.sha256}`).join('\n')),
   };
 }
+
+
+/** Fixture replay selects its recorded contract; a new authored v2 response never executes under v1. */
+export function reviewFixtureContractVersion(fixture: ResolvedModelFixture): 1 | 2 {
+  let legacy = false;
+  for (const entry of fixture.entries.values()) {
+    if (entry.response.kind !== 'unit-result') continue;
+    try {
+      const response: unknown = JSON.parse(entry.response.text);
+      if (!isRecord(response)) continue;
+      if (response.schema === 'ai7.editorial-review.unit-result/2') return 2;
+      if (response.schema === 'ai7.editorial-review.unit-result/1') legacy = true;
+    } catch { /* A deliberately malformed response declares no version of its own. */ }
+  }
+  return legacy ? 1 : 2;
+}

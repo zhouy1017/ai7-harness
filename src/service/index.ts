@@ -1,3 +1,4 @@
+import { reviewFixtureContractVersion } from './provider/model-fixture.js';
 import { ImportedExemplarError } from './imported-exemplars.js';
 import { dataVersionStartupRefusal } from '../shared/data-version-labels.js';
 import { isAbsolute, resolve } from 'node:path';
@@ -851,6 +852,14 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.saveCorrectionProposal(request.input) };
     case 'decideLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
+    case 'inspectEditorialLearning':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEditorialLearning(request.input) };
+    case 'changeEditorialLearning':
+      return { id: request.id, ok: true, op: request.op, result: store.changeEditorialLearning(request.input) };
+    case 'createEditorialMemory':
+      return { id: request.id, ok: true, op: request.op, result: store.createEditorialMemory(request.input) };
+    case 'deactivateEditorialMemory':
+      return { id: request.id, ok: true, op: request.op, result: store.deactivateEditorialMemory(request.input) };
     case 'inspectHouseReviewPreference':
       return { id: request.id, ok: true, op: request.op, result: store.inspectHouseReviewPreference() };
     case 'rebuildHouseReviewPreference':
@@ -1118,6 +1127,7 @@ async function dispatch(
         op: request.op,
         result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress, {
           findingsAfterOrdinal: request.input.findingsAfterOrdinal ?? null,
+          excludedAfterOrdinal: request.input.excludedAfterOrdinal ?? null,
           categoryId: request.input.categoryId ?? null,
           severity: request.input.severity ?? null,
           status: request.input.status ?? null,
@@ -1528,6 +1538,35 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.transitionProductionDocumentPhase(request.input) };
     // 待我处理 (Issue #424, plan slice S78): a read across every Book. The one owner's progress reader and its
     // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
+    // 全域智能体 (Issue #1083): no Book route. The disclosed state is the execution owner's own decision for the selected policy.
+    case 'inspectGlobalAgent':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy)) };
+    case 'recordLearningSupervision':
+      store.recordLearningSupervision(request.input);
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy)) };
+    case 'askGlobalAgent': {
+      const route = globalDialogueReady(dialogues, launchPolicy);
+      const turn = store.askGlobalAgent(request.input);
+      dialogues.beginGlobal(turn, route, () => store.globalAgentSourcesCurrent(request.input.sources));
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(turn.dialogueId, (id) => dialogues.liveText(id)) };
+    }
+    case 'inspectGlobalAgentDialogue':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(request.input.dialogueId, (id) => dialogues.liveText(id)) };
+    case 'stopGlobalAgentAnswer': {
+      const attempt = store.globalAgentAttempt(request.input, 'stop');
+      if (typeof attempt !== 'string') throw new StoreErrorClass('DIALOGUE_INVALID', '回答标识无效。');
+      await dialogues.stop(attempt);
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(request.input.dialogueId, (id) => dialogues.liveText(id)) };
+    }
+    case 'continueGlobalAgentAnswer':
+    case 'regenerateGlobalAgentAnswer': {
+      const route = globalDialogueReady(dialogues, launchPolicy);
+      const turn = store.globalAgentAttempt(request.input, request.op === 'continueGlobalAgentAnswer' ? 'continue' : 'regenerate');
+      if (typeof turn === 'string') throw new StoreErrorClass('DIALOGUE_INVALID', '回答标识无效。');
+      const pins = turn.message.globalSources!;
+      dialogues.beginGlobal(turn, route, () => store.globalAgentSourcesCurrent(pins));
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(turn.dialogueId, (id) => dialogues.liveText(id)) };
+    }
     case 'inspectGlobalAttention':
       return {
         id: request.id, ok: true, op: request.op,
@@ -1655,7 +1694,24 @@ async function dispatch(
   }
 }
 
+/** The Book-less dialogue's route (Issue #1083), refused before anything is recorded unless the selected policy admits one. */
+function globalDialogueReady(dialogues: DialogueExecutionOwner, policy: LaunchPolicyProjection) {
+  try { return dialogues.requireGlobalReady(policy); }
+  catch (error) {
+    if (error instanceof DialogueError) throw new StoreErrorClass(error.code, error.message);
+    throw error;
+  }
+}
+
+function globalDialogueAdmitted(dialogues: DialogueExecutionOwner, policy: LaunchPolicyProjection): boolean {
+  try { dialogues.requireGlobalReady(policy); return true; } catch (error) {
+    if (error instanceof DialogueError) return false;
+    throw error;
+  }
+}
+
 /** A dialogue refusal from the execution owner, said as the store says its own; the Book's source decides a live route. */
+
 function dialogueReady(dialogues: DialogueExecutionOwner, sourceDigest: string | null): void {
   try {
     dialogues.requireReady(sourceDigest);
@@ -2025,7 +2081,7 @@ async function run(): Promise<void> {
       interruptAfterAbandonObjectRemoval: importControl === 'after-abandon-object-delete-before-finalize',
       baselineAnalysisRoute: fixture === null
         ? null
-        : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+        : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
       baselinePromptContract,
       // J-11's calibration gate (Issue #429, EVAL-011a): the product's ten Books in every other launch.
       ...(calibrationMinBooks === undefined ? {} : { calibrationMinAdjustments: calibrationMinBooks }),

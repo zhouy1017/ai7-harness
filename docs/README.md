@@ -21,7 +21,7 @@ Start with the [product README](../README.md) for audience, capabilities, limita
 | Development capture conversion | [Fixture conversion](development/manual-model-fixture-recording.md) |
 | Repository assignment, review and integration | [Orca dispatch](agents/orca-dispatch.md) and [task-specific router](agents/README.md) |
 
-These guides route the wave 17 candidate and its accepted [automatic-delivery contract](adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) to their implementation owners, #1009 and #1015. [PROGRESS](../PROGRESS.md) distinguishes integration state from the recorded dev baseline; workflow implementation is not evidence of an executed release.
+The Owner's 2026-10-23 direction — procedures as the central object, a governed concurrent harness, evidence on the card, structural editing and less ceremony — is recorded in [ADR 0095](adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) and [ADR 0096](adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) and ordered by the [development plan](development/development-plan.md); the [automatic-delivery contract](adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) keeps its owners. [PROGRESS](../PROGRESS.md) distinguishes integration state from the recorded dev baseline; an accepted design or an implemented workflow is not evidence of a delivered feature or an executed release.
 
 ## Design authority
 

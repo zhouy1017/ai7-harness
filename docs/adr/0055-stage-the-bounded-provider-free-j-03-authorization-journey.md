@@ -8,6 +8,8 @@ On 2026-08-31 the Owner selected Issue #47's first bounded standard-direct autho
 
 ## Bounded J-03 meaning
 
+> Amended by [ADR 0096 §3](./0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#3-less-ceremony-more-trust): the shipped default workspace profile is pinned at Book creation; the separately reviewed install-and-enable sequence remains for every other artifact, and this successor changes no historical Journey evidence.
+
 Issue #47 will implement only the first provider-free J-03 slice. It begins from the exact Book, primary Manuscript and Manuscript Revision lineage imported from the [`sample1` compatibility baseline](./0044-use-sample1-as-compatibility-and-recording-baseline.md), and it binds the exact Book-scoped enabled `@ai7/editorial-workspace-profile@1.0.0` revision plus the explicitly reviewed Revision 2 pin of its separately governed AI7 compatibility/authority sidecar. It persists the exact Task Intent; `Task Input / 任务输入` Manuscript Checkpoint and task-bound pins; current-Book source scope; Model Role and capability requirements; Provider/outbound-data and budget disclosure; explicit Run Budget Ceiling state; Execution Plan/Plan Envelope; and standard direct Run Authorization.
 
 That slice then stops truthfully before scheduler dispatch, DSH Session creation, Provider adapter or Credential Broker resolution, Provider payload construction, network access, model execution, or any Effect. Provider Processing v1 remains selected and permits no live transmission. Durable authorization is neither Provider eligibility nor execution success; Issue #91 remains the sole owner of those execution boundaries. Quick Start and Default Execution Rule behavior remain deferred to a separately authorized successor.

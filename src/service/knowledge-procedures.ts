@@ -2,21 +2,17 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { KnowledgeProceduresProjection } from '../shared/protocol.js';
 import { isRecord } from './analysis/canonical.js';
 import type { EditorialWorkspaceProfileHouseReading } from './editorial-workspace-profile.js';
+import { readPreinstalledProcedures } from './procedures/library.js';
 import type { ReviewCategoryConfiguration } from './review/category-configuration.js';
 
 /**
- * 知识库 › 工序与规则's expert 工序 (Issue #427, plan slice S79d; V2-UX-KB-010, REUSE-029, REUSE-030): the 工序 the review
- * categories run, named by what each does, with its version, its state, the category it serves and how many approved
- * Review Runs applied its version; and the native artifact AI7 carries in the house's words — 本社方案 vN — in the
- * lifecycle its owner reads, with how many Books enabled it and its identities for 查看技术详情. It is a read over the
- * configuration, the Review Runs' snapshots and the 方案's owner; it writes nothing.
+ * 知识库 › 工序与规则's expert 工序 (Issue #427, plan slice S79d; V2-UX-KB-010, REUSE-029, REUSE-030): since Issue #1081
+ * (F-26a; ADR 0095 §1) the pre-installed procedure library — each version with its stages and how many approved runs it
+ * served — and the native artifact AI7 carries in the house's words — 本社方案 vN — in the lifecycle its owner reads, with
+ * how many Books enabled it and its identities for 查看技术详情. It is a read over the procedure versions, the Review Runs'
+ * snapshots, the baseline Runs and the 方案's owner; it writes nothing.
  */
 
-/** Why a 工序 cannot run yet, said of the house: the category's own reason speaks of one Book (Issue #427 review). */
-const HOUSE_UNAVAILABLE_REASONS: Readonly<Record<string, string>> = {
-  'cross-deliverable-consistency': '生产文档之间的一致性核对还没有接通。',
-};
-const HOUSE_UNAVAILABLE_FALLBACK = '这一工序的依据还没有接通。';
 /** The house's word for the 编辑工作区方案 with its AI7 权限侧车 (editor-surfaces §10). */
 export const HOUSE_PROFILE_TITLE = '本社方案';
 
@@ -44,18 +40,10 @@ export function readKnowledgeProcedures(
       applied.set(key, (applied.get(key) ?? 0) + 1);
     }
   }
-  const procedures = configuration.categories.map((entry) => ({
-    procedureId: entry.procedure.procedureId,
-    title: entry.procedure.title,
-    version: entry.procedure.version,
-    categoryId: entry.categoryId,
-    categoryLabel: entry.label,
-    state: entry.executor === 'unavailable' ? 'unavailable' as const : 'enabled' as const,
-    unavailableReason: entry.executor === 'unavailable' ? HOUSE_UNAVAILABLE_REASONS[entry.categoryId] ?? HOUSE_UNAVAILABLE_FALLBACK : null,
-    reviewRuns: applied.get(`${entry.procedure.procedureId}\n${entry.procedure.version}`) ?? 0,
-  }));
+  const reviewRuns = new Map(configuration.categories.map((entry) =>
+    [entry.categoryId, applied.get(`${entry.procedure.procedureId}\n${entry.procedure.version}`) ?? 0]));
   return {
-    procedures,
+    preinstalled: readPreinstalledProcedures(db, reviewRuns),
     artifacts: [{
       title: HOUSE_PROFILE_TITLE,
       revision: profile.revision,

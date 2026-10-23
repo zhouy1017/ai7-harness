@@ -28,7 +28,7 @@ import {
 import { HELP_ENTRY } from './help-labels.js';
 
 // The shell around every screen (Issue #934, wave 11 slice 11a; Issue #1002, wave 16 slice 16a; editor-surfaces §0.3; IA-006 to IA-013, ADR 0076, ADR 0092):
-// a two-level sidebar — the five global destinations, 置顶 and 最近打开 Books (with an inline searchable 切换书稿 ▾ list),
+// a two-level sidebar — the six global destinations, 置顶 and 最近打开 Books (with an inline searchable 切换书稿 ▾ list),
 // the current Book's three groups and 设置 — and a context header naming where the window is. The screens stay their own
 // owners: they still replace `#screen`, and they tell the shell which Book and section they show through `follow`. The
 // shell owns no record: pinning, recency and the collapsed state are preferences, written through the main process's file and nothing else.
@@ -66,6 +66,7 @@ const SCREEN_ACTIVE: Readonly<Record<string, ShellActive>> = Object.freeze({
   series: { kind: 'destination', destination: 'series' },
   'knowledge-base': { kind: 'destination', destination: 'knowledge' },
   'quality-learning': { kind: 'destination', destination: 'quality' },
+  'global-agent': { kind: 'destination', destination: 'global-agent' },
   settings: { kind: 'settings' },
   help: { kind: 'help' },
   'model-service': { kind: 'settings' },

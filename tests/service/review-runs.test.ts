@@ -20,7 +20,7 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import { PROCEDURE_STEP_NOT_CHOSEN } from '../../src/service/captured-procedures.js';
 import { RECONCILED_INTERRUPTED_DETAIL, type BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
 import { graphemeCount, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
-import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { loadModelFixture, reviewFixtureContractVersion, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import { reviewLeadsOf } from '../../src/service/review/review-leads.js';
@@ -115,7 +115,7 @@ async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExe
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
   });
   const executionOwner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner === undefined ? executionOwner : owner(executionOwner));
@@ -386,6 +386,178 @@ function eventTrail(reviewRunId: string): Array<[string, string]> {
   }
 }
 describe('a Review Run over the real store on exact sample1', () => {
+  it('reconstructs a saved v1 plan under v1 even after the launch switches to current v2 fixtures (#1084)', async () => {
+    const legacy = await open('review-overlap-authored');
+    const book = await importBook(legacy);
+    let runRecordId = '';
+    let taskIntentId = '';
+    let envelopeDigest = '';
+    try {
+      await authorizeAndDrive(legacy, book, prepare(legacy, book, [TYPOS], WHOLE));
+      const projection = legacy.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE, 1));
+      runRecordId = projection.run!.runRecordId;
+      taskIntentId = projection.taskIntent!.taskIntentId;
+      envelopeDigest = projection.planEnvelope!.digest;
+    } finally { await close(legacy); }
+    const current = await open('sample1-review-authored');
+    try {
+      const ledger = current.store.executionLedgerForRun(runRecordId);
+      expect(ledger.definition.contractVersion).toBe('ai7.editorial-review/1');
+      const retained = ledger.inspect(book.bookId);
+      expect(retained.taskIntent!.taskIntentId).toBe(taskIntentId);
+      expect(retained.planEnvelope!.digest).toBe(envelopeDigest);
+      expect(retained.planEnvelope!.procedure?.version).toBe(1);
+    } finally { await close(current); }
+  }, 300_000);
+
+  it('widens a v1 revision-84 store without changing a recorded byte and refuses a terminal store missing excluded rows (#1084)', async () => {
+    let session = await open('review-overlap-authored');
+    const book = await importBook(session);
+    await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+    await close(session);
+    const before: Array<{ table: string; rows: unknown[] }> = [];
+    const db = database();
+    try {
+      db.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE');
+      for (const table of ['analysis_task_intents', 'analysis_result_set_revisions', 'analysis_plan_adaptations']) {
+        const sql = String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)!.sql);
+        const triggers = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?").all(table);
+        before.push({ table, rows: db.prepare(`SELECT canonical_json, sha256 FROM ${table} ORDER BY rowid`).all() });
+        db.exec(`CREATE TEMP TABLE old_review_rows AS SELECT * FROM ${table}; DROP TABLE ${table};`);
+        db.exec(sql.replaceAll("'ai7.editorial-review/1', 'ai7.editorial-review/2'", "'ai7.editorial-review/1'")
+          .replaceAll("contract_version IN ('ai7.editorial-review/1')", "contract_version = 'ai7.editorial-review/1'")
+          .replace("adaptation_class IN ('safe-retry', 'contract-retry')", "adaptation_class = 'safe-retry'"));
+        db.exec(`INSERT INTO ${table} SELECT * FROM temp.old_review_rows; DROP TABLE temp.old_review_rows;`);
+        for (const trigger of triggers) db.exec(String(trigger.sql));
+      }
+      db.exec('DROP TABLE review_excluded_findings; PRAGMA user_version = 84; COMMIT');
+    } finally { db.close(); }
+    session = await open('review-overlap-authored');
+    try {
+      const after = database();
+      try {
+        expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(88);
+        for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
+        expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      } finally { after.close(); }
+    } finally { await close(session); }
+    const broken = database();
+    try { broken.exec('DROP TABLE review_excluded_findings'); } finally { broken.close(); }
+    await expect(open('review-overlap-authored')).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
+  }, 300_000);
+
+  it('counts a safe retry and one later contract retry separately, with no third contract retry (#1084)', async () => {
+    await withBook('sample1-review-contract-v2-controls', async (session, book) => {
+      const entries = session.fixture.entries;
+      if (!(entries instanceof Map)) throw new Error('Expected mutable authored control entries');
+      for (const [key, entry] of [...session.fixture.entries]) {
+        if (entry.unitOrdinal !== 1) continue;
+        if (entry.attempt === 1) entries.set(key, { ...entry, response: { kind: 'adapter-failure', code: 'PROVIDER_ERROR', message: 'Synthetic before-response server failure', status: 503 } });
+        if (entry.attempt === 2 && entry.response.kind === 'unit-result') {
+          entries.set(key, { ...entry, response: { ...entry.response, text: '{invalid' } });
+          entries.set(key.replace(/#2$/u, '#3'), { ...entry, attempt: 3 });
+        }
+      }
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(projection.resultSetRevision!.gaps).toEqual([]);
+      expect(projection.run!.adaptations!.map((entry) => [entry.adaptationClass, entry.attemptIndex, entry.repetition])).toEqual([
+        ['safe-retry', 2, 'byte-identical'], ['contract-retry', 3, 'byte-identical'],
+      ]);
+    });
+  }, 300_000);
+
+  it('settles a second invalid envelope without resending it and pages oversized rejected text without loss (#1084)', async () => {
+    await withBook('sample1-review-contract-v2-controls', async (session, book) => {
+      const entries = session.fixture.entries;
+      if (!(entries instanceof Map)) throw new Error('Expected mutable authored control entries');
+      const longNote = '合成说明'.repeat(20_000);
+      for (const [key, entry] of [...session.fixture.entries]) {
+        if (entry.unitOrdinal !== 1 || entry.attempt !== 2 || entry.response.kind !== 'unit-result') continue;
+        const body = JSON.parse(entry.response.text) as { findings: Array<Record<string, unknown>> };
+        body.findings.at(-1)!.note = longNote;
+        entries.set(key, { ...entry, response: { ...entry.response, text: JSON.stringify(body) } });
+      }
+      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      const chunks: string[] = [];
+      let page = workspace(session, book, run.reviewRunId).run!;
+      let pages = 0;
+      for (;;) {
+        expect(Buffer.byteLength(JSON.stringify(page), 'utf8')).toBeLessThan(512 * 1024);
+        chunks.push(...page.excluded!.filter((entry) => entry.reasonCode === 'contract-schema-invalid').map((entry) => entry.text));
+        if (page.excludedNextOrdinal == null) break;
+        if (++pages > 100) throw new Error('Excluded paging failed to advance');
+        page = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId, undefined,
+          { findingsAfterOrdinal: null, categoryId: null, severity: null, status: null, chapterBlockId: null, excludedAfterOrdinal: page.excludedNextOrdinal }).run!;
+      }
+      expect((JSON.parse(chunks.join('')) as { note: string }).note === longNote).toBe(true);
+      expect(pages).toBeGreaterThan(0);
+    });
+    // A fresh route with two invalid envelopes makes one adaptation and keeps the unit as its gap.
+    const isolated = await createServiceTestRoots('ai7-contract-retry-bounded-');
+    const previous = roots;
+    roots = isolated;
+    try {
+      await withBook('sample1-review-contract-v2-controls', async (session, book) => {
+        const entries = session.fixture.entries;
+        if (!(entries instanceof Map)) throw new Error('Expected mutable authored control entries');
+        for (const [key, entry] of [...session.fixture.entries]) if (entry.unitOrdinal === 1 && entry.attempt === 2 && entry.response.kind === 'unit-result')
+          entries.set(key, { ...entry, response: { ...entry.response, text: '{invalid' } });
+        await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+        const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+        expect(projection.run!.adaptations).toHaveLength(1);
+        expect(projection.resultSetRevision!.gaps).toEqual(expect.arrayContaining([expect.objectContaining({ unitOrdinal: 1, code: 'contract-invalid' })]));
+      });
+    } finally { roots = previous; await isolated.dispose(); }
+  }, 300_000);
+
+  it('keeps the contract retry and the rejected sibling on J-04\'s review-time manuscript, after all three of its first-block edits (#1084)', async () => {
+    await withBook('sample1-review-contract-v2-controls', async (session, book) => {
+      // J-04's own suffixes, in its order (run-j04.mjs saveEditorSuffix): its Review Run reads unit 1 with all three in place.
+      for (const suffix of [J04_EDIT_SUFFIX, '，J-04 计划版本形成后的确认编辑', '，J-04 快速开始前的确认编辑']) appendToBlockAt(session, book, 1, suffix);
+      const settled = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      expect(settled.categories[0]).toMatchObject({ state: 'settled', excludedCount: 3 });
+      expect(settled.excluded!.some((entry) => entry.reasonCode === 'contract-schema-invalid' && entry.text.includes('合成的无效发现'))).toBe(true);
+      const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(projection.run!.adaptations!.map((entry) => [entry.adaptationClass, entry.unitOrdinal])).toEqual([['contract-retry', 1]]);
+      expect(projection.resultSetRevision!.gaps).toEqual([]);
+    });
+  }, 300_000);
+
+  it('retries one invalid v2 envelope, keeps valid siblings, and persists the visible rejected finding without a mark (#1084)', async () => {
+    const session = await open('sample1-review-contract-v2-controls');
+    const book = await importBook(session);
+    let runId = '';
+    try {
+      const prepared = prepare(session, book, [TYPOS], WHOLE);
+      const settled = await authorizeAndDrive(session, book, prepared);
+      runId = settled.reviewRunId;
+      expect(settled.categories[0]!.state).toBe('settled');
+      expect(settled.findings.length).toBeGreaterThan(0);
+      expect(settled.excluded!.some((entry) => entry.reasonCode === 'contract-schema-invalid' && entry.text.includes('合成的无效发现'))).toBe(true);
+      const ledger = session.store.reviewCategoryLedger(reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      const projection = ledger.inspect(book.bookId);
+      expect(projection.run!.adaptations).toHaveLength(1);
+      expect(projection.run!.adaptations![0]).toMatchObject({ adaptationClass: 'contract-retry', unitOrdinal: 1, attemptIndex: 2, repetition: 'byte-identical' });
+      const revision = projection.resultSetRevision!;
+      expect(revision.gaps).toEqual([]);
+      expect(revision.units[0]!.state).toBe('closed');
+      expect(revision.provenance.adaptations).toEqual({ count: 1, unitOrdinals: [1] });
+      const frozen = ledger.frozenPlan(projection.taskIntent!.taskIntentId, projection.planEnvelope!.digest).components['plan-envelope'] as Record<string, unknown>;
+      expect(frozen.contractIdentity).toMatchObject({ contractId: 'ai7.editorial-review', version: 2 });
+      expect(projection.planEnvelope!.procedure?.version).toBe(2);
+      const db = database();
+      try {
+        const rejected = db.prepare('SELECT canonical_json FROM review_excluded_findings WHERE review_run_id = ?').all(runId);
+        expect(rejected.length).toBe(settled.excludedTotal);
+        expect(db.prepare("SELECT count(*) n FROM review_findings WHERE review_run_id = ? AND quote = '合成的无效发现'").get(runId)!.n).toBe(0);
+      } finally { db.close(); }
+    } finally { await close(session); }
+    const reopened = await open('sample1-review-contract-v2-controls');
+    try { expect(workspace(reopened, book, runId).run!.excluded!.some((entry) => entry.reasonCode === 'contract-schema-invalid')).toBe(true); }
+    finally { await close(reopened); }
+  }, 300_000);
+
   it('materializes an overlap-misnumbered synthetic finding at its resolved block, applies and reverses it (#1022)', async () => {
     const session = await open('review-overlap-authored');
     try {
@@ -405,7 +577,8 @@ describe('a Review Run over the real store on exact sample1', () => {
         for (let offset = 0; offset < words.length; offset += 256) replace(offset, offset, words.slice(offset, offset + 256));
       }
       const settled = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
-      const category = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      const category = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE, 1));
+      expect(category.planEnvelope!.procedure?.version).toBe(1);
       expect(category.resultSetRevision!.units).toHaveLength(2);
       expect(category.resultSetRevision!.gaps).toEqual([]);
       expect(category.resultSetRevision!.findingCounts).toMatchObject({ listed: 2, located: 1, excluded: 1 });
@@ -485,6 +658,10 @@ describe('a Review Run over the real store on exact sample1', () => {
 
       // Ticked in any order, a Run keeps the configuration's order.
       const prepared = prepare(session, book, [LITERARY, PLOT, STYLE, TYPOS], WHOLE);
+      expect(prepared.preinstalledProcedures?.map((entry) => [entry.categoryId, entry.procedure.procedureId, entry.procedure.version])).toEqual(
+        [TYPOS, STYLE, PLOT, LITERARY].map((categoryId) => [categoryId, `ai7-procedure/review-${categoryId}`, categoryId === PLOT ? 1 : 2]),
+      );
+      expect(prepared.preinstalledProcedures?.every((entry) => /^[a-f0-9]{64}$/u.test(entry.procedure.digest))).toBe(true);
       expect(prepared).toMatchObject({ ordinal: 1, label: '第 1 次', scope: { kind: 'whole', label: '全书', selectedRange: null }, authorization: null, canContinue: false });
       expect(prepared.categories.map((category) => [category.categoryId, category.state])).toEqual([
         [TYPOS, 'prepared'], [STYLE, 'prepared'], [PLOT, 'prepared'], [LITERARY, 'prepared'],
@@ -1376,13 +1553,13 @@ describe('a Review Run over the real store on exact sample1', () => {
     }
   }, 300_000);
 
-  it('names a category that waits for a place of the governor 等待运行名额, and drops it once the category has one (Issue #632)', async () => {
+  it('records an approval while full, names a category that waits for a place of the governor 等待运行名额, and drops it once the category has one (Issue #632)', async () => {
     let taken = null as PlacesTakenOwner | null;
     const session = await open('sample1-review-authored', (inner) => { taken = new PlacesTakenOwner(inner); return taken; });
     try {
       const book = await importBook(session);
       const prepared = prepare(session, book, [TYPOS, STYLE], WHOLE);
-      session.store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
+      session.store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared), true);
       const loop = session.driver.drive(prepared.reviewRunId);
       await taken!.reached;
       const waiting = workspace(session, book, prepared.reviewRunId).run!;
@@ -1938,7 +2115,7 @@ async function openLayeredSelection(): Promise<Session> {
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
   });
   const owner = new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },

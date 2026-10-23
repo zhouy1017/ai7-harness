@@ -1,3 +1,4 @@
+import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, admittedGlobalAgentRoute } from './global-agent-session.js';
 import { randomUUID } from 'node:crypto';
 import { RetrievalIndex } from '../retrieval/index.js';
 import { PlatformToolSession } from '../provider/platform-tool-session.js';
@@ -14,6 +15,7 @@ import {
 } from '../../shared/protocol.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
+import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { DeepSeekOpenAiCompatibleAdapter, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
 import { Ai7LocalDeterministicAdapter, dialogueRetrievalFixtureRule, type AnswerHold } from '../provider/local-deterministic-adapter.js';
 import {
@@ -141,7 +143,7 @@ export interface WorkspaceTurnStart extends DialogueTurnStart {
 }
 
 /** A turn this owner runs: a dialogue's, or a workspace's with the hand-over it settles into. */
-type OwnedTurn = DialogueTurnStart & { readonly settled?: WorkspaceTurnStart['settled'] };
+type OwnedTurn = DialogueTurnStart & { readonly settled?: WorkspaceTurnStart['settled']; readonly globalRoute?: AdmittedDialogueRoute; readonly globalCredentialReference?: string; readonly sourceGuard?: () => boolean };
 
 /** Hand a workspace turn its settled answer; a hand-over that throws changes nothing already recorded. */
 function handOver(turn: OwnedTurn, outcome: DialogueOutcome, streamed: string): void {
@@ -209,6 +211,17 @@ export class DialogueExecutionOwner {
     if (this.#disposed) throw new DialogueError('DIALOGUE_ROUTE_UNAVAILABLE', 'AI7 正在关闭；没有发送任何内容。');
   }
 
+  requireGlobalReady(policy: LaunchPolicyProjection): AdmittedDialogueRoute {
+    const route = admittedGlobalAgentRoute(policy);
+    if (route === null || this.#deps.live === null || this.#disposed) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
+    return route;
+  }
+
+  beginGlobal(turn: DialogueTurnStart, route: AdmittedDialogueRoute, sourceGuard: () => boolean): void {
+    if (turn.message.globalSources === undefined || !sourceGuard()) throw new DialogueError('GLOBAL_AGENT_SCOPE_CHANGED', '记忆范围已经变化；未发送任何内容。');
+    this.begin({ ...turn, globalRoute: route, globalCredentialReference: this.#deps.live?.credentialReference ?? '', sourceGuard });
+  }
+
   /** What the attempt in flight sent and has streamed so far; `null` for any other attempt. */
   liveText(attemptId: string): LiveAnswer | null {
     const active = this.#active;
@@ -232,7 +245,9 @@ export class DialogueExecutionOwner {
 
   /** Start the attempt's turn and return at once; the answer streams into memory and settles its own outcome. */
   begin(turn: OwnedTurn): void {
-    this.requireReady();
+    if (turn.globalRoute === undefined) this.requireReady();
+    else if (this.#disposed || this.#deps.live === null || turn.sourceGuard?.() !== true)
+      throw new DialogueError('GLOBAL_AGENT_SCOPE_CHANGED', '全域对话绑定已变化；未发送任何内容。');
     if (this.#active?.attemptId === turn.attemptId || this.#queued.some((queued) => queued.attemptId === turn.attemptId)) return;
     if (this.#active !== null) {
       this.#queued.push(turn);
@@ -298,13 +313,14 @@ export class DialogueExecutionOwner {
     const message = buildDialogueMessage(turn.message);
     const sessionId = randomUUID();
     // An Agent 工作区 turn registers no tool, whatever the rule or fixture offers the dialogue (Issue #90, slice 13a).
+    const global = turn.message.globalSources !== undefined;
     const workspace = turn.settled !== undefined;
-    const localRule = workspace ? null
+    const localRule = workspace || global ? null
       : live?.route?.localTools ?? (live === null && this.#deps.fixture !== null ? dialogueRetrievalFixtureRule(this.#deps.fixture, turn.message) : null);
     let retrieval: RetrievalIndex | null = null;
-    const promptContractDigest = workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST
+    const promptContractDigest = global ? GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST
       : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
-    const systemPrompt = workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt
+    const systemPrompt = global ? GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt
       : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
     let current: string | null = null;
     let spanOpened = false;
@@ -314,9 +330,9 @@ export class DialogueExecutionOwner {
       // Inside the attempt: a source that cannot be read settles the attempt as failed rather than leaving it answering.
       retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(turn.dialogueId) ?? new RetrievalIndex([]);
       active.retrieval = retrieval;
-      const route = live === null ? null : live.route!;
+      const route = live === null ? null : turn.globalRoute ?? live.route!;
       // Read once: under ordinary-production the configured reference may change while this answer is in flight (Issue #811).
-      const credentialReference = live === null ? '' : live.credentialReference;
+      const credentialReference = live === null ? '' : turn.globalCredentialReference ?? live.credentialReference;
       const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
       const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
       const composition = describeComposition(executionRoute, model, promptContractDigest,
@@ -331,7 +347,8 @@ export class DialogueExecutionOwner {
         model,
         systemPrompt,
         // The editor's own selected words and question: the local deterministic route, or a remote one whose rule names them.
-        outboundDataCategory: DIALOGUE_OUTBOUND_CATEGORY,
+        outboundDataCategory: global ? 'public-or-synthetic' : DIALOGUE_OUTBOUND_CATEGORY,
+        ...(global ? { contractCategories: new Set(['house-review-preference-excerpt'] as const) } : {}),
         policy: route === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           // The selected version, as the verified projection names it.
@@ -344,7 +361,7 @@ export class DialogueExecutionOwner {
         ...(route === null ? {} : { ruleOutboundCategories: route.outboundDataCategories }),
       };
       const acceptedOutputDigests = new Set<string>();
-      const scope = { currentBindingDigest: () => current, acceptedOutputDigests, ...(route === null ? {} : { ceilingState: () => 'not-applicable' as const }) };
+      const scope = { currentBindingDigest: () => turn.sourceGuard?.() === false ? null : current, acceptedOutputDigests, ...(route === null ? {} : { ceilingState: () => 'not-applicable' as const }) };
       const toolSession = retrieval === null ? null : new PlatformToolSession({ binding: bindingFacts, scope, retrieval, purpose: DIALOGUE_TEST_ITEM_PURPOSE });
       // Development validation only (ADR 0089, Issue #808): the Provider Test Ledger and Result Cache answer, refuse or record
       // the request. A live launch outside one is business, and the request reaches the transport itself.
@@ -372,8 +389,11 @@ export class DialogueExecutionOwner {
           const nativeFetch = live.runtime.nativeFetch;
           // A stop during cache/session/credential setup can precede the Harness turn, when interrupt() is still idle.
           // Check again at both transport boundaries so that neither a cache claim nor an actual send starts after it.
+          // Nothing has left at either boundary, so the adapter reads it as a transport failure, never an unknown result (#1080).
           const requireRunning = (signal?: AbortSignal): void => {
-            if (active.stopRequested || this.#disposed || signal?.aborted === true) throw new DOMException('Dialogue interrupted.', 'AbortError');
+            if (active.stopRequested || this.#disposed || signal?.aborted === true) {
+              throw Object.assign(new DOMException('Dialogue interrupted.', 'AbortError'), { requestSent: false });
+            }
           };
           const send: DeepSeekTransport = async (url, init) => {
             requireRunning(init.signal);
@@ -468,6 +488,11 @@ export class DialogueExecutionOwner {
     }
     // The turn's last event in the Session, when the turn reached it at all.
     const endSeq = outcome !== null && spanOpened && outcome.span.endSeq >= outcome.span.startSeq ? outcome.span.endSeq : null;
+    // A stop or close that aborts the request before it leaves is a transport failure to the adapter (#1080), yet it is still
+    // the editor's stop, or AI7 closing, and settles as one: nothing was sent.
+    const last = outcome?.signals.at(-1);
+    const stoppedBeforeSend = outcome !== null && outcome.terminal === 'failed' && (active.stopRequested || this.#disposed) &&
+      last?.kind === 'failed' && last.failure.code === AI7_FAILURE_CODES.TRANSPORT_FAILED;
     let settled: DialogueOutcome;
     let cause: string | null = null;
     if (outcome === null) {
@@ -475,15 +500,16 @@ export class DialogueExecutionOwner {
       cause = failure ?? 'DIALOGUE_EXECUTION_FAILED';
     } else if (outcome.terminal === 'completed') {
       settled = 'completed';
-    } else if (outcome.terminal === 'interrupted' && active.stopRequested) {
+    } else if ((outcome.terminal === 'interrupted' || stoppedBeforeSend) && active.stopRequested) {
       settled = 'stopped';
+    } else if (stoppedBeforeSend) {
+      settled = 'interrupted';
+      cause = DIALOGUE_CLOSED_CAUSE;
     } else if (outcome.terminal === 'interrupted') {
       settled = 'interrupted';
-      const last = outcome.signals.at(-1);
       cause = this.#disposed ? DIALOGUE_CLOSED_CAUSE : last?.kind === 'interrupted' ? last.failure.code : 'INTERRUPTED';
     } else {
       settled = 'failed';
-      const last = outcome.signals.at(-1);
       cause = last?.kind === 'failed' ? last.failure.code : 'AMBIGUOUS';
     }
     // A write the store refused once (a moment's lock, a busy disk) is tried once more; one refused twice leaves the attempt

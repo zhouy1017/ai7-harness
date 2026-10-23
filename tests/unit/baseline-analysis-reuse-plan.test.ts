@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { AnalysisError } from '../../src/service/analysis/canonical.js';
+import { AnalysisError, canonicalJson } from '../../src/service/analysis/canonical.js';
+import { reviewCategoryContractInput, reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
+import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { deriveCoverageManifest, unitContentKeys, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from '../../src/service/analysis/identity.js';
 import {
@@ -266,3 +268,36 @@ describe('resendUnits', () => {
   });
 });
 
+
+
+it('review v2 reuse compares the framework version and semantic category inputs, independently of prompt bytes (#1084)', () => {
+  const manifest = manifestOf(baseBlocks);
+  const predecessor: ScopePlanPredecessor = { revisionId: randomUUID(), ordinal: 1, digest: 'a'.repeat(64),
+    contractVersion: 'ai7.editorial-review/2', schemaDigest: 'a'.repeat(64), categoryConfigurationIdentity: 'configuration-1',
+    coverageManifestDigest: manifest.digest, manifest, unitStates: manifest.units.map((unit) => ({ unitOrdinal: unit.ordinal, state: 'closed' })),
+    unreviewedUnitOrdinals: [] };
+  const derive = (configuration: string, contractVersion = 'ai7.editorial-review/2') => deriveScopePlan({
+    kind: 'editorial-review/typos-and-usage', contractVersion, schemaDigest: 'b'.repeat(64), categoryConfigurationIdentity: configuration,
+    mode: 'review-sync', recompute: 'changed', selectedRange: null, manifest, predecessor });
+  expect(derive('configuration-1').counts.reused).toBe(manifest.units.length);
+  expect(derive('configuration-2').counts.reused).toBe(0);
+  expect(derive('configuration-1', 'ai7.editorial-review/3').counts.reused).toBe(0);
+});
+
+it('refuses review v2 reuse when a frozen clause changes under the same contract version (#1084)', () => {
+  const input = reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!);
+  const revised = { ...input, clauses: input.clauses.map((clause, index) => index === 0 ? { ...clause, text: `${clause.text}（合成修订）` } : clause) };
+  const [current, changed] = [input, revised].map((category) => reviewCategoryKindDefinition(category));
+  expect(changed!.contractVersion).toBe(current!.contractVersion);
+  // The store pins the semantic identity in this exact form beside the schema digest.
+  const identityOf = (definition: typeof current) => canonicalJson(definition!.contractIdentity!.categoryConfiguration);
+  const manifest = manifestOf(baseBlocks);
+  const predecessor: ScopePlanPredecessor = { revisionId: randomUUID(), ordinal: 1, digest: 'a'.repeat(64),
+    contractVersion: current!.contractVersion, schemaDigest: current!.schemaDigest, categoryConfigurationIdentity: identityOf(current),
+    coverageManifestDigest: manifest.digest, manifest, unitStates: manifest.units.map((unit) => ({ unitOrdinal: unit.ordinal, state: 'closed' })),
+    unreviewedUnitOrdinals: [] };
+  const derive = (definition: typeof current) => deriveScopePlan({ kind: 'editorial-review/typos-and-usage', contractVersion: definition!.contractVersion,
+    schemaDigest: definition!.schemaDigest, categoryConfigurationIdentity: identityOf(definition), mode: 'review-sync', recompute: 'changed', selectedRange: null, manifest, predecessor });
+  expect(derive(current).counts.reused).toBe(manifest.units.length);
+  expect(derive(changed).counts.reused).toBe(0);
+});

@@ -1,7 +1,7 @@
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage } from '../dialogue/contract.js';
-import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
+import { AI7_FAILURE_CODES, retryBackoffMs, type DshFailureCodes } from './classification.js';
 import type { CredentialBroker, CredentialSlotBinding } from './credential-broker.js';
 import {
   DEEPSEEK_ROUTE,
@@ -46,6 +46,8 @@ import { normalizeModelResponse, type CanonicalModelResult, type ModelUsage, typ
 export const DEEPSEEK_ADAPTER_REVISION = 1 as const;
 export const DEEPSEEK_CONFIGURATION_REVISION = 1 as const;
 export const DEEPSEEK_REASONING_EFFORT = 'high' as const;
+/** Factory default until transport.requestDeadlineSeconds is consumed (F-21). */
+export const MODEL_REQUEST_DEADLINE_MS = 180_000;
 /** The opaque per-request Session header the gateway uses for prompt caching; it carries the Session id and nothing else. */
 export const OPENCODE_GO_SESSION_HEADER = 'x-opencode-session' as const;
 /** The specific User-Agent the developer-live route sends: the product and the trusted scope, no host or user detail. */
@@ -594,12 +596,19 @@ export function parseProviderResponse(
 }
 
 /** Classify a transport-level rejection (network denial, abort, other) into failure facts. */
-export function classifyTransportError(error: unknown): { code: string; message: string } {
+export function classifyTransportError(error: unknown, sent = false): { code: string; message: string } {
   const code = isRecord(error) && typeof error.code === 'string' ? error.code : null;
+  const cause = isRecord(error) && isRecord(error.cause) ? error.cause : null;
+  const timeoutCode = code ?? (typeof cause?.code === 'string' ? cause.code : null);
   const name = isRecord(error) && typeof error.name === 'string' ? error.name : null;
   if (code === 'AI7_PROXY_UNREACHABLE') return { code, message: '代理不可达：请检查网络代理设置。' };
   if (code === AI7_FAILURE_CODES.NETWORK_DENIED) return { code, message: '出站网络在当前产品区间内被禁用。' };
-  if (name === 'AbortError') return { code: AI7_FAILURE_CODES.INTERRUPTED, message: '请求被中断。' };
+  if (timeoutCode === 'UND_ERR_CONNECT_TIMEOUT') return { code: AI7_FAILURE_CODES.TRANSPORT_FAILED, message: '连接在发送请求前超时。' };
+  if (name === 'AbortError' || name === 'TimeoutError' || timeoutCode === 'UND_ERR_HEADERS_TIMEOUT' || timeoutCode === 'UND_ERR_BODY_TIMEOUT' || timeoutCode === 'ETIMEDOUT') {
+    return sent && !(isRecord(error) && error.requestSent === false)
+      ? { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '请求已发出，但已中止或超过时限，结果未知。' }
+      : { code: AI7_FAILURE_CODES.TRANSPORT_FAILED, message: '请求在发送前已中止，未发送任何内容。' };
+  }
   return { code: AI7_FAILURE_CODES.TRANSPORT_FAILED, message: '模型服务传输失败。' };
 }
 
@@ -751,6 +760,8 @@ export interface DeepSeekAdapterDependencies {
   /** The technical Session id of the turn in flight; required by a profile that sends the Session header. */
   readonly sessionId?: () => string;
   readonly requestShape?: 'editorial-dialogue-sse';
+  /** The execution owner's pause/cancel signal; combined with the harness signal and request deadline. */
+  readonly signal?: AbortSignal;
 }
 
 /** A replayed outcome as this turn incurred it: the same answer, and no usage spent sending it. */
@@ -767,8 +778,10 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
   #transmissions = 0;
   #lastResult: CanonicalModelResult | null = null;
   #lastUsage: ModelUsage | null = null;
+  #lastRetryDelayMs: number | null = null;
 
   get lastUsage(): ModelUsage | null { return this.#lastUsage; }
+  get lastRetryDelayMs(): number | null { return this.#lastRetryDelayMs; }
 
   constructor(deps: DeepSeekAdapterDependencies) {
     this.#deps = deps;
@@ -838,6 +851,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     // fails before any response arrives has no canonical result, and must not appear to have one.
     this.#lastResult = null;
     this.#lastUsage = null;
+    this.#lastRetryDelayMs = null;
     if (options.provider !== this.#profile.route || options.model !== this.#modelProfile.model) {
       yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, '适配器只服务其绑定路由与模型。');
       return;
@@ -863,17 +877,28 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     let outcome: ProviderResponseOutcome;
     let streamed = '';
     let blockStarted = false;
+    let sent = false;
+    let responseStatus: number | undefined;
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(new DOMException('模型请求超过时限。', 'TimeoutError')), MODEL_REQUEST_DEADLINE_MS);
+    const signal = AbortSignal.any([deadline.signal, ...(options.signal === undefined ? [] : [options.signal]),
+      ...(this.#deps.signal === undefined ? [] : [this.#deps.signal])]);
+    // The transport owns its send/cache settlement. Abort it through the signal and await its result so a possibly billed
+    // request is durably held before the caller sees completion; racing ahead would leave a cache writer behind.
     try {
       const response: DeepSeekTransportResponse = await this.#deps.broker.releaseTo(this.#deps.slotBinding, ticket, async (secret) => {
+        signal.throwIfAborted();
+        sent = true;
         this.#transmissions += 1;
         const transport = this.#deps.transport ?? ((url, init) => fetch(url, init));
         return transport(assembly.url, {
           method: assembly.method,
           headers: { ...assembly.headers, ...credentialHeaders(this.#profile, secret) },
           body: assembly.body,
-          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          signal,
         });
       });
+      responseStatus = response.status;
       let body: unknown = null;
       const dialogueStream = this.#deps.requestShape === 'editorial-dialogue-sse';
       if (dialogueStream && response.status === 200 && response.replayed !== true) {
@@ -906,12 +931,19 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       const parsed = parseProviderResponse(response.status, body, this.#deps.codes, this.#profile, this.#modelProfile,
         { toolCallsOffered: (options.tools ?? []).length > 0 });
       outcome = response.replayed === true ? withoutIncurredUsage(parsed) : parsed;
+      if (outcome.kind === 'failure' && this.#profile.limitPolicy === 'rate-limit-retryable' &&
+          (outcome.code === AI7_FAILURE_CODES.RATE_LIMIT || (outcome.code === AI7_FAILURE_CODES.PROVIDER_ERROR && outcome.status >= 500 && outcome.status <= 599))) {
+        this.#lastRetryDelayMs = retryBackoffMs(response.headers?.get('retry-after') ?? null);
+      }
     } catch (error) {
       const classified = error instanceof Error && error.message === 'AI7_OUTCOME_UNKNOWN'
         ? { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '模型服务已接受请求，但回答没有完整传回。' }
-        : classifyTransportError(error);
-      yield fail(classified.code, classified.message, classified.code === AI7_FAILURE_CODES.OUTCOME_UNKNOWN ? 200 : undefined);
+        : classifyTransportError(signal.aborted && !(isRecord(error) && error.requestSent === false)
+          ? new DOMException('请求已中止。', deadline.signal.aborted ? 'TimeoutError' : 'AbortError') : error, sent);
+      yield fail(classified.code, classified.message, classified.code === AI7_FAILURE_CODES.OUTCOME_UNKNOWN ? responseStatus : undefined);
       return;
+    } finally {
+      clearTimeout(timer);
     }
     this.#lastUsage = 'usage' in outcome ? outcome.usage ?? null : null;
     if (outcome.kind === 'failure') {

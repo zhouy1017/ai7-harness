@@ -131,8 +131,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-budget-reached': '已停止 · 预算已达上限',
   // A Provider Account Limit (Issue #51, S16b): the drawer's own status, a blocker the editor resolves with the model service.
   'analysis-account-limit': '模型服务账户限额',
-  // 结果待确认 (Issue #51, S16c): the drawer's own status for a Run stopped on sent requests whose results cannot be known.
-  'analysis-outcome-unknown': '结果待确认',
+  // A Run stopped on sent requests whose results cannot be known (Issue #51, S16c), recorded before #1080: the per-unit state.
+  'analysis-outcome-unknown': '该单元结果未知',
   // 结果待确认 a completed Run left (Issue #757): the same words; the Task Outcome stands.
   'analysis-outcome-unconfirmed': '结果待确认',
   'analysis-blocked': '派发前已阻止',
@@ -423,7 +423,7 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
     case 'analysis-outcome-unknown':
       return '有阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发，读完的部分都已保存。';
     case 'analysis-outcome-unconfirmed':
-      return '运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。';
+      return `运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为${item.object.kind === 'unconfirmed' && item.object.ranges > 0 ? '结果未知的单元缺口' : '结果待确认的缺口'}，AI7 没有自动再发。`;
     case 'analysis-blocked':
       return '授权已记录，派发前阻止：当前启动没有可执行的路由。';
     case 'analysis-orphaned':
@@ -459,7 +459,7 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
     case 'analysis-running':
       return runningReason(facts.progress);
     case 'analysis-cancelling':
-      return `你取消了这项任务；正在进行的这一步完成后停止，之后不再发送任何内容 · ${runningReason(facts.progress)}`;
+      return `你取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容 · ${runningReason(facts.progress)}`;
     case 'analysis-pausing':
       return `你暂停了这项任务；正在进行的这一步完成后停下，已完成的部分都会保存 · ${runningReason(facts.progress)}`;
     case 'analysis-paused':
@@ -598,7 +598,8 @@ export function globalAttentionView(projection: GlobalAttentionProjection): Read
         state: entry.state,
         book,
         object,
-        stateLabel: GLOBAL_ATTENTION_STATE_LABELS[entry.state],
+        stateLabel: entry.state === 'analysis-outcome-unconfirmed' && entry.object.kind === 'unconfirmed' && entry.object.ranges > 0
+          ? '该单元结果未知' : GLOBAL_ATTENTION_STATE_LABELS[entry.state],
         pill: GLOBAL_ATTENTION_STATE_PILLS[entry.state],
         reason: globalAttentionReason(entry),
         nextStep: globalAttentionNextStepLine(entry.nextStep),

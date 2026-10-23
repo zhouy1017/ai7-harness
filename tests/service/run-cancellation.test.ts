@@ -276,11 +276,11 @@ describe('取消任务 over the real store', () => {
       expect(progress(runRecordId)).toMatchObject({ unitsSettled: 5, currentUnitOrdinal: 6 });
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, progress);
       const impact = plan.runControl!.cancel.impact;
-      expect(impact[0]).toContain('已读完 4 个阅读范围，等你回答 0 个，你已回答但尚未续行 0 个，结果待确认 1 个，未尝试 2 个');
-      expect(impact[0]).toContain('正在读的第 6 个阅读范围读完后停止');
+      expect(impact[0]).toContain('已读完 4 个阅读范围，等你回答 0 个，你已回答但尚未续行 0 个，结果未知 1 个，未尝试 2 个');
+      expect(impact[0]).toContain('停在正在读的第 6 个阅读范围');
       expect(impact[0]).toContain('新的结果集修订版');
       expect(impact[0]).toContain('这项分析不改稿，没有需要撤回的受控动作。');
-      expect(impact.slice(1)).toEqual(['第 4 个阅读范围的请求已发出、结果待确认；不会再发，在这份修订版里记为结果待确认的缺口，不记为未尝试。']);
+      expect(impact.slice(1)).toEqual(['第 4 个阅读范围的请求已发出、结果未知；不会再发，在这份修订版里记为结果未知的单元缺口，不记为未尝试。']);
       const beforeReads = store.inspectBaselineAnalysis(bookId, progress);
       const digest = createHash('sha256').update(JSON.stringify(impact)).digest('hex');
       for (const afterOrdinal of [1, 0, 1]) {
@@ -337,10 +337,10 @@ describe('取消任务 over the real store', () => {
         activity: { unitsSettled: 2, unitsTotal: SAMPLE1_UNITS, currentUnitOrdinal: 3 },
       });
       expect(running.runControl!.cancel.impact).toEqual([[
-        `正在读的第 3 个阅读范围读完后停止；其余 ${SAMPLE1_UNITS - 3} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
+        `停在正在读的第 3 个阅读范围；其余 ${SAMPLE1_UNITS - 3} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
         '已读完的 2 个阅读范围和正在读的这一个的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
         '这项分析不改稿，没有需要撤回的受控动作。',
-        '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。',
+        '正在等待的那一轮模型请求会被中止；回答已传回的照常计入，否则该阅读范围记为结果未知的缺口，不会再发。',
       ].join('')]);
       expect(running.runControl!.executingSince).toBe(store.inspectBaselineAnalysis(bookId, progress).run!.transitions.find((transition) => transition.state === 'executing')!.recordedAt);
 
@@ -449,7 +449,7 @@ describe('取消任务 over the real store', () => {
       await until(() => heldAt === 'cross-unit-reduction', 'the reduction turn out');
       expect(execution.progressFor(runRecordId)).toMatchObject({ stage: 'cross-unit-reduction', unitsSettled: SAMPLE1_UNITS });
       expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, progress).runControl!.cancel.impact[0])
-        .toContain('正在进行的跨单元归纳完成后停止，之后的步骤都不再进行，不再发送任何内容。');
+        .toContain('正在进行的跨单元归纳会被中止，回答已传回的照常计入；之后的步骤都不再进行，不再发送任何内容。');
 
       expect(store.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
       expect(execution.cancelRun(runRecordId, store.baselineAnalysisLedger)).toBe('stopping');

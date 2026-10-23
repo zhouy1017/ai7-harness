@@ -54,7 +54,7 @@ Editors experience one continuous Manuscript rather than technical windows or Ma
 
 ### D-009 — Navigation-first outline with explicit structure adjustment
 
-The virtualized hierarchical outline is normally a navigator in the right contextual navigation. A separate Whole-manuscript Position Rail provides sparse global markers. Reordering, level changes, or other structural edits require an explicit Structure Adjustment Mode with affected-range disclosure and durable undo; model-suggested structural changes remain Proposals. The right navigation also contains a persistent `搜索与跳转` entry, whose detailed search behavior is decided separately.
+The virtualized hierarchical outline is normally a navigator in the right contextual navigation. A separate Whole-manuscript Position Rail provides sparse global markers. Section moves, multi-heading hierarchy changes or other outline-driven structural edits require an explicit Structure Adjustment Mode with affected-range disclosure and durable undo; splitting, merging, inserting or deleting a paragraph and changing one heading's level at the caret are ordinary edits ([root ADR 0096 §1](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#1-structural-edits-are-ordinary-edits)); model-suggested structural changes remain Proposals. The right navigation also contains a persistent `搜索与跳转` entry, whose detailed search behavior is decided separately.
 
 ### D-010 — Manuscript-scoped Search and Jump
 
@@ -413,6 +413,14 @@ On 2026-09-09 the Owner closed the design session with every screen decided and 
 ### D-091 — Warm paper, night ink and accessible Book switching
 
 [ADR 0092](../adr/0092-refine-editor-facing-gui-aesthetics-motion-and-book-switcher.md) records the Owner’s 2026-10-20 design instruction: warm-paper/night-ink semantic palettes, reduced-motion-safe spatial feedback, current-catalog grouped Book switching, comfortable manuscript reading and actual technical disclosure. It changes only its named clauses and asserts no implementation or integration completion.
+
+### D-092 — Procedures at the center, a governed concurrent harness, evidence on the card
+
+[Root ADR 0095](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) records the Owner's 2026-10-23 direction: every task is one run of a procedure (工序) that the house may rewrite, create, capture and reuse, with the built-in kinds as pre-installed procedures; a two-layer execution governor with several units and several Books in flight and an idle-time background lane; DSH as the harness for tool-using, multi-step, sub-agent work inside the same authority envelope; review contract v2 with numbered blocks, per-finding tolerance and visible excluded findings; factual evidence on the card, archived and attached on export, with the 审阅报告 a derived view; one production policy with a runtime model table; and a learning agent that may ask the editor why, at an adjustable frequency. It changes only the clauses it names and asserts no implementation.
+
+### D-093 — Structural editing, structure recognition and less ceremony
+
+[Root ADR 0096](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) records the editor-side decisions of the same day: splitting, merging, inserting and deleting paragraphs and changing a heading's level are ordinary edits; footnotes become an editable note block and tables and images are shown read-only; a manuscript without heading styles receives a candidate structure the editor confirms; the default workspace profile is pinned at Book creation; a procedure starts from its sheet with one action; cards carry one decision system; identifiers stay behind 技术详情; and the context header's processing indicator reflects the real execution state.
 
 ## Current documents
 

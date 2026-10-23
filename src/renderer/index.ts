@@ -1,3 +1,5 @@
+import { renderProcedureLibrary } from './procedure-library.js';
+import { mountGlobalAgent } from './global-agent.js';
 import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
 import { ANALYSIS_MORE_RANGES, ANALYSIS_READ_FAILED, ANALYSIS_READING, ANALYSIS_MORE_REPORT_ROWS, ANALYSIS_MORE_CHOICES, ANALYSIS_EARLIER_HISTORY, ANALYSIS_PAGED_LIST_LABELS } from './analysis-paging-labels.js';
@@ -22,7 +24,8 @@ import {
   APPEARANCE_STATUS,
   APPEARANCE_TITLE,
 } from './appearance-labels.js';
-import { renderHouseReviewPreference } from './knowledge-base-memory.js';
+import { renderHouseReviewPreference, mountEditorialMemory } from './knowledge-base-memory.js';
+import { mountLearningAskFrequency } from './learning-settings.js';
 import { mountDiagnostics } from './diagnostics.js';
 import { DIAGNOSTICS_OPENED } from './diagnostics-labels.js';
 import { mountEditQualitySignals } from './quality-learning.js';
@@ -190,10 +193,8 @@ import {
 } from './evaluation-labels.js';
 import {
   PROCEDURES_HEADING,
-  PROCEDURE_STATE_LABELS,
   RULES_HEADING,
   artifactLine,
-  procedureLine,
   EXEMPLARS_EMPTY,
   EXEMPLARS_LATER,
   EXEMPLARS_MORE,
@@ -1054,6 +1055,7 @@ const shell = mountShell({
     if (authorityInterrupted) return;
     if (destination === 'library') void leaveThen(() => returnToLibrary());
     else if (destination === 'series') void leaveThen(() => renderSeriesList(null));
+    else if (destination === 'global-agent') void leaveThen(() => renderGlobalAgent());
     else if (destination === 'knowledge') void leaveThen(() => renderKnowledgeBase('guidelines'));
     else void leaveThen(() => renderQualityLearning('learning', null));
   },
@@ -1525,6 +1527,9 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
       await renderQualityLearning('learning', target.bookId);
       return;
     // A dialogue (Issue #52, S17a): the Book's 工作概览 with the dialogue in the foreground beside it.
+    case 'global-agent-dialogue':
+      await renderGlobalAgent(target.dialogueId);
+      return;
     case 'dialogue':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
         renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
@@ -1707,6 +1712,13 @@ async function renderOwnedBookWorkbenchRoute(): Promise<void> {
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法读取精确图书工作台路由。'), 'error');
   }
+}
+
+async function renderGlobalAgent(dialogueId?: string): Promise<void> {
+  await window.ai7.leaveBookWorkbench();
+  shell.leaveBook();
+  replaceScreen('global-agent', mountGlobalAgent({ api: window.ai7, setStatus, errorMessage: rendererErrorMessage,
+    ...(dialogueId === undefined ? {} : { dialogueId }), openAudit: () => void leaveThen(() => renderQualityLearning('audit', null)) }));
 }
 
 async function returnToLibrary(): Promise<void> {
@@ -5758,8 +5770,14 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
   const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
   // 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005): the profile each 评估 version snapshots, and its use.
   if (tab === 'memory') {
+    const preferenceHost = element('div'); const memoryHost = element('div');
+    panelNode.append(preferenceHost, memoryHost);
     try {
-      renderHouseReviewPreference(panelNode, await window.ai7.inspectHouseReviewPreference(), window.ai7);
+      renderHouseReviewPreference(preferenceHost, await window.ai7.inspectHouseReviewPreference(), window.ai7);
+      // 编辑记忆 (Issue #1082, F-05 part 1): explicit memory and the learning controls beside the delivered 本社审阅偏好.
+      await mountEditorialMemory(memoryHost, window.ai7).catch((error: unknown) => {
+        memoryHost.replaceChildren(element('p', 'field-note', rendererErrorMessage(error, '无法读取编辑记忆。')));
+      });
       if (content.isConnected) setStatus('本社审阅偏好已打开');
     } catch (error) { setStatus(rendererErrorMessage(error, '无法读取本社审阅偏好。'), 'error'); }
     return;
@@ -6001,6 +6019,7 @@ async function renderQualityLearning(tab: QualityLearningTab, bookId: string | n
     all.dataset['learningAction'] = 'all-books';
     back.append(all);
   }
+  back.append(button('全域对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
   back.append(button('返回', 'quiet', () => void initializeStartup()));
   if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
   content.append(
@@ -6096,20 +6115,12 @@ function knowledgeBasePage(tab: KnowledgeBaseTab, tabFocused: boolean): { conten
 function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjection, tabFocused = false, procedures: KnowledgeProceduresProjection | null = null): void {
   const { content, panelNode } = knowledgeBasePage('rules', tabFocused);
   content.dataset['ruleCount'] = String(projection.rules.length);
-  // The expert 工序 (Issue #427, S79d; KB-010): what each does, its version, state and use, then the native artifact.
+  // The expert 工序 (Issue #427, S79d; KB-010), since Issue #1081 the pre-installed procedure library: what each does, its
+  // version, state, use and stages, then the native artifact.
   if (procedures !== null) {
     const section = element('section', 'knowledge-procedures');
-    section.dataset['procedureCount'] = String(procedures.procedures.length);
-    const list = element('ul', 'knowledge-procedure-list');
-    for (const procedure of procedures.procedures) {
-      const item = element('li', undefined);
-      item.dataset['procedureId'] = procedure.procedureId;
-      item.dataset['procedureState'] = procedure.state;
-      item.dataset['procedureRuns'] = String(procedure.reviewRuns);
-      item.append(element('span', `status-pill procedure-state-${procedure.state}`, PROCEDURE_STATE_LABELS[procedure.state]), element('span', undefined, ` ${procedureLine(procedure)}`));
-      if (procedure.unavailableReason !== null) item.append(element('span', 'field-note procedure-reason', ` · ${procedure.unavailableReason}`));
-      list.append(item);
-    }
+    section.dataset['procedureCount'] = String(procedures.preinstalled.length);
+    const list = renderProcedureLibrary(procedures.preinstalled);
     const artifacts = element('ul', 'knowledge-artifact-list');
     for (const artifact of procedures.artifacts) {
       const item = element('li', undefined, artifactLine(artifact));
@@ -6130,7 +6141,7 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
           ? []
           : [element('dt', undefined, '权限侧车 SHA-256'), element('dd', 'technical-identity', artifact.technical.sidecarSha256)]),
       ]),
-      ...procedures.procedures.flatMap((procedure) => [element('dt', undefined, procedure.title), element('dd', 'technical-identity', procedure.procedureId)]),
+      ...procedures.preinstalled.flatMap((procedure) => [element('dt', undefined, procedure.title), element('dd', 'technical-identity', procedure.procedureId)]),
     );
     section.append(element('h3', undefined, PROCEDURES_HEADING), list, artifacts, identities);
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): apart from the built-in 工序, read on their own.
@@ -6827,6 +6838,7 @@ function renderSettingsHub(): void {
     section.append(heading, list);
     content.append(section);
   }
+  mountLearningAskFrequency(content, window.ai7);
   replaceScreen('settings', content);
   setStatus(SETTINGS_HUB_WORDS.opened);
 }

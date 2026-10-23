@@ -43,12 +43,10 @@ import {
   LEARNING_LINEAGE_STEPS,
   LEARNING_LINEAGE_STOP,
   LEARNING_LINEAGE_TASKS_NONE,
-  LEARNING_LINEAGE_WHY_EMPTY,
   LEARNING_REMEDIATION_CANCEL,
   LEARNING_REMEDIATION_CONFIRM,
   LEARNING_REMEDIATION_GROUPS,
   LEARNING_REMEDIATION_HEADING,
-  LEARNING_REMEDIATION_MEMORY,
   learningAuditBatchStop,
   learningAuditBookHeading,
   learningAuditChoicesCut,
@@ -62,6 +60,9 @@ import {
   learningLineageEarlier,
   learningLineageHeading,
   learningRemediationCompleted,
+  learningRemediationMemory,
+  learningLineageMemories,
+  learningLineageWhy,
   learningRemediationFuture,
   learningRemediationLeftOutLine,
   learningRemediationOutcome,
@@ -537,7 +538,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     const texts: Record<(typeof LEARNING_REMEDIATION_GROUPS)[number]['group'], string> = {
       future: learningRemediationFuture(preview.groups.future, preview.scope, preview.bookTitle, preview.groups),
       running: learningRemediationRunning(preview.groups),
-      memory: LEARNING_REMEDIATION_MEMORY,
+      memory: learningRemediationMemory(preview.groups.memory),
       completed: learningRemediationCompleted(preview.groups.decisionsKept, preview.groups),
     };
     const counts: Record<(typeof LEARNING_REMEDIATION_GROUPS)[number]['group'], number> = {
@@ -768,10 +769,11 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     section.append(backward);
 
     // 后来影响了什么 (LAUD-004): each stage after the decision — the 本社审阅偏好 versions it supports and the 审阅 that read
-    // them (Issue #912), and the two memory stages nothing makes yet — an empty one saying so.
+    // them (Issue #912), the memory candidates nothing makes yet — an empty stage saying so — and the editorial memory the editor
+    // created explicitly from it (Issue #1082).
     const forward = el('section', 'learning-lineage-forward');
     forward.setAttribute('aria-label', LEARNING_LINEAGE_FORWARD);
-    forward.append(el('h5', 'learning-lineage-forward-heading', LEARNING_LINEAGE_FORWARD), el('p', 'field-note learning-lineage-why', LEARNING_LINEAGE_WHY_EMPTY));
+    forward.append(el('h5', 'learning-lineage-forward-heading', LEARNING_LINEAGE_FORWARD), el('p', 'field-note learning-lineage-why', learningLineageWhy(read.downstream.activeMemories)));
     const later = el('ol', 'learning-lineage-steps');
     later.start = 3;
     const counts = [read.downstream.signals, read.downstream.memoryCandidates, read.downstream.activeMemories, read.downstream.tasks];
@@ -786,6 +788,8 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
           list.append(line);
         }
         body.push(list);
+      } else if (offset === 2 && count > 0) {
+        body.push(el('p', 'field-note learning-lineage-memories', learningLineageMemories(count)));
       } else if (offset === 3 && read.tasks.length > 0) {
         const list = el('ul', 'learning-lineage-tasks');
         for (const task of read.tasks) {

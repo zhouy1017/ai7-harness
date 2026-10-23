@@ -1801,6 +1801,9 @@ async function main() {
     at('capture-source-set');
     // 将以上工序保存为可复用工序: the source set — both categories, each kept — the classification it recommends and why, what
     // extraction keeps and what it never saves. Removing a step changes what it keeps; nothing can be added or reordered.
+    // #1084: current authored contracts use numbered v2 blocks; exclusions remain readable beside accepted marks.
+    requireJourney(sourceRun.excludedTotal > 0 && sourceRun.excluded.some((entry) => entry.reasonCode === 'quote-not-found'), 'capture-v2-excluded-projection');
+    await assertRenderer(renderer, `(() => { const details=document.querySelector('details.review-excluded'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return details.querySelector('summary')?.textContent.startsWith('未列为发现的 ') && details.querySelectorAll('.review-excluded-entry').length>0 && !details.querySelector('[data-review-finding-id]'); })()`, 'capture-v2-visible-excluded');
     await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'capture-open');
     const captureSheet = await readCapture(renderer, (read) => read.steps.length === 2 && read.focused, 'capture-sheet');
     requireJourney(JSON.stringify(captureSheet.steps.map(([id, eligible, checked]) => [id, eligible, checked])) === JSON.stringify([['style-and-format', 'true', true], ['literary-expression', 'true', true]]) &&

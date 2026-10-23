@@ -547,7 +547,7 @@ describe('the authorization bar (S74a)', () => {
       runRecordId: 'run',
       cancelling: false,
       pausing: false,
-      cancel: { reason: null, impact: ['正在读的第 3 个阅读范围读完后停止。'] },
+      cancel: { reason: null, impact: ['停在正在读的第 3 个阅读范围。'] },
       pause: { reason: null },
       resume: null,
       redo: { reason: '先暂停，再改计划重做' },
@@ -568,10 +568,10 @@ describe('the authorization bar (S74a)', () => {
     // Confirmed: 正在取消 and its sentence until the Run has stopped, and nothing more to press (CTRL-005).
     const cancelling = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
       state: { key: 'cancelling', label: '正在取消' },
-      runControl: { ...runControl, cancelling: true, cancel: { reason: '已在取消：正在进行的这一步完成后停止', impact: [] } },
+      runControl: { ...runControl, cancelling: true, cancel: { reason: '已在取消：正在进行的这一步会被中止，此后不再发送任何内容', impact: [] } },
     }));
     expect(cancelling).toMatchObject({ status: '正在取消', note: TASK_BAR_CANCELLING_NOTE });
-    expect(TASK_BAR_CANCELLING_NOTE).toBe('已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容');
+    expect(TASK_BAR_CANCELLING_NOTE).toBe('已记下你的取消；正在进行的这一步会被中止，此后不会再发送任何内容');
     expect(names(cancelling)).toEqual(['run-link']);
     // Stopped: 已取消, never 已中断; 改计划重做 beside the way to the Run while it can be made (Issue #422, S76c).
     const stopped = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'cancelled-after-start', label: '已取消' } }));
@@ -891,10 +891,10 @@ describe('结果待确认 in the drawer (S16c)', () => {
   };
 
   it('names the unconfirmed ranges and what the editor can do, with no repeat-shaped action', () => {
-    expect([TASK_BAR_VIEW_UNCONFIRMED, TASK_BAR_UNCONFIRMED_HEADING]).toEqual(['查看未确认的部分', '结果待确认的阅读范围']);
+    expect([TASK_BAR_VIEW_UNCONFIRMED, TASK_BAR_UNCONFIRMED_HEADING]).toEqual(['查看未确认的部分', '该单元结果未知']);
     expect(taskBarOutcomeUnknownNote(1, 8, 8)).toBe(
       '1 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。' +
-      '其余已读完的 7 / 8 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 1 个记为结果待确认的缺口');
+      '其余已读完的 7 / 8 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 1 个记为结果未知的单元缺口');
     expect(taskBarOutcomeUnknownNote(1, 8, 8)).not.toMatch(/续行|重做|再次计费/u);
     expect(taskBarUnconfirmedUnit(4, 1)).toBe('第 4 个阅读范围 · 请求已发出 1 次 · 回答没有完整传回');
     const unknown = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'outcome-unknown', label: '结果待确认' }, runControl: control }));

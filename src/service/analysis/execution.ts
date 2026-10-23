@@ -150,14 +150,12 @@ function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
 
 /**
  * How many Runs the governor executes at once (Issue #49, S14; ADR 0021): two. Under development-ci either place takes any
- * Run. Under a live launch — developer-live and ordinary production — one place is the editor's and the other a 后台分析登记's
- * (Issue #864, the Commander's governor correction): the editor's Runs still execute one at a time, as the human-attended scope
- * and its live-once Provider testing (ADR 0065, ADR 0067) have always held them, and the second place takes only a Run an
- * Enrollment started (`backgroundAnalysisShare`: capacity − 1).
+ * Run. Live launches also admit foreground Runs across Books into both places. Background enrollments remain bounded by
+ * their existing share (`backgroundAnalysisShare`: capacity − 1) and never reserve an otherwise free foreground place.
  */
 export const EXECUTION_RUN_CAPACITY = 2;
-/** The places the editor's Runs may hold under a live launch: one, the other being background analysis's (Issue #864). */
-const LIVE_FOREGROUND_PLACES = 1;
+/** Foreground Runs may use the whole governor (ADR 0095 §2); the background share is unchanged. */
+const LIVE_FOREGROUND_PLACES = EXECUTION_RUN_CAPACITY;
 /** Waiting units retain their records and hold no governor place; all other admission semantics stay with the governor. */
 export function holdsGovernorSlot(state: string): boolean { return state !== 'awaiting-clarification'; }
 /** A bounded waiting set; excess starts are recorded as refused before dispatch, never silently dropped. */
@@ -229,7 +227,7 @@ export interface ExecutionOwnerDependencies {
  * J-10's unit hold (Issue #422, plan slice S76a): once a unit's turn has come back, the owner asks whether the unit
  * may settle, given how many units already have, and waits until it may. The unit is in flight all that time, which
  * is what lets the Journey cancel a Run with a unit under way and watch 正在取消 until that unit finishes. A
- * cancellation does not end the hold, exactly as it never cuts off a sent turn; an interruption does, so a held Run
+ * cancellation does not end this test-only post-response hold; an interruption does, so a held Run
  * never keeps AI7 from closing.
  */
 export type UnitHold = (unitsSettled: number, interrupted: () => boolean) => Promise<void>;
@@ -263,10 +261,11 @@ interface ActiveRun {
    */
   validationStep: string;
   harness: PrimaryAgentHarnessHandle | null;
+  readonly requestAbort: AbortController;
   interrupted: boolean;
   /**
-   * 取消任务 (Issue #422): the editor cancelled the Run and `cancelling` is recorded. It is read between units only,
-   * so the unit in flight finishes — a sent turn is never aborted — and nothing after it is sent.
+   * 取消任务 (Issue #422): the editor cancelled the Run and `cancelling` is recorded. It stops further units
+   * and aborts a model request in flight. A sent request settles as its own outcome-unknown gap.
    */
   cancelRequested: boolean;
   /** 暂停 (Issue #422, S76b): read between units like a cancellation; the Run then waits, keeping what it read. */
@@ -354,13 +353,6 @@ export function accountLimitDetail(settled: number, total: number): string {
 
 // 结果待确认's words (Issue #51, S16c; Issue #757) live in `./outcome-unknown.js`, which the ledger reads too.
 export { OUTCOME_UNKNOWN_CARRIED, OUTCOME_UNKNOWN_NOT_RESENT, carriedOutcomeUnknownReason } from './outcome-unknown.js';
-
-/** 结果待确认's stop, in the Run's own words: which ranges, what is kept, and what the editor can do. */
-export function outcomeUnknownDetail(unitOrdinals: ReadonlyArray<number>, settled: number, total: number): string {
-  const ranges = unitOrdinals.map((ordinal) => `第 ${ordinal} 个`).join('、');
-  return `结果待确认：${ranges}阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。` +
-    `其余已读完的 ${settled - unitOrdinals.length} / ${total} 个阅读范围结果都已保存，不会再发送任何内容。可以取消任务保留已读完的部分，或改计划重做。`;
-}
 
 /** The reduction's, a sample's or the reflection's own words when its turn's result cannot be known (Issue #51, S16c). */
 export function ambiguousTurnReason(signals: ReadonlyArray<HarnessSignal>): string | null {
@@ -581,8 +573,9 @@ export class BaselineAnalysisExecutionOwner {
 
   /**
    * Whether the governor has no place for a Run the editor starts now (Issue #49, S14): as many Runs execute as it holds, or —
-   * under a live launch — the editor's one place is taken (Issue #864). A start then waits in its queue (`admitOrQueue`); a quick
-   * start, a Review Run's approval and a 续行 wait for a place with their reasons.
+   * under a live launch — the editor's Runs hold every foreground place (Issue #864; all of them since #1080). A start then
+   * waits in its queue (`admitOrQueue`); a Review Run's recorded approval, a quick start and a 续行 wait for a place with their
+   * reasons.
    */
   get busy(): boolean {
     const occupying = this.#occupiedPlaces();
@@ -837,6 +830,7 @@ export class BaselineAnalysisExecutionOwner {
     // the partial revision, never one that drops them (Issue #759).
     if (options.cancel !== true && !resuming) this.#requireMaterials(runRecordId, ledger);
     // 结果待确认 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016): a Run stopped there never goes on — only its cancellation runs.
+    // Only Runs recorded before #1080 carry that stop; a Run now completes with its unknown units as gaps.
     if (resuming && options.cancel !== true && ledger.outcomeUnknownOf(runRecordId) !== null) {
       throw new ExecutionAdmissionError('EXECUTION_OUTCOME_UNKNOWN', OUTCOME_UNKNOWN_NO_RESUME);
     }
@@ -885,6 +879,7 @@ export class BaselineAnalysisExecutionOwner {
       transmissionsAtDispatch: 0,
       validationStep: '',
       harness: null,
+      requestAbort: new AbortController(),
       interrupted: false,
       cancelRequested: options.cancel === true,
       pauseRequested: false,
@@ -1040,7 +1035,7 @@ export class BaselineAnalysisExecutionOwner {
 
   /**
    * 取消任务 (Issue #422, plan slice S76a; CTRL-005, CTRL-008), once `cancelling` is recorded. The Run this owner
-   * executes stops at the next unit boundary: the unit in flight finishes, nothing after it is sent, and the Run ends
+   * executes aborts its model request, retains an unknown gap if sent, sends nothing after it, and the Run ends
    * `cancelled` with what it completed kept. A Run it does not hold — paused, left 可续行, or one AI7 left behind when
    * it last closed — has nothing running: what it kept is gathered in a place of the governor's, and one that kept nothing is
    * settled here at once.
@@ -1049,6 +1044,7 @@ export class BaselineAnalysisExecutionOwner {
     const active = this.#active.get(runRecordId);
     if (active !== undefined) {
       active.cancelRequested = true;
+      active.requestAbort.abort();
       return 'stopping';
     }
     if (ledger.currentRunState(runRecordId) !== 'cancelling') {
@@ -1089,13 +1085,14 @@ export class BaselineAnalysisExecutionOwner {
 
   /**
    * 暂停 (Issue #422, S76b; CTRL-001), once `pausing` is recorded. The Run this owner executes stops at the next unit
-   * boundary — the unit in flight finishes — and records `paused` with what it read kept. A pause recorded for a Run
+   * boundary — a sent aborted request becomes an unknown gap — and records `paused` with what it read kept. A pause recorded for a Run
    * nothing executes has reached its boundary already, and settles here.
    */
   pauseRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'pausing' | 'settled' {
     const active = this.#active.get(runRecordId);
     if (active !== undefined) {
       active.pauseRequested = true;
+      active.requestAbort.abort();
       return 'pausing';
     }
     if (ledger.currentRunState(runRecordId) !== 'pausing') {
@@ -1112,7 +1109,9 @@ export class BaselineAnalysisExecutionOwner {
     const running = [...this.#active.values()];
     for (const active of running) {
       active.interrupted = true;
-      active.harness?.interrupt();
+      active.requestAbort.abort();
+      // Let the live adapter classify a sent abort as unknown; a harness interruption would erase that distinction.
+      if (this.#live() === null) active.harness?.interrupt();
     }
     await Promise.all(running.map((active) => active.done));
   }
@@ -1412,6 +1411,7 @@ export class BaselineAnalysisExecutionOwner {
           attribution: () => ({}),
           promptContractDigest,
           codes,
+          signal: active.requestAbort.signal,
           profile: routeProfile,
           modelProfile: liveModelProfile,
           sessionId: () => harness.currentSessionId(),
@@ -1651,6 +1651,11 @@ export class BaselineAnalysisExecutionOwner {
       const priorAdaptations = continuation === null ? [] : ledger.adaptationsOf(facts.runRecordId);
       let spanOrdinal = stored?.spanCount ?? 0;
       let adaptationOrdinal = priorAdaptations.length;
+      const contractRule = liveKindRule(policy, definition.kind, [], facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
+      const contractDeclared = definition.contractIdentity?.version === 2 &&
+        (ledger.frozenPlan(facts.taskIntentId, facts.planEnvelopeDigest).components['plan-envelope'] as { boundary?: { adaptable?: ReadonlyArray<{ adaptationClass: string }> } })
+          .boundary?.adaptable?.some((entry) => entry.adaptationClass === 'contract-retry') === true;
+      const contractAllowed = live === null || contractRule?.plusDeclaredContractRetryAdaptations === true;
       const adaptedUnitOrdinals: number[] = priorAdaptations.map((entry) => entry.unitOrdinal);
       // The units the Run kept before it stopped count as settled here exactly as they did then: their results, their
       // observations, their usage — toward the revision, the report and the ceiling alike — and their accepted answers.
@@ -1747,12 +1752,6 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
       const remainingUnits = submittedUnits.filter((unit) => !checkpointed.has(unit.ordinal) && !waiting.has(unit.ordinal));
-      // 结果待确认 (Issue #51, S16c): whether any range of this Run — kept before it stopped, or settled now — is a sent request
-      // whose result cannot be known. Such a range is a kept checkpoint, so no continuation ever reads it again.
-      const unconfirmedOrdinals = (): number[] => unitRecords
-        .filter((record) => record.closed.state === 'gap' && record.closed.gap.code === 'outcome-unknown')
-        .map((record) => record.unitOrdinal)
-        .sort((left, right) => left - right);
       // One technical turn for one unit attempt: the span is recorded by reference with the attempt index, the admitted
       // payload digest and the digest of the unit message it submitted — and a safe retry's, the adaptation it carries out
       // (Issue #286) — and every attempt's usage counts toward the Run.
@@ -1773,6 +1772,7 @@ export class BaselineAnalysisExecutionOwner {
         // Read before anything else can start a turn: the adapter clears this at the start of every
         // stream, so it is this attempt's result or nothing.
         const canonical = liveAdapter.instance?.lastCanonicalResult ?? null;
+        const retryDelayMs = liveAdapter.instance?.lastRetryDelayMs ?? null;
         // J-10's unit hold (Issue #422): the turn is back and the unit stays in flight until the Journey lets it settle.
         if (this.#deps.unitHold) await this.#deps.unitHold(active.progress.unitsSettled, () => active.interrupted);
         const payloadDigest = admittedPayloadDigest;
@@ -1785,7 +1785,7 @@ export class BaselineAnalysisExecutionOwner {
         // One model turn came back. It counts whether it transmitted, replayed from the Provider Result
         // Cache, or read the deterministic fixture: what the reader learns is that the Run is moving.
         active.progress.completedAttempts += 1;
-        return { turn, unitUsage, payloadDigest, unitMessageDigest, canonical };
+        return { turn, unitUsage, payloadDigest, unitMessageDigest, canonical, retryDelayMs };
       };
       type SubmittedAttempt = Awaited<ReturnType<typeof submitAttempt>>;
       // The continuation point (CONT-015): a unit is kept the moment it settles, as its revision will hold it, and the
@@ -1940,7 +1940,7 @@ export class BaselineAnalysisExecutionOwner {
           // Run sends it again — not a safe retry, not a fallback, not a continuation — since a second request could bill and
           // apply again: it is kept at once as its own gap, which every later continuation reads back as settled.
           if (ambiguous?.kind === 'ambiguous' && ambiguous.failure !== undefined) {
-            const said = `${ambiguous.failure.reason}（${ambiguous.failure.code}）`;
+            const said = `${ambiguous.failure.reason.replace(/^结果待确认/u, '该单元结果未知')}（${ambiguous.failure.code}）`;
             const reason = s.firstFailure !== null ? `第 1 次尝试：${s.firstFailure.reason}（${s.firstFailure.code}）；安全重试后第 2 次尝试：${said}` : said;
             gap('outcome-unknown', `${reason}；${OUTCOME_UNKNOWN_NOT_RESENT}`);
           } else {
@@ -2054,7 +2054,25 @@ export class BaselineAnalysisExecutionOwner {
         failure: { readonly reason: string; readonly code: string; readonly failureClass: string; readonly status: number | null },
         first: { readonly payloadDigest: string | null; readonly unitMessageDigest: string | null },
         answerId: string | null,
-      ): Promise<SubmittedAttempt> => {
+        retryDelayMs: number | null = null,
+      ): Promise<SubmittedAttempt | null> => {
+        if (live !== null && routeProfile.limitPolicy === 'rate-limit-retryable' &&
+            (failure.code === 'RATE_LIMIT' || (failure.code === 'PROVIDER_ERROR' && failure.status !== null && failure.status >= 500 && failure.status <= 599))) {
+          const signal = active.requestAbort.signal;
+          await new Promise<void>((resolve) => {
+            if (signal.aborted) { resolve(); return; }
+            const finish = (): void => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); };
+            const timer = setTimeout(finish, retryDelayMs ?? 5_000);
+            signal.addEventListener('abort', finish, { once: true });
+          });
+        }
+        // The wait is outside the adaptation: cancellation, pause, scope and budget are checked again before a send.
+        if (active.cancelRequested || active.pauseRequested || active.interrupted || liveInterruption !== null || scopeChanged()) return null;
+        if (ceilingState() === 'reached') {
+          liveInterruption = 'run-budget-ceiling-reached';
+          terminalClassification = 'interrupted';
+          return null;
+        }
         adaptationOrdinal += 1;
         const adaptation = ledger.recordAdaptation({
           attemptId,
@@ -2164,6 +2182,12 @@ export class BaselineAnalysisExecutionOwner {
           const startedAtMs = Date.now();
           const attempt = await safeRetry(w.unit, w.requestDigest, w.failure,
             { payloadDigest: w.firstPayloadDigest, unitMessageDigest: w.firstUnitMessageDigest }, entry.answer!.answerId);
+          if (attempt === null) {
+            settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
+              'adapter-failure', `${w.failure.reason}；安全重试等待期间运行已停止；没有再次发送。`);
+            keepSettled(w.unit, w.wallMs);
+            return 'stopped';
+          }
           // AI7 stopping under the retry cut it off: the unit is not settled, and 续行 applies the answer again.
           if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) return 'stopped';
           const settled = await settleAndRetain({
@@ -2223,7 +2247,7 @@ export class BaselineAnalysisExecutionOwner {
         // A retry-safe failure the bound plan does not let AI7 retry (Issue #419: the editor said 不允许).
         let withheld: string | null = null;
         // A safe retry is a further transmission, so a Run the editor cancelled meanwhile makes none.
-        if (attempt.turn.terminal === 'failed' && !active.interrupted && !active.cancelRequested) {
+        if (attempt.turn.terminal === 'failed' && !active.interrupted && !active.cancelRequested && !active.pauseRequested) {
           const failed = attempt.turn.signals.find((signal) => signal.kind === 'failed');
           if (failed?.kind === 'failed' && failed.failure.retrySafe) {
             const mode = adaptationMode(facts.editorEdits, 'safe-retry');
@@ -2269,16 +2293,49 @@ export class BaselineAnalysisExecutionOwner {
             }
             if (withheld === null && mode === 'automatic') {
               firstFailure = failed.failure;
-              attempt = await safeRetry(unit, requestDigest, failed.failure, attempt, null);
-              if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
-              attempts = 2;
-              // Both attempts cost the Run, so the unit's row carries what the unit cost, not what its
-              // last attempt cost.
-              unitUsageTotal = addUsage(unitUsageTotal, attempt.unitUsage);
+              const retried = await safeRetry(unit, requestDigest, failed.failure, attempt, null, attempt.retryDelayMs);
+              if (retried !== null) {
+                attempt = retried;
+                if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
+                attempts = 2;
+                // Both attempts cost the Run, so the unit's row carries what the unit cost, not what its
+                // last attempt cost.
+                unitUsageTotal = addUsage(unitUsageTotal, attempt.unitUsage);
+              } else withheld = '安全重试等待期间运行已停止；没有再次发送。';
             } else if (withheld === null) {
               withheld = SAFE_RETRY_WITHHELD;
             }
           }
+        }
+        // A contract retry is a separate declared adaptation, never an inference from a possibly billed failure.
+        // Only a completed, nonempty answer with an invalid envelope can reach it; finding rejections close normally.
+        const contractCandidate = attempt.turn.signals.find((signal) => signal.kind === 'contentCandidate');
+
+        const contractParsed = contractDeclared && contractAllowed && attempt.turn.terminal === 'completed' && contractCandidate?.kind === 'contentCandidate'
+          ? definition.parseUnitResult(contractCandidate.text, unit) : null;
+        if (contractDeclared && contractAllowed && attempts <= 2 &&
+            !priorAdaptations.some((entry) => entry.unitOrdinal === unit.ordinal && entry.adaptationClass === 'contract-retry') &&
+            attempt.turn.terminal === 'completed' && contractCandidate?.kind === 'contentCandidate' &&
+            contractCandidate.text.trim().length > 0 && attempt.canonical?.kind !== 'empty-answer' &&
+            parseModelClarification(contractCandidate.text) === null && contractParsed?.ok === false &&
+            (contractParsed.code === 'not-json' || contractParsed.code === 'schema-invalid') &&
+            !active.cancelRequested && !active.pauseRequested && !active.interrupted && liveInterruption === null && !scopeChanged() && ceilingState() !== 'reached') {
+          const message = unitMessages.get(unit.ordinal)!;
+          if (attempt.unitMessageDigest !== sha256Hex(message)) throw new ExecutionAdmissionError('CONTRACT_RETRY_MESSAGE_DRIFT', '契约重试的单元消息与首次请求不同。');
+          adaptationOrdinal += 1;
+          const contractAttemptIndex = attempts === 1 ? 2 : 3;
+          const adaptation = ledger.recordAdaptation({ adaptationClass: 'contract-retry', attemptIndex: contractAttemptIndex, attemptId, runRecordId: facts.runRecordId,
+            taskIntentId: facts.taskIntentId, ordinal: adaptationOrdinal, unitOrdinal: unit.ordinal,
+            classifiedReason: '单元结果信封无法解析，以相同消息重试一次。', failureCode: 'CONTRACT_INVALID', failureClass: 'contract-invalid',
+            failureStatus: null, requestDigest, firstPayloadDigest: attempt.payloadDigest, firstUnitMessageDigest: attempt.unitMessageDigest,
+            planEnvelopeDigest: facts.planEnvelopeDigest, bindingDigest });
+          adaptedUnitOrdinals.push(unit.ordinal);
+          if (currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '契约重试期间执行绑定发生变化。');
+          acceptedOutputDigests.add(contractCandidate.digest);
+          attempt = await submitAttempt(unit, contractAttemptIndex, 'retrying', adaptation.adaptationId);
+          if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
+          attempts = contractAttemptIndex;
+          unitUsageTotal = addUsage(unitUsageTotal, attempt.unitUsage);
         }
         // A range the account limit refused before 续行 carries that attempt in its row as well.
         const prior = refused !== null && refused.unitOrdinal === unit.ordinal ? refused : null;
@@ -2308,16 +2365,12 @@ export class BaselineAnalysisExecutionOwner {
       // no reduction, no revision, no outcome — and 续行 goes on from the next unit. A cancellation outranks both, and a
       // spent ceiling, an account limit, or a unit whose turn ended the Run — refused, cut off, or one the harness could not
       // end — still ends it as the interruption it is, with that unit's gap kept. A sent request whose result cannot be known
-      // stops it 结果待确认 instead, once every other range is read (Issue #51, S16c).
+      // remains a per-unit gap while the other units and the Run complete (ADR 0095 §2).
       const stopWithoutEnding = (): boolean => {
         if (active.cancelRequested || liveInterruption !== null || terminalClassification === 'interrupted') return false;
         const stopping = active.pauseRequested || (active.interrupted && active.resumableOnInterrupt);
         const asking = waiting.size > 0 && !unitsEnded && !active.interrupted;
-        // 结果待确认 (Issue #51, S16c): every range the Run could read is read, and some sent request's result is unknown.
-        const unconfirmed = unconfirmedOrdinals();
-        // Only a kind that keeps its progress stops there: one that keeps none settles the range as its gap and completes.
-        const confirming = active.resumableOnInterrupt && unconfirmed.length > 0 && !unitsEnded && !active.interrupted;
-        if (accountLimit === null && !stopping && !asking && !confirming) return false;
+        if (accountLimit === null && !stopping && !asking) return false;
         // A spent ceiling outranks a pause, AI7 stopping, an open question and an account limit (Issue #51, S16a; MODEL-016):
         // nothing more may be sent under it, so no Run waits to be continued past it. An open question's answer and the
         // request an account limit refused would each be one more request, and AI7 stopping leaves nothing to send the rest:
@@ -2326,9 +2379,7 @@ export class BaselineAnalysisExecutionOwner {
         // ceiling reached if one is still to be sent, and a Run that needs none completes, since the ceiling counts only
         // where it stops a request.
         if (ceilingState() === 'reached') {
-          // A Run that would stop 结果待确认 with the ceiling spent ends as the ceiling reached, its unknown ranges kept as their
-          // own gaps in the partial revision (Issue #51, S16c).
-          if (asking || confirming || accountLimit !== null || active.interrupted) {
+          if (asking || accountLimit !== null || active.interrupted) {
             liveInterruption = 'run-budget-ceiling-reached';
             terminalClassification = 'interrupted';
           }
@@ -2383,17 +2434,7 @@ export class BaselineAnalysisExecutionOwner {
           });
           return true;
         }
-        // 结果待确认 (Issue #51, S16c; CTRL-007, CONT-016; ADR 0034): the Run stops here — no reduction, no revision, no outcome —
-        // keeping everything it read and holding nothing, and nothing more is ever sent under it. It does not go on: the
-        // editor ends it with 取消任务, which keeps what was read, or redoes it as a newly authorized Run (改计划重做).
-        ledger.recordRunState(facts.runRecordId, 'resumable', {
-          detail: outcomeUnknownDetail(unconfirmed, settled, submittedUnits.length),
-          unitsSettled: settled,
-          unitsTotal: submittedUnits.length,
-          stopReason: 'outcome-unknown',
-          carriedUsage,
-        });
-        return true;
+        return false;
       };
       if (stopWithoutEnding()) return;
       // A question the Run's end leaves open stays on record (CLAR-005), and its unit settles as the gap it is, unretried —

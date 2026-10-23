@@ -9,10 +9,10 @@
   "entries": [
     {
       "unitOrdinal": 1,
-      "requestDigest": "dc27e896826faecb8703012e7752c47f344f33edfee6e26072cda50bea88ee24",
+      "requestDigest": "992c587a4433bffcdcdac64b5abdb09f78fd20c01884a1902ff5e3a629f78b05",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"仔细的擦拭\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"状语后的结构助词应为“地”。\",\"replacement\":\"仔细地擦拭\"},{\"quote\":\"渡过了第一个冬天\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"经历一段时间应写作“度过”。\",\"replacement\":\"度过了第一个冬天\"},{\"quote\":\"既使风浪再大\",\"blockOrdinal\":6,\"severity\":\"should\",\"note\":\"让步连词应为“即使”。\",\"replacement\":\"即使风浪再大\"},{\"quote\":\"一部份钱\",\"blockOrdinal\":7,\"severity\":\"note\",\"note\":\"“部份”应作“部分”。\",\"replacement\":\"一部分的钱\"},{\"quote\":\"必竟是第一次\",\"blockOrdinal\":9,\"severity\":\"should\",\"note\":\"“必竟”为错字。\",\"replacement\":\"毕竟是第一次\"},{\"quote\":\"截止今年夏天\",\"blockOrdinal\":10,\"severity\":\"should\",\"note\":\"表示到某时为止应用“截至”。\",\"replacement\":\"截至今年夏天\"},{\"quote\":\"的确给灯塔\",\"blockOrdinal\":4,\"severity\":\"note\",\"note\":\"疑为结构助词误用。\",\"replacement\":\"地确给灯塔\"},{\"quote\":\"更值得记录下来\",\"blockOrdinal\":12,\"severity\":\"note\",\"note\":\"可更简洁。\",\"replacement\":\"更值得记下来\"},{\"quote\":\"灯塔守护人\",\"blockOrdinal\":1,\"severity\":\"note\",\"note\":\"题名用字。\",\"replacement\":\"灯塔守望人\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"仔细的擦拭\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"状语后的结构助词应为“地”。\",\"replacement\":\"仔细地擦拭\"},{\"quote\":\"渡过了第一个冬天\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"经历一段时间应写作“度过”。\",\"replacement\":\"度过了第一个冬天\"},{\"quote\":\"既使风浪再大\",\"blockOrdinal\":6,\"severity\":\"should\",\"note\":\"让步连词应为“即使”。\",\"replacement\":\"即使风浪再大\"},{\"quote\":\"一部份钱\",\"blockOrdinal\":7,\"severity\":\"note\",\"note\":\"“部份”应作“部分”。\",\"replacement\":\"一部分的钱\"},{\"quote\":\"必竟是第一次\",\"blockOrdinal\":9,\"severity\":\"should\",\"note\":\"“必竟”为错字。\",\"replacement\":\"毕竟是第一次\"},{\"quote\":\"截止今年夏天\",\"blockOrdinal\":10,\"severity\":\"should\",\"note\":\"表示到某时为止应用“截至”。\",\"replacement\":\"截至今年夏天\"},{\"quote\":\"的确给灯塔\",\"blockOrdinal\":4,\"severity\":\"note\",\"note\":\"疑为结构助词误用。\",\"replacement\":\"地确给灯塔\"},{\"quote\":\"更值得记录下来\",\"blockOrdinal\":12,\"severity\":\"note\",\"note\":\"可更简洁。\",\"replacement\":\"更值得记下来\"},{\"quote\":\"灯塔守护人\",\"blockOrdinal\":1,\"severity\":\"note\",\"note\":\"题名用字。\",\"replacement\":\"灯塔守望人\"}]}",
         "usage": {
           "inputTokens": 900,
           "outputTokens": 510
@@ -45,10 +45,10 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "389dbbb796098ed83a7d526f41f296d1e093e8cc56311d545040b7e55a83f95b",
+      "requestDigest": "ffcf3cbd26cdad0532b4697c2d3235ad99cc4ec8847114333eb3cf0bc47dcf96",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"三千余件,其中\",\"blockOrdinal\":3,\"severity\":\"should\",\"note\":\"中文行文中误用半角逗号。\"},{\"quote\":\"1985年\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"年份写法与全文汉字数字不一致。\"},{\"quote\":\"「家底」\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"引号与全文“”体例不一致。\"},{\"quote\":\"匆匆走过...\",\"blockOrdinal\":7,\"severity\":\"note\",\"note\":\"省略号应为“……”。\"},{\"quote\":\"全程约3km\",\"blockOrdinal\":9,\"severity\":\"note\",\"note\":\"计量单位写法与中文行文不一致。\"},{\"quote\":\"1∶5000\",\"blockOrdinal\":11,\"severity\":\"note\",\"note\":\"比例尺写法宜统一。\"},{\"quote\":\"前后两进的格局\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"可补充说明格局。\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"三千余件,其中\",\"blockOrdinal\":3,\"severity\":\"should\",\"note\":\"中文行文中误用半角逗号。\"},{\"quote\":\"1985年\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"年份写法与全文汉字数字不一致。\"},{\"quote\":\"「家底」\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"引号与全文“”体例不一致。\"},{\"quote\":\"匆匆走过...\",\"blockOrdinal\":7,\"severity\":\"note\",\"note\":\"省略号应为“……”。\"},{\"quote\":\"全程约3km\",\"blockOrdinal\":9,\"severity\":\"note\",\"note\":\"计量单位写法与中文行文不一致。\"},{\"quote\":\"1∶5000\",\"blockOrdinal\":11,\"severity\":\"note\",\"note\":\"比例尺写法宜统一。\"},{\"quote\":\"前后两进的格局\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"可补充说明格局。\"}]}",
         "usage": {
           "inputTokens": 900,
           "outputTokens": 410

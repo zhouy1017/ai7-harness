@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
-import { DialogueExecutionOwner, dialogueLiveRoute, dialogueRouteRefusal, productionDialogueRoute, type DialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
+import { DIALOGUE_CLOSED_CAUSE, DialogueExecutionOwner, dialogueLiveRoute, dialogueRouteRefusal, productionDialogueRoute, type DialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import {
   DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL,
   DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL,
@@ -640,7 +640,9 @@ describe('就这段提问… on the live route (provider-free)', () => {
       const projection = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
       expect(calls).toHaveLength(0);
       expect(await ledgerLines()).toHaveLength(0);
+      // Nothing was sent, so the adapter reads a transport failure; the attempt still settles as the stop or close it was (#1080 review).
       expect(projection.attempts[0]!.state).toBe(action === 'stop' ? 'stopped' : 'interrupted');
+      expect(projection.attempts[0]!.causeCode).toBe(action === 'stop' ? null : DIALOGUE_CLOSED_CAUSE);
       expect(projection.question).toBe(QUESTION);
       expect(projection.attempts[0]!.fragments).toHaveLength(0);
     } finally {
@@ -899,7 +901,7 @@ describe('revision 72 (Issue #811)', () => {
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       // Synchronized delta with #66 and #89: revisions 81 (imported Skill relations) and 83 (their updates) follow revision 80 (Task Intent Drafts).
-      expect(LATEST_SCHEMA_VERSION).toBe(84);
+      expect(LATEST_SCHEMA_VERSION).toBe(88);
       // Revision 8 accepts nullable selection: two NULL rows coexist, but a second 1 or any other integer is refused.
       expect(database.prepare('SELECT selected FROM model_service_connections ORDER BY connection_id').all()).toEqual([{ selected: 1 }, { selected: null }]);
       expect(() => database.exec("UPDATE model_service_connections SET selected = 1 WHERE provider_id = 'opencode-go'")).toThrow();

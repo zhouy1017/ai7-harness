@@ -1,6 +1,8 @@
+import { procedureIdForKind } from '../procedures/preinstalled.js';
+import { recordProcedurePlanPin, readProcedurePlanPin } from '../procedures/definition-store.js';
 import { kindResearchDeclaration } from './live-kind-admission.js';
 import { factualReviewDefinitionsByDigest, factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from './kind-definition.js';
-import { FACTUAL_REVIEW_KIND, type EvidenceAssuranceLevel } from '../../shared/protocol.js';
+import { FACTUAL_REVIEW_KIND, type EvidenceAssuranceLevel, type ProcedureDefinitionPin } from '../../shared/protocol.js';
 import { FACTUAL_VERIFICATION_POLICY_VERSION } from './factual-review-contract.js';
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
@@ -245,7 +247,7 @@ const RUN_STATE_LABELS: Record<BaselineAnalysisRunState, string> = {
 export const RUN_CANCELLED_AFTER_START_LABEL = '已取消' as const;
 
 /** What `cancelling` records (CTRL-005): the editor's word, and where the Run stops. */
-export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的阅读范围读完后停止，此后不再发送任何内容。' as const;
+export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容。' as const;
 
 /** What `pausing` records (CTRL-001): the editor's word, and where the Run stops to wait. */
 export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的阅读范围读完后停下，已完成的部分都会保存。' as const;
@@ -296,10 +298,10 @@ export const BUDGET_REACHED_RUN_LABEL = '任务运行预算已达上限 · 已�
 /** A Run the provider's account limit stopped (Issue #51, S16b; RUN-012): a remediable blocker, never 任务已中断 · 可续行. */
 export const ACCOUNT_LIMIT_RUN_LABEL = '模型服务账户限额' as const;
 /**
- * A Run stopped because a sent request's result cannot be known (Issue #51, S16c; CTRL-007, COPY-009): 结果待确认, never
- * 任务已中断 · 可续行 nor 已取消.
+ * A Run stopped because a sent request's result cannot be known (Issue #51, S16c; CTRL-007, COPY-009), never 任务已中断 · 可续行
+ * nor 已取消. Only Runs recorded before #1080 carry that stop; it reads as the per-unit state 该单元结果未知 (ADR 0095 §2).
  */
-export const OUTCOME_UNKNOWN_RUN_LABEL = '结果待确认' as const;
+export const OUTCOME_UNKNOWN_RUN_LABEL = '该单元结果未知' as const;
 /** Why 结果待确认 has no 续行 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016). */
 export const OUTCOME_UNKNOWN_NO_RESUME = '结果待确认：有阅读范围的请求已发出而结果无法确认，这次运行不能续行；可以取消任务保留已读完的部分，或改计划重做。' as const;
 
@@ -401,6 +403,7 @@ export function assuranceContractMoved(definition: Pick<AnalysisKindDefinition, 
 }
 
 export interface BaselineAnalysisRouteFacts {
+  readonly reviewContractVersion?: 1 | 2;
   readonly fixtureIdentity: string;
   readonly fixtureSha256: string;
   readonly fixtureLineage: ReadonlyArray<{ identity: string; sha256: string }>;
@@ -657,6 +660,8 @@ interface PlanVersionFacts {
 
 /** The input of one `safe-retry` Plan Adaptation the execution owner records before it dispatches the retry. */
 export interface PlanAdaptationInput {
+  readonly adaptationClass?: 'safe-retry' | 'contract-retry';
+  readonly attemptIndex?: 2 | 3;
   readonly attemptId: string;
   readonly runRecordId: string;
   readonly taskIntentId: string;
@@ -1142,6 +1147,7 @@ export class BaselineAnalysisStore {
    */
   definitionForDigest(promptContractDigest: string): AnalysisKindDefinition {
     const current = this.definition;
+    if (current.kind.startsWith('editorial-review/')) return current.legacyReviewContract?.promptContractDigest === promptContractDigest ? current.legacyReviewContract : current;
     if (current.kind !== FACTUAL_REVIEW_KIND) return current;
     for (const level of ['standard', 'strict', 'quick'] as const) {
       const candidate = this.#factualDefinitionFor(level);
@@ -1430,6 +1436,7 @@ export class BaselineAnalysisStore {
       executionPlan: plan['execution-plan'] as BaselineAnalysisProjection['executionPlan'],
       planEnvelope: {
         digest: asString(digests['plan-envelope']),
+        procedure: readProcedurePlanPin(this.#db, asString(digests['plan-envelope'])),
         dispatchAllowed: envelope.dispatchAllowed === true,
         providerStatus: envelope.providerStatus as 'remote-denied-local-deterministic' | 'remote-denied-no-route',
         summary: asString(envelope.summary),
@@ -1485,11 +1492,11 @@ export class BaselineAnalysisStore {
       // An adaptation recorded before Issue #286 names no unit-message digest, and reads as one that kept none.
       const record = parseCanonicalJson(asString(row.canonical_json)) as Omit<PlanAdaptationRecord, 'firstUnitMessageDigest'> & { firstUnitMessageDigest?: string | null };
       const first = record.firstUnitMessageDigest ?? null;
-      requireAnalysis(record.adaptationId === row.adaptation_id && record.adaptationClass === 'safe-retry', 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
+      requireAnalysis(record.adaptationId === row.adaptation_id && (record.adaptationClass === 'safe-retry' || record.adaptationClass === 'contract-retry'), 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
       const retry = this.#retryTurnOf(asString(row.attempt_id), asNumber(row.unit_ordinal), record.adaptationId, record.firstUnitMessageDigest === undefined);
       const repetition: SafeRetryRepetition = first === null || retry === null || retry.unitMessageDigest === null ? 'unrecorded'
         : retry.unitMessageDigest === first ? 'byte-identical' : 'differs';
-      return { ...record, firstUnitMessageDigest: first, retry, repetition, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason, repetition) };
+      return { ...record, firstUnitMessageDigest: first, retry, repetition, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason, repetition, record.adaptationClass) };
     });
   }
 
@@ -2421,6 +2428,7 @@ export class BaselineAnalysisStore {
         kind: this.#definition.kind,
         contractVersion: this.#definition.contractVersion,
         schemaDigest: this.#definition.schemaDigest,
+        ...(this.#definition.contractIdentity?.categoryConfiguration === undefined ? {} : { categoryConfigurationIdentity: canonicalJson(this.#definition.contractIdentity.categoryConfiguration) }),
         mode,
         recompute: this.#definition.mode(mode).recompute,
         selectedRange,
@@ -2599,6 +2607,7 @@ export class BaselineAnalysisStore {
     const blockedBy = current.state === 'blocked-before-dispatch' ? (currentRecord.cause === 'plan-moved' ? 'plan-moved' : 'launch') : null;
     return {
       runRecordId,
+      procedure: (parseCanonicalJson(asString(runRecord.canonical_json)) as { procedure?: ProcedureDefinitionPin }).procedure ?? null,
       state: current.state,
       stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
         : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
@@ -2884,7 +2893,7 @@ export class BaselineAnalysisStore {
       ordinal,
       createdAt: asString(row.created_at),
       digest: asString(row.sha256),
-      contractVersion: this.#definition.contractVersion,
+      contractVersion: asString(row.contract_version),
       manuscriptPin,
       coverageManifestDigest: asString(row.coverage_manifest_sha256),
       schemaDigest: asString(body.schemaDigest),
@@ -3055,6 +3064,7 @@ export class BaselineAnalysisStore {
     return {
       ...facts,
       schemaDigest: asString(this.#revisionBody(row).schemaDigest),
+      ...(typeof this.#revisionBody(row).categoryConfigurationIdentity === 'string' ? { categoryConfigurationIdentity: asString(this.#revisionBody(row).categoryConfigurationIdentity) } : {}),
       unreviewedUnitOrdinals,
       changedUnreadUnitOrdinals: [...this.#unreadWalk(row).changed.keys()].sort((left, right) => left - right),
     };
@@ -3902,10 +3912,11 @@ export class BaselineAnalysisStore {
       providerResolutionPlanDigest: records['provider-resolution-plan']!.digest,
       executionPlanDigest: records['execution-plan']!.digest,
       promptContractDigest,
+      ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
-      boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? []),
+      boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? [], definition.contractIdentity?.version === 2),
     };
     const envelope = canonicalRecord(reusePlan === null ? envelopeBase : {
       ...envelopeBase,
@@ -3926,6 +3937,8 @@ export class BaselineAnalysisStore {
       `INSERT INTO analysis_plan_versions(plan_version_id, task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(planVersionId, taskIntentId, ordinal, input.planRevisionId, envelope.digest, instant, version.json, version.digest);
+    const procedureId = procedureIdForKind(this.#definition.kind);
+    if (procedureId !== null) recordProcedurePlanPin(this.#db, taskIntentId, envelope.digest, procedureId, definition.contractVersion === 'ai7.editorial-review/1' ? 1 : undefined);
     return { planVersionId, planEnvelopeDigest: envelope.digest };
   }
 
@@ -4007,7 +4020,9 @@ export class BaselineAnalysisStore {
       ...(origin.kind === 'default-execution-rule' ? { ruleVersionId: origin.ruleVersionId } : {}),
       ...(origin.kind === 'background-analysis-enrollment' ? { enrollmentVersionId: origin.enrollmentVersionId } : {}),
     });
-    const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant });
+    const procedure = readProcedurePlanPin(this.#db, planEnvelopeDigest);
+    const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant,
+      ...(procedure === null ? {} : { procedure }) });
     transact(this.#db, () => {
       this.#db.prepare(
         `INSERT INTO analysis_run_authorizations(authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256)
@@ -5032,11 +5047,11 @@ export class BaselineAnalysisStore {
   recordAdaptation(input: PlanAdaptationInput): { adaptationId: string; digest: string; recordedAt: string } {
     const adaptationId = randomUUID();
     const recordedAt = new Date().toISOString();
-    const built = buildPlanAdaptationRecord({ adaptationId, ...input, attemptIndex: 2, recordedAt });
+    const built = buildPlanAdaptationRecord({ adaptationId, ...input, attemptIndex: input.attemptIndex ?? 2, recordedAt });
     this.#db.prepare(
       `INSERT INTO analysis_plan_adaptations(adaptation_id, attempt_id, ordinal, unit_ordinal, adaptation_class, recorded_at, canonical_json, sha256)
-       VALUES (?, ?, ?, ?, 'safe-retry', ?, ?, ?)`,
-    ).run(adaptationId, input.attemptId, input.ordinal, input.unitOrdinal, recordedAt, built.json, built.digest);
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(adaptationId, input.attemptId, input.ordinal, input.unitOrdinal, input.adaptationClass ?? 'safe-retry', recordedAt, built.json, built.digest);
     return { adaptationId, digest: built.digest, recordedAt };
   }
 
@@ -5109,6 +5124,7 @@ export class BaselineAnalysisStore {
         coverageManifestDigest: facts.manifestDigest,
         // The contract the Run executed (Issue #901): a factual level's own; every other kind's, and an earlier plan's, as before.
         schemaDigest: this.definitionForRun(facts.runRecordId, facts.promptContractDigest).schemaDigest,
+        ...(this.#definition.contractIdentity?.categoryConfiguration === undefined ? {} : { categoryConfigurationIdentity: canonicalJson(this.#definition.contractIdentity.categoryConfiguration) }),
         reducerDigest: this.#definition.reducerDigest,
         // The revision pins the route that produced it: the fixture on the deterministic route, the
         // live route's own identity when the Run actually transmitted.

@@ -3,10 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BaselineAnalysisExecutionOwner, OUTCOME_UNKNOWN_CARRIED, OUTCOME_UNKNOWN_NOT_RESENT, outcomeUnknownDetail } from '../../src/service/analysis/execution.js';
-import { OUTCOME_UNKNOWN_NO_RESUME, RECONCILED_RESUMABLE_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
+import { BaselineAnalysisExecutionOwner, OUTCOME_UNKNOWN_CARRIED, OUTCOME_UNKNOWN_NOT_RESENT } from '../../src/service/analysis/execution.js';
+import { RECONCILED_RESUMABLE_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { OUTCOME_UNKNOWN_NO_REDO, resendDisclosure } from '../../src/service/task-plan.js';
+import { resendDisclosure } from '../../src/service/task-plan.js';
 import { ModelFixtureError, fixtureEntryKey, loadLaunchFixture, loadModelFixture, outcomeUnknownFixtureAllowed, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { QUICK_START_RESEND } from '../../src/service/default-execution-rules.js';
@@ -22,14 +22,14 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 // deterministic route over `sample1-baseline-outcome-unknown` — unit 4's first request is sent and its answer never comes
 // back whole. No Provider, socket or credential value. Unit 4 is kept at once as its own `outcome-unknown` gap and nothing in
 // the Run ever sends it again — not 续行, not after a pause, a reconciliation or a spent ceiling; the Run reads the other
-// seven and stops 结果待确认, which has no 续行, and 取消任务 keeps what was read.
+// seven and completes with its revision and outcome, without resending the unknown unit.
 
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
 let fixture: ResolvedModelFixture;
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
-const UNKNOWN_REASON = '结果待确认：请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费。（AI7_OUTCOME_UNKNOWN）';
+const UNKNOWN_REASON = '该单元结果未知：请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费。（AI7_OUTCOME_UNKNOWN）';
 
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-service-outcome-unknown-');
@@ -124,97 +124,41 @@ const spansOf = (store: EditorialStore, bookId: string): Array<number | null> =>
 const attentionOf = (store: EditorialStore, bookId: string) => store.inspectGlobalAttention(() => null, false).groups
   .flatMap((group) => group.items.map((entry) => [group.key, entry] as const)).find(([, entry]) => entry.book.bookId === bookId);
 const UNKNOWN_GAP = `${UNKNOWN_REASON}；${OUTCOME_UNKNOWN_NOT_RESENT}`;
-const CANCEL_LINE = '第 4 个阅读范围的请求已发出、结果待确认；不会再发，在这份修订版里记为结果待确认的缺口，不记为未尝试。';
+const CANCEL_LINE = '第 4 个阅读范围的请求已发出、结果未知；不会再发，在这份修订版里记为结果未知的单元缺口，不记为未尝试。';
 
 describe('结果待确认 over the real store', () => {
-  it('keeps unit 4 at once as its own gap, reads the other seven, and stops 结果待确认 with no 续行', async () => {
+  it('completes the baseline with unit 4 as a gap, a revision and an outcome, without resending', async () => {
     const store = await openWithRoute();
     const execution = owner(store);
     try {
-      const { bookId, taskIntentId, runRecordId } = await stoppedRun(store, execution, 'L2 sample1 结果待确认');
+      const { bookId, taskIntentId, runRecordId } = await stoppedRun(store, execution, 'L2 sample1 单元结果未知');
       const ledger = store.baselineAnalysisLedger;
-      // Unit 4 was sent once and never again; it is kept as its own gap, and the Run stopped holding nothing.
-      const stopped = store.inspectBaselineAnalysis(bookId, () => null);
-      expect(stopped.state).toBe('resumable');
-      expect(stopped.stateLabel).toBe('结果待确认');
-      expect(stopped.run?.stateLabel).toBe('结果待确认');
-      expect(states(stopped)).toEqual(['authorized', 'admitted', 'executing', 'resumable']);
-      expect(stopped.run?.transitions.at(-1)?.detail).toBe(outcomeUnknownDetail([4], SAMPLE1_UNITS, SAMPLE1_UNITS));
+      const completed = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(completed.state).toBe('settled');
+      expect(states(completed)).toEqual(['authorized', 'admitted', 'executing', 'completed-with-gaps']);
+      expect(completed.taskOutcome?.classification).toBe('completed-with-gaps');
+      expect(completed.resultSetRevision?.coverage.unitsClosed).toBe(7);
+      expect(completed.resultSetRevision?.gaps.map((gap) => [gap.unitOrdinal, gap.code, gap.reason]))
+        .toEqual([[4, 'outcome-unknown', UNKNOWN_GAP]]);
       expect(spansOf(store, bookId)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
       expect(ledger.adaptationsOf(runRecordId)).toEqual([]);
-      expect(stopped.taskOutcome).toBeNull();
-      expect(stopped.resultSetRevision).toBeNull();
-      const kept = ledger.unitCheckpoints(runRecordId);
-      expect(kept.map((checkpoint) => checkpoint.unit.unitOrdinal)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-      expect(kept[3]!.unit.closed).toMatchObject({ state: 'gap', gap: { code: 'outcome-unknown', reason: UNKNOWN_GAP } });
-      expect(ledger.outcomeUnknownOf(runRecordId)).toEqual({ units: [{ unitOrdinal: 4, attempts: 1, reason: UNKNOWN_GAP }] });
-
-      // The drawer: 结果待确认 in its own words, the unconfirmed range, and no 续行 (ADR 0034, CONT-011, CONT-016).
+      expect(ledger.outcomeUnknownOf(runRecordId)).toBeNull();
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
-      expect(plan.state).toEqual({ key: 'outcome-unknown', label: '结果待确认' });
-      // Neither 续行 nor 改计划重做 (CONT-011): 取消任务 settles it first.
-      expect(plan.runControl).toMatchObject({
-        resume: null, redo: { reason: OUTCOME_UNKNOWN_NO_REDO }, continuation: { unitsSettled: SAMPLE1_UNITS, unitsTotal: SAMPLE1_UNITS, pendingAnswerUnits: [] }, accountLimit: null,
-        outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: true },
-      });
-      expect(plan.redo).toBeNull();
-      expect(plan.technical.find((row) => row.key === 'outcome-unknown')?.value).toBe(`第 4 个阅读范围 · 已发送 1 次 · ${UNKNOWN_GAP}`);
-      // 待我处理: 异常与结果待确认, blocking, whose next step is 查看未确认的部分.
-      expect(attentionOf(store, bookId)?.[0]).toBe('exceptions');
-      expect(attentionOf(store, bookId)?.[1]).toMatchObject({ state: 'analysis-outcome-unknown', blocked: true, nextStep: 'view-unconfirmed', target: { kind: 'analysis-plan', bookId, taskIntentId } });
-      // A stopped Task is not done: the Book takes no new one until it is cancelled or redone.
-      expect(await refusal(() => prepare(store, bookId))).toBe('ANALYSIS_TASK_ACTIVE');
-      // 续行 is refused by the store and by the executor alike, and nothing is sent.
-      expect(await refusal(() => store.continuableBaselineAnalysisRun(bookId, taskIntentId))).toBe('ANALYSIS_RESUME_OUTCOME_UNKNOWN');
-      expect(() => execution.admitAndDispatch(runRecordId, ledger, { resume: true })).toThrowError(OUTCOME_UNKNOWN_NO_RESUME);
-      await execution.whenIdle();
-      expect(spansOf(store, bookId)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-      expect(states(store.inspectBaselineAnalysis(bookId, () => null))).toEqual(['authorized', 'admitted', 'executing', 'resumable']);
-      store.markCleanShutdown();
-    } finally {
-      await execution.dispose();
-      store.close();
-    }
-  }, 300_000);
-
-  it('cancels a Run stopped 结果待确认 into its partial revision, unit 4 its own outcome-unknown gap', async () => {
-    const store = await openWithRoute();
-    const execution = owner(store);
-    try {
-      const { bookId, taskIntentId, runRecordId } = await stoppedRun(store, execution, 'L2 sample1 结果待确认取消');
-      const before = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
-      expect(before.state.key).toBe('outcome-unknown');
-      // 取消任务's summary counts seven ranges read and names unit 4 apart, its own gap rather than a range not attempted.
-      expect(before.runControl?.cancel.impact).toContain(CANCEL_LINE);
-      expect(before.runControl?.cancel.impact[0]).toContain('已读完 7 个阅读范围，等你回答 0 个，你已回答但尚未续行 0 个，结果待确认 1 个，未尝试 0 个');
-      expect(before.runControl?.cancel.impact[0]).toContain('已读结果与这些缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。');
-      expect(before.runControl?.cancel.impact.slice(1)).toEqual([CANCEL_LINE]);
-      store.requestBaselineAnalysisCancel(bookId, taskIntentId);
-      execution.cancelRun(runRecordId, store.baselineAnalysisLedger);
-      await execution.whenIdle();
-      const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
-      expect(cancelled.run?.state).toBe('cancelled');
-      expect(spansOf(store, bookId)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-      expect(cancelled.resultSetRevision?.coverage.unitsClosed).toBe(7);
-      expect(cancelled.resultSetRevision?.gaps.map((gap) => [gap.unitOrdinal, gap.code, gap.reason])).toEqual([[4, 'outcome-unknown', UNKNOWN_GAP]]);
-      expect(cancelled.taskOutcome!.report!.usagePerStage.units.requests).toBe(SAMPLE1_UNITS);
-      // Once cancelled, 改计划重做 is offered; the Task it prepares reads unit 4 again, and its Plan Preview says so first.
-      const after = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
-      expect(after.redo?.prepare).toMatchObject({ redoOf: runRecordId, update: { mode: 'sync-current' } });
-      expect(after.resend).toBeNull();
-      if (after.redo === null || 'kind' in after.redo.prepare) throw new Error('Expected baseline redo');
-      let progress = store.createBaselineAnalysisPreparationWork(bookId, after.redo!.prepare.goal, after.redo!.prepare.update, launchPolicy, false, runRecordId);
+      expect(plan.state).toEqual({ key: 'settled', label: '已完成' });
+      expect(plan.runControl?.resume ?? null).toBeNull();
+      expect(plan.unconfirmed?.ranges.map((range) => range.unitOrdinal)).toEqual([4]);
+      expect(attentionOf(store, bookId)?.[1]).toMatchObject({ state: 'analysis-outcome-unconfirmed', blocked: false, nextStep: 'view-unconfirmed' });
+      expect(() => execution.admitAndDispatch(runRecordId, ledger, { resume: true })).toThrow();
+      expect(spansOf(store, bookId).filter((ordinal) => ordinal === 4)).toHaveLength(1);
+      // A fresh Task is allowed, but its Plan Preview discloses the possible double billing before new authorization.
+      let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], { mode: 'reanalyze-book', selectedRange: null }, launchPolicy);
       while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
-      const redo = progress.projection!;
-      expect(redo.update?.reusePlan?.counts).toMatchObject({ reused: 7, recomputed: 1 });
-      const preview = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: redo.taskIntent!.taskIntentId });
-      expect(preview.resend).toEqual({ units: [4], statement: resendDisclosure([4]) });
-      expect(resendDisclosure([4])).toBe('第 4 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它的请求，开始任务即重新授权这次发送。');
+      const next = progress.projection!;
+      expect(next.update?.reusePlan?.counts).toMatchObject({ reused: 0, recomputed: 8 });
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: next.taskIntent!.taskIntentId }).resend)
+        .toEqual({ units: [4], statement: resendDisclosure([4]) });
       store.markCleanShutdown();
-    } finally {
-      await execution.dispose();
-      store.close();
-    }
+    } finally { await execution.dispose(); store.close(); }
   }, 300_000);
 
   it('Scenario A: a pause holding unit 4, 续行, an immediate 暂停 and 续行 again never re-send unit 4', async () => {
@@ -232,7 +176,7 @@ describe('结果待确认 over the real store', () => {
       expect(paused.runControl).toMatchObject({ resume: { reason: null }, outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: false } });
       expect(paused.runControl?.cancel.impact).toContain(CANCEL_LINE);
       // Its 改计划重做 summary counts what was read apart from unit 4 and discloses that the new Task sends unit 4 again.
-      expect(paused.redo?.summary).toContain('这项任务会在这里停下并取消；已读完的 4 个阅读范围（另有 1 个结果待确认）保留在一份新的结果集修订版里，没读到的记为未尝试。');
+      expect(paused.redo?.summary).toContain('这项任务会在这里停下并取消；已读完的 4 个阅读范围（另有 1 个结果未知）保留在一份新的结果集修订版里，没读到的记为未尝试。');
       expect(paused.redo?.summary).toContain(resendDisclosure([4]));
       // 续行, then 暂停 before it reaches its first range: the early pause keeps unit 4 where it was.
       execution.admitAndDispatch(runRecordId, ledger, { resume: true });
@@ -241,12 +185,13 @@ describe('结果待确认 over the real store', () => {
       await execution.whenIdle();
       expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('paused');
       expect(ledger.unconfirmedRangesOf(runRecordId).map((unit) => unit.unitOrdinal)).toEqual([4]);
-      // 续行 again reads 6, 7 and 8 — never 4 — and stops 结果待确认.
+      // 续行 again reads 6, 7 and 8 — never 4 — and completes with its gap.
       execution.admitAndDispatch(runRecordId, ledger, { resume: true });
       await execution.whenIdle();
       expect(spansOf(store, bookId)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-      expect(store.inspectBaselineAnalysis(bookId, () => null).stateLabel).toBe('结果待确认');
-      expect(ledger.outcomeUnknownOf(runRecordId)?.units.map((unit) => [unit.unitOrdinal, unit.attempts])).toEqual([[4, 1]]);
+      expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('settled');
+      expect(ledger.outcomeUnknownOf(runRecordId)).toBeNull();
+      expect(ledger.unconfirmedRangesOf(runRecordId).map((unit) => [unit.unitOrdinal, unit.attempts])).toEqual([[4, 1]]);
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
@@ -300,7 +245,7 @@ describe('结果待确认 over the real store', () => {
       execution.admitAndDispatch(runRecordId, ledger, { resume: true });
       await execution.whenIdle();
       expect(spansOf(store, bookId)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-      expect(store.inspectBaselineAnalysis(bookId, () => null).stateLabel).toBe('结果待确认');
+      expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('settled');
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
@@ -352,7 +297,7 @@ describe('结果待确认 over the real store', () => {
           ? { ...entry, response: { kind: 'outcome-unknown' as const, message: '合成：回答没有完整传回。' } }
           : entry])),
     });
-    const UNKNOWN_SUBOPERATION = `${UNKNOWN_REASON}；${OUTCOME_UNKNOWN_NOT_RESENT}。`;
+    const UNKNOWN_SUBOPERATION = `${UNKNOWN_REASON.replace('该单元结果未知', '结果待确认')}；${OUTCOME_UNKNOWN_NOT_RESENT}。`;
     // Each variant on its own Agent Data Root, since a route is bound when the store opens.
     const runOver = async (route: ResolvedModelFixture, title: string) => {
       const outer = roots;
@@ -438,14 +383,11 @@ describe('结果待确认 over the real store', () => {
 
 // Issue #51 (S16c; review of #755, P2-a and P2-b): after 取消任务 settles 结果待确认, every Task that sends unit 4 again says so in
 // its plan, whatever recomputes it, and nothing starts one without the editor reading that plan.
-describe('结果待确认 after 取消任务', () => {
+describe('per-unit unknown after completion', () => {
   /** A Run stopped 结果待确认 and cancelled: the Book's latest revision holds unit 4 as its own outcome-unknown gap. */
   async function cancelledHoldingUnit4(store: EditorialStore, execution: BaselineAnalysisExecutionOwner, title: string) {
     const stopped = await stoppedRun(store, execution, title);
-    store.requestBaselineAnalysisCancel(stopped.bookId, stopped.taskIntentId);
-    execution.cancelRun(stopped.runRecordId, store.baselineAnalysisLedger);
-    await execution.whenIdle();
-    expect(store.inspectBaselineAnalysis(stopped.bookId, () => null).run?.state).toBe('cancelled');
+    expect(store.inspectBaselineAnalysis(stopped.bookId, () => null).run?.state).toBe('completed-with-gaps');
     return stopped;
   }
   const prepareUpdate = (store: EditorialStore, bookId: string, mode: BaselineAnalysisUpdateMode, selectedRange: { startPosition: number; endPosition: number } | null = null) => {
@@ -498,9 +440,6 @@ describe('结果待确认 after 取消任务', () => {
       expect(resendOf(store, bookId, taskIntentId)).toBeNull();
       const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, book.planEnvelope!.digest).dispatchRunRecordId!;
       second.admitAndDispatch(runRecordId);
-      await second.whenIdle();
-      store.requestBaselineAnalysisCancel(bookId, taskIntentId);
-      second.cancelRun(runRecordId, store.baselineAnalysisLedger);
       await second.whenIdle();
       const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
       expect(cancelled.resultSetRevision!.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[4, 'outcome-unknown']]);
@@ -615,9 +554,6 @@ describe('结果待确认 carried forward', () => {
     try {
       const stopped = await stoppedRun(store, execution, 'L2 sample1 改后还原');
       const { bookId } = stopped;
-      store.requestBaselineAnalysisCancel(bookId, stopped.taskIntentId);
-      execution.cancelRun(stopped.runRecordId, store.baselineAnalysisLedger);
-      await execution.whenIdle();
       const initial = store.inspectBaselineAnalysis(bookId, () => null);
       const checkpoint = initial.checkpoint!;
       const blockId = initial.coverageManifest!.units[3]!.blockIds.find((id) => store.baselineAnalysisLedger.readWorkingBlocks(checkpoint.branchId).find((block) => block.blockId === id)?.kind === 'paragraph')!;
@@ -655,9 +591,6 @@ describe('结果待确认 carried forward', () => {
     try {
       const stopped = await stoppedRun(store, execution, 'L2 sample1 结果待确认延续');
       const { bookId } = stopped;
-      store.requestBaselineAnalysisCancel(bookId, stopped.taskIntentId);
-      execution.cancelRun(stopped.runRecordId, store.baselineAnalysisLedger);
-      await execution.whenIdle();
       const checkpoint = store.inspectBaselineAnalysis(bookId, () => null).checkpoint!;
       const editFirstParagraph = (text: string): void => {
         const window = store.getManuscriptWindow(checkpoint.manuscriptId, checkpoint.branchId, null);

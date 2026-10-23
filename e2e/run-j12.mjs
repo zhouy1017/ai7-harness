@@ -672,7 +672,7 @@ async function main() {
     await mkdir(resolve(shellRoot, 'crashes'));
     await writeFile(resolve(shellRoot, 'crashes', '2026-10-17T00-00-00.000Z-render-process-gone.json'), JSON.stringify({
       instant: '2026-10-17T00:00:00.000Z', kind: 'render-process-gone', reason: 'crashed', exitCode: 1,
-      appVersion: '0.1.0', schemaRevision: 84, protocol: 161, platform: process.platform, arch: process.arch,
+      appVersion: '0.1.0', schemaRevision: 88, protocol: 165, platform: process.platform, arch: process.arch,
       electron: '43.4.1', uptimeSeconds: 1, stack: '    at <redacted-path>:12:3',
     }), { flag: 'wx' });
     const executable = electronExecutable();
@@ -737,6 +737,11 @@ async function main() {
     let [primary] = await waitForRendererCount(manager, 1, 'initial-window');
     await waitFor(primary, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'initial-ready');
     await assertRenderer(primary, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
+    await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('当前处理策略未允许')`, 'global-agent-policy-disclosed');
+    await assertRenderer(primary, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体（记忆与全局指导）'; })()`, 'global-agent-entry-no-work');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-ready');
     await primary.send('Page.setBypassCSP', { enabled: true });
     const fetchRejected = await primary.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
     await primary.send('Page.setBypassCSP', { enabled: false });
@@ -1301,9 +1306,9 @@ async function main() {
     const diagnosticsBundle = resolve(diagnosticsDestination, diagnosticsFolders[0]);
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
-    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v17.json'), 'utf8'));
+    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v18.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 161 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 165 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -1415,8 +1420,8 @@ async function main() {
         firstConnection.binding?.credentialSlot === 'deepseek-api-key' &&
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
-        // Synchronized delta with Issue #1044: selected active set v17; Provider Processing remains v1.
-        firstConnection.policy?.activePolicySetVersion === 'v17' &&
+        // Synchronized delta with Issue #1079: selected active set v18; Provider Processing remains v1.
+        firstConnection.policy?.activePolicySetVersion === 'v18' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&

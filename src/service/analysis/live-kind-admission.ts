@@ -36,6 +36,7 @@ export interface LiveKindBinding {
 /** The parts of an analysis kind definition admission reads. */
 export interface LiveKindDefinition {
   readonly kind: string;
+  readonly contractVersion?: string;
   readonly promptContractDigest: string;
   readonly livePromptContractDigest?: () => string;
   readonly materialReferences?: unknown;
@@ -170,7 +171,7 @@ function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectatio
   if (review !== undefined) {
     if (review.executor !== 'review-category-contract' || review.seriesKnowledge !== undefined) return null;
     return {
-      promptContractDigest: reviewCategoryKindDefinition(reviewCategoryContractInput(review)).promptContractDigest,
+      promptContractDigest: reviewCategoryKindDefinition(reviewCategoryContractInput(review), definition.contractVersion === 'ai7.editorial-review/1' ? 1 : 2).promptContractDigest,
       payloadCategories: ['public-or-synthetic'],
     };
   }

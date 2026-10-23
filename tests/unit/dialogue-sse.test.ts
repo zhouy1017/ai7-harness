@@ -140,7 +140,7 @@ describe('dialogue-only SSE transport (Issue #833)', () => {
     const block = { blockId: `blk_${'d'.repeat(24)}`, kind: 'paragraph' as const, level: null, text: '合成段落。' };
     const unit = { ordinal: 1, digest: 'e'.repeat(64), blockIds: [block.blockId], overlapBlockIds: [] } as unknown as CoverageManifestUnitProjection;
     const blocks = new Map([[block.blockId, block]]);
-    const review = reviewCategoryContract(reviewCategoryContractInput(BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories[0]!));
+    const review = reviewCategoryContract(reviewCategoryContractInput(BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories[0]!), 1);
     const requests = [
       { digest: BASELINE_PROMPT_CONTRACT_DIGEST, options: turn(BASELINE_PROMPT_CONTRACT.systemPrompt, buildUnitMessage(unit, 1, blocks)), pinned: BASELINE_BYTES_SHA256 },
       { digest: reviewCategoryContractDigest(review), options: turn(review.systemPrompt, buildReviewCategoryUnitMessage(review, unit, 1, blocks)), pinned: REVIEW_BYTES_SHA256 },

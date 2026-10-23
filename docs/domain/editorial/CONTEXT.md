@@ -145,6 +145,11 @@ Professional assessment of an Editorial Deliverable or Manuscript, producing fin
 _中文_: 编辑审读
 _Avoid_: Review Article, Factual Verification alone
 
+**Review Report**:
+A derived, versioned view of one review run's findings — overview, 必须处理, chapter-by-category statistics, duplicates merged, each finding with its quote, suggested text, reason and sources — exported in the manuscript's formats with every factual finding's evidence attached. The cards on the manuscript are the primary deliverable; the report never is ([ADR 0095 §5](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#5-review-contract-v2-evidence-on-the-card-and-the-derived-report)).
+_中文_: 审阅报告
+_Avoid_: 审稿意见, Editorial Deliverable, the primary output of a review
+
 **Multi-aspect Editorial Task**:
 An editorial task that judges or produces an Editorial Deliverable across the relevant literary and publication considerations rather than optimizing one isolated text property.
 _Avoid_: Generic content task, single-pass text generation
@@ -307,7 +312,7 @@ A revision-bound, evidence-linked record of a suspected factual or semantic defe
 _Avoid_: Model verdict, applied correction
 
 **Correction Proposal**:
-A suggested change bound to one exact Editorial Deliverable Revision that addresses an Editorial Error Finding without altering active deliverable content until accepted through its applicable mutation workflow. For a Manuscript, it remains exact-Manuscript-Revision-bound and model-generated changes still begin on a Proposal Branch; the editor sees it as a 修改建议 mark and accepts it through one-click 接受并应用 ([ADR 0076](../../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)).
+A suggested change bound to one exact Editorial Deliverable Revision that addresses an Editorial Error Finding without altering active deliverable content until accepted through its applicable mutation workflow. For a Manuscript, it remains exact-Manuscript-Revision-bound and model-generated changes still begin on a Proposal Branch; the editor sees it as a 修改建议 mark and accepts it through one-click 接受并应用 ([ADR 0076](../../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)). For a factual finding, its card carries the source link, verbatim snippet, 来源译文 and note also archived in 来源与证据 and attached per finding on report export ([ADR 0095 §5](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#5-review-contract-v2-evidence-on-the-card-and-the-derived-report)).
 _Avoid_: Silent rewrite, completed fix
 
 **Source Version**:
@@ -355,7 +360,7 @@ _中文_: 来源导入记录
 _Avoid_: Manuscript Import Record, non-file Source Acquisition Record, factual-verification result, Run Source Scope grant, manuscript creation
 
 **Manuscript Block**:
-A stable structural text identity, such as a title, heading, paragraph, quotation, or list item, whose lineage continues across edits and moves and is explicit across splits or merges.
+A stable structural text identity, such as a title, heading, paragraph, quotation, list item, note or read-only table, whose lineage continues across edits and moves and is explicit across splits or merges; splitting, merging, inserting or deleting a block and changing one heading's level are ordinary structural edits recorded with that lineage ([ADR 0096 §1](../../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#1-structural-edits-are-ordinary-edits)).
 _Avoid_: Source Index Chunk, line number, text hash
 
 **Manuscript Revision**:
@@ -484,7 +489,7 @@ _Avoid_: source search, initial web/research retrieval, fuzzy match, factual ver
 
 
 **Annotation**:
-An exportable comment bound to an exact Manuscript Revision range, authored by an editor, by AI7 from a named Task, review category or analysis, or carried in from an imported file with its original author. It may be converted to a Proposal Change Item by an editor and is exported unless the export excludes annotations ([ADR 0076](../../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)).
+An exportable comment bound to an exact Manuscript Revision range, authored by an editor, by AI7 from a named Task, review category or analysis, or carried in from an imported file with its original author. It may be converted to a Proposal Change Item by an editor and is exported unless the export excludes annotations ([ADR 0076](../../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)). For a factual finding, its card carries the source link, verbatim snippet, 来源译文 and note also archived in 来源与证据 and attached per finding on report export ([ADR 0095 §5](../../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#5-review-contract-v2-evidence-on-the-card-and-the-derived-report)).
 _中文_: 批注
 _Avoid_: Editor Note, Proposal Change Item, Editorial Error Finding without a location, model context
 

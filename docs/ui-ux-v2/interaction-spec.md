@@ -143,7 +143,7 @@ The overview may use visually prominent cards and quiet state summaries in the C
 
 | Group | Includes | Badge | Primary interaction |
 | --- | --- | --- | --- |
-| `异常与结果待确认` | Ambiguous external outcomes, recovery attention, material drift, Manuscript Conflicts, and cannot-continue-safely failures | Counts unresolved editor-action items | Open exact reconciliation, recovery, refresh/reselection, conflict, or failure record |
+| `异常与结果待确认` | Ambiguous external Effect outcomes (model-request gaps remain in their completed Runs under ADR 0095 §2), recovery attention, material drift, Manuscript Conflicts, and cannot-continue-safely failures | Counts unresolved editor-action items | Open exact reconciliation, recovery, refresh/reselection, conflict, or failure record |
 | `等待你的决定` | Clarification Request, Plan Revision, Proposal Decision, Review Decision, Effect Approval, plus target-house `里程碑版本待处理` and `发稿版本待设定` projections over internal Signoff/Public Release records | Counts unresolved editor-action items | Open exact named decision context |
 | `运行中与已暂停` | Current business-readable Run phase, next step, and wait reason | Does not count | Open bound Run projection without taking authority from the Task Ledger |
 | `最近完成` | Recent Task Outcomes, Effect Receipts, and classified outcomes | Does not count | Open exact outcome or receipt; aging out changes only the projection |
@@ -482,7 +482,7 @@ Selecting a recommendation changes only the Task Intent Draft. It does not disco
 | Default Execution Rule draft | Repeat the same newly user-initiated pattern under one existing exact eligible artifact revision | Reduces later Task Intent review only; creates no background trigger or new procedure definition |
 | Native DSH Skill draft | Reusable model-assisted steps with variable inputs/outputs and existing declarative AI7 Capabilities | Produces a non-executing native Skill draft for later independent validation and scoped enablement |
 | Workflow-definition draft | Reusable phases, gates, responsibilities, required artifacts or Deliverable lifecycle | Produces an inactive native DSH definition draft plus its separate AI7 Workflow Profile draft projection; exact DSH carrier mapping remains deferred |
-| Captured Procedure (`可复用工序`) | A completed Review Run whose steps are review categories the existing executors already perform ([ADR 0087](../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md)) | Saves version 1 `待验证`; after `验证并启用` it is runnable as an ordinary Review Run — the 新建审阅 sheet filled from it, plan and `开始审阅` as ever, the Run pinned to the exact version; it never starts by itself |
+| Captured Procedure (`可复用工序`) | A completed Review Run whose steps are review categories the existing executors already perform ([ADR 0087](../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md)) | Saves version 1 `待验证`; after `验证并启用` it is runnable as an ordinary Review Run — the 新建审阅 sheet filled from it, plan and `开始审阅` as ever, the Run pinned to the exact version; it never starts without explicit authority; this row describes the review-only predecessor, generalized by ADR 0095 §1 into editable Procedure Definitions with explicit starts or the governed idle-lane authority of §3 |
 | Developer Capability Proposal | New code, tool, external integration or code-bearing Capability Implementation is required | Produces a developer-track suggestion; no Plugin or capability is installed or enabled |
 
 - `将以上工序保存为可复用工序` opens the classification preview before any result exists. The button label never claims that a Skill, Workflow or Plugin has already been generated.
@@ -718,7 +718,7 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 - Clicking an expanded candidate, evidence comparison, or result may explicitly open a Dedicated Work Workspace; no background event changes work-surface mode automatically.
 - Provider/model/cost and diagnostics remain behind secondary disclosure unless they are the blocking condition. No activity surface implies factual verification, Proposal Decision, Effect Approval, Effect Receipt, workflow completion, Signoff, or Public Release Permission.
 - Run Budget Ceiling Reached, Provider Account Limit, Run Capacity Wait, Connectivity Wait State, Cooperative Run Pause, and Resume-ready Run State retain different labels and action sets; no generic `预算不足` or `继续` collapses them.
-- While a Run executes, the Run Activity Header and every other Run surface show the Run Liveness Signal beside Measured Run Progress (V2-UX-LIVE-001 to 003): the current unit and its start instant, the last recorded transition, completed model attempts with usage, and the Provider attempt's state, sampled within 2 seconds and refreshed at least every 5 seconds, with the measured stale case `本步骤用时已超过通常水平` and only the safe actions valid for the state.
+- While a Run executes, the Run Activity Header and every other Run surface show the Run Liveness Signal beside Measured Run Progress (V2-UX-LIVE-001 to 003): every unit in flight and its start instant, the last recorded transition, completed model attempts with usage, and each Provider attempt's state (ADR 0095 §2), sampled within 2 seconds and refreshed at least every 5 seconds, with the measured stale case `本步骤用时已超过通常水平` and only the safe actions valid for the state.
 - A transient status indicator lives exactly as long as the state that produced it and never covers content it does not own (V2-UX-LIVE-004); an indicator that outlives its state is a statement not derived from current state, the same defect as a scope label that stops being true.
 
 ## Interactive Editorial Dialogue presentation
@@ -1033,7 +1033,7 @@ Every formal agent-originated Manuscript mutation, including work from Agent Wor
 | `已应用` | Verified old→new revision, atomic count, Effect identity, actor/time, Proposal Decision | View manuscript/proposal/full receipt; prepare reversal |
 | `未应用` | Confirmed zero commit plus failed/stopped stage and reason | Retry only when replay safety is proven; otherwise re-prepare |
 | `正在确认应用结果` | Stable Effect identity and current recovery source | Wait/navigate; never repeat dispatch |
-| `结果待确认` | What is known, what is missing, last authoritative evidence | Resolve/recover outcome; no repeat-shaped action |
+| `结果待确认` | What is known, what is missing, last authoritative evidence | Resolve/recover outcome; no repeat-shaped action (external Effects; a unit whose model request's outcome is unknown is a gap in a completed Run with a disclosed new-attempt action, ADR 0095 §2) |
 
 ### Receipt rules
 

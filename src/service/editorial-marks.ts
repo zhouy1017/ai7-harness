@@ -1,3 +1,4 @@
+import { EditorialLearningLedger } from './learning/ledger.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { proposalReviewPosition } from './editorial-workspace-profile.js';
@@ -1469,6 +1470,7 @@ export class EditorialMarkStore {
           "INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, 'reason-field', ?)",
         ).run(decisionId, reason, now);
       }
+      new EditorialLearningLedger(this.#db).captureDecision(decisionId);
       this.#db.prepare('UPDATE editorial_marks SET status = ?, updated_at = ? WHERE mark_id = ?')
         .run(input.disposition === 'rejected' ? 'resolved' : 'open', now, input.markId);
     });
@@ -1500,6 +1502,7 @@ export class EditorialMarkStore {
       this.#db.prepare(
         'INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, ?, ?)',
       ).run(input.decisionId, reason, input.reasonSource, new Date().toISOString());
+      new EditorialLearningLedger(this.#db).captureDecision(input.decisionId);
     });
     return this.#command(input, input.markId);
   }
@@ -1542,6 +1545,7 @@ export class EditorialMarkStore {
         reason,
         first: firstReasonOf(current),
       });
+      new EditorialLearningLedger(this.#db).captureDecision(input.decisionId);
     });
     return this.#command(input, input.markId);
   }
@@ -1696,6 +1700,7 @@ export class EditorialMarkStore {
         "INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, 'reason-field', ?)",
       ).run(decisionId, this.#body(reason), now);
     }
+    new EditorialLearningLedger(this.#db).captureDecision(decisionId);
     return decisionId;
   }
 

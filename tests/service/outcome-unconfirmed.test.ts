@@ -331,9 +331,6 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       const runRecordId = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
       execution.admitAndDispatch(runRecordId);
       await execution.whenIdle();
-      store.requestBaselineAnalysisCancel(bookId, prepared.taskIntent!.taskIntentId);
-      execution.cancelRun(runRecordId, store.baselineAnalysisLedger);
-      await execution.whenIdle();
       const plan = () => store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: null });
       store.resolveUnconfirmedOutcomes(bookId, 'baseline-analysis', plan().unconfirmed!.digest);
       expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toBeUndefined();
@@ -550,7 +547,7 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
     }
   }, 120_000);
 
-  it('lists a Run stopped 结果待确认 once it is cancelled — 取消任务 settles nothing — until 保留为缺口 (CTRL-007; #763 review)', async () => {
+  it('lists the completed Run’s unknown unit until 保留为缺口 without holding the Run (#1080)', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-outcome-unknown');
     const store = await open(fixture);
     const execution = ownerOf(store, fixture);
@@ -563,24 +560,17 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
       execution.admitAndDispatch(runRecordId);
       await execution.whenIdle();
-      // Stopped 结果待确认, the Run has no outcome yet: it is its own item, and nothing is listed beside it.
-      expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toBeUndefined();
-      store.requestBaselineAnalysisCancel(bookId, taskIntentId);
-      execution.cancelRun(runRecordId, store.baselineAnalysisLedger);
-      await execution.whenIdle();
-      // The partial revision holds unit 4 as its own outcome-unknown gap, and the Run's outcome is the editor's cancellation —
-      // which is not a settlement of unit 4's request: it is listed until the editor keeps it as a gap.
+      // The Run completed with its revision and outcome; only the unit remains unknown.
       expect(store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision?.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[4, 'outcome-unknown']]);
-      expect(store.baselineAnalysisLedger.unconfirmedOutcomesOf(bookId).ranges.map((range) => [range.unitOrdinal, range.classification])).toEqual([[4, 'cancelled']]);
+      expect(store.baselineAnalysisLedger.unconfirmedOutcomesOf(bookId).ranges.map((range) => [range.unitOrdinal, range.classification])).toEqual([[4, 'completed-with-gaps']]);
       expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toMatchObject({ state: 'analysis-outcome-unconfirmed', object: { ranges: 1, steps: [] } });
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
       expect(plan.unconfirmed?.ranges).toEqual([{ unitOrdinal: 4, category: null, recordedAt: expect.any(String), earlierText: false }]);
       expect(store.resolveUnconfirmedOutcomes(bookId, 'baseline-analysis', plan.unconfirmed!.digest)).toEqual({ resolved: 1 });
       expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toBeUndefined();
-      // Kept as a gap is not read: the redo's plan still names unit 4 as sent again.
-      const after = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
-      if (after.redo === null || 'kind' in after.redo.prepare) throw new Error('Expected baseline redo');
-      let redoProgress = store.createBaselineAnalysisPreparationWork(bookId, after.redo!.prepare.goal, after.redo!.prepare.update, launchPolicy, false, runRecordId);
+      // Keeping the gap does not authorize a resend; the next full analysis still previews the earlier unknown unit.
+      let redoProgress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'],
+        { mode: 'reanalyze-book', selectedRange: null }, launchPolicy);
       while (!redoProgress.done) redoProgress = store.advanceBaselineAnalysisPreparationWork(redoProgress.workId!);
       expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: redoProgress.projection!.taskIntent!.taskIntentId }).resend?.units).toEqual([4]);
       store.markCleanShutdown();

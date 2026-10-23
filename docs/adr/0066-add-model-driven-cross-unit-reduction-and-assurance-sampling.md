@@ -22,7 +22,7 @@ Every Run produces one durable **Run Report** linked from its Task Outcome: stag
 
 ### Finding record shape for factual review
 
-Factual-review findings (the J-04 branches of plan slices S18 and S19) use one record shape: a verbatim quote anchored to an exact block range, a category from a closed set, a severity tier `A` (confirmed), `B` (probable), or `C` (advisory), a verdict from `确证`, `部分成立`, `存疑`, `无法核实`, `未外部复核`, or `误报`, a basis, and sources with institutional provenance. A finding judged `误报` keeps its identity in an excluded appendix; duplicates merge into one record that lists the merged identities. Exact field names are decided in the slice and recorded in its closure.
+Factual-review findings (the J-04 branches of plan slices S18 and S19) use one record shape: a verbatim quote anchored to an exact block range, a category from a closed set, a severity tier `A` (confirmed), `B` (probable), or `C` (advisory), a verdict from `确证`, `部分成立`, `存疑`, `无法核实`, `未外部复核`, or `误报`, a basis, and sources with institutional provenance. A finding judged `误报` keeps its identity in an excluded appendix that the editor can read with the finding's text and reason ([ADR 0095 §5](0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md#5-review-contract-v2-evidence-on-the-card-and-the-derived-report); it never becomes a mark); duplicates merge into one record that lists the merged identities. Under ADR 0095 §1 this contract, the reduction contract and the Run Report are stage types of pre-installed procedures; a contract's identity is its version id over immutable bytes. Exact field names are decided in the slice and recorded in its closure.
 
 ### Research budget
 

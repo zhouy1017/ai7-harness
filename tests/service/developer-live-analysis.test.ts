@@ -1168,7 +1168,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   // Issue #51 (S16c): an accepted request whose answer never comes back whole. It was sent, so the ledger says so — in its own
   // classification — and nothing caches it, so nothing replays a result nobody saw: the Run stops 结果待确认, which has no
   // 续行, and nothing in it ever transmits the range again.
-  it('stops 结果待确认 on a dropped answer, records it sent and uncached, and never transmits it again', async () => {
+  it('completes with an unknown-unit gap on a dropped answer, records it sent and uncached, and never transmits it again', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const { units: responses, named } = await unitAnswers(prepared);
@@ -1185,31 +1185,26 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const execution = owner(store, transport as unknown as typeof fetch);
     const stopped = await runLive(store, bookId, prepared, execution);
     const runRecordId = stopped.run!.runRecordId;
-    // Every range was sent once, unit 4 included and never again; the Run stopped before the reduction.
-    expect(calls).toHaveLength(SAMPLE1_UNITS);
-    expect(stopped.run!.state).toBe('resumable');
-    expect(stopped.run!.stateLabel).toBe('结果待确认');
-    expect(stopped.taskOutcome).toBeNull();
-    expect(store.baselineAnalysisLedger.outcomeUnknownOf(runRecordId)?.units.map((unit) => [unit.unitOrdinal, unit.attempts])).toEqual([[4, 1]]);
+    // Every unit was sent once; the Run completes through its reduction and reflection with unit 4 kept as a gap.
+    expect(calls).toHaveLength(SAMPLE1_UNITS + 2);
+    expect(stopped.run!.state).toBe('completed-with-gaps');
+    expect(stopped.state).toBe('settled');
+    expect(stopped.taskOutcome?.classification).toBe('completed-with-gaps');
+    expect(stopped.resultSetRevision!.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[4, 'outcome-unknown']]);
+    expect(store.baselineAnalysisLedger.outcomeUnknownOf(runRecordId)).toBeNull();
     const lines = await ledgerLines(cacheRoot);
-    expect(lines).toHaveLength(SAMPLE1_UNITS);
-    const unknown = lines.filter((line) => line.classification === 'outcome-unknown');
+    expect(lines).toHaveLength(SAMPLE1_UNITS + 2);
+    const unknown = lines.filter((line) => line.classification === 'outcome-unknown' && (line.validation as { step: string }).step.endsWith('/unit-4'));
     expect(unknown).toHaveLength(1);
     expect(unknown[0]).toMatchObject({ outcome: 'failed', status: 200, usage: null });
     // Nothing is cached, and the request stays held as possibly billed for every later reader (Issue #808).
     expect(await new ProviderResultCache(cacheRoot).readEntry(String(unknown[0]!.cacheKey))).toEqual({ state: 'absent' });
     expect(await new ProviderResultCache(cacheRoot).readClaim(String(unknown[0]!.claimKey))).toMatchObject({ state: 'outcome-unknown' });
 
-    // 续行 is refused, and 取消任务 keeps what was read with unit 4 its own gap: nothing more is transmitted.
-    expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrowError(/结果待确认/u);
-    store.requestBaselineAnalysisCancel(bookId, prepared.taskIntent!.taskIntentId);
-    execution.cancelRun(runRecordId, store.baselineAnalysisLedger);
-    await execution.whenIdle();
-    const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
-    expect(cancelled.run!.state).toBe('cancelled');
-    expect(cancelled.resultSetRevision!.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[4, 'outcome-unknown']]);
-    expect(calls).toHaveLength(SAMPLE1_UNITS);
-    expect(await ledgerLines(cacheRoot)).toHaveLength(SAMPLE1_UNITS);
+    // A completed Run never resumes or re-sends unit 4; the development cache hold remains unknown.
+    expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrow();
+    expect(calls.filter((call) => /^分析单元 4\//mu.test((JSON.parse(call.body) as { messages: Array<{ content: string }> }).messages.at(-1)!.content))).toHaveLength(1);
+    expect(await ledgerLines(cacheRoot)).toHaveLength(SAMPLE1_UNITS + 2);
     await store.close();
   });
 
@@ -1396,7 +1391,7 @@ async function enrolledLive(policy: LaunchPolicyProjection, ceilingTokens: numbe
 }
 
 describe('后台分析登记 under developer-live with a stub transport (Issue #864)', { timeout: 60_000 }, () => {
-  it('holds two places under a live launch, the editor\'s Runs taking one, and refuses any other capacity', async () => {
+  it('holds two foreground places under a live launch and refuses any other capacity', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const { units: responses, named } = await unitAnswers(prepared);
@@ -1412,7 +1407,7 @@ describe('后台分析登记 under developer-live with a stub transport (Issue #
       execution.admitAndDispatch(authorized.dispatchRunRecordId!);
       await held.arrived(0);
       // One of the editor's Runs in flight: no place for another of theirs, the background place still free.
-      expect([execution.busy, execution.full]).toEqual([true, false]);
+      expect([execution.busy, execution.full]).toEqual([false, false]);
       for (let index = 0; index < FULL_CHAIN_TURNS + 2; index += 1) held.release(index);
       await execution.whenIdle();
       expect([execution.busy, execution.full]).toEqual([false, false]);
