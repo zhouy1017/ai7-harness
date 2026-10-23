@@ -5228,9 +5228,10 @@ export class EditorialStore {
       // Revision 83 (Issue #89; ADR 0090 §3): the foreign Skill update candidates, rules and current selections beside them.
       initializeImportedSkillUpdateSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeModelSelectionSchema(authority);
-      initializeEditorialLearningSchema(authority);
       initializeMaterialTranslationAttemptSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeProcedureDefinitionSchema(authority);
+      // Revision 86 (Issue #1082): reference-only Learning Signals, the learning controls and explicit editorial memory.
+      initializeEditorialLearningSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);

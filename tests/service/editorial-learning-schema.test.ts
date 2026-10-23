@@ -14,7 +14,7 @@ async function predecessor(): Promise<DatabaseSync> {
   store.markCleanShutdown(); store.close();
   const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
   for (const table of Object.keys(EDITORIAL_LEARNING_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE ${table}`);
-  db.exec('PRAGMA user_version = 84');
+  db.exec('PRAGMA user_version = 85');
   return db;
 }
 
