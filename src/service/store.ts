@@ -775,7 +775,6 @@ import {
   DIMENSION_LABELS,
   DISPOSITION_LABELS,
   JUDGMENT_LABELS,
-  LEARNING_ELIGIBILITY_BASIS,
   LOCAL_LEARNING_POLICY_BASIS,
   LearningEligibilityError,
   analysisReasonLabel,
@@ -13133,8 +13132,9 @@ export class EditorialStore {
     return this.#learningCall(() => {
       const operationalScope = this.#baselineAnalysis.launch.operationalScope;
       const history = new HouseReviewPreferenceLedger(this.#authority).history(operationalScope);
+      // Its disclosure states the basis 学习准入 decisions now record (Issue #1082); the record, lineage and use are unchanged.
       return { operationalScope, current: history.at(-1) ?? null,
-        history: history.map(({ versionId, ordinal, recordedAt, sourceCount }) => ({ versionId, ordinal, recordedAt, sourceCount })), basis: LEARNING_ELIGIBILITY_BASIS };
+        history: history.map(({ versionId, ordinal, recordedAt, sourceCount }) => ({ versionId, ordinal, recordedAt, sourceCount })), basis: LOCAL_LEARNING_POLICY_BASIS.text };
     });
   }
 
