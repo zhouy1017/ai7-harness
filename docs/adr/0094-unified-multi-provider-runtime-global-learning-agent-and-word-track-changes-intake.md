@@ -56,12 +56,13 @@ If preflight finds a changed material boundary, unavailable binding or unresolve
 
 ## Clauses amended
 
-Only the named restrictions are replaced; independent obligations remain. Conflicting current prose is reconciled in these owners; immutable Policy Documents are unchanged.
+Only the named restrictions are replaced; independent obligations remain. Conflicting current prose is reconciled in these owners; existing immutable policy versions and runtime selections are unchanged.
 
 | Owner | Affected clause and replacement |
 | --- | --- |
 | [ADR 0002](0002-book-series-cross-project-and-house-learning-scopes.md) | Opening learning-scope description and Consequences: derived global learning under §3; exact Book mutation/source boundaries survive. |
 | [ADR 0004](0004-govern-learning-eligibility-with-versioned-policy-documents.md) | Recommendation-only/explicit activation restriction for all learning: §3's opt-out local curation envelope; policy expansion still requires its own authority. |
+| [Learning Eligibility Policy](../policies/learning-eligibility-policy.md) | Current authority boundary clauses 1–4 (user-approved-only admission, universal recommendation-only start, audited-example prerequisite and review), clause 5 (decision provenance), clause 8 (signals/candidates only and blanket no memory approval), clause 9 (disable consequences), and Policy-document contract's owner-approved material/scope bullet: §3's default eligible local admission, attributable automatic basis, exclusions/supervision, separate governed curation and supported derived-memory activation. Independent proposed-policy revision/activation, versioning, evidence, rollback, lineage and no-self-expansion safeguards remain. |
 | [ADR 0019](0019-editorial-quality-metrics-and-behavior-evaluation-gate.md) | Sample threshold and Later refinement's blanket no-learning clause: §3's supported-pattern activation; factual quality remains separate. |
 | [ADR 0045](0045-preserve-native-dsh-artifacts-behind-ai7-authority-sidecars.md), [ADR 0048](0048-enroll-and-evaluate-background-manuscript-analysis.md) | ADR 0045 Staged admission's blanket Enrollment requirement; ADR 0048 Background Analysis Enrollment, Feedback, Retained Policy boundary and Deferred details: Enrollment remains specific to manuscript analysis; §3 separately governs automatic curation and eligible decision-signal learning, without activating Policy Documents or expanding source/Apply authority. |
 | [ADR 0073](0073-configure-a-compatible-provider-by-declaration-and-defer-discovery.md) | Decision §§3/5, Consequences and rejected in-product selector: §1's unified selector and separately activated eligibility; declarations and capability evidence stay required. |
