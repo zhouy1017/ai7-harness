@@ -5758,11 +5758,14 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
   const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
   // 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005): the profile each 评估 version snapshots, and its use.
   if (tab === 'memory') {
+    const preferenceHost = element('div'); const memoryHost = element('div');
+    panelNode.append(preferenceHost, memoryHost);
     try {
-      const preferenceHost = element('div'); const memoryHost = element('div');
-      panelNode.append(preferenceHost, memoryHost);
       renderHouseReviewPreference(preferenceHost, await window.ai7.inspectHouseReviewPreference(), window.ai7);
-      await mountEditorialMemory(memoryHost, window.ai7);
+      // 编辑记忆 (Issue #1082, F-05 part 1): explicit memory and the learning controls beside the delivered 本社审阅偏好.
+      await mountEditorialMemory(memoryHost, window.ai7).catch((error: unknown) => {
+        memoryHost.replaceChildren(element('p', 'field-note', rendererErrorMessage(error, '无法读取编辑记忆。')));
+      });
       if (content.isConnected) setStatus('本社审阅偏好已打开');
     } catch (error) { setStatus(rendererErrorMessage(error, '无法读取本社审阅偏好。'), 'error'); }
     return;

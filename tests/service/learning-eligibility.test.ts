@@ -146,6 +146,8 @@ describe('学习准入 over the real store', () => {
       store.recordProposalDecisionFeedback({ ...binding, markId: rejectedMark, decisionId: rejection.decisionId, expectedFeedback: 0,
         action: 'revise', reason: '学习理由修订示例', reasonSource: 'free-text' });
       expect(inspect().signals[0]!.source.reasonRevision).toBe(1);
+      // The revised reason supersedes the earlier signal: unusable, and never reported as the editor's 明确排除.
+      expect(inspect().signals.slice(0, 2).map((signal) => [signal.source.reasonRevision, signal.currentEligibility])).toEqual([[1, 'house'], [0, 'superseded']]);
       const create = { clientMemoryId: randomUUID(), signalId: rewritten.signalId, title: '保持用语一致', editorialDimension: '语言', confidence: 0.5 };
       store.createEditorialMemory(create); store.createEditorialMemory(create);
       const memory = inspect().items[0]!;

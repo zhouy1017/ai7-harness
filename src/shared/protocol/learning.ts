@@ -5,7 +5,8 @@ export interface LearningSourceReference {
   bookId: string;
   manuscriptId: string;
   branchId: string;
-  markId: string;
+  /** `null` for a 审阅 finding that carries no mark. */
+  markId: string | null;
   decisionId: string;
   revisionId: string;
   journalSequence: number;
@@ -27,6 +28,9 @@ export interface LearningSignal {
   eligibility: { choice: LearningEligibilityChoice; decisionId: string | null; basisVersion: number };
   recordedAt: string;
 }
+
+/** Where a signal stands now: its eligibility, or `superseded` once a later decision or a revised reason replaced its source. */
+export type LearningSignalStanding = LearningEligibilityChoice | 'superseded';
 
 export interface GlobalEditorialMemoryVersion {
   itemId: string;
@@ -51,7 +55,7 @@ export interface EditorialLearningProjection {
   controlEntries: number;
   excludedBooks: ReadonlyArray<{ bookId: string; title: string }>;
   excludedMaterials: ReadonlyArray<{ bookId: string; materialKey: string }>;
-  signals: ReadonlyArray<LearningSignal & { currentEligibility: LearningEligibilityChoice; bookTitle: string }>;
+  signals: ReadonlyArray<LearningSignal & { currentEligibility: LearningSignalStanding; bookTitle: string }>;
   items: ReadonlyArray<{ current: GlobalEditorialMemoryVersion; usable: boolean; history: ReadonlyArray<GlobalEditorialMemoryVersion> }>;
   nextSignalOffset: number | null;
   nextItemOffset: number | null;

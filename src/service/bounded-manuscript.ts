@@ -2820,8 +2820,9 @@ function requireManuscriptReimportTargetSchema(
   const includeMaterialTranslationAttempts = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_SELECTION_SCHEMA_VERSION || committed(MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL);
   // Revision 77 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
   const includeFactualVerificationTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= FACTUAL_VERIFICATION_SCHEMA_VERSION || committed(FACTUAL_VERIFICATION_SCHEMA_SQL);
-  // Revision 79 (Issue #911): 本社审阅偏好 versions and each review category Task's pin of the version it read.
+  // Revision 86 (Issue #1082): reference-only Learning Signals, the learning controls and explicit editorial memory.
   const includeEditorialLearningTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= EDITORIAL_LEARNING_SCHEMA_VERSION || committed(EDITORIAL_LEARNING_SCHEMA_SQL);
+  // Revision 79 (Issue #911): 本社审阅偏好 versions and each review category Task's pin of the version it read.
   const includeHousePreferenceTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || committed(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL);
   // Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts, their versions and their one promotion each.
   const includeTaskIntentDraftTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= TASK_INTENT_DRAFT_SCHEMA_VERSION || committed(TASK_INTENT_DRAFT_SCHEMA_SQL);

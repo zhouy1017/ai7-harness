@@ -1,10 +1,22 @@
-import type { EditorialLearningProjection, HouseReviewPreferenceProjection, RendererApi } from '../shared/protocol.js';
+import type { EditorialLearningProjection, HouseReviewPreferenceProjection, LearningSignal, RendererApi } from '../shared/protocol.js';
 import { learningChoiceLabel } from './quality-learning-labels.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   node.textContent = text;
   return node;
+}
+
+/** What the editor did, in the words of the decision itself (Issue #1082). */
+const SIGNAL_KIND_LABELS: Readonly<Record<LearningSignal['kind'], string>> = {
+  accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝并说明原因', 'review-finding-ignored': '忽略并说明',
+};
+
+/** A signal the opt-out default admitted is never shown as the editor's own 纳入 choice (ADR 0094 §3; the policy's rule 2). */
+function signalStandingLabel(signal: EditorialLearningProjection['signals'][number]): string {
+  if (signal.currentEligibility === 'superseded') return '已被后来的决定或原因取代';
+  if (signal.currentEligibility === 'house' && signal.eligibility.decisionId === null) return '默认纳入本机学习';
+  return learningChoiceLabel(signal.currentEligibility);
 }
 
 /** Explicit, reference-only memory management alongside the existing 本社审阅偏好. */
@@ -54,7 +66,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi):
       item.append(el('h4', current.title), el('p', `${current.editorialDimension} · 信心 ${Math.round(current.confidence * 100)}% · ${current.activation === 'inactive' ? '已停用' : usable ? '已启用' : '来源受限，暂停使用'}`));
       const lineage = el('details', ''); lineage.append(el('summary', '来源与版本历史'));
       for (const source of [...current.positiveExamples, ...current.negativeExamples]) {
-        lineage.append(el('p', `图书 ${source.bookId} · 标记 ${source.markId} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`));
+        lineage.append(el('p', `图书 ${source.bookId} · 标记 ${source.markId ?? '无'} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`));
       }
       for (const version of history) lineage.append(el('p', `v${version.ordinal} · ${version.activation === 'active' ? '启用' : '停用'} · ${version.recordedAt}`));
       item.append(lineage);
@@ -71,10 +83,10 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi):
     if (page.signals.length === 0) section.append(el('p', '尚无符合准入的学习信号。'));
     for (const signal of page.signals) {
       const row = el('article', ''); row.className = 'learning-material'; row.dataset['learningSignal'] = signal.signalId;
-      row.append(el('p', `《${signal.bookTitle}》 · ${signal.kind} · ${signal.recordedAt}`),
-        el('p', `作者：${signal.attribution.authors.join('、') || '未记录'} · 责编：${signal.attribution.editors.join('、') || '未记录'} · ${learningChoiceLabel(signal.currentEligibility)}`),
+      row.append(el('p', `《${signal.bookTitle}》 · ${SIGNAL_KIND_LABELS[signal.kind]} · ${signal.recordedAt}`),
+        el('p', `作者：${signal.attribution.authors.join('、') || '未记录'} · 责编：${signal.attribution.editors.join('、') || '未记录'} · ${signalStandingLabel(signal)}`),
         el('p', `决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`));
-      if (signal.currentEligibility !== 'excluded') row.append(action('排除此材料', () => run(() => api.changeEditorialLearning({ kind: 'material', signalId: signal.signalId }))));
+      if (signal.currentEligibility !== 'excluded' && signal.currentEligibility !== 'superseded') row.append(action('排除此材料', () => run(() => api.changeEditorialLearning({ kind: 'material', signalId: signal.signalId }))));
       if (!page.excludedBooks.some((book) => book.bookId === signal.source.bookId)) row.append(action('排除本书', () => run(() => api.changeEditorialLearning({ kind: 'book', bookId: signal.source.bookId, excluded: true, expectedEntries: page.controlEntries }))));
       if (signal.currentEligibility === 'house') {
         const form = el('form', '');

@@ -124,7 +124,10 @@ export const LEARNING_ELIGIBILITY_POLICY_BASIS = {
   version: 1,
   text: LEARNING_ELIGIBILITY_BASIS,
 } as const;
-/** Every basis a stored decision may name. */
+/**
+ * Version 2 (Issue #1082; ADR 0094 §3, the policy's rules 2 and 5 as #1059 revises them): the disclosed opt-out envelope that
+ * local capture records as its governing basis. Version 1 stays readable for every decision already made under it.
+ */
 export const LOCAL_LEARNING_POLICY_BASIS = {
   policy: 'ai7.learning-eligibility-policy',
   mode: 'opt-out-local',
@@ -133,6 +136,7 @@ export const LOCAL_LEARNING_POLICY_BASIS = {
   rules: [2, 5],
   text: '本机学习默认开启：记录符合准入的处理与改写，供以后跨书参考；可随时关闭全局开关，或排除某本书、某条材料。明确排除或更窄范围立即优先。仅本机收集，不发送内容，也不训练基础模型。',
 } as const;
+/** Every basis a stored decision may name. */
 const KNOWN_LEARNING_ELIGIBILITY_BASES: ReadonlyArray<unknown> = [LEARNING_ELIGIBILITY_POLICY_BASIS, LOCAL_LEARNING_POLICY_BASIS];
 
 function knownBasis(value: unknown): boolean {

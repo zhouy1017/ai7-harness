@@ -1,10 +1,9 @@
-import type { LearningEligibilityChoice } from '../../shared/protocol.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type {
   ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput,
   EditorialLearningProjection, GlobalEditorialMemoryVersion, InspectEditorialLearningInput,
-  LearningSignal, LearningSourceReference,
+  LearningSignal, LearningSignalStanding, LearningSourceReference,
 } from '../../shared/protocol/learning.js';
 import { canonicalJson, canonicalRecord, sha256Hex } from '../analysis/canonical.js';
 import { BookPeople } from '../book-people.js';
@@ -154,7 +153,7 @@ export class EditorialLearningLedger {
     const original = read<{ binding: { manuscript: { manuscriptId: string; branchId: string; revisionId: string; journalSequence: number }; resultSetRevisionId: string | null } }>(row);
     const candidate = reviewDispositionCandidate({ signalId: String(row.signal_id), reviewRunId, findingId,
       categoryLabel: String(row.category_id), reason: String(row.reason), recordedAt: String(row.recorded_at) }, false);
-    const source: LearningSourceReference = { bookId, ...original.binding.manuscript, markId: String(row.mark_id ?? ''),
+    const source: LearningSourceReference = { bookId, ...original.binding.manuscript, markId: row.mark_id === null ? null : String(row.mark_id),
       decisionId: String(row.disposition_id), blockDigest: null, materialKey: candidate.materialKey, materialDigest: learningMaterialDigest(candidate),
       reasonRevision: 0, reviewRunId, findingId, resultSetRevisionId: original.binding.resultSetRevisionId };
     this.#capture(String(row.signal_id), 'review-finding-ignored', source, null, candidate.recordedAt);
@@ -193,19 +192,20 @@ export class EditorialLearningLedger {
       const record = read<{ binding: { manuscript: { manuscriptId: string; branchId: string; revisionId: string; journalSequence: number }; resultSetRevisionId: string | null } }>(original);
       requireLearning(record.binding.manuscript.manuscriptId === source.manuscriptId && record.binding.manuscript.branchId === source.branchId &&
         record.binding.manuscript.revisionId === source.revisionId && record.binding.manuscript.journalSequence === source.journalSequence &&
-        record.binding.resultSetRevisionId === source.resultSetRevisionId && String(original.mark_id ?? '') === source.markId);
+        record.binding.resultSetRevisionId === source.resultSetRevisionId && (original.mark_id === null ? null : String(original.mark_id)) === source.markId);
     }
     return signal;
   }
 
-  #currentEligibility(signal: LearningSignal, controls: Controls): LearningEligibilityChoice {
+  /** A later decision on the item, or a revised reason, supersedes the source: never usable, and never shown as 明确排除. */
+  #currentEligibility(signal: LearningSignal, controls: Controls): LearningSignalStanding {
     if (!controls.enabled || controls.excludedBooks.has(signal.source.bookId)) return 'excluded';
     if (signal.source.reviewRunId === null) {
       const current = this.db.prepare(`SELECT decision_id FROM proposal_item_decisions WHERE item_id =
         (SELECT item_id FROM proposal_item_decisions WHERE decision_id = ?) ORDER BY ordinal DESC LIMIT 1`).get(signal.source.decisionId);
-      if (current?.decision_id !== signal.source.decisionId) return 'excluded';
+      if (current?.decision_id !== signal.source.decisionId) return 'superseded';
       const candidate = this.#candidate(signal.source.decisionId)?.candidate;
-      if (candidate === undefined || learningMaterialDigest(candidate) !== signal.source.materialDigest) return 'excluded';
+      if (candidate === undefined || learningMaterialDigest(candidate) !== signal.source.materialDigest) return 'superseded';
     }
     return this.#standing(signal.source.bookId, signal.source.materialKey).choice;
   }

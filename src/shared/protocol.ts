@@ -1,5 +1,3 @@
-import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, EditorialLearningProjection, InspectEditorialLearningInput } from './protocol/learning.js';
-export type * from './protocol/learning.js';
 import type {
   QuickStartBaselineAnalysisResult,
   HISTORICALLY_AFFECTED_RESULT_MARKER,
@@ -111,6 +109,13 @@ import type {
   DatabaseReplacementsProjection,
 } from './protocol/data-storage.js';
 import type { ProcedureDefinitionPin, PreinstalledProcedureProjection } from './protocol/procedures.js';
+import type {
+  ChangeEditorialLearningInput,
+  CreateEditorialMemoryInput,
+  DeactivateEditorialMemoryInput,
+  EditorialLearningProjection,
+  InspectEditorialLearningInput,
+} from './protocol/learning.js';
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
@@ -404,10 +409,10 @@ export const IPC_CHANNELS = {
   recordChangeSuggestionDecision: 'ai7:j05:record-change-suggestion-decision',
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
-  inspectEditorialLearning: 'ai7:learning:inspectEditorialLearning',
-  changeEditorialLearning: 'ai7:learning:changeEditorialLearning',
-  createEditorialMemory: 'ai7:learning:createEditorialMemory',
-  deactivateEditorialMemory: 'ai7:learning:deactivateEditorialMemory',
+  inspectEditorialLearning: 'ai7:learning:inspect-editorial-learning',
+  changeEditorialLearning: 'ai7:learning:change-editorial-learning',
+  createEditorialMemory: 'ai7:learning:create-editorial-memory',
+  deactivateEditorialMemory: 'ai7:learning:deactivate-editorial-memory',
   inspectHouseReviewPreference: 'ai7:j11:inspect-house-review-preference',
   rebuildHouseReviewPreference: 'ai7:j11:rebuild-house-review-preference',
   inspectEditQualitySignals: 'ai7:j11:inspect-edit-quality-signals',
@@ -10070,6 +10075,7 @@ export * from './protocol/data-storage.js';
 export * from './protocol/deliverables.js';
 
 export * from './protocol/procedures.js';
+export * from './protocol/learning.js';
 
 // ---- 待我处理 · Global Attention (Issue #424, plan slice S78; editor-surfaces §8.1) ------------------------
 
