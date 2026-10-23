@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFocusMode, mountEditorModes } from '../../src/renderer/editor-modes.js';
 import {
@@ -97,6 +98,85 @@ describe('reading typography and density (VIEW-001 to VIEW-006)', () => {
 });
 
 describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
+  // Source contracts only: mini-dom has no stylesheet/layout engine. J03 owns geometry evidence.
+  const stylesheet = readFileSync(new URL('../../src/renderer/styles.css', import.meta.url), 'utf8');
+  const compact = (value: string) => value.replace(/\s+/gu, '');
+  const drawer = 'body[data-task-drawer="open"]';
+  const guards = [':root:not([data-sidebar="icons"])', drawer, ':has(.editor-workspace)'];
+  const fallbackSelector = `${guards[0]} ${drawer}${guards[2]}`;
+  const fallbackEffects = [
+    { target: '', declaration: 'padding-right:0' },
+    { target: '.status-bar', declaration: 'right:1.2rem' },
+    { target: '#task-drawer-separator', declaration: 'display:none' },
+  ];
+
+  function assertDrawerStyles(source: string) {
+    const css = source.replace(/\/\*[\s\S]*?\*\//gu, '');
+    // These drawer media blocks contain flat rules. Consume every rule, rather than stopping at the first closing brace.
+    const media = [...css.matchAll(/@media\s*([^{}]+)\{((?:[^{}]*\{[^{}]*\}\s*)+)\}/gu)];
+    const fallback = media.filter(([, query, rules]) => query!.includes('max-width') && rules!.includes('#task-drawer-separator'));
+    expect(fallback).toHaveLength(1);
+    const [, query, block] = fallback[0]!;
+    expect(compact(query!)).toBe('(min-width:1120px)and(max-width:1184px)');
+    const rules = [...block!.matchAll(/([^{}]+)\{([^{}]*)\}/gu)];
+    expect(block!.replace(/[^{}]+\{[^{}]*\}/gu, '').trim()).toBe('');
+    const seen = new Set<string>();
+    for (const [, selectors, declarations] of rules) {
+      for (const selector of selectors!.split(',')) {
+        // Compare each complete selector: a guarded list member cannot conceal a broad sibling or different subject.
+        const effect = fallbackEffects.find(({ target }) => compact(selector) === compact(`${fallbackSelector} ${target}`));
+        expect(effect, selector.trim()).toBeDefined();
+        expect(declarations!.split(';').map(compact).filter(Boolean)).toEqual([effect!.declaration]);
+        seen.add(effect!.target);
+      }
+    }
+    expect([...seen].sort()).toEqual(fallbackEffects.map(({ target }) => target).sort());
+
+    // Ordinary columns with focus mode OFF. Later focus-mode-on rules intentionally hide the drawer/separator.
+    const columns = media.filter(([, header]) => compact(header!) === '(min-width:1120px)');
+    const columnRules = columns.flatMap(([, , body]) => [...body!.matchAll(/([^{}]+)\{([^{}]*)\}/gu)]);
+    for (const { target, declaration } of [
+      { target: '', declaration: 'padding-right:var(--task-drawer-width)' },
+      { target: '.status-bar', declaration: 'right:calc(var(--task-drawer-width)+1.2rem)' },
+      { target: '#task-drawer-separator', declaration: 'display:block' },
+    ]) {
+      const declarations = columnRules.filter(([, selectors]) => selectors!.split(',').some((selector) => compact(selector) === compact(`${drawer} ${target}`)))
+        .flatMap(([, , body]) => body!.split(';').map(compact).filter(Boolean));
+      expect(declarations, `focus off: ${target || 'body'}`).toEqual([declaration]);
+    }
+    return { css, query: query!, rules };
+  }
+
+  it('limits the inclusive 1120–1184px drawer fallback to manuscripts with the expanded sidebar, preserving ordinary columns', () => {
+    assertDrawerStyles(stylesheet);
+    assertDrawerStyles(stylesheet.replaceAll('{', ' { /* formatting only */\n').replaceAll(';', ' ;\n'));
+  });
+
+  it('rejects missing guards in every fallback rule and every added selector-list member', () => {
+    const { css, rules } = assertDrawerStyles(stylesheet);
+    for (const { target } of fallbackEffects) {
+      const selector = `${fallbackSelector}${target ? ` ${target}` : ''}`;
+      const original = rules.find(([, selectors]) => compact(selectors!) === compact(selector))![1]!;
+      for (const guard of guards) {
+        const broad = selector.replace(guard, '');
+        expect(() => assertDrawerStyles(css.replace(original, broad)), `${target || 'body'} missing ${guard}`).toThrow();
+        expect(() => assertDrawerStyles(css.replace(original, `${selector}, ${broad}`)), `${target || 'body'} list member missing ${guard}`).toThrow();
+      }
+    }
+  });
+
+  it('rejects changed fallback boundaries and an additional broad override after the guarded rules', () => {
+    const { css, query, rules } = assertDrawerStyles(stylesheet);
+    for (const changed of [query.replace('1120', '1119'), query.replace('1120', '1121'), query.replace('1184', '1183'), query.replace('1184', '1185')]) {
+      expect(() => assertDrawerStyles(css.replace(query, changed)), changed).toThrow();
+    }
+    for (const { target, declaration } of fallbackEffects) {
+      const selector = `${fallbackSelector}${target ? ` ${target}` : ''}`;
+      const rule = rules.find(([, selectors]) => compact(selectors!) === compact(selector))![0];
+      expect(() => assertDrawerStyles(css.replace(rule, `${rule}\n${drawer} ${target} { ${declaration}; }`))).toThrow();
+    }
+  });
+
   it('keeps each region within its safe bounds, by pointer or by keyboard', () => {
     expect(clampRegion('supportingWidth', 10)).toBe(REGION_BOUNDS.supportingWidth.min);
     expect(clampRegion('drawerWidth', 10_000)).toBe(REGION_BOUNDS.drawerWidth.max);
