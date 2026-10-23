@@ -131,7 +131,7 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-budget-reached': '已停止 · 预算已达上限',
   // A Provider Account Limit (Issue #51, S16b): the drawer's own status, a blocker the editor resolves with the model service.
   'analysis-account-limit': '模型服务账户限额',
-  // 结果待确认 (Issue #51, S16c): the drawer's own status for a Run stopped on sent requests whose results cannot be known.
+  // A Run stopped on sent requests whose results cannot be known (Issue #51, S16c), recorded before #1080: the per-unit state.
   'analysis-outcome-unknown': '该单元结果未知',
   // 结果待确认 a completed Run left (Issue #757): the same words; the Task Outcome stands.
   'analysis-outcome-unconfirmed': '结果待确认',

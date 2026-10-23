@@ -296,8 +296,8 @@ export const BUDGET_REACHED_RUN_LABEL = '任务运行预算已达上限 · 已�
 /** A Run the provider's account limit stopped (Issue #51, S16b; RUN-012): a remediable blocker, never 任务已中断 · 可续行. */
 export const ACCOUNT_LIMIT_RUN_LABEL = '模型服务账户限额' as const;
 /**
- * A Run stopped because a sent request's result cannot be known (Issue #51, S16c; CTRL-007, COPY-009): 结果待确认, never
- * 任务已中断 · 可续行 nor 已取消.
+ * A Run stopped because a sent request's result cannot be known (Issue #51, S16c; CTRL-007, COPY-009), never 任务已中断 · 可续行
+ * nor 已取消. Only Runs recorded before #1080 carry that stop; it reads as the per-unit state 该单元结果未知 (ADR 0095 §2).
  */
 export const OUTCOME_UNKNOWN_RUN_LABEL = '该单元结果未知' as const;
 /** Why 结果待确认 has no 续行 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016). */

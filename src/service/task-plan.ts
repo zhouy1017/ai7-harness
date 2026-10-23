@@ -243,7 +243,8 @@ export function accountLimitReached(condition: string): string {
 }
 /**
  * 结果待确认 (Issue #51, S16c; CTRL-007, COPY-009, interaction-spec §807, §1036): the pill of a Run stopped on sent requests
- * whose results cannot be known — never 任务已中断 · 可续行 nor 已取消.
+ * whose results cannot be known — never 任务已中断 · 可续行 nor 已取消. Only Runs recorded before #1080 carry that stop, and
+ * it reads as the per-unit state 该单元结果未知 (ADR 0095 §2).
  */
 export const OUTCOME_UNKNOWN_STATE = { key: 'outcome-unknown', label: '该单元结果未知' } as const;
 /**
