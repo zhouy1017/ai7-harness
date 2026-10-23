@@ -113,7 +113,7 @@ export const SIDEBAR = Object.freeze({
 
 /** An expression that follows one sidebar row, `false` while that row is missing, hidden or unavailable. */
 export function sidebarNavigate(selector) {
-  const labels = { attention: '待我处理', library: '书库', series: '书系', knowledge: '知识库', quality: '质量与学习', manuscript: '稿件', review: '审阅', evaluation: '评估', deliverables: '交付物', findings: '发现', analysis: '分析', sources: '来源与证据', overview: '工作概览', history: '历史与恢复', hub: '设置' };
+  const labels = { attention: '待我处理', library: '书库', series: '书系', knowledge: '知识库', quality: '质量与学习', 'global-agent': '全域智能体（记忆与全局指导）', manuscript: '稿件', review: '审阅', evaluation: '评估', deliverables: '交付物', findings: '发现', analysis: '分析', sources: '来源与证据', overview: '工作概览', history: '历史与恢复', hub: '设置' };
   return `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.closest('[hidden]')||node.getAttribute('aria-disabled')==='true'||(node instanceof HTMLButtonElement&&node.disabled))return false; const key=node.dataset.navDestination??node.dataset.navBookSection??node.dataset.navSettings; const labels=${JSON.stringify(labels)}; if(key && (node.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')!==labels[key])return false; node.click(); return true; })()`;
 }
 
