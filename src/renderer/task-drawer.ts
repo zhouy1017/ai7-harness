@@ -16,7 +16,7 @@ import type {
   TaskPlanRunControlProjection,
 } from '../shared/protocol.js';
 import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
-import { TASK_PAGE_FAILED, TASK_PAGE_NAMES, taskPageMore, taskResendSummary } from './analysis-paging-labels.js';
+import { TASK_PAGE_FAILED, TASK_PAGE_NAMES, taskPageMore, taskPageShown, taskResendSummary } from './analysis-paging-labels.js';
 import { isStartWhenOnlineTaskKind } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { mountTaskComposer, mountTaskPanel, type ComposerRange, type TaskComposerSeed } from './task-panel.js';
@@ -757,7 +757,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
       ...(next.edit.lastEdit === null ? [] : [el('p', 'field-note task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit))]),
       mode === 'compact' ? compactBlock(next) : fullBlock(next),
-      ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.')).flatMap((path) => {
+      ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.') && path !== 'runControl.cancel.impact').flatMap((path) => {
         const button = pageControl(next, path, TASK_PAGE_NAMES[path] ?? path);
         return button === null ? [] : [button];
       }),
@@ -1207,16 +1207,25 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     button.disabled = working || interrupted;
     button.addEventListener('click', () => {
       if (plan !== next) return;
+      const focused = document.activeElement === button;
       button.disabled = true;
       clearPoll();
       ticket += 1;
       void api.getTaskPlanPage({ kind: next.kind, ref: next.ref, path, afterOrdinal: meta.nextOrdinal!, digest: meta.digest }).then((page) => {
         if (plan !== next || root.hidden) return;
         if (page.path !== path) throw new Error(TASK_PAGE_FAILED);
-        paint(appendTaskPlanPage(next, page), true);
+        // Disabling a focused button blurs it. Restore only if the editor has not moved focus elsewhere.
+        const restoreFocus = focused && (document.activeElement === document.body || document.activeElement === button);
+        const appended = appendTaskPlanPage(next, page);
+        paint(appended, true);
+        if (restoreFocus && path === 'runControl.cancel.impact') {
+          const target = appended.listPages?.[path]?.nextOrdinal === null ? 'cancel-impact' : 'page-runControl-cancel-impact';
+          bar.querySelector<HTMLElement>(`[data-task-drawer-control="${target}"]`)?.focus();
+        }
       }).catch((error: unknown) => {
         if (plan !== next || root.hidden) return;
         button.disabled = false;
+        if (focused && path === 'runControl.cancel.impact' && document.activeElement === document.body) button.focus();
         options.setStatus(options.errorMessage(error, TASK_PAGE_FAILED), 'error');
         schedulePoll(next);
       });
@@ -2083,6 +2092,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const actions = el('div', 'button-row');
     actions.append(confirm, keep);
     section.append(heading, lines, actions);
+    if (plan !== null) {
+      const path = 'runControl.cancel.impact';
+      const meta = plan.listPages?.[path];
+      const count = el('p', 'field-note', taskPageShown(TASK_PAGE_NAMES[path]!, meta?.shown ?? run.cancel.impact.length, meta?.total ?? run.cancel.impact.length));
+      count.dataset['cancelImpactCount'] = '';
+      count.setAttribute('aria-live', 'polite');
+      section.insertBefore(count, lines);
+      const more = pageControl(plan, path, TASK_PAGE_NAMES[path]!);
+      if (more !== null) section.insertBefore(more, actions);
+    }
     if (working) for (const button of [confirm, keep]) button.disabled = true;
     return section;
   }

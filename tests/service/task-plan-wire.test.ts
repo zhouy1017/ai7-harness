@@ -8,7 +8,7 @@ import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_FRAME_BYTES, EVALUATION
   type EvaluationRewriteProjection, type TaskPlanProjection, type ServiceResponse } from '../../src/shared/protocol.js';
 import { serializedBytes } from '../../src/service/analysis/baseline-analysis-wire.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
-import { baselineAnalysisPlan, evaluationRewritePlan, reviewWorkspaceWire, taskPlanOutbound, taskPlanWire, withAnswerBlockers, withResend } from '../../src/service/task-plan.js';
+import { baselineAnalysisPlan, evaluationRewritePlan, reviewWorkspaceWire, taskPlanOutbound, taskPlanWire, withAnswerBlockers, withLedgerRunControls, withResend } from '../../src/service/task-plan.js';
 import { decodeRequest, encodeServiceResponse, ProtocolError } from '../../src/service/request-frames.js';
 import { appendTaskPlanPage } from '../../src/renderer/analysis-paging.js';
 import { longSettledAnalysis } from '../support/long-baseline-analysis.js';
@@ -35,7 +35,21 @@ function expectNonEmptyPages(listPages: TaskPlanProjection['listPages']): void {
   for (const [path, meta] of Object.entries(listPages ?? {})) expect(meta.total === 0 || meta.shown >= 1, path).toBe(true);
 }
 
-const PAGEABLE_PATHS = ['drift.entries', 'edit.lastEdit.entries', 'resend.units', 'resend.statement', 'unconfirmed.ranges',
+/** Find the smallest usable reply, including its real projection overhead. */
+function minimumTaskPlanWire(plan: TaskPlanProjection): TaskPlanProjection {
+  let low = 1;
+  let high = serializedBytes(taskPlanWire(plan));
+  while (low < high) {
+    const budget = Math.floor((low + high) / 2);
+    try { taskPlanWire(plan, budget); high = budget; }
+    catch (error) { expect(String(error)).toMatch(/任务计划摘要超出可读取范围/u); low = budget + 1; }
+  }
+  const minimum = taskPlanWire(plan, high);
+  expect(serializedBytes(minimum)).toBeLessThanOrEqual(high);
+  return minimum;
+}
+
+const PAGEABLE_PATHS = ['drift.entries', 'edit.lastEdit.entries', 'resend.units', 'resend.statement', 'unconfirmed.ranges', 'runControl.cancel.impact',
   'runControl.outcomeUnknown.units', 'runControl.continuation.pendingAnswerUnits', 'clarifications'];
 function largestPageable(plan: TaskPlanProjection): number {
   const lists = PAGEABLE_PATHS.map((path) => path.split('.').reduce<unknown>((value, key) =>
@@ -50,8 +64,8 @@ function largestPageable(plan: TaskPlanProjection): number {
  * is returned unchanged.
  */
 function completePages(store: EditorialStore, original: TaskPlanProjection, generated: boolean): void {
-  if (serializedBytes(original) <= REPLY_BUDGET) expect(taskPlanWire(original)).toBe(original);
-  if (largestPageable(original) < 16 * 1024) return;
+  if (serializedBytes(original) <= REPLY_BUDGET && (original.runControl?.cancel.impact.length ?? 0) <= 51) expect(taskPlanWire(original)).toBe(original);
+  if (largestPageable(original) < 16 * 1024 && (original.runControl?.cancel.impact.length ?? 0) <= 51) return;
   let wire = taskPlanWire(original, Math.min(serializedBytes(original) - 1, REPLY_BUDGET));
   expect(Object.keys(wire.listPages ?? {}).length).toBeGreaterThan(0);
   expectNonEmptyPages(wire.listPages);
@@ -65,7 +79,9 @@ function completePages(store: EditorialStore, original: TaskPlanProjection, gene
         visited.add(meta.nextOrdinal!);
         const page = store.getTaskPlanPage({ bookId: original.bookId, kind: original.kind, ref: original.ref,
           path, afterOrdinal: meta.nextOrdinal!, digest: meta.digest });
+        if (path === 'runControl.cancel.impact') expect((page.items as unknown[]).length).toBe(Math.min(50, meta.total - meta.shown));
         expect(serializedBytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES / 2);
+        expect(encodeServiceResponse({ id: ID, ok: true, op: 'getTaskPlanPage', result: page }).length).toBeLessThanOrEqual(MAX_FRAME_BYTES + 4);
         wire = appendTaskPlanPage(wire, page);
       }
       expect(wire.listPages![path]!.shown).toBe(wire.listPages![path]!.total);
@@ -126,6 +142,90 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
         unitsSettled: 0, unitsClosed: 0, unitsTotal: units.length, blockers: [], bindingHolds: true,
         outcomeUnknown: { units: units.map((unitOrdinal) => ({ unitOrdinal, attempts: 1, reason: '生成原因' })), stopped: true } } });
     stopped.edit = { ...stopped.edit, lastEdit: { ordinal: 2, recordedAt: '2026-10-19T00:00:00.000Z', entries: drift.drift.entries } };
+    if (shape === 'headings') {
+      // Exercise the actual drawer derivation and outbound encoder with extreme stopped-Run facts.
+      // These are authored range records, not model results or durable authority.
+      for (const size of [51, 20_000, 32_000]) {
+        const ordinals = Array.from({ length: size }, (_, index) => index + 1);
+        for (const unknown of [false, true]) {
+          const extreme = baselineAnalysisPlan({ projection: { ...settled, run: { ...settled.run!, state: 'resumable', progress: null } },
+            bookTitle: '生成测试', blocks, stopped: {
+              waiting: unknown ? [] : ordinals.map((unitOrdinal) => ({ unitOrdinal, answered: unitOrdinal % 2 === 0 })),
+              unitsSettled: unknown ? ordinals.length : 0, unitsClosed: 0, unitsTotal: ordinals.length, blockers: [], bindingHolds: true,
+              outcomeUnknown: unknown ? { units: ordinals.map((unitOrdinal) => ({ unitOrdinal, attempts: 1, reason: '生成原因' })), stopped: true } : null,
+            } });
+          sweep(`${size}-ranges`, unknown ? 'unknown' : 'waiting', 'inspectTaskPlan', extreme);
+          const first = taskPlanWire(extreme);
+          if (size === 51) {
+            const shortTechnical = { ...extreme, technical: extreme.technical.map((row) => ({ ...row, value: '生成技术摘要' })) };
+            expect(serializedBytes(shortTechnical)).toBeLessThan(REPLY_BUDGET);
+            const countLimited = taskPlanWire(shortTechnical);
+            expect(countLimited.technical).toEqual(shortTechnical.technical);
+            expect(Object.keys(countLimited.listPages!)).toEqual(['runControl.cancel.impact']);
+          }
+          expect(first.listPages?.['runControl.cancel.impact']?.total).toBe(ordinals.length + 1);
+          expect(first.listPages?.['runControl.cancel.impact']?.shown).toBe(51); // Summary plus fifty details.
+          expect(first.runControl!.cancel.impact[0]).toBe(extreme.runControl!.cancel.impact[0]);
+          expect(first.runControl!.cancel.impact[0]).toContain('这项分析不改稿，没有需要撤回的受控动作。');
+          const minimum = minimumTaskPlanWire(extreme);
+          expect(minimum.listPages?.['runControl.cancel.impact']?.shown).toBe(1);
+          expect(minimum.runControl!.cancel.impact).toEqual([extreme.runControl!.cancel.impact[0]]);
+          const meta = first.listPages!['runControl.cancel.impact']!;
+          expect(minimum.listPages!['runControl.cancel.impact']!.digest).toBe(meta.digest);
+          const fromMinimum = store.getTaskPlanPage({ bookId: extreme.bookId, kind: extreme.kind, ref: extreme.ref,
+            path: 'runControl.cancel.impact', afterOrdinal: 1, digest: meta.digest }, extreme);
+          expect(fromMinimum.items).toEqual(extreme.runControl!.cancel.impact.slice(1, 51));
+          expect(() => store.getTaskPlanPage({ bookId: extreme.bookId, kind: extreme.kind, ref: extreme.ref,
+            path: 'runControl.cancel.impact', afterOrdinal: meta.nextOrdinal!, digest: '0'.repeat(64) }, extreme)).toThrow(/变化/u);
+          const moved = { ...extreme, runControl: { ...extreme.runControl!, cancel: { ...extreme.runControl!.cancel,
+            impact: [extreme.runControl!.cancel.impact[0]! + '执行绑定已变化。', ...extreme.runControl!.cancel.impact.slice(1)] } } };
+          expect(() => store.getTaskPlanPage({ bookId: extreme.bookId, kind: extreme.kind, ref: extreme.ref,
+            path: 'runControl.cancel.impact', afterOrdinal: meta.nextOrdinal!, digest: meta.digest }, moved)).toThrow(/变化/u);
+          completePages(store, extreme, true);
+        }
+      }
+      const mixedFacts = { unitsSettled: 5, unitsClosed: 3, unitsTotal: 10, blockers: [], bindingHolds: true,
+        waiting: [{ unitOrdinal: 6, answered: false }, { unitOrdinal: 7, answered: true }],
+        outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1, reason: '生成原因' }, { unitOrdinal: 5, attempts: 1, reason: '生成原因' }], stopped: true } };
+      for (const kind of ['review-run', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing', 'fixed-task'] as const) {
+        const shared = withLedgerRunControls({ ...stopped, kind }, { ...settled, run: { ...settled.run!, state: 'resumable', progress: null } }, blocks, mixedFacts);
+        const summary = shared.runControl!.cancel.impact[0]!;
+        expect(summary).toContain('已读完 3 个阅读范围');
+        expect(summary).toContain('结果待确认 2 个');
+        expect(summary).toContain(kind === 'review-run' ? '取消不会撤回已完成的受控动作' : '不会自动采用、改稿或发稿');
+        expect(summary).not.toContain('这项分析不改稿');
+        expect(summary).toContain('这项任务最新的结果');
+        // Other large lists already have the full sweep above; isolate this kind's minimum cancellation share.
+        expect(minimumTaskPlanWire({ ...shared, technical: [], clarifications: [] }).runControl!.cancel.impact).toEqual([summary]);
+        expect(taskPlanWire(shared).listPages).not.toHaveProperty('redo.summary');
+        if (shared.redo !== null) {
+          expect(shared.redo.summary.join('')).toContain('已读完的 5 个阅读范围');
+          expect(shared.redo.summary.join('')).not.toMatch(/等你回答|你已回答|结果待确认/u);
+        }
+        const active = withLedgerRunControls({ ...stopped, kind }, { ...settled, run: { ...settled.run!, state: 'executing', progress: {
+          unitsTotal: 10, unitsSettled: 5, currentUnitOrdinal: 8, currentUnitStartedAt: '2026-10-19T00:00:00.000Z',
+          attemptState: 'dispatched', completedAttempts: 5, longestSettledUnitMs: 10, stage: 'units', lastTransitionAt: '2026-10-19T00:00:00.000Z',
+        } } }, blocks, undefined, false, { waiting: mixedFacts.waiting, unconfirmed: [4, 5] });
+        const activeSummary = active.runControl!.cancel.impact[0]!;
+        expect(activeSummary).toContain('已读完 3 个阅读范围，等你回答 1 个，你已回答但尚未续行 1 个，结果待确认 2 个，未尝试 2 个');
+        expect(activeSummary).toContain(kind === 'review-run' ? '取消不会撤回已完成的受控动作' : '不会自动采用、改稿或发稿');
+        expect(minimumTaskPlanWire({ ...active, technical: [], clarifications: [] }).runControl!.cancel.impact).toEqual([activeSummary]);
+        expect(active.runControl!.continuation).toBeNull();
+        expect(active.redo).toBeNull();
+      }
+      for (const state of ['paused', 'resumable'] as const) {
+        for (const unitsSettled of [0, 3, null]) for (const bindingHolds of [true, false]) {
+          const ordinary = baselineAnalysisPlan({ projection: { ...settled, run: { ...settled.run!, state, progress: null } },
+            bookTitle: '生成测试', blocks, stopped: { unitsSettled, unitsClosed: unitsSettled, unitsTotal: 10,
+              waiting: [], blockers: [], bindingHolds } });
+          const minimum = minimumTaskPlanWire({ ...ordinary, technical: [] });
+          expect(minimum.runControl!.cancel.impact).toEqual(ordinary.runControl!.cancel.impact);
+          expect(minimum.runControl!.cancel.impact).toHaveLength(1);
+          expect(minimum.runControl!.cancel.impact[0]).toContain('这项分析不改稿，没有需要撤回的受控动作。');
+          expect(minimum.runControl!.cancel.impact[0]).toContain(unitsSettled === null ? '数量无法核对' : `已读完 ${unitsSettled} 个阅读范围`);
+        }
+      }
+    }
     // The prepared plan is the store's own; the later states are #988's generated settled analysis through the real plan
     // factories (`withResend`, `baselineAnalysisPlan`), with drift lines, unconfirmed ranges and questions generated one per unit.
     for (const [state, next] of Object.entries({ prepared: plan, 'settled-update': settledPlan, resend, drift, 'stopped-clarifications': stopped })) {

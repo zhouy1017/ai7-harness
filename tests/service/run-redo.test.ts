@@ -376,7 +376,8 @@ describe('改计划重做 over the real store', () => {
       expect(plan.state.key).toBe('paused');
       // 续行 says why it cannot go on and where the way on is; 取消任务 and 改计划重做 say nothing is kept.
       expect(plan.runControl?.resume).toEqual({ reason: RESUME_BLOCKED_BINDING });
-      expect(plan.runControl?.cancel.impact[1]).toBe('执行绑定已经变化，已读完的 3 个阅读范围不能整理成结果集修订版；这次取消不会形成修订版。');
+      expect(plan.runControl?.cancel.impact[0]).toContain('已读完 3 个阅读范围');
+      expect(plan.runControl?.cancel.impact[0]).toContain('执行绑定已经变化，这次取消不会形成结果集修订版。');
       expect(plan.redo).toEqual({
         summary: [
           '这项任务会在这里停下并取消；执行绑定已经变化，已读完的 3 个阅读范围不能沿用，不会形成结果集修订版。',

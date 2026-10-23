@@ -243,7 +243,7 @@ describe('暂停 and 续行 over the real store', () => {
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, progress);
       expect(plan.state).toEqual({ key: 'paused', label: '已暂停' });
       expect(plan.runControl).toMatchObject({ resume: { reason: null }, continuation: { unitsSettled: 3, unitsTotal: SAMPLE1_UNITS }, activity: null });
-      expect(plan.runControl!.cancel.impact[1]).toContain('已读完的 3 个阅读范围');
+      expect(plan.runControl!.cancel.impact[0]).toContain('已读完 3 个阅读范围');
       expect(store.inspectGlobalAttention(progress, execution.busy).groups.flatMap((group) => group.items).find((item) => item.book.bookId === bookId)?.state)
         .toBe('analysis-paused');
       // A paused Task is not done: the Book takes no new one until it is continued or cancelled.
@@ -445,7 +445,7 @@ describe('暂停 and 续行 over the real store', () => {
       const plan = await second.inspectTaskPlanWithConnection({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, async () => null, ONLINE, () => null);
       expect(plan.runControl?.continuation).toEqual({ unitsSettled: null, unitsTotal: SAMPLE1_UNITS, pendingAnswerUnits: [] });
       expect(plan.runControl?.resume?.reason).toContain('已保存的阅读进度无法核对');
-      expect(plan.runControl?.cancel.impact[0]).toBe('这项任务已经停下，它已保存的阅读进度无法核对；取消后不会发送任何内容，也不会形成结果集修订版。');
+      expect(plan.runControl?.cancel.impact[0]).toContain('已保存的阅读进度无法核对，这次取消不会形成结果集修订版。');
       // 取消任务 still ends it: nothing of it can be gathered, so it is cancelled with no revision, and says why.
       expect(second.requestBaselineAnalysisCancel(bookId, taskIntentId)).toBe(runRecordId);
       expect(secondOwner.cancelRun(runRecordId, second.baselineAnalysisLedger)).toBe('settled');

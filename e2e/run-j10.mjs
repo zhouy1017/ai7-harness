@@ -139,12 +139,12 @@ const REDO_SUMMARY = Object.freeze([
 /** The redo Task's own sentence: what it carries from the Run it redoes, and what it reads. */
 const REDO_GOAL_FIRST = '改计划重做：沿用已读完的 6 个阅读范围，接着读其余 2 个';
 const REDO_GOAL_THIRD = '改计划重做：沿用已读完的 2 个阅读范围，接着读其余 6 个';
-const IMPACT = Object.freeze([
+const IMPACT = Object.freeze([[
   `正在读的第 6 个阅读范围读完后停止；其余 ${SAMPLE1_UNITS - 6} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
   '已读完的 5 个阅读范围和正在读的这一个的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
   '这项分析不改稿，没有需要撤回的受控动作。',
   '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。',
-]);
+].join('')]);
 const REFLECTION_CANCELLED = '运行已按你的要求取消，运行反思未发起。';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -1709,6 +1709,63 @@ async function main() {
     const whileViewing = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(whileViewing?.run?.state === 'resumable' && JSON.stringify(whileViewing.run.transitions) === JSON.stringify(unconfirmed.run.transitions) &&
       JSON.stringify(whileViewing.run.attempt?.spans) === JSON.stringify(unconfirmed.run.attempt?.spans), 'outcome-unknown-unmoved');
+
+    at('cancel-impact-paging');
+    // Force the minimum inline page of this real stopped Run's read-only projection. The built drawer and real
+    // getTaskPlanPage remain the subject: no replacement UI, fabricated model result or durable record is installed.
+    // Extreme derivation, 50-detail defaults, byte cuts and complete traversal are exercised by task-plan-wire.test.ts.
+    const pagingPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'baseline-analysis',ref:${JSON.stringify(seventhIntentId)}})`);
+    const pagingLines = pagingPlan.runControl.cancel.impact;
+    requireJourney(pagingLines.length === 2, 'cancel-paging-two-entries');
+    const pagingDigest = createHash('sha256').update(JSON.stringify(pagingLines)).digest('hex');
+    await assertRenderer(renderer, `(() => {
+      const original = Promise.prototype.then;
+      globalThis.__j10RestoreCancelPaging = () => { Promise.prototype.then = original; delete globalThis.__j10RestoreCancelPaging; };
+      Promise.prototype.then = function (fulfilled, rejected) {
+        return original.call(this, typeof fulfilled !== 'function' ? fulfilled : (value) => {
+          if (value?.kind === 'baseline-analysis' && value.ref === ${JSON.stringify(seventhIntentId)} && value.runControl?.cancel?.impact?.length === 2) {
+            value = { ...value, runControl: { ...value.runControl, cancel: { ...value.runControl.cancel, impact: value.runControl.cancel.impact.slice(0, 1) } },
+              listPages: { ...value.listPages, 'runControl.cancel.impact': { shown: 1, total: 2, nextOrdinal: 1, digest: ${JSON.stringify(pagingDigest)} } } };
+          }
+          return fulfilled(value);
+        }, rejected);
+      };
+      return true;
+    })()`, 'cancel-paging-minimum-wire');
+    try {
+      for (const attempt of ['first', 'reopened']) {
+        await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', `cancel-paging-${attempt}-close`);
+        await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', `cancel-paging-${attempt}-open`);
+        await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='outcome-unknown'`, `cancel-paging-${attempt}-ready`);
+        await clickSelector(renderer, '#task-drawer [data-task-drawer-control="cancel-run"]', `cancel-paging-${attempt}-impact`);
+        await waitFor(renderer, `(() => {
+          const impact = document.querySelector('#task-drawer-cancel-impact');
+          const more = impact?.querySelector('[data-task-drawer-control="page-runControl-cancel-impact"]');
+          return impact?.querySelector('[data-cancel-impact-count]')?.textContent === '取消影响说明 · 已显示 1 / 2 条' &&
+            impact.querySelectorAll('li').length === 1 && more?.textContent === '继续读取取消影响说明（已显示 1 / 2）' &&
+            impact.querySelector('li').textContent.includes('已读完 7 个阅读范围') &&
+            impact.querySelector('li').textContent.includes('结果待确认 1 个') &&
+            impact.querySelector('li').textContent.includes('没有需要撤回的受控动作') && document.activeElement === impact.querySelector('h4');
+        })()`, `cancel-paging-${attempt}-summary`);
+        await pressTab(renderer);
+        await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl === 'page-runControl-cancel-impact' && document.activeElement.matches(':focus-visible')`, `cancel-paging-${attempt}-keyboard`);
+        await pressEnter(renderer);
+        await waitFor(renderer, `(() => {
+          const impact = document.querySelector('#task-drawer-cancel-impact');
+          return impact?.querySelector('[data-cancel-impact-count]')?.textContent === '取消影响说明 · 已显示 2 / 2 条' &&
+            impact.querySelectorAll('li').length === 2 && impact.querySelectorAll('li')[1].textContent === ${JSON.stringify(OUTCOME_UNKNOWN_CANCEL_LINE)} &&
+            !impact.querySelector('[data-task-drawer-control="page-runControl-cancel-impact"]') && document.activeElement === impact.querySelector('h4');
+        })()`, `cancel-paging-${attempt}-complete`);
+      }
+      await clickSelector(renderer, '#task-drawer [data-task-drawer-control="keep-running"]', 'cancel-paging-leave-confirmation');
+    } finally {
+      await renderer.evaluate(`globalThis.__j10RestoreCancelPaging?.()`);
+    }
+    const afterPaging = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(JSON.stringify(afterPaging.run) === JSON.stringify(unconfirmed.run) &&
+      JSON.stringify(afterPaging.authorization) === JSON.stringify(unconfirmed.authorization) &&
+      JSON.stringify(afterPaging.planVersions) === JSON.stringify(unconfirmed.planVersions) &&
+      afterPaging.taskOutcome === null && afterPaging.resultSetRevision === null, 'cancel-paging-records-nothing');
 
     at('outcome-unknown-cancelled');
     // No 续行 anywhere: the way out is 取消任务, whose summary names unit 4 as its own gap, never a range not attempted. Confirmed,

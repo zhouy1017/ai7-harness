@@ -552,6 +552,7 @@ import {
   ANSWER_BLOCKED_OFFLINE,
   RESUME_BLOCKED_SLOT,
   type BaselineStoppedRunFacts,
+  type BaselineCancellationRanges,
 } from './task-plan.js';
 import { decisionResolvesConflict, initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention, type ProposalConflictRegenerationLineage } from './proposal-conflicts.js';
 import {
@@ -6205,7 +6206,8 @@ export class EditorialStore {
         if (projection.taskIntent?.taskIntentId === controlling.taskIntentId) {
           const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun, controlling.ledger);
           const originalState = plan.state;
-          plan = withLedgerRunControls(plan, projection, [], stopped ?? undefined, controlling.ledger.launch.operationalScope === 'developer-live');
+          plan = withLedgerRunControls(plan, projection, [], stopped ?? undefined, controlling.ledger.launch.operationalScope === 'developer-live',
+            this.#liveCancellationRanges(projection, controlling.ledger));
           if (active === undefined && projection.run?.state !== 'cancelled') plan = { ...plan, state: originalState, runControl: null };
           plan = { ...plan, edit: { ...plan.edit, planEnvelopeDigest: plan.edit.editable
             ? canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest : null } };
@@ -6230,7 +6232,8 @@ export class EditorialStore {
       if (checkpoint !== null) {
         const blocks = this.#analysisCall(() => ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
         const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun, ledger);
-        plan = withLedgerRunControls(plan, projection, blocks, stopped ?? undefined, ledger.launch.operationalScope === 'developer-live');
+        plan = withLedgerRunControls(plan, projection, blocks, stopped ?? undefined, ledger.launch.operationalScope === 'developer-live',
+          this.#liveCancellationRanges(projection, ledger));
       }
     }
     // A Task prepared from a Task Intent Draft shows the draft's sentence in its 目标块 (Issue #423, slice 7a).
@@ -6288,7 +6291,8 @@ export class EditorialStore {
       const clarifications = projection.run === null ? [] : this.#analysisCall(() => ledger.clarificationsOf(projection.run!.runRecordId));
       // 结果待确认 (Issue #51, S16c): the ranges this Task would send again whose earlier result could not be known.
       const resendUnits = this.#analysisCall(() => ledger.resendUnitsOf(projection));
-      const baseline = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, ...(defaultRule === undefined ? {} : { defaultRule }), clarifications, resendUnits, ...(stopped === null ? {} : { stopped }) }));
+      const baseline = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, ...(defaultRule === undefined ? {} : { defaultRule }), clarifications, resendUnits, ...(stopped === null ? {} : { stopped }),
+        liveCancellation: this.#liveCancellationRanges(projection, ledger) }));
       const routeKind = projection.providerResolutionPlan?.executionRoute.kind ?? null;
       const plan = custom === null ? baseline : customAnalysisPlan(baseline, { ...customAnalysisVersionInput(custom), version: custom.version },
         routeKind === 'opencode-go' || routeKind === 'deepseek-open-platform');
@@ -6812,6 +6816,25 @@ export class EditorialStore {
   reconcileStoppedReviewCategoryRuns(): { settled: number } {
     this.#assertAvailable();
     return { settled: this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns())) };
+  }
+
+  /** Exact recorded ranges for a live Run's cancellation disclosure; no stopped-Run authority is inferred. */
+  #liveCancellationRanges(projection: BaselineAnalysisProjection, ledger: BaselineAnalysisStore): BaselineCancellationRanges | null {
+    const run = projection.run;
+    if (run === null || run.progress === null) return null;
+    const inFlight = run.progress.stage === 'units' ? run.progress.currentUnitOrdinal : null;
+    return this.#analysisCall(() => {
+      const checkpoints = ledger.unitCheckpoints(run.runRecordId);
+      const settled = new Set(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal));
+      return {
+        // An answered range already in flight is being continued, not waiting to be continued.
+        waiting: ledger.clarificationsOf(run.runRecordId)
+          .filter((request) => !settled.has(request.unitOrdinal) && request.unitOrdinal !== inFlight)
+          .map((request) => ({ unitOrdinal: request.unitOrdinal, answered: request.answer !== null })),
+        unconfirmed: checkpoints.filter((checkpoint) => checkpoint.unit.closed.state === 'gap' && checkpoint.unit.closed.gap.code === 'outcome-unknown')
+          .map((checkpoint) => checkpoint.unit.unitOrdinal),
+      };
+    });
   }
 
   /**
