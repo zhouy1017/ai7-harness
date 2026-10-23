@@ -36,10 +36,12 @@ const codeOf = (action: () => unknown): unknown => {
 };
 
 describe('Data Version 1 frozen at the 1.0.0 boundary', () => {
-  it('is frozen, its baseline the terminal schema revision, and the software reads the classification\'s Data Version', () => {
+  it('keeps the frozen baseline while the additive terminal revision stays in Data Version 1', () => {
     expect(DATA_VERSION_FROZEN).toBe(true);
     // The baseline is a literal: when a later slice adds a revision, LATEST moves past it and the classification must follow.
-    expect(DATA_VERSION_BASELINE_REVISION).toBe(LATEST_SCHEMA_VERSION);
+    expect(DATA_VERSION_BASELINE_REVISION).toBe(83);
+    expect(LATEST_SCHEMA_VERSION).toBe(84);
+    expect(DATA_VERSION).toBe(1);
     expect(DATA_VERSION).toBe(dataVersionAt(LATEST_SCHEMA_VERSION));
   });
 
@@ -58,7 +60,7 @@ describe('Data Version 1 frozen at the 1.0.0 boundary', () => {
     expect(unclassifiedRevisions([84, 86], 83, [...classes, { revision: 86, class: 'breaking' as const, change: '甲' }])).toEqual([]);
     // A breaking class raises the number only: Data Version 2 from revision 86 on.
     expect([85, 86].map((revision) => dataVersionAt(revision, [...classes, { revision: 86, class: 'breaking' as const, change: '甲' }]))).toEqual([1, 2]);
-    expect(SCHEMA_REVISION_CLASSES).toEqual([]);
+    expect(SCHEMA_REVISION_CLASSES).toEqual([{ revision: 84, class: 'additive' }]);
   });
 });
 

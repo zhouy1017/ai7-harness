@@ -178,7 +178,7 @@ describe('custom analysis kind family live admission (#920)', () => {
   const FAMILY_DIGEST = 'e'.repeat(64);
   const stubDefinition = (kind = 'custom-analysis/synthetic-dimension') => ({ kind, promptContractDigest: FAMILY_DIGEST, livePromptContractDigest: () => FAMILY_DIGEST });
   const customRuleId = 'developer-live-public-samplebook-custom-analysis';
-  const GO_PRODUCTION_BINDING = { route: 'opencode-go', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'deepseek-v4.1-flash', credentialSlot: 'opencode-go', credentialReference: 'credential-ref-go-0001' };
+  const GO_PRODUCTION_BINDING = { route: 'opencode-go', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'deepseek-v4.1-flash', credentialSlot: 'opencode-go', credentialReference: '33333333-3333-4333-8333-333333333333' };
 
   it('lists a kind by an exact entry or by a whole-segment family entry, and nothing wider', () => {
     expect(taskKindListed(['custom-analysis/*'], 'custom-analysis/dimension-1')).toBe(true);
@@ -244,7 +244,7 @@ describe('custom analysis kind family live admission (#920)', () => {
 
   it('selects the ordinary-production custom rule on the editor\'s configured binding', async () => {
     const production = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'ordinary-production', GO_PRODUCTION_BINDING);
-    expect(production.providerProcessing.version).toBe('v23');
+    expect(production.providerProcessing.version).toBe('v25');
     expect(liveKindRule(production, 'custom-analysis/synthetic-dimension', ['editor-authored-question-template'])?.ruleId).toBe('ordinary-production-custom-analysis');
     const productionBinding = production.providerProcessing.admittedRules.find((rule) => rule.ruleId === 'ordinary-production-custom-analysis')!;
     expect(liveKindAdmission(production, stubDefinition(), productionBinding)?.outboundDataCategories).toEqual(expect.arrayContaining(['public-or-synthetic', 'editor-authored-question-template']));
