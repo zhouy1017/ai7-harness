@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_CODE, attributionHeaders } from '@deepseek-ai/dsh-llm';
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
-import { AI7_FAILURE_CODES, RETRY_SAFE_FAILURE_TABLE, classifyModelFailure, evaluateRunBudgetCeiling, isRetrySafeFailure } from '../../src/service/provider/classification.js';
+import { AI7_FAILURE_CODES, RETRY_SAFE_FAILURE_TABLE, classifyModelFailure, evaluateRunBudgetCeiling, isRetrySafeFailure, retryBackoffMs } from '../../src/service/provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding } from '../../src/service/provider/credential-broker.js';
 import {
   DEEPSEEK_ROUTE_PROFILE,
+  MODEL_REQUEST_DEADLINE_MS,
   DeepSeekOpenAiCompatibleAdapter,
   OPENCODE_GO_ROUTE_PROFILE,
   OPENCODE_GO_SESSION_HEADER,
@@ -677,7 +678,7 @@ describe('parseProviderResponse', () => {
   });
 
   it('classifies interrupted and denied transports', () => {
-    expect(classifyTransportError(Object.assign(new Error('abort'), { name: 'AbortError' }))).toEqual({ code: AI7_FAILURE_CODES.INTERRUPTED, message: '请求被中断。' });
+    expect(classifyTransportError(Object.assign(new Error('abort'), { name: 'AbortError' }))).toEqual({ code: AI7_FAILURE_CODES.TRANSPORT_FAILED, message: '请求在发送前已中止，未发送任何内容。' });
     expect(classifyTransportError({ code: NETWORK_DENIED_CODE })).toMatchObject({ code: NETWORK_DENIED_CODE });
     expect(classifyTransportError(new Error('x'))).toMatchObject({ code: AI7_FAILURE_CODES.TRANSPORT_FAILED });
   });
@@ -715,11 +716,96 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
     expect(chunks.find((chunk) => chunk.type === 'block-end')).toEqual({ type: 'block-end', index: 0, block: { type: 'text', text: '{"ok":true}' } });
   });
 
+  it('does not send a pre-aborted request and marks a post-send abort as unknown', async () => {
+    const before = new AbortController();
+    before.abort();
+    const unsent = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async () => { throw new Error('must not send'); } });
+    expect((await collect(unsent.adapter.stream({ ...request(), signal: before.signal }))).at(-1))
+      .toMatchObject({ reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.TRANSPORT_FAILED } } });
+    expect(unsent.calls).toHaveLength(0);
+    expect(unsent.adapter.transmissions).toBe(0);
+
+    const after = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    const sent = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async (_url, init) => {
+      receivedSignal = init.signal;
+      after.abort();
+      throw init.signal!.reason;
+    } });
+    expect((await collect(sent.adapter.stream({ ...request(), signal: after.signal }))).at(-1))
+      .toMatchObject({ reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN } } });
+    expect(receivedSignal?.aborted).toBe(true);
+    expect(sent.calls).toHaveLength(1);
+  });
+
+  it('awaits the transport unknown-result settlement after abort before returning to its caller', async () => {
+    const controller = new AbortController();
+    let sent!: () => void;
+    const reached = new Promise<void>((resolve) => { sent = resolve; });
+    let finishSettlement!: () => void;
+    const settlement = new Promise<void>((resolve) => { finishSettlement = resolve; });
+    let held = false;
+    let completed = false;
+    const running = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async (_url, init) => {
+      sent();
+      await new Promise<void>((resolve) => init.signal!.addEventListener('abort', () => resolve(), { once: true }));
+      await settlement;
+      held = true;
+      throw init.signal!.reason;
+    } });
+    const result = collect(running.adapter.stream({ ...request(), signal: controller.signal })).then((chunks) => { completed = true; return chunks; });
+    await reached;
+    controller.abort();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    finishSettlement();
+    expect((await result).at(-1)).toMatchObject({ reason: { failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN } } });
+    expect(held).toBe(true);
+    expect(running.calls).toHaveLength(1);
+  });
+
+  it.each(['headers', 'body'] as const)('bounds a stalled %s read by the default deadline without resending', async (stage) => {
+    vi.useFakeTimers();
+    try {
+      let sent = false;
+      let signal: AbortSignal | undefined;
+      const stalled = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async (_url, init) => {
+        sent = true;
+        signal = init.signal;
+        const pending = () => new Promise<never>((_resolve, reject) => {
+          init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+        });
+        if (stage === 'headers') return pending();
+        return { status: 200, json: pending };
+      } });
+      const completed = collect(stalled.adapter.stream(request()));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sent).toBe(true);
+      expect(signal).toBeInstanceOf(AbortSignal);
+      await vi.advanceTimersByTimeAsync(MODEL_REQUEST_DEADLINE_MS - 1);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await completed).at(-1)).toMatchObject({ reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN } } });
+      expect(signal?.aborted).toBe(true);
+      expect(stalled.calls).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([429, 503])('exposes bounded Retry-After metadata for a retryable %s refusal', async (status) => {
+    const limited = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async () => ({
+      status, headers: new Headers({ 'Retry-After': '75' }), json: async () => ({}),
+    }) });
+    await collect(limited.adapter.stream(request()));
+    expect(limited.adapter.lastRetryDelayMs).toBe(60_000);
+  });
+
   it('turns quota, error, and interrupted transport shapes into terminal failure chunks', async () => {
     const quota = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async () => ({ status: 402, json: async () => ({ error: { message: 'Insufficient Balance' } }) }) });
     expect((await collect(quota.adapter.stream(request()))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: QUOTA_EXCEEDED_CODE, status: 402 } } });
     const interrupted = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async () => { throw Object.assign(new Error('aborted'), { name: 'AbortError' }); } });
-    expect((await collect(interrupted.adapter.stream(request()))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'aborted', failure: { code: AI7_FAILURE_CODES.INTERRUPTED } } });
+    expect((await collect(interrupted.adapter.stream(request()))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN } } });
     const wrongBinding = adapter({ ticket: ticketFor('f'.repeat(64)), secret: 'placeholder', transport: async () => ({ status: 200, json: async () => ({}) }) });
     expect((await collect(wrongBinding.adapter.stream(request()))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.TRANSMIT_TICKET_ABSENT } } });
     expect(wrongBinding.calls).toEqual([]);
@@ -796,6 +882,25 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
 });
 
 describe('classification', () => {
+  it('reads Retry-After seconds and HTTP dates with a 60-second cap and a 5-second fallback', () => {
+    const now = Date.parse('2026-10-23T00:00:00Z');
+    expect(retryBackoffMs('7', now)).toBe(7_000);
+    expect(retryBackoffMs('0', now)).toBe(0);
+    expect(retryBackoffMs('Fri, 23 Oct 2026 00:00:08 GMT', now)).toBe(8_000);
+    expect(retryBackoffMs('Fri, 23 Oct 2026 00:02:00 GMT', now)).toBe(60_000);
+    expect(retryBackoffMs('Fri, 23 Oct 2026 00:00:00 GMT', now + 1_000)).toBe(0);
+    expect(retryBackoffMs(null, now)).toBe(5_000);
+    expect(retryBackoffMs('invalid', now)).toBe(5_000);
+    expect(retryBackoffMs('-1', now)).toBe(5_000);
+    expect(classifyTransportError(new TypeError('fetch failed', { cause: { code: 'UND_ERR_BODY_TIMEOUT' } }), true).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
+    expect(classifyTransportError(new TypeError('fetch failed', { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }), true).code).toBe(AI7_FAILURE_CODES.TRANSPORT_FAILED);
+    for (const name of ['AbortError', 'TimeoutError']) {
+      const error = new DOMException('private', name);
+      expect(classifyTransportError(error, false).code).toBe(AI7_FAILURE_CODES.TRANSPORT_FAILED);
+      expect(classifyTransportError(error, true).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
+    }
+  });
+
   it('keys failure classes on the DSH constants and the AI7 codes', () => {
     expect(classifyModelFailure({ code: QUOTA_EXCEEDED_CODE, message: '' }, codes)).toMatchObject({ signal: 'failed', failureClass: 'provider-account-limit' });
     expect(classifyModelFailure({ code: INVALID_CREDENTIAL_CODE, message: '' }, codes)).toMatchObject({ failureClass: 'invalid-credential' });

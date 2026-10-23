@@ -503,13 +503,13 @@ describe('evaluation on the Go execution path (#429)', () => {
     expect(result.taskOutcome!.classification).toBe(mode === 'cancel' ? 'cancelled' : 'interrupted');
     expect(sent).toBe(2);
     const revision = result.resultSetRevision!;
-    const closed = mode === 'cancel' ? 2 : 1;
+    const closed = 1;
     expect(revision.coverage.unitsClosed).toBe(closed);
     expect(revision.units.filter((unit) => unit.state === 'closed').map((unit) => unit.unitOrdinal)).toEqual(Array.from({ length: closed }, (_, index) => index + 1));
     // The interrupted second request was sent; its unreported tokens are not invented.
     expect(revision.usage.requests).toBe(2);
     expect(revision.usage.inputTokens + revision.usage.outputTokens).toBeGreaterThan(0);
-    expect(revision.gaps.every((gap) => gap.code === (mode === 'interrupt' && gap.unitOrdinal === 2 ? 'interrupted' : 'not-attempted'))).toBe(true);
+    expect(revision.gaps.every((gap) => gap.code === (gap.unitOrdinal === 2 ? 'outcome-unknown' : 'not-attempted'))).toBe(true);
     expect(runReportUsageReconciles(result.taskOutcome!.report!, revision.usage)).toBe(true);
   }, 300_000);
 });

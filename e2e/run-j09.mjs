@@ -1211,6 +1211,12 @@ async function main() {
       runningOf(twoAtOnce, bookId).progress?.unitsSettled === 1) && runA !== runC,
     'two-runs-at-once', twoAtOnce?.items?.map((item) => [item.group, item.state, item.progress?.unitsSettled ?? null]));
 
+    // #1080: both active Books retain a distinct reading range in flight, each with its own attempt start instant.
+    const simultaneous = [heldA, heldC];
+    requireJourney(simultaneous.every((analysis) => analysis.run?.progress?.currentUnitOrdinal === 2 &&
+      typeof analysis.run.progress.currentUnitStartedAt === 'string') && heldA.run.runRecordId !== heldC.run.runRecordId,
+    'two-editor-books-with-units-in-flight');
+
     at('concurrent-queued-run');
     // 乙's range update, reconfirmed and started while 甲 and 丙 hold both places: its start is recorded and waits for a
     // place — 等待运行名额 in the bar, with why and its 取消, and on ②A — and nothing of it is sent.

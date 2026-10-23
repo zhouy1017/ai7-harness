@@ -350,8 +350,11 @@ export class FastRoleExecutionOwner {
         adapterFactory: (codes) => {
           if (live === null || route === null || slotBinding === null) return new Ai7LocalDeterministicAdapter(this.#deps.fixture!, promptContractDigest, codes);
           const nativeFetch = live.runtime.nativeFetch;
+          // Nothing has left at either boundary, so the adapter reads it as a transport failure, never an unknown result (#1080).
           const requireRunning = (signal?: AbortSignal): void => {
-            if (this.#disposed || signal?.aborted === true) throw new DOMException('Fast-role request interrupted.', 'AbortError');
+            if (this.#disposed || signal?.aborted === true) {
+              throw Object.assign(new DOMException('Fast-role request interrupted.', 'AbortError'), { requestSent: false });
+            }
           };
           const send: DeepSeekTransport = async (url, init) => {
             requireRunning(init.signal);

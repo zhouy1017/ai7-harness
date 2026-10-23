@@ -40,7 +40,7 @@ import {
   TASK_BAR_UNCONFIRMED_HEADING,
   taskBarUnconfirmedUnit,
   TASK_BAR_VIEW_UNCONFIRMED,
-  UNCONFIRMED_HEADING,
+  unconfirmedHeading,
   UNCONFIRMED_KEEP_AS_GAP,
   UNCONFIRMED_KEEP_FAILED,
   UNCONFIRMED_KEPT_NOTE,
@@ -817,7 +817,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const section = el('section', 'task-plan-unconfirmed');
     section.dataset['taskPlanUnconfirmed'] = listed.digest;
     section.setAttribute('role', 'group');
-    const heading = el('h4', undefined, UNCONFIRMED_HEADING);
+    const heading = el('h4', undefined, unconfirmedHeading(listed));
     heading.id = uid('unconfirmed-record');
     section.setAttribute('aria-labelledby', heading.id);
     section.append(heading, el('p', 'attention-note', unconfirmedStatement(listed, plan?.listPages?.['unconfirmed.ranges']?.total)));

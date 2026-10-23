@@ -9,11 +9,3 @@ export class ExecutionAdmissionError extends Error {
     this.name = 'ExecutionAdmissionError';
   }
 }
-
-/**
- * Every place of the execution owner's governor taken (Issue #420, S74a A2; Issue #49, S14): a Review Run's approval
- * is refused with this reason before anything is recorded, while 开始任务's start is recorded and waits for a place
- * instead. It lives here, beside the owner's refusal type, so the ledgers that refuse with it need not import the owner.
- */
-export const EXECUTION_SLOT_BUSY = 'EXECUTION_BUSY';
-export const EXECUTION_SLOT_BUSY_REASON = '运行名额已满：正在运行的任务结束后再开始。';

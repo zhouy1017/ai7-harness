@@ -5,11 +5,12 @@ import { unconfirmedOutcomeKey } from '../../src/service/analysis/baseline-analy
 import { composeGlobalAttention, type GlobalAttentionReadings, type UnconfirmedAttentionReading } from '../../src/service/global-attention.js';
 import { categoryResendDisclosure, resendDisclosure, withResend } from '../../src/service/task-plan.js';
 import { decodeRequest, ProtocolError } from '../../src/service/request-frames.js';
-import { globalAttentionObjectLabel, globalAttentionReason, GLOBAL_ATTENTION_NEXT_STEP_LABELS, GLOBAL_ATTENTION_STATE_LABELS } from '../../src/renderer/global-attention-labels.js';
+import { globalAttentionObjectLabel, globalAttentionReason, globalAttentionView, GLOBAL_ATTENTION_NEXT_STEP_LABELS, GLOBAL_ATTENTION_STATE_LABELS } from '../../src/renderer/global-attention-labels.js';
 import {
   TASK_BAR_VIEW_UNCONFIRMED,
   UNCONFIRMED_KEEP_AS_GAP,
   unconfirmedLine,
+  unconfirmedHeading,
   unconfirmedStatement,
   unconfirmedWhat,
 } from '../../src/renderer/task-drawer-labels.js';
@@ -79,8 +80,9 @@ describe('待我处理 over 结果待确认 a completed Run left', () => {
     const projection = composeGlobalAttention({ ...NONE, unconfirmed: [reading({ ranges: 1, steps: ['assurance-sampling', 'run-report-reflection'] })] }, NOW);
     const item = projection.groups[0]!.items[0]!;
     expect(GLOBAL_ATTENTION_STATE_LABELS[item.state]).toBe('结果待确认');
+    expect(globalAttentionView(projection)[0]!.items[0]!.stateLabel).toBe('该单元结果未知');
     expect(globalAttentionObjectLabel(item.object)).toBe('基线分析 · 1 个阅读范围、保证抽样、运行反思');
-    expect(globalAttentionReason(item)).toBe('运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。');
+    expect(globalAttentionReason(item)).toBe('运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果未知的单元缺口，AI7 没有自动再发。');
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS[item.nextStep]).toBe(TASK_BAR_VIEW_UNCONFIRMED);
     expect(globalAttentionObjectLabel({ kind: 'unconfirmed', taskKind: 'writing', ranges: 3, steps: [] })).toBe('写作任务 · 3 个阅读范围');
   });
@@ -95,7 +97,9 @@ describe('the drawer\'s 结果待确认 block', () => {
       steps: [{ stage: 'assurance-sampling', category: null, recordedAt: NOW.toISOString() }, { stage: 'assurance-sampling', category: null, recordedAt: NOW.toISOString() }],
       digest: 'c'.repeat(64),
     };
-    expect(unconfirmedStatement(listed)).toBe('1 个阅读范围、保证抽样的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。' +
+    expect(unconfirmedHeading(listed)).toBe('该单元结果未知');
+    expect(unconfirmedHeading({ ...listed, ranges: [] })).toBe('结果待确认');
+    expect(unconfirmedStatement(listed)).toBe('1 个阅读范围、保证抽样的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果未知的单元缺口，AI7 没有自动再发。' +
       '保留为缺口只记下你的确认：不发送任何内容，不改变结果；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。');
     // Only a step listed: nothing a later Task reads is named as sent again, so the statement says no such thing (#763 review).
     expect(unconfirmedStatement({ ...listed, ranges: [] })).toBe('保证抽样的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。' +
@@ -114,7 +118,7 @@ describe('a re-send disclosed in the plan of a kind that keeps no progress', () 
     expect(withResend(plan, [])).toBe(plan);
     expect(withResend(plan, [2, 5]).resend).toEqual({ units: [2, 5], statement: resendDisclosure([2, 5]) });
     expect(categoryResendDisclosure([{ category: '事实核查', units: [4] }, { category: '体例与格式', units: [1, 2] }])).toBe(
-      '「事实核查」第 4 个，「体例与格式」第 1、2 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。');
+      '「事实核查」第 4 个，「体例与格式」第 1、2 个阅读范围上一次的请求已发出、结果未知，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。');
   });
 });
 

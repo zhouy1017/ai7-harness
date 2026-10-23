@@ -51,13 +51,9 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // and 续行, and 待我处理 holds it as an exception. 处理模型服务 opens 设置 › 模型服务 and moves nothing; 续行 then goes on
 // in the same Run and attempt from unit 4, whose second turn the fixture serves, to its end.
 //
-// On the seventh Book, launched over the outcome-unknown fixture (Issue #51, S16c), unit 4's request is sent and its answer
-// never comes back whole. Nothing in the Run sends it again: unit 4 is kept as its own gap, the Run reads the other seven
-// ranges and stops — 结果待确认, never 任务已中断 · 可续行 — keeping them and holding nothing, with 查看未确认的部分 first,
-// 取消任务 and 查看运行, and neither 续行 nor 改计划重做 (ADR 0034, CONT-011, CONT-016), and 待我处理 holds it in
-// 异常与结果待确认. 查看未确认的部分 names unit 4 and sends nothing; 取消任务 then keeps what was read, unit 4 its own
-// outcome-unknown gap. Only then is 改计划重做 offered, and the Task it prepares says, before it is started, that it sends
-// unit 4's request again, which may already have been processed and billed.
+// On the seventh Book (#1080), unit 4's sent request has an unknown result. An explicit pause keeps the checkpoint and
+// the cancellation preview still pages it correctly; continuation reads only the remaining units. The Run completes with
+// unit 4 as a gap, its revision and outcome recorded, and no resend. The drawer and attention name 该单元结果未知.
 //
 // On the eighth Book, launched over the reduction fixture (Issue #757), every range is read and the cross-unit reduction's
 // request is sent and its answer never comes back whole: the Run completes, and 待我处理 holds it in 异常与结果待确认 with
@@ -95,10 +91,6 @@ const ACCOUNT_LIMIT_NOTE = '模型服务按账户限额拒绝了第 4 个阅读�
 const SEVENTH_BOOK = Object.freeze({ title: '结果待确认旅程' });
 /** The seventh Book's launch (Issue #51, S16c): unit 4's first request is sent and its answer never comes back whole. */
 const OUTCOME_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-outcome-unknown';
-const OUTCOME_UNKNOWN_NOTE = '1 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。' +
-  '其余已读完的 7 / 8 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 1 个记为结果待确认的缺口';
-const OUTCOME_UNKNOWN_RESEND = '第 4 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它的请求，开始任务即重新授权这次发送。';
-const OUTCOME_UNKNOWN_CANCEL_LINE = '第 4 个阅读范围的请求已发出、结果待确认；不会再发，在这份修订版里记为结果待确认的缺口，不记为未尝试。';
 const EIGHTH_BOOK = Object.freeze({ title: '归纳结果待确认旅程' });
 /** The eighth Book's launch (Issue #757): every range is read, and the reduction's request is sent and never answers whole. */
 const REDUCTION_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-reduction-unknown';
@@ -124,7 +116,7 @@ const THIRD_HOLD = 1;
 // The drawer's own words (`src/renderer/task-drawer-labels.ts` and `src/service/task-plan.ts`), pinned there by
 // their unit suites.
 const REDO_REASON = '先暂停，再改计划重做';
-const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容';
+const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被中止，此后不会再发送任何内容';
 const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
 const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
@@ -140,10 +132,10 @@ const REDO_SUMMARY = Object.freeze([
 const REDO_GOAL_FIRST = '改计划重做：沿用已读完的 6 个阅读范围，接着读其余 2 个';
 const REDO_GOAL_THIRD = '改计划重做：沿用已读完的 2 个阅读范围，接着读其余 6 个';
 const IMPACT = Object.freeze([[
-  `正在读的第 6 个阅读范围读完后停止；其余 ${SAMPLE1_UNITS - 6} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
+  `停在正在读的第 6 个阅读范围；其余 ${SAMPLE1_UNITS - 6} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
   '已读完的 5 个阅读范围和正在读的这一个的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
   '这项分析不改稿，没有需要撤回的受控动作。',
-  '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。',
+  '正在等待的那一轮模型请求会被中止；回答已传回的照常计入，否则该阅读范围记为结果未知的缺口，不会再发。',
 ].join('')]);
 const REFLECTION_CANCELLED = '运行已按你的要求取消，运行反思未发起。';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1429,7 +1421,8 @@ async function main() {
       JSON.stringify(answeredRun.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'awaiting-clarification', 'resumable', 'admitted', 'executing', 'completed-with-gaps']) &&
       JSON.stringify(answeredRun.run.attempt?.spans?.map((span) => [span.unitOrdinal, span.attemptIndex])) === JSON.stringify([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1], [8, 1], [5, 2]]) &&
       answeredRevision?.coverage?.unitsClosed === 7 && JSON.stringify(answeredRevision.gaps.map((gap) => gap.unitOrdinal)) === '[2]' &&
-      answeredRun.run.adaptations?.length === 1 && answeredRun.run.adaptations[0].unitOrdinal === 5 && typeof answeredRun.run.adaptations[0].clarificationAnswerId === 'string',
+      answeredRun.run.adaptations?.length === 1 && answeredRun.run.adaptations[0].unitOrdinal === 5 &&
+      answeredRun.run.adaptations[0].failureCode === 'PROVIDER_ERROR' && answeredRun.run.adaptations[0].failureStatus === 503 && typeof answeredRun.run.adaptations[0].clarificationAnswerId === 'string',
     'answered-run', { state: answeredRun?.state, run: answeredRun?.run?.state, transitions: answeredRun?.run?.transitions?.map((transition) => transition.state), closed: answeredRevision?.coverage?.unitsClosed });
     const answeredPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
     requireJourney(answeredPlan?.clarifications?.[0]?.state === 'answered' && answeredPlan.clarifications[0].answer?.optionId === 'retry' &&
@@ -1674,41 +1667,21 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'seventh-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'seventh-return-library');
 
-    at('outcome-unknown-stop');
-    // 开始任务: unit 4's request is sent and its answer never comes back whole. Nothing in the Run sends it again; it is kept as
-    // its own gap, the Run reads the other seven ranges and stops — 结果待确认 in its own words, never 任务已中断 · 可续行's —
-    // keeping them and holding nothing: 查看未确认的部分 first, then 取消任务 and 查看运行, and neither 续行 nor 改计划重做; ②A's
-    // card says the same, and 待我处理 holds it in 异常与结果待确认 whose next step is 查看未确认的部分.
+    at('outcome-unknown-paused-checkpoint');
+    // Pause explicitly after the unknown fourth unit; it is kept once and is never read again by continuation.
+    await writeFile(holdPath, '4', 'utf8');
     await openAnalysisOf(renderer, seventhBookId, 'seventh-analysis');
     await startFirstBaseline(renderer, 'ready', 'seventh-baseline');
     const seventhIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
     requireJourney(UUID_PATTERN.test(seventhIntentId), 'seventh-task');
-    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(seventhIntentId)} && analysis.run?.state==='resumable')`, 'outcome-unknown-stopped', 180_000);
-    await waitForBar(renderer, {
-      state: 'outcome-unknown', pill: '结果待确认', status: '结果待确认', note: OUTCOME_UNKNOWN_NOTE,
-      actions: [['view-unconfirmed', '查看未确认的部分', 'enabled', null], ['cancel-run', '停止任务', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
-    }, 'outcome-unknown-bar', 30_000);
-    requireJourney(await renderer.evaluate(`document.querySelector('#task-drawer [data-task-drawer-control="resume"]')===null && document.querySelector('#task-drawer [data-task-drawer-control="redo"]')===null`) === true, 'outcome-unknown-no-repeat');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.progress?.unitsSettled===4 && analysis.run.progress.currentUnitOrdinal===5)`, 'unknown-fifth-in-flight', 180_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'unknown-pause');
+    await writeFile(holdPath, 'release', 'utf8');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='paused'`, 'unknown-explicitly-paused', 30_000);
     const unconfirmed = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(unconfirmed?.state === 'resumable' && unconfirmed.stateLabel === '结果待确认' && unconfirmed.run?.stateLabel === '结果待确认' &&
-      JSON.stringify(unconfirmed.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'resumable']) &&
-      JSON.stringify(unconfirmed.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&
+    requireJourney(unconfirmed?.run?.state === 'paused' && unconfirmed.run.progress === null &&
       (unconfirmed.taskOutcome ?? null) === null && (unconfirmed.resultSetRevision ?? null) === null,
-    'outcome-unknown-record', { state: unconfirmed?.state, label: unconfirmed?.stateLabel, transitions: unconfirmed?.run?.transitions?.map((transition) => transition.state), spans: unconfirmed?.run?.attempt?.spans?.map((span) => span.unitOrdinal) });
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='结果待确认'`, 'outcome-unknown-card', 30_000);
-    const unknownAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
-    requireJourney(unknownAttention?.groups?.find((group) => group.key === 'exceptions')?.items?.some((entry) =>
-      entry.book?.bookId === seventhBookId && entry.state === 'analysis-outcome-unknown' && entry.nextStep === 'view-unconfirmed' && entry.blocked === true) === true,
-    'outcome-unknown-in-attention', unknownAttention?.groups ?? null);
-
-    at('outcome-unknown-view');
-    // 查看未确认的部分 opens the list beside the bar, focused on its heading: unit 4, sent once, its answer not back whole. It sends
-    // and records nothing.
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="view-unconfirmed"]', 'outcome-unknown-view');
-    await waitFor(renderer, `(() => { const items=[...document.querySelectorAll('#task-drawer-unconfirmed li')]; return document.querySelector('#task-drawer-unconfirmed h4')?.textContent==='结果待确认的阅读范围' && items.length===1 && items[0].dataset.unconfirmedUnit==='4' && items[0].textContent==='第 4 个阅读范围 · 请求已发出 1 次 · 回答没有完整传回' && document.activeElement?.dataset?.taskDrawerControl==='unconfirmed' && document.querySelector('#task-drawer [data-task-drawer-control="view-unconfirmed"]')?.getAttribute('aria-expanded')==='true'; })()`, 'outcome-unknown-list', 30_000);
-    const whileViewing = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(whileViewing?.run?.state === 'resumable' && JSON.stringify(whileViewing.run.transitions) === JSON.stringify(unconfirmed.run.transitions) &&
-      JSON.stringify(whileViewing.run.attempt?.spans) === JSON.stringify(unconfirmed.run.attempt?.spans), 'outcome-unknown-unmoved');
+    'unknown-pause-keeps-checkpoint');
 
     at('cancel-impact-paging');
     // Force the minimum inline page of this real stopped Run's read-only projection. The built drawer and real
@@ -1736,15 +1709,15 @@ async function main() {
       for (const attempt of ['first', 'reopened']) {
         await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', `cancel-paging-${attempt}-close`);
         await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', `cancel-paging-${attempt}-open`);
-        await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='outcome-unknown'`, `cancel-paging-${attempt}-ready`);
+        await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='paused'`, `cancel-paging-${attempt}-ready`);
         await clickSelector(renderer, '#task-drawer [data-task-drawer-control="cancel-run"]', `cancel-paging-${attempt}-impact`);
         await waitFor(renderer, `(() => {
           const impact = document.querySelector('#task-drawer-cancel-impact');
           const more = impact?.querySelector('[data-task-drawer-control="page-runControl-cancel-impact"]');
           return impact?.querySelector('[data-cancel-impact-count]')?.textContent === '取消影响说明 · 已显示 1 / 2 条' &&
             impact.querySelectorAll('li').length === 1 && more?.textContent === '继续读取取消影响说明（已显示 1 / 2）' &&
-            impact.querySelector('li').textContent.includes('已读完 7 个阅读范围') &&
-            impact.querySelector('li').textContent.includes('结果待确认 1 个') &&
+            impact.querySelector('li').textContent.includes('已读完 4 个阅读范围') &&
+            impact.querySelector('li').textContent.includes('结果未知 1 个') &&
             impact.querySelector('li').textContent.includes('没有需要撤回的受控动作') && document.activeElement === impact.querySelector('h4');
         })()`, `cancel-paging-${attempt}-summary`);
         await pressTab(renderer);
@@ -1753,7 +1726,7 @@ async function main() {
         await waitFor(renderer, `(() => {
           const impact = document.querySelector('#task-drawer-cancel-impact');
           return impact?.querySelector('[data-cancel-impact-count]')?.textContent === '取消影响说明 · 已显示 2 / 2 条' &&
-            impact.querySelectorAll('li').length === 2 && impact.querySelectorAll('li')[1].textContent === ${JSON.stringify(OUTCOME_UNKNOWN_CANCEL_LINE)} &&
+            impact.querySelectorAll('li').length === 2 && impact.querySelectorAll('li')[1].textContent === ${JSON.stringify('第 4 个阅读范围的请求已发出、结果未知；不会再发，在这份修订版里记为结果未知的单元缺口，不记为未尝试。')} &&
             !impact.querySelector('[data-task-drawer-control="page-runControl-cancel-impact"]') && document.activeElement === impact.querySelector('h4');
         })()`, `cancel-paging-${attempt}-complete`);
       }
@@ -1767,40 +1740,24 @@ async function main() {
       JSON.stringify(afterPaging.planVersions) === JSON.stringify(unconfirmed.planVersions) &&
       afterPaging.taskOutcome === null && afterPaging.resultSetRevision === null, 'cancel-paging-records-nothing');
 
-    at('outcome-unknown-cancelled');
-    // No 续行 anywhere: the way out is 取消任务, whose summary names unit 4 as its own gap, never a range not attempted. Confirmed,
-    // the Run ends cancelled with what it read kept — seven ranges closed, unit 4 the outcome-unknown gap its sent request
-    // left — and nothing more sent. 待我处理 no longer holds the stopped Run, but 取消任务 settles nothing about unit 4's request
-    // (CTRL-007): the ended Run's unit 4 is listed in 异常与结果待确认 until the editor keeps it as a gap (#763 review).
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="cancel-run"]', 'outcome-unknown-cancel');
-    await waitFor(renderer, `[...document.querySelectorAll('#task-drawer-cancel-impact li')].some((line)=>line.textContent===${JSON.stringify(OUTCOME_UNKNOWN_CANCEL_LINE)})`, 'outcome-unknown-cancel-impact', 30_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="confirm-cancel-run"]', 'outcome-unknown-cancel-confirm');
-    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(seventhIntentId)} && analysis.run?.state==='cancelled')`, 'outcome-unknown-run-ended', 180_000);
-    const confirmedRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(confirmedRun?.run?.runRecordId === unconfirmed.run.runRecordId &&
-      JSON.stringify(confirmedRun.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&
-      confirmedRun.resultSetRevision?.coverage?.unitsClosed === SAMPLE1_UNITS - 1 &&
-      JSON.stringify(confirmedRun.resultSetRevision?.gaps?.map((gap) => [gap.unitOrdinal, gap.code])) === JSON.stringify([[4, 'outcome-unknown']]) &&
-      confirmedRun.taskOutcome?.classification === 'cancelled',
-    'outcome-unknown-cancelled-run', { run: confirmedRun?.run?.state, spans: confirmedRun?.run?.attempt?.spans?.map((span) => span.unitOrdinal), gaps: confirmedRun?.resultSetRevision?.gaps?.map((gap) => [gap.unitOrdinal, gap.code]) });
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='cancelled-after-start'`, 'outcome-unknown-shown-cancelled', 30_000);
-    const confirmedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
-    requireJourney(confirmedAttention?.groups?.every((group) => group.items.every((entry) => entry.state !== 'analysis-outcome-unknown')) === true, 'outcome-unknown-left-attention', confirmedAttention?.groups ?? null);
-    requireJourney(confirmedAttention?.groups?.find((group) => group.key === 'exceptions')?.items?.some((entry) =>
-      entry.itemId === `unconfirmed:${seventhBookId}:baseline-analysis` && entry.state === 'analysis-outcome-unconfirmed' && entry.blocked === false &&
-      entry.object?.kind === 'unconfirmed' && entry.object.ranges === 1 && entry.nextStep === 'view-unconfirmed') === true,
-    'outcome-unknown-cancelled-still-listed', confirmedAttention?.groups ?? null);
-
-    at('outcome-unknown-redo-disclosed');
-    // Once the editor ended the Run, 改计划重做 is offered. The Task it prepares carries the seven ranges read and reads unit 4
-    // again — and its plan says so first: unit 4's earlier request may already have been processed and billed, and starting
-    // this Task authorizes sending it again. Nothing runs until the editor starts it.
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="redo"]', 'outcome-unknown-redo');
-    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanRef!==${JSON.stringify(seventhIntentId)} && drawer.dataset.taskPlanState==='ready' && drawer.querySelector('.task-plan-resend')?.textContent===${JSON.stringify(OUTCOME_UNKNOWN_RESEND)} && drawer.querySelector('.task-plan-resend')?.dataset.taskPlanResend==='4'; })()`, 'outcome-unknown-redo-opened', 120_000);
-    const resendTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(resendTask?.state === 'prepared' && (resendTask.run ?? null) === null && resendTask.taskIntent?.redoOf?.runRecordId === unconfirmed.run.runRecordId &&
-      resendTask.update?.reusePlan?.counts?.reused === SAMPLE1_UNITS - 1 && resendTask.update.reusePlan.counts.recomputed === 1,
-    'outcome-unknown-redo-task', { state: resendTask?.state, run: resendTask?.run?.state ?? null, counts: resendTask?.update?.reusePlan?.counts ?? null });
+    at('outcome-unknown-completes-per-unit');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'unknown-resume-other-units');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`, 'unknown-run-completed', 180_000);
+    const completedUnknown = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(completedUnknown?.state === 'settled' && completedUnknown.run?.state === 'completed-with-gaps' &&
+      completedUnknown.taskOutcome?.classification === 'completed-with-gaps' &&
+      completedUnknown.resultSetRevision?.coverage?.unitsClosed === 7 &&
+      JSON.stringify(completedUnknown.resultSetRevision.gaps.map((gap) => [gap.unitOrdinal, gap.code])) === '[[4,"outcome-unknown"]]' &&
+      JSON.stringify(completedUnknown.run.attempt.spans.map((span) => span.unitOrdinal)) === '[1,2,3,4,5,6,7,8]' &&
+      completedUnknown.run.adaptations.length === 0,
+    'unknown-unit-gap-with-revision-and-outcome');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed h4')?.textContent==='该单元结果未知' && document.querySelector('#task-drawer [data-task-drawer-control="resume"]')===null && document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')===null`, 'unknown-unit-ui', 30_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="view-unconfirmed-record"]', 'unknown-unit-view');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed li')?.textContent==='第 4 个阅读范围 · 请求已发出 · 回答没有完整传回'`, 'unknown-unit-listed', 30_000);
+    const completedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(completedAttention.groups.find((group) => group.key === 'exceptions').items.some((entry) =>
+      entry.book?.bookId === seventhBookId && entry.state === 'analysis-outcome-unconfirmed' && entry.blocked === false),
+    'unknown-unit-attention-does-not-hold-run');
 
     // ---- 结果待确认 a completed Run left (Issue #757; ATTN-002, NOTIF-004, CTRL-007) ---------------------------------------
     at('relaunch-for-reduction-unknown');

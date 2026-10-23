@@ -245,7 +245,7 @@ const RUN_STATE_LABELS: Record<BaselineAnalysisRunState, string> = {
 export const RUN_CANCELLED_AFTER_START_LABEL = '已取消' as const;
 
 /** What `cancelling` records (CTRL-005): the editor's word, and where the Run stops. */
-export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的阅读范围读完后停止，此后不再发送任何内容。' as const;
+export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容。' as const;
 
 /** What `pausing` records (CTRL-001): the editor's word, and where the Run stops to wait. */
 export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的阅读范围读完后停下，已完成的部分都会保存。' as const;
@@ -296,10 +296,10 @@ export const BUDGET_REACHED_RUN_LABEL = '任务运行预算已达上限 · 已�
 /** A Run the provider's account limit stopped (Issue #51, S16b; RUN-012): a remediable blocker, never 任务已中断 · 可续行. */
 export const ACCOUNT_LIMIT_RUN_LABEL = '模型服务账户限额' as const;
 /**
- * A Run stopped because a sent request's result cannot be known (Issue #51, S16c; CTRL-007, COPY-009): 结果待确认, never
- * 任务已中断 · 可续行 nor 已取消.
+ * A Run stopped because a sent request's result cannot be known (Issue #51, S16c; CTRL-007, COPY-009), never 任务已中断 · 可续行
+ * nor 已取消. Only Runs recorded before #1080 carry that stop; it reads as the per-unit state 该单元结果未知 (ADR 0095 §2).
  */
-export const OUTCOME_UNKNOWN_RUN_LABEL = '结果待确认' as const;
+export const OUTCOME_UNKNOWN_RUN_LABEL = '该单元结果未知' as const;
 /** Why 结果待确认 has no 续行 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016). */
 export const OUTCOME_UNKNOWN_NO_RESUME = '结果待确认：有阅读范围的请求已发出而结果无法确认，这次运行不能续行；可以取消任务保留已读完的部分，或改计划重做。' as const;
 

@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
-import { EXECUTION_SLOT_BUSY_REASON } from '../../src/service/analysis/execution-error.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { validateTaskAuthorizationSchema } from '../../src/service/task-authorization.js';
 import {
@@ -460,18 +459,6 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
         reconfirm: null,
       });
       expect(await barPlan(store, bookId, 'review-run', firstRunId, 'missing')).toEqual({ plan: drawer, asked: 0 });
-      // One slot, no queue (S74a A2): while a Run holds the slot the approval is refused before it is written.
-      const beforeBusy = relationDigests();
-      let busy: unknown = null;
-      try {
-        store.authorizeReviewRun(bookId, firstRunId, drawer.start.categoryDigests, true);
-      } catch (error) {
-        busy = error;
-      }
-      expect(busy).toMatchObject({ code: 'EXECUTION_BUSY', message: EXECUTION_SLOT_BUSY_REASON });
-      expect(relationDigests()).toEqual(beforeBusy);
-      expect(plan(store, bookId, 'review-run', firstRunId).start.readiness).toBe('ready');
-
       // A second preparation supersedes the first before it was approved: the first Run's plan says why
       // its approval would now be refused, in the refusal's own words, and asks for nothing else.
       const secondRunId = prepareRun(bookId, [TYPOS_AND_USAGE.categoryId]);
@@ -484,7 +471,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       // The latest Run's bar binds its own digests; once approved, the same region is the Run's state.
       const second = plan(store, bookId, 'review-run', secondRunId);
       expect(second.start.readiness).toBe('ready');
-      store.authorizeReviewRun(bookId, secondRunId, second.start.categoryDigests);
+      store.authorizeReviewRun(bookId, secondRunId, second.start.categoryDigests, true);
       expect(plan(store, bookId, 'review-run', secondRunId).start).toEqual({ readiness: 'started', needsModelConnection: false, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null });
       // A repeat of the approval already recorded answers as it always has, whatever the slot.
       expect(() => store.authorizeReviewRun(bookId, secondRunId, second.start.categoryDigests, true)).not.toThrow();

@@ -404,15 +404,14 @@ describe('reference-free review on the Go execution path', () => {
     expect(outcome.taskOutcome!.classification).toBe(mode === 'cancel' ? 'cancelled' : 'interrupted');
     expect(outcome.run!.state).toBe(mode === 'cancel' ? 'cancelled' : 'interrupted');
     expect(sent).toBe(turn);
-    // A cancellation takes effect between reading ranges: the turn in flight and every unit before it stay
-    // closed with their findings and usage; only the units never sent become not-attempted gaps.
+    // Cancel and shutdown abort the sent request: only earlier complete units are closed; the sent unit is unknown.
     const revision = outcome.resultSetRevision as ReviewCategoryResultSetRevisionProjection;
-    const closed = mode === 'cancel' ? turn : 0;
+    const closed = turn - 1;
     expect(revision.usage.inputTokens + revision.usage.outputTokens).toBe(closed * 60);
     expect(revision.units.filter((unit) => unit.state === 'closed').map((unit) => unit.unitOrdinal)).toEqual(Array.from({ length: closed }, (_, index) => index + 1));
     expect(revision.findings.length).toBe(closed === 0 ? 0 : 1);
     expect(revision.coverage.unitsClosed + revision.gaps.length).toBe(revision.coverage.unitsTotal);
-    expect(revision.gaps.every((gap) => gap.code === (mode === 'interrupt' && gap.unitOrdinal === 1 ? 'interrupted' : 'not-attempted'))).toBe(true);
+    expect(revision.gaps.every((gap) => gap.code === (gap.unitOrdinal === turn ? 'outcome-unknown' : 'not-attempted'))).toBe(true);
     const view = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
     expect(view.categories[0]!.detail?.includes('ANALYSIS_STATE')).not.toBe(true);
   });

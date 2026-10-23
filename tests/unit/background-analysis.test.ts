@@ -230,7 +230,7 @@ describe('the 后台分析登记 decision', () => {
     expect(BACKGROUND_STARTING_POINT_LABELS).toEqual({ prospective: '只分析登记之后的改动', backfill: '现在也分析当前稿件' });
     expect(backgroundEnrollmentName(2)).toBe('后台分析登记 · 第 2 版');
     expect(backgroundAnalysisWhen(30_000)).toContain('停下 30 秒后开始');
-    expect(backgroundAnalysisWhen(30_000)).toContain('运行名额总给你留一个');
+    expect(backgroundAnalysisWhen(30_000)).toContain('你开始的任务可使用全部运行名额');
     expect(backgroundQuietReason(30_000)).toBe('稿件刚改动过；停下 30 秒后开始。');
     expect(backgroundDriftReason(['模型服务', '工序'])).toBe('登记时定下的「模型服务」、「工序」已经变化，后台分析不会按旧的登记开始；请撤销后重新登记。');
     expect(BACKGROUND_ANALYSIS_NOT_GRANTED.some((line) => line.includes('不超过登记时设下的预算上限'))).toBe(true);

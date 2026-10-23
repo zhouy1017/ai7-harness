@@ -117,11 +117,42 @@ describe('per-request native-fetch dispatcher', () => {
     expect(native).toHaveBeenCalledOnce();
     expect(destroy).toHaveBeenCalledOnce();
   });
+  it('keeps a cancellation before physical send transport-failed and preserves a sent timeout', async () => {
+    const { native, factory } = fixture();
+    const controller = new AbortController();
+    const fetch = proxyAwareFetch(native, async () => {
+      controller.abort();
+      return { mode: 'direct' };
+    }, factory);
+    let failure: unknown;
+    try { await fetch(modelUrl, { signal: controller.signal }); } catch (error) { failure = error; }
+    expect(classifyTransportError(failure, true).code).toBe('TRANSPORT_FAILED');
+    expect(native).not.toHaveBeenCalled();
+    const bodyTimeout = proxyAwareFetch(async () => { throw new TypeError('private', { cause: { code: 'UND_ERR_BODY_TIMEOUT' } }); }, async () => ({ mode: 'direct' }));
+    expect(classifyTransportError(await bodyTimeout(modelUrl).catch((error: unknown) => error), true).code).toBe('AI7_OUTCOME_UNKNOWN');
+    const timeout = proxyAwareFetch(async () => { throw new DOMException('private', 'TimeoutError'); }, async () => ({ mode: 'direct' }));
+    expect(classifyTransportError(await timeout(modelUrl).catch((error: unknown) => error), true).code).toBe('AI7_OUTCOME_UNKNOWN');
+  });
+  it('keeps a connect timeout unreachable: proxy-unreachable through a proxy, a reported transport failure direct (#1080 review)', async () => {
+    const { factory, destroy } = fixture();
+    factory.mockImplementation((_uri, failed) => { failed(); return { destroy } as unknown as ReturnType<ProxyDispatcherFactory>; });
+    const connectTimeout = async (): Promise<Response> => { throw new TypeError('private', { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }); };
+    const reports: Array<'proxy-unreachable' | 'model-service-unreachable' | null> = [];
+    const proxied = proxyAwareFetch(connectTimeout, async () => parseProxyUrl('http://proxy.invalid:8080'), factory, (value) => { reports.push(value); });
+    expect(classifyTransportError(await proxied(modelUrl).catch((error: unknown) => error), true).code).toBe('AI7_PROXY_UNREACHABLE');
+    const direct = proxyAwareFetch(connectTimeout, async () => ({ mode: 'direct' }), factory, (value) => { reports.push(value); });
+    expect(classifyTransportError(await direct(modelUrl).catch((error: unknown) => error), true).code).toBe('TRANSPORT_FAILED');
+    // A socket timeout through a proxy that never connected is the proxy's, never an unknown model-service result.
+    const proxiedSocket = proxyAwareFetch(async () => { throw new TypeError('private', { cause: { code: 'ETIMEDOUT' } }); },
+      async () => parseProxyUrl('http://proxy.invalid:8080'), factory, (value) => { reports.push(value); });
+    expect(classifyTransportError(await proxiedSocket(modelUrl).catch((error: unknown) => error), true).code).toBe('AI7_PROXY_UNREACHABLE');
+    expect(reports).toEqual(['proxy-unreachable', 'model-service-unreachable', 'proxy-unreachable']);
+  });
   it('recognizes proxy 407 separately and preserves cancellation', async () => {
     const { factory } = fixture();
     const fetch = proxyAwareFetch(async () => new Response('', { status: 407 }), async () => parseProxyUrl('https://proxy.invalid:8080'), factory);
     await expect(fetch(modelUrl)).rejects.toMatchObject({ code: 'AI7_PROXY_UNREACHABLE' });
     const aborted = proxyAwareFetch(async () => { throw new DOMException('secret', 'AbortError'); }, async () => ({ mode: 'direct' }), factory);
-    await expect(aborted(modelUrl)).rejects.toMatchObject({ name: 'AbortError', message: '请求被中断。' });
+    await expect(aborted(modelUrl)).rejects.toMatchObject({ name: 'AbortError', message: '请求已中止或超过时限。' });
   });
 });

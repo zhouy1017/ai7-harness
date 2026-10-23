@@ -191,7 +191,7 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
         const shared = withLedgerRunControls({ ...stopped, kind }, { ...settled, run: { ...settled.run!, state: 'resumable', progress: null } }, blocks, mixedFacts);
         const summary = shared.runControl!.cancel.impact[0]!;
         expect(summary).toContain('已读完 3 个阅读范围');
-        expect(summary).toContain('结果待确认 2 个');
+        expect(summary).toContain('结果未知 2 个');
         expect(summary).toContain(kind === 'review-run' ? '取消不会撤回已完成的受控动作' : '不会自动采用、改稿或发稿');
         expect(summary).not.toContain('这项分析不改稿');
         expect(summary).toContain('这项任务最新的结果');
@@ -207,7 +207,7 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
           attemptState: 'dispatched', completedAttempts: 5, longestSettledUnitMs: 10, stage: 'units', lastTransitionAt: '2026-10-19T00:00:00.000Z',
         } } }, blocks, undefined, false, { waiting: mixedFacts.waiting, unconfirmed: [4, 5] });
         const activeSummary = active.runControl!.cancel.impact[0]!;
-        expect(activeSummary).toContain('已读完 3 个阅读范围，等你回答 1 个，你已回答但尚未续行 1 个，结果待确认 2 个，未尝试 2 个');
+        expect(activeSummary).toContain('已读完 3 个阅读范围，等你回答 1 个，你已回答但尚未续行 1 个，结果未知 2 个，未尝试 2 个');
         expect(activeSummary).toContain(kind === 'review-run' ? '取消不会撤回已完成的受控动作' : '不会自动采用、改稿或发稿');
         expect(minimumTaskPlanWire({ ...active, technical: [], clarifications: [] }).runControl!.cancel.impact).toEqual([activeSummary]);
         expect(active.runControl!.continuation).toBeNull();

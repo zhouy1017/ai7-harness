@@ -161,7 +161,7 @@ describe('each item', () => {
       'analysis-interrupted': '已中断',
       'analysis-budget-reached': '已停止 · 预算已达上限',
       'analysis-account-limit': '模型服务账户限额',
-      'analysis-outcome-unknown': '结果待确认',
+      'analysis-outcome-unknown': '该单元结果未知',
       'analysis-outcome-unconfirmed': '结果待确认',
       'analysis-blocked': '派发前已阻止',
       'analysis-orphaned': '已中断',
@@ -441,7 +441,7 @@ describe('each item', () => {
       'analysis-waiting-admission': '已经联网：AI7 先核对计划，没有变化就开始；现在什么都没有运行。',
       // Issue #49 (S14; CONC-007): a start waiting on the governor for a place.
       'analysis-waiting-capacity': '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送。',
-      'analysis-cancelling': '你取消了这项任务；正在进行的这一步完成后停止，之后不再发送任何内容 · 正在逐个阅读范围分析 · 已完成 2/8 个阅读范围',
+      'analysis-cancelling': '你取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容 · 正在逐个阅读范围分析 · 已完成 2/8 个阅读范围',
       'analysis-pausing': '你暂停了这项任务；正在进行的这一步完成后停下，已完成的部分都会保存 · 正在逐个阅读范围分析 · 已完成 2/8 个阅读范围',
       'analysis-paused': '已暂停：已读完的阅读范围都已保存；续行时从下一个接着读，也可以取消它。',
       'analysis-resumable': 'AI7 关闭时这项任务正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。',

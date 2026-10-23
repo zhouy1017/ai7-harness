@@ -80,11 +80,26 @@ export const createProxyDispatcher: ProxyDispatcherFactory = (uri, failed) => ne
 });
 
 function interruptedOrDenied(error: unknown): Error | null {
-  if (error instanceof Error && error.name === 'AbortError') return new DOMException('请求被中断。', 'AbortError');
+  if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+    return new DOMException('请求已中止或超过时限。', error.name);
+  }
   if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'AI7_OUTBOUND_NETWORK_DENIED') {
     return Object.assign(new Error('出站网络在当前产品区间内被禁用。'), { code: 'AI7_OUTBOUND_NETWORK_DENIED' });
   }
   return null;
+}
+
+/**
+ * A timeout that may have come after the request left (ADR 0095 §2, #1080) is unknown, never a resendable transport failure.
+ * It is read only once a failed proxy connection is ruled out; undici's connect timeout is not one of these, so it keeps its
+ * unreachable report and class.
+ */
+function responseTimedOut(error: unknown): Error | null {
+  const cause = error instanceof Error ? error.cause : null;
+  const code = cause !== null && typeof cause === 'object' && 'code' in cause ? cause.code : null;
+  return code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT' || code === 'ETIMEDOUT'
+    ? new DOMException('模型服务响应超过时限。', 'TimeoutError')
+    : null;
 }
 
 /** Captured fetch only. Called by admitted transports; no global dispatcher or host allowance is changed. */
@@ -92,12 +107,18 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
   factory: ProxyDispatcherFactory = createProxyDispatcher,
   report: (failure: 'proxy-unreachable' | 'model-service-unreachable' | null) => void = () => undefined): typeof fetch {
   return async (input, init) => {
+    const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    const beforeSend = (): void => {
+      if (signal?.aborted === true) throw Object.assign(new Error('请求在发送前已中止。'), { code: 'TRANSPORT_FAILED', requestSent: false });
+    };
+    beforeSend();
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const setting = await read();
+    beforeSend();
     if (setting.mode === 'direct') {
       try { const response = await nativeFetch(input, { ...init, redirect: 'manual' }); report(null); return response; }
       catch (error) {
-        const preserved = interruptedOrDenied(error);
+        const preserved = interruptedOrDenied(error) ?? responseTimedOut(error);
         if (preserved !== null) throw preserved;
         report('model-service-unreachable'); throw Object.assign(new Error('模型服务不可达。'), { code: 'TRANSPORT_FAILED' });
       }
@@ -135,6 +156,8 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
         report('proxy-unreachable');
         throw Object.assign(new Error('代理不可达：请检查网络代理设置。'), { code: PROXY_UNREACHABLE });
       }
+      const timedOut = responseTimedOut(error);
+      if (timedOut !== null) throw timedOut;
       // Discard native error causes, which may contain proxy URLs or headers.
       report('model-service-unreachable');
       throw Object.assign(new Error('模型服务不可达。'), { code: 'TRANSPORT_FAILED' });

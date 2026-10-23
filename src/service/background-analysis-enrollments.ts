@@ -763,7 +763,7 @@ export const BACKGROUND_ANALYSIS_STATEMENT =
   '登记后台分析后，这本书的稿件有了已确认的改动、停下一会儿，AI7 会自己开始一次基线分析，把结果带到当前稿件；每次运行都不超过登记时设下的预算上限，并留下那一次的计划和运行授权，写明按哪一版登记开始。暂停后先不开始新的后台分析，续行后照常；撤销后不再开始。';
 export const BACKGROUND_ANALYSIS_WHAT = '基线分析：还没有结果时做首次基线分析；结果过期时同步到当前稿件，只重算改动过的部分。';
 export function backgroundAnalysisWhen(quietMs: number): string {
-  return `稿件有已确认的改动并停下 ${Math.round(quietMs / 1000)} 秒后开始；你正在准备或运行这本书的任务时不开始，也不重做你开始过的任务；运行名额总给你留一个，不够时等下一次，不排队等候。`;
+  return `稿件有已确认的改动并停下 ${Math.round(quietMs / 1000)} 秒后开始；你正在准备或运行这本书的任务时不开始，也不重做你开始过的任务；你开始的任务可使用全部运行名额；后台分析只在有空位且未达到后台份额时开始，不够时等下一次，不排队等候。`;
 }
 export const BACKGROUND_ANALYSIS_NOT_GRANTED: ReadonlyArray<string> = [
   '不改动稿件，不采纳或应用任何建议',
@@ -795,7 +795,7 @@ export const BACKGROUND_PAUSED = '已暂停：续行之前不会开始新的后�
 export const BACKGROUND_NO_CEILING = '这份登记没有预算上限（登记时还不要求设上限）：后台分析不会开始；请撤销后重新登记并设上限。';
 export const BACKGROUND_NO_RULE = '这次启动的模型服务策略没有准许后台分析发送内容（或还没有设置模型服务）：后台分析不会开始。';
 export const BACKGROUND_NO_ROUTE = '这次启动没有可执行的分析路由，后台分析不会开始。';
-export const BACKGROUND_NO_SHARE = '本机一次只运行一个任务，这个名额留给你开始的任务，后台分析不会开始。';
+export const BACKGROUND_NO_SHARE = '当前后台份额没有可用的运行名额，后台分析不会开始。';
 export const BACKGROUND_FACTS_UNREADABLE = '读不到这本书的分析设置，后台分析不会开始。';
 export function backgroundDriftReason(labels: ReadonlyArray<string>): string {
   return `登记时定下的${labels.map((label) => `「${label}」`).join('、')}已经变化，后台分析不会按旧的登记开始；请撤销后重新登记。`;
@@ -823,7 +823,7 @@ export const BACKGROUND_START_FIRST = '条件满足：即将开始首次基线�
 export const BACKGROUND_START_SYNC = '条件满足：即将同步到当前稿件。';
 export const BACKGROUND_ENROLL_NO_RULE = '这次启动的模型服务策略没有准许后台分析发送内容：登记了也不会开始，所以现在不能登记。';
 export const BACKGROUND_ENROLL_NO_ROUTE = '这次启动没有可执行的分析路由：登记了也不会开始后台分析，所以现在不能登记。';
-export const BACKGROUND_ENROLL_NO_SHARE = '本机一次只运行一个任务，后台分析没有可用的运行名额，所以现在不能登记。';
+export const BACKGROUND_ENROLL_NO_SHARE = '当前后台份额没有可用的运行名额，所以现在不能登记。';
 export const BACKGROUND_ENROLL_STALE = '登记内容已经变化；请重新打开登记后再确认。';
 /** The background checkpoint gave way: the manuscript changed under it, or another Task took a checkpoint of the branch. */
 export const BACKGROUND_CHECKPOINT_PREEMPTED = '稿件在准备中变化，或另一项任务为它建立了固定点；后台分析让开，下次再看。';

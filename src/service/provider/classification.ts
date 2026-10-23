@@ -42,6 +42,15 @@ export interface ModelFailureFacts {
   readonly status?: number;
 }
 
+/** Retry-After is transport metadata, never part of the request or its authority envelope. */
+export function retryBackoffMs(retryAfter: string | null, now = Date.now()): number {
+  const value = retryAfter?.trim() ?? '';
+  const seconds = /^\d+(?:\.\d+)?$/u.test(value) ? Number(value) : null;
+  const date = seconds === null && /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)/iu.test(value) ? Date.parse(value) : NaN;
+  const delay = seconds === null ? date - now : seconds * 1_000;
+  return Number.isFinite(delay) ? Math.max(0, Math.min(60_000, delay)) : 5_000;
+}
+
 export type ModelFailureClass =
   | 'proxy-unreachable'
   | 'provider-account-limit'
