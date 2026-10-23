@@ -7,7 +7,7 @@ import type { ShellBookSection } from '../shared/preferences.js';
 
 export type ShellDestination = 'attention' | 'library' | 'series' | 'knowledge' | 'quality' | 'global-agent';
 
-/** The six global destinations in their fixed order (IA-007): 待我处理 · 书库 · 书系 · 知识库 · 质量与学习. */
+/** The six global destinations in their fixed order (IA-007): 待我处理 · 书库 · 书系 · 知识库 · 质量与学习 · 全域智能体（Issue #1083）. */
 export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination; readonly label: string; readonly icon: string }> = Object.freeze([
   { key: 'attention', label: '待我处理', icon: '待' },
   { key: 'library', label: '书库', icon: '库' },

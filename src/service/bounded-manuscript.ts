@@ -2827,8 +2827,9 @@ function requireManuscriptReimportTargetSchema(
   // Revision 86 (Issue #1082): reference-only Learning Signals, the learning controls and explicit editorial memory.
   const includeEditorialLearningTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= EDITORIAL_LEARNING_SCHEMA_VERSION || committed(EDITORIAL_LEARNING_SCHEMA_SQL);
   // Revision 79 (Issue #911): 本社审阅偏好 versions and each review category Task's pin of the version it read.
-  const includeSupervisionTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 87 || committed(SUPERVISION_SCHEMA_SQL);
   const includeHousePreferenceTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || committed(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL);
+  // Revision 87 (Issue #1083): the editor's Learning Supervision Directives.
+  const includeSupervisionTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= GLOBAL_AGENT_SCHEMA_VERSION || committed(SUPERVISION_SCHEMA_SQL);
   // Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts, their versions and their one promotion each.
   const includeTaskIntentDraftTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= TASK_INTENT_DRAFT_SCHEMA_VERSION || committed(TASK_INTENT_DRAFT_SCHEMA_SQL);
   // Revision 81 (Issue #66; ADR 0090): imported Skills, their source snapshots, working revisions and lifecycle states.
@@ -2971,7 +2972,8 @@ function requireManuscriptReimportTargetSchema(
       // revision 71 (S17c) widens the bindings for the live route, and revision 72 (Issue #811) for ordinary production: a store
       // below 71 may still hold revision 60's or 71's text, and one at 71 revision 71's.
       ...(includeDialogueTables ? DIALOGUE_SCHEMA_SQL : {}),
-      ...(includeDialogueTables && Number(db.prepare('PRAGMA user_version').get()?.user_version) < 87
+      // Revision 87 (Issue #1083) admits an all-null binding for a Book-less turn: a store below it may still hold the earlier text.
+      ...(includeDialogueTables && Number(db.prepare('PRAGMA user_version').get()?.user_version) < GLOBAL_AGENT_SCHEMA_VERSION
         ? { dialogue_tasks: [DIALOGUE_TASKS_REVISION_86_SQL, DIALOGUE_SCHEMA_SQL.dialogue_tasks] } : {}),
       ...(includeDialogueTables && Number(db.prepare('PRAGMA user_version').get()?.user_version) < MODEL_SERVICE_ROUTES_SCHEMA_VERSION
         ? {

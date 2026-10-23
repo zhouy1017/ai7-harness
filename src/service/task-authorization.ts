@@ -2422,6 +2422,8 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
   if (version === GLOBAL_AGENT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // Revision 86 → 87 (Issue #1083) moves no analysis relation: the supervision ledger and the Book-less dialogue metadata are
+  // their owners', made before this runs, so only the version advances — as it does from revisions 83 to 85.
   if (version === EDITORIAL_LEARNING_SCHEMA_VERSION) return advanceToTerminalRevision(db);
   if (version === PROCEDURE_DEFINITION_SCHEMA_VERSION) return advanceToTerminalRevision(db);
   if (version === MODEL_SELECTION_SCHEMA_VERSION) return advanceToTerminalRevision(db);

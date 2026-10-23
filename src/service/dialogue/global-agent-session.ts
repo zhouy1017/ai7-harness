@@ -1,5 +1,4 @@
 import type { GlobalAgentDialogueProjection, LaunchPolicyProjection } from '../../shared/protocol.js';
-import { GLOBAL_AGENT_POLICY_BLOCKED } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { admittedFastRoleRoute, DIALOGUE_TASK_KIND, type AdmittedDialogueRoute } from './dialogue-route.js';
 import { resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue-history.js';
@@ -21,9 +20,6 @@ export function admittedGlobalAgentRoute(policy: LaunchPolicyProjection): Admitt
   const route = admittedFastRoleRoute(policy, DIALOGUE_TASK_KIND, 'public-or-synthetic');
   return route !== null && route.outboundDataCategories.has('house-review-preference-excerpt')
     ? { ...route, localTools: null } : null;
-}
-export function globalAgentPolicyRefusal(policy: LaunchPolicyProjection): string | null {
-  return admittedGlobalAgentRoute(policy) === null ? GLOBAL_AGENT_POLICY_BLOCKED : null;
 }
 
 /** The same attempt/span-to-Harness join as Book dialogue, with no fabricated manuscript or transcript copy. */

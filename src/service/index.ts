@@ -1536,10 +1536,12 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.transitionProductionDocumentPhase(request.input) };
     // 待我处理 (Issue #424, plan slice S78): a read across every Book. The one owner's progress reader and its
     // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
+    // 全域智能体 (Issue #1083): no Book route. The disclosed state is the execution owner's own decision for the selected policy.
     case 'inspectGlobalAgent':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id)) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy)) };
     case 'recordLearningSupervision':
-      return { id: request.id, ok: true, op: request.op, result: store.recordLearningSupervision(request.input) };
+      store.recordLearningSupervision(request.input);
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy)) };
     case 'askGlobalAgent': {
       const route = globalDialogueReady(dialogues, launchPolicy);
       const turn = store.askGlobalAgent(request.input);
@@ -1690,7 +1692,7 @@ async function dispatch(
   }
 }
 
-/** A dialogue refusal from the execution owner, said as the store says its own; the Book's source decides a live route. */
+/** The Book-less dialogue's route (Issue #1083), refused before anything is recorded unless the selected policy admits one. */
 function globalDialogueReady(dialogues: DialogueExecutionOwner, policy: LaunchPolicyProjection) {
   try { return dialogues.requireGlobalReady(policy); }
   catch (error) {
@@ -1698,6 +1700,15 @@ function globalDialogueReady(dialogues: DialogueExecutionOwner, policy: LaunchPo
     throw error;
   }
 }
+
+function globalDialogueAdmitted(dialogues: DialogueExecutionOwner, policy: LaunchPolicyProjection): boolean {
+  try { dialogues.requireGlobalReady(policy); return true; } catch (error) {
+    if (error instanceof DialogueError) return false;
+    throw error;
+  }
+}
+
+/** A dialogue refusal from the execution owner, said as the store says its own; the Book's source decides a live route. */
 
 function dialogueReady(dialogues: DialogueExecutionOwner, sourceDigest: string | null): void {
   try {

@@ -134,9 +134,13 @@ export class SupervisionDirectives {
   }
 }
 
+/**
+ * A derived line is named by its group — the house or one Book, and one category — not by its words: a later decision or a
+ * 停止今后使用 rereads the group's tendency, and the 停用, 冻结 or 修正 recorded on it must still reach the reread line.
+ */
 export function preferenceItems(version: Pick<HouseReviewPreferenceVersion, 'lines' | 'versionId'> | null): GlobalMemoryItem[] {
   return version === null ? [] : version.lines.map((line) => ({
-    itemId: `preference:${sha256Hex(canonicalJson(line))}`, revisionId: version.versionId,
+    itemId: `preference:${line.bookId ?? 'house'}:${line.categoryId}`, revisionId: version.versionId,
     kind: 'preference', text: line.text, categoryId: line.categoryId, bookId: line.bookId, state: 'active', lineage: [],
   }));
 }
@@ -162,11 +166,4 @@ export function governedMemoryItems(base: ReadonlyArray<GlobalMemoryItem>, direc
     }
   }
   return [...items.values()];
-}
-
-/** A supervision change invalidates every pinned version it reaches, including an already prepared Run. */
-export function supervisionAffects(directives: ReadonlyArray<LearningSupervisionDirective>, bookId: string, categoryId: string): boolean {
-  return directives.some((directive) => directive.scope.kind === 'house' ||
-    directive.scope.kind === 'book' && directive.scope.bookId === bookId ||
-    directive.scope.kind === 'category' && directive.scope.categoryId === categoryId);
 }

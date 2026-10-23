@@ -117,7 +117,7 @@ export function sidebarNavigate(selector) {
   return `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.closest('[hidden]')||node.getAttribute('aria-disabled')==='true'||(node instanceof HTMLButtonElement&&node.disabled))return false; const key=node.dataset.navDestination??node.dataset.navBookSection??node.dataset.navSettings; const labels=${JSON.stringify(labels)}; if(key && (node.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')!==labels[key])return false; node.click(); return true; })()`;
 }
 
-/** The sidebar on the library: the five destinations in their order with their exact names, 书库 current, 设置 at the foot. */
+/** The sidebar on the library: the six destinations in their order with their exact names, 书库 current, 设置 at the foot. */
 export const SIDEBAR_LIBRARY_READY = `(() => { const rows=Array.from(document.querySelectorAll('#app-sidebar .sidebar-destinations [data-nav-destination]')); const names=rows.map((row)=>row.dataset.navDestination+':'+(row.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')); return JSON.stringify(names)===${JSON.stringify(JSON.stringify(['attention:待我处理', 'library:书库', 'series:书系', 'knowledge:知识库', 'quality:质量与学习', 'global-agent:全域智能体（记忆与全局指导）']))} && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.getAttribute('aria-current')==='page' && document.querySelector('#app-sidebar [data-nav-settings]')?.textContent==='设置' && document.querySelector('#context-title')?.textContent==='书库'; })()`;
 
 /** The current Book's groups in the sidebar — for that Book, or any when `bookId` is null — with one section marked current. */

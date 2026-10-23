@@ -6,7 +6,7 @@ import { fragmentsText } from './dialogue/fragments.js';
 import { globalAgentDialogueProjection } from './dialogue/global-agent-session.js';
 import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalMemoryPin } from '../shared/protocol.js';
 import { GLOBAL_AGENT_SCHEMA_VERSION } from './task-authorization.js';
-import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema, supervisionAffects } from './learning/supervision-directives.js';
+import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema } from './learning/supervision-directives.js';
 import { GLOBAL_AGENT_POLICY_BLOCKED, type GlobalAgentProjection, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { analysisBytePage, revisionUnitsPage, analysisOverviewPage, baselineAnalysisSummaryPage } from './analysis/baseline-analysis-wire.js';
 import { acquireSkillPackage, ImportedSkills, ImportedSkillError, SkillAcquisitions, type AcquiredSkillPackage } from './imported-skills.js';
@@ -21,7 +21,7 @@ import { customAnalysisKindDefinition, customAnalysisPlan } from './analysis/cus
 import { withModelClarification } from './provider/clarification-contract.js';
 import { CUSTOM_ANALYSIS_DIMENSION_STATE_LABELS, CUSTOM_ANALYSIS_UNIT_PLACEHOLDER, MAX_CUSTOM_ANALYSIS_ROWS_SHOWN, customAnalysisKindId, MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN, customAnalysisDimensionIdOfKind, customAnalysisModeGoal, isCustomAnalysisDimensionId, isCustomAnalysisKindId } from '../shared/protocol.js';
 import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, CustomAnalysisRevisionSummaryProjection, CustomAnalysisRowProjection, PrepareCustomAnalysisInput, SaveCustomAnalysisDimensionInput } from '../shared/protocol.js';
-import { HousePreferenceInfluence, HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, withdrawalOf, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
+import { HousePreferenceInfluence, HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, preferenceNames, withdrawalOf, withoutNames, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
 import { inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
 import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
 import type { ApplyReceiptProjection, BatchProposalDecisionDraftInput, InspectApplyReceiptInput, PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordProposalDecisionInput, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput } from '../shared/protocol.js';
@@ -5239,13 +5239,15 @@ export class EditorialStore {
       initializeProcedureDefinitionSchema(authority);
       // Revision 86 (Issue #1082): reference-only Learning Signals, the learning controls and explicit editorial memory.
       initializeEditorialLearningSchema(authority);
+      // Revision 87 (Issue #1083): the editor's Learning Supervision Directives; a damaged chain refuses the store once the
+      // whole-store validation has read the relation itself.
       initializeSupervisionSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
-      new SupervisionDirectives(authority).validate();
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
       validateTaskAuthorizationSchema(authority);
       new EditorialLearningLedger(authority).validate();
+      new SupervisionDirectives(authority).validate();
       journal = new DatabaseSync(databasePath);
       configureDatabase(journal);
       ingest = new DatabaseSync(databasePath);
@@ -13138,20 +13140,32 @@ export class EditorialStore {
     }));
   }
 
-  /** A Book-less read: entering creates neither a Task nor a Session/Run. */
-  inspectGlobalAgent(live: (attemptId: string) => LiveAnswer | null = () => null): GlobalAgentProjection {
+  /**
+   * A Book-less read (Issue #1083): entering creates neither a Task nor a Session/Run. `dialogueAdmitted` is the execution
+   * owner's own decision for the selected policy; each item reads as a Run or the session would read it, without the house's names.
+   */
+  inspectGlobalAgent(live: (attemptId: string) => LiveAnswer | null = () => null, dialogueAdmitted = false): GlobalAgentProjection {
     return this.#learningCall(() => {
       const operationalScope = this.#baselineAnalysis.launch.operationalScope;
       const preference = new HouseReviewPreferenceLedger(this.#authority).history(operationalScope).at(-1) ?? null;
       const base = preference === null ? null : { ...preference, lines: preference.governance?.baseLines ?? preference.lines };
       const directives = new SupervisionDirectives(this.#authority).history(operationalScope);
-      return { operationalScope, dialogueState: GLOBAL_AGENT_POLICY_BLOCKED,
-        explanation: '此处暂不能调用模型。记忆与学习监督操作仅在本机记录，不读取稿件。',
+      const names = preferenceNames(base?.lines ?? [], this.#housePreferencePeopleNames());
+      return { operationalScope, dialogueState: dialogueAdmitted ? 'available' : GLOBAL_AGENT_POLICY_BLOCKED,
+        explanation: dialogueAdmitted ? '只使用明确勾选的已启用记忆版本，不读取稿件；治理仍须单独操作。'
+          : '此处暂不能调用模型。记忆与学习监督操作仅在本机记录，不读取稿件。',
         categories: BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map(({ categoryId, label }) => ({ categoryId, label })),
         books: this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all().map((row) => ({ bookId: String(row.book_id), title: String(row.title) })),
-        items: governedMemoryItems(preferenceItems(base), directives).map((item) => ({ ...item,
-          revisionId: `${item.revisionId}@${directives.at(-1)?.directiveId ?? 'base'}` })), directives, history: this.#dialogues.globalTasks().filter((task) => task.operationalScope === operationalScope).map((task) => globalAgentDialogueProjection(task, this.#dialogues, this.#dialogueHistory, live)) };
+        items: governedMemoryItems(preferenceItems(base), directives).map((item) => ({ ...item, text: withoutNames(item.text, names),
+          revisionId: `${item.revisionId}@${directives.at(-1)?.directiveId ?? 'base'}` })), directives, history: this.#globalAgentHistory(live) };
     });
+  }
+
+  /** The Book-less dialogues of this launch's scope, newest first, by the same Harness join as a Book dialogue (Issue #1083). */
+  #globalAgentHistory(live: (attemptId: string) => LiveAnswer | null): GlobalAgentDialogueProjection[] {
+    const operationalScope = this.#baselineAnalysis.launch.operationalScope;
+    return this.#dialogues.globalTasks().filter((task) => task.operationalScope === operationalScope)
+      .map((task) => globalAgentDialogueProjection(task, this.#dialogues, this.#dialogueHistory, live));
   }
 
   globalAgentSourcesCurrent(pins: ReadonlyArray<GlobalMemoryPin>): boolean {
@@ -13208,7 +13222,7 @@ export class EditorialStore {
       if (input.scope.kind === 'book') requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.scope.bookId) !== undefined,
         'BOOK_INVALID', '监督范围的图书不存在。');
       new SupervisionDirectives(this.#authority).record(current.operationalScope, input, current.items);
-      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames());
+      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames(), true);
     }));
     return this.inspectGlobalAgent();
   }
@@ -19105,22 +19119,23 @@ export class EditorialStore {
    */
   learningInfluenceGuard(runRecordId: string): string | null {
     this.#assertAvailable();
-    const run = this.#authority.prepare(`SELECT t.task_intent_id, t.book_id, t.kind FROM analysis_run_records r
-      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ?`).get(runRecordId);
-    if (run !== undefined) {
-      const ledger = new HouseReviewPreferenceLedger(this.#authority);
-      const pin = ledger.pinned(String(run.task_intent_id));
-      const version = pin === null ? null : ledger.version(pin.versionId);
-      if (version !== null) {
-        if (this.#housePreferencePeopleNames().some((name) => name.trim().length > 0 && version.lines.some((line) => line.text.includes(name))))
-          return '本社人员信息已变化，请重新准备任务。';
-        const directives = new SupervisionDirectives(this.#authority).history(version.operationalScope);
-        const head = version.governance?.headDirectiveId;
-        const newer = head === undefined ? directives : directives.slice(directives.findIndex((entry) => entry.directiveId === head) + 1);
-        if (supervisionAffects(newer, String(run.book_id), String(run.kind).replace('editorial-review/', ''))) return '学习监督方向已变化，请重新准备任务。';
-      }
+    return this.#reviewRuns.learningReadGuard(runRecordId) ?? this.#preferenceGovernanceGuard(runRecordId);
+  }
+
+  /**
+   * The same guard over explicit governance (Issue #1083): a 停用, 冻结, 修正 or 合并 — or a person the house names now — that
+   * changes the lines a Run's pin carries stops it before its next range, as a withdrawal does; a change elsewhere does not.
+   */
+  #preferenceGovernanceGuard(runRecordId: string): string | null {
+    const run = this.#authority.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    if (run === undefined) return null;
+    try {
+      return new HouseReviewPreferenceLedger(this.#authority).governanceChanged(asString(run.task_intent_id), () => this.#housePreferencePeopleNames())
+        ? '本社审阅偏好的学习监督已变化' : null;
+    } catch (error) {
+      if (!(error instanceof LearningEligibilityError)) throw error;
+      return '无法读取的学习监督记录';
     }
-    return this.#reviewRuns.learningReadGuard(runRecordId);
   }
 
   /** Verify the consuming ledger's frozen material boundary; no material paragraphs are paged or composed here. */
@@ -20651,7 +20666,7 @@ export class EditorialStore {
         const baseline = this.#baselineAnalysis.attentionReadings(progress, since, limit);
         const review = this.#reviewRuns.attentionReadings(progress, since, limit);
         return composeGlobalAttention({
-          globalDialogues: this.inspectGlobalAgent().history,
+          globalDialogues: this.#globalAgentHistory(() => null),
           applyOutcomes: readApplyOutcomeAttention(this.#authority, limit),
           imports: readImportAttention(this.#authority, limit),
           recoveries: readRecoveryAttention(this.#authority, limit),

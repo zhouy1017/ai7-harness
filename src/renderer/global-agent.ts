@@ -149,7 +149,7 @@ export function mountGlobalAgent(options: {
     current = projection;
     ask.disabled = projection.dialogueState !== 'available'; question.disabled = ask.disabled;
     selected.clear();
-    state.textContent = `${projection.dialogueState} · ${projection.explanation}`;
+    state.textContent = `${projection.dialogueState === 'available' ? '可以提问' : projection.dialogueState} · ${projection.explanation}`;
     list.replaceChildren();
     if (projection.items.length === 0) list.append(el('p', '还没有记忆。可以明确新建一条本社审阅偏好。'));
     for (const item of projection.items) {
