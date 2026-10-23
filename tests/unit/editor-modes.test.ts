@@ -107,6 +107,7 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
   const drawer = 'body[data-task-drawer="open"]';
   const guards = [':root:not([data-sidebar="icons"])', drawer, ':has(.editor-workspace)'];
   const fallbackSelector = `${guards[0]} ${drawer}${guards[2]}`;
+  const fallbackQuery = '(min-width:1120px)and(max-width:1184px)';
   const fallbackEffects = [
     { target: '', declaration: 'padding-right:0' },
     { target: '.status-bar', declaration: 'right:1.2rem' },
@@ -117,10 +118,12 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
     const css = source.replace(/\/\*[\s\S]*?\*\//gu, '');
     // These drawer media blocks contain flat rules. Consume every rule, rather than stopping at the first closing brace.
     const media = [...css.matchAll(/@media\s*([^{}]+)\{((?:[^{}]*\{[^{}]*\}\s*)+)\}/gu)];
-    const fallback = media.filter(([, query, rules]) => query!.includes('max-width') && rules!.includes('#task-drawer-separator'));
+    // Include every block at this range, even a body/status-only override; the separator also catches changed boundaries.
+    const fallback = media.filter(([, query, rules]) => compact(query!) === fallbackQuery
+      || (query!.includes('max-width') && rules!.includes('#task-drawer-separator')));
     expect(fallback).toHaveLength(1);
     const [, query, block] = fallback[0]!;
-    expect(compact(query!)).toBe('(min-width:1120px)and(max-width:1184px)');
+    expect(compact(query!)).toBe(fallbackQuery);
     const rules = [...block!.matchAll(/([^{}]+)\{([^{}]*)\}/gu)];
     expect(block!.replace(/[^{}]+\{[^{}]*\}/gu, '').trim()).toBe('');
     const seen = new Set<string>();
@@ -197,6 +200,14 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
       if (target) {
         expect(() => assertDrawerStyles(css.replace(`${drawer} ${target}`, `${drawer}${target}`)), `column subject: ${target}`).toThrow();
       }
+    }
+  });
+
+  it('rejects an unguarded fallback override in a separate media block', () => {
+    const { css, query } = assertDrawerStyles(stylesheet);
+    for (const { target, declaration } of fallbackEffects) {
+      const override = `@media ${query} { ${drawer} ${target} { ${declaration}; } }`;
+      expect(() => assertDrawerStyles(`${css}\n${override}`), target || 'body').toThrow();
     }
   });
 
