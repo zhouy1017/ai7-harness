@@ -76,7 +76,8 @@ describe('Procedure Definition persistence and exact plan pins', () => {
     expect(store.getBookOverview(book.bookId).book.bookId).toBe(book.bookId);
     store.markCleanShutdown(); store.close();
     db = new DatabaseSync(path);
-    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(86);
+    // Synchronized with #1082 and #1083: revisions 86 and 87 follow without moving these relations.
+    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(87);
     db.exec('DROP TABLE procedure_plan_pins'); db.close();
     await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
     db = new DatabaseSync(path, { readOnly: true });

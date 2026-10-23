@@ -166,19 +166,19 @@ describe('revision 87 (Issue #1083)', () => {
   const objects = (db: DatabaseSync): Array<{ name: string; sql: string }> =>
     db.prepare("SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'dialogue_tasks%' AND name NOT LIKE 'learning_supervision_directives%' ORDER BY name").all() as Array<{ name: string; sql: string }>;
 
-  it('migrates an exact revision-84 store by adding the supervision ledger and widening dialogue metadata, moving nothing else, and refuses an 87 without the ledger', async () => {
+  it('migrates an exact revision-86 store by adding the supervision ledger and widening dialogue metadata, moving nothing else, and refuses an 87 without the ledger', async () => {
     const subject = await open();
     subject.markCleanShutdown(); await subject.close(); store = undefined;
     const path = join(roots!.dataRoot, 'store', 'ai7.sqlite');
     const planted = new DatabaseSync(path, { enableForeignKeyConstraints: false });
     let before: Array<{ name: string; sql: string }>;
     try {
-      // The store as revision 84 left it: no supervision ledger, every dialogue binding column NOT NULL.
+      // The store as revision 86 left it: no supervision ledger, every dialogue binding column NOT NULL.
       for (const trigger of Object.keys(SUPERVISION_TRIGGER_SQL)) planted.exec(`DROP TRIGGER ${trigger}`);
       planted.exec('DROP TABLE learning_supervision_directives; DROP TRIGGER dialogue_tasks_no_update; DROP TRIGGER dialogue_tasks_no_delete; DROP TABLE dialogue_tasks;');
       planted.exec(DIALOGUE_TASKS_REVISION_86_SQL);
       planted.exec(DIALOGUE_TRIGGER_SQL.dialogue_tasks_no_update!); planted.exec(DIALOGUE_TRIGGER_SQL.dialogue_tasks_no_delete!);
-      planted.exec('PRAGMA user_version = 84');
+      planted.exec('PRAGMA user_version = 86');
       before = objects(planted);
     } finally { planted.close(); }
     store = await EditorialStore.open(roots!.dataRoot, roots!.codeRoot);
