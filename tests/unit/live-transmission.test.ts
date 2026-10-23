@@ -705,6 +705,7 @@ describe('the ledger across slices and kinds', () => {
 
   it.each([
     ['item grammar', { itemId: 'Future_7/test/1' }], ['ordinal zero', { itemId: 'Future7/test/0' }],
+    ['item type', { itemId: ['Future7/first-baseline/1'] }],
     ['ordinal limit', { itemId: 'Future7/test/1000000' }], ['kind', { kind: 'shell' }], ['outcome', { outcome: 'maybe' }],
     ['timestamp', { recordedAt: 'invalid' }], ['stale', { stale: 'true' }], ['status', { status: '200' }],
     ['negative status', { status: -1 }], ['status range', { status: 600 }],
@@ -727,6 +728,12 @@ describe('the ledger across slices and kinds', () => {
   ] as const)('rejects malformed foreign model metadata: %s', async (_name, patch) => {
     await ledger({ ...foreignModel(), ...patch });
     await expect(opened()).rejects.toMatchObject({ code: 'PROVIDER_LEDGER_CORRUPT' });
+  });
+
+  it.each(['requestDigest', 'promptContractDigest'] as const)('rejects a non-string required %s even without foreign identity keys', async (field) => {
+    const line = foreignModel();
+    await ledger({ ...line, cacheKey: undefined, claimKey: undefined, generation: undefined, [field]: [line[field]] });
+    expect(await refusal(opened())).toBe('PROVIDER_LEDGER_CORRUPT');
   });
 
   it.each([
@@ -768,6 +775,17 @@ describe('the ledger across slices and kinds', () => {
     const result = await refusal(call(await opened(), modelFetch(calls), unitBody(BLOCK_B, 'synthetic ledger question', 'e')));
     expect(result).toBe(differentRoute ? 'sent' : 'PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
     expect(calls).toHaveLength(differentRoute ? 1 : 0);
+  });
+
+  it.each(['route', 'endpoint', 'requestShape'] as const)('does not hold an unrelated foreign unknown with no cache key and a different %s', async (field) => {
+    const line = foreignModel();
+    await ledger({ ...line, [field]: 'different-configuration', cacheKey: undefined, claimKey: undefined, generation: undefined,
+      outcome: 'failed', classification: 'outcome-unknown' });
+    const cache = await opened();
+    const calls: string[] = [];
+    expect(await refusal(call(cache, modelFetch(calls), unitBody(BLOCK_A, 'synthetic ledger question')))).toBe('sent');
+    expect(calls).toHaveLength(1);
+    expect(await cache.validEvidence()).toHaveLength(1);
   });
 
   it.each(['item', 'family', 'stale'] as const)('releases retired foreign transmitted history through %s retirement', async (retirement) => {

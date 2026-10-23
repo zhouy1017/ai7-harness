@@ -177,7 +177,8 @@ export async function transmitOnce(
     });
     // A lost claim is not proof of an unsent request. A surviving settled unknown line remains
     // authoritative, including legacy exact requests whose original namespace was never recorded.
-    const sameRequest = cache.lines.filter(isModelCallLine).filter((line) => line.model === model &&
+    // Foreign history was checked against every available namespace fact before replay or claims.
+    const sameRequest = cache.lines.filter(isModelCallLine).filter((line) => isSupportedProviderTestItemId(line.itemId) && line.model === model &&
       (line.cacheKey === undefined ? line.requestDigest === requestDigest :
         line.route === namespace.route && line.endpoint === namespace.endpoint && line.requestShape === namespace.requestShape &&
         line.semanticDigest === semanticDigest));

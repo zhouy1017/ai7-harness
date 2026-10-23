@@ -410,8 +410,8 @@ function parseLedgerLine(line: string): ProviderLedgerEntry {
     ['transmitted', 'replayed', 'failed', 'refused'].includes(item.outcome ?? ''),
   'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 测试项字段无效。');
   if (kind === undefined || kind === 'model-call') {
-    requireCache(typeof item.model === 'string' && DIGEST_PATTERN.test(item.requestDigest ?? '') &&
-      DIGEST_PATTERN.test(item.promptContractDigest ?? '') && (item.usage === null || validUsage(item.usage)) &&
+    requireCache(typeof item.model === 'string' && validDigest(item.requestDigest) &&
+      validDigest(item.promptContractDigest) && (item.usage === null || validUsage(item.usage)) &&
       (item.incurredUsage === undefined || item.incurredUsage === null || validUsage(item.incurredUsage)),
     'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 模型记录无效。');
     requireCache(item.evidencePosition === undefined || (Number.isSafeInteger(item.evidencePosition) && item.evidencePosition >= 0),
