@@ -55,6 +55,7 @@ const RENDERER_TARGET_QUERY_ABANDONED = new Error('renderer-target query abandon
 const PROTECTION_HEADLINE = '本地写入中断 · 当前更改尚未持久保存';
 const PROTECTION_READ_ONLY_HEADLINE = '保护性只读 · 本地写入中断 · 当前更改尚未持久保存';
 const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
+const PENDING_BUFFER_REFUSED = '尚待确认的编辑已达到单次安全上限，这次输入未被接收；请等待写入确认后分段输入。';
 const JOURNAL_EDIT_GRAPHEMES = 256;
 const PROTECTION_CJK_BASE = 0x7000;
 const STARTUP_FAILURE_MARKERS = Object.freeze([
@@ -1573,8 +1574,10 @@ async function runProtectionJourney(renderer) {
   // Even the input before the first unavailable acknowledgement must fit the declared reserve; a large paste is refused intact.
   const initialLength = await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length`);
   const initialLimit = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferSoftLimit)`);
+  requireJourney(Number.isSafeInteger(initialLimit) && initialLimit > 0, 'protection-initial-bound');
+  await assertRenderer(renderer, `(() => { const status = document.querySelector('#persistence-status'); return status instanceof HTMLElement && status.textContent !== ${JSON.stringify(PENDING_BUFFER_REFUSED)}; })()`, 'protection-initial-bound');
   await typeAtWindowEnd(renderer, protectionText(initialLimit + 1, 8_000), 'protection-initial-bound-type');
-  await protectionChecks(renderer, `({ noInput: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength}, noProtection: !p.shown, noEntry: p.journal === ${durable} })`, 'protection-initial-bound');
+  await protectionChecks(renderer, `({ refused: document.querySelector('#persistence-status')?.textContent === ${JSON.stringify(PENDING_BUFFER_REFUSED)} && document.querySelector('#persistence-status')?.dataset.tone === 'error', noInput: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength}, noProtection: !p.shown, noEntry: p.journal === ${durable} })`, 'protection-initial-bound');
   requireJourney((await renderer.setJournalFault('fail-all'))?.mode === 'fail-all', 'protection-arm');
   at('protection-enter');
   await typeAtWindowEnd(renderer, protectionText(12), 'protection-enter-type');
