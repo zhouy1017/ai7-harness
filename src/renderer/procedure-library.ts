@@ -32,9 +32,10 @@ export function renderProcedureLibrary(procedures: readonly PreinstalledProcedur
       for (const previous of procedure.previousVersions ?? []) {
         const row = document.createElement('p');
         row.className = 'field-note';
-        row.setAttribute('style', 'overflow-wrap: anywhere');
         row.dataset['procedurePreviousVersion'] = String(previous.version);
-        row.textContent = `第 ${previous.version} 版 · ${previous.stages.map((stage) => stage.label).join(' → ')} · 摘要 ${previous.digest}`;
+        // The words carry no identifier (LAYER-008); the retained version's digest stays on the row for inspection.
+        row.dataset['procedureDigest'] = previous.digest;
+        row.textContent = `第 ${previous.version} 版 · ${previous.stages.map((stage) => stage.label).join(' → ')}`;
         history.append(row);
       }
       item.append(history);

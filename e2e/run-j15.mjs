@@ -464,6 +464,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
     // Synchronized delta with Issue #89: revision 83's updates lead revision 82's custom dimensions, then revision 81's imported Skills.
     // Synchronized delta with #66: revision 81's four imported Skill relations follow them.
     // Synchronized delta with Issue #423 (slice 7a): revision 80's three Task Intent Draft relations follow them.
+    // Synchronized delta with Issue #1084: revision 88's review_excluded_findings goes with the Review Run relations it extends.
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
@@ -593,6 +594,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
       DROP TABLE quality_signals;
       DROP TABLE review_finding_dispositions;
       DROP TABLE review_findings;
+      DROP TABLE review_excluded_findings;
       DROP TABLE review_run_category_events;
       DROP TABLE review_run_authorizations;
       DROP TABLE review_runs;
@@ -1108,10 +1110,11 @@ async function main() {
     })()`);
     const library = await renderer.evaluate(`({ stages: Array.from(document.querySelectorAll('.procedure-stages'), (node) => node.textContent), predecessor: document.querySelector('.procedure-predecessor')?.textContent, baseline: document.querySelector('[data-procedure-id="ai7-procedure/baseline-analysis"]')?.textContent })`);
     requireJourney(library.stages.length === 10 && library.stages.every((value) => value.length > 0) && library.predecessor?.includes('审阅专用前身') && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
-    await assertRenderer(renderer, `(() => { const entries=document.querySelectorAll('.preinstalled-procedure-library li[data-procedure-version="2"]'); if(entries.length!==7)return false; return Array.from(entries).every((entry) => { const history=entry.querySelector('details.procedure-previous-versions'); if(!(history instanceof HTMLDetailsElement))return false; history.open=true; return history.querySelector('[data-procedure-previous-version="1"]')?.textContent.includes('第 1 版'); }); })()`, 'preinstalled-review-v2-with-v1-history');
+    await assertRenderer(renderer, `(() => { const entries=document.querySelectorAll('.preinstalled-procedure-library li[data-procedure-version="2"]'); if(entries.length!==7)return false; return Array.from(entries).every((entry) => { const history=entry.querySelector('details.procedure-previous-versions'); if(!(history instanceof HTMLDetailsElement))return false; history.open=true; const row=history.querySelector('[data-procedure-previous-version="1"]'); return row?.textContent.startsWith('第 1 版 · ') === true && /^[0-9a-f]{64}$/u.test(row.dataset.procedureDigest ?? '') && !/[0-9a-f]{64}/u.test(row.textContent); }); })()`, 'preinstalled-review-v2-with-v1-history');
     const technical = new Map(procedures?.technical ?? []);
     requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(10).fill(['enabled', '已启用', '0', 'solid'])) &&
-      procedures.first === '已启用 错别字与规范用语审阅工序 · 第 1 版 · 预装 · 已使用 0 次 · 分块审读 → 综合 → 派生报告' &&
+      // #1084: the review procedures read under contract /2 are version 2, version 1 kept in their closed 历史版本.
+      procedures.first === '已启用 错别字与规范用语审阅工序 · 第 2 版 · 预装 · 已使用 0 次 · 分块审读 → 综合 → 派生报告历史版本第 1 版 · 分块审读 → 综合 → 派生报告' &&
       JSON.stringify(procedures.reasons) === '[]' &&
       procedures.artifact === '本社方案 v2 · 已安装 · 已为 1 本书启用' && procedures.identifierInWords === false &&
       procedures.detailsOpen === false && procedures.summary === '查看技术详情' &&
