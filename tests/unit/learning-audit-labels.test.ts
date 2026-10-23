@@ -30,6 +30,10 @@ import {
   learningLineageSignalLine,
   learningLineageTaskLine,
   learningRemediationRunning,
+  learningRemediationMemory,
+  learningLineageMemories,
+  learningLineageWhy,
+  LEARNING_REMEDIATION_MEMORY,
   LEARNING_REMEDIATION_RUNNING,
 } from '../../src/renderer/learning-audit-labels.js';
 import { LEARNING_AUDIT_STANDINGS } from '../../src/shared/protocol.js';
@@ -137,5 +141,14 @@ describe('学习回溯 words', () => {
       '1 个已完成的审阅任务参考过它们，会标上「此结果参考的学习材料后来停止今后使用」：甲。这些结果、发现和报告都不会改写，标记也不表示结果有错；它们来自的反馈与改动，以及此前的 2 个准入决定，都原样保留。');
     expect(learningRemediationFuture(1, 'house', '回溯之书', { currentVersion: 3, linesAffected: 2 })).toBe(
       '1 条学习材料今后不再可用于学习（原来是纳入出版社经验）；它们会显示为明确排除。本社审阅偏好 v3 中有 2 行出自它们，记录后会生成不含它们的新版本，之后的审阅只读新版本。');
+  });
+
+  it('names explicit editorial memory that references a material, and keeps the empty wording when none does (Issue #1082)', () => {
+    expect(learningLineageWhy(0)).toBe(LEARNING_LINEAGE_WHY_EMPTY);
+    expect(learningLineageWhy(1)).toContain('明确新建的记忆');
+    expect(learningLineageWhy(1)).not.toContain('这两步因此是空的');
+    expect(learningLineageMemories(2)).toBe('2 条你明确新建的编辑记忆引用了它；停止今后使用后，这些记忆会暂停使用，记录原样保留。');
+    expect(learningRemediationMemory(0)).toBe(LEARNING_REMEDIATION_MEMORY);
+    expect(learningRemediationMemory(1)).toBe('1 条你明确新建的编辑记忆引用了它们：记录后这些记忆暂停使用，记忆和它的版本历史原样保留；AI7 还不会自己生成记忆候选。');
   });
 });
