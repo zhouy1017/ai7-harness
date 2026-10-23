@@ -245,7 +245,7 @@ const RUN_STATE_LABELS: Record<BaselineAnalysisRunState, string> = {
 export const RUN_CANCELLED_AFTER_START_LABEL = '已取消' as const;
 
 /** What `cancelling` records (CTRL-005): the editor's word, and where the Run stops. */
-export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的阅读范围读完后停止，此后不再发送任何内容。' as const;
+export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容。' as const;
 
 /** What `pausing` records (CTRL-001): the editor's word, and where the Run stops to wait. */
 export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的阅读范围读完后停下，已完成的部分都会保存。' as const;

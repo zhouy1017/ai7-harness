@@ -1345,13 +1345,12 @@ export class ReviewRunStore {
    * loop reaches each; a plan that moves in between is refused there, with the ledger's reason.
    *
    * A full governor never refuses the approval: the driver waits for a place before authorizing the next category
-   * (#1080). `_slotBusy` is still passed by the store's callers and is no longer read.
+   * (#1080).
    */
   recordAuthorization(
     bookId: string,
     reviewRunId: string,
     planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
-    _slotBusy = false,
     start: 'now' | 'when-online' = 'now',
     ruleVersionId: string | null = null,
   ): void {

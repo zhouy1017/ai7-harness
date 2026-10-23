@@ -14,6 +14,7 @@ import {
 } from '../../shared/protocol.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
+import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { DeepSeekOpenAiCompatibleAdapter, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
 import { Ai7LocalDeterministicAdapter, dialogueRetrievalFixtureRule, type AnswerHold } from '../provider/local-deterministic-adapter.js';
 import {
@@ -372,8 +373,11 @@ export class DialogueExecutionOwner {
           const nativeFetch = live.runtime.nativeFetch;
           // A stop during cache/session/credential setup can precede the Harness turn, when interrupt() is still idle.
           // Check again at both transport boundaries so that neither a cache claim nor an actual send starts after it.
+          // Nothing has left at either boundary, so the adapter reads it as a transport failure, never an unknown result (#1080).
           const requireRunning = (signal?: AbortSignal): void => {
-            if (active.stopRequested || this.#disposed || signal?.aborted === true) throw new DOMException('Dialogue interrupted.', 'AbortError');
+            if (active.stopRequested || this.#disposed || signal?.aborted === true) {
+              throw Object.assign(new DOMException('Dialogue interrupted.', 'AbortError'), { requestSent: false });
+            }
           };
           const send: DeepSeekTransport = async (url, init) => {
             requireRunning(init.signal);
@@ -468,6 +472,11 @@ export class DialogueExecutionOwner {
     }
     // The turn's last event in the Session, when the turn reached it at all.
     const endSeq = outcome !== null && spanOpened && outcome.span.endSeq >= outcome.span.startSeq ? outcome.span.endSeq : null;
+    // A stop or close that aborts the request before it leaves is a transport failure to the adapter (#1080), yet it is still
+    // the editor's stop, or AI7 closing, and settles as one: nothing was sent.
+    const last = outcome?.signals.at(-1);
+    const stoppedBeforeSend = outcome !== null && outcome.terminal === 'failed' && (active.stopRequested || this.#disposed) &&
+      last?.kind === 'failed' && last.failure.code === AI7_FAILURE_CODES.TRANSPORT_FAILED;
     let settled: DialogueOutcome;
     let cause: string | null = null;
     if (outcome === null) {
@@ -475,15 +484,16 @@ export class DialogueExecutionOwner {
       cause = failure ?? 'DIALOGUE_EXECUTION_FAILED';
     } else if (outcome.terminal === 'completed') {
       settled = 'completed';
-    } else if (outcome.terminal === 'interrupted' && active.stopRequested) {
+    } else if ((outcome.terminal === 'interrupted' || stoppedBeforeSend) && active.stopRequested) {
       settled = 'stopped';
+    } else if (stoppedBeforeSend) {
+      settled = 'interrupted';
+      cause = DIALOGUE_CLOSED_CAUSE;
     } else if (outcome.terminal === 'interrupted') {
       settled = 'interrupted';
-      const last = outcome.signals.at(-1);
       cause = this.#disposed ? DIALOGUE_CLOSED_CAUSE : last?.kind === 'interrupted' ? last.failure.code : 'INTERRUPTED';
     } else {
       settled = 'failed';
-      const last = outcome.signals.at(-1);
       cause = last?.kind === 'failed' ? last.failure.code : 'AMBIGUOUS';
     }
     // A write the store refused once (a moment's lock, a busy disk) is tried once more; one refused twice leaves the attempt

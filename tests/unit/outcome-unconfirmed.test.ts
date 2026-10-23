@@ -118,7 +118,7 @@ describe('a re-send disclosed in the plan of a kind that keeps no progress', () 
     expect(withResend(plan, [])).toBe(plan);
     expect(withResend(plan, [2, 5]).resend).toEqual({ units: [2, 5], statement: resendDisclosure([2, 5]) });
     expect(categoryResendDisclosure([{ category: '事实核查', units: [4] }, { category: '体例与格式', units: [1, 2] }])).toBe(
-      '「事实核查」第 4 个，「体例与格式」第 1、2 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。');
+      '「事实核查」第 4 个，「体例与格式」第 1、2 个阅读范围上一次的请求已发出、结果未知，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。');
   });
 });
 

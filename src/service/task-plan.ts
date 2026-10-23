@@ -258,7 +258,7 @@ export const OUTCOME_UNKNOWN_NO_REDO = '结果待确认：先取消任务，确�
  * authorization 开始任务 gives.
  */
 export function resendDisclosure(units: ReadonlyArray<number>): string {
-  return `第 ${units.join('、')} 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它的请求，开始任务即重新授权这次发送。`;
+  return `第 ${units.join('、')} 个阅读范围上一次的请求已发出、结果未知，可能已被模型服务处理并计费；这项任务会再发一次它的请求，开始任务即重新授权这次发送。`;
 }
 /**
  * A Review Run whose categories send again ranges an earlier Run of the same category left 结果待确认 (Issue #757; CONT-011):
@@ -266,7 +266,7 @@ export function resendDisclosure(units: ReadonlyArray<number>): string {
  */
 export function categoryResendDisclosure(entries: ReadonlyArray<{ category: string; units: ReadonlyArray<number> }>): string {
   const named = entries.map((entry) => `「${entry.category}」第 ${entry.units.join('、')} 个`).join('，');
-  return `${named}阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。`;
+  return `${named}阅读范围上一次的请求已发出、结果未知，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。`;
 }
 /**
  * A plan of a kind that keeps no progress with the ranges it sends again whose earlier request's result could not be known
@@ -2053,7 +2053,7 @@ export const RUN_CONTROL_REDO_REASON = '先暂停，再改计划重做';
 /** A stopped Run that never began reading has nothing to redo from: it is cancelled, and the Task prepared again. */
 export const RUN_CONTROL_REDO_NOT_BEGUN_REASON = '这项任务还没有开始阅读，没有可以重做的部分；可以取消它，再重新准备任务';
 /** Once the editor confirmed 取消任务 nothing more is offered: the Run is stopping. */
-export const RUN_CONTROL_CANCELLING_REASON = '已在取消：正在进行的这一步完成后停止';
+export const RUN_CONTROL_CANCELLING_REASON = '已在取消：正在进行的这一步会被中止，此后不再发送任何内容';
 /** While the Run pauses, 取消任务 waits for it to have stopped. */
 export const RUN_CONTROL_PAUSING_REASON = '正在暂停：正在进行的这一步完成后停下';
 /** What the analysis never does, so there is nothing a cancellation could leave committed (CTRL-007). */
@@ -2092,9 +2092,9 @@ export function baselineCancellationImpact(
   const inFlight = progress?.stage === 'units' && progress.currentUnitOrdinal !== null;
   const liveRemaining = progress === null ? 0 : Math.max(0, progress.unitsTotal - progress.unitsSettled - asked.length - (inFlight ? 1 : 0));
   const stops = progress === null ? '这项任务已经停下；' : progress.stage !== 'units'
-    ? `正在进行的${STAGE_WORDS[progress.stage]}完成后停止，之后的步骤都不再进行，不再发送任何内容。`
+    ? `正在进行的${STAGE_WORDS[progress.stage]}会被中止，回答已传回的照常计入；之后的步骤都不再进行，不再发送任何内容。`
     : inFlight
-      ? `正在读的第 ${progress.currentUnitOrdinal} 个阅读范围读完后停止；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`
+      ? `停在正在读的第 ${progress.currentUnitOrdinal} 个阅读范围；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`
       : `在这两个阅读范围之间停止；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`;
   // The existing redo caller supplies only aggregate progress. Preserve that disclosure without inventing zero
   // waiting/unknown counts; the cancellation owner supplies both arrays, even when they are empty.
@@ -2129,9 +2129,9 @@ export function baselineCancellationImpact(
     // The first, bounded entry is the complete decision summary even at the wire guard's minimum share.
     // Each subsequent entry names one exact range, so the existing list pager can always advance.
     return [
-      `${stops}${read === null ? '已读完数量无法核对' : `已读完 ${read} 个阅读范围`}，等你回答 ${asked.length - answered} 个，你已回答但尚未续行 ${answered} 个，结果待确认 ${unconfirmed.length} 个，${remaining === null ? '未尝试数量无法核对' : `未尝试 ${remaining} 个`}。${progress === null ? '取消后，之后的归纳、抽样都不再进行，不再发送任何内容；' : ''}等待回答的范围不再重试，结果待确认的请求不会再发，仍记为结果待确认的缺口，不记为未尝试。${consequence}${CANCELLATION_NO_EFFECTS}${inFlight ? '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。' : ''}`,
+      `${stops}${read === null ? '已读完数量无法核对' : `已读完 ${read} 个阅读范围`}，等你回答 ${asked.length - answered} 个，你已回答但尚未续行 ${answered} 个，结果未知 ${unconfirmed.length} 个，${remaining === null ? '未尝试数量无法核对' : `未尝试 ${remaining} 个`}。${progress === null ? '取消后，之后的归纳、抽样都不再进行，不再发送任何内容；' : ''}等待回答的范围不再重试，结果未知的请求不会再发，仍记为结果未知的单元缺口，不记为未尝试。${consequence}${CANCELLATION_NO_EFFECTS}${inFlight ? '正在等待的那一轮模型请求会被中止；回答已传回的照常计入，否则该阅读范围记为结果未知的缺口，不会再发。' : ''}`,
       ...asked.map((entry) => `第 ${entry.unitOrdinal} 个阅读范围${entry.answered ? '你已回答，但还没有按回答接着做' : '在等你的回答'}；取消后不再重试${carried ? '，在这份修订版里记为缺口。' : '。'}`),
-      ...unconfirmed.map((ordinal) => `第 ${ordinal} 个阅读范围的请求已发出、结果待确认；不会再发，${carried ? '在这份修订版里' : ''}记为结果待确认的缺口，不记为未尝试。`),
+      ...unconfirmed.map((ordinal) => `第 ${ordinal} 个阅读范围的请求已发出、结果未知；不会再发，${carried ? '在这份修订版里' : ''}记为结果未知的单元缺口，不记为未尝试。`),
     ];
   }
   // Admitted and waiting its turn: nothing read yet — unless it is a Run going on from what it kept.
@@ -2151,7 +2151,7 @@ export function baselineCancellationImpact(
     stops,
     settled,
     CANCELLATION_NO_EFFECTS,
-    ...(inFlight ? ['正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。'] : []),
+    ...(inFlight ? ['正在等待的那一轮模型请求会被中止；回答已传回的照常计入，否则该阅读范围记为结果未知的缺口，不会再发。'] : []),
   ].join('')];
 }
 
@@ -2304,7 +2304,7 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
  */
 /** `（另有 M 个结果待确认）` beside a count of ranges read (Issue #51, S16c), or nothing when there are none. */
 function unconfirmedApart(count: number): string {
-  return count === 0 ? '' : `（另有 ${count} 个结果待确认）`;
+  return count === 0 ? '' : `（另有 ${count} 个结果未知）`;
 }
 
 /**

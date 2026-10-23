@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
-import { DialogueExecutionOwner, dialogueLiveRoute, dialogueRouteRefusal, productionDialogueRoute, type DialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
+import { DIALOGUE_CLOSED_CAUSE, DialogueExecutionOwner, dialogueLiveRoute, dialogueRouteRefusal, productionDialogueRoute, type DialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import {
   DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL,
   DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL,
@@ -640,7 +640,9 @@ describe('就这段提问… on the live route (provider-free)', () => {
       const projection = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
       expect(calls).toHaveLength(0);
       expect(await ledgerLines()).toHaveLength(0);
-      expect(projection.attempts[0]!.state).toBe('failed');
+      // Nothing was sent, so the adapter reads a transport failure; the attempt still settles as the stop or close it was (#1080 review).
+      expect(projection.attempts[0]!.state).toBe(action === 'stop' ? 'stopped' : 'interrupted');
+      expect(projection.attempts[0]!.causeCode).toBe(action === 'stop' ? null : DIALOGUE_CLOSED_CAUSE);
       expect(projection.question).toBe(QUESTION);
       expect(projection.attempts[0]!.fragments).toHaveLength(0);
     } finally {

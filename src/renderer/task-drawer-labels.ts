@@ -384,7 +384,7 @@ export const TASK_BAR_CANCEL_KEEP = '继续运行';
 /** The fallback when 取消任务 is refused for a reason the service does not word. */
 export const TASK_BAR_CANCEL_RUN_FAILED = '无法取消这项任务。';
 /** CTRL-005: what 正在取消 says beside itself until the Run has stopped — never a spinner, never 已取消 early. */
-export const TASK_BAR_CANCELLING_NOTE = '已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容';
+export const TASK_BAR_CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被中止，此后不会再发送任何内容';
 /** 取消任务 of a Run nothing was running — one waiting in the queue, or one AI7 left behind when it closed — settles at once. */
 export const TASK_BAR_CANCELLED_NOTE = '已取消这项任务；此后不会再发送任何内容';
 /** CTRL-001: what 正在暂停 says until the Run has reached its boundary — never 已暂停 early. */

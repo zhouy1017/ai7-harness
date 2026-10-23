@@ -547,7 +547,7 @@ describe('the authorization bar (S74a)', () => {
       runRecordId: 'run',
       cancelling: false,
       pausing: false,
-      cancel: { reason: null, impact: ['正在读的第 3 个阅读范围读完后停止。'] },
+      cancel: { reason: null, impact: ['停在正在读的第 3 个阅读范围。'] },
       pause: { reason: null },
       resume: null,
       redo: { reason: '先暂停，再改计划重做' },
@@ -568,10 +568,10 @@ describe('the authorization bar (S74a)', () => {
     // Confirmed: 正在取消 and its sentence until the Run has stopped, and nothing more to press (CTRL-005).
     const cancelling = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
       state: { key: 'cancelling', label: '正在取消' },
-      runControl: { ...runControl, cancelling: true, cancel: { reason: '已在取消：正在进行的这一步完成后停止', impact: [] } },
+      runControl: { ...runControl, cancelling: true, cancel: { reason: '已在取消：正在进行的这一步会被中止，此后不再发送任何内容', impact: [] } },
     }));
     expect(cancelling).toMatchObject({ status: '正在取消', note: TASK_BAR_CANCELLING_NOTE });
-    expect(TASK_BAR_CANCELLING_NOTE).toBe('已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容');
+    expect(TASK_BAR_CANCELLING_NOTE).toBe('已记下你的取消；正在进行的这一步会被中止，此后不会再发送任何内容');
     expect(names(cancelling)).toEqual(['run-link']);
     // Stopped: 已取消, never 已中断; 改计划重做 beside the way to the Run while it can be made (Issue #422, S76c).
     const stopped = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'cancelled-after-start', label: '已取消' } }));

@@ -459,7 +459,7 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
     case 'analysis-running':
       return runningReason(facts.progress);
     case 'analysis-cancelling':
-      return `你取消了这项任务；正在进行的这一步完成后停止，之后不再发送任何内容 · ${runningReason(facts.progress)}`;
+      return `你取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容 · ${runningReason(facts.progress)}`;
     case 'analysis-pausing':
       return `你暂停了这项任务；正在进行的这一步完成后停下，已完成的部分都会保存 · ${runningReason(facts.progress)}`;
     case 'analysis-paused':

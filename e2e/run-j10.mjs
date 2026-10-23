@@ -116,7 +116,7 @@ const THIRD_HOLD = 1;
 // The drawer's own words (`src/renderer/task-drawer-labels.ts` and `src/service/task-plan.ts`), pinned there by
 // their unit suites.
 const REDO_REASON = '先暂停，再改计划重做';
-const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步完成后停止，此后不会再发送任何内容';
+const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被中止，此后不会再发送任何内容';
 const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
 const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
@@ -132,10 +132,10 @@ const REDO_SUMMARY = Object.freeze([
 const REDO_GOAL_FIRST = '改计划重做：沿用已读完的 6 个阅读范围，接着读其余 2 个';
 const REDO_GOAL_THIRD = '改计划重做：沿用已读完的 2 个阅读范围，接着读其余 6 个';
 const IMPACT = Object.freeze([[
-  `正在读的第 6 个阅读范围读完后停止；其余 ${SAMPLE1_UNITS - 6} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
+  `停在正在读的第 6 个阅读范围；其余 ${SAMPLE1_UNITS - 6} 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。`,
   '已读完的 5 个阅读范围和正在读的这一个的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
   '这项分析不改稿，没有需要撤回的受控动作。',
-  '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。',
+  '正在等待的那一轮模型请求会被中止；回答已传回的照常计入，否则该阅读范围记为结果未知的缺口，不会再发。',
 ].join('')]);
 const REFLECTION_CANCELLED = '运行已按你的要求取消，运行反思未发起。';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1717,7 +1717,7 @@ async function main() {
           return impact?.querySelector('[data-cancel-impact-count]')?.textContent === '取消影响说明 · 已显示 1 / 2 条' &&
             impact.querySelectorAll('li').length === 1 && more?.textContent === '继续读取取消影响说明（已显示 1 / 2）' &&
             impact.querySelector('li').textContent.includes('已读完 4 个阅读范围') &&
-            impact.querySelector('li').textContent.includes('结果待确认 1 个') &&
+            impact.querySelector('li').textContent.includes('结果未知 1 个') &&
             impact.querySelector('li').textContent.includes('没有需要撤回的受控动作') && document.activeElement === impact.querySelector('h4');
         })()`, `cancel-paging-${attempt}-summary`);
         await pressTab(renderer);
@@ -1726,7 +1726,7 @@ async function main() {
         await waitFor(renderer, `(() => {
           const impact = document.querySelector('#task-drawer-cancel-impact');
           return impact?.querySelector('[data-cancel-impact-count]')?.textContent === '取消影响说明 · 已显示 2 / 2 条' &&
-            impact.querySelectorAll('li').length === 2 && impact.querySelectorAll('li')[1].textContent === ${JSON.stringify('第 4 个阅读范围的请求已发出、结果待确认；不会再发，在这份修订版里记为结果待确认的缺口，不记为未尝试。')} &&
+            impact.querySelectorAll('li').length === 2 && impact.querySelectorAll('li')[1].textContent === ${JSON.stringify('第 4 个阅读范围的请求已发出、结果未知；不会再发，在这份修订版里记为结果未知的单元缺口，不记为未尝试。')} &&
             !impact.querySelector('[data-task-drawer-control="page-runControl-cancel-impact"]') && document.activeElement === impact.querySelector('h4');
         })()`, `cancel-paging-${attempt}-complete`);
       }

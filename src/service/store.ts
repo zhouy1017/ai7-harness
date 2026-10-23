@@ -6102,18 +6102,17 @@ export class EditorialStore {
 
   /**
    * The editor's one approval of a prepared Review Run, naming the exact plan digest of every
-   * Task-backed category (B1). The caller then hands the Run to the drive loop. `slotBusy` is the
-   * execution owner's word that other Runs hold every place of its governor: a new approval is refused with
-   * `EXECUTION_BUSY` before anything is written (Issue #420, S74a A2; Issue #49, S14).
+   * Task-backed category (B1). The caller then hands the Run to the drive loop. An approval is recorded even while other
+   * Runs hold every place of the governor; the drive loop waits for one (#1080, ADR 0095 §2). `_slotBusy` is no longer read.
    */
   authorizeReviewRun(
     bookId: string,
     reviewRunId: string,
     approvedDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
-    slotBusy = false,
+    _slotBusy = false,
   ): ReviewWorkspaceProjection {
     return this.#reviewCall(() => {
-      this.#reviewRuns.recordAuthorization(bookId, reviewRunId, approvedDigests, slotBusy, 'now');
+      this.#reviewRuns.recordAuthorization(bookId, reviewRunId, approvedDigests, 'now');
       return this.#reviewRuns.workspace(bookId, reviewRunId);
     });
   }
@@ -6968,7 +6967,7 @@ export class EditorialStore {
   startTaskWhenOnline(input: StartTaskWhenOnlineInput): void {
     this.#assertAvailable();
     if (input.kind === 'review-run') {
-      this.#reviewCall(() => this.#reviewRuns.recordAuthorization(input.bookId, input.ref, input.planDigests, false, 'when-online'));
+      this.#reviewCall(() => this.#reviewRuns.recordAuthorization(input.bookId, input.ref, input.planDigests, 'when-online'));
       return;
     }
     const digest = input.planEnvelopeDigest;
@@ -7502,7 +7501,7 @@ export class EditorialStore {
     const now = this.#reviewRuleFacts(input.bookId, input.reviewRunId);
     const active = this.#ruleCall(() => this.#rules.activeFor(input.bookId, now.pattern));
     if (active?.version.ruleVersionId !== input.ruleVersionId || now.digest !== facts.digest || !now.allowed) return fallBack(QUICK_START_RULE_CHANGED);
-    this.#reviewCall(() => this.#reviewRuns.recordAuthorization(input.bookId, input.reviewRunId, plan.start.categoryDigests, false, 'now', input.ruleVersionId));
+    this.#reviewCall(() => this.#reviewRuns.recordAuthorization(input.bookId, input.reviewRunId, plan.start.categoryDigests, 'now', input.ruleVersionId));
     return { outcome: 'started', reasons: [], dispatch: true };
   }
 

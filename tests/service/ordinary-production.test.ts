@@ -727,6 +727,18 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver, controller.signal);
     expect(result.outcome).toBe('cancelled'); expect(resolver.resolve).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled();
   });
+  it('keeps a probe cancelled after its key resolves but before it is sent cancelled, never outcome-unknown (#1080 review)', async () => {
+    const { store } = await openProductionStore();
+    store.saveModelServiceConnection('Cancelled late probe', null, 'ready', 'openai-platform');
+    const controller = new AbortController();
+    const resolver = { resolve: vi.fn(async () => { controller.abort(); return 'public-placeholder'; }) };
+    const transport = vi.fn();
+    const result = await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: transport },
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver, controller.signal);
+    expect(resolver.resolve).toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
+    expect(result.outcome).toBe('cancelled');
+  });
 
   it('invalidates tested state on key replacement and refuses a stale selection before secret release', async () => {
     const { store } = await openProductionStore();

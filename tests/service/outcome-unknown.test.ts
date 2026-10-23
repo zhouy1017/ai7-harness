@@ -124,7 +124,7 @@ const spansOf = (store: EditorialStore, bookId: string): Array<number | null> =>
 const attentionOf = (store: EditorialStore, bookId: string) => store.inspectGlobalAttention(() => null, false).groups
   .flatMap((group) => group.items.map((entry) => [group.key, entry] as const)).find(([, entry]) => entry.book.bookId === bookId);
 const UNKNOWN_GAP = `${UNKNOWN_REASON}；${OUTCOME_UNKNOWN_NOT_RESENT}`;
-const CANCEL_LINE = '第 4 个阅读范围的请求已发出、结果待确认；不会再发，在这份修订版里记为结果待确认的缺口，不记为未尝试。';
+const CANCEL_LINE = '第 4 个阅读范围的请求已发出、结果未知；不会再发，在这份修订版里记为结果未知的单元缺口，不记为未尝试。';
 
 describe('结果待确认 over the real store', () => {
   it('completes the baseline with unit 4 as a gap, a revision and an outcome, without resending', async () => {
@@ -176,7 +176,7 @@ describe('结果待确认 over the real store', () => {
       expect(paused.runControl).toMatchObject({ resume: { reason: null }, outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: false } });
       expect(paused.runControl?.cancel.impact).toContain(CANCEL_LINE);
       // Its 改计划重做 summary counts what was read apart from unit 4 and discloses that the new Task sends unit 4 again.
-      expect(paused.redo?.summary).toContain('这项任务会在这里停下并取消；已读完的 4 个阅读范围（另有 1 个结果待确认）保留在一份新的结果集修订版里，没读到的记为未尝试。');
+      expect(paused.redo?.summary).toContain('这项任务会在这里停下并取消；已读完的 4 个阅读范围（另有 1 个结果未知）保留在一份新的结果集修订版里，没读到的记为未尝试。');
       expect(paused.redo?.summary).toContain(resendDisclosure([4]));
       // 续行, then 暂停 before it reaches its first range: the early pause keeps unit 4 where it was.
       execution.admitAndDispatch(runRecordId, ledger, { resume: true });

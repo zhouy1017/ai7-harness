@@ -247,12 +247,12 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
           waiting: [{ unitOrdinal: 6, answered: false }, { unitOrdinal: 7, answered: true }], unconfirmed: [4, 5],
         });
         const summary = impact[0]!;
-        for (const count of ['已读完 3 个', '等你回答 1 个', '你已回答但尚未续行 1 个', '结果待确认 2 个', '未尝试 3 个']) expect(summary).toContain(count);
+        for (const count of ['已读完 3 个', '等你回答 1 个', '你已回答但尚未续行 1 个', '结果未知 2 个', '未尝试 3 个']) expect(summary).toContain(count);
         expect(summary).toContain(CANCELLATION_NO_EFFECTS);
         expect(summary).toContain(bindingHolds ? '新的结果集修订版' : '不会形成结果集修订版');
         expect(impact.slice(1)).toHaveLength(4);
         for (const ordinal of [4, 5, 6, 7]) expect(impact.slice(1).filter((line) => line.startsWith(`第 ${ordinal} 个阅读范围`))).toHaveLength(1);
-        expect(impact.slice(1).filter((line) => line.includes('结果待确认'))).toHaveLength(2);
+        expect(impact.slice(1).filter((line) => line.includes('结果未知'))).toHaveLength(2);
         expect(impact.every((line) => Buffer.byteLength(line) < 2048)).toBe(true);
       }
     });
@@ -265,7 +265,7 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
         expect(impact[0]).toContain(CANCELLATION_NO_EFFECTS);
         expect(impact[0]).toContain('修订版');
         expect(impact[0]).toContain('不再发送任何内容');
-        expect(impact[0]).toContain('等你回答 0 个，你已回答但尚未续行 0 个，结果待确认 0 个');
+        expect(impact[0]).toContain('等你回答 0 个，你已回答但尚未续行 0 个，结果未知 0 个');
         expect(impact[0]).toContain(unitsSettled === null ? '未尝试数量无法核对' : `未尝试 ${8 - unitsSettled} 个`);
       }
     });
@@ -284,17 +284,17 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
       unitsSettled: 5, unitsTotal: 10, waiting: [{ unitOrdinal: 6, answered: false }, { unitOrdinal: 7, answered: true }], unconfirmed: [4],
     });
     expect(between[0]).toContain('在这两个阅读范围之间停止；其余 3 个阅读范围和');
-    expect(between[0]).toContain('已读完 4 个阅读范围，等你回答 1 个，你已回答但尚未续行 1 个，结果待确认 1 个，未尝试 3 个');
+    expect(between[0]).toContain('已读完 4 个阅读范围，等你回答 1 个，你已回答但尚未续行 1 个，结果未知 1 个，未尝试 3 个');
     expect(between.slice(1)).toHaveLength(3);
     expect(between[0]).not.toContain('这项任务已经停下');
     for (const stage of ['cross-unit-reduction', 'assurance-sampling', 'run-report-reflection'] as const) {
       const afterUnits = baselineCancellationImpact(run('executing', progress({ stage, unitsSettled: 8, currentUnitOrdinal: null })), null, {
         unitsSettled: 8, unitsTotal: 8, waiting: [], unconfirmed: [4],
       });
-      expect(afterUnits[0]).toContain('完成后停止，之后的步骤都不再进行');
-      expect(afterUnits[0]).toContain('已读完 7 个阅读范围，等你回答 0 个，你已回答但尚未续行 0 个，结果待确认 1 个，未尝试 0 个');
+      expect(afterUnits[0]).toContain('会被中止，回答已传回的照常计入；之后的步骤都不再进行');
+      expect(afterUnits[0]).toContain('已读完 7 个阅读范围，等你回答 0 个，你已回答但尚未续行 0 个，结果未知 1 个，未尝试 0 个');
       expect(afterUnits[0]).toContain(CANCELLATION_NO_EFFECTS);
-      expect(afterUnits.slice(1)).toEqual(['第 4 个阅读范围的请求已发出、结果待确认；不会再发，在这份修订版里记为结果待确认的缺口，不记为未尝试。']);
+      expect(afterUnits.slice(1)).toEqual(['第 4 个阅读范围的请求已发出、结果未知；不会再发，在这份修订版里记为结果未知的单元缺口，不记为未尝试。']);
     }
   });
 
@@ -307,16 +307,16 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
     // Carrying nothing, it never says the Run read nothing: what it read may be what this launch could not carry.
     expect(redoGoalSentence(null)).toBe('改计划重做：不沿用上一次运行的结果，这次从头读');
     expect(redoGoalSentence({ reused: 0, recomputed: 8, invalidated: 8, bypassed: 0 })).toBe('改计划重做：不沿用上一次运行的结果，这次从头读');
-    expect(RUN_CONTROL_CANCELLING_REASON).toBe('已在取消：正在进行的这一步完成后停止');
+    expect(RUN_CONTROL_CANCELLING_REASON).toBe('已在取消：正在进行的这一步会被中止，此后不再发送任何内容');
     expect(CANCELLATION_NO_EFFECTS).toBe('这项分析不改稿，没有需要撤回的受控动作。');
   });
 
   it('names the unit in flight, the ones left, what is kept, and the one answer not back yet', () => {
     expect(baselineCancellationImpact(run('executing', progress()))).toEqual([[
-      '正在读的第 3 个阅读范围读完后停止；其余 5 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '停在正在读的第 3 个阅读范围；其余 5 个阅读范围和之后的归纳、抽样都不再进行，不再发送任何内容。',
       '已读完的 2 个阅读范围和正在读的这一个的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
       CANCELLATION_NO_EFFECTS,
-      '正在等待的那一轮模型回答不会被中途切断，它的结果照常计入。',
+      '正在等待的那一轮模型请求会被中止；回答已传回的照常计入，否则该阅读范围记为结果未知的缺口，不会再发。',
     ].join('')]);
   });
 
@@ -324,7 +324,7 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
     // Units 3 and 7 edited, then 同步到当前稿件: two ranges read again, six reused.
     const impact = baselineCancellationImpact(run('executing', progress({ unitsTotal: 2, unitsSettled: 1, currentUnitOrdinal: 7 })), { manuscriptUnits: 8, reusedUnits: 6 });
     expect(impact[0]).toContain([
-      '正在读的第 7 个阅读范围读完后停止；之后的归纳、抽样都不再进行，不再发送任何内容。',
+      '停在正在读的第 7 个阅读范围；之后的归纳、抽样都不再进行，不再发送任何内容。',
       '已读完的 1 个阅读范围和正在读的这一个的结果与缺口，连同沿用上一份分析的 6 个阅读范围，会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。',
     ].join(''));
     expect(impact[0]).toContain(CANCELLATION_NO_EFFECTS);
@@ -340,7 +340,7 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
 
   it('stops a later step once it completes, and a Run not yet reading before anything is sent', () => {
     expect(baselineCancellationImpact(run('executing', progress({ stage: 'assurance-sampling', unitsSettled: 8, currentUnitOrdinal: null })))[0])
-      .toContain('正在进行的保证抽样完成后停止，之后的步骤都不再进行，不再发送任何内容。');
+      .toContain('正在进行的保证抽样会被中止，回答已传回的照常计入；之后的步骤都不再进行，不再发送任何内容。');
     expect(baselineCancellationImpact(run('admitted', null))).toEqual([[
       '这项任务还没有开始阅读；取消后不会发送任何内容，也不会形成结果集修订版。',
       CANCELLATION_NO_EFFECTS,
@@ -416,7 +416,7 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
     ]);
     // Every range it read asked: its gaps are its revision, one of them answered but not yet gone on by.
     const waiting = baselineCancellationImpact(run('paused', null), null, { unitsSettled: 0, unitsTotal: 4, waiting: [{ unitOrdinal: 3, answered: true }, { unitOrdinal: 7, answered: false }] });
-    expect(waiting[0]).toContain('已读完 0 个阅读范围，等你回答 1 个，你已回答但尚未续行 1 个，结果待确认 0 个，未尝试 2 个');
+    expect(waiting[0]).toContain('已读完 0 个阅读范围，等你回答 1 个，你已回答但尚未续行 1 个，结果未知 0 个，未尝试 2 个');
     expect(waiting.slice(1)).toEqual([
       '第 3 个阅读范围你已回答，但还没有按回答接着做；取消后不再重试，在这份修订版里记为缺口。',
       '第 7 个阅读范围在等你的回答；取消后不再重试，在这份修订版里记为缺口。',
