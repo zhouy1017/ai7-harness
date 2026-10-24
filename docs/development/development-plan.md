@@ -1,4 +1,4 @@
-# AI7 development plan
+# AI7 development plan — 0.2.0 / 0.3.0 / 1.0.0
 
 This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Its current baseline is `dev@be7babafce795cde7eb4bb5a83ae1aab023b1c9e`, the integration of [#1051](https://github.com/zhouy1017/ai7-harness/pull/1051) after the Phase 0 refresh [#1037](https://github.com/zhouy1017/ai7-harness/pull/1037) and the bounded Wave 19 checkpoint [#1042](https://github.com/zhouy1017/ai7-harness/pull/1042). The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains the boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make planned features available.
 
