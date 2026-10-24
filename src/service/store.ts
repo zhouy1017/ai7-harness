@@ -2,7 +2,7 @@ import { backgroundEnrollmentKinds } from './analysis/live-kind-admission.js';
 import { executionBackgroundShare } from './analysis/execution.js';
 import { initializeProcedureDefinitionSchema } from './procedures/definition-store.js';
 import { EditorialLearningLedger, initializeEditorialLearningSchema } from './learning/ledger.js';
-import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection } from '../shared/protocol/learning.js';
+import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
 import { dialogueQuestionDigest } from './dialogue/contract.js';
 import { fragmentsText } from './dialogue/fragments.js';
 import { globalAgentDialogueProjection } from './dialogue/global-agent-session.js';
@@ -13204,12 +13204,16 @@ export class EditorialStore {
     return this.#learningCall(() => {
       requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
       if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-      return readEditQualitySignals(this.#authority, bookId);
+      return { ...readEditQualitySignals(this.#authority, bookId), preferenceAdoption: new EditorialLearningLedger(this.#authority).adoption(bookId) };
     });
   }
 
   inspectEditorialLearning(input: InspectEditorialLearningInput): EditorialLearningProjection {
     return this.#learningCall(() => new EditorialLearningLedger(this.#authority).inspect(input));
+  }
+
+  recordLearningReasonAsk(input: LearningReasonAskInput, frequency: import('../shared/protocol/learning.js').LearningReasonAskFrequency): LearningReasonAskProjection | null {
+    return this.#learningCall(() => this.#transaction(this.#authority, () => new EditorialLearningLedger(this.#authority).reasonAsk(input, frequency)));
   }
 
   changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection {

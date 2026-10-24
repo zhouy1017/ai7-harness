@@ -2159,22 +2159,17 @@ async function main() {
     }
 
     at('decision-feedback-dismiss');
-    // 拒绝 asks why once, under 你的处理: three reasons fitted to a rejection, none chosen, `其他 / 自行输入` beside them, and
-    // `不说明`. 不说明 records no more than that, and closing and reopening the card never asks again.
+    // F-05 part 2a: the persisted off setting suppresses every proactive ask; manual reasons remain reachable.
+    await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'off'})`);
     await openMarkCard(renderer, 'change-suggestion', rejectBlock, 'decision-reject-card');
     await assertRenderer(renderer, `window.__j11.act('reject')`, 'decision-reject');
-    const asked = await readDecision(renderer, (card) => card.prompt?.mode === 'prompt', 'decision-reject-asked');
-    requireJourney(asked.state === 'none' && asked.prompt.question === '为什么拒绝？（可选）' &&
-      JSON.stringify(asked.prompt.chips) === JSON.stringify([['证据不足', false], ['方向不合适', false], ['保持作者风格', false]]) &&
-      asked.prompt.own === '其他 / 自行输入' && asked.prompt.end === '不说明' && asked.reason === null && asked.later === null, 'decision-reject-asked-words', asked);
-    await assertRenderer(renderer, `window.__j11.act('reason-dismiss')`, 'decision-dismiss');
-    await waitFor(renderer, `${status} === '已记下：这次不说明原因。'`, 'decision-dismiss-status');
-    const dismissed = await readDecision(renderer, (card) => card.state === 'dismissed', 'decision-dismissed');
+    const dismissed = await readDecision(renderer, (card) => card.state === 'none' && card.later === '补充原因…', 'decision-dismissed');
+    await assertRenderer(renderer, `!document.querySelector('[data-learning-reason-ask]')`, 'learning-off-no-ask-after-rejection');
     requireJourney(dismissed.prompt === null && dismissed.reason === null && dismissed.later === '补充原因…', 'decision-dismissed-words', dismissed);
     await pressEscape(renderer);
     await waitFor(renderer, `window.__j11.card() === null`, 'decision-dismissed-closed');
     await openMarkCard(renderer, 'change-suggestion', rejectBlock, 'decision-dismissed-reopen');
-    const reopenedDismissed = await readDecision(renderer, (card) => card.state === 'dismissed', 'decision-dismissed-reopened');
+    const reopenedDismissed = await readDecision(renderer, (card) => card.state === 'none', 'decision-dismissed-reopened');
     requireJourney(reopenedDismissed.prompt === null && reopenedDismissed.later === '补充原因…', 'decision-dismissed-not-asked-again', reopenedDismissed);
 
     at('decision-feedback-own-accord');
@@ -2211,9 +2206,9 @@ async function main() {
     // nothing: reopened, the card offers 补充原因… and the service holds no entry after the decision.
     await openMarkCard(renderer, 'change-suggestion', applyBlock, 'decision-apply-card');
     await assertRenderer(renderer, `window.__j11.act('accept-and-apply')`, 'decision-accept-and-apply');
-    const applied = await readDecision(renderer, (card) => card.applied && card.prompt?.mode === 'prompt', 'decision-applied-asked');
-    requireJourney(applied.state === 'none' && applied.prompt.question === '为什么接受？（可选）' &&
-      JSON.stringify(applied.prompt.chips) === JSON.stringify([['语言更准确', false], ['保持作者风格', false]]) && applied.prompt.end === '不说明', 'decision-applied-asked-words', applied);
+    const applied = await readDecision(renderer, (card) => card.applied && card.later === '补充原因…', 'decision-applied-asked');
+    requireJourney(applied.state === 'none' && applied.prompt === null, 'decision-applied-asked-words', applied);
+    await assertRenderer(renderer, `!document.querySelector('[data-learning-reason-ask]')`, 'learning-off-no-ask-after-apply');
     await pressEscape(renderer);
     await waitFor(renderer, `window.__j11.card() === null`, 'decision-applied-moved-on');
     await openMarkCard(renderer, 'change-suggestion', applyBlock, 'decision-applied-reopen');
@@ -3255,6 +3250,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-learning-enabled]')?.checked === false && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'editorial-memory-switch-off-saved');
 
     at('learning-ask-frequency');
+    await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'occasionally'})`);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'learning-frequency-settings');
     await waitFor(renderer, `document.querySelector('[data-settings-group="editorial"] [data-learning-ask-frequency]')?.disabled === false`, 'learning-frequency-ready');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-learning-ask-frequency]'); return select.value==='occasionally' && Array.from(select.options,option=>option.textContent).join('/')==='经常/偶尔/关闭'; })()`, 'learning-frequency-default');

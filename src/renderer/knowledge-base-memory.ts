@@ -10,6 +10,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLEl
 /** What the editor did, in the words of the decision itself (Issue #1082). */
 const SIGNAL_KIND_LABELS: Readonly<Record<LearningSignal['kind'], string>> = {
   accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝并说明原因', 'review-finding-ignored': '忽略并说明',
+  'proactive-reason': '学习询问原因',
 };
 
 /** A signal the opt-out default admitted is never shown as the editor's own 纳入 choice (ADR 0094 §3; the policy's rule 2). */

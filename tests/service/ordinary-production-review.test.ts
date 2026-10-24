@@ -1,4 +1,8 @@
 import { afterEach, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { renderReportExport } from '../../src/service/report-export.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
@@ -36,6 +40,7 @@ async function productionReview(
   answer: (category: string, ordinal: number, prior: number) => 'valid' | 'invalid' | 'stall' | 'tools',
   project: (policy: LaunchPolicyProjection) => LaunchPolicyProjection = (policy) => policy,
   useMaterial = false,
+  usePreferences = false,
 ) {
   roots = await createServiceTestRoots('ai7-production-review-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
@@ -103,6 +108,8 @@ async function productionReview(
   driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   const book = await importSample1Book(store, roots.codeRoot, '合成生产审阅');
   await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+  if (usePreferences) store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
+    categoryId: 'typos-and-usage', text: '统一编辑用语，保留有意的节奏。', effect: 'guide' });
   const materialIds = useMaterial ? [await sample1DerivedLibraryItem(store, roots, book)] : [];
   let work = store.createReviewRunPreparationWork(book.bookId, [...categories],
     { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy, null, materialIds);
@@ -115,6 +122,42 @@ async function productionReview(
 }
 
 const typosDefinition = () => reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+
+it('sends only selected preference lines, records exact unit/finding versions, exports them and measures adoption from decisions', async () => {
+  const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage', 'publication-risk'],
+    (category, ordinal, prior) => category === 'typos-and-usage' && ordinal === 1 && prior === 0 ? 'tools' : 'valid', (policy) => policy, false, true);
+  const result = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
+  const finding = result.findings.find((entry) => entry.categoryId === 'typos-and-usage')!;
+  expect(finding).toBeDefined();
+  expect(finding.referencedRuleVersions).toHaveLength(1);
+  const rule = finding.referencedRuleVersions![0]!;
+  expect(rule.text).toBe('统一编辑用语，保留有意的节奏。');
+  expect(requests.filter((entry) => entry.category === 'typos-and-usage').every((entry) => entry.body.includes(rule.text))).toBe(true);
+  expect(requests.filter((entry) => entry.category === 'publication-risk').every((entry) => !entry.body.includes(rule.text))).toBe(true);
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    const records = db.prepare(`SELECT u.canonical_json FROM analysis_unit_results u JOIN analysis_result_set_revisions r ON r.revision_id = u.revision_id
+      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE t.kind = 'editorial-review/typos-and-usage' AND u.state = 'closed'`).all();
+    expect(records.length).toBeGreaterThan(0);
+    expect(records.every((row) => (JSON.parse(String(row.canonical_json)) as { referencedRuleVersions: unknown[] }).referencedRuleVersions.length === 1)).toBe(true);
+  } finally { db.close(); }
+  const report = opened.generateReviewReport(bookId, reviewRunId).run!.report!;
+  for (const format of ['markdown', 'pdf', 'docx'] as const) {
+    const output = renderReportExport({ bookTitle: '合成生产审阅', version: report.version, generatedAt: report.generatedAt, record: report.record }, format, { emit: true });
+    expect(output.bytes?.byteLength).toBeGreaterThan(0);
+    if (format !== 'docx') {
+      const text = new TextDecoder().decode(output.bytes!);
+      expect(text).toContain('已参考规则'); expect(text).toContain(rule.versionId); expect(text.replaceAll('\\_', '_')).toContain(finding.findingId);
+    }
+  }
+  const before = opened.inspectEditQualitySignals(bookId).preferenceAdoption!.find((entry) => entry.versionId === rule.versionId)!;
+  expect(before).toMatchObject({ referenced: { findings: 1, accepted: 0, rate: 0 }, unreferenced: { findings: 1, accepted: 0 }, mostlyRejected: false });
+  opened.recordChangeSuggestionDecision({ manuscriptId: result.manuscript.manuscriptId, branchId: result.manuscript.branchId,
+    windowStartBlockId: finding.blockId, markId: finding.markId!, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: null });
+  const after = opened.inspectEditQualitySignals(bookId).preferenceAdoption!.find((entry) => entry.versionId === rule.versionId)!;
+  expect(after).toMatchObject({ referenced: { findings: 1, accepted: 0, rejected: 1, rate: 0 }, mostlyRejected: true });
+  expect(opened.inspectHouseReviewPreference().current?.versionId).toBe(rule.versionId);
+}, 60_000);
 
 it('reconstructs a tool-aware material review from its frozen plan and retains its material wrapper', async () => {
   const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage'],

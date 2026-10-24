@@ -371,14 +371,22 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
   const body = document.createElement('p');
   body.setAttribute('role', 'status');
   let generation = 0;
+  const adoption = document.createElement('div'); adoption.dataset['preferenceAdoption'] = '';
   const load = async () => {
     const current = ++generation;
     const metric = await api.inspectEditQualitySignals({ bookId: select.value || null });
     if (current !== generation) return;
     body.textContent = `建议保留率：${metric.applied === 0 ? '暂无已应用的判定' : `${metric.surviving}/${metric.applied}（${Math.round(metric.surviving / metric.applied * 100)}%）`} · 按类别加权的改写量：${metric.editVolume} 字符单位`;
     body.dataset['lineageDigest'] = metric.lineageDigest;
+    adoption.replaceChildren(el('h4', undefined, '已参考规则的采纳率'));
+    const share = (count: { accepted: number; findings: number; rate: number | null }) => count.rate === null ? '暂无发现' : `${count.accepted}/${count.findings}（${Math.round(count.rate * 100)}%）`;
+    if (!metric.preferenceAdoption?.length) adoption.append(el('p', 'field-note', '尚无可比较的审阅发现。'));
+    for (const row of metric.preferenceAdoption ?? []) {
+      adoption.append(el('p', 'field-note', `${row.bookTitle} · ${row.versionId === null ? '全部规则' : `本社审阅偏好 v${row.ordinal} · ${row.versionId}`}：已参考 ${share(row.referenced)}；未参考 ${share(row.unreferenced)}${row.mostlyRejected ? ' · 参考后的发现多数被拒绝，请复核这条规则。' : ''}`));
+    }
+    adoption.append(el('p', 'field-note', '采纳数包含接受、修改后接受及已应用；分母包含尚未处理的发现。此比较不证明规则导致采纳。'));
   };
   select.addEventListener('change', () => void load().catch(() => { body.textContent = '无法读取编辑改动质量信号。'; }));
-  section.append(heading, select, more, body); root.append(section);
+  section.append(heading, select, more, body, adoption); root.append(section);
   await Promise.all([load(), loadBooks()]);
 }

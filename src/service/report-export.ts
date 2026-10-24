@@ -76,7 +76,9 @@ function layoutOf(input: ReportExportInput): ReportLayout {
     },
     appendix: {
       title: record.appendix.title,
-      lines: [reviewReportConfigurationLine(record.appendix.configuration.version), ...record.appendix.categories.map(reviewReportAppendixLine)],
+      lines: [reviewReportConfigurationLine(record.appendix.configuration.version), ...record.appendix.categories.map(reviewReportAppendixLine),
+        ...(record.appendix.referencedRules ?? []).flatMap((finding) => finding.rules.map((rule) =>
+          `发现 ${finding.findingId} · 已参考规则：${rule.text}（本社审阅偏好 v${rule.ordinal} · ${rule.versionId} · 行 ${rule.lineIndex + 1}）`))],
     },
   };
 }

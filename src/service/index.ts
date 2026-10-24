@@ -869,6 +869,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
     case 'inspectEditorialLearning':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEditorialLearning(request.input) };
+    case 'recordLearningReasonAsk':
+      return { id: request.id, ok: true, op: request.op, result: store.recordLearningReasonAsk(request.input, request.input.frequency) };
     case 'changeEditorialLearning':
       return { id: request.id, ok: true, op: request.op, result: store.changeEditorialLearning(request.input) };
     case 'createEditorialMemory':

@@ -23,6 +23,7 @@ import {
   knowledgeMenuLabel,
 } from './series-knowledge-labels.js';
 import type { BoundedEditor } from './editor.js';
+import { learningReasonAskCard } from './analysis-feedback.js';
 import type {
   EditorClipboardCommand,
   EditorialMarkAnchorProjection,
@@ -134,7 +135,7 @@ interface MountOptions {
   api: Pick<
     RendererApi,
     'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
-    'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
+    'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'recordLearningReasonAsk' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
     'inspectProposalWorkspace' | 'saveProposalDecisionDraft' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark'
   >;
   /**
@@ -963,6 +964,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-label', `${MARK_KIND_LABELS[card.kind]}浮卡`);
     panel.dataset['markCard'] = card.markId;
+    panel.dataset['learningDecisionId'] = card.suggestion?.decision?.decisionId ?? '';
     panel.dataset['markKind'] = card.kind;
     panel.dataset['markAnchor'] = card.anchorState;
 
@@ -1367,9 +1369,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   /** A decision just recorded, and not already carrying a reason, is asked why once (FDBK-001, MARK-005). */
   function notePrompt(before: string | null, after: EditorialMarkCardProjection | null): void {
     const decision = after?.suggestion?.decision ?? null;
-    promptFor = after !== null && decision !== null && decision.decisionId !== before && decision.reasonState === 'none'
-      ? { markId: after.markId, decisionId: decision.decisionId, mode: 'prompt' }
-      : null;
+    promptFor = null;
+    if (after === null || decision === null || decision.decisionId === before) return;
+    // The decision is already complete. A slow or failed local ask cannot delay repaint, Apply, or another decision.
+    void api.recordLearningReasonAsk({ action: 'offer', decisionId: decision.decisionId }).then((ask) => {
+      if (ask === null || openCardId !== after.markId || destroyed || floating?.dataset['learningDecisionId'] !== decision.decisionId) return;
+      const region = floating?.querySelector<HTMLElement>('[data-mark-region="disposition"]');
+      if (region?.querySelector('[data-learning-reason-ask]') === null) region.append(learningReasonAskCard(ask, api));
+    }).catch(() => {});
   }
 
   async function decide(

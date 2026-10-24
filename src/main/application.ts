@@ -4406,6 +4406,14 @@ function registerRendererHandlers(
     requireAuthority();
     return service.call('inspectEditorialLearning', input);
   }));
+  ipcMain.handle(IPC_CHANNELS.recordLearningReasonAsk, (event, input: Parameters<RendererApi['recordLearningReasonAsk']>[0]) => envelope(async () => {
+    requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+    return serializeEffect(async () => {
+      requireAuthority();
+      return service.call('recordLearningReasonAsk', { ...input, frequency: preferences.read().values['learning.askFrequency'] });
+    });
+  }));
   ipcMain.handle(IPC_CHANNELS.changeEditorialLearning, (event, input: ServiceOperationMap['changeEditorialLearning']['input']) => envelope(async () => {
     requireSender(event);
     requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');

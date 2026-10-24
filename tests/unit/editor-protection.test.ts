@@ -161,8 +161,8 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
 });
 
 describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
-  it('is protocol 170 for Global Agent sending disclosure', () => {
-    expect(SERVICE_PROTOCOL_VERSION).toBe(170);
+  it('is protocol 171 for preference retrieval, referenced-rule disclosure and learning asks', () => {
+    expect(SERVICE_PROTOCOL_VERSION).toBe(171);
   });
 
   it('arms only J-02\'s `armed` launch in the development-ci scope and refuses every other present control', () => {

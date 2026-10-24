@@ -4,6 +4,7 @@ import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js
 import { REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 import { HouseReviewPreferenceLedger, housePreferenceLabel } from '../house-review-preference.js';
 import { LearningEligibilityError } from '../learning-eligibility.js';
+import type { ReferencedRuleVersion } from '../../shared/protocol/learning.js';
 import type { HouseReviewPreferenceUse, LearningLedgerMaterialKind, ReviewRunInfluenceProjection } from '../../shared/protocol.js';
 import { randomUUID } from 'node:crypto';
 import { clarificationPlanBaseDigest } from '../provider/clarification-contract.js';
@@ -748,6 +749,7 @@ interface MaterializedFinding {
   /** The 批注's words on the manuscript; a 修改建议 carries its note as the rationale instead. */
   readonly body: string;
   readonly basis: ReadonlyArray<EditorialMarkBasisProjection>;
+  readonly referencedRuleVersions?: ReadonlyArray<ReferencedRuleVersion>;
 }
 
 /** One finding row read back with the mark it names and everything its status is derived from. */
@@ -776,6 +778,8 @@ interface FindingView {
   readonly toGrapheme: number;
   readonly quote: string;
   readonly note: string;
+  readonly referencedRuleVersions: ReadonlyArray<ReferencedRuleVersion>;
+  readonly learningDecisionId: string | null;
   readonly replacement: string | null;
   readonly clauseRef: string | null;
   readonly stateLine: string | null;
@@ -2394,6 +2398,18 @@ export class ReviewRunStore {
       requireReview(blockText !== undefined, 'REVIEW_RECORD_INVALID', '发现所在的内容块不在该修订版中。');
       return sliceGraphemes(blockText, fromGrapheme, toGrapheme);
     };
+    const references = new Map<number, ReadonlyArray<ReferencedRuleVersion>>();
+    for (const row of this.#db.prepare('SELECT * FROM analysis_unit_results WHERE revision_id = ? AND state = ?').all(revision.revisionId, 'closed') as SqlRow[]) {
+      const unit = recordOf(text(row.canonical_json), text(row.sha256));
+      references.set(integer(row.unit_ordinal), (unit.referencedRuleVersions ?? []) as ReadonlyArray<ReferencedRuleVersion>);
+    }
+    const rulesOf = (finding: { unitOrdinal: number; mergedFrom: ReadonlyArray<{ unitOrdinal: number }> }): ReferencedRuleVersion[] => {
+      const unique = new Map<string, ReferencedRuleVersion>();
+      for (const ordinal of [finding.unitOrdinal, ...finding.mergedFrom.map((entry) => entry.unitOrdinal)]) {
+        for (const rule of references.get(ordinal) ?? []) unique.set(`${rule.versionId}/${rule.lineIndex}`, rule);
+      }
+      return [...unique.values()];
+    };
     let findings: MaterializedFinding[];
     let excludedCount: number;
     let excluded: ReviewExcludedFindingProjection[] = [];
@@ -2437,6 +2453,7 @@ export class ReviewRunStore {
         stateLine: unverified ? '未联网核查' : null,
         body: `${disclosure}${category.entry.riskPointsOnly ? RISK_POINT_PREFIX : ''}${finding.note}`,
         basis: this.#clauseBasis(category.entry, finding.clauseId),
+        referencedRuleVersions: rulesOf(finding),
       }));
       excluded = review.excluded.filter((finding) => recomputed.has(finding.unitOrdinal)).map((finding) => ({
         categoryId: category.categoryId, categoryLabel: category.entry.label, unitOrdinal: finding.unitOrdinal,
@@ -2652,6 +2669,7 @@ export class ReviewRunStore {
             clauseId: finding.clauseId,
             stateLine: finding.stateLine,
             basis: finding.basis,
+            referencedRuleVersions: finding.referencedRuleVersions ?? [],
             markId,
             carried: carried[index] !== null,
             anchor,
@@ -2832,6 +2850,9 @@ export class ReviewRunStore {
           locationLabel: finding.blockPosition === null ? '内容块已不在当前稿件中' : `内容块 ${finding.blockPosition}`,
         })),
       });
+      const referencedRules = view.findings.filter((finding) => finding.referencedRuleVersions.length > 0)
+        .map((finding) => ({ findingId: finding.findingId, rules: finding.referencedRuleVersions }));
+      if (referencedRules.length > 0) record.appendix.referencedRules = referencedRules;
       const canonical = canonicalRecord(record);
       this.#db.prepare('INSERT INTO review_reports(report_id, review_run_id, version, generated_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
         .run(randomUUID(), reviewRunId, version, generatedAt, canonical.json, canonical.digest);
@@ -3958,6 +3979,8 @@ export class ReviewRunStore {
   #findingViews(reviewRunId: string, branchId: string, findingId: string | null): FindingView[] {
     const rows = this.#db.prepare(
       `SELECT f.*, em.kind mark_kind, em.status mark_status, em.anchor_state mark_anchor, em.from_grapheme mark_from, em.to_grapheme mark_to,
+              COALESCE((SELECT d.decision_id FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id WHERE i.mark_id = f.mark_id ORDER BY d.ordinal DESC LIMIT 1),
+                (SELECT d.disposition_id FROM review_finding_dispositions d WHERE d.review_run_id = f.review_run_id AND d.finding_id = f.finding_id ORDER BY d.ordinal DESC LIMIT 1)) learning_decision_id,
               (SELECT d.disposition FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id
                 WHERE i.mark_id = f.mark_id ORDER BY d.ordinal DESC LIMIT 1) decision,
               (SELECT c.kind FROM editorial_marks c WHERE c.converted_from_mark_id = f.mark_id ORDER BY c.created_at LIMIT 1) converted_to,
@@ -4000,6 +4023,8 @@ export class ReviewRunStore {
         toGrapheme: markId === null || mark.to === null ? integer(row.to_grapheme) : mark.to,
         quote: text(row.quote),
         note: text(row.note),
+        referencedRuleVersions: (recordOf(text(row.canonical_json), text(row.sha256)).referencedRuleVersions ?? []) as ReadonlyArray<ReferencedRuleVersion>,
+        learningDecisionId: nullableText(row.learning_decision_id),
         replacement: nullableText(row.replacement),
         clauseRef: nullableText(row.clause_ref),
         stateLine: nullableText(row.state_line),
@@ -4136,6 +4161,8 @@ export class ReviewRunStore {
         note: finding.note,
         replacement: finding.replacement,
         clauseRefs: clauseRefs(finding.categoryId, finding.clauseRef),
+        referencedRuleVersions: finding.referencedRuleVersions,
+        learningDecisionId: finding.learningDecisionId,
         stateLine: finding.stateLine,
         markId: finding.markId,
         markStatus: finding.markStatus,

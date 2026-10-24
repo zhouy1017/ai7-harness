@@ -119,6 +119,7 @@ import type {
   DeactivateEditorialMemoryInput,
   EditorialLearningProjection,
   InspectEditorialLearningInput,
+  LearningReasonAskInput, LearningReasonAskProjection, PreferenceAdoptionProjection, ReferencedRuleVersion,
 } from './protocol/learning.js';
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
@@ -127,7 +128,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 170 as const;
+export const SERVICE_PROTOCOL_VERSION = 171 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -416,6 +417,7 @@ export const IPC_CHANNELS = {
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
   inspectEditorialLearning: 'ai7:learning:inspect-editorial-learning',
+  recordLearningReasonAsk: 'ai7:learning:record-reason-ask',
   changeEditorialLearning: 'ai7:learning:change-editorial-learning',
   createEditorialMemory: 'ai7:learning:create-editorial-memory',
   deactivateEditorialMemory: 'ai7:learning:deactivate-editorial-memory',
@@ -6816,6 +6818,9 @@ export interface ReviewFindingProjection {
   chapterTitle: string | null;
   quote: string;
   note: string;
+  referencedRuleVersions?: ReadonlyArray<ReferencedRuleVersion>;
+  /** The latest local decision's identity, for its optional learning ask. */
+  learningDecisionId?: string | null;
   /** What a 修改建议 proposes in place of the quotation (empty proposes deleting it); `null` for a 批注. */
   replacement: string | null;
   clauseRefs: ReadonlyArray<{ documentTitle: string; clauseId: string; text: string }>;
@@ -6869,6 +6874,8 @@ export interface HouseReviewPreferenceUse {
   materialSetDigest: string;
   sourceCount: number;
   lines: ReadonlyArray<string>;
+  /** Absent on /1–/3 pins. Indices identify whole lines of the exact version, in retrieval rank order. */
+  selection?: { lineIndexes: ReadonlyArray<number> };
 }
 export interface HouseReviewPreferenceVersion {
   schema: 'ai7.house-review-preference/1';
@@ -6882,6 +6889,9 @@ export interface HouseReviewPreferenceVersion {
   sourceCount: number;
   lines: ReadonlyArray<{
     text: string; categoryId: string; bookId: string | null;
+    /** Optional recorded retrieval facts; older preference records have no confidence estimate. */
+    confidence?: number;
+    recordedAt?: string;
     sources: ReadonlyArray<{ bookId: string; bookTitle: string; materialDigest: string; decisionId: string; eligibilityDecisionId: string; qualityLineageDigest: string;
       attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> } }>;
   }>;
@@ -6898,6 +6908,7 @@ export interface EditQualitySignalsProjection {
   surviving: number;
   editVolume: number;
   lineageDigest: string;
+  preferenceAdoption?: ReadonlyArray<PreferenceAdoptionProjection>;
   categories: ReadonlyArray<{ categoryId: string; applied: number; surviving: number; editVolume: number; lineageDigest: string }>;
 }
 
@@ -6944,6 +6955,7 @@ export interface ReviewReportRecord {
   };
   appendix: {
     title: '附录';
+    referencedRules?: ReadonlyArray<{ findingId: string; rules: ReadonlyArray<ReferencedRuleVersion> }>;
     configuration: { schema: string; version: string; digest: string };
     categories: ReadonlyArray<{
       categoryId: string;
@@ -12201,6 +12213,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
   inspectEditorialLearning: { input: InspectEditorialLearningInput; output: EditorialLearningProjection };
+  recordLearningReasonAsk: { input: LearningReasonAskInput & { frequency: import('./preferences.js').LearningAskFrequency }; output: LearningReasonAskProjection | null };
   changeEditorialLearning: { input: ChangeEditorialLearningInput; output: EditorialLearningProjection };
   createEditorialMemory: { input: CreateEditorialMemoryInput; output: EditorialLearningProjection };
   deactivateEditorialMemory: { input: DeactivateEditorialMemoryInput; output: EditorialLearningProjection };
@@ -12798,6 +12811,7 @@ export interface RendererApi extends GlobalAgentRendererApi {
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): Promise<EditorialMarkCommandProjection>;
   inspectEditorialLearning(input: InspectEditorialLearningInput): Promise<EditorialLearningProjection>;
+  recordLearningReasonAsk(input: LearningReasonAskInput): Promise<LearningReasonAskProjection | null>;
   changeEditorialLearning(input: ChangeEditorialLearningInput): Promise<EditorialLearningProjection>;
   createEditorialMemory(input: CreateEditorialMemoryInput): Promise<EditorialLearningProjection>;
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): Promise<EditorialLearningProjection>;
