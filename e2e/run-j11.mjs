@@ -3323,13 +3323,15 @@ async function main() {
     requireJourney(lineOwners.includes(firstGovernedMemory) && lineOwners.includes(secondGovernedMemory) && new Set(lineOwners).size === lineOwners.length, 'memory-governance-distinct-lines');
     const governMemory = async (ids, operation, text, effect, name) => {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), `${name}-global`);
-      await waitFor(renderer, `document.querySelector('[data-global-agent-governance] [data-global-agent-save]')?.disabled === false`, `${name}-ready`);
+      // The destination mounts its form before its projection loads: wait for this projection's exact targets and category.
+      await waitFor(renderer, `(() => { const form=document.querySelector('[data-global-agent-governance]'); const root=form?.closest('[data-global-agent]'); return form?.querySelector('[data-global-agent-save]')?.disabled === false && Array.from(form.querySelectorAll('select')).some((select)=>select.value==='typos-and-usage') && ${JSON.stringify(ids)}.every((id)=>root?.querySelector('[data-global-agent-item="'+id+'"]') instanceof HTMLInputElement); })()`, `${name}-ready`);
       await assertRenderer(renderer, `(() => {for(const id of ${JSON.stringify(ids)}) {const checkbox=document.querySelector('[data-global-agent-item="'+id+'"]');if(!(checkbox instanceof HTMLInputElement))return false;checkbox.click();}return true;})()`, `${name}-targets`);
       await choose(renderer, '[data-global-agent-operation]', operation, `${name}-operation`);
       if (operation === 'supervise') await choose(renderer, '[data-global-agent-effect]', effect, `${name}-effect`);
       await fill(renderer, '[data-global-agent-text]', text, `${name}-text`);
       await clickSelector(renderer, '[data-global-agent-save]', `${name}-save`);
-      await waitFor(renderer, `document.querySelector('[data-global-agent-save]')?.disabled === false && document.querySelector('[data-global-agent-text]')?.value === ''`, `${name}-saved`);
+      // Saved only once the answer's own projection shows the new directive, not when the earlier form is merely idle again.
+      await waitFor(renderer, `document.querySelector('[data-global-agent-save]')?.disabled === false && document.querySelector('[data-global-agent-text]')?.value === '' && Array.from(document.querySelectorAll('[data-global-agent] p')).some((line)=>line.textContent.includes(' · ' + ${JSON.stringify(text)} + ' · ')) `, `${name}-saved`);
     };
     await governMemory([firstGovernedMemory], 'correct', '合成记忆：统一术语并保留作者节奏。', 'guide', 'memory-governance-correct');
     await governMemory([firstGovernedMemory, secondGovernedMemory], 'merge', '合成记忆：统一术语，保留节奏。', 'guide', 'memory-governance-merge');
