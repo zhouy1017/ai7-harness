@@ -591,7 +591,7 @@ describe('the authorization bar (S74a)', () => {
       runControl: { ...runControl, pausing: true, cancel: { reason: '正在暂停：正在进行的这一步完成后停下', impact: [] }, pause: { reason: '这项任务现在没有在运行，不能暂停；可以取消它' } },
     }));
     expect(pausing).toMatchObject({ status: '正在暂停', note: TASK_BAR_PAUSING_NOTE });
-    expect(TASK_BAR_PAUSING_NOTE).toBe('已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存');
+    expect(TASK_BAR_PAUSING_NOTE).toBe('已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存');
     expect(names(pausing)).toEqual(['run-link']);
   });
 
@@ -622,7 +622,7 @@ describe('the authorization bar (S74a)', () => {
     }));
     expect(blocked.status).toBe('任务已中断 · 可续行');
     expect(blocked.actions[0]).toEqual({ name: 'resume', label: '续行', tone: 'primary', disabledReason: '运行名额已满：正在运行的任务结束后再续行。' });
-    expect(taskBarContinuationNote(8, 8)).toBe('已读完全部 8 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样');
+    expect(taskBarContinuationNote(8, 8)).toBe('已读完全部 8 个阅读范围，结果都已保存；续行时只处理尚未完成的步骤，已保存的步骤不会重做');
     // An answer recorded and not yet carried out is handled first; with none, today's words stand (Issue #784).
     expect(taskBarContinuationNote(7, 8, [5])).toBe('已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分');
     expect(taskBarContinuationNote(7, 8, [5, 6])).toContain('先按你的回答处理第 5、6 个，再继续未完成的部分');

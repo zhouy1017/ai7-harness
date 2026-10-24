@@ -55,7 +55,7 @@ import {
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
 import { canonicalRecord, sha256Hex } from './canonical.js';
-import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, RUN_IDLE_YIELD_LABEL, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
+import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, RUN_IDLE_YIELD_LABEL, type BaselineAnalysisStore, type CarriedStages, type StageContinuation, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
@@ -333,7 +333,7 @@ export const CANCELLED_WITHOUT_REVISION = '运行已按你的要求取消；已�
  */
 export function pausedDetail(settled: number, total: number): string {
   return settled >= total
-    ? `已暂停：全部 ${total} 个阅读范围都已读完，结果都已保存。点「续行」接着做之后的归纳与抽样。`
+    ? `已暂停：全部 ${total} 个阅读范围都已读完，结果都已保存。点「续行」只处理尚未完成的步骤，已保存的步骤不会重做。`
     : `已在阅读范围之间暂停：已读完 ${settled} / ${total} 个阅读范围，结果都已保存。点「续行」从下一个阅读范围接着读。`;
 }
 
@@ -909,6 +909,7 @@ export class BaselineAnalysisExecutionOwner {
     // 续行 goes on only under the Execution Binding the Run persisted (CONT-015): the same route, model, fixture,
     // policy, credential slot, ceiling and plan digests. Anything else refuses before a state is recorded.
     const continuation: Continuation | null = resuming ? { stored: ledger.executionBindingOf(runRecordId) } : null;
+    if (resuming && options.cancel !== true) ledger.stageContinuationOf(runRecordId);
     if (continuation?.stored != null && this.#bindingMoved(continuation.stored, facts, live, ledger)) {
       throw new ExecutionAdmissionError('EXECUTION_RESUME_BINDING_DRIFT', '这次运行授权时的执行绑定已经变化（模型服务、路由、策略或 AI7 版本不同）；不能续行。请改计划重做。');
     }
@@ -1171,7 +1172,7 @@ export class BaselineAnalysisExecutionOwner {
 
   /**
    * 暂停 (Issue #422, S76b; CTRL-001), once `pausing` is recorded. The Run this owner executes stops at the next unit
-   * boundary — a sent aborted request becomes an unknown gap — and records `paused` with what it read kept. A pause recorded for a Run
+   * boundary without aborting its sent request, and records `paused` with what it read kept. A pause recorded for a Run
    * nothing executes has reached its boundary already, and settles here.
    */
   pauseRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger, mode: 'manual' | 'idle-yield' = 'manual'): 'pausing' | 'settled' {
@@ -1181,7 +1182,6 @@ export class BaselineAnalysisExecutionOwner {
     if (active !== undefined) {
       active.pauseRequested = true;
       active.idleYieldRequested = mode === 'idle-yield';
-      if (mode === 'manual') active.requestAbort.abort();
       return 'pausing';
     }
     if (ledger.currentRunState(runRecordId) !== 'pausing') {
@@ -1330,6 +1330,11 @@ export class BaselineAnalysisExecutionOwner {
     if (ledger.kind === FACTUAL_REVIEW_KIND) this.#deps.factualRunStart?.({ bookId: facts.bookId, runRecordId: facts.runRecordId, taskIntentId: facts.taskIntentId });
     const definition: AnalysisKindDefinition = ledger.definitionForRun(facts.runRecordId, facts.promptContractDigest);
     const promptContractDigest = definition.promptContractDigest;
+    let keptStages: StageContinuation | null = null;
+    if (continuation !== null) {
+      try { keptStages = ledger.stageContinuationOf(facts.runRecordId); }
+      catch (error) { if (!active.cancelRequested) throw error; }
+    }
     const factualAssurance = ledger.factualRunAssurance(facts.runRecordId);
     const webTools = definition.evidenceAssuranceLevel !== 'quick' && facts.webToolsBackend !== undefined;
     const live = this.#live();
@@ -1576,6 +1581,14 @@ export class BaselineAnalysisExecutionOwner {
         facts, definition, live, fixture, attemptId, harnessSessionId, boundAt, compositionDigest: harness.composition.digest,
       });
       const bindingDigest = canonicalRecord(bindingRecord).digest;
+      const stages: StageContinuation = keptStages ?? { runRecordId: facts.runRecordId, attemptId, bindingDigest,
+        manifestDigest: facts.manifestDigest, promptContractDigest };
+      const stageEvidence = (): Record<string, unknown> => {
+        if (stages.reduction === undefined) return {};
+        const data = canonicalRecord(stages);
+        if (data.json.length > 16_000_000) throw new ExecutionAdmissionError('EXECUTION_CHECKPOINT_INVALID', '阶段进度超过可保存范围；不能声称已暂停。');
+        return { stageContinuation: { schema: 'ai7.analysis.stage-continuation/1', data: stages, digest: data.digest } };
+      };
       // Readiness only: the product path reaches the Protected Secret Store and releases no value.
       const credentialReadiness = await this.#broker.checkReadiness({
         bindingDigest,
@@ -1782,7 +1795,7 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
       active.progress.unitsSettled = checkpoints.length;
-      // What an earlier stop left spent beyond its units — a reduction or a sample it will form again — still counts
+      // What an earlier stop left spent beyond its units — settled or refused stage work — still counts
       // toward the ceiling (Issue #51, S16a), and in the Run's usage and its report by the stage it was spent in (Issue #541):
       // the Run spent it, whatever it keeps. A stop recorded before the stages were kept counts toward the ceiling only.
       const carriedStop = continuation === null ? null : ledger.carriedUsageOf(facts.runRecordId);
@@ -2086,7 +2099,7 @@ export class BaselineAnalysisExecutionOwner {
             searchSnapshotDigest: lastSearch === undefined ? null : researchSnapshotDigest(lastSearch),
             searchState: session.breakerState === 'tripped' || session.unitDisclosure === '联网核查未完成' ? 'incomplete' : captures.searchCalls > 0 ? 'completed' : 'not-searched',
             searchCalls: captures.searchCalls,
-            fetchAllowed: () => !active.cancelRequested && !active.interrupted && (!active.pauseRequested || active.idleYieldRequested) && liveInterruption === null && ceilingState() !== 'reached',
+            fetchAllowed: () => !active.cancelRequested && !active.interrupted && liveInterruption === null && ceilingState() !== 'reached',
             fetch: async (url) => {
               const got = await session.retain(url);
               return 'failed' in got ? got : retainedPageOf(got) ?? { failed: '取回的页面没有可读的正文。' };
@@ -2486,7 +2499,7 @@ export class BaselineAnalysisExecutionOwner {
           }
           return false;
         }
-        // What this stop leaves spent beyond its units — a reduction or a sample 续行 forms again — is kept with it by stage,
+        // What this stop leaves spent beyond its units — settled or refused stage work — is kept with it by stage,
         // so the ceiling counts it after 续行 as it did before, and the Run's report states it where it was spent (Issue #541).
         // The stages hold what earlier stops kept too, since 续行 counted it into them.
         const carriedStages = Object.fromEntries(CARRIED_STAGES.map((stage) => [stage, { ...stageUsage[stage] }])) as CarriedStages;
@@ -2509,6 +2522,7 @@ export class BaselineAnalysisExecutionOwner {
             // The refused attempt was sent: 续行 counts it, and a cancellation ends its range as the gap it is.
             ...(accountLimit.refused === undefined ? {} : { refusedAttempt: accountLimit.refused }),
             carriedUsage,
+            ...stageEvidence(),
           });
           return true;
         }
@@ -2520,6 +2534,7 @@ export class BaselineAnalysisExecutionOwner {
             unitsSettled: settled,
             unitsTotal: submittedUnits.length,
             carriedUsage,
+            ...stageEvidence(),
           });
           return true;
         }
@@ -2533,6 +2548,7 @@ export class BaselineAnalysisExecutionOwner {
             unitsTotal: submittedUnits.length,
             waitingUnits: [...waiting.keys()],
             carriedUsage,
+            ...stageEvidence(),
           });
           return true;
         }
@@ -2609,7 +2625,14 @@ export class BaselineAnalysisExecutionOwner {
       // the baseline kind declares none, and every word and digest of its reduction is the one it always had.
       const step = definition.crossUnit?.step ?? null;
       const named = (text: string): string => (step === null ? text : text.replaceAll('跨单元归纳', step.label));
-      if (definition.crossUnit === null) {
+      const reductionInput = canonicalRecord(closedOutcomes).digest;
+      const reductionContract = definition.crossUnit?.promptContractDigest ?? promptContractDigest;
+      if (stages.reduction !== undefined) {
+        if (stages.reduction.inputDigest !== reductionInput || stages.reduction.contractDigest !== reductionContract) {
+          throw new ExecutionAdmissionError('EXECUTION_CHECKPOINT_INVALID', '已保存的归纳输入或契约无法核对；未发送。');
+        }
+        crossUnit = stages.reduction.outcome;
+      } else if (definition.crossUnit === null) {
         // A kind that declares no cross-unit contract never forms the request, never counts a turn,
         // and says so exactly. The baseline path below is unchanged, request counts included.
         crossUnit = { state: 'not-run', reason: definition.crossUnitAbsentReason };
@@ -2720,8 +2743,11 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
 
-      // A pause, or AI7 stopping, while the reduction's turn was out: the Run waits with every unit kept, and 续行 forms
-      // the reduction again.
+      if (accountLimit === null && !active.cancelRequested && !active.interrupted) stages.reduction = {
+        inputDigest: reductionInput, contractDigest: reductionContract,
+        requestDigest: crossUnit.state === 'not-run' ? null : crossUnit.requestDigest, outcome: crossUnit,
+      };
+      // A settled reduction, including a gap, is kept before pausing; continuation never sends it again.
       if (stopWithoutEnding()) return;
 
       // The kind's reducers run over the complete new unit set: reused plus recomputed. This is the
@@ -2753,7 +2779,7 @@ export class BaselineAnalysisExecutionOwner {
       // adaptation. It runs only after a unit loop that reached its end, for the same reason the
       // reduction does — an interrupted Run has already stopped, and nothing further is sent.
       const sample = await this.#drawAndJudge({
-        active, definition, harness, reduction: reduced, manifest, blocksById, admittedUserMessages,
+        active, definition, harness, reduction: reduced, manifest, blocksById, admittedUserMessages, stages,
         acceptedOutputDigests, liveAdapter, countTurn, clock, ceilingState, live, policy,
         stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
         stoppedReason: liveInterruption === 'run-budget-ceiling-reached' ? ASSURANCE_SAMPLING_BUDGET_REACHED : null,
@@ -2917,15 +2943,38 @@ export class BaselineAnalysisExecutionOwner {
   async #drawAndJudge(context: AssuranceSamplingContext): Promise<AssuranceSampleOutcome> {
     const { active, definition, harness, reduction, manifest, live, policy } = context;
     if (definition.assurance === null) return assuranceSampleNotRun(definition.assuranceAbsentReason);
-    if (active.cancelRequested) return assuranceSampleNotRun(ASSURANCE_SAMPLING_CANCELLED);
+    if (active.cancelRequested) {
+      const kept = context.stages.sampling;
+      return kept === undefined ? assuranceSampleNotRun(ASSURANCE_SAMPLING_CANCELLED)
+        : assuranceSampleOutcome(kept.draw, kept.dispositions, kept.sampled.turnsWithUsage === 0 ? null : kept.sampled,
+          [...kept.gapReasons, ASSURANCE_SAMPLING_CANCELLED]);
+    }
     if (context.stopped || active.interrupted) return assuranceSampleNotRun(context.stoppedReason ?? '运行在单元阶段结束前停止，保证抽样未发起。');
     if (context.removedByEditor) return assuranceSampleNotRun(ASSURANCE_SAMPLING_REMOVED);
     const candidates = definition.assurance.candidates(reduction);
     if (candidates.length === 0) return assuranceSampleNotRun('本次运行没有可抽样的发现，保证抽样未发起。');
-    const draw = drawAssuranceSample(manifest, candidates);
-    const dispositions: AnalysisAssuranceSampleDispositionProjection[] = [];
-    const gapReasons: string[] = [];
-    const sampled = { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 };
+    const inputDigest = canonicalRecord({ manifest, candidates }).digest;
+    const contractDigest = definition.assurance.promptContractDigest;
+    const prior = context.stages.sampling;
+    if (prior !== undefined && (prior.inputDigest !== inputDigest || prior.contractDigest !== contractDigest)) {
+      throw new ExecutionAdmissionError('EXECUTION_CHECKPOINT_INVALID', '已保存的抽样输入或契约无法核对；未发送。');
+    }
+    const draw = prior?.draw ?? drawAssuranceSample(manifest, candidates);
+    const dispositions = [...(prior?.dispositions ?? [])];
+    const gapReasons = [...(prior?.gapReasons ?? [])];
+    const sampled = { ...(prior?.sampled ?? { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }) };
+    const turns = assuranceSamplingTurns(draw.sampled);
+    const settledTurns = [...(prior?.turns ?? [])];
+    if (prior !== undefined && (prior.nextTurn > turns.length + 1 || settledTurns.some((kept, index) => {
+      const turn = turns[index]!;
+      return kept.unitOrdinal !== turn.unitOrdinal || kept.requestDigest !== canonicalRecord(buildAssuranceSamplingMessage(manifest.units[turn.unitOrdinal - 1]!, manifest.units.length,
+        context.blocksById, turn.findings, definition.assurance!.prompt)).digest;
+    }))) throw new ExecutionAdmissionError('EXECUTION_CHECKPOINT_INVALID', '已保存的抽样回合无法核对；未发送。');
+    const save = (nextTurn: number, ended: boolean): void => {
+      context.stages.sampling = { inputDigest, contractDigest, draw, nextTurn, ended,
+        turns: [...settledTurns], dispositions: [...dispositions], gapReasons: [...gapReasons], sampled: { ...sampled } };
+    };
+    if (prior === undefined) save(1, false);
     if (live !== null && policy.providerProcessing.assuranceSamplingAllowed !== true) {
       // The sampling turns are transmissions the active Provider Processing policy does not name, so
       // none of them forms a request. The verified developer-live document names them; a projection that does not
@@ -2933,8 +2982,9 @@ export class BaselineAnalysisExecutionOwner {
       return assuranceSampleOutcome(draw, [], null, [ASSURANCE_SAMPLING_POLICY_BOUNDED]);
     }
     let sampleTurn = 0;
-    for (const turn of assuranceSamplingTurns(draw.sampled)) {
+    for (const turn of turns) {
       sampleTurn += 1;
+      if (prior !== undefined && (prior.ended || sampleTurn < prior.nextTurn)) continue;
       if (active.interrupted) {
         gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '运行已中断，本轮未派发。'));
         break;
@@ -2956,7 +3006,7 @@ export class BaselineAnalysisExecutionOwner {
         context.onCeilingReached();
         break;
       }
-      // 暂停 between two sampling turns (S76b): no further one is sent; the Run waits, and 续行 draws the sample again.
+      // Pause admits no next turn; the exact draw and settled prefix survive continuation.
       if (active.pauseRequested) break;
       const unit = manifest.units[turn.unitOrdinal - 1]!;
       const message = buildAssuranceSamplingMessage(unit, manifest.units.length, context.blocksById, turn.findings, definition.assurance.prompt);
@@ -2994,48 +3044,62 @@ export class BaselineAnalysisExecutionOwner {
       active.progress.completedAttempts += 1;
       const gap = (detail: string): void => { gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, detail)); };
       const candidate = result.signals.find((signal) => signal.kind === 'contentCandidate');
-      if (result.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
-        context.acceptedOutputDigests.add(candidate.digest);
-        if (canonical?.kind === 'empty-answer') {
-          gap(assuranceSamplingEmptyAnswerGapReason(canonical.reasoningPresent));
-          continue;
-        }
-        const parsed = parseAssuranceSamplingResult(candidate.text, { refs: turn.findings.map((finding) => finding.ref) });
-        if (!parsed.ok) {
-          gap(unparsableAssuranceSamplingAnswerGapReason(parsed.code, parsed.detail, candidate.text));
-          continue;
-        }
-        // The disposition names its finding by `ref`; the tier and the anchor unit are read back from
-        // the candidate the Run itself drew, never from the model's answer.
-        const byRef = new Map(turn.findings.map((finding) => [finding.ref, finding] as const));
-        for (const entry of parsed.result.dispositions) {
-          const finding = byRef.get(entry.ref)!;
-          dispositions.push({
-            ref: entry.ref,
-            unitOrdinal: finding.unitOrdinal,
-            tier: finding.tier,
-            disposition: entry.disposition,
-            reason: entry.reason,
-          });
-        }
-      } else if (result.terminal === 'completed') {
-        gap('技术回合完成但没有模型输出。');
-      } else if (result.terminal === 'failed') {
-        const failure = result.signals.find((signal) => signal.kind === 'failed');
-        // No safe retry here: one attempt per turn, and a retry-safe failure is a gap like any other.
-        gap(failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。');
-        // A Provider Account Limit ends the suboperation outright: no retry, no fallback, no second model — and a Run that
-        // keeps its progress stops there, to draw the sample again with 续行 (Issue #51, S16b).
-        if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit') {
-          context.onAccountLimit(`${failure.failure.reason}（${failure.failure.code}）`);
+      let ended = false;
+      let settledState: 'closed' | 'gap' | 'outcome-unknown' = 'gap';
+      let refused = false;
+      try {
+        if (result.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
+          context.acceptedOutputDigests.add(candidate.digest);
+          if (canonical?.kind === 'empty-answer') {
+            gap(assuranceSamplingEmptyAnswerGapReason(canonical.reasoningPresent));
+            continue;
+          }
+          const parsed = parseAssuranceSamplingResult(candidate.text, { refs: turn.findings.map((finding) => finding.ref) });
+          if (!parsed.ok) {
+            gap(unparsableAssuranceSamplingAnswerGapReason(parsed.code, parsed.detail, candidate.text));
+            continue;
+          }
+          // The disposition names its finding by `ref`; the tier and the anchor unit are read back from
+          // the candidate the Run itself drew, never from the model's answer.
+          const byRef = new Map(turn.findings.map((finding) => [finding.ref, finding] as const));
+          for (const entry of parsed.result.dispositions) {
+            const finding = byRef.get(entry.ref)!;
+            dispositions.push({
+              ref: entry.ref,
+              unitOrdinal: finding.unitOrdinal,
+              tier: finding.tier,
+              disposition: entry.disposition,
+              reason: entry.reason,
+            });
+          }
+          settledState = 'closed';
+        } else if (result.terminal === 'completed') {
+          gap('技术回合完成但没有模型输出。');
+        } else if (result.terminal === 'failed') {
+          const failure = result.signals.find((signal) => signal.kind === 'failed');
+          // No safe retry here: one attempt per turn, and a retry-safe failure is a gap like any other.
+          gap(failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。');
+          // A Provider Account Limit ends the suboperation outright: no retry, no fallback, no second model — and a Run that
+          // keeps its progress stops there, before retrying the refused turn with 续行 (Issue #51, S16b).
+          if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit') {
+            context.onAccountLimit(`${failure.failure.reason}（${failure.failure.code}）`);
+            refused = true;
+            break;
+          }
+        } else {
+          // 结果待确认 (Issue #51, S16c): a sampling turn whose result cannot be known says so, never 被中断, and the sample stops.
+          const unknown = ambiguousTurnReason(result.signals);
+          const failure = result.signals.find((signal) => signal.kind === 'interrupted');
+          gap(unknown ?? (failure?.kind === 'interrupted' ? failure.failure.reason : '保证抽样被中断。'));
+          ended = true;
+          if (unknown !== null) settledState = 'outcome-unknown';
           break;
         }
-      } else {
-        // 结果待确认 (Issue #51, S16c): a sampling turn whose result cannot be known says so, never 被中断, and the sample stops.
-        const unknown = ambiguousTurnReason(result.signals);
-        const failure = result.signals.find((signal) => signal.kind === 'interrupted');
-        gap(unknown ?? (failure?.kind === 'interrupted' ? failure.failure.reason : '保证抽样被中断。'));
-        break;
+      } finally {
+        if (!refused) {
+          settledTurns.push({ requestDigest: canonicalRecord(message).digest, unitOrdinal: turn.unitOrdinal, usage: turnUsage, state: settledState });
+          save(sampleTurn + 1, ended);
+        }
       }
     }
     context.clock.close();
@@ -3263,6 +3327,7 @@ interface RunReportReflectionContext {
 
 /** Exactly what the sampling suboperation may read or move; the finding components are not among them. */
 interface AssuranceSamplingContext {
+  readonly stages: StageContinuation;
   readonly active: ActiveRun;
   readonly definition: AnalysisKindDefinition;
   readonly harness: PrimaryAgentHarnessHandle;

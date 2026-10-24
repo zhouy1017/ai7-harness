@@ -552,7 +552,7 @@ describe('the execution owner\'s concurrency governor over the real store on exa
 });
 
 describe('live foreground places and request aborts (#1080)', () => {
-  it.each(['ordinary-production', 'developer-live'] as const)('runs two Books under %s, queues the third and aborts on pause/cancel', async (scope) => {
+  it.each(['ordinary-production', 'developer-live'] as const)('runs two Books under %s, queues the third, pauses at a boundary and aborts only on cancel', async (scope) => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
     const ceiling = { kind: 'tokens' as const, maxTotalTokens: 500_000 };
     if (scope === 'ordinary-production') {
@@ -571,11 +571,15 @@ describe('live foreground places and request aborts (#1080)', () => {
           credentialSlot: 'opencode-go', credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, runBudgetCeiling: ceiling } });
       recordMissingCredentialConnection(store, 'L2 开发连接');
     }
-    const calls: Array<{ signal: AbortSignal; body: string }> = [];
-    const nativeFetch: typeof fetch = async (_url, init) => {
-      calls.push({ signal: init!.signal!, body: String(init!.body) });
-      return new Promise((_resolve, reject) => init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason), { once: true }));
-    };
+    const calls: Array<{ signal: AbortSignal; body: string; release: () => void }> = [];
+    const nativeFetch: typeof fetch = async (_url, init) => new Promise<Response>((resolveResponse, reject) => {
+      const signal = init!.signal!;
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      calls.push({ signal, body: String(init!.body), release: () => resolveResponse(new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ schema: 'ai7.baseline-manuscript-analysis.unit-result/1', unitOrdinal: 1,
+          synopsis: '合成边界结果。', entities: [], events: [], relationships: [], settingClaims: [], conflicts: [], unresolved: [], confidence: 'high' }) }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 })) });
+    });
     const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
       secretResolver: { resolve: async () => 'placeholder-key' },
       ...(scope === 'ordinary-production' ? { production: { scope, nativeFetch } }
@@ -594,10 +598,14 @@ describe('live foreground places and request aborts (#1080)', () => {
       expect(() => execution.pauseRun(ar.runRecordId, store.baselineAnalysisLedger, 'idle-yield')).toThrowError(/只有后台运行/u);
       store.requestBaselineAnalysisPause(a.bookId, a.taskIntentId);
       execution.pauseRun(ar.runRecordId);
+      expect(calls[0]!.signal.aborted).toBe(false);
+      expect(store.inspectBaselineAnalysis(a.bookId, () => null).state).toBe('pausing');
+      calls[0]!.release();
       await execution.whenDone(ar.runRecordId);
-      expect(calls[0]!.signal.aborted).toBe(true);
+      expect(calls[0]!.signal.aborted).toBe(false);
       expect(store.inspectBaselineAnalysis(a.bookId, () => null).run?.state).toBe('paused');
-      expect(store.baselineAnalysisLedger.unconfirmedRangesOf(ar.runRecordId).map((unit) => unit.unitOrdinal)).toEqual([1]);
+      expect(store.baselineAnalysisLedger.unconfirmedRangesOf(ar.runRecordId)).toEqual([]);
+      expect(store.baselineAnalysisLedger.unitCheckpoints(ar.runRecordId)[0]?.unit.closed.state).toBe('closed');
       await until(() => calls.length === 3, 'queued Book request admitted');
       store.requestBaselineAnalysisCancel(b.bookId, b.taskIntentId);
       execution.cancelRun(br.runRecordId);
@@ -607,7 +615,7 @@ describe('live foreground places and request aborts (#1080)', () => {
       expect(cancelled.run?.state).toBe('cancelled');
       expect(cancelled.resultSetRevision?.gaps.find((gap) => gap.unitOrdinal === 1)?.code).toBe('outcome-unknown');
       expect(store.baselineAnalysisLedger.adaptationsOf(br.runRecordId)).toEqual([]);
-      expect(calls).toHaveLength(3); // No automatic resend of either aborted request.
+      expect(calls).toHaveLength(3); // No next step from the paused Run, and no resend of the cancelled request.
       store.requestBaselineAnalysisCancel(c.bookId, c.taskIntentId);
       execution.cancelRun(cr.runRecordId);
       await execution.whenDone(cr.runRecordId);
@@ -650,7 +658,7 @@ async function heldProductionLaunch(): Promise<{ store: EditorialStore; owner: B
   return { store, owner, calls };
 }
 
-it('defers an exact authorization, yields after the sent unit without aborting, and resumes the same bounded Run (#1089)', async () => {
+it.each([false, true])('yields at a sent unit boundary and honors manual pause=%s before idle resume (#1089, #1114)', async (manual) => {
   const { store, owner, calls } = await heldProductionLaunch();
   try {
     const background = await preparedBook(store, '合成空闲甲', false);
@@ -679,13 +687,17 @@ it('defers an exact authorization, yields after the sent unit without aborting, 
     expect(store.baselineAnalysisLedger.currentRunState(runRecordId)).toBe('executing');
     expect(start(store, owner, waiting).admission).toBe('queued');
     expect(calls[0]!.signal.aborted).toBe(false);
+    if (manual) {
+      store.requestBaselineAnalysisPause(background.bookId, background.taskIntentId);
+      owner.pauseRun(runRecordId);
+    }
     calls[0]!.release();
     await until(() => store.inspectBaselineAnalysis(background.bookId, () => null).state === 'paused', 'unit-boundary yield');
     expect(calls[0]!.signal.aborted).toBe(false);
     expect(store.baselineAnalysisLedger.unitCheckpoints(runRecordId)).toHaveLength(1);
     expect(store.baselineAnalysisLedger.unconfirmedRangesOf(runRecordId)).toEqual([]);
-    expect(store.inspectBaselineAnalysis(background.bookId, () => null).run?.stateLabel).toBe('让位给你的任务');
-    expect(store.inspectGlobalAttention(() => null, false, 'admitting').groups.find((group) => group.key === 'active')!.items.some((item) => item.state === 'analysis-yielded')).toBe(true);
+    expect(store.inspectBaselineAnalysis(background.bookId, () => null).run?.stateLabel).toBe(manual ? '已暂停' : '让位给你的任务');
+    expect(store.inspectGlobalAttention(() => null, false, 'admitting').groups.find((group) => group.key === 'active')!.items.some((item) => item.state === (manual ? 'analysis-paused' : 'analysis-yielded'))).toBe(true);
     await until(() => calls.length === 3, 'foreground uses yielded place');
     for (const book of [foreground, waiting]) {
       const run = store.inspectBaselineAnalysis(book.bookId, () => null).run!;
@@ -694,6 +706,12 @@ it('defers an exact authorization, yields after the sent unit without aborting, 
     }
     await until(() => !owner.full, 'foreground cancelled');
     owner.setBackgroundIdle(true);
+    if (manual) {
+      await owner.whenPlaceFree();
+      expect(calls).toHaveLength(3);
+      expect(store.baselineAnalysisLedger.currentRunState(runRecordId)).toBe('paused');
+      owner.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true });
+    }
     await until(() => calls.length === 4, 'same Run resumes on idle');
     const resumed = store.inspectBaselineAnalysis(background.bookId, owner.progressFor.bind(owner));
     expect(resumed.run?.runRecordId).toBe(runRecordId);

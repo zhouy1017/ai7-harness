@@ -1,5 +1,6 @@
 import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -10,7 +11,7 @@ import { RECONCILED_PAUSED_DETAIL, RECONCILED_RESUMABLE_DETAIL } from '../../src
 import { BaselineAnalysisExecutionOwner, CANCELLED_WITHOUT_REVISION, pausedDetail, resumableDetail } from '../../src/service/analysis/execution.js';
 import type { TaskPlanConnectivity } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { RESUME_BLOCKED_OFFLINE, RESUME_BLOCKED_SLOT, RUN_CONTROL_CANCELLING_REASON } from '../../src/service/task-plan.js';
@@ -199,7 +200,7 @@ describe('schema revision 33 over the real store', () => {
 describe('暂停 and 续行 over the real store', () => {
   it('says where 续行 goes on: the next range, or, with every range read, the reduction and the sample', () => {
     expect(pausedDetail(3, SAMPLE1_UNITS)).toBe('已在阅读范围之间暂停：已读完 3 / 8 个阅读范围，结果都已保存。点「续行」从下一个阅读范围接着读。');
-    expect(pausedDetail(SAMPLE1_UNITS, SAMPLE1_UNITS)).toBe('已暂停：全部 8 个阅读范围都已读完，结果都已保存。点「续行」接着做之后的归纳与抽样。');
+    expect(pausedDetail(SAMPLE1_UNITS, SAMPLE1_UNITS)).toBe('已暂停：全部 8 个阅读范围都已读完，结果都已保存。点「续行」只处理尚未完成的步骤，已保存的步骤不会重做。');
     expect(resumableDetail(2, SAMPLE1_UNITS)).toBe('AI7 关闭时这项任务正在运行：已读完 2 / 8 个阅读范围，结果都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。');
     expect(resumableDetail(SAMPLE1_UNITS, SAMPLE1_UNITS)).toBe('AI7 关闭时这项任务正在运行：全部 8 个阅读范围都已读完，结果都已保存。点「续行」接着做之后的归纳与抽样；在此之前不会发送任何内容。');
   });
@@ -510,4 +511,127 @@ describe('暂停 and 续行 over the real store', () => {
       store.close();
     }
   }, 300_000);
+});
+
+// Count actual fixture resolutions, independently of report accounting and owner stage callbacks.
+class BoundaryDispatches extends Map<string, ModelFixtureEntry> {
+  readonly sent: string[] = [];
+  override get(key: string): ModelFixtureEntry | undefined {
+    if (key.includes('#')) this.sent.push(key);
+    return super.get(key);
+  }
+}
+
+describe('settled stage continuation at a manual pause boundary (#1114)', () => {
+  it('keeps reduction and a multi-turn draw through repeated pauses and restart, without repeating a dispatch or usage', async () => {
+    const original = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-sampling-two-turns');
+    const entries = new BoundaryDispatches([...original.entries].map(([key, entry]) => [key, entry.response.kind === 'outcome-unknown'
+      ? { ...entry, response: { kind: 'unit-result' as const, text: JSON.stringify({ schema: 'ai7.analysis.assurance-sampling-result/1',
+        dispositions: [{ ref: '{{ref:1}}', disposition: '成立', reason: '合成抽样依据。' }] }), usage: { inputTokens: 100, outputTokens: 10 } } }
+      : entry]));
+    fixture = { ...original, entries };
+    let store = await openWithRoute();
+    let runRecordId = '';
+    let taskIntentId = '';
+    let bookId = '';
+    let remainingPauses = 2;
+    const makeOwner = () => new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+      secretResolver: { resolve: async () => null }, stageHold: async () => {
+        if (remainingPauses-- > 0) {
+          store.requestBaselineAnalysisPause(bookId, taskIntentId);
+          execution.pauseRun(runRecordId);
+        }
+      } });
+    let execution = makeOwner();
+    try {
+      const prepared = await preparedBook(store, '合成阶段暂停');
+      ({ bookId, taskIntentId } = prepared);
+      runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runRecordId);
+      await execution.whenIdle();
+      const binding = store.baselineAnalysisLedger.executionBindingOf(runRecordId)!;
+      expect(entries.sent).toHaveLength(SAMPLE1_UNITS + 1);
+      expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('paused');
+      expect(store.baselineAnalysisLedger.stageContinuationOf(runRecordId)?.reduction?.outcome.state).toBe('closed');
+      execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true });
+      await execution.whenIdle();
+      const kept = store.baselineAnalysisLedger.stageContinuationOf(runRecordId)!;
+      expect(entries.sent).toHaveLength(SAMPLE1_UNITS + 2);
+      expect(kept.sampling).toMatchObject({ nextTurn: 2, ended: false, dispositions: [{ disposition: '成立' }] });
+      expect(kept.sampling!.draw.sampled).toHaveLength(2);
+      expect(kept.sampling!.turns).toEqual([expect.objectContaining({ unitOrdinal: 1, state: 'closed', usage: { inputTokens: 100, outputTokens: 10 } })]);
+      await execution.dispose(); store.markCleanShutdown(); store.close();
+      store = await openWithRoute(); execution = makeOwner();
+      execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true });
+      await execution.whenIdle();
+      const settled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(settled.run?.runRecordId).toBe(runRecordId);
+      expect(store.baselineAnalysisLedger.executionBindingOf(runRecordId)!.bindingDigest).toBe(binding.bindingDigest);
+      expect(store.baselineAnalysisLedger.executionBindingOf(runRecordId)!.attemptId).toBe(binding.attemptId);
+      expect(settled.resultSetRevision?.assuranceSample).toMatchObject({ state: 'closed', size: 2 });
+      expect(entries.sent).toHaveLength(SAMPLE1_UNITS + 4);
+      expect(new Set(entries.sent).size).toBe(entries.sent.length);
+      expect(settled.taskOutcome!.report!.usagePerStage['cross-unit-reduction'].requests).toBe(1);
+      expect(settled.taskOutcome!.report!.usagePerStage['assurance-sampling']).toMatchObject({ requests: 2, inputTokens: 1600, outputTokens: 210 });
+      expect(settled.resultSetRevision!.usage.requests).toBe(SAMPLE1_UNITS + 3);
+    } finally { await execution.dispose(); store.close(); }
+  });
+
+  it.each(['digest', 'identity', 'contract', 'version', 'incomplete'] as const)('blocks %s stage evidence before any continuation dispatch', async (damage) => {
+    const entries = new BoundaryDispatches(fixture.entries); fixture = { ...fixture, entries };
+    const store = await openWithRoute();
+    const prepared = await preparedBook(store, '合成阶段核对');
+    const { bookId, taskIntentId } = prepared;
+    const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.digest).dispatchRunRecordId!;
+    const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+      secretResolver: { resolve: async () => null }, stageHold: async () => {
+        store.requestBaselineAnalysisPause(bookId, taskIntentId); execution.pauseRun(runRecordId);
+      } });
+    try {
+      execution.admitAndDispatch(runRecordId); await execution.whenIdle();
+      const before = entries.sent.length;
+      withDatabase(false, (db) => {
+        const row = db.prepare("SELECT sequence, canonical_json FROM analysis_run_states WHERE run_record_id = ? AND state = 'paused' ORDER BY sequence DESC LIMIT 1").get(runRecordId)!;
+        const record = JSON.parse(String(row.canonical_json));
+        if (damage === 'identity') record.stageContinuation.data.attemptId = randomUUID();
+        if (damage === 'contract') record.stageContinuation.data.reduction.contractDigest = 'a'.repeat(64);
+        if (damage === 'version') record.stageContinuation.schema = 'ai7.analysis.stage-continuation/99';
+        if (damage === 'incomplete') delete record.carriedUsage;
+        if (damage === 'digest') record.stageContinuation.data.reduction.inputDigest = 'a'.repeat(64);
+        else record.stageContinuation.digest = canonicalRecord(record.stageContinuation.data).digest;
+        const canonical = canonicalRecord(record);
+        db.exec('DROP TRIGGER analysis_run_states_no_update');
+        db.prepare('UPDATE analysis_run_states SET canonical_json = ?, sha256 = ? WHERE run_record_id = ? AND sequence = ?').run(canonical.json, canonical.digest, runRecordId, Number(row.sequence));
+      });
+      expect(store.baselineAnalysisLedger.continuationBlockers(runRecordId)).not.toEqual([]);
+      expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrow();
+      expect(entries.sent).toHaveLength(before);
+    } finally { await execution.dispose(); store.close(); }
+  });
+
+  it.each(['sample1-baseline-reduction-unknown', 'sample1-baseline-sampling-two-turns'])('never repeats the settled unknown stage in %s after pause', async (identity) => {
+    const original = await loadModelFixture(FIXTURES_ROOT, identity);
+    const entries = new BoundaryDispatches(original.entries); fixture = { ...original, entries };
+    const store = await openWithRoute(); const prepared = await preparedBook(store, '合成未知阶段暂停');
+    const { bookId, taskIntentId } = prepared;
+    const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.digest).dispatchRunRecordId!;
+    let paused = false;
+    const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+      secretResolver: { resolve: async () => null }, stageHold: async (stage) => {
+        if (!paused && stage === (identity.includes('reduction') ? 'cross-unit-reduction' : 'assurance-sampling')) {
+          paused = true; store.requestBaselineAnalysisPause(bookId, taskIntentId); execution.pauseRun(runRecordId);
+        }
+      } });
+    try {
+      execution.admitAndDispatch(runRecordId); await execution.whenIdle();
+      const before = entries.sent.length;
+      execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true }); await execution.whenIdle();
+      // The only later dispatch is the terminal reflection, never the unknown step or a later sample.
+      expect(entries.sent).toHaveLength(before + 1);
+      expect(new Set(entries.sent).size).toBe(entries.sent.length);
+      const result = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(result.run?.state).toMatch(/^completed/);
+      expect(result.taskOutcome?.report?.failures.some((failure) => failure.reason.includes('结果待确认'))).toBe(true);
+    } finally { await execution.dispose(); store.close(); }
+  });
 });
