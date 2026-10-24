@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { GlobalAgentSourceCandidate, GlobalEditorialMemoryVersion, GlobalMemoryItem, GlobalMemoryPin, HouseReviewPreferenceVersion, LearningSupervisionDirective, RecordLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
+import type { GlobalAgentSourceCandidate, GlobalEditorialMemoryVersion, EditorialMemoryVersion, LegacyEditorialMemoryVersion, GlobalMemoryItem, GlobalMemoryPin, HouseReviewPreferenceVersion, LearningSupervisionDirective, RecordLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex, UUID_PATTERN } from '../analysis/canonical.js';
 import { LearningEligibilityError } from '../learning-eligibility.js';
 
@@ -31,7 +31,9 @@ export const SUPERVISION_FOREIGN_KEYS = {
  * own shape and never their manuscript references. Declared only: F-06 part 2 wires it together with the tools (#1025).
  */
 export type EditorialMemoryGovernanceRevision = Pick<GlobalEditorialMemoryVersion,
-  'itemId' | 'versionId' | 'title' | 'editorialDimension' | 'activation' | 'signalIds' | 'supervisionDirectiveRefs'>;
+  'itemId' | 'versionId' | 'title' | 'editorialDimension' | 'signalIds' | 'supervisionDirectiveRefs'> & (
+  Pick<EditorialMemoryVersion, 'schema' | 'state' | 'applicability' | 'parentVersions'> |
+  Pick<LegacyEditorialMemoryVersion, 'schema' | 'activation'>);
 export interface EditorialMemoryGovernanceHooks {
   /** Must page EditorialLearningLedger.inspect and use its current `usable` decision, including exclusions. */
   revisions(): ReadonlyArray<{ readonly current: EditorialMemoryGovernanceRevision; readonly usable: boolean }>;
@@ -42,7 +44,10 @@ export function editorialMemoryGovernanceItem(
   entry: { readonly current: EditorialMemoryGovernanceRevision; readonly usable: boolean }, categoryId: string,
 ): GlobalMemoryItem {
   return { itemId: entry.current.itemId, revisionId: entry.current.versionId, kind: 'memory', text: entry.current.title,
-    categoryId, bookId: null, state: entry.usable && entry.current.activation === 'active' ? 'active' : 'inactive', lineage: [] };
+    categoryId, bookId: entry.current.schema === 'ai7.global-editorial-memory/2' && entry.current.applicability.kind === 'book' ? entry.current.applicability.bookId : null,
+    state: entry.current.schema === 'ai7.global-editorial-memory/2' ? entry.current.state
+      : entry.usable && entry.current.activation === 'active' ? 'active' : 'inactive',
+    lineage: entry.current.schema === 'ai7.global-editorial-memory/2' ? entry.current.parentVersions.map((pin) => ({ itemId: pin.itemId, revisionId: pin.versionId })) : [] };
 }
 
 /** Explicit directions are selectable data for the next question; listing one neither runs nor changes curation. */
@@ -70,6 +75,7 @@ export function initializeSupervisionSchema(db: DatabaseSync, version: number): 
 export function validSupervisionInput(value: unknown): value is RecordLearningSupervisionInput {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const input = value as RecordLearningSupervisionInput;
+  if (input.actionId !== undefined && !UUID_PATTERN.test(input.actionId)) return false;
   if (!['create', 'merge', 'correct', 'deactivate', 'supervise'].includes(input.operation) ||
       !['guide', 'freeze', 'correct'].includes(input.effect) || typeof input.text !== 'string' || !input.text.isWellFormed() ||
       [...input.text.trim()].length > 200 || typeof input.categoryId !== 'string' || !/^[a-z][a-z0-9-]{0,47}$/u.test(input.categoryId) ||
@@ -113,6 +119,16 @@ export class SupervisionDirectives {
 
   record(scope: TrustedOperationalScope, input: RecordLearningSupervisionInput, items: ReadonlyArray<GlobalMemoryItem>, now = new Date()): LearningSupervisionDirective {
     valid(validSupervisionInput(input));
+    valid(Object.keys(input).sort().join(',') === ['operation', 'targets', 'scope', 'text', 'categoryId', 'effect',
+      ...(input.actionId === undefined ? [] : ['actionId'])].sort().join(','));
+    if (input.actionId !== undefined) {
+      const prior = this.history(scope).find((entry) => entry.actionId === input.actionId);
+      if (prior !== undefined) {
+        const { schema: _schema, actor: _actor, directiveId: _id, ordinal: _ordinal, supersedes: _supersedes,
+          operationalScope: _scope, recordedAt: _at, ...original } = prior;
+        valid(canonicalJson(original) === canonicalJson(input)); return prior;
+      }
+    }
     for (const pin of input.targets) valid(items.some((item) => item.itemId === pin.itemId && item.revisionId === pin.revisionId), 'LEARNING_SUPERVISION_STALE');
     for (const pin of input.targets) {
       const target = items.find((item) => item.itemId === pin.itemId)!;
@@ -127,7 +143,7 @@ export class SupervisionDirectives {
     }
     const prior = this.history(scope).at(-1);
     const record: LearningSupervisionDirective = {
-      ...input, schema: 'ai7.learning-supervision-directive/1', actor: 'editor', text: input.text.trim(), targets: input.targets.map((pin) => ({ itemId: pin.itemId, revisionId: pin.revisionId })),
+      ...input, schema: 'ai7.learning-supervision-directive/1', actor: 'editor', text: input.actionId === undefined ? input.text.trim() : input.text, targets: input.targets.map((pin) => ({ itemId: pin.itemId, revisionId: pin.revisionId })),
       directiveId: randomUUID(), ordinal: (prior?.ordinal ?? 0) + 1, supersedes: prior?.directiveId ?? null,
       operationalScope: scope, recordedAt: now.toISOString(),
     };
@@ -143,8 +159,8 @@ export class SupervisionDirectives {
  * 停止今后使用 rereads the group's tendency, and the 停用, 冻结 or 修正 recorded on it must still reach the reread line.
  */
 export function preferenceItems(version: Pick<HouseReviewPreferenceVersion, 'lines' | 'versionId'> | null): GlobalMemoryItem[] {
-  return version === null ? [] : version.lines.map((line) => ({
-    itemId: `preference:${line.bookId ?? 'house'}:${line.categoryId}`, revisionId: version.versionId,
+  return version === null ? [] : version.lines.filter((line) => line.owner?.kind !== 'editorial-memory').map((line) => ({
+    itemId: line.owner?.itemId ?? `preference:${line.bookId ?? 'house'}:${line.categoryId}`, revisionId: version.versionId,
     kind: 'preference', text: line.text, categoryId: line.categoryId, bookId: line.bookId, state: 'active', lineage: [],
   }));
 }

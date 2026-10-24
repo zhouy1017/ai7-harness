@@ -128,7 +128,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 172 as const;
+export const SERVICE_PROTOCOL_VERSION = 173 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -420,6 +420,7 @@ export const IPC_CHANNELS = {
   recordLearningReasonAsk: 'ai7:learning:record-reason-ask',
   changeEditorialLearning: 'ai7:learning:change-editorial-learning',
   createEditorialMemory: 'ai7:learning:create-editorial-memory',
+  acceptEditorialMemory: 'ai7:learning:accept-editorial-memory',
   deactivateEditorialMemory: 'ai7:learning:deactivate-editorial-memory',
   inspectHouseReviewPreference: 'ai7:j11:inspect-house-review-preference',
   rebuildHouseReviewPreference: 'ai7:j11:rebuild-house-review-preference',
@@ -6861,6 +6862,8 @@ export interface ReviewRunInfluenceProjection {
     /** `null` where the decision behind it is no longer in this house's records. */
     materialKey: string | null;
     kind: LearningLedgerMaterialKind | null;
+    /** Local historical provenance only; absent on legacy /1 sources. */
+    provenanceAvailability?: 'available' | 'unavailable';
     /** When its 停止今后使用 was recorded after it was admitted; `null` while it stands. */
     withdrawnAt: string | null;
   }>;
@@ -6878,8 +6881,9 @@ export interface HouseReviewPreferenceUse {
   selection?: { lineIndexes: ReadonlyArray<number> };
 }
 export interface HouseReviewPreferenceVersion {
-  schema: 'ai7.house-review-preference/1';
+  schema: 'ai7.house-review-preference/1' | 'ai7.house-review-preference/2';
   governance?: { baseLines: HouseReviewPreferenceVersion['lines']; baseMaterialSetDigest: string; headDirectiveId: string };
+  legacyBasis?: { lines: HouseReviewPreferenceVersion['lines']; materialSetDigest: string };
   versionId: string;
   ordinal: number;
   supersedes: string | null;
@@ -6889,10 +6893,25 @@ export interface HouseReviewPreferenceVersion {
   sourceCount: number;
   lines: ReadonlyArray<{
     text: string; categoryId: string; bookId: string | null;
-    sources: ReadonlyArray<{ bookId: string; bookTitle: string; materialDigest: string; decisionId: string; eligibilityDecisionId: string; qualityLineageDigest: string;
-      attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> } }>;
+    lineId?: string;
+    owner?: { kind: 'legacy-preference'; itemId: string } | { kind: 'editorial-memory'; itemId: string; versionId: string };
+    sources: ReadonlyArray<HouseReviewPreferenceSource>;
   }>;
 }
+export type HouseReviewPreferenceSource = {
+  kind?: 'review-decision'; bookId: string; bookTitle: string; materialDigest: string; decisionId: string;
+  eligibilityDecisionId: string; qualityLineageDigest: string; feedbackKey?: string;
+  attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> };
+} | {
+  kind: 'editorial-memory'; bookId: string; bookTitle: string; materialDigest: string; decisionId: string;
+  /** Automatic admission has no human decision identity. */
+  eligibilityDecisionId?: never;
+  itemId: string; versionId: string; actionId: string; sourceKey: string; feedbackKey: string;
+  captured: import('./protocol/learning.js').EditorialMemorySourceSnapshot;
+  currentAdmission: import('./protocol/learning.js').EditorialMemoryAdmission;
+  currentEligibility: 'book' | 'house';
+  attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> };
+};
 export interface HouseReviewPreferenceProjection {
   operationalScope: TrustedOperationalScope;
   current: HouseReviewPreferenceVersion | null;
@@ -9909,6 +9928,7 @@ export interface LearningAuditMaterialProjection {
   readonly recordedAt: string;
   readonly excerpt: ReadonlyArray<string>;
   readonly standing: LearningAuditStanding;
+  readonly automaticAdmission?: { readonly choice: 'house'; readonly sourceKeys: ReadonlyArray<string> } | null;
   /** How many decisions it holds: the count the next one names. */
   readonly decisions: number;
   /** When the decision that stands — or, when it changed, the one it had — was made. */
@@ -10017,11 +10037,12 @@ export interface LearningLineageProjection {
   readonly bookTitle: string;
   readonly material: LearningMaterialProjection;
   readonly standing: LearningAuditStanding;
+  readonly automaticAdmission?: { readonly choice: 'house'; readonly sourceKeys: ReadonlyArray<string> } | null;
   /** The newest `MAX_LEARNING_LINEAGE_DECISIONS` decisions, oldest first, the last the one that stands. */
   readonly decisions: ReadonlyArray<LearningLineageDecisionProjection>;
   /** How many earlier decisions the chain holds beyond those. */
   readonly earlierDecisions: number;
-  readonly downstream: { readonly signals: number; readonly memoryCandidates: 0; readonly activeMemories: number; readonly tasks: number };
+  readonly downstream: { readonly signals: number; readonly memoryCandidates: number; readonly activeMemories: number; readonly tasks: number };
   /** Its 学习信号, oldest first. */
   readonly signals: ReadonlyArray<LearningLineageSignalProjection>;
   /** The newest `MAX_LEARNING_LINEAGE_TASKS` Tasks that used it, oldest first. */
@@ -12223,6 +12244,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
   recordLearningReasonAsk: { input: LearningReasonAskInput & { frequency: import('./preferences.js').LearningAskFrequency }; output: LearningReasonAskProjection | null };
   changeEditorialLearning: { input: ChangeEditorialLearningInput; output: EditorialLearningProjection };
   createEditorialMemory: { input: CreateEditorialMemoryInput; output: EditorialLearningProjection };
+  acceptEditorialMemory: { input: import('./protocol/learning.js').AcceptEditorialMemoryInput; output: EditorialLearningProjection };
   deactivateEditorialMemory: { input: DeactivateEditorialMemoryInput; output: EditorialLearningProjection };
   inspectHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
   rebuildHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
@@ -12821,6 +12843,7 @@ export interface RendererApi extends GlobalAgentRendererApi {
   recordLearningReasonAsk(input: LearningReasonAskInput): Promise<LearningReasonAskProjection | null>;
   changeEditorialLearning(input: ChangeEditorialLearningInput): Promise<EditorialLearningProjection>;
   createEditorialMemory(input: CreateEditorialMemoryInput): Promise<EditorialLearningProjection>;
+  acceptEditorialMemory(input: import('./protocol/learning.js').AcceptEditorialMemoryInput): Promise<EditorialLearningProjection>;
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): Promise<EditorialLearningProjection>;
   inspectHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
   rebuildHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;

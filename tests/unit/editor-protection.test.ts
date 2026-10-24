@@ -161,8 +161,8 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
 });
 
 describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
-  it('is protocol 172 for explicit local review options', () => {
-    expect(SERVICE_PROTOCOL_VERSION).toBe(172);
+  it('is protocol 173 for local editorial memory governance', () => {
+    expect(SERVICE_PROTOCOL_VERSION).toBe(173);
   });
 
   it('arms only J-02\'s `armed` launch in the development-ci scope and refuses every other present control', () => {

@@ -436,7 +436,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     try {
       const after = database();
       try {
-        expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(90);
+        expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(91);
         for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
         expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
       } finally { after.close(); }

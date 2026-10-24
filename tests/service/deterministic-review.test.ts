@@ -234,7 +234,7 @@ describe('provider-free local ReviewRun', () => {
     db.exec("DELETE FROM procedure_definition_versions WHERE procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 89");
     db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definition_versions_no_delete']!); db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definitions_no_delete']!); db.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); store.markCleanShutdown(); store.close(); db = database();
-    expect(db.prepare('SELECT * FROM books').all()).toEqual(prior); expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(90);
+    expect(db.prepare('SELECT * FROM books').all()).toEqual(prior); expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(91);
     db.exec('PRAGMA user_version = 89'); db.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); replaceFirst(book, '他停住了…又望向门口。'); const prepared = prepare(book, policy); authorize(book, prepared);
     const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose(); store.markCleanShutdown(); store.close();

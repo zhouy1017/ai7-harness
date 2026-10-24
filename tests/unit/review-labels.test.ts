@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  reviewInfluenceMaterialLine,
   REVIEW_ACTION_LABELS,
   REVIEW_ANCHOR_CHANGED,
   REVIEW_BATCH_ALL_OR_NONE,
@@ -67,6 +68,15 @@ import type { ReviewChapterOptionProjection, ReviewFindingCountsProjection, Revi
 
 // Unit suite for the words of 审阅 (Issue #417; editor-surfaces §4). Every string is compared byte for
 // byte, so a wording change is a decision made here and never a drift noticed in a Journey.
+
+it('labels missing historical /2 ancestry separately from a real withdrawal and preserves legacy labels', () => {
+  const legacy = { bookTitle: '原始图书标题', withdrawnAt: null };
+  expect(reviewInfluenceMaterialLine(legacy, '修改建议', () => '日期')).toBe('《原始图书标题》 · 修改建议');
+  expect(reviewInfluenceMaterialLine({ ...legacy, provenanceAvailability: 'available' }, '修改建议', () => '日期')).toBe('《原始图书标题》 · 修改建议');
+  expect(reviewInfluenceMaterialLine({ ...legacy, provenanceAvailability: 'unavailable' }, '修改建议', () => '日期')).toBe('《原始图书标题》 · 修改建议 · 原社记忆来源在本社不可用');
+  expect(reviewInfluenceMaterialLine({ ...legacy, withdrawnAt: '2026-10-01T00:00:00Z', provenanceAvailability: 'unavailable' }, '修改建议', () => '真实日期'))
+    .toBe('《原始图书标题》 · 修改建议 · 原社记忆来源在本社不可用 · 真实日期 已停止今后使用');
+});
 
 const counts: ReviewFindingCountsProjection = { must: 2, should: 5, note: 1, pending: 6, handled: 1, ignored: 1 };
 const manuscript = { manuscriptId: 'm', branchId: 'b', revisionId: 'r', revisionLabel: 'r2', journalSequence: 3, workingDigest: 'd', totalBlocks: 97 };

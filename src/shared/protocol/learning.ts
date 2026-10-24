@@ -1,4 +1,4 @@
-import type { LearningEligibilityChoice } from '../protocol.js';
+import type { LearningEligibilityChoice, TrustedOperationalScope } from '../protocol.js';
 
 /** Local reference-only learning. Text remains with the exact source record. */
 export interface LearningSourceReference {
@@ -39,7 +39,8 @@ export interface LearningSignal {
 /** Where a signal stands now: its eligibility, or `superseded` once a later decision or a revised reason replaced its source. */
 export type LearningSignalStanding = LearningEligibilityChoice | 'superseded';
 
-export interface GlobalEditorialMemoryVersion {
+export interface LegacyEditorialMemoryVersion {
+  schema?: 'ai7.global-editorial-memory/1';
   itemId: string;
   versionId: string;
   ordinal: number;
@@ -56,32 +57,86 @@ export interface GlobalEditorialMemoryVersion {
   recordedAt: string;
 }
 
+export interface LearningControlSnapshot {
+  switchEntryId: string | null;
+  bookEntryId: string | null;
+}
+export type EditorialMemoryAdmission = {
+  kind: 'explicit'; decisionId: string; ordinal: number; basis: { policy: string; mode: string; version: number };
+  materialDigest: string; controls: LearningControlSnapshot;
+} | {
+  kind: 'automatic'; basis: { policy: string; mode: 'opt-out-local'; version: 2 };
+  signalId: string; materialDigest: string; controls: LearningControlSnapshot;
+};
+export interface EditorialMemorySourceSnapshot {
+  sourceKey: string;
+  feedbackKey: string;
+  signalId: string;
+  source: LearningSourceReference;
+  operationalScope: TrustedOperationalScope;
+  editorialDimension: string;
+  eligibility: 'book' | 'house';
+  admission: EditorialMemoryAdmission;
+  attribution: LearningSignal['attribution'];
+  bookTitle: string;
+}
+export type EditorialMemoryApplicability = { kind: 'house' } | { kind: 'book'; bookId: string };
+export interface EditorialMemoryVersion {
+  /** Legacy-only projection field; never serialized on /2 records. */
+  activation?: never;
+  schema: 'ai7.global-editorial-memory/2';
+  itemId: string; versionId: string; ordinal: number; supersedes: string | null; recordedAt: string;
+  operationalScope: TrustedOperationalScope;
+  applicability: EditorialMemoryApplicability;
+  editorialDimension: string; title: string; confidence: number;
+  state: 'proposed' | 'active' | 'inactive' | 'frozen';
+  actor: 'editor'; actionId: string;
+  action: 'create' | 'accept' | 'merge' | 'correct' | 'deactivate' | 'freeze';
+  signalIds: ReadonlyArray<string>;
+  positiveExamples: ReadonlyArray<LearningSourceReference>;
+  negativeExamples: ReadonlyArray<LearningSourceReference>;
+  sources: ReadonlyArray<EditorialMemorySourceSnapshot>;
+  parentVersions: ReadonlyArray<{ itemId: string; versionId: string }>;
+  supervisionDirectiveRefs: ReadonlyArray<string>;
+}
+export type GlobalEditorialMemoryVersion = LegacyEditorialMemoryVersion | EditorialMemoryVersion;
+
 export interface EditorialLearningProjection {
   basis: string;
   enabled: boolean;
   controlEntries: number;
   excludedBooks: ReadonlyArray<{ bookId: string; title: string }>;
   excludedMaterials: ReadonlyArray<{ bookId: string; materialKey: string }>;
-  signals: ReadonlyArray<LearningSignal & { currentEligibility: LearningSignalStanding; bookTitle: string }>;
-  items: ReadonlyArray<{ current: GlobalEditorialMemoryVersion; usable: boolean; history: ReadonlyArray<GlobalEditorialMemoryVersion> }>;
+  signals: ReadonlyArray<LearningSignal & { currentEligibility: LearningSignalStanding; bookTitle: string;
+    memoryCandidate?: { editorialDimension: string; operationalScope: TrustedOperationalScope } | null }>;
+  items: ReadonlyArray<{ current: GlobalEditorialMemoryVersion; usable: boolean; history: ReadonlyArray<GlobalEditorialMemoryVersion>;
+    sources?: ReadonlyArray<EditorialMemorySourceSnapshot>; nextSourceOffset?: number | null; nextHistoryOffset?: number | null }>;
   nextSignalOffset: number | null;
   nextItemOffset: number | null;
   nextExclusionOffset: number | null;
 }
 
-export interface InspectEditorialLearningInput { signalOffset: number; itemOffset: number; exclusionOffset?: number }
+export interface InspectEditorialLearningInput {
+  signalOffset: number; itemOffset: number; exclusionOffset?: number;
+  detailItemId?: string; historyOffset?: number; sourceOffset?: number;
+}
 export type ChangeEditorialLearningInput =
   | { kind: 'switch'; enabled: boolean; expectedEntries: number }
   | { kind: 'book'; bookId: string; excluded: boolean; expectedEntries: number }
   | { kind: 'material'; signalId: string };
-export interface CreateEditorialMemoryInput {
+export interface LegacyCreateEditorialMemoryInput {
   clientMemoryId: string;
   signalId: string;
   title: string;
   editorialDimension: string;
   confidence: number;
 }
-export interface DeactivateEditorialMemoryInput { itemId: string; expectedVersionId: string }
+export type CreateEditorialMemoryInput = LegacyCreateEditorialMemoryInput | {
+  schema: 'ai7.global-editorial-memory/2'; actionId: string; signalIds: ReadonlyArray<string>;
+  applicability: EditorialMemoryApplicability; title: string; editorialDimension: string; confidence: number;
+};
+export interface AcceptEditorialMemoryInput { itemId: string; expectedVersionId: string; actionId: string }
+export interface DeactivateEditorialMemoryInput { itemId: string; expectedVersionId: string; actionId?: string }
 
 export interface LearningReasonAskProjection {
   askId: string;

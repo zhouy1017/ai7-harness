@@ -125,7 +125,7 @@ describe('学习回溯 words', () => {
   it('counts what read a material and says what stopping it reaches, truthfully empty when nothing did (Issue #912)', () => {
     expect(learningAuditUse(0)).toBe(LEARNING_AUDIT_UNUSED);
     expect(learningAuditUse(3)).toBe('被 3 个任务使用过');
-    expect(LEARNING_LINEAGE_WHY_EMPTY).toBe('学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。');
+    expect(LEARNING_LINEAGE_WHY_EMPTY).toBe('学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；这条材料目前没有编辑撰写的候选或已启用记忆，并非被隐藏。模型自动归纳尚未提供。');
     expect(LEARNING_AUDIT_FILTERS_LATER).not.toContain('也没有任务读取学习材料');
     const instant = (iso: string) => iso.slice(0, 10);
     expect(learningLineageSignalLine({ ordinal: 2, recordedAt: '2026-10-17T01:00:00.000Z', current: true, lines: 1 }, instant)).toBe('本社审阅偏好 v2 · 2026-10-17 · 其中 1 行出自这条材料 · 现行版本');
@@ -145,10 +145,12 @@ describe('学习回溯 words', () => {
 
   it('names explicit editorial memory that references a material, and keeps the empty wording when none does (Issue #1082)', () => {
     expect(learningLineageWhy(0)).toBe(LEARNING_LINEAGE_WHY_EMPTY);
-    expect(learningLineageWhy(1)).toContain('明确新建的记忆');
+    expect(learningLineageWhy(1)).toContain('0 条编辑撰写的候选、1 条已启用记忆');
+    expect(learningLineageWhy(0, 2)).toContain('2 条编辑撰写的候选、0 条已启用记忆');
+    expect(learningLineageWhy(0, 2)).not.toBe(LEARNING_LINEAGE_WHY_EMPTY);
     expect(learningLineageWhy(1)).not.toContain('这两步因此是空的');
     expect(learningLineageMemories(2)).toBe('2 条你明确新建的编辑记忆引用了它；停止今后使用后，这些记忆会暂停使用，记录原样保留。');
     expect(learningRemediationMemory(0)).toBe(LEARNING_REMEDIATION_MEMORY);
-    expect(learningRemediationMemory(1)).toBe('1 条你明确新建的编辑记忆引用了它们：记录后这些记忆暂停使用，记忆和它的版本历史原样保留；AI7 还不会自己生成记忆候选。');
+    expect(learningRemediationMemory(1)).toBe('1 条编辑撰写的候选或已启用记忆引用了它们：记录后停止后续使用，候选仍须明确接受，记忆和版本历史原样保留；模型自动归纳尚未提供。');
   });
 });
