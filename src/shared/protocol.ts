@@ -127,7 +127,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 166 as const;
+export const SERVICE_PROTOCOL_VERSION = 167 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -2402,9 +2402,9 @@ export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ord
  */
 export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22' | 'v24';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27';
 /** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18';
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
@@ -2633,6 +2633,26 @@ export type OutboundDataCategoryId =
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
 export interface AdmittedProviderRule {
+  /** v27 review names the same bounded synthesis turn as writing/evaluation; eligibility only. */
+  readonly plusOneCrossUnitSynthesisTurn?: boolean;
+  /** Book-less dialogue: category labels record what is sent and do not restrict transmission; ADR 0079 §4.4 redaction still applies. */
+  readonly globalAgentDialogue?: {
+    readonly source: {
+      readonly bookRequired: false;
+      readonly explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly: true;
+      readonly eligibleRevisionPinsRequired: true;
+      readonly editorOwnWordsAllowed: true;
+      readonly unlistedSourcesAllowed: false;
+    };
+    readonly outboundCategoryRestriction: 'none';
+    readonly outboundDataDisclosureRequired: true;
+    readonly redaction: {
+      readonly housePeopleNamesAndRolesStripped: true;
+      readonly remarksAndInternalNotesStripped: true;
+      readonly authorInformationAllowed: true;
+      readonly houseNameAllowed: true;
+    };
+  };
   readonly taskKindOverrides?: Readonly<Record<string, { readonly webSearch: boolean }>>;
   readonly editorTaskInstruction?: {
     readonly category: 'editor-task-instruction';
@@ -2783,6 +2803,29 @@ export interface LaunchPolicyProjection {
   operationalScope: TrustedOperationalScope | null;
   activePolicySetVersion: ActivePolicySetVersion | null;
   providerProcessing: {
+    /** Per-kind enrollment eligibility only; baseline Background Analysis Enrollment is independent. */
+    readonly backgroundProcessingEnrollment?: {
+      readonly enrollableKinds: ReadonlyArray<{
+        readonly kind: 'learning-curation' | 'material-index' | 'review-reduction' | 'factual-recheck';
+        readonly mandatoryCeiling: true;
+      }>;
+      readonly activeMatchingEnrollmentRequired: true;
+      readonly revocable: true;
+      readonly planEnvelopeRequired: true;
+      readonly exactProviderBindingRequired: true;
+      readonly runAuthorizationRequired: true;
+      readonly runSourceScopeRequired: true;
+      readonly ceilingEvaluatedBeforeEveryDispatch: true;
+      readonly finalProviderPayloadEgressGateRequired: true;
+      readonly openingPageOrImportCreatesEnrollment: false;
+    };
+    readonly subAgents?: {
+      readonly declaredInPlanEnvelopeRequired: true;
+      readonly inheritsParentScopeBindingPolicyAndCeiling: true;
+      readonly countsInsideParentAttemptTransmissionBound: true;
+      readonly finalProviderPayloadEgressGateRequired: true;
+      readonly createsTaskRunOrDecisionRecordAllowed: false;
+    };
     /** Configurable defaults, not immutable numeric execution caps (ADR 0095 §2). */
     readonly execution?: {
       readonly maxInFlightRequests: { readonly configurable: true; readonly default: number };

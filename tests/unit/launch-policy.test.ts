@@ -23,7 +23,7 @@ import type { AdmittedLocalTools, AdmittedPlatformTools, AdmittedProviderRule, L
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v18.json';
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v19.json';
 const CARRIED_PATHS = [
   CARRIER_PATH,
   ACTIVE_SET_PATH,
@@ -34,6 +34,7 @@ const CARRIED_PATHS = [
   'docs/policies/provider-processing-policy.v23.json',
   'docs/policies/provider-processing-policy.v25.json',
   'docs/policies/provider-processing-policy.v26.json',
+  'docs/policies/provider-processing-policy.v27.json',
   'docs/policies/provider-processing-policy.v24.json',
   'docs/policies/external-export-policy.v1.json',
   'docs/policies/external-export-policy.v2.json',
@@ -42,11 +43,16 @@ const CARRIED_PATHS = [
 const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
-  'ordinary-production': ['v26', 'docs/policies/provider-processing-policy.v26.json', 'ab33c4fbab602a09e7233d3bf92cb4d59d841e3d532a933c5a155a2800d2063a'],
+  'ordinary-production': ['v27', 'docs/policies/provider-processing-policy.v27.json', '8d0eaedb28454c9f923501991e0b4130d7ed5f9b267905cd30d3f7a434db1a12'],
   'developer-live': ['v24', 'docs/policies/provider-processing-policy.v24.json', '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6'],
 } as const;
 /** Every immutable predecessor asset keeps its exact bytes: v6, v13, v15, v17, v19 and v21 (the old ordinary-production), v11, v12, v14, v16, v18, v20 and v22 (the old developer-live), and sets v9 to v15. */
 const RETAINED_PREDECESSOR_DIGESTS = {
+  'docs/policies/provider-processing-policy.v26.json': 'ab33c4fbab602a09e7233d3bf92cb4d59d841e3d532a933c5a155a2800d2063a',
+  'docs/policies/provider-processing-policy.v26.schema.json': '352fd43afd11529c610931cef03a4a25e2289c3587483d57e1e99a5950c056e0',
+  'docs/policies/provider-processing-policy.v26.md': '4db4254ebfdc3bb05e2c3b312d5fef12df68c074789a9e0523dc66d336957c87',
+  'docs/policies/active-policy-set.v18.json': '165ddae6775e892579356bf838f340b8f626bc5ae3c2ed15c0165e886ecc099e',
+  'docs/policies/active-policy-set.v18.schema.json': '7325adaf84400ae6190e76d0fc74742691d000df45fb57cc08c69e80c782822b',
   'docs/policies/provider-processing-policy.v25.json': 'd46a98dc4f99170b7e0706102af388a8b33e5dabbc351e76a5f47db374a2104c',
   'docs/policies/provider-processing-policy.v25.schema.json': '1300084ced7fc6689ea3d043919f4fcfa3db1f515c66c3d6c799ec283ce0cf34',
   'docs/policies/provider-processing-policy.v25.md': 'a5a3ea352d72b295b40da920be960ca338a23b88404f98d16812754fac61119d',
@@ -75,7 +81,7 @@ const RETAINED_PREDECESSOR_DIGESTS = {
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v16 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = '165ddae6775e892579356bf838f340b8f626bc5ae3c2ed15c0165e886ecc099e';
+const ACTIVE_SET_SHA256 = '5b551888903b629c700fea7d358e57e1474b1f7984fe73f6605cd85619726f3e';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -431,6 +437,129 @@ beforeEach(async () => {
   await mkdir(codeRoot);
 });
 
+describe('Provider Processing v27 Owner decisions', () => {
+  const path = 'docs/policies/provider-processing-policy.v27.json';
+
+  it('retains the model bindings and verifies without mutating the immutable document', () => {
+    const policy = readPolicySync(path);
+    const original = structuredClone(policy);
+    expect(policy.roleBindings).toEqual(readPolicySync('docs/policies/provider-processing-policy.v26.json').roleBindings);
+    expect(policy.connectionTest).toEqual(readPolicySync('docs/policies/provider-processing-policy.v26.json').connectionTest);
+    expect(() => verifyOrdinaryProductionPolicy(policy)).not.toThrow();
+    expect(policy).toEqual(original);
+  });
+
+  it('changes only the four Owner decisions and the successor identity', () => {
+    const policy = readPolicySync(path);
+    const predecessor = readPolicySync('docs/policies/provider-processing-policy.v26.json');
+    const inherited = structuredClone(policy);
+    for (const key of ['schemaPath', 'version', 'predecessorVersion', 'predecessorCanonicalPath', 'canonicalPath', 'humanProjectionPath']) inherited[key] = predecessor[key];
+    delete inherited.subAgents;
+    const rules = rulesOf(inherited);
+    expect(rules.slice(-2).map((rule) => rule.ruleId)).toEqual(['ordinary-production-global-agent-dialogue', 'enrolled-background-processing']);
+    rules.splice(-2);
+    delete (rules[2]!.transmissions as Record<string, unknown>).plusOneCrossUnitSynthesisTurn;
+    expect(inherited).toEqual(predecessor);
+    const before = readPolicySync('docs/policies/active-policy-set.v18.json');
+    const after = readPolicySync(ACTIVE_SET_PATH);
+    expect(after).toMatchObject({ version: 'v19', predecessorVersion: 'v18', predecessorCanonicalPath: 'docs/policies/active-policy-set.v18.json' });
+    const beforePolicies = before.activePolicies as Record<string, Record<string, unknown>>;
+    const afterPolicies = after.activePolicies as typeof beforePolicies;
+    expect(afterPolicies['external-export-policy']).toEqual(beforePolicies['external-export-policy']);
+    const beforePins = beforePolicies['provider-processing-policy']!.scopePins as Record<string, unknown>;
+    const afterPins = afterPolicies['provider-processing-policy']!.scopePins as Record<string, unknown>;
+    for (const scope of ['development-ci', 'fixture-recording', 'developer-live']) expect(afterPins[scope]).toEqual(beforePins[scope]);
+    expect(afterPins['ordinary-production']).toMatchObject({ version: 'v27', canonicalPath: path });
+  });
+
+  it('projects scoped category-free dialogue, four ceiling-bound background kinds and parent-bound sub-agents only under production v27', async () => {
+    await placeValidCheckout();
+    const document = readPolicySync(path);
+    const reading = verifyOrdinaryProductionPolicy(document);
+    const rules = bindOrdinaryProductionRules(reading, GO_PRODUCTION_BINDING)!;
+    const global = rules.find((rule) => rule.ruleId === 'ordinary-production-global-agent-dialogue')!;
+    expect(global).toMatchObject({ taskKinds: ['global-agent-dialogue'], modelRole: 'Fast Interaction Role', backgroundOrigin: false,
+      localTools: { targetedRetrieval: { allowed: false } }, webSearchToolAllowed: false,
+      globalAgentDialogue: { source: { bookRequired: false, explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly: true,
+        eligibleRevisionPinsRequired: true, editorOwnWordsAllowed: true, unlistedSourcesAllowed: false },
+        outboundCategoryRestriction: 'none', outboundDataDisclosureRequired: true,
+        redaction: { housePeopleNamesAndRolesStripped: true, remarksAndInternalNotesStripped: true, authorInformationAllowed: true, houseNameAllowed: true } },
+    });
+    expect(global.outboundDataCategories).toEqual(Object.keys(document.outboundDataCategories as object));
+    expect(reading.backgroundProcessingEnrollment!.enrollableKinds).toEqual([
+      { kind: 'learning-curation', mandatoryCeiling: true }, { kind: 'material-index', mandatoryCeiling: true },
+      { kind: 'review-reduction', mandatoryCeiling: true }, { kind: 'factual-recheck', mandatoryCeiling: true },
+    ]);
+    expect(rules.find((rule) => rule.ruleId === 'enrolled-background-processing')).toMatchObject({
+      backgroundOrigin: true, taskKinds: ['learning-curation', 'material-index', 'review-reduction', 'factual-recheck'],
+    });
+    for (const id of ['ordinary-production-review', 'ordinary-production-writing', 'ordinary-production-evaluation']) {
+      expect(rules.find((rule) => rule.ruleId === id)).toMatchObject({ crossUnitSynthesisAllowed: true, plusOneCrossUnitSynthesisTurn: true });
+    }
+    const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', GO_PRODUCTION_BINDING);
+    expect(projection.providerProcessing.subAgents).toEqual(document.subAgents);
+    expect(projection.providerProcessing.backgroundProcessingEnrollment).toEqual(rulesOf(document).at(-1)!.backgroundProcessingEnrollment);
+    const prior = verifyOrdinaryProductionPolicy(readPolicySync('docs/policies/provider-processing-policy.v26.json'));
+    expect(prior.subAgents).toBeUndefined();
+    expect(prior.backgroundProcessingEnrollment).toBeUndefined();
+    for (const scope of ['developer-live', 'development-ci'] as const) {
+      const other = await resolveSourceCheckoutLaunchPolicy(codeRoot, scope);
+      expect(other.providerProcessing.subAgents).toBeUndefined();
+      expect(other.providerProcessing.backgroundProcessingEnrollment).toBeUndefined();
+      expect(other.providerProcessing.admittedRules.some((rule) => rule.globalAgentDialogue !== undefined)).toBe(false);
+    }
+  });
+
+  it('rejects every missing, altered or extra term of either new rule, including its source and per-kind ceiling', () => {
+    const original = readPolicySync(path);
+    const inspect = (value: unknown, keys: string[]): string[][] => [keys, ...(
+      value !== null && typeof value === 'object'
+        ? Object.entries(value).flatMap(([key, child]) => inspect(child, [...keys, key])) : [])];
+    const paths = [10, 11].flatMap((index) => inspect(rulesOf(original)[index], ['decision', 'providerAllowRules', String(index)]));
+    for (const keys of paths) {
+      for (const remove of [false, true]) {
+        const policy = structuredClone(original);
+        let parent = policy;
+        for (const key of keys.slice(0, -1)) parent = parent[key] as Record<string, unknown>;
+        const key = keys.at(-1)!;
+        if (remove) delete parent[key];
+        else parent[key] = { unknownTerm: true };
+        expect(() => verifyOrdinaryProductionPolicy(policy), keys.join('/')).toThrow('LAUNCH_POLICY_INVALID');
+      }
+      const policy = structuredClone(original);
+      let node: unknown = policy;
+      for (const key of keys) node = (node as Record<string, unknown>)[key];
+      if (node !== null && typeof node === 'object' && !Array.isArray(node)) {
+        (node as Record<string, unknown>).unknownTerm = true;
+        expect(() => verifyOrdinaryProductionPolicy(policy), keys.join('/')).toThrow('LAUNCH_POLICY_INVALID');
+      }
+    }
+  });
+
+  it('requires the review synthesis bound and every sub-agent inheritance declaration exactly', () => {
+    const original = readPolicySync(path);
+    const paths = [
+      ['decision', 'providerAllowRules', '2', 'transmissions', 'plusOneCrossUnitSynthesisTurn'],
+      ['subAgents'],
+      ...Object.keys(original.subAgents as Record<string, unknown>).map((key) => ['subAgents', key]),
+    ];
+    for (const keys of paths) {
+      for (const remove of [false, true]) {
+        const policy = structuredClone(original);
+        let parent = policy;
+        for (const key of keys.slice(0, -1)) parent = parent[key] as Record<string, unknown>;
+        const key = keys.at(-1)!;
+        if (remove) delete parent[key];
+        else parent[key] = { unknownTerm: true };
+        expect(() => verifyOrdinaryProductionPolicy(policy), keys.join('/')).toThrow('LAUNCH_POLICY_INVALID');
+      }
+    }
+    const policy = structuredClone(original);
+    (policy.subAgents as Record<string, unknown>).unknownTerm = true;
+    expect(() => verifyOrdinaryProductionPolicy(policy)).toThrow('LAUNCH_POLICY_INVALID');
+  });
+});
+
 describe('Provider Processing v26 Wave 20 eligibility', () => {
   const path = 'docs/policies/provider-processing-policy.v26.json';
   const predecessorPath = 'docs/policies/provider-processing-policy.v25.json';
@@ -505,7 +634,7 @@ describe('Provider Processing v26 Wave 20 eligibility', () => {
 
   it('changes only the ordinary-production pin from active set v17 and preserves its other scopes', () => {
     const predecessor = readPolicySync('docs/policies/active-policy-set.v17.json');
-    const selected = readPolicySync(ACTIVE_SET_PATH);
+    const selected = readPolicySync('docs/policies/active-policy-set.v18.json');
     const before = predecessor.activePolicies as Record<string, Record<string, unknown>>;
     const after = selected.activePolicies as typeof before;
     expect(selected).toMatchObject({ version: 'v18', predecessorVersion: 'v17', predecessorCanonicalPath: 'docs/policies/active-policy-set.v17.json' });
@@ -547,11 +676,11 @@ afterEach(async () => {
   await rm(sandbox, { recursive: true, force: true });
 });
 
-describe('active policy set v18', () => {
+describe('active policy set v19', () => {
   it('is the sole active set: the carrier pins it, it maps all four scopes, and every pin matches the exact bytes', async () => {
-    expect(ACTIVE_SET_VERSION).toBe('v18');
+    expect(ACTIVE_SET_VERSION).toBe('v19');
     expect(DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION).toBe('v24');
-    expect(ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION).toBe('v26');
+    expect(ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION).toBe('v27');
     const carrier = JSON.parse(await readFile(join(REPO_ROOT, ...CARRIER_PATH.split('/')), 'utf8')) as Record<string, unknown>;
     expect(carrier).toEqual({
       manifestType: 'ai7-source-checkout-launch-authority',
@@ -559,7 +688,7 @@ describe('active policy set v18', () => {
       runtimeForm: 'source-checkout',
       trustedOperationalScope: 'development-ci',
       launchSelectableScopes: ['development-ci', 'developer-live', 'ordinary-production'],
-      activePolicySet: { version: 'v18', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
+      activePolicySet: { version: 'v19', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
     });
     expect(LAUNCH_SELECTABLE_SCOPES).toEqual(carrier.launchSelectableScopes);
     expect(await sha256Of(ACTIVE_SET_PATH)).toBe(ACTIVE_SET_SHA256);
@@ -571,8 +700,8 @@ describe('active policy set v18', () => {
         'external-export-policy': { version: string; canonicalPath: string; sha256: string };
       };
     };
-    expect(activeSet.version).toBe('v18');
-    expect(activeSet.predecessorVersion).toBe('v17');
+    expect(activeSet.version).toBe('v19');
+    expect(activeSet.predecessorVersion).toBe('v18');
     const pins = activeSet.activePolicies['provider-processing-policy'].scopePins;
     expect(Object.keys(pins)).toEqual(Object.keys(EXPECTED_PINS));
     for (const [scope, [version, canonicalPath, sha256]] of Object.entries(EXPECTED_PINS)) {
@@ -685,7 +814,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('development-ci');
     // One active set per launch: development-ci reports v16 while its Provider Processing pin stays v1.
-    expect(projection.activePolicySetVersion).toBe('v18');
+    expect(projection.activePolicySetVersion).toBe('v19');
     expect(projection.providerProcessing.version).toBe('v1');
     expect(projection.providerProcessing.label).toBe('开发与持续集成：零次实时传输');
     expect(projection.providerProcessing.bindingState).toBeUndefined();
@@ -701,7 +830,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('developer-live');
-    expect(projection.activePolicySetVersion).toBe('v18');
+    expect(projection.activePolicySetVersion).toBe('v19');
     expect(projection.providerProcessing).toEqual({
       version: 'v24',
       decision: 'eligible-only',
@@ -1304,12 +1433,14 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
       expect(projection.integrityState).toBe('verified');
       expect(projection.denialReason).toBeNull();
       expect(projection.operationalScope).toBe('ordinary-production');
-      expect(projection.activePolicySetVersion).toBe('v18');
+      expect(projection.activePolicySetVersion).toBe('v19');
       expect(projection.providerProcessing).toEqual({
-        version: 'v26',
-        execution: readPolicySync('docs/policies/provider-processing-policy.v26.json').execution,
-        transport: readPolicySync('docs/policies/provider-processing-policy.v26.json').transport,
-        research: readPolicySync('docs/policies/provider-processing-policy.v26.json').research,
+        version: 'v27',
+        execution: readPolicySync('docs/policies/provider-processing-policy.v27.json').execution,
+        transport: readPolicySync('docs/policies/provider-processing-policy.v27.json').transport,
+        research: readPolicySync('docs/policies/provider-processing-policy.v27.json').research,
+        subAgents: readPolicySync('docs/policies/provider-processing-policy.v27.json').subAgents,
+        backgroundProcessingEnrollment: rulesOf(readPolicySync('docs/policies/provider-processing-policy.v27.json')).at(-1)!.backgroundProcessingEnrollment,
         decision: 'eligible-only',
         authorizedLiveTransmissionCount: 'bounded-by-run',
         liveTransmissionAllowed: false,
@@ -1334,27 +1465,29 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
     expect(projection.integrityState).toBe('verified');
     expect(projection.operationalScope).toBe('ordinary-production');
     expect(projection.providerProcessing).toEqual({
-      version: 'v26',
-      execution: readPolicySync('docs/policies/provider-processing-policy.v26.json').execution,
-      transport: readPolicySync('docs/policies/provider-processing-policy.v26.json').transport,
-      research: readPolicySync('docs/policies/provider-processing-policy.v26.json').research,
+      version: 'v27',
+      execution: readPolicySync('docs/policies/provider-processing-policy.v27.json').execution,
+      transport: readPolicySync('docs/policies/provider-processing-policy.v27.json').transport,
+      research: readPolicySync('docs/policies/provider-processing-policy.v27.json').research,
+        subAgents: readPolicySync('docs/policies/provider-processing-policy.v27.json').subAgents,
+        backgroundProcessingEnrollment: rulesOf(readPolicySync('docs/policies/provider-processing-policy.v27.json')).at(-1)!.backgroundProcessingEnrollment,
       decision: 'eligible-only',
       authorizedLiveTransmissionCount: 'bounded-by-run',
       liveTransmissionAllowed: true,
       crossUnitReductionAllowed: true,
       assuranceSamplingAllowed: true,
       runReportReflectionAllowed: true,
-      admittedRules: [...v26ProductionAdmittedRules(binding), expect.objectContaining({ ruleId: 'ordinary-production-model-connection-test', taskKinds: ['model-connection-test'], route: binding.route, model: binding.model })],
+      admittedRules: [...v27ProductionAdmittedRules(binding), expect.objectContaining({ ruleId: 'ordinary-production-model-connection-test', taskKinds: ['model-connection-test'], route: binding.route, model: binding.model })],
       bindingState: 'configured',
       label: '本机生产：实时传输受运行边界约束',
     });
-    expect(projection.providerProcessing.admittedRules).toHaveLength(11);
+    expect(projection.providerProcessing.admittedRules).toHaveLength(13);
     // The two source flags agree with the categories here too: material in review, writing, evaluation and 来源译文; deliverables in review.
     expect(projection.providerProcessing.admittedRules.filter((rule) => rule.materialReferencesAllowed).map((rule) => rule.ruleId))
       .toEqual(['ordinary-production-review', 'ordinary-production-writing', 'ordinary-production-evaluation', 'ordinary-production-material-translation']);
     expect(projection.providerProcessing.admittedRules.filter((rule) => rule.editorialDeliverablesAllowed).map((rule) => rule.ruleId))
       .toEqual(['ordinary-production-review']);
-    for (const rule of projection.providerProcessing.admittedRules) {
+    for (const rule of projection.providerProcessing.admittedRules.filter((rule) => rule.globalAgentDialogue === undefined)) {
       expect(rule.materialReferencesAllowed, rule.ruleId).toBe(rule.outboundDataCategories.includes('frozen-material-reference-excerpt'));
       expect(rule.editorialDeliverablesAllowed, rule.ruleId).toBe(rule.outboundDataCategories.includes('editorial-deliverable-excerpt'));
     }
@@ -1362,7 +1495,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
     expect(new Set(projection.providerProcessing.admittedRules.map((rule) => `${rule.route}|${rule.endpoint}|${rule.model}|${rule.credentialSlot}`)).size).toBe(1);
     expect(JSON.stringify(projection)).not.toContain(binding.credentialReference);
     // Production admission must retain every policy category, including all three unpublished classes.
-    const policyRules = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v26.json'));
+    const policyRules = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v27.json'));
     for (const rule of projection.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test')) {
       expect(rule.outboundDataCategories, rule.ruleId).toEqual(policyRules.find((candidate) => candidate.ruleId === rule.ruleId)!.allowedOutboundDataCategories);
     }
@@ -1401,7 +1534,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
 
   it('denies an ordinary-production launch whose v23 bytes drifted, under any binding, while the other scopes still verify', async () => {
     await placeValidCheckout();
-    const target = join(codeRoot, ...'docs/policies/provider-processing-policy.v26.json'.split('/'));
+    const target = join(codeRoot, ...'docs/policies/provider-processing-policy.v27.json'.split('/'));
     await writeFile(target, `${await readFile(target, 'utf8')}\n`);
     for (const binding of [null, GO_PRODUCTION_BINDING]) {
       const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', binding);
@@ -1598,7 +1731,8 @@ describe('Provider Processing v22 and v23: enrolled background analysis and mode
     const developerLive = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'developer-live');
     const production = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', GO_PRODUCTION_BINDING);
     for (const [projection, ids] of [[developerLive, V16_ADMITTED_RULES.map((rule) => rule.ruleId)], [production, PRODUCTION_RULE_ID_ORDER]] as const) {
-      const rules = projection.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test');
+      const rules = projection.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test' &&
+        rule.ruleId !== 'ordinary-production-global-agent-dialogue' && rule.ruleId !== 'enrolled-background-processing');
       expect(rules.map((rule) => rule.ruleId)).toEqual(ids);
       expect(rules.map((rule) => [rule.clarificationQuestionAllowed, rule.clarificationTimeoutHours, rule.backgroundOrigin])).toEqual(expected);
       // The default-execution-rule origin is projected from each rule's own authorityOrigin: review in both scopes, writing in developer-live only.
@@ -1787,7 +1921,7 @@ describe('Provider Processing v22 and v23: platform tools on the research rules 
     ['ordinary-production', V23_PATH],
   ] as const)('denies a %s launch after a one-byte change inside a backend host of its pinned bytes', async (scope, path) => {
     await placeValidCheckout();
-    const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v26.json' : path).split('/'));
+    const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v27.json' : path).split('/'));
     const bytes = await readFile(target);
     const offset = bytes.indexOf('"api.search.tinyfish.ai"');
     expect(offset).toBeGreaterThan(0);
@@ -1882,7 +2016,7 @@ describe('Provider Processing v22 and v23: local targeted retrieval on every rul
   it.each([['developer-live', V24_PATH], ['ordinary-production', V23_PATH]] as const)('denies a %s launch after a one-byte change inside the local tools block of its pinned bytes (%s)', async (scope, path) => {
     for (const [from, to] of [['"callsPerUnit": 5', '"callsPerUnit": 6'], ['"candidatesPerCall": 8', '"candidatesPerCall": 9'], ['"scope": "no-egress"', '"scope": "no-egrexs"'], ['"allowed": false', '"allowed": true']] as const) {
       await placeValidCheckout();
-      const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v26.json' : path).split('/'));
+      const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v27.json' : path).split('/'));
       const original = await readFile(target, 'utf8');
       expect(original.includes(from), from).toBe(true);
       await writeFile(target, original.replace(from, to));
@@ -2221,7 +2355,7 @@ describe('Provider Processing v22 and v23: custom analysis dimensions and Series
 
   it('lists a kind family entry in the custom analysis rule alone, in every policy document of the repository', () => {
     const families: string[] = [];
-    for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19', 'v20', 'v21', 'v22', 'v23', 'v24', 'v25', 'v26']) {
+    for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19', 'v20', 'v21', 'v22', 'v23', 'v24', 'v25', 'v26', 'v27']) {
       const policy = readPolicySync(`docs/policies/provider-processing-policy.${version}.json`);
       for (const rule of rulesOf(policy)) {
         for (const kind of (rule.allowedTaskKinds as string[] | undefined) ?? []) if (kind.includes('*')) families.push(`${version} ${String(rule.ruleId)} ${kind}`);
@@ -2233,6 +2367,7 @@ describe('Provider Processing v22 and v23: custom analysis dimensions and Series
       `v24 ${CUSTOM_RULE_ID} custom-analysis/*`,
       'v25 ordinary-production-custom-analysis custom-analysis/*',
       'v26 ordinary-production-custom-analysis custom-analysis/*',
+      'v27 ordinary-production-custom-analysis custom-analysis/*',
     ]);
   });
 
@@ -2327,12 +2462,14 @@ describe('Provider Processing v24: the ADR 0091 Public SampleBooks (Issue #990)'
   });
 });
 
-/** Independent predecessor expectations plus the exact selected v26 additions. */
-function v26ProductionAdmittedRules(binding: ConfiguredProviderBinding): AdmittedProviderRule[] {
-  const declared = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v26.json'));
+/** Independent predecessor expectations plus the selected v27 additions. */
+function v27ProductionAdmittedRules(binding: ConfiguredProviderBinding): AdmittedProviderRule[] {
+  const declared = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v27.json'));
   return productionAdmittedRules(binding).map((rule) => {
     const document = declared.find((entry) => entry.ruleId === rule.ruleId)!;
     return { ...rule, localTools: document.localTools as AdmittedLocalTools,
+      ...(['ordinary-production-review', 'ordinary-production-writing', 'ordinary-production-evaluation'].includes(rule.ruleId)
+        ? { plusOneCrossUnitSynthesisTurn: true } : {}),
       ...(rule.ruleId !== 'ordinary-production-review' ? {} : {
         taskKinds: document.allowedTaskKinds as string[], outboundDataCategories: document.allowedOutboundDataCategories as AdmittedProviderRule['outboundDataCategories'],
         plusDeclaredContractRetryAdaptations: true, crossUnitSynthesisAllowed: true,
@@ -2341,5 +2478,14 @@ function v26ProductionAdmittedRules(binding: ConfiguredProviderBinding): Admitte
         houseReviewGuidelineClause: document.houseReviewGuidelineClause as NonNullable<AdmittedProviderRule['houseReviewGuidelineClause']>,
       }),
     };
-  });
+  }).concat([
+    expect.objectContaining({ ruleId: 'ordinary-production-global-agent-dialogue', taskKinds: ['global-agent-dialogue'],
+      modelRole: 'Fast Interaction Role', backgroundOrigin: false, route: binding.route, model: binding.model,
+      globalAgentDialogue: expect.objectContaining({ outboundCategoryRestriction: 'none', outboundDataDisclosureRequired: true }),
+    }),
+    expect.objectContaining({ ruleId: 'enrolled-background-processing',
+      taskKinds: ['learning-curation', 'material-index', 'review-reduction', 'factual-recheck'],
+      modelRole: 'Main Editorial Role', backgroundOrigin: true, route: binding.route, model: binding.model,
+    }),
+  ]);
 }
