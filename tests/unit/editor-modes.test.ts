@@ -117,7 +117,8 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
   function assertDrawerStyles(source: string) {
     const css = source.replace(/\/\*[\s\S]*?\*\//gu, '');
     // These drawer media blocks contain flat rules. Consume every rule, rather than stopping at the first closing brace.
-    const media = [...css.matchAll(/@media\s*([^{}]+)\{((?:[^{}]*\{[^{}]*\}\s*)+)\}/gu)];
+    // No quantifier shares whitespace between rules, so a block holding a nested at-rule fails fast instead of backtracking.
+    const media = [...css.matchAll(/@media\s*([^{}]+)\{((?:[^{}]*\{[^{}]*\})+)\s*\}/gu)];
     // Include every block at this range, even a body/status-only override; the separator also catches changed boundaries.
     const fallback = media.filter(([, query, rules]) => compact(query!) === fallbackQuery
       || (query!.includes('max-width') && rules!.includes('#task-drawer-separator')));
@@ -150,6 +151,9 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
         .flatMap(([, , body]) => body!.split(';').map(compact).filter(Boolean));
       expect(declarations, `focus off: ${target || 'body'}`).toEqual([declaration]);
     }
+    // Drawer-state selectors live only in these blocks: an override in another media block or at top level fails.
+    const drawerSelectors = (text: string) => text.split('data-task-drawer').length - 1;
+    expect(drawerSelectors(css)).toBe(drawerSelectors(block!) + columns.reduce((count, [, , body]) => count + drawerSelectors(body!), 0));
     return { css, query: query!, rules };
   }
 
@@ -203,11 +207,18 @@ describe('Resizable Workspace Regions (VIEW-007 to VIEW-012)', () => {
     }
   });
 
-  it('rejects an unguarded fallback override in a separate media block', () => {
+  it('rejects an unguarded fallback override in a separate media block or at top level', () => {
     const { css, query } = assertDrawerStyles(stylesheet);
     for (const { target, declaration } of fallbackEffects) {
-      const override = `@media ${query} { ${drawer} ${target} { ${declaration}; } }`;
-      expect(() => assertDrawerStyles(`${css}\n${override}`), target || 'body').toThrow();
+      const rule = `${drawer} ${target} { ${declaration}; }`;
+      for (const override of [
+        `@media ${query} { ${rule} }`,
+        `@media (max-width: 1184px) and (min-width: 1120px) { ${rule} }`,
+        `@media (min-width: 1000px) and (max-width: 1300px) { ${rule} }`,
+        rule,
+      ]) {
+        expect(() => assertDrawerStyles(`${css}\n${override}`), override).toThrow();
+      }
     }
   });
 
