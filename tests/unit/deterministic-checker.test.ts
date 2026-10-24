@@ -28,7 +28,13 @@ describe('local punctuation and numeral predicates', () => {
     expect(await counts(['她写道：“清点（‘蓝卡”', '’）'])).toEqual(['P01']);
     expect(await counts(['记录（待补。'])).toEqual(['P01']);
     expect(await counts(['记录（待补。'], {}, 'selection')).toEqual([]);
+    // An opener found unmatched only at the whole-Book end still sorts into frozen block order.
+    expect(await counts(['记录（待补。', '他停住了…又望向门口。'])).toEqual(['P01', 'P02']);
     expect(await counts(['记录（`专用字段`待补。'])).toEqual([]);
+    // A right single quote with no left single quote open is a possible apostrophe, never an unmatched-closer card.
+    const apostrophes = await checkLocalPlan(plan(['她说：“I don’t know.”', '他念：“‘we’re’ 之后。”']));
+    expect(apostrophes.candidates).toEqual([]); expect(apostrophes.counts.P01.skipped).toBe(2);
+    expect(await counts(['她说：“‘甲（乙’）”'])).toEqual(['P01']);
   });
   it('recognizes only Unicode ellipsis lengths and skips leaders and undeclared doubled forms', async () => {
     expect(await counts(['他停住了…又望向门口。', '她没有回答……', '后来………………', '小节……37', '真的吗……？', 'ASCII ...'])).toEqual(['P02', 'P02']);
@@ -54,6 +60,10 @@ describe('local punctuation and numeral predicates', () => {
     expect(result.candidates.every((candidate) => candidate.basis === 'editor-convention')).toBe(true);
     expect(await counts(['比例为0.37%。', '比例为17%～29%。', '预算为3万元—6万元。', '页码32—47页', '编号A3—6', '2026-03', '.37', '版本v.37', '数值12345'], numeric)).toEqual([]);
     expect(await counts(['β.37%', '𝛽.37%', '−3—6万元', 'A3—6万元', 'v.37%', '路径C:\\.37%'], numeric)).toEqual([]);
+    // Signed endpoints in any sign glyph stay outside N02, and a non-ASCII sign never leaves a partial N01 token.
+    expect(await counts(['－3～5%', '＋3～5%', '±3～5%', '﹣3～5万', '－.37%', '±.37%', '1-.37%', '--.37%'], numeric)).toEqual([]);
+    const signed = await checkLocalPlan(plan(['比例为-.37%。', '比例为+.37%。'], numeric));
+    expect(signed.candidates.map((candidate) => [candidate.ruleId, candidate.from, candidate.to, candidate.quote])).toEqual([['N01', 3, 8, '-.37%'], ['N01', 3, 8, '+.37%']]);
   });
   it('excludes fences, inline code, URLs, email and explicit foreign/technical ranges', async () => {
     expect(await counts(['```text', '标点… .37%', '```', '`待核… .37%`', 'https://host.invalid/…/.37%', 'www.host.invalid/…', 'name.37%@host.invalid', '~~~', '不闭合…'], numeric)).toEqual([]);

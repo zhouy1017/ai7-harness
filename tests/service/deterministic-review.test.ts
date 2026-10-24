@@ -3,8 +3,8 @@ import { join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EditorialStore } from '../../src/service/store.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { EditorialStore, StoreError } from '../../src/service/store.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import { readLocalStageArtifacts } from '../../src/service/review/review-runs.js';
 import { graphemeCount } from '../../src/service/analysis/factual-review-contract.js';
@@ -55,11 +55,23 @@ function authorize(book: Book, prepared: ReturnType<typeof prepare>) {
   store.authorizeReviewRun(book.bookId, prepared.run.reviewRunId, prepared.plan.start.categoryDigests);
 }
 function database() { return new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite')); }
+function blockText(book: Book, blockId: string): string {
+  return store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId }).blocks.find((block) => block.blockId === blockId)!.text;
+}
 describe('provider-free local ReviewRun', () => {
-  for (const scope of ['development-ci', 'ordinary-production'] as const) it(`runs without any model under ${scope}, converts, applies, reverses and reopens`, async () => {
+  // The last variant has a ready, selected production model service bound to the launch, so a model path exists and stays untouched.
+  for (const [scope, configured] of [['development-ci', false], ['ordinary-production', false], ['ordinary-production', true]] as const) it(`runs without any model under ${scope}${configured ? ' beside a configured model service' : ''}, converts, applies, reverses and reopens`, async () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, scope, null);
-    store.baselineAnalysisLedger.bindLaunch({ operationalScope: scope, policy, live: null });
+    let policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, scope, null);
+    if (configured) {
+      const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === 'deepseek-open-platform')!;
+      const pending = store.saveModelServiceConnection('本地检查旁的模型服务', null, 'needs-attention', route.route);
+      store.saveModelServiceConnection('本地检查旁的模型服务', pending.credentialReference, 'ready', route.route);
+      store.selectModelServiceRoute(route.route);
+      const binding = { ...route, credentialReference: pending.credentialReference };
+      policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding);
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: { scope: 'ordinary-production', ...binding, runBudgetCeiling: 'unset' } });
+    } else store.baselineAnalysisLedger.bindLaunch({ operationalScope: scope, policy, live: null });
     const book = await importSample1Book(store, roots.codeRoot, '本地检查公开样书');
     const target = replaceFirst(book, '🟦e\u0301他停住了…又望向门口。比例为.37%。');
     const traps = [vi.spyOn(adapter, 'DeepSeekOpenAiCompatibleAdapter').mockImplementation(() => { throw new Error('provider construction'); }),
@@ -75,14 +87,22 @@ describe('provider-free local ReviewRun', () => {
     expect(run.localCheck!.counts!.N01!.disabled).toBe(97);
     const finding = run.findings.find((finding) => finding.blockId === target && finding.stateLine?.startsWith('P02/'))!;
     expect(finding.output).toBe('annotation'); expect(finding.replacement).toBeNull(); expect(finding.markId).not.toBeNull();
+    // Exact grapheme offsets past an astral and a combining grapheme; numerals stay off, so `.37%` produces no card.
+    expect([finding.fromGrapheme, finding.toGrapheme, finding.quote]).toEqual([6, 7, '…']);
+    expect(run.findings.some((item) => item.stateLine?.startsWith('N0'))).toBe(false);
+    expect(run.report!.record.appendix.categories).toEqual([expect.objectContaining({ categoryId: 'local-text-check', adapterPin: null, planEnvelopeDigest: prepared.run.localCheck!.planDigest })]);
+    const original = blockText(book, target);
     const binding = () => ({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: target }).blocks[0]!.blockId });
     const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: target });
     const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
     const converted = store.updateEditorialMark({ ...binding(), markId: finding.markId!, action: 'convert', body: null, highlightColor: null, status: null, rationale: null, targetKind: 'change-suggestion', proposedText: '……' });
     expect(converted.card!.convertedFrom?.markId).toBe(finding.markId);
     const applied = store.applyChangeSuggestion({ ...binding(), markId: converted.card!.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+    // The editor's replacement is written, never one the checker supplied; reversal restores the tester-edited text.
+    expect(blockText(book, target)).toBe(original.replace('了…又', '了……又'));
     const reversed = store.reverseAppliedChangeSuggestion({ ...binding(), markId: converted.card!.markId, clientEffectId: randomUUID() });
     expect(reversed.application.reversesEffectId).toBe(applied.application.effectId);
+    expect(blockText(book, target)).toBe(original);
     expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, converted.card!.markId).pinnedText === card.pinnedText).toBe(true);
     for (const trap of traps) expect(trap).not.toHaveBeenCalled(); expect(fetchTrap).not.toHaveBeenCalled();
     const db = database(); const before = readLocalStageArtifacts(db, run.reviewRunId).map((artifact) => artifact.digest);
@@ -164,6 +184,37 @@ describe('provider-free local ReviewRun', () => {
     expect(run.state).toBe('settled'); expect(execution).not.toHaveBeenCalled(); expect(run.localCheck!.excluded.some((entry) => entry.candidateId === invalid.id)).toBe(true);
     expect(run.findings.some((finding) => finding.blockId === target)).toBe(true);
     const after = database(); expect(readLocalStageArtifacts(after, run.reviewRunId).at(-1)!.record.state).toBe('materialized'); after.close();
+  });
+
+  it('refuses source drift after a committed completion without materializing or checking again', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '本地完成后漂移样书');
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); replaceFirst(book, '他停住了…又望向门口。');
+    const prepared = prepare(book, policy); authorize(book, prepared); const steps = store.reviewRunDriveSteps;
+    const execution = vi.spyOn(checker, 'checkLocalPlan');
+    steps.begin(prepared.run.reviewRunId);
+    await steps.local!(prepared.run.reviewRunId, () => { const db = database(); try { return db.prepare('SELECT state FROM review_local_stage_artifacts ORDER BY sequence DESC LIMIT 1').get()?.state === 'completed'; } finally { db.close(); } });
+    steps.end(prepared.run.reviewRunId);
+    replaceFirst(book, '她停住了…又望向门口。');
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.continue(prepared.run.reviewRunId); await driver.dispose();
+    const run = store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!;
+    expect(run.localCheck!.state).toBe('refused'); expect(run.findings).toEqual([]); expect(run.canContinue).toBe(false); expect(execution).toHaveBeenCalledTimes(1);
+    const db = database(); expect(readLocalStageArtifacts(db, run.reviewRunId).map(({ record }) => record.state)).toEqual(['started', 'completed', 'refused']);
+    expect(db.prepare("SELECT count(*) n FROM editorial_marks WHERE source_origin = 'review-category'").get()!.n).toBe(0); db.close();
+  });
+
+  it('freezes explicit exclusions into the plan and refuses one outside the frozen paragraphs in its own words', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '本地排除样书');
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); const target = replaceFirst(book, '外语…片段。他停住了…又望向门口。');
+    const excluded = { ...OPTIONS, excludedRanges: [{ blockId: target, from: 0, to: 3, reason: 'foreign' as const }] };
+    const prepared = prepare(book, policy, excluded); expect(prepared.run.localCheck!.options.excludedRanges).toEqual(excluded.excludedRanges); authorize(book, prepared);
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose();
+    const run = store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!;
+    expect(run.findings.filter((finding) => finding.blockId === target).map((finding) => [finding.fromGrapheme, finding.toGrapheme])).toEqual([[10, 11]]);
+    expect(run.localCheck!.counts!.P02!.exempt).toBeGreaterThan(0);
+    const outside = { ...OPTIONS, excludedRanges: [{ blockId: `blk_${'0'.repeat(24)}`, from: 0, to: 1, reason: 'technical' as const }] };
+    let refusal: unknown;
+    try { store.createReviewRunPreparationWork(book.bookId, ['local-text-check'], WHOLE, policy, null, [], null, null, null, outside); } catch (error) { refusal = error; }
+    expect(refusal).toBeInstanceOf(StoreError); expect(refusal).toMatchObject({ code: 'LOCAL_PLAN_INVALID', message: '本地检查计划或输入无效；请重新准备。' });
   });
 
   it('migrates genuine schema89 additively, tolerates a committed pre-stamp table and rejects corrupted artifact chains', async () => {

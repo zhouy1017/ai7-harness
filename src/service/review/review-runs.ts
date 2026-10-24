@@ -2,7 +2,7 @@ import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/
 import { reviewProcedureId } from '../procedures/preinstalled.js';
 import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { LOCAL_REVIEW_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
-import { freezeLocalPlan, numeralBasis, validLocalOptions, validateLocalPlan, type LocalCheckPlan, type LocalCheckBlock } from './deterministic/plan.js';
+import { LocalCheckError, freezeLocalPlan, numeralBasis, validLocalOptions, validateLocalPlan, type LocalCheckPlan, type LocalCheckBlock } from './deterministic/plan.js';
 import { exactLocalCandidateIds, checkLocalPlan, localCandidateNote, type LocalCheckResult } from './deterministic/checker.js';
 import { LOCAL_CHECK_CATEGORY, LOCAL_CHECK_PROCEDURE, LOCAL_CHECK_LIMITATION, LOCAL_RULE_IDS } from './deterministic/rules.js';
 import { LOCAL_REVIEW_CATEGORY, REVIEW_CATEGORY_CONFIGURATION_SCHEMA } from './category-configuration.js';
@@ -300,6 +300,15 @@ export function readLocalStageArtifacts(db: DatabaseSync, runId: string): Array<
 export function validateLocalStageArtifacts(db: DatabaseSync): void {
   if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'review_local_stage_artifacts' AND type = 'table'").get() === undefined) return;
   for (const row of db.prepare("SELECT review_run_id FROM review_runs WHERE json_type(canonical_json, '$.localPlan') IS NOT NULL OR review_run_id IN (SELECT review_run_id FROM review_local_stage_artifacts)").all()) readLocalStageArtifacts(db, String(row.review_run_id));
+}
+/** A refused local plan reaches the editor in its own words, as the Review Run's refusal rather than a failed request. */
+function localRefusal<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (error instanceof LocalCheckError) throw new ReviewRunError(error.code, error.message);
+    throw error;
+  }
 }
 function localSource(source: LocalCheckPlan['source']): LocalCheckPlan['source'] {
   return { manuscriptId: source.manuscriptId, branchId: source.branchId, revisionId: source.revisionId, journalSequence: source.journalSequence, workingDigest: source.workingDigest };
@@ -1167,8 +1176,9 @@ export class ReviewRunStore {
     requireReview(input.scope.kind !== 'changed', 'LOCAL_SCOPE_INVALID', '本地文字检查请选择全书、选章或当前选区。');
     const scope = this.#resolveScope(input.scope, this.#chapterOptions(input.bookId, head), head);
     requireReview(scope.kind !== 'changed' && (scope.kind === 'whole' || scope.selectedRange !== null), 'LOCAL_SCOPE_INVALID', '请重新选择本地检查范围。');
-    const localPlan = freezeLocalPlan({ procedure: resolveProcedureDefinition(this.#db, LOCAL_CHECK_PROCEDURE, 1).pin,
-      source: localSource(head), bookImportId: this.#localBookImport(input.bookId), scope: scope.kind, options: input.localCheck, blocks: this.#localBlocks(head.branchId, scope) });
+    const frozen = { procedure: resolveProcedureDefinition(this.#db, LOCAL_CHECK_PROCEDURE, 1).pin, source: localSource(head),
+      bookImportId: this.#localBookImport(input.bookId), scope: scope.kind, options: input.localCheck, blocks: this.#localBlocks(head.branchId, scope) };
+    const localPlan = localRefusal(() => freezeLocalPlan(frozen));
     const category: SnapshotCategory = { position: 1, categoryId: LOCAL_CHECK_CATEGORY, executor: 'local-text-check', entry: LOCAL_REVIEW_CATEGORY,
       basisStatement: reviewCategoryBasisStatement(LOCAL_REVIEW_CATEGORY) + `；标点：${localPlan.options.punctuation === 'chinese-prose' ? '编辑确认中文正文' : '未启用'}；数字：${numeralBasis(localPlan.options) === 'editor-convention' ? '编辑约定' : numeralBasis(localPlan.options) === 'national-standard' ? '编辑声明在适用范围内' : numeralBasis(localPlan.options) === 'out-of-applicability' ? '不在声明的适用范围内，未检查' : '未启用'}`,
       selectedRange: scope.selectedRange, task: null };
@@ -1180,7 +1190,7 @@ export class ReviewRunStore {
   #requireLocalSource(snapshot: RunSnapshot): void {
     const plan = snapshot.localPlan;
     requireReview(plan !== undefined, 'LOCAL_PLAN_INVALID', '本地检查计划缺失。');
-    validateLocalPlan(plan);
+    localRefusal(() => validateLocalPlan(plan));
     requireReview(plan.bookImportId === this.#localBookImport(snapshot.bookId), 'LOCAL_IMPORTED_AUTHORITY', '导入的审阅记录只供查看；请在本机新建本地文字检查。');
     const head = this.#head(snapshot.bookId);
     requireReview(head !== null && canonicalJson(localSource(head)) === canonicalJson(plan.source), 'LOCAL_SOURCE_MOVED', '稿件修订或范围已变化；本地检查没有继续，请重新准备。');
@@ -2969,8 +2979,10 @@ export class ReviewRunStore {
         const detail = [
           `已形成 ${findings.length} 条发现：${marked} 条在稿件上`,
           ...(changed > 0 ? [`${changed} 条原文已变，未能标出`] : []),
+          // A local candidate has no quotation to locate; its exclusions are listed with the local check, not in the appendix.
           ...(source.excludedCount > 0
-            ? [source.selection ? selectionExcludedLine(source.excludedCount) : `另有 ${source.excludedCount} 条未能定位引文，列在排除附录中`]
+            ? [source.local !== undefined ? `另有 ${source.excludedCount} 个本地候选未通过精确定位或超出结果界限，未生成批注，列在本次本地检查的排除记录中`
+              : source.selection ? selectionExcludedLine(source.excludedCount) : `另有 ${source.excludedCount} 条未能定位引文，列在排除附录中`]
             : []),
           ...(source.outsideSelection > 0 ? [selectionOutsideLine(source.outsideSelection)] : []),
         ].join('；') + '。';
