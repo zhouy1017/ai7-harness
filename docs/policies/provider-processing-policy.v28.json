@@ -1,0 +1,3294 @@
+{
+  "schemaDialect": "http://json-schema.org/draft-07/schema#",
+  "schemaPath": "docs/policies/provider-processing-policy.v28.schema.json",
+  "documentType": "ai7-policy-document",
+  "policyId": "provider-processing-policy",
+  "policyType": "provider-processing",
+  "version": "v28",
+  "lifecycleStatus": "active",
+  "predecessorVersion": "v27",
+  "predecessorCanonicalPath": "docs/policies/provider-processing-policy.v27.json",
+  "canonicalPath": "docs/policies/provider-processing-policy.v28.json",
+  "humanProjectionPath": "docs/policies/provider-processing-policy.v28.md",
+  "operationalScope": "ordinary-production",
+  "authorityBasis": [
+    "docs/domain/execution/CONTEXT.md",
+    "docs/adr/0007-separate-decisions-authority-and-effect-proof.md",
+    "docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md",
+    "docs/adr/0046-separate-provider-processing-by-operational-scope.md",
+    "docs/adr/0048-enroll-and-evaluate-background-manuscript-analysis.md",
+    "docs/adr/0065-admit-a-developer-live-provider-processing-scope.md",
+    "docs/adr/0066-add-model-driven-cross-unit-reduction-and-assurance-sampling.md",
+    "docs/adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md",
+    "docs/adr/0070-run-developer-live-unattended-and-size-the-ceiling-per-unit.md",
+    "docs/adr/0079-record-the-owner-s-decisions-of-2026-09-10-on-storage-policies-export-egress-providers-and-samplebooks.md",
+    "docs/adr/0080-assign-a-provider-route-and-model-to-every-task-that-transmits.md",
+    "docs/adr/0085-decide-a-ranged-proposal-s-conflict-by-the-words-it-replaces.md",
+    "docs/adr/0088-carry-the-editorial-dialogue-under-developer-live.md",
+    "docs/adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md",
+    "docs/architecture-v2/HARNESS-INTEGRATION.md",
+    "docs/development/milestone-1.0.0-scope.md",
+    "docs/adr/0074-admit-a-bounded-research-egress-and-a-runtime-factual-verification-policy.md",
+    "docs/adr/0026-manuscript-retrieval-returns-candidates.md",
+    "docs/adr/0047-separate-targeted-retrieval-from-covered-manuscript-analysis.md",
+    "docs/adr/0004-govern-learning-eligibility-with-versioned-policy-documents.md",
+    "docs/policies/learning-eligibility-policy.md",
+    "docs/adr/0090-admit-procedure-recommendation-foreign-skill-import-and-custom-analysis-dimensions.md",
+    "docs/adr/0002-book-series-cross-project-and-house-learning-scopes.md",
+    "docs/adr/0037-enforce-versioned-series-retrieval-exclusions-immediately.md",
+    "docs/adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md",
+    "docs/adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md"
+  ],
+  "trustedSelection": {
+    "selectionAuthorityClass": "trusted-build-or-launch-authority",
+    "launchArgument": "--trusted-operational-scope ordinary-production",
+    "developerHostOnly": false,
+    "hostedOrCiSelectionAllowed": false,
+    "ordinaryProductSettingAllowed": false,
+    "environmentVariableSelectorAllowed": false,
+    "providerSelectorAllowed": false,
+    "artifactOrPluginSelectorAllowed": false,
+    "crossScopeFallbackAllowed": false,
+    "selectionConfiguresProvider": false,
+    "selectionDispatchesRun": false
+  },
+  "decision": {
+    "default": "deny",
+    "providerAllowRules": [
+      {
+        "ruleId": "ordinary-production-baseline-analysis",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "newlyUserInitiatedTaskRequired": true,
+          "directRunAuthorizationAllowed": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "backgroundAnalysisEnrollmentAllowed": false,
+          "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": true,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false
+        },
+        "source": {
+          "admittedInputs": "user-owned-manuscripts-and-house-knowledge",
+          "privateManuscriptAllowed": true,
+          "materialReferencesAllowed": false,
+          "seriesKnowledgeAllowed": false,
+          "editorialDeliverablesAllowed": false
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Main Editorial Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "boundedByCoverageManifestUnitCount": true,
+          "plusDeclaredSafeRetryAdaptations": true,
+          "plusCrossUnitReductionTopicSections": true,
+          "plusAssuranceSampleAnchorUnits": true,
+          "plusOneRunReportReflectionTurn": true,
+          "plusClarificationAnswerTurns": true,
+          "oneTechnicalSessionPerAnalysisUnit": true,
+          "accumulatingSingleSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "crossUnitReductionAllowed": true,
+          "assuranceSamplingAllowed": true,
+          "runReportReflectionAllowed": true,
+          "webSearchToolAllowed": false
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": true,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          },
+          "declarations": [
+            {
+              "name": "retrieve",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "exact_fetch",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "read_blocks",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "baseline_facts",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "guideline_clause",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "term_table",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "search_manuscript",
+              "readOnly": true,
+              "concurrencySafe": true
+            }
+          ],
+          "parallelCallsAllowed": true
+        },
+        "clarification": {
+          "modelQuestionAllowed": true,
+          "maxQuestionsPerUnit": 1,
+          "unitWaitsOthersContinue": true,
+          "timeoutHours": 24,
+          "timeoutContinuesAs": "unanswered-with-run-report-disclosure"
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "planEnvelopeRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "declaredOperationClassesRequired": true,
+          "exactRunBudgetCeilingStateRequired": true,
+          "unsetRunBudgetCeilingAllowed": true,
+          "defaultRunBudgetCeilingTokensPerFrozenUnit": 30000,
+          "defaultRunBudgetCeilingComputedAfterCoverageManifestFreeze": true,
+          "ceilingEvaluatedBeforeEveryDispatch": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsRunAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "baseline-manuscript-analysis"
+        ]
+      },
+      {
+        "ruleId": "ordinary-production-editorial-dialogue",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "foregroundEditorSelectionAndQuestionRequired": true,
+          "admittedAttemptActions": [
+            "ask",
+            "continue",
+            "regenerate"
+          ],
+          "planEnvelopeOrRunAuthorizationRequired": false,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "backgroundAnalysisEnrollmentAllowed": false,
+          "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": true,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false
+        },
+        "source": {
+          "admittedInputs": "user-owned-manuscripts-and-house-knowledge",
+          "privateManuscriptAllowed": true,
+          "materialReferencesAllowed": false,
+          "seriesKnowledgeAllowed": false,
+          "editorialDeliverablesAllowed": false,
+          "editorSelectedPassageOnly": true
+        },
+        "allowedOutboundDataCategories": [
+          "editor-selected-manuscript-excerpt",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Fast Interaction Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "oneTechnicalSessionPerAttempt": true,
+          "oneBoundedPayloadPerAttempt": true,
+          "payloadLimitedToFrozenContractSelectionQuestionAndRetainedFragments": true,
+          "continueAndRegenerateAreNewAttempts": true,
+          "automaticResendInsideStoppedSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "webSearchToolAllowed": false
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": true,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          },
+          "declarations": [
+            {
+              "name": "retrieve",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "exact_fetch",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "read_blocks",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "baseline_facts",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "guideline_clause",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "term_table",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "search_manuscript",
+              "readOnly": true,
+              "concurrencySafe": true
+            }
+          ],
+          "parallelCallsAllowed": true
+        },
+        "clarification": {
+          "modelQuestionAllowed": false
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "runBudgetCeilingApplies": false,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsAttemptAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "editorial-dialogue"
+        ]
+      },
+      {
+        "ruleId": "ordinary-production-review",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "newlyUserInitiatedTaskRequired": true,
+          "directRunAuthorizationAllowed": true,
+          "matchingActiveDefaultExecutionRuleAllowed": true,
+          "backgroundAnalysisEnrollmentAllowed": false,
+          "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": true,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false
+        },
+        "source": {
+          "admittedInputs": "user-owned-manuscripts-and-house-knowledge",
+          "privateManuscriptAllowed": true,
+          "materialReferencesAllowed": true,
+          "seriesKnowledgeAllowed": true,
+          "editorialDeliverablesAllowed": true
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "frozen-material-reference-excerpt",
+          "editorial-deliverable-excerpt",
+          "house-review-preference-excerpt",
+          "series-knowledge-excerpt",
+          "web-search-query",
+          "public-source-fetch",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content",
+          "editor-task-instruction",
+          "house-review-guideline-clause"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Main Editorial Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "boundedByCoverageManifestUnitCount": true,
+          "plusDeclaredSafeRetryAdaptations": true,
+          "plusAssuranceSampleAnchorUnits": true,
+          "plusOneRunReportReflectionTurn": true,
+          "plusClarificationAnswerTurns": true,
+          "oneTechnicalSessionPerAnalysisUnit": true,
+          "accumulatingSingleSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "crossUnitReductionAllowed": false,
+          "assuranceSamplingAllowed": true,
+          "runReportReflectionAllowed": true,
+          "webSearchToolAllowed": true,
+          "crossUnitSynthesisAllowed": true,
+          "plusDeclaredContractRetryAdaptations": true,
+          "plusOneCrossUnitSynthesisTurn": true
+        },
+        "platformTools": {
+          "websearch": {
+            "selection": "user-configured",
+            "backends": [
+              {
+                "id": "search-tinyfish",
+                "host": "api.search.tinyfish.ai",
+                "endpoint": "https://api.search.tinyfish.ai/",
+                "credentialSlot": "search-tinyfish",
+                "anonymous": false
+              },
+              {
+                "id": "search-deepseek",
+                "host": "api.deepseek.com",
+                "endpoint": "https://api.deepseek.com/anthropic/v1/messages",
+                "credentialSlot": "search-deepseek",
+                "anonymous": false
+              },
+              {
+                "id": "search-brave",
+                "host": "api.search.brave.com",
+                "endpoint": "https://api.search.brave.com/res/v1/web/search",
+                "credentialSlot": "search-brave",
+                "anonymous": false
+              },
+              {
+                "id": "search-parallel",
+                "host": "api.parallel.ai",
+                "endpoint": "https://api.parallel.ai/v1/search",
+                "credentialSlot": "search-parallel",
+                "anonymous": false
+              },
+              {
+                "id": "search-bochaai",
+                "host": "api.bochaai.com",
+                "endpoint": "https://api.bochaai.com/v1/web-search",
+                "credentialSlot": "search-bochaai",
+                "anonymous": false
+              }
+            ],
+            "selectionRequiresCredential": true,
+            "userConfiguredBackendAuthorizesTransmission": false
+          },
+          "webfetch": {
+            "maxBytes": 5242880,
+            "timeoutSeconds": 30,
+            "boundedByCitations": true
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "联网核查未完成"
+          },
+          "oneQueryPerRunUnit": true,
+          "toolResultCategory": "public-or-synthetic"
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": true,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          },
+          "declarations": [
+            {
+              "name": "retrieve",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "exact_fetch",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "read_blocks",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "baseline_facts",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "guideline_clause",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "term_table",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "search_manuscript",
+              "readOnly": true,
+              "concurrencySafe": true
+            }
+          ],
+          "parallelCallsAllowed": true
+        },
+        "sourceTranslationAllowed": true,
+        "houseReviewPreference": {
+          "category": "house-review-preference-excerpt",
+          "descriptionZh": "本社审阅偏好摘录：由本社编辑自己对审阅发现已作出的判断（采纳、改后采纳、忽略并说明理由）归纳出的类别偏好行与理由短语，随审阅请求一并发出。每次请求至多 12 行、合计至多 200 个字素；必须标明所依据的偏好记录版本；绝不含稿件正文，绝不含作者或编辑姓名；普通生产下只取自普通生产来源（编辑自己的稿件所属的本社判断记录）。",
+          "derivedFrom": "judged-review-decisions-of-the-same-house",
+          "maxLines": 12,
+          "maxGraphemesTotal": 200,
+          "attributedToRecordVersion": true,
+          "manuscriptTextAllowed": false,
+          "housePeopleNamesAndRolesStripped": true,
+          "authorOrEditorNamesAllowed": false,
+          "sourceScope": "ordinary-production-sources-only"
+        },
+        "seriesKnowledgeExcerpt": {
+          "category": "series-knowledge-excerpt",
+          "descriptionZh": "书系知识摘录：本次审阅冻结的书系范围所固定的书系知识条目版本，按书系一致性审阅已有的条款边界切成条款，随审阅请求一并发出。每次请求至多 40 条、每条至多 300 个字素；只取自本次审阅固定的那些书系的条目；已生效的书系检索排除一律遵守，被排除的条目不发出；必须标明所依据的条目版本；普通生产下只取自普通生产来源（编辑自己的书系）。",
+          "derivedFrom": "series-knowledge-item-revisions-pinned-by-the-run-frozen-series-scope",
+          "maxClauses": 40,
+          "maxGraphemesPerClause": 300,
+          "onlyPinnedSeriesItems": true,
+          "retrievalExclusionsHonoured": true,
+          "attributedToItemRevisions": true,
+          "sourceScope": "ordinary-production-sources-only"
+        },
+        "clarification": {
+          "modelQuestionAllowed": true,
+          "maxQuestionsPerUnit": 1,
+          "unitWaitsOthersContinue": true,
+          "timeoutHours": 24,
+          "timeoutContinuesAs": "unanswered-with-run-report-disclosure"
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "planEnvelopeRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "declaredOperationClassesRequired": true,
+          "exactRunBudgetCeilingStateRequired": true,
+          "unsetRunBudgetCeilingAllowed": true,
+          "defaultRunBudgetCeilingTokensPerFrozenUnit": 30000,
+          "defaultRunBudgetCeilingComputedAfterCoverageManifestFreeze": true,
+          "ceilingEvaluatedBeforeEveryDispatch": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsRunAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "editorial-review/typos-and-usage",
+          "editorial-review/style-and-format",
+          "editorial-review/literary-expression",
+          "editorial-review/cross-deliverable-consistency",
+          "editorial-review/factual-review",
+          "editorial-review/academic-integrity",
+          "factual-review",
+          "editorial-review/series-consistency",
+          "editorial-review/publication-risk",
+          "editorial-review/plot-consistency"
+        ],
+        "taskKindOverrides": {
+          "editorial-review/publication-risk": {
+            "webSearch": false
+          },
+          "editorial-review/plot-consistency": {
+            "webSearch": false
+          }
+        },
+        "editorTaskInstruction": {
+          "category": "editor-task-instruction",
+          "maxGraphemes": 1200,
+          "attributedToProcedureVersion": true,
+          "personNamesAllowed": false,
+          "contractFramingOverrideAllowed": false
+        },
+        "houseReviewGuidelineClause": {
+          "category": "house-review-guideline-clause",
+          "maxClauses": 40,
+          "maxGraphemesPerClause": 300,
+          "attributedToImportedDocumentVersion": true,
+          "personNamesAllowed": false
+        },
+        "claimScopedFactualStages": {
+          "taskKind": "factual-review",
+          "taskMode": "whole-manuscript",
+          "evidenceAssuranceLevels": [
+            "standard",
+            "strict"
+          ],
+          "procedureId": "ai7-procedure/factual-claim-check",
+          "procedureVersion": 1,
+          "claimArtifactSchema": "ai7.factual-claim-ledger/1",
+          "exactProcedureContractCompositionAndSourcePinsRequired": true,
+          "legacyRuleFallbackAllowed": false,
+          "claimExtraction": {
+            "contractId": "ai7.factual-claim-extraction/1",
+            "stageId": "claim-extraction",
+            "maximumInitialSessionsPerCoverageUnit": 1,
+            "maximumModelRequestsPerSession": 1,
+            "maximumAssertionsPerCoverageUnit": 200,
+            "tools": [],
+            "automaticTransportRetryAllowed": false,
+            "contractRetryAllowed": false
+          },
+          "claimVerification": {
+            "contractId": "ai7.factual-claim-verification/1",
+            "stageId": "web-verification",
+            "maximumInitialSessionsPerEligibleClaim": 1,
+            "maximumModelRequestsPerSession": 129,
+            "maximumPlatformToolRoundsPerSession": 128,
+            "tools": [
+              "websearch",
+              "webfetch"
+            ],
+            "searchBudgetBasis": "run-ledger-digest-claim-id",
+            "maximumSearchSubmissionsPerClaim": 3,
+            "distinctCanonicalQueriesRequired": true,
+            "unknownSubmissionSpendsBudget": true,
+            "counterResetOnResumeAllowed": false,
+            "automaticTransportRetryAllowed": false,
+            "contractRetryAllowed": false,
+            "maximumMetadataUtf8Bytes": 16384,
+            "sourceUnitMessageMustEqualFrozenAuthorizedMessage": true
+          },
+          "newSamplingTurnsAllowed": false,
+          "newReflectionTurnsAllowed": false,
+          "newClarificationTurnsAllowed": false,
+          "newModelSynthesisTurnsAllowed": false
+        },
+        "factualClaimContract": {
+          "countContract": {
+            "coverageUnits": "exact-frozen-coverage-manifest-U",
+            "assertionsMaximum": "200*U",
+            "eligibleClaims": "C<=A; real-world-fact-or-quotation-with-valid-exact-reference-integrity-only",
+            "maximumInitialSessions": "U+C",
+            "maximumModelSubmissions": "U+129*C",
+            "maximumSearchSubmissions": "3*C",
+            "wholeRunHttpCallCap": false,
+            "occurrenceMembershipImmutable": true,
+            "counterReservationBeforeTransportRequired": true,
+            "unknownOrFailedSubmissionConsumesSlot": true,
+            "resumeOrRestartResetsCounters": false,
+            "newStageRetryOverridesGeneralTransportRetry": true,
+            "extraInheritedSynthesisTurnAllowed": false,
+            "foregroundDeclaredRunBudgetCeiling": "exact-declared-value-or-unset",
+            "mandatoryFiniteForegroundCeiling": false,
+            "semanticOccurrenceCoalescingAllowed": false,
+            "occurrenceIdentity": [
+              "bookId",
+              "revision",
+              "block",
+              "exactRange",
+              "quote",
+              "assertionClass",
+              "question"
+            ],
+            "overlapDuplicateProducerReferencesRetained": true,
+            "ineligibleClassesReceiveVerificationOrSearchBudget": false,
+            "existingPerRunStagesAddedOrMultipliedByC": false,
+            "membershipUAndCFixedBeforeVerificationAdmission": true,
+            "explicitCeilingReservesInFlightAndStopsAtExhaustion": true,
+            "unsetCeilingMeansUnlimitedProviderCredit": false
+          },
+          "assertionContract": {
+            "maximumAssertionsPerCoverageUnit": 200,
+            "maximumQuoteGraphemes": 80,
+            "maximumQuestionGraphemes": 120,
+            "maximumBasisGraphemes": 200,
+            "blockOrdinal": "existing-numbered-block",
+            "assertionClasses": [
+              "real-world-fact",
+              "quotation",
+              "report-about-manuscript",
+              "fictional-canon",
+              "judgment"
+            ],
+            "categories": [
+              "时间",
+              "地点",
+              "人物",
+              "机构",
+              "器物",
+              "数字",
+              "引文",
+              "史实",
+              "技术",
+              "其他"
+            ],
+            "severities": [
+              "A",
+              "B",
+              "C"
+            ]
+          },
+          "verificationInput": {
+            "exactFields": [
+              "schema",
+              "ledgerDigest",
+              "claimId",
+              "sourceUnitOrdinal",
+              "sourceUnitDigest",
+              "assertionOrdinal",
+              "assertionClass",
+              "category",
+              "severity",
+              "quote",
+              "question",
+              "basis",
+              "sourceUnitMessage"
+            ],
+            "schema": "ai7.factual-claim-verification/1",
+            "claimId": "sha256-of-canonical-occurrence-identity-lowercase-64-hex",
+            "allDigests": "lowercase-64-hex-sha256",
+            "sourceUnitOrdinal": "1..U",
+            "assertionOrdinal": "1..200",
+            "maximumMetadataUtf8Bytes": 16384,
+            "sourceUnitMessage": "byte-identical-already-authorized-frozen-producing-unit-message",
+            "sourceUnitByteCountAndDigestRequired": true,
+            "fullEncodedRequestByteCountAndDigestRequired": true,
+            "target1200IsHardMessageCap": false,
+            "silentTruncationAllowed": false,
+            "sourceRefreshAllowed": false,
+            "wholeLedgerTransmissionAllowed": false,
+            "modelSelectedClaimIdAllowed": false,
+            "ambientContextAllowed": false
+          },
+          "research": {
+            "searchReservationKey": [
+              "runId",
+              "ledgerDigest",
+              "claimId"
+            ],
+            "maximumDistinctCanonicalQuerySubmissions": 3,
+            "successfulSameQueryReuse": "attributed-replay-without-new-submission",
+            "unknownOutcomeReplayableAsSuccess": false,
+            "malformedOrLocalRefusal": "spends-platform-breaker-not-transport-reservation",
+            "maximumPlatformToolRoundsInclusiveOfRefusals": 128,
+            "webfetch": {
+              "maxBytes": 5242880,
+              "timeoutSeconds": 30,
+              "boundedByCitations": true,
+              "maximumPerUrlPerRun": 1,
+              "automaticRetryAllowed": false
+            },
+            "backendSelection": "exactly-the-websearch-backends-credential-slots-and-selection-of-ordinary-production-review.platformTools.websearch-in-this-document; no-endpoint-or-credential-addition",
+            "searchConnectionTestIsTaskBackend": false,
+            "localRetrievalAllowed": false,
+            "knownOrUnknownFailedSubmissionResendAllowed": false,
+            "oneQueryPerRunUnitOverriddenOnlyForThisVerificationContract": true
+          },
+          "payload": {
+            "initialClaimCategories": [
+              "public-or-synthetic",
+              "unpublished-metadata",
+              "unpublished-excerpts",
+              "unpublished-full-content"
+            ],
+            "researchCategories": [
+              "web-search-query",
+              "public-source-fetch",
+              "public-or-synthetic"
+            ],
+            "newMaterialCategoryAllowed": false,
+            "houseGuidelineOrPreferenceBlockInherited": false,
+            "toolContinuationsOnlyCurrentClaimDeclaredToolResults": true,
+            "newLocalRetrievalClarificationOrToolRegistered": false
+          },
+          "scope": {
+            "otherTaskModesLevelsOrKindsInheritGrant": false,
+            "nonInheritingPaths": [
+              "quick",
+              "range",
+              "supplementary-second-check",
+              "enrolled-factual-recheck",
+              "other-review-kinds"
+            ],
+            "existingV1AndV2PromptResultAndFixtureBytesUnchanged": true,
+            "reviewedPromptAndCompositionBytesPinnedByPlanRequired": true,
+            "unimplementedOrUnadmittedContractResult": "refuse",
+            "developerLiveStageAllowance": false
+          }
+        }
+      },
+      {
+        "ruleId": "ordinary-production-writing",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "newlyUserInitiatedTaskRequired": true,
+          "directRunAuthorizationAllowed": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "backgroundAnalysisEnrollmentAllowed": false,
+          "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": true,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false
+        },
+        "source": {
+          "admittedInputs": "user-owned-manuscripts-and-house-knowledge",
+          "privateManuscriptAllowed": true,
+          "materialReferencesAllowed": true,
+          "seriesKnowledgeAllowed": false,
+          "editorialDeliverablesAllowed": false
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "book-metadata-and-synopsis",
+          "house-exemplar-excerpt",
+          "frozen-material-reference-excerpt",
+          "web-search-query",
+          "public-source-fetch",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Main Editorial Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "boundedByCoverageManifestUnitCount": true,
+          "plusDeclaredSafeRetryAdaptations": true,
+          "plusOneCrossUnitSynthesisTurn": true,
+          "plusAssuranceSampleAnchorUnits": false,
+          "plusOneRunReportReflectionTurn": true,
+          "plusClarificationAnswerTurns": true,
+          "oneTechnicalSessionPerAnalysisUnit": true,
+          "accumulatingSingleSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "crossUnitReductionAllowed": false,
+          "crossUnitSynthesisAllowed": true,
+          "assuranceSamplingAllowed": false,
+          "runReportReflectionAllowed": true,
+          "webSearchToolAllowed": true
+        },
+        "platformTools": {
+          "websearch": {
+            "selection": "user-configured",
+            "backends": [
+              {
+                "id": "search-tinyfish",
+                "host": "api.search.tinyfish.ai",
+                "endpoint": "https://api.search.tinyfish.ai/",
+                "credentialSlot": "search-tinyfish",
+                "anonymous": false
+              },
+              {
+                "id": "search-deepseek",
+                "host": "api.deepseek.com",
+                "endpoint": "https://api.deepseek.com/anthropic/v1/messages",
+                "credentialSlot": "search-deepseek",
+                "anonymous": false
+              },
+              {
+                "id": "search-brave",
+                "host": "api.search.brave.com",
+                "endpoint": "https://api.search.brave.com/res/v1/web/search",
+                "credentialSlot": "search-brave",
+                "anonymous": false
+              },
+              {
+                "id": "search-parallel",
+                "host": "api.parallel.ai",
+                "endpoint": "https://api.parallel.ai/v1/search",
+                "credentialSlot": "search-parallel",
+                "anonymous": false
+              },
+              {
+                "id": "search-bochaai",
+                "host": "api.bochaai.com",
+                "endpoint": "https://api.bochaai.com/v1/web-search",
+                "credentialSlot": "search-bochaai",
+                "anonymous": false
+              }
+            ],
+            "selectionRequiresCredential": true,
+            "userConfiguredBackendAuthorizesTransmission": false
+          },
+          "webfetch": {
+            "maxBytes": 5242880,
+            "timeoutSeconds": 30,
+            "boundedByCitations": true
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "联网核查未完成"
+          },
+          "oneQueryPerRunUnit": true,
+          "toolResultCategory": "public-or-synthetic"
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": true,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          },
+          "declarations": [
+            {
+              "name": "retrieve",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "exact_fetch",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "read_blocks",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "baseline_facts",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "guideline_clause",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "term_table",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "search_manuscript",
+              "readOnly": true,
+              "concurrencySafe": true
+            }
+          ],
+          "parallelCallsAllowed": true
+        },
+        "clarification": {
+          "modelQuestionAllowed": true,
+          "maxQuestionsPerUnit": 1,
+          "unitWaitsOthersContinue": true,
+          "timeoutHours": 24,
+          "timeoutContinuesAs": "unanswered-with-run-report-disclosure"
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "planEnvelopeRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "declaredOperationClassesRequired": true,
+          "exactRunBudgetCeilingStateRequired": true,
+          "unsetRunBudgetCeilingAllowed": true,
+          "defaultRunBudgetCeilingTokensPerFrozenUnit": 30000,
+          "defaultRunBudgetCeilingComputedAfterCoverageManifestFreeze": true,
+          "ceilingEvaluatedBeforeEveryDispatch": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsRunAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "writing"
+        ]
+      },
+      {
+        "ruleId": "ordinary-production-evaluation",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "newlyUserInitiatedTaskRequired": true,
+          "directRunAuthorizationAllowed": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "backgroundAnalysisEnrollmentAllowed": false,
+          "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": true,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false
+        },
+        "source": {
+          "admittedInputs": "user-owned-manuscripts-and-house-knowledge",
+          "privateManuscriptAllowed": true,
+          "materialReferencesAllowed": true,
+          "seriesKnowledgeAllowed": false,
+          "editorialDeliverablesAllowed": false
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "editor-authored-evaluation-text",
+          "house-exemplar-excerpt",
+          "frozen-material-reference-excerpt",
+          "web-search-query",
+          "public-source-fetch",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Main Editorial Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "boundedByCoverageManifestUnitCount": true,
+          "plusDeclaredSafeRetryAdaptations": true,
+          "plusOneCrossUnitSynthesisTurn": true,
+          "plusAssuranceSampleAnchorUnits": false,
+          "plusOneRunReportReflectionTurn": true,
+          "plusClarificationAnswerTurns": true,
+          "oneTechnicalSessionPerAnalysisUnit": true,
+          "accumulatingSingleSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "crossUnitReductionAllowed": false,
+          "crossUnitSynthesisAllowed": true,
+          "assuranceSamplingAllowed": false,
+          "runReportReflectionAllowed": true,
+          "webSearchToolAllowed": true
+        },
+        "platformTools": {
+          "websearch": {
+            "selection": "user-configured",
+            "backends": [
+              {
+                "id": "search-tinyfish",
+                "host": "api.search.tinyfish.ai",
+                "endpoint": "https://api.search.tinyfish.ai/",
+                "credentialSlot": "search-tinyfish",
+                "anonymous": false
+              },
+              {
+                "id": "search-deepseek",
+                "host": "api.deepseek.com",
+                "endpoint": "https://api.deepseek.com/anthropic/v1/messages",
+                "credentialSlot": "search-deepseek",
+                "anonymous": false
+              },
+              {
+                "id": "search-brave",
+                "host": "api.search.brave.com",
+                "endpoint": "https://api.search.brave.com/res/v1/web/search",
+                "credentialSlot": "search-brave",
+                "anonymous": false
+              },
+              {
+                "id": "search-parallel",
+                "host": "api.parallel.ai",
+                "endpoint": "https://api.parallel.ai/v1/search",
+                "credentialSlot": "search-parallel",
+                "anonymous": false
+              },
+              {
+                "id": "search-bochaai",
+                "host": "api.bochaai.com",
+                "endpoint": "https://api.bochaai.com/v1/web-search",
+                "credentialSlot": "search-bochaai",
+                "anonymous": false
+              }
+            ],
+            "selectionRequiresCredential": true,
+            "userConfiguredBackendAuthorizesTransmission": false
+          },
+          "webfetch": {
+            "maxBytes": 5242880,
+            "timeoutSeconds": 30,
+            "boundedByCitations": true
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "联网核查未完成"
+          },
+          "oneQueryPerRunUnit": true,
+          "toolResultCategory": "public-or-synthetic"
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": true,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          },
+          "declarations": [
+            {
+              "name": "retrieve",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "exact_fetch",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "read_blocks",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "baseline_facts",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "guideline_clause",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "term_table",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "search_manuscript",
+              "readOnly": true,
+              "concurrencySafe": true
+            }
+          ],
+          "parallelCallsAllowed": true
+        },
+        "clarification": {
+          "modelQuestionAllowed": true,
+          "maxQuestionsPerUnit": 1,
+          "unitWaitsOthersContinue": true,
+          "timeoutHours": 24,
+          "timeoutContinuesAs": "unanswered-with-run-report-disclosure"
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "planEnvelopeRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "declaredOperationClassesRequired": true,
+          "exactRunBudgetCeilingStateRequired": true,
+          "unsetRunBudgetCeilingAllowed": true,
+          "defaultRunBudgetCeilingTokensPerFrozenUnit": 30000,
+          "defaultRunBudgetCeilingComputedAfterCoverageManifestFreeze": true,
+          "ceilingEvaluatedBeforeEveryDispatch": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsRunAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "evaluation",
+          "readers-report",
+          "evaluation-rewrite"
+        ]
+      },
+      {
+        "ruleId": "ordinary-production-editorial-polish",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "foregroundEditorActionRequired": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "backgroundAnalysisEnrollmentAllowed": false,
+          "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": true,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false
+        },
+        "source": {
+          "admittedInputs": "user-owned-manuscripts-and-house-knowledge",
+          "privateManuscriptAllowed": true,
+          "materialReferencesAllowed": false,
+          "seriesKnowledgeAllowed": false,
+          "editorialDeliverablesAllowed": false,
+          "editorSelectedPassageOnly": true
+        },
+        "allowedOutboundDataCategories": [
+          "editor-selected-manuscript-excerpt",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content",
+          "house-review-preference-excerpt"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Fast Interaction Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "oneTechnicalSessionPerAttempt": true,
+          "oneBoundedPayloadPerAttempt": true,
+          "crossUnitSynthesisAllowed": false,
+          "automaticResendInsideStoppedSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "webSearchToolAllowed": false,
+          "crossUnitReductionAllowed": false,
+          "assuranceSamplingAllowed": false,
+          "runReportReflectionAllowed": false,
+          "payloadLimitedToFrozenContractEditorSelectedPassageAndBoundedHouseReviewPreference": true
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": true,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          },
+          "declarations": [
+            {
+              "name": "retrieve",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "exact_fetch",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "read_blocks",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "baseline_facts",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "guideline_clause",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "term_table",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "search_manuscript",
+              "readOnly": true,
+              "concurrencySafe": true
+            }
+          ],
+          "parallelCallsAllowed": true
+        },
+        "clarification": {
+          "modelQuestionAllowed": false
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true,
+          "runBudgetCeilingApplies": false
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsAttemptAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "output": {
+          "suggestionsOnly": true,
+          "appliesManuscriptChange": false
+        },
+        "allowedTaskKinds": [
+          "editorial-polish"
+        ],
+        "houseReviewPreference": {
+          "category": "house-review-preference-excerpt",
+          "descriptionZh": "本社审阅偏好摘录：由本社编辑自己对审阅发现已作出的判断（采纳、改后采纳、忽略并说明理由）归纳出的类别偏好行与理由短语，随审阅请求一并发出。每次请求至多 12 行、合计至多 200 个字素；必须标明所依据的偏好记录版本；绝不含稿件正文，绝不含作者或编辑姓名；普通生产下只取自普通生产来源（编辑自己的稿件所属的本社判断记录）。",
+          "derivedFrom": "judged-review-decisions-of-the-same-house",
+          "maxLines": 12,
+          "maxGraphemesTotal": 200,
+          "attributedToRecordVersion": true,
+          "manuscriptTextAllowed": false,
+          "housePeopleNamesAndRolesStripped": true,
+          "authorOrEditorNamesAllowed": false,
+          "sourceScope": "ordinary-production-sources-only"
+        }
+      },
+      {
+        "ruleId": "ordinary-production-conflict-regenerate",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "foregroundEditorActionRequired": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "backgroundAnalysisEnrollmentAllowed": false,
+          "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": true,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false
+        },
+        "source": {
+          "admittedInputs": "user-owned-manuscripts-and-house-knowledge",
+          "privateManuscriptAllowed": true,
+          "materialReferencesAllowed": false,
+          "seriesKnowledgeAllowed": false,
+          "editorialDeliverablesAllowed": false,
+          "singleManuscriptConflictRegionOnly": true
+        },
+        "allowedOutboundDataCategories": [
+          "manuscript-conflict-region-excerpt",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Fast Interaction Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "oneTechnicalSessionPerAttempt": true,
+          "oneBoundedPayloadPerAttempt": true,
+          "payloadLimitedToFrozenContractAndEditorManuscriptExcerpts": true,
+          "crossUnitSynthesisAllowed": false,
+          "automaticResendInsideStoppedSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "webSearchToolAllowed": false,
+          "crossUnitReductionAllowed": false,
+          "assuranceSamplingAllowed": false,
+          "runReportReflectionAllowed": false
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": true,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          },
+          "declarations": [
+            {
+              "name": "retrieve",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "exact_fetch",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "read_blocks",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "baseline_facts",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "guideline_clause",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "term_table",
+              "readOnly": true,
+              "concurrencySafe": true
+            },
+            {
+              "name": "search_manuscript",
+              "readOnly": true,
+              "concurrencySafe": true
+            }
+          ],
+          "parallelCallsAllowed": true
+        },
+        "clarification": {
+          "modelQuestionAllowed": false
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true,
+          "runBudgetCeilingApplies": false
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsAttemptAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "output": {
+          "suggestionsOnly": true,
+          "appliesManuscriptChange": false
+        },
+        "allowedTaskKinds": [
+          "conflict-regenerate"
+        ]
+      },
+      {
+        "ruleId": "enrolled-background-manuscript-analysis-processing",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "activeMatchingBackgroundAnalysisEnrollmentRequired": true,
+          "newUserInitiatedTaskRequired": false,
+          "providerSetupCreatesEnrollment": false,
+          "manuscriptImportCreatesEnrollment": false,
+          "artifactInstallOrEnablementCreatesEnrollment": false,
+          "eachDispatchCreatesExactRun": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "importTriggeredOrUnenrolledCrossRunDispatchAllowed": false
+        },
+        "scopeLimits": {
+          "manuscriptAnalysisOnly": true,
+          "formalManuscriptMutationAllowed": false,
+          "externalEffectAllowed": false,
+          "generalBackgroundLearningAllowed": false,
+          "backgroundPolicyWorkAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": false,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": true,
+          "backgroundAllowed": true
+        },
+        "source": {
+          "admittedInputs": "user-owned-manuscripts-and-house-knowledge",
+          "privateManuscriptAllowed": true,
+          "materialReferencesAllowed": false,
+          "seriesKnowledgeAllowed": false,
+          "editorialDeliverablesAllowed": false
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Main Editorial Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "boundedByCoverageManifestUnitCount": true,
+          "plusDeclaredSafeRetryAdaptations": true,
+          "plusCrossUnitReductionTopicSections": true,
+          "plusAssuranceSampleAnchorUnits": true,
+          "plusOneRunReportReflectionTurn": true,
+          "plusClarificationAnswerTurns": true,
+          "oneTechnicalSessionPerAnalysisUnit": true,
+          "accumulatingSingleSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "crossUnitReductionAllowed": true,
+          "assuranceSamplingAllowed": true,
+          "runReportReflectionAllowed": true,
+          "webSearchToolAllowed": false
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": false,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          }
+        },
+        "clarification": {
+          "modelQuestionAllowed": true,
+          "maxQuestionsPerUnit": 1,
+          "unitWaitsOthersContinue": true,
+          "timeoutHours": 24,
+          "timeoutContinuesAs": "unanswered-with-run-report-disclosure"
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "planEnvelopeRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "declaredOperationClassesRequired": true,
+          "exactRunBudgetCeilingStateRequired": true,
+          "unsetRunBudgetCeilingAllowed": false,
+          "enrollmentCeilingRequired": true,
+          "ceilingSplitAcrossBooks": "equal-remainder-to-first",
+          "ceilingEvaluatedBeforeEveryDispatch": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true,
+          "backgroundShare": "execution.backgroundShare"
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsRunAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "baseline-manuscript-analysis"
+        ]
+      },
+      {
+        "ruleId": "ordinary-production-material-translation",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "foregroundEditorActionRequired": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "backgroundAnalysisEnrollmentAllowed": false,
+          "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": true,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false
+        },
+        "source": {
+          "admittedInputs": "user-owned-manuscripts-and-house-knowledge",
+          "privateManuscriptAllowed": true,
+          "materialReferencesAllowed": true,
+          "seriesKnowledgeAllowed": false,
+          "editorialDeliverablesAllowed": false,
+          "frozenMaterialExcerptOnly": true
+        },
+        "allowedOutboundDataCategories": [
+          "frozen-material-reference-excerpt",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Fast Interaction Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform",
+            "openai-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "oneTechnicalSessionPerAttempt": true,
+          "oneBoundedPayloadPerAttempt": true,
+          "payloadLimitedToFrozenContractAndMaterialExcerpt": true,
+          "crossUnitSynthesisAllowed": false,
+          "automaticResendInsideStoppedSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "webSearchToolAllowed": false,
+          "crossUnitReductionAllowed": false,
+          "assuranceSamplingAllowed": false,
+          "runReportReflectionAllowed": false
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": false,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          }
+        },
+        "clarification": {
+          "modelQuestionAllowed": false
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "runBudgetCeilingApplies": false,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsAttemptAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "material-translation"
+        ]
+      },
+      {
+        "ruleId": "ordinary-production-custom-analysis",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "newlyUserInitiatedTaskRequired": true,
+          "directRunAuthorizationAllowed": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "backgroundAnalysisEnrollmentAllowed": false,
+          "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": true,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false
+        },
+        "source": {
+          "admittedInputs": "user-owned-manuscripts-and-house-knowledge",
+          "privateManuscriptAllowed": true,
+          "materialReferencesAllowed": false,
+          "seriesKnowledgeAllowed": false,
+          "editorialDeliverablesAllowed": false
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "editor-authored-question-template",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Main Editorial Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "boundedByCoverageManifestUnitCount": true,
+          "plusDeclaredSafeRetryAdaptations": true,
+          "plusAssuranceSampleAnchorUnits": true,
+          "plusOneRunReportReflectionTurn": true,
+          "plusClarificationAnswerTurns": true,
+          "oneTechnicalSessionPerAnalysisUnit": true,
+          "accumulatingSingleSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "crossUnitReductionAllowed": false,
+          "assuranceSamplingAllowed": true,
+          "runReportReflectionAllowed": true,
+          "webSearchToolAllowed": false
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": false,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          }
+        },
+        "editorAuthoredQuestionTemplate": {
+          "category": "editor-authored-question-template",
+          "descriptionZh": "编辑自拟的单元提问模板：编辑在知识库「工序与规则」里为一个自定义分析维度写下的、对每个单元提出的问题模板，随该维度每个单元的请求一并发出。每个模板至多 400 个字素；必须标明所依据的分析维度版本；绝不含稿件正文，绝不含作者或编辑姓名；它只是 AI7 固定的分析合同里一个有边界的数据参数，绝不改写或覆盖 AI7 的合同框架。",
+          "sourceDocument": "process-and-rules-document",
+          "maxGraphemes": 400,
+          "attributedToDimensionVersion": true,
+          "manuscriptTextAllowed": false,
+          "housePeopleNamesAndRolesStripped": true,
+          "authorOrEditorNamesAllowed": false,
+          "contractFramingOverrideAllowed": false
+        },
+        "clarification": {
+          "modelQuestionAllowed": true,
+          "maxQuestionsPerUnit": 1,
+          "unitWaitsOthersContinue": true,
+          "timeoutHours": 24,
+          "timeoutContinuesAs": "unanswered-with-run-report-disclosure"
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "planEnvelopeRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "declaredOperationClassesRequired": true,
+          "exactRunBudgetCeilingStateRequired": true,
+          "unsetRunBudgetCeilingAllowed": true,
+          "defaultRunBudgetCeilingTokensPerFrozenUnit": 30000,
+          "defaultRunBudgetCeilingComputedAfterCoverageManifestFreeze": true,
+          "ceilingEvaluatedBeforeEveryDispatch": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsRunAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "custom-analysis/*"
+        ]
+      },
+      {
+        "ruleId": "ordinary-production-global-agent-dialogue",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "admittedAttemptActions": [
+            "ask",
+            "continue",
+            "regenerate"
+          ],
+          "planEnvelopeOrRunAuthorizationRequired": false,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "backgroundAnalysisEnrollmentAllowed": false,
+          "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false,
+          "foregroundEditorQuestionRequired": true
+        },
+        "executionMode": {
+          "humanAttended": true,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false
+        },
+        "source": {
+          "bookRequired": false,
+          "explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly": true,
+          "eligibleRevisionPinsRequired": true,
+          "editorOwnWordsAllowed": true,
+          "unlistedSourcesAllowed": false
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content",
+          "editor-selected-manuscript-excerpt",
+          "editor-authored-evaluation-text",
+          "house-exemplar-excerpt",
+          "book-metadata-and-synopsis",
+          "manuscript-conflict-region-excerpt",
+          "frozen-material-reference-excerpt",
+          "editorial-deliverable-excerpt",
+          "house-review-preference-excerpt",
+          "editor-authored-question-template",
+          "series-knowledge-excerpt",
+          "web-search-query",
+          "public-source-fetch",
+          "editor-task-instruction",
+          "house-review-guideline-clause"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Fast Interaction Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "oneTechnicalSessionPerAttempt": true,
+          "oneBoundedPayloadPerAttempt": true,
+          "continueAndRegenerateAreNewAttempts": true,
+          "automaticResendInsideStoppedSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "webSearchToolAllowed": false,
+          "payloadLimitedToFrozenContractListedRevisionsEditorWordsAndRetainedFragments": true
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": false,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          }
+        },
+        "clarification": {
+          "modelQuestionAllowed": false
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "runBudgetCeilingApplies": false,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true,
+          "listedSourceRevisionsRecheckedBeforeTransmission": true,
+          "outboundDataDisclosureRequired": true
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsAttemptAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "global-agent-dialogue"
+        ],
+        "outboundCategoryRestriction": "none"
+      },
+      {
+        "ruleId": "enrolled-background-processing",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "newUserInitiatedTaskRequired": false,
+          "providerSetupCreatesEnrollment": false,
+          "manuscriptImportCreatesEnrollment": false,
+          "artifactInstallOrEnablementCreatesEnrollment": false,
+          "eachDispatchCreatesExactRun": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "importTriggeredOrUnenrolledCrossRunDispatchAllowed": false,
+          "activeMatchingBackgroundProcessingEnrollmentRequired": true
+        },
+        "scopeLimits": {
+          "declaredEnrolledKindOnly": true,
+          "formalManuscriptMutationAllowed": false,
+          "externalEffectAllowed": false,
+          "backgroundPolicyWorkAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": false,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": true,
+          "backgroundAllowed": true
+        },
+        "source": {
+          "admittedInputs": "authorized-pinned-sources-only",
+          "runSourceScopeRequired": true,
+          "unlistedSourcesAllowed": false
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Main Editorial Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "boundedByCoverageManifestUnitCount": true,
+          "plusDeclaredSafeRetryAdaptations": true,
+          "plusCrossUnitReductionTopicSections": true,
+          "plusAssuranceSampleAnchorUnits": true,
+          "plusOneRunReportReflectionTurn": true,
+          "plusClarificationAnswerTurns": true,
+          "oneTechnicalSessionPerAnalysisUnit": true,
+          "accumulatingSingleSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": false,
+          "crossUnitReductionAllowed": true,
+          "assuranceSamplingAllowed": true,
+          "runReportReflectionAllowed": true,
+          "webSearchToolAllowed": false
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": false,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          }
+        },
+        "clarification": {
+          "modelQuestionAllowed": true,
+          "maxQuestionsPerUnit": 1,
+          "unitWaitsOthersContinue": true,
+          "timeoutHours": 24,
+          "timeoutContinuesAs": "unanswered-with-run-report-disclosure"
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "planEnvelopeRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "declaredOperationClassesRequired": true,
+          "exactRunBudgetCeilingStateRequired": true,
+          "unsetRunBudgetCeilingAllowed": false,
+          "enrollmentCeilingRequired": true,
+          "ceilingSplitAcrossBooks": "equal-remainder-to-first",
+          "ceilingEvaluatedBeforeEveryDispatch": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true,
+          "backgroundShare": "execution.backgroundShare"
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsRunAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "material-index",
+          "review-reduction"
+        ],
+        "backgroundProcessingEnrollment": {
+          "enrollableKinds": [
+            {
+              "kind": "learning-curation",
+              "mandatoryCeiling": true
+            },
+            {
+              "kind": "material-index",
+              "mandatoryCeiling": true
+            },
+            {
+              "kind": "review-reduction",
+              "mandatoryCeiling": true
+            },
+            {
+              "kind": "factual-recheck",
+              "mandatoryCeiling": true
+            }
+          ],
+          "activeMatchingEnrollmentRequired": true,
+          "revocable": true,
+          "planEnvelopeRequired": true,
+          "exactProviderBindingRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "ceilingEvaluatedBeforeEveryDispatch": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "openingPageOrImportCreatesEnrollment": false
+        }
+      },
+      {
+        "ruleId": "ordinary-production-learning-curation",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "enabledLearningEnvelopeRequired": true,
+          "separateBackgroundProcessingEnrollmentRequired": false,
+          "thresholdOrImportedBatchTriggerAllowed": true,
+          "importAloneAuthorizesDispatch": false,
+          "providerSetupAloneAuthorizesDispatch": false,
+          "artifactInstallOrEnablementAuthorizesDispatch": false,
+          "eachDispatchCreatesExactRun": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "optionalEnrollmentReplacesEnvelopeChecks": false
+        },
+        "scopeLimits": {
+          "declaredKindOnly": true,
+          "formalManuscriptMutationAllowed": false,
+          "externalEffectAllowed": false,
+          "backgroundPolicyWorkAllowed": false,
+          "automaticPreferenceActivationAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": false,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": true,
+          "backgroundAllowed": true
+        },
+        "source": {
+          "admittedInputs": "exact-eligible-typed-proposal-decision-records-only",
+          "runSourceScopeRequired": true,
+          "unlistedSourcesAllowed": false,
+          "ambientManuscriptRetrievalAllowed": false
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "editorial-learning-example",
+          "house-review-preference-excerpt"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Main Editorial Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "oneTechnicalSessionPerFrozenCurationBatch": true,
+          "oneBoundedPayloadPerFrozenCurationBatch": true,
+          "plusDeclaredSafeRetryAdaptations": true,
+          "insideMandatoryRunCeiling": true,
+          "webSearchToolAllowed": false,
+          "crossUnitSynthesisAllowed": false,
+          "crossUnitReductionAllowed": false,
+          "assuranceSamplingAllowed": false,
+          "runReportReflectionAllowed": false,
+          "ambientRetrievalAllowed": false
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": false,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          }
+        },
+        "clarification": {
+          "modelQuestionAllowed": false
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "planEnvelopeRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "declaredOperationClassesRequired": true,
+          "exactRunBudgetCeilingStateRequired": true,
+          "unsetRunBudgetCeilingAllowed": false,
+          "ceilingEvaluatedBeforeEveryDispatch": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true,
+          "backgroundShare": "execution.backgroundShare",
+          "enabledLearningEnvelopeRequired": true,
+          "mandatoryRunBudgetCeilingRequired": true,
+          "sourceManifestRequired": true
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsRunAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "learning-curation"
+        ],
+        "enabledLearningEnvelope": {
+          "pins": [
+            "eligibleSourceAndCategoryContract",
+            "scope",
+            "supervision",
+            "model",
+            "provider",
+            "policy",
+            "mandatoryBudget",
+            "disableAndExclusionConsequences"
+          ],
+          "missingStaleRevokedOrExceededResult": "refuse",
+          "extraPerPassClickRequired": false,
+          "disableStopsLaterDispatchAndUse": true
+        },
+        "learningExamples": {
+          "category": "editorial-learning-example",
+          "labelZh": "编辑学习决策样例",
+          "purpose": "model-driven-learning-curation-only",
+          "contractId": "ai7.editorial-learning-example/1",
+          "sourceKinds": [
+            "proposal-decision"
+          ],
+          "decisions": [
+            "accepted",
+            "accepted-with-edit",
+            "rejected"
+          ],
+          "exactModelVisibleFields": [
+            "exampleId",
+            "sourceKind",
+            "decision",
+            "editorialDimension",
+            "before",
+            "proposal",
+            "after",
+            "afterSemantics",
+            "reason",
+            "reasonSource",
+            "reasonRevision",
+            "sourceRef",
+            "transmittedContentDigest",
+            "redactionApplied",
+            "redactionBasisVersion"
+          ],
+          "exampleId": "opaque-unique-per-batch",
+          "editorialDimension": "proven-existing-closed-category-or-null",
+          "before": "exact-pinned-currentText-after-required-redaction",
+          "proposal": "exact-pinned-proposedText-after-required-redaction",
+          "afterByDecision": {
+            "accepted": "proposal",
+            "accepted-with-edit": "editedText",
+            "rejected": "before"
+          },
+          "afterSemantics": "chosen-text-not-apply-proof",
+          "reason": "exact-revised-reason-after-redaction-or-null",
+          "reasonSources": [
+            "reason-field",
+            "suggested",
+            "free-text",
+            null
+          ],
+          "reasonRevision": "exact-source-feedback-revision",
+          "sourceRef": "opaque-local-manifest-reference",
+          "transmittedContentDigest": "sha256-of-exact-redacted-model-visible-fields-excluding-this-field",
+          "redactionApplied": "boolean",
+          "redactionBasisVersion": "pinned-existing-redaction-implementation-identity",
+          "maxExamplesPerRequest": 10,
+          "maxBeforeGraphemes": 2048,
+          "maxProposalGraphemes": 2048,
+          "maxAfterGraphemes": 2048,
+          "maxReasonGraphemes": 512,
+          "maxTextGraphemesTotal": 16000,
+          "maxEncodedCategoryBytes": 131072,
+          "encoding": "UTF-8-canonical-JSON",
+          "maxOpaqueIdCharacters": 128,
+          "maxLocalMaterialKeyCharacters": 256,
+          "sha256Representation": "exactly-64-lowercase-hex",
+          "emptyTextAllowedOnlyForProvenInsertionOrDeletion": true,
+          "absentProofRepresentedByNull": false,
+          "normalizationElisionOrSilentTruncationAllowed": false,
+          "extraSurroundingContextAllowed": false,
+          "localFrozenManifest": {
+            "pins": [
+              "signalId",
+              "bookId",
+              "manuscriptId",
+              "branchId",
+              "markId",
+              "proposalItemId",
+              "decisionId",
+              "revisionId",
+              "journalSequence",
+              "blockDigest",
+              "materialKey",
+              "materialDigest",
+              "reasonRevision",
+              "eligibilityBasisAndDecision",
+              "controlsScopeSupervisionSnapshotsAndRevisions",
+              "sourceRecordDigest",
+              "originalToRedactedDigestBinding",
+              "redactionRosterAndVersion",
+              "orderedBatchMembership",
+              "encodedPayloadDigest"
+            ],
+            "standingCheckedBeforeSendAndBeforePublicationOrUse": [
+              "current",
+              "excluded",
+              "deferred",
+              "superseded",
+              "withdrawn"
+            ]
+          },
+          "oversizeBehavior": "hold-whole-example-with-fixed-reason-code; no-truncation",
+          "includedHeldCountsAndCoverageRequired": true,
+          "insufficientEvidenceResult": "no-proposal",
+          "output": "proposed-rules-or-exemplars-with-confidence-and-verified-batch-exampleIds-and-reconstructed-local-lineage",
+          "automaticPreferenceActivationAllowed": false,
+          "rejectedDecisionRequiresExistingCaptureEligibility": true,
+          "syntheticHumanDecisionApplySuccessOrAdmissionManufactured": false,
+          "sourceRefMayContainTitlePersonNameOrPath": false,
+          "payloadExcludes": [
+            "author-or-editor-attribution-arrays",
+            "house-personnel-names-and-roles",
+            "book-titles",
+            "remarks-and-internal-note-fields",
+            "credentials",
+            "source-file-paths",
+            "ambient-neighboring-manuscript-text"
+          ],
+          "genericNotesOrRemarksAttachmentsAllowed": false,
+          "internalNoteMaterialWithheld": true,
+          "manuscriptCharacterOrPersonNamesReclassifiedAsHousePersonnel": false,
+          "redactionLifted": false,
+          "batchesFromWholeEligibleExamplesOnly": true,
+          "numericalThresholdEstablishesQuality": false,
+          "requestBound": "frozen-batch-manifest-and-mandatory-run-ceiling",
+          "newDailyQuotaOrCallCountCeiling": false,
+          "unsupportedContradictoryOrSingletonPatternsForcedIntoRules": false,
+          "explicitAcceptanceIntoExistingPreferenceOwnerRequired": true,
+          "excludedSourceKindsPendingTypedContract": [
+            "imported-word-pairs",
+            "post-1113-reason-ask-signal-kinds-without-proven-same-material-digest",
+            "review-finding-ignored-before-after-not-bound-by-candidate-digest",
+            "arbitrary-rewrite-history",
+            "whole-documents",
+            "ambient-neighbors",
+            "external-examples",
+            "automatically-inferred-source-associations"
+          ]
+        },
+        "houseReviewPreference": {
+          "category": "house-review-preference-excerpt",
+          "descriptionZh": "本社审阅偏好摘录：由本社编辑自己对审阅发现已作出的判断（采纳、改后采纳、忽略并说明理由）归纳出的类别偏好行与理由短语，随审阅请求一并发出。每次请求至多 12 行、合计至多 200 个字素；必须标明所依据的偏好记录版本；绝不含稿件正文，绝不含作者或编辑姓名；普通生产下只取自普通生产来源（编辑自己的稿件所属的本社判断记录）。",
+          "derivedFrom": "judged-review-decisions-of-the-same-house",
+          "maxLines": 12,
+          "maxGraphemesTotal": 200,
+          "attributedToRecordVersion": true,
+          "manuscriptTextAllowed": false,
+          "housePeopleNamesAndRolesStripped": true,
+          "authorOrEditorNamesAllowed": false,
+          "sourceScope": "ordinary-production-sources-only",
+          "purpose": "candidate-reference-and-deduplication-only"
+        }
+      },
+      {
+        "ruleId": "enrolled-background-factual-recheck",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "newUserInitiatedTaskRequired": false,
+          "providerSetupCreatesEnrollment": false,
+          "manuscriptImportCreatesEnrollment": false,
+          "artifactInstallOrEnablementCreatesEnrollment": false,
+          "eachDispatchCreatesExactRun": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "importTriggeredOrUnenrolledCrossRunDispatchAllowed": false,
+          "activeMatchingBackgroundProcessingEnrollmentRequired": true,
+          "latestCurrentEditorRequestEvidenceDecisionRequired": true
+        },
+        "scopeLimits": {
+          "declaredEnrolledKindOnly": true,
+          "formalManuscriptMutationAllowed": false,
+          "externalEffectAllowed": false,
+          "backgroundPolicyWorkAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": false,
+          "developerHostOnly": false,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": true,
+          "backgroundAllowed": true
+        },
+        "source": {
+          "admittedInputs": "one-preexisting-reference-integrity-valid-claim-and-its-exact-frozen-source-unit-message",
+          "runSourceScopeRequired": true,
+          "unlistedSourcesAllowed": false,
+          "wholeLedgerTransmissionAllowed": false,
+          "extractionAllowed": false,
+          "sourceRefreshAllowed": false
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content",
+          "web-search-query",
+          "public-source-fetch"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Main Editorial Role",
+          "bindingSource": "user-configured-role-binding",
+          "allowedRoutes": [
+            "opencode-go",
+            "deepseek-open-platform"
+          ],
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "oneTechnicalSessionForOnePreexistingClaim": true,
+          "maximumInitialSessions": 1,
+          "maximumModelSubmissions": 129,
+          "maximumPlatformToolRounds": 128,
+          "maximumSearchSubmissions": 3,
+          "automaticTransportRetryAllowed": false,
+          "contractRetryAllowed": false,
+          "webSearchToolAllowed": true,
+          "extraInheritedStageAllowance": false
+        },
+        "localTools": {
+          "targetedRetrieval": {
+            "allowed": false,
+            "source": "authorized-pinned-sources-only",
+            "callsPerUnit": 5,
+            "candidatesPerCall": 8,
+            "exactFetchRequiredBeforeCitation": true,
+            "scope": "no-egress"
+          },
+          "breaker": {
+            "roundTrips": 128,
+            "end": "检索未完成"
+          }
+        },
+        "clarification": {
+          "modelQuestionAllowed": false
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "planEnvelopeRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "declaredOperationClassesRequired": true,
+          "exactRunBudgetCeilingStateRequired": true,
+          "unsetRunBudgetCeilingAllowed": false,
+          "enrollmentCeilingRequired": true,
+          "ceilingSplitAcrossBooks": "equal-remainder-to-first",
+          "ceilingEvaluatedBeforeEveryDispatch": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true,
+          "backgroundShare": "execution.backgroundShare",
+          "mandatoryFiniteRunBudgetCeilingRequired": true
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsRunAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": false,
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "developmentCredentialCacheAndLedgerConsulted": false
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "allowedTaskKinds": [
+          "factual-recheck"
+        ],
+        "backgroundProcessingEnrollment": {
+          "enrollableKinds": [
+            {
+              "kind": "factual-recheck",
+              "mandatoryCeiling": true
+            }
+          ],
+          "activeMatchingEnrollmentRequired": true,
+          "revocable": true,
+          "planEnvelopeRequired": true,
+          "exactProviderBindingRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "ceilingEvaluatedBeforeEveryDispatch": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "openingPageOrImportCreatesEnrollment": false
+        },
+        "legacyRuleFallbackAllowed": false,
+        "factualRecheck": {
+          "decisionSchema": "ai7.factual-review-decision/1",
+          "decisionOwner": "factual_review_decisions",
+          "decisionPins": [
+            "decisionId",
+            "bookId",
+            "resultId",
+            "assertionKey",
+            "boundVersion",
+            "disposition",
+            "requestedLevel",
+            "canonicalJsonSha256"
+          ],
+          "decisionId": "existing-UUID-contract",
+          "boundVersion": "positive-integer",
+          "disposition": "request-evidence",
+          "requestedLevels": [
+            "standard",
+            "strict"
+          ],
+          "requestedLevelNoLowerThanResult": true,
+          "latestStillCurrentEditorDecisionRequired": true,
+          "claimArtifactSchema": "ai7.factual-claim-ledger/1",
+          "eligibleClaimClasses": [
+            "real-world-fact",
+            "quotation"
+          ],
+          "referenceIntegrityRequired": true,
+          "sameBookActiveMatchingEnrollmentRequired": true,
+          "exactCurrentResultVersionDecisionOccurrenceClaimAndSourceUnitPinsRequired": true,
+          "unchangedManuscriptRevisionAndDigestRequired": true,
+          "maximumClaims": 1,
+          "claimMembershipImmutable": true,
+          "missingStaleOrAmbiguousMappingResult": "refuse",
+          "onlyContractId": "ai7.factual-claim-verification/1",
+          "onlyStageId": "web-verification",
+          "maximumInitialSessions": 1,
+          "maximumModelSubmissions": 129,
+          "maximumPlatformToolRounds": 128,
+          "maximumSearchSubmissions": 3,
+          "automaticTransportRetryAllowed": false,
+          "contractRetryAllowed": false,
+          "onceKey": [
+            "enrollmentId",
+            "ledgerDigest",
+            "claimId",
+            "decisionId"
+          ],
+          "onceKeyPersistedBeforeDispatch": true,
+          "maximumAutomaticRunsPerOnceKey": 1,
+          "unknownOrFailedOutcomeConsumesSubmissionSlots": true,
+          "unresolvedResultCreatesDecisionOrLedgerVersion": false,
+          "laterFreshExplicitDecision": "evaluate-under-its-own-current-pins-and-enrollment",
+          "keepPendingModelRecommendationTimerOrUnresolvedResultQualifies": false,
+          "decisionReasonTransmitted": false,
+          "extractionAllowed": false,
+          "ledgerRefreshAllowed": false,
+          "appendOrReplaceClaimAllowed": false,
+          "newSamplingReflectionClarificationOrSynthesisAllowed": false,
+          "retainedExternalSourceReopeningAllowed": false,
+          "translationAuthorityAdded": false,
+          "revocationAndExclusionRecheckedBeforeAdmission": true,
+          "historicalResultsAndEvidenceImmutable": true,
+          "unknownRequestResendAllowed": false,
+          "verificationContract": {
+            "contractId": "ai7.factual-claim-verification/1",
+            "stageId": "web-verification",
+            "maximumInitialSessionsPerEligibleClaim": 1,
+            "maximumModelRequestsPerSession": 129,
+            "maximumPlatformToolRoundsPerSession": 128,
+            "tools": [
+              "websearch",
+              "webfetch"
+            ],
+            "searchBudgetBasis": "run-ledger-digest-claim-id",
+            "maximumSearchSubmissionsPerClaim": 3,
+            "distinctCanonicalQueriesRequired": true,
+            "unknownSubmissionSpendsBudget": true,
+            "counterResetOnResumeAllowed": false,
+            "automaticTransportRetryAllowed": false,
+            "contractRetryAllowed": false,
+            "maximumMetadataUtf8Bytes": 16384,
+            "sourceUnitMessageMustEqualFrozenAuthorizedMessage": true
+          },
+          "assertionContract": {
+            "maximumAssertionsPerCoverageUnit": 200,
+            "maximumQuoteGraphemes": 80,
+            "maximumQuestionGraphemes": 120,
+            "maximumBasisGraphemes": 200,
+            "blockOrdinal": "existing-numbered-block",
+            "assertionClasses": [
+              "real-world-fact",
+              "quotation",
+              "report-about-manuscript",
+              "fictional-canon",
+              "judgment"
+            ],
+            "categories": [
+              "时间",
+              "地点",
+              "人物",
+              "机构",
+              "器物",
+              "数字",
+              "引文",
+              "史实",
+              "技术",
+              "其他"
+            ],
+            "severities": [
+              "A",
+              "B",
+              "C"
+            ]
+          },
+          "verificationInput": {
+            "exactFields": [
+              "schema",
+              "ledgerDigest",
+              "claimId",
+              "sourceUnitOrdinal",
+              "sourceUnitDigest",
+              "assertionOrdinal",
+              "assertionClass",
+              "category",
+              "severity",
+              "quote",
+              "question",
+              "basis",
+              "sourceUnitMessage"
+            ],
+            "schema": "ai7.factual-claim-verification/1",
+            "claimId": "sha256-of-canonical-occurrence-identity-lowercase-64-hex",
+            "allDigests": "lowercase-64-hex-sha256",
+            "sourceUnitOrdinal": "1..U",
+            "assertionOrdinal": "1..200",
+            "maximumMetadataUtf8Bytes": 16384,
+            "sourceUnitMessage": "byte-identical-already-authorized-frozen-producing-unit-message",
+            "sourceUnitByteCountAndDigestRequired": true,
+            "fullEncodedRequestByteCountAndDigestRequired": true,
+            "target1200IsHardMessageCap": false,
+            "silentTruncationAllowed": false,
+            "sourceRefreshAllowed": false,
+            "wholeLedgerTransmissionAllowed": false,
+            "modelSelectedClaimIdAllowed": false,
+            "ambientContextAllowed": false
+          },
+          "research": {
+            "searchReservationKey": [
+              "runId",
+              "ledgerDigest",
+              "claimId"
+            ],
+            "maximumDistinctCanonicalQuerySubmissions": 3,
+            "successfulSameQueryReuse": "attributed-replay-without-new-submission",
+            "unknownOutcomeReplayableAsSuccess": false,
+            "malformedOrLocalRefusal": "spends-platform-breaker-not-transport-reservation",
+            "maximumPlatformToolRoundsInclusiveOfRefusals": 128,
+            "webfetch": {
+              "maxBytes": 5242880,
+              "timeoutSeconds": 30,
+              "boundedByCitations": true,
+              "maximumPerUrlPerRun": 1,
+              "automaticRetryAllowed": false
+            },
+            "backendSelection": "exactly-the-websearch-backends-credential-slots-and-selection-of-ordinary-production-review.platformTools.websearch-in-this-document; no-endpoint-or-credential-addition",
+            "searchConnectionTestIsTaskBackend": false,
+            "localRetrievalAllowed": false,
+            "knownOrUnknownFailedSubmissionResendAllowed": false,
+            "oneQueryPerRunUnitOverriddenOnlyForThisVerificationContract": true
+          },
+          "foregroundKindOrProcedureGrantInherited": false,
+          "categoriesRestrictedToExactClaimUnitInputAndAdmittedResearchOutputs": true,
+          "otherClaimWholeLedgerAmbientBookOrHouseMaterialPreferenceGuidelineOrImportedSourceInherited": false,
+          "missingLedgerOrClaimResult": "disclosed-refusal-requiring-separately-authorized-upstream-work",
+          "alreadySentWorkSettlement": "existing-cancellation-and-settlement-rules",
+          "freshResearchCaptureProvenanceOwner": "existing-provenance-and-retention-owner"
+        }
+      }
+    ]
+  },
+  "roleBindings": {
+    "Main Editorial Role": {
+      "bindingState": "user-configurable",
+      "userConfigurable": true,
+      "defaultBinding": "opencode-go",
+      "allowedBindings": [
+        {
+          "route": "opencode-go",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go"
+        },
+        {
+          "route": "deepseek-open-platform",
+          "endpoint": "https://api.deepseek.com/chat/completions",
+          "model": "deepseek-flash",
+          "credentialSlot": "deepseek-api-key"
+        }
+      ],
+      "userConfiguredBindingAuthorizesTransmission": false,
+      "fallbackAllowed": false
+    },
+    "Fast Interaction Role": {
+      "bindingState": "user-configurable",
+      "userConfigurable": true,
+      "defaultBinding": "opencode-go",
+      "allowedBindings": [
+        {
+          "route": "opencode-go",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go"
+        },
+        {
+          "route": "deepseek-open-platform",
+          "endpoint": "https://api.deepseek.com/chat/completions",
+          "model": "deepseek-flash",
+          "credentialSlot": "deepseek-api-key"
+        },
+        {
+          "route": "openai-platform",
+          "endpoint": "https://api.openai.com/v1/responses",
+          "model": "gpt-5.6-luna",
+          "credentialSlot": "openai-platform"
+        },
+        {
+          "route": "openai-platform",
+          "endpoint": "https://api.openai.com/v1/responses",
+          "model": "gpt-5.6-sol",
+          "credentialSlot": "openai-platform"
+        }
+      ],
+      "userConfiguredBindingAuthorizesTransmission": false,
+      "fallbackAllowed": false
+    },
+    "Difficult Escalation Role": {
+      "bindingState": "unbound-by-default",
+      "userConfigurable": true,
+      "namedByAnyAllowRule": false,
+      "allowedBindings": [
+        {
+          "route": "opencode-go",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go"
+        },
+        {
+          "route": "deepseek-open-platform",
+          "endpoint": "https://api.deepseek.com/chat/completions",
+          "model": "deepseek-flash",
+          "credentialSlot": "deepseek-api-key"
+        }
+      ],
+      "userConfiguredBindingAuthorizesTransmission": false,
+      "fallbackAllowed": false
+    },
+    "Frontier Model Role": {
+      "bindingState": "unbound-by-default",
+      "userConfigurable": true,
+      "namedByAnyAllowRule": false,
+      "allowedBindings": [
+        {
+          "route": "opencode-go",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go"
+        },
+        {
+          "route": "deepseek-open-platform",
+          "endpoint": "https://api.deepseek.com/chat/completions",
+          "model": "deepseek-flash",
+          "credentialSlot": "deepseek-api-key"
+        }
+      ],
+      "userConfiguredBindingAuthorizesTransmission": false,
+      "fallbackAllowed": false
+    }
+  },
+  "outboundDataCategories": {
+    "public-or-synthetic": {
+      "labelZh": "公开或合成内容"
+    },
+    "unpublished-metadata": {
+      "labelZh": "未公开材料元数据"
+    },
+    "unpublished-excerpts": {
+      "labelZh": "未公开材料选段"
+    },
+    "unpublished-full-content": {
+      "labelZh": "未公开材料全文"
+    },
+    "editor-selected-manuscript-excerpt": {
+      "labelZh": "编辑所选稿件选段"
+    },
+    "editor-authored-evaluation-text": {
+      "labelZh": "编辑自己写下的评估文字"
+    },
+    "house-exemplar-excerpt": {
+      "labelZh": "本社范例选段"
+    },
+    "book-metadata-and-synopsis": {
+      "labelZh": "图书元数据与内容简介"
+    },
+    "manuscript-conflict-region-excerpt": {
+      "labelZh": "稿件冲突区域选段"
+    },
+    "frozen-material-reference-excerpt": {
+      "labelZh": "资料库资料选段"
+    },
+    "editorial-deliverable-excerpt": {
+      "labelZh": "编辑交付物选段"
+    },
+    "house-review-preference-excerpt": {
+      "labelZh": "本社审阅偏好摘录"
+    },
+    "editor-authored-question-template": {
+      "labelZh": "编辑自拟的单元提问模板"
+    },
+    "series-knowledge-excerpt": {
+      "labelZh": "书系知识摘录"
+    },
+    "web-search-query": {
+      "labelZh": "模型自拟的联网检索词"
+    },
+    "public-source-fetch": {
+      "labelZh": "公开来源网页地址"
+    },
+    "editor-task-instruction": {
+      "labelZh": "编辑任务说明"
+    },
+    "house-review-guideline-clause": {
+      "labelZh": "本社审阅规范条款"
+    },
+    "editorial-learning-example": {
+      "labelZh": "编辑学习决策样例",
+      "purpose": "model-driven-learning-curation-only",
+      "contractId": "ai7.editorial-learning-example/1"
+    }
+  },
+  "credentialBoundary": {
+    "isOutboundDataCategory": false,
+    "permittedInModelVisibleMaterial": false,
+    "permittedInGeneralOutboundMaterial": false,
+    "opaqueReferenceOnlyOutsideFinalConsumer": true,
+    "credentialBrokerResolutionRequired": true,
+    "finalAdapterOnly": true,
+    "protectedSecretStoreOnly": true,
+    "credentialOwnedByTheEditor": true,
+    "developmentCredentialFileReadAllowed": false,
+    "policyEligibilityConfiguresCredential": false
+  },
+  "authoritySeparations": {
+    "policyEligibilityDispatchesProviderCall": false,
+    "policyEligibilityCreatesProviderImplementation": false,
+    "runSourceScopeAloneAuthorizesTransmission": false,
+    "runAuthorizationAloneOverridesThisPolicy": false,
+    "configuredProviderAloneAuthorizesTransmission": false,
+    "providerSetupAloneAuthorizesTransmission": false,
+    "configuredCredentialAloneAuthorizesTransmission": false,
+    "artifactInstallOrEnablementAuthorizesTransmission": false,
+    "dshSessionOrPluginMembershipAuthorizesTransmission": false,
+    "defaultExecutionRuleWithoutUserInitiatedTaskAuthorizesTransmission": false,
+    "backgroundAnalysisEnrollmentAuthorizesTransmission": false,
+    "externalExportPolicyAuthorizesProviderTransmission": false,
+    "effectApprovalAuthorizesProviderTransmission": false,
+    "providerResultCacheIsRecordedDeterministicModelFixture": false,
+    "providerResultCacheProvesProviderConformance": false,
+    "providerProcessingAuthorizesManuscriptApply": false,
+    "providerProcessingAuthorizesLearning": false,
+    "providerProcessingAuthorizesPublication": false,
+    "providerProcessingGrantsPublicReleasePermission": false
+  },
+  "connectionTest": {
+    "purpose": "explicit-synthetic-model-connection-test",
+    "taskKind": "model-connection-test",
+    "ruleId": "ordinary-production-model-connection-test",
+    "modelRole": "Fast Interaction Role",
+    "explicitEditorActionRequired": true,
+    "source": "fixed-public-synthetic-only",
+    "bookMaterialAllowed": false,
+    "message": "AI7 public connection test. Reply with AI7_OK only.",
+    "systemPrompt": "This is a public synthetic AI7 text connection test. Do not call tools.",
+    "maxInputCharacters": 256,
+    "maxOutputTokens": 512,
+    "requestsPerAction": 1,
+    "responseBodiesRetained": false,
+    "automaticRetryAllowed": false,
+    "toolsVerified": false,
+    "streamingVerified": false,
+    "allowedBindings": [
+      {
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "model": "deepseek-v4.1-flash",
+        "credentialSlot": "opencode-go"
+      },
+      {
+        "route": "deepseek-open-platform",
+        "endpoint": "https://api.deepseek.com/chat/completions",
+        "model": "deepseek-flash",
+        "credentialSlot": "deepseek-api-key"
+      },
+      {
+        "route": "openai-platform",
+        "endpoint": "https://api.openai.com/v1/responses",
+        "model": "gpt-5.6-luna",
+        "credentialSlot": "openai-platform"
+      },
+      {
+        "route": "openai-platform",
+        "endpoint": "https://api.openai.com/v1/responses",
+        "model": "gpt-5.6-sol",
+        "credentialSlot": "openai-platform"
+      }
+    ]
+  },
+  "execution": {
+    "maxInFlightRequests": {
+      "configurable": true,
+      "default": 4
+    },
+    "perRunUnitParallelism": {
+      "configurable": true,
+      "default": 3
+    },
+    "backgroundShare": {
+      "configurable": true,
+      "default": 1
+    }
+  },
+  "transport": {
+    "requestDeadlineSeconds": 180,
+    "rateLimitRetry": {
+      "honourRetryAfter": true,
+      "maxRetries": 1
+    }
+  },
+  "research": {
+    "searchesPerClaim": 3
+  },
+  "subAgents": {
+    "declaredInPlanEnvelopeRequired": true,
+    "inheritsParentScopeBindingPolicyAndCeiling": true,
+    "countsInsideParentAttemptTransmissionBound": true,
+    "finalProviderPayloadEgressGateRequired": true,
+    "createsTaskRunOrDecisionRecordAllowed": false
+  },
+  "searchConnectionTest": {
+    "ruleId": "ordinary-production-direct-search-connection-test",
+    "purpose": "fixed-public-search-connection-test",
+    "operationalScope": "ordinary-production",
+    "backendId": "search-deepseek",
+    "candidateId": "deepseek-direct-search-v1",
+    "endpoint": "https://api.deepseek.com/v1/tools/search",
+    "method": "POST",
+    "protocol": "deepseek-direct-search",
+    "credentialSlot": "search-deepseek",
+    "headerForm": "authorization-bearer",
+    "modelBindingRequired": false,
+    "explicitEditorActionRequired": true,
+    "source": "fixed-public-only",
+    "allowedOutboundDataCategories": [
+      "public-or-synthetic"
+    ],
+    "bookMaterialAllowed": false,
+    "arguments": {
+      "query": "UNESCO World Book and Copyright Day April 23",
+      "count": 10,
+      "need_content": false
+    },
+    "argumentsCanonicalSha256": "ae23d5c44e8eec9398f100d153f0f5042bd7fe388f50c6c57aba1825659f629c",
+    "maximumRequests": 1,
+    "timeoutMilliseconds": 25000,
+    "responseMaxBytes": 2097152,
+    "redirectMode": "manual",
+    "automaticRetryAllowed": false,
+    "fallbackAllowed": false,
+    "taskOrDefaultSelectionAllowed": false,
+    "measuredStatusPromotionAllowed": false,
+    "durableResultStorageAllowed": false,
+    "responseBodiesRetained": false,
+    "resultsMaximum": 3,
+    "titleMaximumCharacters": 120,
+    "urlMaximumCharacters": 2048,
+    "argumentsCanonicalization": "UTF-8 JSON; recursively sorted object keys; no whitespace; SHA-256",
+    "argumentKeysExact": [
+      "count",
+      "need_content",
+      "query"
+    ],
+    "argumentOverrideOrAdditionalFieldsAllowed": false,
+    "requestScope": "per-explicit-editor-action",
+    "timeoutAndResponseBoundsSource": "existing-search-service-constants",
+    "credentialSource": "existing-ready-ordinary-production-search-deepseek-connection-only",
+    "frozenPinsBeforeSecretAccess": [
+      "credentialOpaqueReference",
+      "credentialGeneration",
+      "candidateConfigurationDigest",
+      "canonicalArgumentAndRequestDigest",
+      "selectedPolicyPin",
+      "explicitActionIdentity"
+    ],
+    "singleUseFinalGateTicketRequired": true,
+    "developmentCredentialMainModelBindingOtherSlotFallbackOrAmbientDefaultInherited": false,
+    "missingChangedStoppedOrStalePinsResult": "refuse-before-secret-access-or-transport",
+    "resultLengthUnit": "unicode-code-points",
+    "presentationBoundsEnforcedBeforeExposure": true,
+    "resultUrlSchemes": [
+      "http",
+      "https"
+    ],
+    "resultUrlUserinfoControlsOrPrivateTargetAllowed": false,
+    "linkOrRedirectFollowingAllowed": false,
+    "bodySnippetSummaryOrContentRetentionAllowed": false,
+    "providerBodyLoggingAllowed": false,
+    "bookOrSourceAcquisitionAllowed": false,
+    "resultProvesOnlyThisExactProbeResponse": true,
+    "addsDirectApiToOrdinaryResearchTool": false,
+    "qualifiesFetch": false,
+    "rejectedOperationalScopes": [
+      "development-ci",
+      "fixture-recording",
+      "developer-live"
+    ],
+    "rejectionPrecedesTicketCredentialOrTransport": true
+  }
+}
