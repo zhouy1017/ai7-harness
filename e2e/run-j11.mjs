@@ -3281,7 +3281,7 @@ async function main() {
     // development-ci v1 still admits no preference payload, and no model request is made by memory governance.
     at('editorial-memory-governance');
     await waitForMemoryControl(`document.querySelector('[data-learning-enabled]')`, 'memory-governance-enable-ready', false);
-    await clickSelector(renderer, '[data-learning-enabled]', 'memory-governance-enable');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-learning-enabled]'); if(!(input instanceof HTMLInputElement)||input.checked||input.disabled)return false;input.click();return true; })()`, 'memory-governance-enable');
     await waitFor(renderer, `document.querySelector('[data-learning-enabled]')?.checked === true && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-enabled');
     await close(); modelFixtureIdentity = 'sample1-review-authored'; await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'memory-governance-source-launch');
